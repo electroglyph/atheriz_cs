@@ -1,0 +1,24 @@
+{
+  "scenario": "_smoke/fixture",
+  "seed": 42,
+  "inputs": {
+    "op": "fixture_parity"
+  },
+  "rolls": {
+    "randint": [],
+    "choice": [],
+    "shuffle": [],
+    "uniform": [],
+    "getrandbits": [],
+    "dice": []
+  },
+  "outputs": {
+    "objects_created": 3,
+    "nodes_created": 2,
+    "o1_location": "t(1,0,0)",
+    "n1_name": "t(0,0,0)",
+    "n2_name": "t(1,0,0)",
+    "node_handler_has_n1": true,
+    "game_time_ticks": 0
+  }
+}

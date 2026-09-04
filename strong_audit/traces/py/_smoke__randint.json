@@ -1,0 +1,22 @@
+{
+  "inputs": {
+    "a": 1,
+    "b": 100,
+    "op": "randint"
+  },
+  "outputs": {
+    "randint": 7
+  },
+  "rolls": {
+    "choice": [],
+    "dice": [],
+    "getrandbits": [],
+    "randint": [
+      7
+    ],
+    "shuffle": [],
+    "uniform": []
+  },
+  "scenario": "_smoke/randint",
+  "seed": 42
+}

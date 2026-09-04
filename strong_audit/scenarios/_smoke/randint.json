@@ -1,0 +1,6 @@
+{
+  "scenario": "_smoke/randint",
+  "seed": 42,
+  "rolls": {"randint": [7], "choice": [], "shuffle": [], "uniform": [], "getrandbits": [], "dice": []},
+  "inputs": {"op": "randint", "a": 1, "b": 100}
+}

@@ -1,0 +1,6 @@
+{
+  "scenario": "_smoke/fixture",
+  "seed": 42,
+  "rolls": {"randint": [], "choice": [], "shuffle": [], "uniform": [], "getrandbits": [], "dice": []},
+  "inputs": {"op": "fixture_parity"}
+}
