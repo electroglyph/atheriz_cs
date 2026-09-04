@@ -740,7 +740,7 @@ public class ConnectionManager
 
     public ConnectionManager(AsyncThreadPool? pool = null, AtherizSettings? settings = null, InputFuncs? inputFuncs = null)
     {
-        _settings = settings ?? AtherizSettings.Default;
+        _settings = settings ?? AtherizSettings.Global;
         Atp = pool ?? new AsyncThreadPool(
             maxThreads: _settings.ThreadpoolLimit,
             queueLimit: _settings.ThreadpoolQueueLimit,

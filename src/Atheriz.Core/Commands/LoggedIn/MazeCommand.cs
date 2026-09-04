@@ -43,14 +43,14 @@ public sealed class MazeCommand : Command
             {
                 // Test injected custom handler via factory – honour it (keeps MazeMapsStoredInPreGrid passing)
                 nh = factoryNh;
-                try { var fi2 = typeof(GlobalServices).GetField("_nodeHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static); if (fi2 != null) fi2.SetValue(null, nh); } catch { }
+                GlobalServices.SetNodeHandler(nh);
             }
             else nh = globalNh;
         }
         catch { nh = NodeHandler.GetCurrent() ?? NodeHandlerFactory(); }
         // Ensure singleton set without losing existing areas
         NodeHandler.SetCurrent(nh);
-        try { var fi2 = typeof(GlobalServices).GetField("_nodeHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static); if (fi2 != null) fi2.SetValue(null, nh); } catch { }
+        GlobalServices.SetNodeHandler(nh);
         var area1 = new NodeArea("maze1");
         var area2 = new NodeArea("maze2");
         var area3 = new NodeArea("maze3");
@@ -78,7 +78,7 @@ public sealed class MazeCommand : Command
         catch { mh = MapHandlerFactory(); }
         try { MapHandlerHolder.Set(mh); } catch { }
         try { Atheriz.Core.Objects.MapHandlerSingleton.Set(mh); } catch { }
-        try { var fi = typeof(GlobalServices).GetField("_mapHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static); if (fi != null) fi.SetValue(null, mh); } catch { }
+        GlobalServices.SetMapHandler(mh);
         var maze1Exit = tuple1.grid.GetRandomNode();
         var maze2Exit = tuple2.grid.GetRandomNode();
         var maze3Exit = tuple3.grid.GetRandomNode();
@@ -94,33 +94,28 @@ public sealed class MazeCommand : Command
         if (maze3Exit != null) maze3Exit.AddLink(new NodeLink("down", new Coord("maze1", 0, 0, 0), new List<string>{"d"}));
         var start = nh.GetNode(new Coord("maze1", 0, 0, 0));
         var end = maze1Exit;
-        // Faithful to maze.py:97-107 queue do_pathfind then move_to, but MoveTo must
-        // happen before background so server-side area-change unbackground (MapHandler)
-        // does not clear the maze path. Do MoveTo first, then queue pathfind (background
-        // after map). Keeps async threadpool semantics but fixes sync-inline race.
+        // Faithful to atheriz/commands/loggedin/maze.py:97-107 — queue do_pathfind first,
+        // then the "moving to" message, map_enabled, and move_to, with no delay.
+        // do_pathfind sends unbackground itself before background, so the highlight
+        // can never be cleared by the area-change unbackground that move_to triggers.
         if (start != null && end != null)
         {
-            try { go.IsMapable = true; } catch { }
-            try { ((dynamic)go).MapEnabled = true; } catch { }
-            go.Msg($"moving to: {start} ...");
-            go.MoveTo(start);
             var capturedConn = go.Session?.Connection;
+            bool queued = false;
             try
             {
                 var pool = ThreadPoolFactory();
                 if (pool != null)
                 {
-                    bool queued = pool.AddTask(() =>
+                    queued = pool.AddTask(() =>
                     {
                         try
                         {
                             var sw2 = System.Diagnostics.Stopwatch.StartNew();
                             var (found, path, dead) = Pathfind.AStar(start, end, go, nh);
                             sw2.Stop();
-                            // Do NOT send unbackground here — MapHandler already sent
-                            // unbackground on area change (limbo→maze1) before map.
-                            // Sending it here would clear the just-set background when
-                            // pool runs sync-inline before MoveTo. Background only.
+                            // Verbatim maze.py do_pathfind: unbackground first, then background.
+                            try { capturedConn?.SendCommand("unbackground", new List<object?> { "" }, null); } catch { }
                             if (found)
                             {
                                 go.Msg($"path found in: {sw2.Elapsed.TotalMilliseconds:F2} milliseconds");
@@ -144,10 +139,14 @@ public sealed class MazeCommand : Command
                         }
                         catch (Exception ex) { try { go.Msg($"pathfind error: {ex.Message}"); } catch { } }
                     });
-                    if (!queued) go.Msg("Pathfinding queue full; try again in a moment.");
                 }
             }
             catch { }
+            if (!queued) go.Msg("Pathfinding queue full; try again in a moment.");
+            else go.Msg($"moving to: {start} ...");
+            try { go.IsMapable = true; } catch { }
+            go.MapEnabled = true;
+            go.MoveTo(start);
         }
         else if (start == null)
         {

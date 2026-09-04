@@ -341,7 +341,7 @@ public sealed class BuildCommand : Command
                     }
                     if (!string.IsNullOrEmpty(ch))
                     {
-                        var roomPH = AtherizSettings.Default.RoomPlaceholder;
+                        var roomPH = AtherizSettings.Global.RoomPlaceholder;
                         mi.UpdateGrid((newCoord.X, newCoord.Y), roomPH);
                         mi.PlaceWalls((newCoord.X, newCoord.Y), ch);
                         var (nn, ss, ee, ww) = GetRoomDirs(mi, (newCoord.X, newCoord.Y));
@@ -350,12 +350,12 @@ public sealed class BuildCommand : Command
                 }
                 else if (road)
                 {
-                    var roadPH = AtherizSettings.Default.RoadPlaceholder;
+                    var roadPH = AtherizSettings.Global.RoadPlaceholder;
                     mi.UpdateGrid((newCoord.X, newCoord.Y), roadPH);
                 }
                 else if (path)
                 {
-                    var pathPH = AtherizSettings.Default.PathPlaceholder;
+                    var pathPH = AtherizSettings.Global.PathPlaceholder;
                     mi.UpdateGrid((newCoord.X, newCoord.Y), pathPH);
                     mi.PlaceWalls((newCoord.X, newCoord.Y), pathPH);
                 }

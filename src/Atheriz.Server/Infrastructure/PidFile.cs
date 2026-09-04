@@ -12,19 +12,24 @@ namespace Atheriz.Server.Infrastructure;
 public sealed class PidFile : IDisposable
 {
     public string PidPath { get; }
+    private readonly int _ownPid;
     private bool _acquired;
     private bool _disposed;
 
-    private PidFile(string pidPath, bool acquired)
+    private PidFile(string pidPath, bool acquired, int ownPid)
     {
         PidPath = pidPath;
         _acquired = acquired;
+        _ownPid = ownPid;
     }
 
     /// <summary>
     /// Mirrors <c>atheriz/atheriz.py:458-472 _pid_is_server_process</c>.
     /// Python uses <c>psutil.pid_exists + proc.name().lower().startswith(("python","atheriz"))</c>.
-    /// In C# we check <c>Process.GetProcessById + ProcessName contains "python"/"dotnet"/"Atheriz"</c>.
+    /// A bare <c>Contains("dotnet")</c> name match is NOT enough: it also matches the
+    /// test host (which loads <c>Atheriz.Server.dll</c>). For dotnet-hosted processes we
+    /// additionally require the command line to mention Atheriz, so `stop` can never
+    /// terminate an unverified process on pid reuse.
     /// Also guards zombie via HasExited (nearest C# equiv).
     /// </summary>
     public static bool IsServerProcess(int pid)
@@ -41,16 +46,19 @@ public sealed class PidFile : IDisposable
             try { name = proc.ProcessName ?? ""; }
             catch { return false; }
             var lower = name.ToLowerInvariant();
-            // atheriz.py:470 — startswith python/atheriz; we also accept dotnet/Atheriz.Server
-            if (lower.StartsWith("python") || lower.StartsWith("atheriz") || lower.Contains("dotnet") || lower.Contains("atheriz"))
+            // atheriz.py:470 — startswith python/atheriz
+            if (lower.StartsWith("python") || lower.StartsWith("atheriz") || lower.Contains("atheriz"))
                 return true;
             // Fallback: check main module filename if available (helps when process name truncated)
             try
             {
                 var mod = proc.MainModule?.FileName ?? "";
                 var ml = mod.ToLowerInvariant();
-                if (ml.Contains("python") || ml.Contains("dotnet") || ml.Contains("atheriz"))
+                if (ml.Contains("atheriz"))
                     return true;
+                // dotnet host: only trust when the command line shows this is our server
+                if (ml.Contains("dotnet") || lower.Contains("dotnet"))
+                    return HasAtherizCmdline(pid);
             }
             catch { }
             return false;
@@ -62,6 +70,22 @@ public sealed class PidFile : IDisposable
         }
         catch (InvalidOperationException) { return false; }
         catch (Exception) { return false; }
+    }
+
+    /// <summary>
+    /// Reads <c>/proc/{pid}/cmdline</c> and reports whether it mentions Atheriz.
+    /// Non-Linux or unreadable → false (fail closed).
+    /// </summary>
+    private static bool HasAtherizCmdline(int pid)
+    {
+        try
+        {
+            var cmdline = $"/proc/{pid}/cmdline";
+            if (!File.Exists(cmdline)) return false;
+            var text = File.ReadAllText(cmdline);
+            return text.Contains("Atheriz", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     /// <summary>
@@ -287,15 +311,14 @@ public sealed class PidFile : IDisposable
                 return false;
             }
 
-            // Stale: check port listening before overwrite — task spec: "handle stale PID (file exists but process dead → overwrite after verify port not listening)"
+            // Stale: verify the port is actually free before deleting — deleting a stale
+            // file while something still LISTENs risks a split-brain second server.
             if (oldPid.HasValue)
             {
-                // If port still listening by any process, treat as not stale (unverified → refuse)
                 if (IsPortListening(webserverPort))
                 {
-                    // Be conservative: if port listening, don't delete; require manual check
-                    // But Python's start_server just deletes stale regardless; we mirror that but log
-                    // We'll still delete if pid dead, because IsServerProcess false means not our server
+                    reason = $"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.";
+                    return false;
                 }
             }
 
@@ -334,7 +357,7 @@ public sealed class PidFile : IDisposable
                 // UnixFileMode 0o600 — atheriz.py relies on os.open 0o600; we set via FsUtil per AGENTS POSIX best-effort
                 FsUtil.TryChmod0600(pidPath);
 
-                pidFile = new PidFile(pidPath, true);
+                pidFile = new PidFile(pidPath, true, currentPid);
                 return true;
             }
             catch (IOException ex) when ((ex.HResult & 0xFFFF) == 80 || File.Exists(pidPath))
@@ -402,6 +425,9 @@ public sealed class PidFile : IDisposable
 
     /// <summary>
     /// Release the PID file — mirrors <c>atheriz/atheriz.py:679 pid_file.unlink()</c> on shutdown.
+    /// Owner-verified: only deletes when the file still contains our own pid, so a stale
+    /// <c>PidFile</c> can never delete a live successor's pid file on pid reuse.
+    /// No finalizer: finalization during a long <c>RunAsync</c> could delete the live pid.
     /// </summary>
     public void Release()
     {
@@ -409,7 +435,7 @@ public sealed class PidFile : IDisposable
         if (!_acquired) return;
         try
         {
-            if (File.Exists(PidPath))
+            if (File.Exists(PidPath) && TryReadPid(PidPath) == _ownPid)
                 File.Delete(PidPath);
         }
         catch { }
@@ -422,10 +448,5 @@ public sealed class PidFile : IDisposable
         _disposed = true;
         Release();
         GC.SuppressFinalize(this);
-    }
-
-    ~PidFile()
-    {
-        try { Release(); } catch { }
     }
 }

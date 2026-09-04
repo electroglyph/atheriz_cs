@@ -14,8 +14,39 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
 
         if (options.MaxCharacters <= 0 || options.MaxCharacters > 100)
             failures.Add($"MaxCharacters must be >0 and <=100 (was {options.MaxCharacters}).");
-        // Stricter upper bound previously documented as 10; we enforce <=100 to remain permissive.
-        // If you need the stricter 10 limit, change to >10.
+        // Python settings.py:83 MAX_CHARACTERS=5; the <=100 upper bound stays permissive by design.
+        if (options.MaxConnectionsPerIp < 0)
+            failures.Add($"MaxConnectionsPerIp must be >=0 (0 = unlimited, was {options.MaxConnectionsPerIp}).");
+        if (options.WebsocketMaxMessageSize <= 0)
+            failures.Add($"WebsocketMaxMessageSize must be >0 (was {options.WebsocketMaxMessageSize}).");
+        if (options.WebsocketMaxPendingSends <= 0)
+            failures.Add($"WebsocketMaxPendingSends must be >0 (was {options.WebsocketMaxPendingSends}).");
+        if (options.WebsocketMaxPendingBytes <= 0)
+            failures.Add($"WebsocketMaxPendingBytes must be >0 (was {options.WebsocketMaxPendingBytes}).");
+        if (options.TelnetMaxPendingBytes <= 0)
+            failures.Add($"TelnetMaxPendingBytes must be >0 (was {options.TelnetMaxPendingBytes}).");
+        if (options.ConnectionInputQueueLimit <= 0)
+            failures.Add($"ConnectionInputQueueLimit must be >0 (was {options.ConnectionInputQueueLimit}).");
+        if (options.ThreadpoolQueueLimit <= 0)
+            failures.Add($"ThreadpoolQueueLimit must be >0 (was {options.ThreadpoolQueueLimit}).");
+        if (options.ThreadpoolLimit is < 1)
+            failures.Add($"ThreadpoolLimit must be null or >=1 (was {options.ThreadpoolLimit}).");
+        if (options.ThreadpoolReliefLimit is < 1)
+            failures.Add($"ThreadpoolReliefLimit must be null or >=1 (was {options.ThreadpoolReliefLimit}).");
+        if (options.ThreadpoolWatchdogSeconds <= 0)
+            failures.Add($"ThreadpoolWatchdogSeconds must be >0 (was {options.ThreadpoolWatchdogSeconds}).");
+        if (options.ThreadpoolWatchdogInterval <= 0)
+            failures.Add($"ThreadpoolWatchdogInterval must be >0 (was {options.ThreadpoolWatchdogInterval}).");
+        if (options.FuncparserMaxNesting <= 0)
+            failures.Add($"FuncparserMaxNesting must be >0 (was {options.FuncparserMaxNesting}).");
+        if (options.MapeditMaxChains <= 0)
+            failures.Add($"MapeditMaxChains must be >0 (was {options.MapeditMaxChains}).");
+        if (options.MenuPromptTimeout <= 0)
+            failures.Add($"MenuPromptTimeout must be >0 (was {options.MenuPromptTimeout}).");
+        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(options.SavePath); }
+        catch (Exception ex) { failures.Add($"SavePath invalid: {ex.Message}"); }
+        try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(options.SecretPath); }
+        catch (Exception ex) { failures.Add($"SecretPath invalid: {ex.Message}"); }
         if (options.ChannelHistoryLimit <= 0)
             failures.Add($"ChannelHistoryLimit must be >0 (was {options.ChannelHistoryLimit}).");
 

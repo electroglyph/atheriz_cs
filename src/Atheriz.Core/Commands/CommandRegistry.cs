@@ -51,7 +51,8 @@ public static class CommandRegistry
 
     private static void RegisterLoggedIn(CmdSet cs)
     {
-        // wontfix py.py:592 sandbox — excluded per plan.md; use Roslyn if re-enabled
+        // wontfix py.py sandbox (atheriz/commands/loggedin/py.py) — intentionally never ported, ever
+        // (AGENTS.md hard rule; C# will never execute Python). No Roslyn/scripting backdoor either.
         // 44+ commands sorted by key (py excluded)
         cs.Adds([
             new LoggedIn.BanCommand(),

@@ -595,11 +595,12 @@ public static class StopHandler
             }
         }
         catch { }
+        // CWD-tree scan only. Never scan /tmp: an attacker-planted admin.token there
+        // would hand CLI control to the wrong server.
         try
         {
-            foreach (var baseDir in new[] { Directory.GetCurrentDirectory(), "/tmp" })
-                foreach (var f in Directory.GetFiles(baseDir, "admin.token", SearchOption.AllDirectories))
-                    if (f.EndsWith("secret/admin.token", StringComparison.Ordinal)) return f;
+            foreach (var f in Directory.GetFiles(Directory.GetCurrentDirectory(), "admin.token", SearchOption.AllDirectories))
+                if (f.EndsWith("secret/admin.token", StringComparison.Ordinal)) return f;
         }
         catch { }
         return null;

@@ -12,6 +12,37 @@ namespace Atheriz.Core.Persistence.Converters;
 /// </summary>
 internal static class GameObjectDtoConverter
 {
+    // Explicit persistence-subtype registry (F004). Only registered full names are ever
+    // instantiated from save data — no Type.GetType / assembly scan / Activator in prod.
+    // Games register their Custom* types at startup; tests register doubles in fixtures.
+    private static readonly object _subtypeLock = new();
+    private static readonly Dictionary<string, Func<GameObject>> _subtypeFactories = new(StringComparer.Ordinal);
+    private static readonly Dictionary<Type, string> _subtypeNames = new();
+
+    internal static void RegisterSubtype(string fullName, Type type, Func<GameObject> factory)
+    {
+        if (string.IsNullOrEmpty(fullName)) throw new ArgumentException("Subtype full name required.", nameof(fullName));
+        if (type == null) throw new ArgumentNullException(nameof(type));
+        if (factory == null) throw new ArgumentNullException(nameof(factory));
+        lock (_subtypeLock)
+        {
+            _subtypeFactories[fullName] = factory;
+            _subtypeNames[type] = fullName;
+        }
+    }
+
+    private static bool TryCreateSubtype(string fullName, out GameObject? instance)
+    {
+        lock (_subtypeLock) { if (_subtypeFactories.TryGetValue(fullName, out var f)) { instance = f(); return true; } }
+        instance = null;
+        return false;
+    }
+
+    private static string? RegisteredNameFor(Type t)
+    {
+        lock (_subtypeLock) { return _subtypeNames.TryGetValue(t, out var n) ? n : null; }
+    }
+
     public static GameObjectDto BuildDto(GameObject obj)
     {
         // Snapshot via public/internal APIs — caller may hold lock; snapshots use recursion-safe reads
@@ -63,20 +94,22 @@ internal static class GameObjectDtoConverter
             Scripts = new HashSet<int>(obj.ScriptsSnapshot),
             Channels = new List<int>(obj.ChannelsSnapshot),
             Extra = obj.GetExtraSnapshot(),
-            Locks = obj.GetLocksSnapshot().Select(kv => new LockDefDto { Name = kv.Key, Policy = string.Join("|", kv.Value.Select(f => f.Method.Name)) }).ToList(),
+            // Declarative lock policies (F004) — never Method.Name (which silently weakened locks on reload).
+            Locks = BuildLockDefs(obj),
         };
 
         if (obj.IsScript)
         {
-            try
+            // Preserve concrete Script subtype only for explicitly registered types (F004).
+            string? registered = RegisteredNameFor(obj.GetType());
+            if (registered != null)
             {
-                string typeName = obj.GetType().AssemblyQualifiedName ?? obj.GetType().FullName ?? "";
-                if (!string.IsNullOrEmpty(typeName) && typeName != typeof(Script).AssemblyQualifiedName && typeName != typeof(Script).FullName)
-                {
-                    dto.Extra["__script_type"] = JsonSerializer.SerializeToElement(typeName, JsonOptions.Default);
-                }
+                dto.Extra["__script_type"] = JsonSerializer.SerializeToElement(registered, JsonOptions.Default);
             }
-            catch { }
+            else if (obj.GetType() != typeof(Script))
+            {
+                AtherizLogger.LogError($"Unregistered script subtype {obj.GetType().FullName} (id {obj.Id}) saved as base script; register it via GameObject.RegisterPersistedSubtype to preserve the subtype.");
+            }
         }
 
         if (!obj.IsScript)
@@ -84,102 +117,81 @@ internal static class GameObjectDtoConverter
             var t = obj.GetType();
             if (t != typeof(GameObject) && t != typeof(Node) && t != typeof(Script) && t != typeof(Channel) && t != typeof(Account))
             {
-                try
+                string? registered = RegisteredNameFor(t);
+                if (registered != null)
                 {
-                    string typeName = t.AssemblyQualifiedName ?? t.FullName ?? "";
-                    if (!string.IsNullOrEmpty(typeName))
-                    {
-                        dto.Extra["__object_type"] = JsonSerializer.SerializeToElement(typeName, JsonOptions.Default);
-                    }
+                    dto.Extra["__object_type"] = JsonSerializer.SerializeToElement(registered, JsonOptions.Default);
                 }
-                catch { }
+                else
+                {
+                    AtherizLogger.LogError($"Unregistered object subtype {t.FullName} (id {obj.Id}) saved as base {type}; register it via GameObject.RegisterPersistedSubtype to preserve the subtype.");
+                }
             }
         }
 
         return dto;
     }
 
+    private static List<LockDefDto> BuildLockDefs(GameObject obj)
+    {
+        var policies = obj.GetLockPoliciesSnapshot();
+        return obj.GetLocksSnapshot().Select(kv =>
+        {
+            policies.TryGetValue(kv.Key, out var pols);
+            var names = pols != null && pols.Count == kv.Value.Count ? pols : Enumerable.Repeat(LockPolicies.Custom, kv.Value.Count);
+            return new LockDefDto { Name = kv.Key, Policy = string.Join("|", names) };
+        }).ToList();
+    }
+
     public static GameObject FromDto(GameObjectDto dto)
     {
-        // Check for generic GameObject/Node subclass preservation via __object_type (e.g., DummyObj/DummyNode, AlarmObj)
+        // Explicit subtype registry only (F004): a registered full name restores the subtype,
+        // anything else (including old AssemblyQualifiedName markers) loads as its base kind
+        // with a loud log — save data is never allowed to pick a type to instantiate.
         if (dto.Extra != null && dto.Extra.TryGetValue("__object_type", out var ot))
         {
-            try
+            string? typeName = ot.ValueKind == JsonValueKind.String ? ot.GetString() : null;
+            dto.Extra.Remove("__object_type");
+            if (!string.IsNullOrEmpty(typeName))
             {
-                string? typeName = ot.ValueKind == JsonValueKind.String ? ot.GetString() : null;
-                if (!string.IsNullOrEmpty(typeName))
+                if (TryCreateSubtype(typeName!, out var inst) && inst != null)
                 {
-                    Type? t = Type.GetType(typeName!) ?? AppDomain.CurrentDomain.GetAssemblies().SelectMany(a=> { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } }).FirstOrDefault(x=> x.FullName==typeName || x.Name==typeName || x.AssemblyQualifiedName==typeName);
-                    if (t != null && typeof(GameObject).IsAssignableFrom(t))
+                    if (inst is Node subNode)
                     {
-                        // For Node subclasses, delegate to Node branch logic after creating instance
-                        if (typeof(Node).IsAssignableFrom(t))
-                        {
-                            // Create Node subclass instance with coord from DTO
-                            Coord coord;
-                            if (dto.Location is LocationRef.CoordLocation cl) coord = cl.Coord;
-                            else if (dto.Extra != null && dto.Extra.TryGetValue("Coord", out var ce))
-                            {
-                                try { coord = JsonSerializer.Deserialize<Coord>(ce.GetRawText())!; } catch { coord = new Coord("limbo",0,0,0); }
-                            }
-                            else coord = new Coord("limbo",0,0,0);
-                            GameObject? nodeInst = null;
-                            try { nodeInst = (GameObject?)Activator.CreateInstance(t, new object[]{ coord }); } catch {}
-                            if (nodeInst == null)
-                            {
-                                try { nodeInst = (GameObject?)Activator.CreateInstance(t, nonPublic:true); } catch {}
-                            }
-                            if (nodeInst == null) throw new InvalidOperationException($"Failed to create Node subclass {t.Name}");
-                            dto.Extra!.Remove("__object_type");
-                            try { ObjectRegistry.RemoveObject((Node)nodeInst); } catch {}
-                            nodeInst.SetIdRaw(dto.Id);
-                            GameObject.ApplyDtoFields(nodeInst, dto, isNodeOverride: true);
-                            // Also ensure Coord set
-                            if (nodeInst is Node nn) nn.Coord = coord;
-                            nodeInst.IsNode = true;
-                            return nodeInst;
-                        }
-                        else
-                        {
-                            GameObject? inst = null;
-                            try { inst = (GameObject?)Activator.CreateInstance(t, nonPublic:true); } catch {}
-                            if (inst == null) try { inst = (GameObject?)Activator.CreateInstance(t); } catch {}
-                            if (inst == null) throw new InvalidOperationException($"Failed to create GameObject subclass {t.Name}");
-                            dto.Extra!.Remove("__object_type");
-                            inst.SetIdRaw(dto.Id);
-                            GameObject.ApplyDtoFields(inst, dto, null);
-                            return inst;
-                        }
+                        Coord subCoord = ExtractCoord(dto);
+                        try { ObjectRegistry.RemoveObject(subNode); } catch (Exception ex) { AtherizLogger.LogError($"Subtype cleanup failed for {typeName}.", ex); }
+                        subNode.SetIdRaw(dto.Id);
+                        GameObject.ApplyDtoFields(inst, dto, isNodeOverride: true);
+                        subNode.Coord = subCoord;
+                        inst.IsNode = true;
+                        return inst;
                     }
+                    inst.SetIdRaw(dto.Id);
+                    GameObject.ApplyDtoFields(inst, dto, null);
+                    return inst;
                 }
+                AtherizLogger.LogError($"Unknown __object_type '{typeName}' for object {dto.Id}; loading as base {dto.Type}.");
             }
-            catch { }
         }
         // Script branch: preserve IsScript and subtype for hook fidelity (faithful to dill subclass preservation)
         if (string.Equals(dto.Type, "script", StringComparison.OrdinalIgnoreCase))
         {
-            // Try to preserve concrete Script subclass via Extra __script_type
+            // Restore the concrete Script subclass only for explicitly registered types.
             if (dto.Extra != null && dto.Extra.TryGetValue("__script_type", out var te))
             {
-                try
+                string? typeName = te.ValueKind == JsonValueKind.String ? te.GetString() : null;
+                dto.Extra.Remove("__script_type");
+                if (!string.IsNullOrEmpty(typeName))
                 {
-                    string? typeName = te.ValueKind == JsonValueKind.String ? te.GetString() : null;
-                    if (!string.IsNullOrEmpty(typeName))
+                    if (TryCreateSubtype(typeName!, out var scoped) && scoped != null)
                     {
-                        Type? t = Type.GetType(typeName!) ?? AppDomain.CurrentDomain.GetAssemblies().SelectMany(a=> { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } }).FirstOrDefault(x=> x.FullName==typeName || x.Name==typeName);
-                        if (t != null && typeof(Script).IsAssignableFrom(t))
-                        {
-                            var inst = (GameObject)Activator.CreateInstance(t, nonPublic:true)!;
-                            // Remove subtype marker from Extra so it doesn't leak to user
-                            dto.Extra!.Remove("__script_type");
-                            inst.SetIdRaw(dto.Id);
-                            GameObject.ApplyDtoFields(inst, dto, null);
-                            inst.IsScript = true;
-                            return inst;
-                        }
+                        scoped.SetIdRaw(dto.Id);
+                        GameObject.ApplyDtoFields(scoped, dto, null);
+                        scoped.IsScript = true;
+                        return scoped;
                     }
+                    AtherizLogger.LogError($"Unknown __script_type '{typeName}' for object {dto.Id}; loading as base script.");
                 }
-                catch { }
             }
             var s = new Script();
             s.SetIdRaw(dto.Id);
@@ -211,7 +223,7 @@ internal static class GameObjectDtoConverter
                         if (he.ValueKind == JsonValueKind.Array) foreach (var el in he.EnumerateArray()) if (el.ValueKind == JsonValueKind.String) list2.Add(el.GetString() ?? "");
                         ch.RestoreHistory(list2);
                     }
-                    catch { }
+                    catch (Exception ex2) { AtherizLogger.LogError($"Channel {dto.Id} history unrestorable; starting empty.", ex2); }
                 }
             }
             // Clear IsModified after load? Original __setstate__ sets modified false via SaveObjects? Keep as per DTO
@@ -227,15 +239,9 @@ internal static class GameObjectDtoConverter
         GameObject o;
         if (isNode)
         {
-            Coord coord;
-            if (dto.Location is LocationRef.CoordLocation cl) coord = cl.Coord;
-            else if (dto.Extra != null && dto.Extra.TryGetValue("Coord", out var ce))
-            {
-                try { coord = JsonSerializer.Deserialize<Coord>(ce.GetRawText())!; } catch { coord = new Coord("limbo",0,0,0); }
-            }
-            else coord = new Coord("limbo",0,0,0);
+            Coord coord = ExtractCoord(dto);
             var node = new Node(coord);
-            try { ObjectRegistry.RemoveObject(node); } catch {}
+            try { ObjectRegistry.RemoveObject(node); } catch (Exception ex) { AtherizLogger.LogError($"Node cleanup failed for object {dto.Id}.", ex); }
             node.SetIdRaw(dto.Id);
             node.Desc = dto.Desc;
             node.IsModified = dto.IsModified;
@@ -247,53 +253,51 @@ internal static class GameObjectDtoConverter
         o = new GameObject();
         o.SetIdRaw(dto.Id);
         GameObject.ApplyDtoFields(o, dto, isNodeOverride: null);
-        // locks from dto are declarative; for now ignore predicate restoration (need interpreter)
         return o;
     }
 
-    public static (string Sql, object[] Params) GetSaveOps(GameObject obj)
+    /// <summary>Coord for node instantiation: Location first, then Extra "Coord", then limbo origin.</summary>
+    internal static Coord ExtractCoord(GameObjectDto dto)
     {
-        // non-clearing: save flag state around serialization (mirrors Python get_save_ops)
-        // Use raw IsModified access without re-entering Write lock to ensure exactly one tracker increment (test SaveUsesLock expects 1)
-        bool had;
-        string json;
-        obj.IncrementTrackerInternal();
-        obj.SyncRoot.EnterWriteLock();
-        try
+        if (dto.Location is LocationRef.CoordLocation cl) return cl.Coord;
+        if (dto.Extra != null && dto.Extra.TryGetValue("Coord", out var ce))
         {
-            had = obj.GetIsModifiedRawNoLock();
-            obj.SetIsModifiedRawNoLock(false);
-            try { json = GameObjectDtoSerializer.ToJson(obj.ToDtoUnsafeInternal()); }
-            finally { obj.SetIsModifiedRawNoLock(had); }
+            try { return JsonSerializer.Deserialize<Coord>(ce.GetRawText())!; }
+            catch (Exception ex) { AtherizLogger.LogError($"Bad Extra Coord for object {dto.Id}; using limbo origin.", ex); }
         }
-        finally { obj.SyncRoot.ExitWriteLock(); }
-        return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [obj.Id, json]);
+        return new Coord("limbo", 0, 0, 0);
     }
 
+    public static (string Sql, object[] Params) GetSaveOps(GameObject obj)
+        => ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [obj.Id, BuildSaveJson(obj, clearing: false)]);
+
     public static (string Sql, object[] Params) GetSaveOpsClearing(GameObject obj)
+        => ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [obj.Id, BuildSaveJson(obj, clearing: true)]);
+
+    private static string BuildSaveJson(GameObject obj, bool clearing)
     {
-        string json;
-        bool had;
+        // Single save-serialization core (mirrors Python get_save_ops).
+        // Use raw IsModified access without re-entering Write lock to ensure exactly one tracker increment (test SaveUsesLock expects 1).
+        // Non-clearing restores the flag afterwards; clearing leaves it false (only restored on error).
         obj.IncrementTrackerInternal();
         obj.SyncRoot.EnterWriteLock();
+        bool had = obj.GetIsModifiedRawNoLock();
+        obj.SetIsModifiedRawNoLock(false);
         try
         {
-            had = obj.GetIsModifiedRawNoLock();
-            obj.SetIsModifiedRawNoLock(false);
-            try
-            {
-                var dto = obj.ToDtoUnsafeInternal();
-                dto.IsModified = false;
-                json = GameObjectDtoSerializer.ToJson(dto);
-                obj.SetIsModifiedRawNoLock(false);
-            }
-            catch
-            {
-                obj.SetIsModifiedRawNoLock(had);
-                throw;
-            }
+            var dto = obj.ToDtoUnsafeInternal();
+            if (clearing) dto.IsModified = false;
+            return GameObjectDtoSerializer.ToJson(dto);
         }
-        finally { obj.SyncRoot.ExitWriteLock(); }
-        return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [obj.Id, json]);
+        catch
+        {
+            obj.SetIsModifiedRawNoLock(had);
+            throw;
+        }
+        finally
+        {
+            if (!clearing) obj.SetIsModifiedRawNoLock(had);
+            obj.SyncRoot.ExitWriteLock();
+        }
     }
 }

@@ -96,9 +96,9 @@ public class FuncParser
             ["mult"] = (a,k,ctx,raw) => ApplyOp(a,k,ctx,"*"),
             ["div"] = (a,k,ctx,raw) => ApplyOp(a,k,ctx,"/"),
             ["round"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; if(!double.TryParse(a[0], out var d)) return ""; int sig=0; if(a.Length>1) int.TryParse(a[1], out sig); var r=Math.Round(d,sig); if(sig==0) return ((int)r).ToString(); return r.ToString(System.Globalization.CultureInfo.InvariantCulture); },
-            ["random"] = (a,k,ctx,raw) => { var rnd=new Random(); if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ if(a[0].Contains('.')){ double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); return rnd.NextDouble()*mx; } int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } { double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn); double.TryParse(a[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); bool isFloat=a[0].Contains('.')||a[1].Contains('.'); if(isFloat) return mn + (mx-mn)*rnd.NextDouble(); return rnd.Next((int)mn,(int)mx+1); } },
-            ["randint"] = (a,k,ctx,raw) => { var rnd=new Random(); if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } int.TryParse(a[0], out var mn2); int.TryParse(a[1], out var mx3); return rnd.Next(mn2,mx3+1); },
-            ["choice"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; var rnd=new Random();
+            ["random"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ if(a[0].Contains('.')){ double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); return rnd.NextDouble()*mx; } int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } { double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn); double.TryParse(a[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); bool isFloat=a[0].Contains('.')||a[1].Contains('.'); if(isFloat) return mn + (mx-mn)*rnd.NextDouble(); return rnd.Next((int)mn,(int)mx+1); } },
+            ["randint"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } int.TryParse(a[0], out var mn2); int.TryParse(a[1], out var mx3); return rnd.Next(mn2,mx3+1); },
+            ["choice"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; var rnd=Random.Shared;
                 if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[")&&single.EndsWith("]")){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch{} } try{
                         var conv = FuncParserHelpers.SafeConvertToTypes( (new object[]{"py"}, new Dictionary<string,object>()), new object?[]{single}, new Dictionary<string,object?>(), ctx.RaiseErrors); if(conv.args.Length>0 && conv.args[0] is System.Collections.IEnumerable en && !(conv.args[0] is string)){ var list=en.Cast<object?>().ToArray(); if(list.Length>0) return list[rnd.Next(list.Length)]?.ToString()??""; } }catch{ if(ctx.RaiseErrors) throw; } if(ctx.RaiseErrors){
                         // For single non-list like "a", py conversion will have thrown if raiseErrors, so propagate
@@ -816,7 +816,6 @@ public class FuncParser
         // If returnStr false but we have mixed content, fallback to string
         if(!returnStr && fullstr.Count==0 && execReturn!=null && execReturn.ToString()!="" )
             return execReturn;
-        fullstr.AddRange(infuncstr.Where(c=> false)); // no-op
         return new string(fullstr.ToArray());
     }
 

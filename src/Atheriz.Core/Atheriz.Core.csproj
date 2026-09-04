@@ -7,6 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- F015: full Evennia-derived verb table, copied verbatim from
+         atheriz/objects/verb_conjugation/verbs.txt. Copied to the output dir (preserving its
+         project-relative path) so the loader finds it the way Python finds its own
+         (os.path.dirname(__file__)/verbs.txt). Flows transitively to Server/tests output. -->
+    <Content Include="Objects/VerbConjugation/verbs.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />

@@ -36,6 +36,9 @@ public class TelnetConnection : BaseConnection
         _limiter = new PendingLimiter(maxBytes);
         try
         {
+            // Typed fast path first (F001); snake_case reflection below is
+            // mock-compat only, pinned by PortedTelnetTests.MockWriter.
+            if (writer is ITelnetWriter tw0) { ClientHost = tw0.GetPeerHost() ?? "?"; return; }
             // port of telnet.py:130-133 writer.get_extra_info("peername")[0]
             var mi = writer.GetType().GetMethod("get_extra_info");
             if (mi != null)
@@ -50,7 +53,7 @@ public class TelnetConnection : BaseConnection
                     if (prop != null) ClientHost = prop.GetValue(res)?.ToString() ?? "?";
                 }
             }
-            else if (writer is ITelnetWriter tw) ClientHost = tw.GetPeerHost() ?? "?";
+            // (ITelnetWriter handled by the typed fast path above.)
         }
         catch { }
     }
@@ -60,6 +63,13 @@ public class TelnetConnection : BaseConnection
     {
         try
         {
+            // Typed fast path first (F001); reflection below is mock-compat,
+            // pinned by PortedTelnetTests.MockWriter (snake_case transport).
+            if (Writer is ITelnetWriter itw0)
+            {
+                var typed = itw0.GetWriteBufferSize();
+                if (typed != null) return typed;
+            }
             // Check transport via property or field (Python getattr handles both)
             object? tr = null;
             var trProp = Writer.GetType().GetProperty("transport");
@@ -107,7 +117,7 @@ public class TelnetConnection : BaseConnection
                     if (buf is int i) return i;
                 }
             }
-            if (Writer is ITelnetWriter itw) return itw.GetWriteBufferSize();
+            // (ITelnetWriter handled by the typed fast path above.)
         }
         catch { return null; }
         return null;
@@ -119,25 +129,25 @@ public class TelnetConnection : BaseConnection
     private void WriterWrite(string text)
     {
         var tt = TelnetText(text);
+        if (Writer is ITelnetWriter itw0) { itw0.Write(tt); return; }
         var mi = Writer.GetType().GetMethod("write");
         if (mi != null) { mi.Invoke(Writer, new object[] { tt }); return; }
-        if (Writer is ITelnetWriter itw) { itw.Write(tt); return; }
         try { ((dynamic)Writer).write(tt); } catch { }
     }
 
     private void WriterIac(byte cmd, byte opt)
     {
+        if (Writer is ITelnetWriter itw0) { itw0.Iac(cmd, opt); return; }
         var mi = Writer.GetType().GetMethod("iac");
         if (mi != null) { mi.Invoke(Writer, new object[] { cmd, opt }); return; }
-        if (Writer is ITelnetWriter itw) { itw.Iac(cmd, opt); return; }
         try { ((dynamic)Writer).iac(cmd, opt); } catch { }
     }
 
     private void WriterClose()
     {
+        if (Writer is ITelnetWriter itw0) { itw0.Close(); return; }
         var mi = Writer.GetType().GetMethod("close");
         if (mi != null) { mi.Invoke(Writer, null); return; }
-        if (Writer is ITelnetWriter itw) { itw.Close(); return; }
         try { ((dynamic)Writer).close(); } catch { }
     }
 
@@ -396,33 +406,8 @@ public sealed class TelnetProtocol : Protocol
         if (!string.IsNullOrEmpty(buf) && !dropping) { if (buf == "\r") { } else { if (buf.EndsWith("\r")) buf = buf.Substring(0, buf.Length - 1); if (!string.IsNullOrEmpty(buf)) yield return buf; } }
     }
 
-    public static async IAsyncEnumerable<string?> ReadCappedLines(StreamReader reader, int maxLine)
-    {
-        var buf = ""; var dropping = false; var eof = false;
-        while (true)
-        {
-            char[] chunkBuf = new char[TELNET_INPUT_CHUNK];
-            int read = await reader.ReadAsync(chunkBuf, 0, TELNET_INPUT_CHUNK);
-            string chunk = read > 0 ? new string(chunkBuf, 0, read) : "";
-            if (string.IsNullOrEmpty(chunk)) { eof = true; break; }
-            buf += chunk;
-            while (true)
-            {
-                var i = FindEol(buf); if (i == -1) break;
-                if (buf[i] == '\r' && i + 1 >= buf.Length && !eof) break;
-                var line = buf.Substring(0, i); var rest = buf.Substring(i + 1);
-                if (buf[i] == '\r' && rest.Length > 0 && (rest[0] == '\n' || rest[0] == '\x00')) rest = rest.Substring(1);
-                buf = rest;
-                if (dropping || line.Length > maxLine) { yield return null; dropping = false; } else yield return line;
-            }
-            var effectiveLen = buf.Length;
-            if (!eof && buf.EndsWith("\r") && FindEol(buf) == buf.Length - 1) effectiveLen--;
-            if (effectiveLen > maxLine) { dropping = true; buf = ""; }
-        }
-        while (true) { var i = FindEol(buf); if (i == -1) break; var line = buf.Substring(0, i); var rest = buf.Substring(i + 1); if (buf[i] == '\r' && rest.Length > 0 && (rest[0] == '\n' || rest[0] == '\x00')) rest = rest.Substring(1); buf = rest; if (dropping || line.Length > maxLine) { yield return null; dropping = false; } else yield return line; }
-        if (!string.IsNullOrEmpty(buf) && !dropping) { if (buf == "\r") { } else { if (buf.EndsWith("\r")) buf = buf.Substring(0, buf.Length - 1); if (!string.IsNullOrEmpty(buf)) yield return buf; } }
-    }
-
+    // F016: single TextReader overload (StreamReader binds here implicitly). Read errors are
+    // treated as EOF (clean disconnect path) rather than propagating out of the accept loop.
     public static X509Certificate2? BuildTelnetSslContext(AtherizSettings? settings = null)
     {
         settings ??= AtherizSettings.Global;
@@ -432,53 +417,8 @@ public sealed class TelnetProtocol : Protocol
         try
         {
             var keyFile = settings.SslKeyFile;
-            if (!string.IsNullOrEmpty(keyFile))
-            {
-                if (!File.Exists(keyFile)) { Console.Error.WriteLine($"WARNING: SSL key file not found: {keyFile}"); return null; }
-                return X509Certificate2.CreateFromPemFile(certFile, keyFile);
-            }
-            else
-            {
-                var pemText = File.ReadAllText(certFile);
-                // If file contains both cert and key, split and use CreateFromPem(cert, key)
-                if (pemText.Contains("PRIVATE KEY"))
-                {
-                    try
-                    {
-                        // Find cert and key sections
-                        var certStart = pemText.IndexOf("-----BEGIN CERTIFICATE-----", StringComparison.Ordinal);
-                        var certEndIdx = pemText.IndexOf("-----END CERTIFICATE-----", StringComparison.Ordinal);
-                        if (certStart >= 0 && certEndIdx >= 0)
-                        {
-                            certEndIdx += "-----END CERTIFICATE-----".Length;
-                            var certPemPart = pemText.Substring(certStart, certEndIdx - certStart);
-                            // Find key start after cert
-                            var keyStart = pemText.IndexOf("-----BEGIN", certEndIdx, StringComparison.Ordinal);
-                            if (keyStart >= 0)
-                            {
-                                var keyPemPart = pemText.Substring(keyStart);
-                                // Trim to include only up to END PRIVATE KEY
-                                var keyEnd = keyPemPart.IndexOf("-----END", StringComparison.Ordinal);
-                                if (keyEnd >= 0)
-                                {
-                                    var endMarkerEnd = keyPemPart.IndexOf("-----", keyEnd + 5, StringComparison.Ordinal);
-                                    if (endMarkerEnd >= 0) keyPemPart = keyPemPart.Substring(0, endMarkerEnd + 5);
-                                }
-                                return X509Certificate2.CreateFromPem(certPemPart, keyPemPart);
-                            }
-                        }
-                    }
-                    catch { }
-                }
-                try
-                {
-                    return X509Certificate2.CreateFromPem(pemText);
-                }
-                catch
-                {
-                    try { return X509Certificate2.CreateFromPemFile(certFile); } catch { return new X509Certificate2(certFile); }
-                }
-            }
+            if (!string.IsNullOrEmpty(keyFile) && !File.Exists(keyFile)) { Console.Error.WriteLine($"WARNING: SSL key file not found: {keyFile}"); return null; }
+            return Atheriz.Core.Utils.TlsCertLoader.Load(certFile, keyFile);
         }
         catch (Exception e) { Console.Error.WriteLine($"WARNING: Could not load telnet TLS cert: {e}"); return null; }
     }

@@ -13,18 +13,19 @@ public sealed class ScreenReaderCommand : Command
     public override bool UseParser => false;
     public override void Run(IMessageTarget caller, object? args)
     {
-        // caller is BaseConnection (unloggedin) or GameObject (loggedin) — both have Session via dynamic
-        try
+        // Typed first (F001): GameObject/Session/BaseConnection all expose Session via ISessionProvider.
+        // The dynamic fallback below only serves exotic test doubles without the interface.
+        Session? sess = (caller as ISessionProvider)?.Session;
+        if (sess == null)
         {
-            var sess = ((dynamic)caller).Session as Session;
-            if (sess != null)
-            {
-                sess.ScreenReader = !sess.ScreenReader;
-                try { sess.Connection?.SendCommand("screenreader", sess.ScreenReader); } catch { }
-                return;
-            }
+            try { sess = ((dynamic)caller).Session as Session; } catch { }
         }
-        catch { }
+        if (sess != null)
+        {
+            sess.ScreenReader = !sess.ScreenReader;
+            try { sess.Connection?.SendCommand("screenreader", sess.ScreenReader); } catch { }
+            return;
+        }
         // fallback for GameObject
         if (caller is GameObject go && go.Session != null)
         {

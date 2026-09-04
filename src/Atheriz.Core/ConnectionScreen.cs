@@ -93,8 +93,6 @@ public static class ConnectionScreen
         var version = GetVersion(); // Port of connection_screen.py:72
         var createText = CreateText(settings); // Port of connection_screen.py:86
         var guestText = GuestText(settings);
-        var serverName = settings.ServerName; // Port of settings.SERVERNAME
-        var hostName = settings.ServerHostname; // Port of settings.SERVER_HOSTNAME
 
         // Build main screen with ANSI truecolor if not screenreader — Port of connection_screen.py:81-94
         bool isScreenReader = session != null && session.ScreenReader; // Port of connection_screen.py:81 session.screenreader
@@ -110,17 +108,9 @@ public static class ConnectionScreen
             raw = string.Format(Screen, version, known, online, createText, guestText);
         }
 
-        // Spec: SERVERNAME hosted on ..., telnet/websocket banner, instructions — enrich header/footer
-        var header = $"{serverName} hosted on {hostName}";
-        var protocols = new List<string>();
-        if (settings.TelnetEnabled) protocols.Add($"telnet port {settings.TelnetPort}");
-        if (settings.WebsocketEnabled) protocols.Add("websocket enabled");
-        var protoLine = protocols.Count > 0 ? string.Join(" | ", protocols) : "no network protocols enabled";
-        var banner = $"{header}\n{protoLine}\n";
-        // Append motd placeholder if needed — settings has no MOTD; use banner only
-        var full = banner + raw;
-        full += $"\nWelcome to {serverName}!\n";
-        full += "Instructions: connect/create/quit/guest/new, or enter 'help' for help.\n";
+        // Byte-faithful to connection_screen.py:79-94 render — SCREEN/SCREEN2 only, no extra
+        // header/footer/banner lines (removed 2026-09-04 per audit Appendix B Q10).
+        var full = raw;
 
         // Port of utils.wrap_truecolor for non-screenreader — via GameUtils.WrapTruecolor
         if (!isScreenReader)

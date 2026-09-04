@@ -20,8 +20,8 @@ public sealed class NoneCommand : Command
         if (pa != null) text = string.Join(" ", pa.GetList("none"));
         else text = (args as string ?? "").Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; }
-        var ignored = Atheriz.Core.Settings.AtherizSettings.Default.AutoAliasIgnoredKeys;
-        var settings = Atheriz.Core.Settings.AtherizSettings.Default;
+        var ignored = Atheriz.Core.Settings.AtherizSettings.Global.AutoAliasIgnoredKeys;
+        var settings = Atheriz.Core.Settings.AtherizSettings.Global;
         // build choices: internal + global + external verbs (mirrors none.py:62)
         var choices = new List<string>();
         if (caller is Objects.GameObject go && go.InternalCmdSet != null)

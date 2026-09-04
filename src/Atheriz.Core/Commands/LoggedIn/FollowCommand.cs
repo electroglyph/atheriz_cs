@@ -28,17 +28,7 @@ public sealed class FollowCommand : Command
         target.SyncRoot.EnterWriteLock();
         try
         {
-            try { ((dynamic)target).AddFollower(go.Id); } catch { }
-            if (!target.FollowersSnapshot.Contains(go.Id))
-            {
-                var f = target.GetType().GetField("_followers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (f != null)
-                {
-                    var set = f.GetValue(target) as HashSet<int>;
-                    set?.Add(go.Id);
-                    target.IsModified = true;
-                }
-            }
+            target.AddFollowerRawNoLock(go.Id);
             if (!target.GetScriptsByType("FollowScript").Any())
             {
                 var s = new Atheriz.Core.Objects.FollowScript();
@@ -68,14 +58,7 @@ public sealed class UnfollowCommand : Command
         var leader = ObjectRegistry.Get(go.Following.Value).FirstOrDefault();
         if (leader != null)
         {
-            try
-            {
-                var f = leader.GetType().GetField("_followers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var set = f?.GetValue(leader) as HashSet<int>;
-                set?.Remove(go.Id);
-                leader.IsModified = true;
-            }
-            catch { }
+            leader.RemoveFollower(go.Id);
             if (go.Access(leader, "view")) leader.Msg($"{go.GetDisplayName(leader)} is no longer following you.");
         }
         go.Following = null;
@@ -110,15 +93,7 @@ public sealed class NofollowCommand : Command
                     if (follower.Access(go, "view")) go.Msg($"You are no longer leading {follower.GetDisplayName(go)}.");
                 }
             }
-            try
-            {
-                var f = go.GetType().GetField("_followers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var set = f?.GetValue(go) as HashSet<int>;
-                set?.Clear();
-                foreach (var k in keep) set?.Add(k);
-                go.IsModified = true;
-            }
-            catch { }
+            go.ClearFollowersExcept(keep);
             if (go.FollowersSnapshot.Count == 0)
             {
                 foreach (var script in go.GetScriptsByType("FollowScript").ToList())

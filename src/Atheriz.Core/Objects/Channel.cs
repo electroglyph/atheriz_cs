@@ -48,6 +48,16 @@ public class Channel : GameObject
         }
     }
 
+    /// <summary>
+    /// Re-syncs the delete guard after <c>GameObject.ApplyDtoFields</c> restores
+    /// <c>_flags.IsDeleted</c> directly (bypassing this override). Called with the
+    /// restored value; takes only _histLock so no lock order is violated.
+    /// </summary>
+    internal void SyncDeletedGuard(bool deleted)
+    {
+        lock (_histLock) { _channelDeleted = deleted; }
+    }
+
     public IReadOnlySet<int> Listeners
     {
         get { lock (_histLock) return new HashSet<int>(_listeners.Keys); }
@@ -75,20 +85,42 @@ public class Channel : GameObject
         lock (_histLock) { _listeners.Remove(obj.Id); }
         IsModified = true;
     }
-
-    public Atheriz.Core.Commands.Command? Command => _command;
-
-    public Atheriz.Core.Commands.Command? GetCommand()
+    /// <summary>
+    /// Hot-reload rewire: swap a stale listener instance for its replacement
+    /// (same id). Listeners are keyed by id so only the value needs swapping.
+    /// </summary>
+    public void ReplaceListener(GameObject replacement)
     {
         lock (_histLock)
         {
-            if (_command != null) return _command;
+            if (_listeners.TryGetValue(replacement.Id, out var cur) && !ReferenceEquals(cur, replacement))
+                _listeners[replacement.Id] = replacement;
+        }
+    }
+
+    public Atheriz.Core.Commands.Command? Command => _command;
+    private string? _commandKey;
+    private string? _commandDesc;
+
+    public Atheriz.Core.Commands.Command? GetCommand()
+    {
+        // Snapshot Name/Desc before locking: GameObject props take SyncRoot, so
+        // reading them under _histLock would nest channel -> object (inversion;
+        // the fixed order everywhere is object -> channel).
+        string key = Name.ToLowerInvariant();
+        string desc = Desc;
+        lock (_histLock)
+        {
+            // Invalidate the cached command on rename (old cache ignored Name/Desc).
+            if (_command != null && _commandKey == key && _commandDesc == desc) return _command;
             var cmd = new BaseChannelCommand();
-            ((BaseChannelCommand)cmd).SetKey(Name.ToLowerInvariant());
-            ((BaseChannelCommand)cmd).SetDesc(Desc);
+            ((BaseChannelCommand)cmd).SetKey(key);
+            ((BaseChannelCommand)cmd).SetDesc(desc);
             cmd.Channel = this;
             cmd.Id = Id;
             _command = cmd;
+            _commandKey = key;
+            _commandDesc = desc;
             return cmd;
         }
     }
@@ -111,17 +143,17 @@ public class Channel : GameObject
             var o = objs.FirstOrDefault();
             if (o != null)
             {
+                // Typed peer detach (was GetField("_channels") reflection, now banned
+                // in prod). Unsubscribe removes this channel id from the peer and
+                // marks it modified; GameObject._lock is recursive so holding the
+                // peer write lock across it is safe. Lock order stays object -> channel.
                 try
                 {
                     o.SyncRoot.EnterWriteLock();
-                    try
-                    {
-                        var f = o.GetType().GetField("_channels", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                        if (f?.GetValue(o) is List<int> lst) lst.Remove(this.Id);
-                        o.IsModified = true;
-                    }
+                    try { o.Unsubscribe(this); }
                     finally { o.SyncRoot.ExitWriteLock(); }
-                } catch {}
+                }
+                catch (Exception ex) { try { AtherizLogger.LogError($"channel delete detach failed for object {lid}: {ex.Message}"); } catch { } }
             }
         }
         Globals.ObjectRegistry.RemoveObject(this);
@@ -145,9 +177,12 @@ public class Channel : GameObject
             IsModified = true;
             listeners = _listeners.Values.ToList();
         }
+        string formatted = FormatMessage(timestamp, senderName, text);
         foreach (var listener in listeners)
         {
-            try { listener.Msg(FormatMessage(timestamp, senderName, text)); } catch {}
+            // FormatMessage is a pure function of (timestamp, sender, text), so
+            // format once instead of once per listener.
+            try { listener.Msg(formatted); } catch {}
         }
     }
 
@@ -187,68 +222,60 @@ public class Channel : GameObject
         }
     }
 
-    public override (string Sql, object[] Params) GetSaveOps()
-    {
-        bool had;
-        string json;
-        IncrementTracker();
-        lock (_histLock)
-        {
-            SyncRoot.EnterWriteLock();
-            try
-            {
-                had = GetIsModifiedRawNoLock();
-                SetIsModifiedRawNoLock(false);
-                try { json = Persistence.Dto.GameObjectDtoSerializer.ToJson(ToDto()); }
-                finally { SetIsModifiedRawNoLock(had); }
-            }
-            finally { SyncRoot.ExitWriteLock(); }
-        }
-        return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", new object[] { Id, json });
-    }
+    // Save ops never nest _histLock inside SyncRoot (or vice versa): history is
+    // snapshotted under _histLock, then the modified-flag dance runs under
+    // SyncRoot only. Fixed lock order everywhere is object -> channel.
+    public override (string Sql, object[] Params) GetSaveOps() => BuildSaveOps(clearing: false);
 
-    public override (string Sql, object[] Params) GetSaveOpsClearing()
+    public override (string Sql, object[] Params) GetSaveOpsClearing() => BuildSaveOps(clearing: true);
+
+    private (string Sql, object[] Params) BuildSaveOps(bool clearing)
     {
-        string json;
+        IncrementTracker();
+        List<string> histSnap;
+        lock (_histLock) { histSnap = _history.ToList(); }
         bool had = false;
-        IncrementTracker();
-        lock (_histLock)
+        string json;
+        SyncRoot.EnterWriteLock();
+        try
         {
-            SyncRoot.EnterWriteLock();
+            had = GetIsModifiedRawNoLock();
+            SetIsModifiedRawNoLock(false);
             try
             {
-                had = GetIsModifiedRawNoLock();
-                SetIsModifiedRawNoLock(false);
-                try
-                {
-                    var dto = ToDto();
-                    dto.IsModified = false;
-                    json = Persistence.Dto.GameObjectDtoSerializer.ToJson(dto);
-                    SetIsModifiedRawNoLock(false);
-                }
-                catch
-                {
-                    SetIsModifiedRawNoLock(had);
-                    throw;
-                }
+                var dto = BuildDto(histSnap);
+                if (clearing) dto.IsModified = false;
+                json = Persistence.Dto.GameObjectDtoSerializer.ToJson(dto);
+                // Non-clearing restores the flag (GetSaveOps is a peek); clearing
+                // leaves it cleared. Either way a throw restores the old flag.
+                SetIsModifiedRawNoLock(clearing ? false : had);
             }
-            finally { SyncRoot.ExitWriteLock(); }
+            catch
+            {
+                SetIsModifiedRawNoLock(had);
+                throw;
+            }
         }
+        finally { SyncRoot.ExitWriteLock(); }
         return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", new object[] { Id, json });
     }
 
-    public new GameObjectDto ToDto()
+    public override GameObjectDto ToDto()
+    {
+        List<string> histSnap;
+        lock (_histLock) { histSnap = _history.ToList(); }
+        return BuildDto(histSnap);
+    }
+
+    private GameObjectDto BuildDto(List<string> history)
     {
         var dto = base.ToDto();
         dto.Type = "channel";
-        lock (_histLock)
-        {
-            dto.Extra["history"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_history.ToList())).RootElement.Clone();
-            // listeners intentionally excluded per __getstate__ (pop listeners)
-            // lock also excluded (not in DTO)
-            dto.Extra.Remove("listeners");
-            dto.Extra.Remove("lock");
-        }
+        dto.Extra["history"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(history)).RootElement.Clone();
+        // listeners intentionally excluded per __getstate__ (pop listeners)
+        // lock also excluded (not in DTO)
+        dto.Extra.Remove("listeners");
+        dto.Extra.Remove("lock");
         // Ensure command not persisted
         dto.Extra.Remove("_command");
         dto.Extra.Remove("command");

@@ -50,7 +50,7 @@ public static class GlobalServices
     // Port of get.py:149-156 get_async_threadpool
     public static AsyncThreadPool GetAsyncThreadPool() => GetOrCreateSingleton(ref _asyncThreadPool, () =>
     {
-        var settings = AtherizSettings.Default;
+        var settings = AtherizSettings.Global;
         int limit = settings.ThreadpoolLimit ?? Environment.ProcessorCount;
         if (limit < 1) limit = 1;
         return new AsyncThreadPool(
@@ -74,14 +74,14 @@ public static class GlobalServices
     // Port of get.py:129-136 get_map_handler
     public static MapHandler GetMapHandler() => GetOrCreateSingleton(ref _mapHandler, () =>
     {
-        var settings = AtherizSettings.Default;
+        var settings = AtherizSettings.Global;
         return new MapHandler(settings, autoLoad: true);
     });
 
     // Port of get.py:69-76 get_game_time
     public static GameTime GetGameTime() => GetOrCreateSingleton(ref _gameTime, () =>
     {
-        var settings = AtherizSettings.Default;
+        var settings = AtherizSettings.Global;
         var ticker = _asyncTicker;
         var pool = _asyncThreadPool;
         if (ticker != null || pool != null)
@@ -229,6 +229,21 @@ public static class GlobalServices
     public static GameTime? TryGetGameTime()
     {
         try { var snap = Volatile.Read(ref _gameTime); return snap; } catch { return null; }
+    }
+
+    // Typed singleton override (F001: replaces GlobalServices._nodeHandler/_mapHandler
+    // reflection writes in MazeCommand). Same-lock assignment, no behavior change.
+    public static void SetNodeHandler(NodeHandler nh)
+    {
+        _singletonLock.EnterWriteLock();
+        try { _nodeHandler = nh; }
+        finally { _singletonLock.ExitWriteLock(); }
+    }
+    public static void SetMapHandler(MapHandler mh)
+    {
+        _singletonLock.EnterWriteLock();
+        try { _mapHandler = mh; }
+        finally { _singletonLock.ExitWriteLock(); }
     }
 
     // Expose lock for StartStop faithful clearing (mirrors get_singleton._SINGLETON_LOCK)

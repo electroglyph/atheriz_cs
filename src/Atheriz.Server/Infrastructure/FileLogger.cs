@@ -10,7 +10,10 @@ public sealed class FileLoggerProvider : ILoggerProvider
     private readonly string _savePath;
     private readonly LogLevel _minLevel;
     private readonly object _lock = new();
-    private bool _disabled;
+    // F009: no permanent _disabled latch. A single transient IO error (locked file, full
+    // disk that later frees) used to silence file logging for the rest of the process.
+    // Failures are counted for diagnostics and every write retries.
+    private long _writeFailures;
 
     public FileLoggerProvider(string savePath, LogLevel minLevel = LogLevel.Information)
     {
@@ -23,7 +26,9 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
     public void Dispose() { }
 
-    internal bool IsEnabled(LogLevel level) => level >= _minLevel && !_disabled;
+    internal bool IsEnabled(LogLevel level) => level >= _minLevel;
+
+    internal long WriteFailures => Interlocked.Read(ref _writeFailures);
 
     internal void WriteLog(LogLevel level, string category, string message, Exception? ex)
     {
@@ -47,10 +52,10 @@ public sealed class FileLoggerProvider : ILoggerProvider
                 }
                 catch { }
                 try { File.AppendAllText(file, line); }
-                catch { _disabled = true; }
+                catch { Interlocked.Increment(ref _writeFailures); }
             }
         }
-        catch { }
+        catch { Interlocked.Increment(ref _writeFailures); }
     }
 
     private void Rotate(string file) => AtherizLogger.Rotate(file);

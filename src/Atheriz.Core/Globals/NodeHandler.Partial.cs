@@ -20,36 +20,77 @@ public partial class NodeHandler
             if (!_doors.TryGetValue(door.ToCoord,out var d2)) { d2=new(); _doors[door.ToCoord]=d2; }
             d2[door.ToExit]=door;
             _modified3=true;
+            _doorGen++;
         }
         finally { Lock3.ExitWriteLock(); }
+        // Port of node.py add_door map stamp (after releasing Lock3: no lock
+        // nesting). MapClose/MapOpen already implement the post_grid (+pre_grid
+        // if non-empty) stamp + render; the MapEnabled gate only skips render
+        // work when maps are disabled.
+        try { if (door.Closed) door.MapClose(); else door.MapOpen(); } catch { }
+    }
+    // Port of node.py remove_door: entries are removed by VALUE (v == door),
+    // not by exit-name key.
+    private static void RemoveDoorValue(Dictionary<string,Door> d, Door door)
+    {
+        List<string>? rem = null;
+        foreach (var kv in d) if (Equals(kv.Value, door)) (rem ??= new()).Add(kv.Key);
+        if (rem != null) foreach (var k in rem) d.Remove(k);
     }
     public void RemoveDoor(Door door)
     {
         Lock3.EnterWriteLock();
         try
         {
-            if(_doors.TryGetValue(door.FromCoord,out var d)) { d.Remove(door.FromExit); _modified3=true; }
-            if(_doors.TryGetValue(door.ToCoord,out var d2)) { d2.Remove(door.ToExit); _modified3=true; }
+            if(_doors.TryGetValue(door.FromCoord,out var d)) RemoveDoorValue(d, door);
+            if(_doors.TryGetValue(door.ToCoord,out var d2)) RemoveDoorValue(d2, door);
+            _modified3=true;
+            _doorGen++;
         }
         finally { Lock3.ExitWriteLock(); }
         var fromNode=GetNode(door.FromCoord);
         fromNode?.RemoveLink(door.FromExit);
         var toNode=GetNode(door.ToCoord);
         toNode?.RemoveLink(door.ToExit);
+        // Port of node.py remove_door map cleanup (update_grid(symbol," ") +
+        // render per (area,z)); after releasing Lock3, no lock nesting.
+        try
+        {
+            var mh = MapHandlerHolder.Get();
+            if (mh != null && door.SymbolCoord != null)
+            {
+                var seen = new HashSet<(string, int)>();
+                foreach (var coord in new[] { door.FromCoord, door.ToCoord })
+                {
+                    if (coord.Equals(default(Coord))) continue;
+                    if (!seen.Add((coord.Area, coord.Z))) continue;
+                    mh.GetMapInfo(coord.Area, coord.Z)?.UpdateGrid(door.SymbolCoord.Value, " ");
+                }
+            }
+        }
+        catch { }
     }
     public void AddNode(Node node)
     {
+        // Upgradeable read: two threads creating the same area concurrently
+        // used to build duplicate NodeAreas (last-wins lost a grid).
         NodeArea? area;
-        Lock.EnterReadLock();
-        try { _areas.TryGetValue(node.Coord.Area, out area); }
-        finally { Lock.ExitReadLock(); }
-        if(area==null)
+        Lock.EnterUpgradeableReadLock();
+        try
         {
-            area=new NodeArea(node.Coord.Area);
-            Lock.EnterWriteLock();
-            try { _areas[area.Name]=area; _modified=true; }
-            finally { Lock.ExitWriteLock(); }
+            if (!_areas.TryGetValue(node.Coord.Area, out area))
+            {
+                area = new NodeArea(node.Coord.Area);
+                Lock.EnterWriteLock();
+                try
+                {
+                    if (!_areas.TryGetValue(node.Coord.Area, out var raced)) { _areas[area.Name] = area; _modified = true; }
+                    else area = raced;
+                }
+                finally { Lock.ExitWriteLock(); }
+            }
         }
+        finally { Lock.ExitUpgradeableReadLock(); }
         var grid=area.GetOrAddGrid(node.Coord.Z);
         grid.AddNode(node);
         Lock.EnterWriteLock();
@@ -90,10 +131,10 @@ public partial class NodeHandler
         }
         finally { Lock.ExitWriteLock(); }
         Lock2.EnterWriteLock();
-        try { _transitions.Clear(); _modified2=true; }
+        try { _transitions.Clear(); _modified2=true; _transGen++; }
         finally { Lock2.ExitWriteLock(); }
         Lock3.EnterWriteLock();
-        try { _doors.Clear(); _modified3=true; }
+        try { _doors.Clear(); _modified3=true; _doorGen++; }
         finally { Lock3.ExitWriteLock(); }
     }
     public NodeArea? GetArea(string name)
@@ -135,13 +176,13 @@ public partial class NodeHandler
     public void AddTransition(Transition t)
     {
         Lock2.EnterWriteLock();
-        try { _transitions[t.ToCoord]=t; _modified2=true; }
+        try { _transitions[t.ToCoord]=t; _modified2=true; _transGen++; }
         finally { Lock2.ExitWriteLock(); }
     }
     public void RemoveTransition(Coord dest)
     {
         Lock2.EnterWriteLock();
-        try { _transitions.Remove(dest); _modified2=true; }
+        try { _transitions.Remove(dest); _modified2=true; _transGen++; }
         finally { Lock2.ExitWriteLock(); }
     }
     public List<Transition> FindTransitions(int? fromZ=null,int? toZ=null,string? fromArea=null,string? toArea=null)
@@ -216,7 +257,7 @@ public partial class NodeHandler
                     finally { door.Lock.ExitWriteLock(); }
                 }
             }
-            if (relocated.Count > 0) _modified3 = true;
+            if (relocated.Count > 0) { _modified3 = true; _doorGen++; }
         }
         finally { Lock3.ExitWriteLock(); }
     }
@@ -239,6 +280,7 @@ public partial class NodeHandler
                     try { trans.ToCoord = newFull; } finally { trans.Lock.ExitWriteLock(); }
                     _transitions[newFull] = trans;
                     _modified2 = true;
+                    _transGen++;
                 }
             }
         }

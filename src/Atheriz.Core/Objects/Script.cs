@@ -77,23 +77,7 @@ public class Script : GameObject
         // Port of base_script.py:108-118 create handling of scripts set? For Script.attach, base_script install_hooks is called via GameObject.add_script which adds to scripts set.
         // Here we ensure child's Scripts set includes this script's Id (mirrors Python child.scripts.add(script.id))
         // Only mark modified if actually added (so resolve_relations after load does not dirty)
-        child.SyncRoot.EnterWriteLock();
-        try
-        {
-            var field = typeof(GameObject).GetField("_scripts", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (field != null)
-            {
-                var set = field.GetValue(child) as HashSet<int>;
-                bool added = false;
-                if (set != null) added = set.Add(this.Id);
-                if (added) child.IsModified = true;
-            }
-            else
-            {
-                child.IsModified = true;
-            }
-        }
-        finally { child.SyncRoot.ExitWriteLock(); }
+        child.AddScriptId(this.Id);
 
         AtInstall(); // Port of base_script.py:209 self.at_install()
     }
@@ -251,18 +235,7 @@ public class Script : GameObject
         }
 
         // Also remove from child's scripts set
-        child.SyncRoot.EnterWriteLock();
-        try
-        {
-            var field = typeof(GameObject).GetField("_scripts", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (field != null)
-            {
-                var set = field.GetValue(child) as HashSet<int>;
-                set?.Remove(this.Id);
-            }
-            child.IsModified = true;
-        }
-        finally { child.SyncRoot.ExitWriteLock(); }
+        child.RemoveScriptId(this.Id);
 
         lock (SyncRoot)
         {

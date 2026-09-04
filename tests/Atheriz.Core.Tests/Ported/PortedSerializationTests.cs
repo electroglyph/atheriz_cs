@@ -10,6 +10,11 @@ namespace Atheriz.Core.Tests.Ported;
 [Collection("Ported")]
 public class PortedSerializationTests
 {
+    // Persistence round-trips only restore explicitly registered subtypes (F004).
+    static PortedSerializationTests()
+    {
+        GameObject.RegisterPersistedSubtype(typeof(AlarmObj).FullName!, typeof(AlarmObj), () => new AlarmObj());
+    }
     class CustomData { public string Value{get;set;}=""; public CustomData? Nested{get;set;} }
 
     private static GameObject Roundtrip(GameObject obj)

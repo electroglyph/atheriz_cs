@@ -250,6 +250,8 @@ public class AsyncThreadPool : IDisposable
 
     private static void RunInternal(WorkItem item)
     {
+        // F009: faults go through AtherizLogger (server.log) instead of bare Console.Error.
+        // AtherizLogger still echoes to Console.Error, so test log-capture keeps working.
         try
         {
             var task = item.Runner();
@@ -257,15 +259,15 @@ public class AsyncThreadPool : IDisposable
             {
                 _ = task.ContinueWith(t =>
                 {
-                    if (t.IsFaulted && t.Exception != null) Console.Error.WriteLine(t.Exception.ToString());
+                    if (t.IsFaulted && t.Exception != null) try { AtherizLogger.LogError(t.Exception.ToString()); } catch { Console.Error.WriteLine(t.Exception.ToString()); }
                 }, TaskScheduler.Default);
             }
             else if (task.IsFaulted && task.Exception != null)
             {
-                Console.Error.WriteLine(task.Exception.ToString());
+                try { AtherizLogger.LogError(task.Exception.ToString()); } catch { Console.Error.WriteLine(task.Exception.ToString()); }
             }
         }
-        catch (Exception ex) { Console.Error.WriteLine(ex.ToString()); }
+        catch (Exception ex) { try { AtherizLogger.LogError(ex.ToString()); } catch { Console.Error.WriteLine(ex.ToString()); } }
     }
 
     private void MaybeSpawnReliefWorker()

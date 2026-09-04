@@ -32,12 +32,30 @@ public sealed class NodeArea
         }
         finally { Lock.ExitReadLock(); }
     }
+    // Port of nodes.py:1261 — Python dict == is order-insensitive; JsonElement has no
+    // value equality in C#, so data compares by canonical raw text. Hash combines the
+    // same components in sorted order so equal areas hash equal.
     public override bool Equals(object? obj)
     {
         if (obj is not NodeArea o) return false;
-        return Name == o.Name && Theme == o.Theme && Grids.SequenceEqual(o.Grids) && Data.SequenceEqual(o.Data) && (LinkedAreas == null && o.LinkedAreas == null || LinkedAreas != null && o.LinkedAreas != null && LinkedAreas.SetEquals(o.LinkedAreas));
+        if (Name != o.Name || Theme != o.Theme) return false;
+        if (Grids.Count != o.Grids.Count || Data.Count != o.Data.Count) return false;
+        foreach (var kv in Grids)
+            if (!o.Grids.TryGetValue(kv.Key, out var g) || !kv.Value.Equals(g)) return false;
+        foreach (var kv in Data)
+            if (!o.Data.TryGetValue(kv.Key, out var je) || kv.Value.GetRawText() != je.GetRawText()) return false;
+        return (LinkedAreas == null && o.LinkedAreas == null) || (LinkedAreas != null && o.LinkedAreas != null && LinkedAreas.SetEquals(o.LinkedAreas));
     }
-    public override int GetHashCode() => HashCode.Combine(Name, Theme);
+    public override int GetHashCode()
+    {
+        var h = new HashCode();
+        h.Add(Name);
+        h.Add(Theme);
+        foreach (var k in Grids.Keys.OrderBy(k => k)) { h.Add(k); h.Add(Grids[k]); }
+        foreach (var k in Data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(Data[k].GetRawText()); }
+        if (LinkedAreas != null) foreach (var a in LinkedAreas.OrderBy(a => a, StringComparer.Ordinal)) h.Add(a);
+        return h.ToHashCode();
+    }
 
     // Port of nodes.py:1258 get_nodes
     public List<Node> GetNodes(List<(int X, int Y, int Z)> coords)

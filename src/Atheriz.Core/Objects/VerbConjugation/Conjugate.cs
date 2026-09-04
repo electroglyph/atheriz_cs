@@ -52,12 +52,16 @@ public static class Conjugate
     {
         var raw = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         bool loadedFromFile = false;
-        // Try to load the real verbs.txt like Python does, for full fidelity (covers swim, negated, etc)
+        // F015: probe the module directory first (verbatim Python: os.path.dirname(__file__)/verbs.txt —
+        // the build copies verbs.txt to the output dir preserving its project-relative path), then
+        // flattened/manual layouts, then CWD-relative spots. No absolute host paths: a hardcoded
+        // /home/... path breaks every other machine with no fallback signal.
         var candidatePaths = new[]
         {
-            "/home/anon/atheriz/atheriz/objects/verb_conjugation/verbs.txt",
-            "atheriz/objects/verb_conjugation/verbs.txt",
+            Path.Combine(AppContext.BaseDirectory, "Objects", "VerbConjugation", "verbs.txt"),
             Path.Combine(AppContext.BaseDirectory, "verbs.txt"),
+            "atheriz/objects/verb_conjugation/verbs.txt",
+            Path.Combine("src", "Atheriz.Core", "Objects", "VerbConjugation", "verbs.txt"),
         };
         string? found = candidatePaths.FirstOrDefault(File.Exists);
         if (found != null)
@@ -125,7 +129,8 @@ public static class Conjugate
 
         VerbTenses = raw;
 
-        // Build lemmas: each inflected form -> infinitive (including negated forms, but they map same)
+        // Build lemmas: each inflected form -> infinitive (including negated forms, but they map same).
+        // Last-wins on collisions is VERBATIM Python (conjugate.py:73-77 unconditional assignment) — keep.
         VerbLemmas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in VerbTenses)
         {
@@ -318,7 +323,7 @@ public static class Conjugate
             var youStr = VerbPresent(verb, "2");
             if (string.IsNullOrEmpty(youStr)) youStr = verb;
             var themStr = VerbPresent(verb, them);
-            if (string.IsNullOrEmpty(themStr)) themStr = verb + themSuff;
+            if (string.IsNullOrEmpty(themStr)) themStr = verb + themSuff; // verbatim conjugate.py:409 (naive +s kept)
             // fallback for generic unknown where VerbPresent returns infinitive unchanged but we still want +s for third
             if (!plural && themStr == verb && !string.Equals(youStr, verb, StringComparison.OrdinalIgnoreCase))
             {

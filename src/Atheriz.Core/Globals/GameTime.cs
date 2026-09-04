@@ -35,8 +35,6 @@ public class GameTime
     private readonly Dictionary<(string Hour, string Minute), List<AlarmEntry>> _alarms = new();
     public bool Started { get; private set; }
 
-    [Obsolete("Use global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds()")]
-    private static double MonotonicSeconds() => global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
     private readonly AtherizSettings _settings;
     private readonly AsyncTicker? _tickerOverride;
     private readonly AsyncThreadPool? _poolOverride;
@@ -46,7 +44,7 @@ public class GameTime
     public GameTime(AtherizSettings? settings, bool autoLoad = true) : this(settings, null, null, autoLoad) { }
     public GameTime(AtherizSettings? settings, AsyncTicker? ticker, AsyncThreadPool? pool, bool autoLoad = true)
     {
-        _settings = settings ?? AtherizSettings.Default;
+        _settings = settings ?? AtherizSettings.Global;
         _tickerOverride = ticker;
         _poolOverride = pool;
         if (autoLoad) Load();
@@ -313,6 +311,24 @@ public class GameTime
         RemoveAlarm(hour, minute, caller.Id);
     }
 
+    // Identity-based removal for the tick loop: a re-armed alarm with the same
+    // caller id added between collect and remove must survive (the old
+    // remove-by-id could delete the new entry — a check-then-act race).
+    private void RemoveAlarmEntry(string hour, string minute, AlarmEntry entry)
+    {
+        hour = hour.ToString(); minute = minute.ToString();
+        _lock.EnterWriteLock();
+        try
+        {
+            if (_alarms.TryGetValue((hour, minute), out var list))
+            {
+                for (int i = 0; i < list.Count; i++)
+                    if (ReferenceEquals(list[i], entry)) { list.RemoveAt(i); break; }
+            }
+        }
+        finally { _lock.ExitWriteLock(); }
+    }
+
     public IReadOnlyDictionary<(string Hour, string Minute), List<AlarmEntry>> SnapshotAlarms()
     {
         using (ReadScope()) return _alarms.ToDictionary(kv => kv.Key, kv => kv.Value.ToList());
@@ -320,27 +336,47 @@ public class GameTime
 
     // ----- ticker -----
 
+    // Guards check-then-act on Started and remembers the ticker the coro was
+    // registered on: concurrent Start() used to double-register OnTick (2x
+    // ticks), and Stop() resolving a different ticker orphaned the coro.
+    // The live-settings interval is kept verbatim (time.py start/stop both use
+    // settings.TIME_UPDATE_SECONDS at call time).
+    private readonly object _startLock = new();
+    private AsyncTicker? _runningTicker;
+
     public void Start()
     {
-        if (Started) return;
-        var ticker = _tickerOverride ?? GlobalServices.TryGetTicker() ?? new AsyncTicker(_poolOverride ?? new AsyncThreadPool());
-        ticker.AddCoro(OnTick, _settings.TimeUpdateSeconds);
-        Started = true;
+        lock (_startLock)
+        {
+            if (Started) return;
+            var ticker = _tickerOverride ?? GlobalServices.TryGetTicker() ?? new AsyncTicker(_poolOverride ?? new AsyncThreadPool());
+            ticker.AddCoro(OnTick, _settings.TimeUpdateSeconds);
+            _runningTicker = ticker;
+            Started = true;
+        }
     }
     public void Start(AsyncTicker ticker)
     {
-        if (Started) return;
-        ticker.AddCoro(OnTick, _settings.TimeUpdateSeconds);
-        Started = true;
+        lock (_startLock)
+        {
+            if (Started) return;
+            ticker.AddCoro(OnTick, _settings.TimeUpdateSeconds);
+            _runningTicker = ticker;
+            Started = true;
+        }
     }
 
     public void Stop()
     {
-        if (_tickerOverride != null) { Stop(_tickerOverride); return; }
-        var ticker = GlobalServices.TryGetTicker();
-        if (ticker != null) ticker.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
+        AsyncTicker? ticker;
+        lock (_startLock)
+        {
+            ticker = _tickerOverride ?? _runningTicker ?? GlobalServices.TryGetTicker();
+            _runningTicker = null;
+            Started = false;
+        }
+        ticker?.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
         try { Save(); } catch { }
-        Started = false;
     }
     public void Stop(AsyncTicker ticker)
     {
@@ -368,14 +404,14 @@ public class GameTime
         finally { _lock.ExitWriteLock(); }
 
         var after = GetTime();
-        var callers = new List<((string Hour, string Minute) Key, int CallerId, bool Repeat, Dictionary<string, JsonElement>? Data)>();
+        var callers = new List<((string Hour, string Minute) Key, AlarmEntry Entry)>();
         _lock.EnterReadLock();
         try
         {
             void Collect(string h, string m)
             {
                 if (_alarms.TryGetValue((h, m), out var list))
-                    foreach (var a in list) callers.Add(((h, m), a.CallerId, a.Repeat, a.Data));
+                    foreach (var a in list) callers.Add(((h, m), a));
             }
             Collect(after.Hour.ToString(), after.Minute.ToString());
             Collect("?", after.Minute.ToString());
@@ -387,31 +423,25 @@ public class GameTime
         if (callers.Count > 0)
         {
             var pool = _poolOverride ?? GlobalServices.TryGetPool() ?? new AsyncThreadPool();
-            foreach (var (key, id, repeat, data) in callers)
+            foreach (var (key, entry) in callers)
             {
-                if (!repeat) RemoveAlarm(key.Hour, key.Minute, id);
-                var objs = ObjectRegistry.Get(id);
+                if (!entry.Repeat) RemoveAlarmEntry(key.Hour, key.Minute, entry);
+                var objs = ObjectRegistry.Get(entry.CallerId);
                 if (objs.Count > 0)
                 {
                     var target = objs[0];
-                    Action? act = null;
-                    var mi = target.GetType().GetMethod("AtAlarm");
-                    if (mi != null)
+                    var capturedData = entry.Data;
+                    var capturedAfter = after;
+                    // Direct virtual dispatch (port of getattr(objs[0], "at_alarm")):
+                    // every GameObject exposes AtAlarm, so no reflection is needed.
+                    Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch { } };
+                    if (!pool.AddTask(act, $"alarm:{entry.CallerId}"))
                     {
-                        var capturedData = data;
-                        var capturedAfter = after;
-                        act = () => { try { mi.Invoke(target, new object?[] { capturedAfter, capturedData }); } catch { } };
-                    }
-                    else
-                    {
-                        continue;
-                    }
-                    if (act != null)
-                    {
-                        if (!pool.AddTask(act, $"alarm:{id}"))
-                            pool.Delay(0.05, act);
+                        AtherizLogger.LogWarning($"Task queue full; alarm for {target} retrying.");
+                        pool.Delay(0.05, act);
                     }
                 }
+                else AtherizLogger.LogWarning($"obj not found for alarm: {entry.CallerId}");
             }
         }
 
@@ -422,8 +452,7 @@ public class GameTime
             var recv = _settings.LunarReceiverLambda ?? (o => o.IsPc && o.IsConnected);
             foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
             {
-                var mi = obj.GetType().GetMethod("AtLunarEvent");
-                if (mi != null) try { mi.Invoke(obj, new object?[] { $"A {afterPhase.ToLower()} moon rises." }); } catch { }
+                try { obj.AtLunarEvent($"A {afterPhase.ToLower()} moon rises."); } catch { }
             }
         }
         if (beforeSun != afterSun)
@@ -432,8 +461,7 @@ public class GameTime
             var recv = _settings.SolarReceiverLambda ?? (o => o.IsPc && o.IsConnected);
             foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
             {
-                var mi = obj.GetType().GetMethod("AtSolarEvent");
-                if (mi != null) try { mi.Invoke(obj, new object?[] { msg }); } catch { }
+                try { obj.AtSolarEvent(msg); } catch { }
             }
         }
     }
@@ -576,8 +604,8 @@ public class GameTime
         };
     }
 
-    // Python Month enum duplicated for naming
-    private enum Month { Ianuarius = 1, Februarius = 2, Martius = 3, Aprilis = 4, Maius = 5, Iunius = 6, Iulius = 7, Augustus = 8, September = 9, October = 10, November = 11, December = 12 }
+    // Game-calendar month names (moved here from Privilege.cs — F016 — its only consumer is GetTime below).
+    public enum Month { Ianuarius = 1, Februarius = 2, Martius = 3, Aprilis = 4, Maius = 5, Iunius = 6, Iulius = 7, Augustus = 8, September = 9, October = 10, November = 11, December = 12 }
 
     public TimeSpanInfo GetTimespan(long ticks)
     {

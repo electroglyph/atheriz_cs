@@ -19,6 +19,10 @@ public static class ServerLifecycle
     private static readonly object ShutdownLock = new();
     // Port of startstop.py:19 _shutdown_completed
     private static bool _shutdownCompleted = false;
+    // Readiness flag for /ready (liveness stays /health per AGENTS webclient constraint).
+    // Set only after DoStartup runs to completion; cleared when a new startup begins.
+    private static volatile bool _startupSucceeded = false;
+    public static bool StartupSucceeded => _startupSucceeded;
 
     // Port of startstop.py:22 _shutdown_step
     private static void ShutdownStep(string name, Action fn)
@@ -34,8 +38,9 @@ public static class ServerLifecycle
     public static void DoStartup(AtherizSettings? settings = null)
     {
         // Port of startstop.py:32 with _shutdown_lock: _shutdown_completed=False (handled in StartStop)
-        settings ??= AtherizSettings.Default;
+        settings ??= AtherizSettings.Global;
         lock (ShutdownLock) _shutdownCompleted = false;
+        _startupSucceeded = false;
 
         // Guard paths — atheriz/atheriz.py:508 etc already done in Program, but repeat for direct calls
         // Port of database_setup.py:66 SAVE_PATH guard
@@ -55,6 +60,7 @@ public static class ServerLifecycle
         catch (Exception ex) { Console.Error.WriteLine($"StartStop.DoStartup failed:\n{ex}"); }
 
         Console.Error.WriteLine("[Lifecycle] DoStartup completed."); // Port of lifecycle log
+        _startupSucceeded = true;
     }
 
     /// <summary>
@@ -63,7 +69,7 @@ public static class ServerLifecycle
     /// </summary>
     public static void DoShutdown(AtherizSettings? settings = null)
     {
-        settings ??= AtherizSettings.Default;
+        settings ??= AtherizSettings.Global;
         // Port of startstop.py:49 with _WORLD_LOCK + _shutdown_lock idempotent
         lock (WorldLock)
         {
@@ -90,7 +96,7 @@ public static class ServerLifecycle
     /// </summary>
     public static void DoReload(AtherizSettings? settings = null)
     {
-        settings ??= AtherizSettings.Default;
+        settings ??= AtherizSettings.Global;
         // Port of startstop.py:125 with _WORLD_LOCK — delegate handles locking faithfully; wrapper lock for parity
         lock (WorldLock)
         {

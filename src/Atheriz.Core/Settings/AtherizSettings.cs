@@ -58,6 +58,12 @@ public sealed class AtherizSettings
     public string WebserverInterface { get; set; } = "0.0.0.0";
     public string? SslCertFile { get; set; } = Environment.GetEnvironmentVariable("ATHERIZ_SSL_CERTFILE");
     public string? SslKeyFile { get; set; } = Environment.GetEnvironmentVariable("ATHERIZ_SSL_KEYFILE");
+    /// <summary>
+    /// When true (default, faithful to the Python server which always starts), a configured
+    /// but unloadable TLS certificate logs a warning and serves plaintext. Set false to
+    /// fail fast instead of serving the admin token over plaintext unnoticed.
+    /// </summary>
+    public bool AllowInsecureTlsFallback { get; set; } = true;
     public bool WebclientSyncCheck { get; set; } = true;
 
     public int? ThreadpoolLimit { get; set; } = Environment.ProcessorCount;

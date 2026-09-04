@@ -28,13 +28,13 @@ public sealed class ReloadCommand : Command
             // Port of reloader.reload_game_logic() — use PluginReloader sync wrapper or ServerLifecycle
             try
             {
-                var task = Atheriz.Core.Plugins.PluginReloader.ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(), AtherizSettings.Default);
+                var task = Atheriz.Core.Plugins.PluginReloader.ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(), AtherizSettings.Global);
                 result = task.GetAwaiter().GetResult();
             }
             catch
             {
                 // fallback to ServerLifecycle.DoReload which handles ticker/map save
-                try { Atheriz.Core.Globals.StartStop.DoReload(AtherizSettings.Default); result = "Reload completed."; }
+                try { Atheriz.Core.Globals.StartStop.DoReload(AtherizSettings.Global); result = "Reload completed."; }
                 catch (Exception ex2) { result = $"Reload failed: {ex2.Message}"; }
             }
         }

@@ -138,7 +138,7 @@ public static class GameTemplateGenerator
         {
             Console.WriteLine("  Initial world:");
             Console.WriteLine($"    - Superuser account: {username}");
-            Console.WriteLine($"    - Starting room at {Atheriz.Core.Settings.AtherizSettings.Default.DefaultHome}");
+            Console.WriteLine($"    - Starting room at {Atheriz.Core.Settings.AtherizSettings.Global.DefaultHome}");
         }
     }
     private static void Scaffold(string folderPath, string gameName)
@@ -168,8 +168,18 @@ public static class GameTemplateGenerator
         Console.WriteLine("  Copying web folder...");
     }
     private static string GS(string ns) => $"// Port of atheriz/new.py:292\n// Port of atheriz/settings.py\nnamespace {ns};\nusing Atheriz.Core.Settings;\n/// <summary>Game settings — mirrors settings.py. See AtherizSettings.</summary>\npublic static class GameSettings\n{{\n    public const string SavePath = \"save\";\n    public const string SecretPath = \"secret\";\n    public const string ServerName = \"{ns}\";\n    public const bool WebclientSyncCheck = true;\n}}\n";
-    // Dynamic generation via reflection — mirrors new.py:ClassInspector.get_override_methods -> get_class_hooks (utils.py:701)
-    // Patterns: at_ / access_ / format_ / pre_ / post_ (case-insensitive) + always setup_parser/run. In C# these are At* etc.
+    // Dynamic generation via reflection — mirrors new.py:ClassInspector.get_override_methods -> get_class_hooks (utils.py:1098).
+    // Python OVERRIDE_PATTERNS = ("at_", "access_", "format_", "pre_", "post_") + ALWAYS (setup_parser, run).
+    // C# ports are PascalCase (AtPreMove ↔ at_pre_move), so the boundary rule is: the char after the stem
+    // must be uppercase, '_' or end-of-name. A bare StartsWith("at") would also match a hypothetical
+    // "Attach" (F012); the boundary check closes that hole with identical output for all real hooks.
+    private static bool IsHookStem(string name, string stem)
+    {
+        if (!name.StartsWith(stem, StringComparison.Ordinal)) return false;
+        if (name.Length == stem.Length) return true;
+        char next = name[stem.Length];
+        return char.IsUpper(next) || next == '_';
+    }
     private static IEnumerable<System.Reflection.MethodInfo> GetHookMethods(Type t)
     {
         // Only inspect methods declared on t itself (or its direct partials), mirroring new.py:ClassInspector per-class hook collection.
@@ -189,10 +199,9 @@ public static class GameTemplateGenerator
             if (!m.IsVirtual || m.IsFinal) continue;
             var n = m.Name;
             var ln = n.ToLowerInvariant();
-            bool isHook = ln.StartsWith("at_") || ln.StartsWith("at") || ln.StartsWith("access") || ln.StartsWith("format") || ln == "setup_parser" || ln == "setupparser" || ln == "run";
+            bool isHook = IsHookStem(n, "At") || IsHookStem(n, "Access") || IsHookStem(n, "Format") || IsHookStem(n, "Pre") || IsHookStem(n, "Post") || ln == "setup_parser" || ln == "setupparser" || ln == "run";
             if (!isHook) continue;
             if (n.StartsWith("get_") || n.StartsWith("set_") || n.StartsWith("add_") || n.StartsWith("remove_")) continue;
-            if (!(ln.StartsWith("at") || ln.StartsWith("access") || ln.StartsWith("format"))) continue;
             yield return m;
         }
     }

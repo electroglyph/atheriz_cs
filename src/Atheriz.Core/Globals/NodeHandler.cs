@@ -42,13 +42,16 @@ public partial class NodeHandler
     private readonly Dictionary<Coord, Transition> _transitions = new();
     private readonly Dictionary<Coord, Dictionary<string, Door>> _doors = new();
     private bool _modified, _modified2, _modified3;
+    // Port of node.py:42-43 _trans_gen/_door_gen: mutation counters so Save
+    // only clears _modified2/_modified3 when nothing changed since the snapshot.
+    private long _transGen, _doorGen;
 
     private static NodeHandler? _current;
     private static readonly object _currentLock = new();
     public static NodeHandler? GetCurrent() { lock (_currentLock) return _current; }
     public static void SetCurrent(NodeHandler? h) { lock (_currentLock) _current = h; }
-    internal void MarkDoorsModified() { _modified3 = true; }
-    internal void MarkTransitionsModified() { _modified2 = true; }
+    internal void MarkDoorsModified() { Lock3.EnterWriteLock(); try { _modified3 = true; _doorGen++; } finally { Lock3.ExitWriteLock(); } }
+    internal void MarkTransitionsModified() { Lock2.EnterWriteLock(); try { _modified2 = true; _transGen++; } finally { Lock2.ExitWriteLock(); } }
 
     public NodeHandler() { lock (_currentLock) _current = this; Load(); }
     public NodeHandler(bool autoLoad) { lock (_currentLock) _current = this; if (autoLoad) Load(); }
@@ -170,10 +173,12 @@ public partial class NodeHandler
         using (ReadScope()) { areaRefs = _areas.Values.ToList(); handlerWas = _modified; }
         var transRefs = new List<Transition>();
         bool transWas;
-        using (ReadScope2()) { transRefs = _transitions.Values.ToList(); transWas = _modified2; }
+        long transGen0;
+        using (ReadScope2()) { transRefs = _transitions.Values.ToList(); transWas = _modified2; transGen0 = _transGen; }
         List<(Coord, Dictionary<string, Door>)> doorsRefs;
         bool doorsWas;
-        using (ReadScope3()) { doorsRefs = _doors.Select(kv => (kv.Key, new Dictionary<string, Door>(kv.Value))).ToList(); doorsWas = _modified3; }
+        long doorGen0;
+        using (ReadScope3()) { doorsRefs = _doors.Select(kv => (kv.Key, new Dictionary<string, Door>(kv.Value))).ToList(); doorsWas = _modified3; doorGen0 = _doorGen; }
 
         // Detach copies (fresh locks, is_modified false)
         var transitionsSnap = transRefs.Select(t => new Transition(t.FromCoord, t.ToCoord, t.Name)).ToList();
@@ -236,34 +241,44 @@ public partial class NodeHandler
                     var nodesDto = new Dictionary<string, NodeDto>();
                     foreach (var (coord,n) in nodesSnap)
                     {
-                        bool wasNode = n.IsModified;
-                        // snapshot under node lock
-                        HashSet<int> scriptsSnap;
-                        string? objType = null;
-                        try
+                        NodeDto dto;
+                        bool wasNode;
+                        // Snapshot + clear atomically under the node write lock. The old
+                        // code read fields off-lock and cleared afterwards, losing edits
+                        // that landed in between (torn DTO / cleared-but-unsaved). All
+                        // Node/GameObject mutators take SyncRoot and the lock is
+                        // SupportsRecursion, so the locked property reads + clear below
+                        // are safe while held; no handler lock is held here (leaf-level).
+                        using (n.WriteScope())
                         {
-                            scriptsSnap = n.ScriptsSet;
-                            var t = n.GetType();
-                            if (t != typeof(Node))
-                                objType = t.AssemblyQualifiedName ?? t.FullName;
+                            wasNode = n.IsModified;
+                            HashSet<int> scriptsSnap;
+                            string? objType = null;
+                            try
+                            {
+                                scriptsSnap = n.ScriptsSet;
+                                var t = n.GetType();
+                                if (t != typeof(Node))
+                                    objType = t.AssemblyQualifiedName ?? t.FullName;
+                            }
+                            catch { scriptsSnap = new HashSet<int>(); }
+                            dto = new NodeDto
+                            {
+                                Coord = n.Coord,
+                                Name = n.Name,
+                                Desc = n.Desc,
+                                Theme = n.Theme,
+                                Symbol = n.Symbol,
+                                LegendDesc = n.LegendDesc,
+                                Links = n.GetLinks(),
+                                Nouns = new Dictionary<string,string>(n.Nouns),
+                                Id = n.Id,
+                                Scripts = scriptsSnap,
+                                ObjectType = objType,
+                            };
+                            if (wasNode) { n.IsModified = false; localNodes.Add(n); }
                         }
-                        catch { scriptsSnap = new HashSet<int>(); }
-                        var dto = new NodeDto
-                        {
-                            Coord = n.Coord,
-                            Name = n.Name,
-                            Desc = n.Desc,
-                            Theme = n.Theme,
-                            Symbol = n.Symbol,
-                            LegendDesc = n.LegendDesc,
-                            Links = n.GetLinks(),
-                            Nouns = new Dictionary<string,string>(n.Nouns),
-                            Id = n.Id,
-                            Scripts = scriptsSnap,
-                            ObjectType = objType,
-                        };
                         nodesDto[$"{coord.Item1},{coord.Item2}"] = dto;
-                        if (wasNode) { n.IsModified = false; localNodes.Add(n); }
                     }
                     gridsDto[z] = new NodeGridDto { Area = g.Area, Z = g.Z, Nodes = nodesDto, Data = gData };
                 }
@@ -313,12 +328,15 @@ public partial class NodeHandler
             throw;
         }
 
-        // Post-commit clear of handler flags (mirrors Python flag reset after COMMIT)
+        // Post-commit clear of handler flags (mirrors Python flag reset after COMMIT).
+        // Transition/door domains clear only if their gen counter is unchanged
+        // since the snapshot (node.py:487-491): a concurrent mutation survives
+        // for the next checkpoint instead of being lost.
         void MarkHandlerClean()
         {
             if (handlerWas) { Lock.EnterWriteLock(); try { _modified = false; } finally { Lock.ExitWriteLock(); } }
-            if (transWas) { Lock2.EnterWriteLock(); try { _modified2 = false; } finally { Lock2.ExitWriteLock(); } }
-            if (doorsWas) { Lock3.EnterWriteLock(); try { _modified3 = false; } finally { Lock3.ExitWriteLock(); } }
+            if (transWas) { Lock2.EnterWriteLock(); try { if (_transGen == transGen0) _modified2 = false; } finally { Lock2.ExitWriteLock(); } }
+            if (doorsWas) { Lock3.EnterWriteLock(); try { if (_doorGen == doorGen0) _modified3 = false; } finally { Lock3.ExitWriteLock(); } }
         }
 
         try
@@ -441,19 +459,9 @@ public partial class NodeHandler
                                 inst.Links = nd.Links ?? new List<NodeLink>();
                                 inst.Nouns = nd.Nouns ?? new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
                                 inst.Id = nd.Id;
-                                // Restore scripts into both _nodeScripts and base _scripts via reflection (Node's private field)
+                                // Restore scripts into the shared base scripts set (typed; was _nodeScripts/_scripts reflection)
                                 if (nd.Scripts != null && nd.Scripts.Count > 0)
-                                {
-                                    try
-                                    {
-                                        var f = typeof(Node).GetField("_nodeScripts", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-                                        var hs = f?.GetValue(inst) as HashSet<int>;
-                                        if (hs != null) { hs.Clear(); foreach(var sid in nd.Scripts) hs.Add(sid); }
-                                        var bf = typeof(GameObject).GetField("_scripts", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-                                        var bhs = bf?.GetValue(inst) as HashSet<int>;
-                                        if (bhs != null) { bhs.Clear(); foreach(var sid in nd.Scripts) bhs.Add(sid); }
-                                    } catch {}
-                                }
+                                    inst.RestoreScriptIds(nd.Scripts);
                                 inst.IsModified=false;
                                 node = inst;
                                 grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
@@ -471,17 +479,7 @@ public partial class NodeHandler
                     try { ObjectRegistry.RemoveObject(node); } catch {}
                     node.Id=nd.Id;
                     if (nd.Scripts != null && nd.Scripts.Count > 0)
-                    {
-                        try
-                        {
-                            var f = typeof(Node).GetField("_nodeScripts", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-                            var hs = f?.GetValue(node) as HashSet<int>;
-                            if (hs != null) { hs.Clear(); foreach(var sid in nd.Scripts) hs.Add(sid); }
-                            var bf = typeof(GameObject).GetField("_scripts", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-                            var bhs = bf?.GetValue(node) as HashSet<int>;
-                            if (bhs != null) { bhs.Clear(); foreach(var sid in nd.Scripts) bhs.Add(sid); }
-                        } catch {}
-                    }
+                        node.RestoreScriptIds(nd.Scripts);
                     node.IsModified=false;
                     grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
                 }

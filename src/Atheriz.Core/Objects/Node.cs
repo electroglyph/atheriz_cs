@@ -32,14 +32,15 @@ public sealed class NodeLink
 public partial class Node : GameObject
 {
     public new static bool _is_thread_safe = true;
-    private readonly ReaderWriterLockSlim _nodeLock = new(LockRecursionPolicy.SupportsRecursion);
-    public ReaderWriterLockSlim NodeLock => _nodeLock;
-    public ReaderWriterLockSlim Lock => _nodeLock; // alias for spec
+    // Single lock: Node shares the base SyncRoot (atheriz/objects/nodes.py uses one
+    // self.lock; the split _nodeLock caused node->base vs base->node order inversions).
+    // NodeLock/Lock are kept as aliases for existing callers (NodeGrid, Pathfind, tests).
+    public ReaderWriterLockSlim NodeLock => SyncRoot;
+    public ReaderWriterLockSlim Lock => SyncRoot;
 
     // Port of atheriz/objects/nodes.py:122
     public Coord Coord { get; set; }
     public string Theme { get; set; } = "";
-    public new string Symbol { get; set; } = "";
     public string? LegendDesc { get; set; }
     public List<NodeLink> Links { get; set; } = [];
     public Dictionary<string, string> Nouns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -47,14 +48,10 @@ public partial class Node : GameObject
     public double EnclosedAttenuation { get; set; } = 20.0; // Port of nodes.py:135 DEFAULT_ENCLOSED_SOUND_ATTENUATION
     public double AmbientSoundLevel { get; set; } = 5.0; // Port of nodes.py:136
 
-    private double _tickSeconds = 1.0;
-    private bool _isTickable;
-    private readonly HashSet<int> _nodeScripts = [];
-
-    public HashSet<int> ScriptsSet
-    {
-        get { _nodeLock.EnterReadLock(); try { return new HashSet<int>(_nodeScripts); } finally { _nodeLock.ExitReadLock(); } }
-    }
+    // Tick/script state lives in base storage (atheriz/objects/nodes.py shares
+    // _tick_seconds/_is_tickable/scripts with Object); Node only adds coro wiring.
+    // Kept for save/load compat (NodeHandler.Save reads ScriptsSet).
+    public HashSet<int> ScriptsSet => ScriptsSnapshot;
 
     public Node() : this(new Coord("limbo", 0, 0, 0)) { }
     // Port of nodes.py:122
@@ -67,7 +64,7 @@ public partial class Node : GameObject
         Symbol = symbol ?? "";
         LegendDesc = legendDesc;
         Links = links ?? [];
-        _tickSeconds = tickSeconds;
+        base.TickSeconds = tickSeconds;
         OpenAttenuation = 10.0;
         EnclosedAttenuation = 20.0;
         AmbientSoundLevel = 5.0;
@@ -77,14 +74,7 @@ public partial class Node : GameObject
         ObjectRegistry.AddObject(this);
     }
 
-    // Port of nodes.py:86
-    public override bool Equals(object? obj)
-    {
-        if (ReferenceEquals(this, obj)) return true;
-        if (obj is Node n) return Id != -1 && Id == n.Id;
-        return false;
-    }
-    public override int GetHashCode() => Id.GetHashCode();
+    // Identity (id equality) lives on GameObject once; see base Equals/GetHashCode.
 
     // Port of nodes.py:95
     public override void AtDesc(GameObject? looker = null) => Hookable("at_desc", () => 0, looker);
@@ -94,12 +84,9 @@ public partial class Node : GameObject
     // Port of nodes.py:108
     public List<GameObject> GetContents()
     {
-        HashSet<int> ids;
-        _nodeLock.EnterReadLock();
-        try { ids = ContentsSnapshot; }
-        finally { _nodeLock.ExitReadLock(); }
-        // also include node-level contents via base _contents? Node uses base contents; delegate to ObjectRegistry
-        return ObjectRegistry.Get(ids.ToList());
+        // ContentsSnapshot already snapshots under SyncRoot; resolve outside the lock.
+        // Node uses base contents; delegate to ObjectRegistry
+        return ObjectRegistry.Get(ContentsSnapshot.ToList());
     }
 
     // Port of nodes.py:113
@@ -117,15 +104,12 @@ public partial class Node : GameObject
     // Port of nodes.py:189
     public override void ResolveRelations()
     {
-        if (_isTickable)
+        if (IsTickable)
         {
             var at = GlobalTickerHolder.Get();
-            at?.AddCoro(AtTick, _tickSeconds);
+            at?.AddCoro(AtTick, TickSeconds);
         }
-        HashSet<int> scripts;
-        _nodeLock.EnterReadLock();
-        try { scripts = new HashSet<int>(_nodeScripts); }
-        finally { _nodeLock.ExitReadLock(); }
+        HashSet<int> scripts = ScriptsSnapshot;
         foreach (var id in scripts)
         {
             var objs = ObjectRegistry.Get(id);
@@ -134,20 +118,15 @@ public partial class Node : GameObject
         AtInit();
     }
 
-    // Port of nodes.py:206
-    public new double TickSeconds
+    // Port of nodes.py:206 (state in base storage; Node adds ticker swap)
+    public override double TickSeconds
     {
-        get { _nodeLock.EnterReadLock(); try { return _tickSeconds; } finally { _nodeLock.ExitReadLock(); } }
+        get => base.TickSeconds;
         set
         {
-            double old = 0; bool doSwap = false;
-            _nodeLock.EnterWriteLock();
-            try
-            {
-                if (_isTickable && value != _tickSeconds) { old = _tickSeconds; _tickSeconds = value; doSwap = true; }
-                else _tickSeconds = value;
-            }
-            finally { _nodeLock.ExitWriteLock(); }
+            double old = base.TickSeconds;
+            bool doSwap = IsTickable && value != old;
+            base.TickSeconds = value;
             if (doSwap)
             {
                 var at = GlobalTickerHolder.Get();
@@ -157,25 +136,18 @@ public partial class Node : GameObject
         }
     }
 
-    // Port of nodes.py:227
-    public new bool IsTickable
+    // Port of nodes.py:227 (state in base storage; Node adds ticker add/remove)
+    public override bool IsTickable
     {
-        get { _nodeLock.EnterReadLock(); try { return _isTickable; } finally { _nodeLock.ExitReadLock(); } }
+        get => base.IsTickable;
         set
         {
-            double tick = 0; bool doAdd = false, doRemove = false;
-            _nodeLock.EnterWriteLock();
-            try
-            {
-                if (_isTickable == value) return;
-                tick = _tickSeconds;
-                _isTickable = value;
-                if (value) doAdd = true; else doRemove = true;
-            }
-            finally { _nodeLock.ExitWriteLock(); }
+            if (base.IsTickable == value) return;
+            double tick = base.TickSeconds;
+            base.IsTickable = value;
             var at = GlobalTickerHolder.Get();
-            if (doAdd) at?.AddCoro(AtTick, tick);
-            else if (doRemove) at?.RemoveCoro(AtTick, tick);
+            if (value) at?.AddCoro(AtTick, tick);
+            else at?.RemoveCoro(AtTick, tick);
         }
     }
 
@@ -315,20 +287,20 @@ public partial class Node : GameObject
         }
         void execSelfDelete()
         {
-            if (_isTickable)
+            if (IsTickable)
             {
-                try { GlobalTickerHolder.Get()?.RemoveCoro(AtTick, _tickSeconds); } catch { }
+                try { GlobalTickerHolder.Get()?.RemoveCoro(AtTick, TickSeconds); } catch { }
             }
             try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch { }
         }
         if (caller != null && !AtDelete(caller)) return null;
-        _nodeLock.EnterWriteLock();
+        SyncRoot.EnterWriteLock();
         try
         {
             if (IsDeleted) return null;
             IsDeleted = true;
         }
-        finally { _nodeLock.ExitWriteLock(); }
+        finally { SyncRoot.ExitWriteLock(); }
         var ops = recursive ? execDeleteRecursive(this) : execMoveContents(this);
         execSelfDelete();
         return (1, ops);

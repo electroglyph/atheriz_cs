@@ -184,7 +184,7 @@ public class MapInfo
         AtherizSettings? settings = null)
     {
         Name = name;
-        Settings = settings ?? AtherizSettings.Default;
+        Settings = settings ?? AtherizSettings.Global;
         if (preGrid != null) foreach (var kv in preGrid) PreGrid[kv.Key] = kv.Value;
         if (postGrid != null) foreach (var kv in postGrid) PostGrid[kv.Key] = kv.Value;
         if (legendEntries != null) LegendEntries.AddRange(legendEntries);
@@ -862,25 +862,26 @@ public class MapHandler
     public MapHandler() : this(null, true) { }
     public MapHandler(AtherizSettings? settings, bool autoLoad = true)
     {
-        _settings = settings ?? AtherizSettings.Default;
+        _settings = settings ?? AtherizSettings.Global;
         if (autoLoad) Load();
     }
     public MapHandler(bool autoLoad) : this(null, autoLoad) { }
 
     public bool IsDirty()
     {
+        // Snapshot refs under the handler lock, then probe each info outside it:
+        // holding the handler read lock across O(N) info locks starves writers.
+        List<MapInfo> infos;
         Lock.EnterReadLock();
-        try
-        {
-            foreach (var mi in _data.Values)
-            {
-                mi.Lock.EnterReadLock();
-                try { if (mi.MapChanged || mi.IsModified) return true; }
-                finally { mi.Lock.ExitReadLock(); }
-            }
-            return false;
-        }
+        try { infos = _data.Values.ToList(); }
         finally { Lock.ExitReadLock(); }
+        foreach (var mi in infos)
+        {
+            mi.Lock.EnterReadLock();
+            try { if (mi.MapChanged || mi.IsModified) return true; }
+            finally { mi.Lock.ExitReadLock(); }
+        }
+        return false;
     }
 
     public void Load()
@@ -1024,6 +1025,27 @@ public class MapHandler
         using (ReadScope()) return _data.TryGetValue((area, z), out var mi) ? mi : null;
     }
 
+    /// <summary>
+    /// Hot-reload rewire: swap stale listener/mapable instances for the replacement
+    /// (same id). Snapshot infos under the handler lock, then replace under each
+    /// info's own write scope (never nested) — mirrors MoveListener lock discipline.
+    /// </summary>
+    public void ReplaceMapEntries(int id, GameObject replacement)
+    {
+        List<MapInfo> infos;
+        using (ReadScope()) infos = _data.Values.ToList();
+        foreach (var mi in infos)
+        {
+            using (mi.WriteScope())
+            {
+                if (mi.Listeners.TryGetValue(id, out var l) && !ReferenceEquals(l, replacement))
+                    mi.Listeners[id] = replacement;
+                if (mi.Objects.TryGetValue(id, out var o) && !ReferenceEquals(o, replacement))
+                    mi.Objects[id] = replacement;
+            }
+        }
+    }
+
     private MapInfo GetOrCreate(string area, int z)
     {
         Lock.EnterWriteLock();
@@ -1085,21 +1107,18 @@ public class MapHandler
 
     public void MoveListener(GameObject listener, Coord toCoord, Coord? fromCoord = null)
     {
-        MapInfo? fromMap = null, toMap = null;
+        // Snapshot under the handler lock, then mutate via each MapInfo's own
+        // lock (never nested): handler->info nesting inverts ReplaceMapEntries'
+        // info-only discipline and risks deadlock once any path locks info->handler.
+        MapInfo? fromMap = null;
         bool areaChanged = fromCoord != null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
-        Lock.EnterWriteLock();
-        try
+        using (ReadScope())
         {
             if (fromCoord != null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
-            if (!_data.TryGetValue((toCoord.Area, toCoord.Z), out toMap))
-            {
-                toMap = new MapInfo { Name = toCoord.Area, Settings = _settings };
-                _data[(toCoord.Area, toCoord.Z)] = toMap;
-            }
-            fromMap?.RemoveListener(listener);
-            toMap.AddListener(listener);
         }
-        finally { Lock.ExitWriteLock(); }
+        var toMap = GetOrCreate(toCoord.Area, toCoord.Z);
+        fromMap?.RemoveListener(listener);
+        toMap.AddListener(listener);
         if (areaChanged) SendUnbackground(listener);
         fromMap?.Render(false);
         toMap?.Render(true);
@@ -1124,20 +1143,14 @@ public class MapHandler
             cur.Render(true);
             return;
         }
-        MapInfo? fromMap = null, toMap = null;
-        Lock.EnterWriteLock();
-        try
+        MapInfo? fromMap = null;
+        using (ReadScope())
         {
             if (fromCoord != null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
-            if (!_data.TryGetValue((toCoord.Area, toCoord.Z), out toMap))
-            {
-                toMap = new MapInfo { Name = toCoord.Area, Settings = _settings };
-                _data[(toCoord.Area, toCoord.Z)] = toMap;
-            }
-            fromMap?.RemoveMapable(mapable);
-            toMap.AddMapable(mapable);
         }
-        finally { Lock.ExitWriteLock(); }
+        var toMap = GetOrCreate(toCoord.Area, toCoord.Z);
+        fromMap?.RemoveMapable(mapable);
+        toMap.AddMapable(mapable);
         fromMap?.Render(false);
         toMap?.Render(true);
     }
@@ -1158,26 +1171,24 @@ public class MapHandler
             cur.Render(true);
             return;
         }
-        MapInfo? fromMap = null, toMap = null;
+        MapInfo? fromMap = null;
         bool areaChanged = fromCoord != null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
-        Lock.EnterWriteLock();
-        try
+        // Snapshot under the handler lock, then mutate via each MapInfo's own
+        // lock: the old code wrote fromMap/toMap.Listeners/Objects directly
+        // while holding only the handler lock, racing Render/AddMapable which
+        // take the info lock (lost entries / torn dictionaries).
+        using (ReadScope())
         {
             if (fromCoord != null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
-            if (!_data.TryGetValue((toCoord.Area, toCoord.Z), out toMap))
-            {
-                toMap = new MapInfo { Name = toCoord.Area, Settings = _settings };
-                _data[(toCoord.Area, toCoord.Z)] = toMap;
-            }
-            if (fromMap != null)
-            {
-                fromMap.Listeners.Remove(obj.Id);
-                fromMap.Objects.Remove(obj.Id);
-            }
-            toMap.Listeners[obj.Id] = obj;
-            toMap.Objects[obj.Id] = obj;
         }
-        finally { Lock.ExitWriteLock(); }
+        var toMap = GetOrCreate(toCoord.Area, toCoord.Z);
+        if (fromMap != null && !ReferenceEquals(fromMap, toMap))
+        {
+            fromMap.RemoveListener(obj);
+            fromMap.RemoveMapable(obj);
+        }
+        toMap.AddListener(obj);
+        toMap.AddMapable(obj, false);
         if (areaChanged) SendUnbackground(obj);
         if (fromMap != null && !ReferenceEquals(fromMap, toMap))
         {

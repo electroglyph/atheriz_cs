@@ -119,9 +119,6 @@ public static class MapEdit
 
     internal static double GetMonotonic() => global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
 
-    [Obsolete("Use global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds()")]
-    internal static double GetMonotonicObsolete() => global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
-
     private static string GenerateToken()
     {
         // Port of mapedit.py:66 secrets.token_urlsafe(32) — 32 bytes => 43 char urlsafe base64

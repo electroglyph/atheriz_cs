@@ -9,7 +9,7 @@ public partial class Node
     // Port of nodes.py:499 add_noun
     public void AddNoun(string key, string desc)
     {
-        _nodeLock.EnterWriteLock();
+        SyncRoot.EnterWriteLock();
         try
         {
             var low = key.ToLowerInvariant();
@@ -17,31 +17,31 @@ public partial class Node
             Nouns[low] = desc;
             IsModified = true;
         }
-        finally { _nodeLock.ExitWriteLock(); }
+        finally { SyncRoot.ExitWriteLock(); }
     }
     // Port of nodes.py:516 remove_noun
     public void RemoveNoun(string key)
     {
-        _nodeLock.EnterWriteLock();
+        SyncRoot.EnterWriteLock();
         try
         {
             Nouns.Remove(key.ToLowerInvariant());
             foreach (var k in Nouns.Keys.ToList()) if (k.ToLowerInvariant() == key.ToLowerInvariant()) Nouns.Remove(k);
             IsModified = true;
         }
-        finally { _nodeLock.ExitWriteLock(); }
+        finally { SyncRoot.ExitWriteLock(); }
     }
     // Port of nodes.py:531 get_noun
     public string? GetNoun(string key)
     {
-        _nodeLock.EnterReadLock();
+        SyncRoot.EnterReadLock();
         try
         {
             if (Nouns.TryGetValue(key.ToLowerInvariant(), out var v)) return v;
             foreach (var kv in Nouns) if (kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase)) return kv.Value;
             return null;
         }
-        finally { _nodeLock.ExitReadLock(); }
+        finally { SyncRoot.ExitReadLock(); }
     }
     public override string ToString() => $"Node: {Coord}"; // Port of nodes.py:551
 
@@ -52,24 +52,24 @@ public partial class Node
     // Port of nodes.py:569
     public List<NodeLink> GetLinks()
     {
-        _nodeLock.EnterReadLock();
+        SyncRoot.EnterReadLock();
         try { return Links.ToList(); }
-        finally { _nodeLock.ExitReadLock(); }
+        finally { SyncRoot.ExitReadLock(); }
     }
     // Port of nodes.py:579
     public bool HasLinkName(string name)
     {
-        _nodeLock.EnterReadLock();
+        SyncRoot.EnterReadLock();
         try { return Links.Any(l => l.Name == name); }
-        finally { _nodeLock.ExitReadLock(); }
+        finally { SyncRoot.ExitReadLock(); }
     }
     // Port of nodes.py:590
     public NodeLink? GetLinkByName(string name)
     {
         var low = name.ToLowerInvariant();
-        _nodeLock.EnterReadLock();
+        SyncRoot.EnterReadLock();
         try { return Links.FirstOrDefault(l => l.Name.ToLowerInvariant() == low || l.Aliases.Any(a => a.Equals(low, StringComparison.OrdinalIgnoreCase))); }
-        finally { _nodeLock.ExitReadLock(); }
+        finally { SyncRoot.ExitReadLock(); }
     }
     public NodeLink? GetLink(string name) => GetLinkByName(name);
     // Port of nodes.py:598
@@ -84,10 +84,17 @@ public partial class Node
             return a?.GetGrid(Coord.Z);
         }
     }
-    // Port of nodes.py:611 name
-    public new string Name { get => Coord.ToString(); set { } }
+    // Port of nodes.py:611 name — coord-derived, read-only in Python (no setter).
+    // Override (not new) so GameObject-typed refs see the same value as Node-typed refs.
+    // The setter is intentionally a no-op: Python's __setstate__ raw-dict restore writes
+    // 'name' into the instance dict where it is shadowed by the read-only data
+    // descriptor, and JSON round-trips write the coord string back. A throwing setter
+    // would break deserialization and the ported regression tests, so the write is
+    // accepted and ignored (never observable via the getter).
+    public override string Name { get => Coord.ToString(); set { } }
 
-    // Port of nodes.py:616 add_script
+    // Port of nodes.py:616 add_script — int | Script accepted (same as base AddScript
+    // overloads); records into the shared base scripts set.
     public void AddScript(object script)
     {
         int id = script is int i ? i : script is GameObject go ? go.Id : -1;
@@ -95,9 +102,7 @@ public partial class Node
         var objs = ObjectRegistry.Get(id);
         if (objs.Count == 0) return;
         if (objs[0] is Script s) s.InstallHooks(this);
-        _nodeLock.EnterWriteLock();
-        try { _nodeScripts.Add(id); IsModified = true; }
-        finally { _nodeLock.ExitWriteLock(); }
+        AddScriptId(id);
     }
     // Port of nodes.py:632
     public void RemoveScript(object script)
@@ -106,21 +111,19 @@ public partial class Node
         if (id == -1) return;
         var objs = ObjectRegistry.Get(id);
         if (objs.Count > 0 && objs[0] is Script s) s.RemoveHooks(this);
-        _nodeLock.EnterWriteLock();
-        try { _nodeScripts.Remove(id); IsModified = true; }
-        finally { _nodeLock.ExitWriteLock(); }
+        RemoveScriptId(id);
     }
     // Port of nodes.py:648
     public NodeLink? GetRandomLink()
     {
-        _nodeLock.EnterReadLock();
+        SyncRoot.EnterReadLock();
         try { return Links.Count == 0 ? null : Links[Random.Shared.Next(Links.Count)]; }
-        finally { _nodeLock.ExitReadLock(); }
+        finally { SyncRoot.ExitReadLock(); }
     }
     // Port of nodes.py:657 add_link
     public void AddLink(NodeLink link)
     {
-        _nodeLock.EnterWriteLock();
+        SyncRoot.EnterWriteLock();
         try
         {
             if (Links.Count > 0 && Links.Contains(link)) return;
@@ -128,7 +131,7 @@ public partial class Node
             else Links.Add(link);
             IsModified = true;
         }
-        finally { _nodeLock.ExitWriteLock(); }
+        finally { SyncRoot.ExitWriteLock(); }
         // notify occupants
         foreach (var o in GetContents()) try { AddExits(o); } catch { }
         if (link.Coord.Area != Coord.Area)
@@ -140,11 +143,11 @@ public partial class Node
     // Port of nodes.py:677
     public bool AddLinkIfAbsent(string name, Func<NodeLink> factory)
     {
-        _nodeLock.EnterReadLock();
+        SyncRoot.EnterReadLock();
         try { if (Links.Any(l => l.Name == name)) return false; }
-        finally { _nodeLock.ExitReadLock(); }
+        finally { SyncRoot.ExitReadLock(); }
         var link = factory();
-        _nodeLock.EnterWriteLock();
+        SyncRoot.EnterWriteLock();
         try
         {
             if (Links.Any(l => l.Name == name)) return false;
@@ -154,7 +157,7 @@ public partial class Node
             else Links.Add(link);
             IsModified = true;
         }
-        finally { _nodeLock.ExitWriteLock(); }
+        finally { SyncRoot.ExitWriteLock(); }
         foreach (var o in GetContents()) try { AddExits(o); } catch { }
         if (link.Coord.Area != Coord.Area)
         {
@@ -167,13 +170,13 @@ public partial class Node
     public void RemoveLink(string name)
     {
         NodeLink? found = null;
-        _nodeLock.EnterWriteLock();
+        SyncRoot.EnterWriteLock();
         try
         {
             var idx = Links.FindIndex(l => l.Name == name);
             if (idx >= 0) { found = Links[idx]; Links.RemoveAt(idx); IsModified = true; }
         }
-        finally { _nodeLock.ExitWriteLock(); }
+        finally { SyncRoot.ExitWriteLock(); }
         if (found != null && Coord.Area != found.Coord.Area)
         {
             var nh = NodeHandler.GetCurrent();
@@ -195,9 +198,9 @@ public partial class Node
         }
         else
         {
-            _nodeLock.EnterReadLock();
+            SyncRoot.EnterReadLock();
             try { snap = Links.ToList(); }
-            finally { _nodeLock.ExitReadLock(); }
+            finally { SyncRoot.ExitReadLock(); }
         }
         if (snap.Count == 0) return;
         var cmds = new List<Command>();
@@ -222,30 +225,30 @@ public partial class Node
     // Port of nodes.py:734 add_objects
     public void AddObjects(List<GameObject> objs)
     {
-        _nodeLock.EnterWriteLock();
+        SyncRoot.EnterWriteLock();
         try
         {
             foreach (var o in objs) AddContent(o.Id);
             IsModified = true;
             foreach (var o in objs) { o.IsModified = true; }
         }
-        finally { _nodeLock.ExitWriteLock(); }
+        finally { SyncRoot.ExitWriteLock(); }
         foreach (var o in objs) try { AddExits(o); } catch { }
     }
     // Port of nodes.py:747 add_object
     public new void AddObject(GameObject obj)
     {
-        _nodeLock.EnterWriteLock();
+        SyncRoot.EnterWriteLock();
         try { AddContent(obj.Id); obj.IsModified = true; IsModified = true; }
-        finally { _nodeLock.ExitWriteLock(); }
+        finally { SyncRoot.ExitWriteLock(); }
         try { AddExits(obj); } catch { }
     }
     // Port of nodes.py:759 remove_object
     public new void RemoveObject(GameObject obj)
     {
-        _nodeLock.EnterWriteLock();
+        SyncRoot.EnterWriteLock();
         try { RemoveContent(obj.Id); IsModified = true; }
-        finally { _nodeLock.ExitWriteLock(); }
+        finally { SyncRoot.ExitWriteLock(); }
         try { obj.InternalCmdSet?.RemoveByTag("exits"); } catch { }
     }
 
@@ -299,9 +302,9 @@ public partial class Node
     {
         if (Links == null) return "";
         string names;
-        _nodeLock.EnterReadLock();
+        SyncRoot.EnterReadLock();
         try { names = string.Join(", ", Links.Select(l => l.Name)); }
-        finally { _nodeLock.ExitReadLock(); }
+        finally { SyncRoot.ExitReadLock(); }
         return !string.IsNullOrEmpty(names) ? $"{GameUtils.WrapXterm256("Exits:", fg: 15, bold: true)} {names}\n" : "";
     }
     // Port of nodes.py:884 get_display_doors
@@ -325,20 +328,20 @@ public partial class Node
     // Port of nodes.py:912 get_display_desc
     public string GetDisplayDesc(GameObject? looker = null)
     {
-        _nodeLock.EnterReadLock();
+        SyncRoot.EnterReadLock();
         try { return !string.IsNullOrEmpty(Desc) ? Desc + "\n" : "You see nothing special.\n"; }
-        finally { _nodeLock.ExitReadLock(); }
+        finally { SyncRoot.ExitReadLock(); }
     }
     // Port of nodes.py:926 get_display_name
     public override string GetDisplayName(GameObject? looker = null)
     {
-        _nodeLock.EnterReadLock();
+        SyncRoot.EnterReadLock();
         try
         {
             if (looker != null && looker.IsBuilder)
                 return GameUtils.WrapTruecolor($"({Coord.Area},{Coord.X},{Coord.Y},{Coord.Z})\n", fg: 170);
         }
-        finally { _nodeLock.ExitReadLock(); }
+        finally { SyncRoot.ExitReadLock(); }
         return "";
     }
     // Port of nodes.py:945 return_appearance

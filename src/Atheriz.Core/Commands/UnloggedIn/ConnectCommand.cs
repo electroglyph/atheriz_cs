@@ -43,15 +43,13 @@ public sealed class ConnectCommand : Command
             int attempts = 0;
             if (host != "?")
             {
-                var dict = ObjectRegistry.FailedLogins.Snapshot();
-                int cur = dict.TryGetValue(host, out var v) ? v : 0;
-                ObjectRegistry.FailedLogins.Set(host, cur + 1);
-                attempts = cur + 1;
+                // Atomic increment under the dict lock (F005) — no snapshot alloc, no lost updates.
+                attempts = ObjectRegistry.FailedLogins.AddOrUpdate(host, (exists, cur) => cur + 1);
             }
             try { if (caller is BaseConnection bc) bc.FailedLoginAttempts++; } catch { }
             caller.Msg("Invalid password.");
             int fail2 = (caller as BaseConnection)?.FailedLoginAttempts ?? 0;
-            var settings = AtherizSettings.Default;
+            var settings = AtherizSettings.Global;
             if (attempts > settings.MaxLoginAttempts || fail2 > settings.MaxLoginAttempts)
             {
                 caller.Msg("Too many failed login attempts. Please try again later.");
@@ -85,7 +83,7 @@ public sealed class ConnectCommand : Command
     // Port of atheriz/commands/unloggedin/connect.py:21 char_selection
     internal static async Task CharSelectionAsync(BaseConnection caller, Account account)
     {
-        var settings = AtherizSettings.Default;
+        var settings = AtherizSettings.Global;
         while (true)
         {
             GameObject? puppetCheck;
@@ -143,17 +141,9 @@ public sealed class ConnectCommand : Command
             if (chosen.IsBanned)
             {
                 string msg = "That character is banned.";
-                try
-                {
-                    var reasonField = chosen.GetType().GetProperty("BanReason")?.GetValue(chosen) as string;
-                    if (!string.IsNullOrEmpty(reasonField)) msg += $" Reason: {reasonField}";
-                    else
-                    {
-                        // Try via flags or direct
-                        var br = chosen.GetType().GetProperty("BanReason")?.GetValue(chosen) as string;
-                        if (!string.IsNullOrEmpty(br)) msg += $" Reason: {br}";
-                    }
-                } catch { }
+                // Typed (F001): BanReason is virtual on GameObject (Account field-backed).
+                string reason = chosen.BanReason;
+                if (!string.IsNullOrEmpty(reason)) msg += $" Reason: {reason}";
                 caller.Msg(msg);
                 continue;
             }

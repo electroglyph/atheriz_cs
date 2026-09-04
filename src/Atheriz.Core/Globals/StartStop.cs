@@ -42,7 +42,7 @@ public static class StartStop
     // Port of startstop.py:30-46 do_startup
     public static void DoStartup(AsyncThreadPool? pool = null, AsyncTicker? ticker = null, AtherizSettings? settings = null)
     {
-        settings ??= AtherizSettings.Default;
+        settings ??= AtherizSettings.Global;
         // Port of startstop.py:32 with _shutdown_lock: _shutdown_completed=False
         lock (_shutdownLock)
         {
@@ -129,7 +129,7 @@ public static class StartStop
     // Port of startstop.py:49-82 do_shutdown
     public static void DoShutdown(AtherizSettings? settings = null, AsyncThreadPool? pool = null, AsyncTicker? ticker = null)
     {
-        settings ??= AtherizSettings.Default;
+        settings ??= AtherizSettings.Global;
         lock (_worldLock)
         {
             lock (_shutdownLock)
@@ -331,7 +331,7 @@ public static class StartStop
     // Port of startstop.py:125-153 do_reload
     public static void DoReload(AtherizSettings? settings = null, AsyncTicker? ticker = null)
     {
-        settings ??= AtherizSettings.Default;
+        settings ??= AtherizSettings.Global;
         lock (_worldLock)
         {
             // Port of startstop.py:127 channel msg
@@ -344,8 +344,7 @@ public static class StartStop
 
             Console.Error.WriteLine("Starting reload sequence..."); // Port of logger.info
 
-            // Port of startstop.py:131-137 try reload server_events
-            try { TryInvokeServerEvent("AtServerReload"); } catch { }
+            // Port of startstop.py:131-137 single at_server_reload() call (was invoked twice; fixed).
             ShutdownStep("at_server_reload", () => TryInvokeServerEvent("AtServerReload"));
 
             // Port of startstop.py:138-139 if TIME_SYSTEM_ENABLED: get_game_time().stop()

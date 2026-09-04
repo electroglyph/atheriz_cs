@@ -19,11 +19,11 @@ public static class Validation
         if (stripped.Contains("  ")) return "Name cannot contain consecutive spaces.";
         return null;
     }
-    public static string? ValidateAccountName(string name) => ValidateName(name, AtherizSettings.Default.MaxAccountNameLength);
-    public static string? ValidateCharacterName(string name) => ValidateName(name, AtherizSettings.Default.MaxCharacterNameLength);
+    public static string? ValidateAccountName(string name) => ValidateName(name, AtherizSettings.Global.MaxAccountNameLength);
+    public static string? ValidateCharacterName(string name) => ValidateName(name, AtherizSettings.Global.MaxCharacterNameLength);
     public static string? ValidatePassword(string password)
     {
-        var settings = AtherizSettings.Default;
+        var settings = AtherizSettings.Global;
         if (string.IsNullOrEmpty(password)) return "Password cannot be empty.";
         if (password.Length < settings.MinPasswordLength) return $"Password must be at least {settings.MinPasswordLength} characters.";
         if (password.Length > settings.MaxPasswordLength) return $"Password must be at most {settings.MaxPasswordLength} characters.";

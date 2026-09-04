@@ -16,7 +16,7 @@ namespace Atheriz.Core.Network;
 /// Abstract interface for all network connections. Mirrors <c>atheriz/network/connection.py:BaseConnection</c> (207 LOC).
 /// Thread-safe FIFO input pipeline via _inputQueue, bounded by CONNECTION_INPUT_QUEUE_LIMIT (100).
 /// </summary>
-public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget
+public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Atheriz.Core.Commands.ISessionProvider
 {
     // port of connection.py:23-40 __init__
     public string? SessionId { get; }
@@ -69,13 +69,6 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget
         }
         catch { }
         return FallbackPool;
-    }
-
-    [Obsolete("Use TimeProvider.MonotonicSeconds()")]
-    private static double MonotonicSeconds()
-    {
-        // mirrors time.monotonic() at connection.py:87,103 — now via TimeProvider
-        return global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
     }
 
     // Port of connection.py:67-117 enqueue_input — throttling now via ThrottleWindow (1s window)
@@ -175,7 +168,13 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget
             }
             try
             {
-                handler.DynamicInvoke(this, args, kwargs); // port of connection.py:150
+                // Typed fast path (F001): registered handlers are
+                // Action<BaseConnection, List<object?>, Dictionary<string, object?>>.
+                // DynamicInvoke stays as fallback for exotic test doubles.
+                if (handler is Action<BaseConnection, List<object?>, Dictionary<string, object?>> typed)
+                    typed(this, args, kwargs);
+                else
+                    handler.DynamicInvoke(this, args, kwargs); // port of connection.py:150
             }
             catch (Exception ex)
             {

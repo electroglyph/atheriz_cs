@@ -111,7 +111,7 @@ public class PortedMazeBackgroundWsIntegrationTests
             }
             await Send("client_ready", Array.Empty<object>());
             var wel=await Drain(2000);
-            Assert.Contains(wel,m=>m.Contains("AtheriZ")||m.Contains("Welcome"));
+            Assert.Contains(wel,m=>m.Contains("ATHERIZ VERSION"));
             await Send("text", new object[]{$"connect mazeadmin mazepass123"});
             var ac=await Drain(3000);
             Assert.Contains(ac,m=>m.Contains("Please select"));

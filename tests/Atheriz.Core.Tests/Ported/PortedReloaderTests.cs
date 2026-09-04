@@ -328,4 +328,26 @@ public class PortedReloaderTests
         Assert.Equal(1, acquires);
         Assert.Equal(1, releases);
     }
+
+    [Fact]
+    public void PatchLiveObjects_RewiresChannelListenerToReplacement()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var obj = new OldSimple("rewire") { A = 5 };
+        obj.Id = Globals.IdGenerator.GetUniqueId();
+        ObjectRegistry.AddObject(obj);
+        var chan = new Channel { Name = "rewire_chan" };
+        chan.Id = Globals.IdGenerator.GetUniqueId();
+        ObjectRegistry.AddObject(chan);
+        chan.AddListener(obj);
+        // NewInitTypeError ctor throws, but patch bypasses ctor (GetUninitializedObject) like Python skipping __init__.
+        var patched = PluginReloader.PatchLiveObjects(typeof(OldSimple), typeof(NewInitTypeError));
+        Assert.Equal(1, patched);
+        var got = ObjectRegistry.Get(obj.Id).FirstOrDefault();
+        Assert.IsType<NewInitTypeError>(got);
+        Assert.Equal(5, ((OldSimple)got!).A);
+        var listener = chan.ListenerObjects.FirstOrDefault();
+        Assert.NotNull(listener);
+        Assert.IsType<NewInitTypeError>(listener);
+    }
 }

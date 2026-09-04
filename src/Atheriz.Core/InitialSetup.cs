@@ -79,7 +79,7 @@ public static class InitialSetup
         // Re-seed salt after clear
         try { SaltProvider.GetSalt(absSecret); } catch {}
 
-        var settings = AtherizSettings.Default;
+        var settings = AtherizSettings.Global;
         // Build NodeArea 9x9x9
         var nh = new NodeHandler(autoLoad: false);
         var area = new NodeArea(LIMBO_AREA);
@@ -264,7 +264,7 @@ public static class InitialSetup
         var button = GameObject.Create("A big red button", isItem: true);
         button.Desc = "A large button that glows with an ominous red light. Wonder if it does anything...";
         button.Aliases = new List<string>{"button"};
-        button.AddLock("get", (GameObject x) => x.IsBuilder);
+        button.AddLock("get", (GameObject x) => x.IsBuilder, LockPolicies.Builder);
         if (button.ExternalCmdSet == null) button.ExternalCmdSet = new Commands.CmdSet();
         try { button.ExternalCmdSet.Add(new PushCommand()); } catch { }
         ObjectRegistry.AddObject(button);
@@ -272,8 +272,8 @@ public static class InitialSetup
 
         account.AddCharacter(character);
         var chan = Channel.Create("Server");
-        chan.AddLock("send", (GameObject x) => x.IsBuilder);
-        chan.AddLock("view", (GameObject x) => x.IsBuilder);
+        chan.AddLock("send", (GameObject x) => x.IsBuilder, LockPolicies.Builder);
+        chan.AddLock("view", (GameObject x) => x.IsBuilder, LockPolicies.Builder);
         chan.Desc = "for server announcements";
         chan.AddListener(character);
         if (!character.ChannelsSnapshot.Contains(chan.Id))

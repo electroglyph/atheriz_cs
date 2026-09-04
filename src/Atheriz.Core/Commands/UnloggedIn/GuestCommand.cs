@@ -60,7 +60,7 @@ public sealed class GuestCommand : Command
             }
             if (notAvailable) { caller.Msg("This character is not available."); return; }
             var nh = NodeHandler.GetCurrent();
-            var home = nh?.GetNode(AtherizSettings.Default.DefaultHome);
+            var home = nh?.GetNode(AtherizSettings.Global.DefaultHome);
             if (home != null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
             try { character.AtPostPuppet(); } catch { }
             caller.Msg($"Guest {name} created.");

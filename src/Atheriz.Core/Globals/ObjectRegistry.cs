@@ -1,8 +1,8 @@
-using System.Collections.Concurrent;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Dto;
 using Atheriz.Core.Persistence.Entities;
+using Atheriz.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Globals;
@@ -22,21 +22,59 @@ public static class ObjectRegistry
         private readonly Dictionary<TKey, TValue> _dict = new();
         private readonly Queue<TKey> _order = new();
         private readonly object _lock = new();
+        private void EvictIfNeeded(TKey justSet)
+        {
+            if (_dict.Count <= Limit) return;
+            var oldest = _order.Dequeue();
+            // if oldest == key (re-enqueued same key that was oldest) need next
+            if (EqualityComparer<TKey>.Default.Equals(oldest, justSet) && _order.Count > 0)
+                oldest = _order.Dequeue();
+            _dict.Remove(oldest);
+        }
         public void Set(TKey key, TValue value)
         {
             lock (_lock)
             {
                 var isNew = !_dict.ContainsKey(key);
                 _dict[key] = value;
-                if (isNew) _order.Enqueue(key);
-                if (isNew && _dict.Count > Limit)
+                if (!isNew) return;
+                _order.Enqueue(key);
+                EvictIfNeeded(key);
+            }
+        }
+        /// <summary>Atomic read-modify-write under the dict lock (F005 login hot path).</summary>
+        public TValue AddOrUpdate(TKey key, Func<bool, TValue, TValue> updater)
+        {
+            lock (_lock)
+            {
+                var isNew = !_dict.ContainsKey(key);
+                var nv = updater(!isNew, isNew ? default! : _dict[key]);
+                _dict[key] = nv;
+                if (isNew)
                 {
-                    var oldest = _order.Dequeue();
-                    // if oldest == key (re-enqueued same key that was oldest) need next
-                    if (EqualityComparer<TKey>.Default.Equals(oldest, key) && _order.Count > 0)
-                        oldest = _order.Dequeue();
-                    _dict.Remove(oldest);
+                    _order.Enqueue(key);
+                    EvictIfNeeded(key);
                 }
+                return nv;
+            }
+        }
+        /// <summary>
+        /// Atomic check-then-set under the dict lock: sets <paramref name="value"/> only when
+        /// <paramref name="allow"/> (exists, current-or-default) returns true.
+        /// </summary>
+        public bool CheckAndSet(TKey key, TValue value, Func<bool, TValue, bool> allow)
+        {
+            lock (_lock)
+            {
+                var exists = _dict.ContainsKey(key);
+                if (!allow(exists, exists ? _dict[key] : default!)) return false;
+                _dict[key] = value;
+                if (!exists)
+                {
+                    _order.Enqueue(key);
+                    EvictIfNeeded(key);
+                }
+                return true;
             }
         }
         public TValue? Get(TKey key)
@@ -44,7 +82,22 @@ public static class ObjectRegistry
             lock (_lock) return _dict.TryGetValue(key, out var v) ? v : default;
         }
         public bool Contains(TKey key) { lock (_lock) return _dict.ContainsKey(key); }
-        public void Remove(TKey key) { lock (_lock) _dict.Remove(key); }
+        public bool TryGetValue(TKey key, out TValue? value) { lock (_lock) return _dict.TryGetValue(key, out value); }
+        public void Remove(TKey key)
+        {
+            lock (_lock)
+            {
+                _dict.Remove(key);
+                // Purge the FIFO queue too — otherwise eviction later removes the wrong live key (F005).
+                if (_order.Count > 0)
+                {
+                    var kept = new Queue<TKey>(_order.Count);
+                    foreach (var k in _order) if (!EqualityComparer<TKey>.Default.Equals(k, key)) kept.Enqueue(k);
+                    _order.Clear();
+                    foreach (var k in kept) _order.Enqueue(k);
+                }
+            }
+        }
         public void Clear() { lock (_lock) { _dict.Clear(); _order.Clear(); } }
         public Dictionary<TKey, TValue> Snapshot() { lock (_lock) return new Dictionary<TKey, TValue>(_dict); }
         public int Count { get { lock (_lock) return _dict.Count; } }
@@ -53,15 +106,10 @@ public static class ObjectRegistry
     // --- state ---
     internal static readonly ReaderWriterLockSlim AllLock = new(LockRecursionPolicy.SupportsRecursion);
     private static readonly Dictionary<int, GameObject> AllObjects = new();
-    // Keep strong refs to ever-created objects to allow MoveTo to find oldLoc even after concurrent ClearAll (flaky test fix)
-    private static readonly ConcurrentDictionary<int, GameObject> EverCreated = new();
 
     private static readonly BoundedDictionary<string, double> TempBannedIps = new();
-    private static readonly object TempBannedLock = new();
     private static readonly BoundedDictionary<string, double> CreationCooldowns = new();
     private static readonly BoundedDictionary<string, int> FailedLoginAttempts = new();
-    private static readonly object CooldownLock = new();
-    private static readonly object FailedLoginLock = new();
 
     public static bool AlwaysSaveAll { get; set; } = false;
 
@@ -69,17 +117,11 @@ public static class ObjectRegistry
     public static bool IsIpBanned(string host, double? now = null)
     {
         var t = now ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        lock (TempBannedLock)
-        {
-            var expires = TempBannedIps.Get(host);
-            // BoundedDictionary returns default(double)=0 if missing — need distinction
-            // Use snapshot check
-            var snap = TempBannedIps.Snapshot();
-            if (!snap.TryGetValue(host, out var exp)) return false;
-            if (t < exp) return true;
-            TempBannedIps.Remove(host);
-            return false;
-        }
+        // Single atomic check+expiry on the dict's own lock (F005) — no O(N) snapshot, no outer lock.
+        if (!TempBannedIps.TryGetValue(host, out var exp)) return false;
+        if (t < exp) return true;
+        TempBannedIps.Remove(host);
+        return false;
     }
     public static void BanIp(string host, double? expires = null)
     {
@@ -94,8 +136,7 @@ public static class ObjectRegistry
     {
         if (host == "?") return false;
         var key = CooldownKey(host);
-        var snap = CreationCooldowns.Snapshot();
-        if (!snap.TryGetValue(key, out var exp)) return false;
+        if (!CreationCooldowns.TryGetValue(key, out var exp)) return false;
         if (exp > now) return true;
         CreationCooldowns.Remove(key);
         return false;
@@ -109,13 +150,9 @@ public static class ObjectRegistry
     {
         if (host == "?") return true;
         var key = CooldownKey(host);
-        lock (CooldownLock)
-        {
-            var snap = CreationCooldowns.Snapshot();
-            if (snap.TryGetValue(key, out var exp) && exp > now) return false;
-            if (cooldown > 0) CreationCooldowns.Set(key, now + cooldown);
-            return true;
-        }
+        if (cooldown <= 0) return !CreationCooldownActive(op, host, now);
+        // Atomic check+reserve on the dict's own lock (F005) — no snapshot, no outer lock.
+        return CreationCooldowns.CheckAndSet(key, now + cooldown, (exists, exp) => !exists || exp <= now);
     }
     public static void ClearCreationCooldown(string host)
     {
@@ -172,42 +209,30 @@ public static class ObjectRegistry
             AllObjects[obj.Id] = obj;
         }
         finally { AllLock.ExitWriteLock(); }
-        EverCreated[obj.Id] = obj;
     }
 
     public static GameObject? GetEver(int id)
     {
+        // Live-map only (F005): the old EverCreated strong-ref cache leaked memory and
+        // resurrected ClearAll'd objects. Callers needing a stale object must hold their own ref.
         AllLock.EnterReadLock();
-        try { if (AllObjects.TryGetValue(id, out var o)) return o; }
+        try { return AllObjects.TryGetValue(id, out var o) ? o : null; }
         finally { AllLock.ExitReadLock(); }
-        if (EverCreated.TryGetValue(id, out var t) && !t.IsDeleted) return t;
-        return null;
     }
 
     public static void AddObjectUnique(GameObject obj, Func<GameObject, bool> predicate, string error)
     {
-        while (true)
+        // Single write lock covering check+insert (F005) — no read-check/write-recheck spin.
+        // Safe: uniqueness predicates only read object properties (no registry re-entry).
+        AllLock.EnterWriteLock();
+        try
         {
-            List<GameObject> snap;
-            AllLock.EnterReadLock();
-            try { snap = AllObjects.Values.ToList(); }
-            finally { AllLock.ExitReadLock(); }
-            if (snap.Any(predicate)) throw new InvalidOperationException(error);
-            AllLock.EnterWriteLock();
-            try
-            {
-                var current = AllObjects.Values.ToList();
-                // compare by reference sequence equality — if same count and same set, no race
-                if (current.Count == snap.Count && current.All(c => snap.Contains(c)))
-                {
-                    var stale = AllObjects.Where(kv => ReferenceEquals(kv.Value, obj) && kv.Key != obj.Id).Select(kv => kv.Key).ToList();
-                    foreach (var k in stale) AllObjects.Remove(k);
-                    AllObjects[obj.Id] = obj;
-                    return;
-                }
-            }
-            finally { AllLock.ExitWriteLock(); }
+            if (AllObjects.Values.Any(predicate)) throw new InvalidOperationException(error);
+            var stale = AllObjects.Where(kv => ReferenceEquals(kv.Value, obj) && kv.Key != obj.Id).Select(kv => kv.Key).ToList();
+            foreach (var k in stale) AllObjects.Remove(k);
+            AllObjects[obj.Id] = obj;
         }
+        finally { AllLock.ExitWriteLock(); }
     }
 
     public static void RemoveObject(GameObject obj)
@@ -305,16 +330,22 @@ public static class ObjectRegistry
             // empty table: still clear? mimic original early return but ensure cleared
             // If no rows, keep existing clear behaviour
         }
-        AllLock.EnterWriteLock();
-        try
+        // Swap + id watermark atomically under both locks: a concurrent
+        // GetUniqueId between the swap and SetId could otherwise hand out an
+        // id that a row then overwrites.
+        lock (IdGenerator.LockObj)
         {
-            AllObjects.Clear();
-            foreach (var kv in objects) AllObjects[kv.Key] = kv.Value;
-        }
-        finally { AllLock.ExitWriteLock(); }
+            AllLock.EnterWriteLock();
+            try
+            {
+                AllObjects.Clear();
+                foreach (var kv in objects) AllObjects[kv.Key] = kv.Value;
+            }
+            finally { AllLock.ExitWriteLock(); }
 
-        if (maxId > IdGenerator.GetId())
-            IdGenerator.SetId(maxId);
+            if (maxId > IdGenerator.GetId())
+                IdGenerator.SetId(maxId);
+        }
 
         // second pass: resolve relations — port of objects.py:272-276 for obj in snapshot: obj.resolve_relations()
         List<GameObject> snap;
@@ -459,9 +490,16 @@ public static class ObjectRegistry
         }
     }
 
-    public static void SaveObjects(string savePath, bool force = false)
+    // Port of save_objects() default path: settings.SAVE_PATH, honoring the
+    // ATHERIZ_SAVE_PATH env override (tests point it at a temp dir, like conftest).
+    public static void SaveObjects(bool force = false)
     {
-        AtherizDbContext db;
+        var savePath = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? AtherizSettings.Global.SavePath;
+        SaveObjects(savePath, force);
+    }
+
+    public static void SaveObjects(string savePath, bool force = false)
+    {        AtherizDbContext db;
         try { db = new AtherizDbContext(savePath); }
         catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
         {

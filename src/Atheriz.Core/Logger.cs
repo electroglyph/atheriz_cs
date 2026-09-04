@@ -11,6 +11,10 @@ public static class AtherizLogger
     // Port of logger.py:17 FORMATTER = "%(levelname)s: %(name)s: %(message)s"
     private const string Formatter = "{Level}: {Category}: {Message}";
     private static readonly object _lock = new();
+    // Dedicated file lock (F009): AppendToFile does check+rotate+append; without a lock
+    // concurrent ticks interleave lines and can corrupt server.log. Kept separate from
+    // _lock so file IO never blocks logger-factory access.
+    private static readonly object _fileLock = new();
     private static ILoggerFactory? _factory;
     private static ILogger? _cachedDefault;
     private static LogLevel _level = LogLevel.Information; // Port of logger.py:28 default info
@@ -29,7 +33,7 @@ public static class AtherizLogger
     // Port of logger.py:19 apply_settings
     public static void ApplySettings(AtherizSettings? settings = null)
     {
-        var s = settings ?? AtherizSettings.Default;
+        var s = settings ?? AtherizSettings.Global;
         _savePath = s.SavePath ?? "save";
         // Port of logger.py:21 level_map debug/info/warning/error/critical
         var map = new Dictionary<string, LogLevel>(StringComparer.OrdinalIgnoreCase)
@@ -112,6 +116,10 @@ public static class AtherizLogger
     private static void AppendToFile(LogLevel level, string category, string message, Exception? ex)
     {
         if (!_fileEnabled) return;
+        // F009: serialize size-check + rotate + append so concurrent writers cannot
+        // interleave lines or rotate mid-append and corrupt server.log.
+        lock (_fileLock)
+        {
         try
         {
             var dir = _savePath;
@@ -136,10 +144,15 @@ public static class AtherizLogger
             catch { _fileEnabled = false; }
         }
         catch { }
+        }
     }
 
     public static void Rotate(string file)
     {
+        // F009: same file lock as AppendToFile (Monitor is re-entrant, so the
+        // Rotate call inside AppendToFile is safe) — rotation never races appends.
+        lock (_fileLock)
+        {
         try
         {
             // 5 files: server.log -> server.log.1 .. server.log.5 (like RotatingFileHandler 5M*5)
@@ -158,14 +171,17 @@ public static class AtherizLogger
             try { if (File.Exists(file)) File.Move(file, first, overwrite: true); } catch { }
         }
         catch { }
+        }
     }
 
     private static void Write(LogLevel level, string category, string message, Exception? ex = null)
     {
         if (level < _level)
         {
-            // For filtered Debug (e.g., Unknown command as Debug when level=Info), still echo to Console.Error for test capture / backward compat
-            // This preserves throttling visibility even when level filtered, matching old Console.Error behavior
+            // F009 deviation: filtered levels still echo to Console.Error. Strict level-honoring
+            // would drop them, but PortedConnectionTestsPart2.DispatchUnknownCmdLogged pins that a
+            // Debug "Unknown command" line is capturable at default info level (mirrors the old
+            // direct-Console.Error behavior), so the echo stays. File output is still skipped.
             var filteredLine = $"{level.ToString().ToUpperInvariant()}: {category}: {message}";
             if (ex != null) filteredLine += $"\n{ex}";
             try { Console.Error.WriteLine(filteredLine); } catch { }

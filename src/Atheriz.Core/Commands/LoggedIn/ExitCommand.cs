@@ -5,6 +5,12 @@ using Atheriz.Core.Objects;
 namespace Atheriz.Core.Commands.LoggedIn;
 
 /// <summary>Port of atheriz/commands/loggedin/exit.py:ExitCommand (hidden) — NodeLinks metadata.</summary>
+/// <remarks>
+/// Key "exit" is the verbatim Python exit.py:15 class key, but live room-exit instances are always
+/// re-keyed per direction (Node.AddExits calls SetKey(link name)), and this type is never added to
+/// the global registry — so it can never collide with QuitCommand's "exit" alias at CmdSet.Add time.
+/// Dispatch order (InternalCmdSet before global registry) resolves any residual overlap. Do not rename.
+/// </remarks>
 public sealed class LoggedInExitCommand : Command
 {
     public override string Key => "exit";
@@ -156,16 +162,8 @@ public sealed class LoggedInExitCommand : Command
                 leader.SyncRoot.EnterWriteLock();
                 try
                 {
-                    var followers = leader.FollowersSnapshot;
-                    // need to remove c.id if present — use reflection to access private _followers?
-                    // Instead try to call Remove via public? GameObject has no public RemoveFollower; we manipulate via SyncRoot + field
-                    var field = typeof(GameObject).GetField("_followers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    if (field != null)
-                    {
-                        var set = field.GetValue(leader) as HashSet<int>;
-                        set?.Remove(c.Id);
-                    }
-                    var modField = typeof(GameObject).GetField("_flags", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    // need to remove c.id if present (typed raw helper: lock already held)
+                    leader.RemoveFollowerRawNoLock(c.Id);
                     // mark modified via IsModified true
                     leader.IsModified = true;
                 }

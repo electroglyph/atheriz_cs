@@ -146,31 +146,15 @@ public sealed class UnbanCommand : Command
     }
     private static void ClearBanReason(GameObject c)
     {
-        try
-        {
-            var f = typeof(GameObject).GetField("_extra", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var dict = f?.GetValue(c) as Dictionary<string, JsonElement>;
-            if (dict != null) dict.Remove("ban_reason");
-            // also remove snake variant if any
-            dict?.Remove("banReason");
-        }
-        catch { }
-        try
-        {
-            var prop = c.GetType().GetProperty("BanReason");
-            if (prop != null && prop.CanWrite) try { prop.SetValue(c, ""); } catch { }
-        }
-        catch { }
+        // Typed (F001): ban reason lives on the BanReason property (Account field-backed,
+        // plain objects extra-backed); both legacy extra spellings are dropped too.
+        c.BanReason = "";
+        c.TryRemoveExtraJson("ban_reason");
+        c.TryRemoveExtraJson("banReason");
     }
     private static void SetBanReason(GameObject c, string reason)
     {
-        try
-        {
-            var f = typeof(GameObject).GetField("_extra", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var dict = f?.GetValue(c) as Dictionary<string, JsonElement>;
-            if (dict != null) dict["ban_reason"] = JsonSerializer.SerializeToElement(reason);
-        }
-        catch { }
+        c.BanReason = reason;
     }
 }
 
@@ -178,22 +162,11 @@ internal static class BanReasonHelper
 {
     internal static void SetBanReason(GameObject c, string reason)
     {
-        try
-        {
-            var f = typeof(GameObject).GetField("_extra", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var dict = f?.GetValue(c) as Dictionary<string, JsonElement>;
-            if (dict != null) dict["ban_reason"] = JsonSerializer.SerializeToElement(reason);
-        }
-        catch { }
+        c.BanReason = reason;
     }
     internal static void ClearBanReason(GameObject c)
     {
-        try
-        {
-            var f = typeof(GameObject).GetField("_extra", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var dict = f?.GetValue(c) as Dictionary<string, JsonElement>;
-            if (dict != null) dict.Remove("ban_reason");
-        }
-        catch { }
+        c.BanReason = "";
+        c.TryRemoveExtraJson("ban_reason");
     }
 }

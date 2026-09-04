@@ -19,18 +19,13 @@ public sealed class SaveCommand : Command
         if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
         go.Msg("Saving...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            // mirror Python: save_objects() + map.save() + node.save(force=True) + gametime.save if enabled
-            ObjectRegistry.SaveObjects("save", force: true);
-        }
-        catch (Exception ex) { go.Msg($"SaveObjects failed: {ex.Message}"); }
-        try { NodeHandler.GetCurrent()?.Save(force: true); } catch { }
-        try { new MapHandler(null, false).Save(force: true); } catch { }
+        // Port of save.py:32 faithful order: save_objects() + map.save() + node.save(force=True) + gametime.save.
+        // Uses the live singletons (never throwaway instances) and settings.SavePath (never hardcoded "save").
+        ObjectRegistry.SaveObjects();
+        GlobalServices.GetMapHandler().Save();
+        GlobalServices.GetNodeHandler().Save(force: true);
         if (AtherizSettings.Global.TimeSystemEnabled)
-        {
-            try { var gt = new GameTime(null, false); gt.Save(); } catch { }
-        }
+            GlobalServices.GetGameTime().Save();
         sw.Stop();
         go.Msg($"Saved in {sw.Elapsed.TotalMilliseconds} milliseconds.");
     }

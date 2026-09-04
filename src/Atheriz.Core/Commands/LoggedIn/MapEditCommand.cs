@@ -15,56 +15,21 @@ public sealed class DrawCommand : Command
 
     public override void Run(IMessageTarget caller, object? args)
     {
+        // Typed (F001): GameObject carries Location/Session; Session.Connection is
+        // typed BaseConnection (ClientHost/SendCommand). A raw BaseConnection caller
+        // resolves via its session puppet. No reflection.
         GameObject? go = caller as GameObject;
-        Node? loc = null;
-        if (go != null) loc = go.ResolveLocationObject() as Node;
-        else
-        {
-            try
-            {
-                var prop = caller.GetType().GetProperty("location", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                if (prop != null) loc = prop.GetValue(caller) as Node;
-            }
-            catch { }
-        }
+        if (go == null && caller is Atheriz.Core.Network.BaseConnection bc0 && bc0.Session.Puppet is GameObject pgo)
+            go = pgo;
+        Node? loc = go?.ResolveLocationObject() as Node;
         if (loc == null)
         {
             caller.Msg("You must be in a valid location to open the map editor.");
             return;
         }
         // session/connection
-        object? session = null;
-        try { session = go != null ? (object?)go.Session : caller.GetType().GetProperty("session", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase)?.GetValue(caller); } catch { }
-        object? conn = null;
-        try
-        {
-            if (session != null)
-            {
-                var prop = session.GetType().GetProperty("connection", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                if (prop != null) conn = prop.GetValue(session);
-                else
-                {
-                    var f = session.GetType().GetField("connection", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                    if (f != null) conn = f.GetValue(session);
-                }
-            }
-            if (conn == null && go != null && go.Session != null) conn = go.Session.Connection;
-            // also check caller direct connection for FakeConnection style (session.connection via FakeConnection)
-            if (conn == null)
-            {
-                var p2 = caller.GetType().GetProperty("session", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                if (p2 != null)
-                {
-                    var s2 = p2.GetValue(caller);
-                    if (s2 != null)
-                    {
-                        var cp = s2.GetType().GetProperty("connection", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                        if (cp != null) conn = cp.GetValue(s2);
-                    }
-                }
-            }
-        }
-        catch { }
+        Session? session = go?.Session;
+        Atheriz.Core.Network.BaseConnection? conn = session?.Connection;
         if (conn == null)
         {
             caller.Msg("No active connection.");
@@ -80,35 +45,10 @@ public sealed class DrawCommand : Command
             mi = new MapInfo(area);
             mh.SetMapInfo(area, z, mi);
         }
-        string ip = "?";
-        try
-        {
-            var ipProp = conn.GetType().GetProperty("ClientHost") ?? conn.GetType().GetProperty("client_host");
-            if (ipProp != null) ip = ipProp.GetValue(conn) as string ?? "?";
-            else
-            {
-                var f = conn.GetType().GetField("client_host", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                if (f != null) ip = f.GetValue(conn) as string ?? "?";
-            }
-        }
-        catch { ip = "?"; }
+        string ip = conn.ClientHost ?? "?";
 
         string key = MapEdit.Grant(ip, area, z, go?.Session);
-        string rawSym = "X";
-        try
-        {
-            if (caller is GameObject g2)
-            {
-                // Try get Symbol property (Node vs GameObject)
-                rawSym = g2.Symbol ?? "X";
-            }
-            else
-            {
-                var p = caller.GetType().GetProperty("symbol", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                if (p != null) rawSym = p.GetValue(caller) as string ?? "X";
-            }
-        }
-        catch { rawSym = "X"; }
+        string rawSym = go?.Symbol ?? "X";
         if (string.IsNullOrEmpty(rawSym)) rawSym = "X";
         string plain = GameUtils.StripAnsi(rawSym);
         plain = plain.Trim();
@@ -197,21 +137,9 @@ public sealed class DrawCommand : Command
 
         try
         {
-            if (conn is Atheriz.Core.Network.BaseConnection bc)
-            {
-                bc.SendCommand("launch_draw", new List<object?>{ key, payload }, new Dictionary<string, object?>());
-            }
-            else
-            {
-                var sendMethod = conn.GetType().GetMethod("SendCommand", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance, null, new Type[]{typeof(string), typeof(System.Collections.Generic.List<object>), typeof(System.Collections.Generic.Dictionary<string, object>)}, null)
-                    ?? conn.GetType().GetMethod("SendCommand", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                if (sendMethod != null)
-                {
-                    var argsList = new List<object?>{ key, payload };
-                    var kw = new Dictionary<string, object?>();
-                    try { sendMethod.Invoke(conn, new object?[]{ "launch_draw", argsList, kw }); } catch { conn.GetType().GetMethod("SendCommand")?.Invoke(conn, new object?[]{ "launch_draw", argsList, kw }); }
-                }
-            }
+            var argsList = new List<object?> { key, payload };
+            var kw = new Dictionary<string, object?>();
+            conn.SendCommand("launch_draw", argsList, kw);
         }
         catch { }
         caller.Msg("Opening AtheriZ Draw in a new tab.");

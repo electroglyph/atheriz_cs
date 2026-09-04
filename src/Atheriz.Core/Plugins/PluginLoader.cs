@@ -32,15 +32,8 @@ public sealed class EntityReplacementAttribute : Attribute
 /// </summary>
 public sealed class PluginLoader : IDisposable
 {
-    // Port of reloader.py:14 _EXCLUDED_MODULES — never reload core/server state
-    // Do NOT reload these; mirroring Python excluded set comments.
-    private static readonly HashSet<string> ExcludedAssemblyPrefixes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Atheriz.Core", // mirrors atheriz.reloader, atheriz.globals.*, atheriz.settings etc
-        "Microsoft.",
-        "System.",
-        "xunit.",
-    };
+    // Single exclusion source: PluginReloader.IsExcludedAssembly (port of _EXCLUDED_MODULES).
+    // Never reload core/server state; mirrors Python excluded set comments.
 
     private AssemblyLoadContext? _alc;
     private Assembly? _loaded;
@@ -64,12 +57,16 @@ public sealed class PluginLoader : IDisposable
         if (!File.Exists(full))
             throw new FileNotFoundException($"Plugin assembly not found at {full}", full);
 
-        // Check excluded prefixes — mirrors _EXCLUDED_MODULES guard
+        // Check excluded prefixes — mirrors _EXCLUDED_MODULES guard (skip entirely, like Python's continue).
         var name = Path.GetFileNameWithoutExtension(full);
-        if (ExcludedAssemblyPrefixes.Any(p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase) || full.Contains(p)))
+        if (PluginReloader.IsExcludedAssembly(full))
         {
             Console.Error.WriteLine($"[PluginLoader] Skipping excluded assembly: {name}");
+            return;
         }
+
+        // Unload any previous ALC first — overwriting _alc without unloading leaks it.
+        if (_loaded != null) Unload();
 
         // Create collectible ALC — mirrors importlib.reload isolation + Python's two-pass reload
         _alc = new AssemblyLoadContext($"game-{Guid.NewGuid():N}", isCollectible: true);
@@ -141,28 +138,6 @@ public sealed class PluginLoader : IDisposable
             _alc = null;
         }
         Console.Error.WriteLine("[PluginLoader] Unloaded.");
-    }
-
-    /// <summary>
-    /// Stub for live patching — mirrors <c>reloader._apply_patch(obj, new_class)</c> at reloader.py:249.
-    /// Faithful semantics note: copy FieldInfo values, skip <c>session/listeners/command</c>, preserve lock,
-    /// try __getstate__/__setstate__ else __dict__ copy, rollback on failure, then ResolveRelations.
-    /// TODO: implement FieldInfo copy when object model stabilizes; keep skeleton with lock discipline.
-    /// Excluded: Microsoft.* / Atheriz.Core like _EXCLUDED_MODULES.
-    /// </summary>
-    public int PatchLiveObjects(IEnumerable<object> liveObjects)
-    {
-        // TODO — full port would:
-        // - Iterate liveObjects (mirrors filter_by at reloader.py:486-491 + NodeHandler traversal)
-        // - For each obj, look up newClass = Replacements[obj.GetType()] or base-type walk
-        // - Acquire obj.lock (or _FALLBACK_PATCH_LOCK at reloader.py:246) via ReaderWriterLockSlim
-        // - Save session/listeners/command (reloader.py:255-257)
-        // - OrigDict = obj.__dict__.copy() via reflection FieldInfo snapshot
-        // - Try: state = obj.__getstate__() ?? FieldInfo dict; obj.__class__ = newClass; obj.__setstate__(state) ?? FieldInfo patch; restore session/listeners/command
-        // - Except: rollback __class__ + __dict__ (reloader.py:288-299) and rethrow
-        // - After loop, re-ResolveRelations (reloader.py:518-525) and re-init CmdSets (reloader.py:508-512)
-        Console.Error.WriteLine("[PluginLoader] PatchLiveObjects stub — no objects patched (TODO mirrors _apply_patch).");
-        return 0;
     }
 
     public void Dispose()

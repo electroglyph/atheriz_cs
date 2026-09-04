@@ -51,7 +51,7 @@ public static class Autosave
 
     public static void AutosaveTick(AtherizSettings? settings, MapHandler? mapHandler = null, NodeHandler? nodeHandler = null, GameTime? gameTime = null)
     {
-        settings ??= _cachedSettings ?? AtherizSettings.Default;
+        settings ??= _cachedSettings ?? AtherizSettings.Global;
         var failures = new List<string>();
 
         // objects
@@ -126,7 +126,7 @@ public static class Autosave
     {
         lock (_lock)
         {
-            settings ??= AtherizSettings.Default;
+            settings ??= AtherizSettings.Global;
             if (settings.AutosaveMinutes == 0 || _autosaveStarted) return;
             double interval = IntervalSeconds(settings);
             ticker.AddCoro(AutosaveTick, interval);
@@ -137,7 +137,7 @@ public static class Autosave
             _cachedNodes = nodeHandler;
             _cachedTime = gameTime;
         }
-        try { AtherizLogger.LogInformation($"Autosave enabled: every {(settings ?? AtherizSettings.Default).AutosaveMinutes} minutes."); } catch { Console.Error.WriteLine($"Autosave enabled: every {(settings ?? AtherizSettings.Default).AutosaveMinutes} minutes."); }
+        try { AtherizLogger.LogInformation($"Autosave enabled: every {(settings ?? AtherizSettings.Global).AutosaveMinutes} minutes."); } catch { Console.Error.WriteLine($"Autosave enabled: every {(settings ?? AtherizSettings.Global).AutosaveMinutes} minutes."); }
     }
 
     /// <summary>

@@ -12,10 +12,13 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public class Door
 {
-    // TODO: SupportsRecursion required for re-entrant TryOpen/TryClose -> Access pattern (WriteLock held then Access acquires ReadLock)
+    // Mirrors Python's RLock on Door (base_door.py:24 self.lock = RLock()):
+    // Try* methods hold the write lock across Access (read lock), and tests set
+    // state under an explicit write lock, so recursion is required, not incidental.
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);
     public ReaderWriterLockSlim SyncRoot => _lock;
-    // Compat: keep public Lock for Ported tests (now delegates to private _lock); new code should use SyncRoot/ReadScope/WriteScope
+    // Compat: keep public Lock for Ported tests (delegates to the single _lock);
+    // new code should use SyncRoot/ReadScope/WriteScope.
     public ReaderWriterLockSlim Lock => _lock;
     public IDisposable ReadScope() { _lock.EnterReadLock(); return new LockScope(_lock, false); }
     public IDisposable WriteScope() { _lock.EnterWriteLock(); return new LockScope(_lock, true); }
@@ -26,18 +29,68 @@ public class Door
         public LockScope(ReaderWriterLockSlim rw, bool isWrite) { _rw = rw; _isWrite = isWrite; }
         public void Dispose() { if (_isWrite) _rw.ExitWriteLock(); else _rw.ExitReadLock(); }
     }
-    public Coord FromCoord { get; set; }
-    public string FromExit { get; set; } = "";
-    public Coord ToCoord { get; set; }
-    public string ToExit { get; set; } = "";
-    public (int X, int Y)? SymbolCoord { get; set; }
-    public string ClosedSymbol { get; set; } = "";
-    public string OpenSymbol { get; set; } = "";
-    public bool Closed { get; set; } = true;
-    public bool Locked { get; set; } = false;
-    public string Name { get; set; } = "";
-    public string DoorDesc { get; set; } = "";
-    public int? KeyId { get; set; }
+    // Door state lives outside ObjectRegistry, so direct assignment used to be lost
+    // on save (only Try* paths marked doors modified). Every mutating setter below
+    // takes the lock, and any change marks the NodeHandler doors section modified
+    // (after releasing the door lock, so the order is always door -> handler).
+    private Coord _fromCoord;
+    private string _fromExit = "";
+    private Coord _toCoord;
+    private string _toExit = "";
+    private (int X, int Y)? _symbolCoord;
+    private string _closedSymbol = "";
+    private string _openSymbol = "";
+    private bool _closed = true;
+    private bool _locked = false;
+    private string _name = "";
+    private string _doorDesc = "";
+    private int? _keyId;
+    public Coord FromCoord { get => ReadProp(ref _fromCoord); set => SetProp(ref _fromCoord, value); }
+    public string FromExit { get => ReadProp(ref _fromExit); set => SetProp(ref _fromExit, value ?? ""); }
+    public Coord ToCoord { get => ReadProp(ref _toCoord); set => SetProp(ref _toCoord, value); }
+    public string ToExit { get => ReadProp(ref _toExit); set => SetProp(ref _toExit, value ?? ""); }
+    public (int X, int Y)? SymbolCoord { get => ReadProp(ref _symbolCoord); set => SetProp(ref _symbolCoord, value); }
+    public string ClosedSymbol { get => ReadProp(ref _closedSymbol); set => SetProp(ref _closedSymbol, value ?? ""); }
+    public string OpenSymbol { get => ReadProp(ref _openSymbol); set => SetProp(ref _openSymbol, value ?? ""); }
+    public bool Closed { get => ReadProp(ref _closed); set => SetProp(ref _closed, value); }
+    public bool Locked { get => ReadProp(ref _locked); set => SetProp(ref _locked, value); }
+    public string Name { get => ReadProp(ref _name); set => SetProp(ref _name, value ?? ""); }
+    public string DoorDesc { get => ReadProp(ref _doorDesc); set => SetProp(ref _doorDesc, value ?? ""); }
+    public int? KeyId { get => ReadProp(ref _keyId); set => SetProp(ref _keyId, value); }
+    private T ReadProp<T>(ref T field)
+    {
+        _lock.EnterReadLock();
+        try { return field; }
+        finally { _lock.ExitReadLock(); }
+    }
+    private void SetProp<T>(ref T field, T value)
+    {
+        bool changed;
+        _lock.EnterWriteLock();
+        try
+        {
+            changed = !EqualityComparer<T>.Default.Equals(field, value);
+            if (changed) field = value;
+        }
+        finally { _lock.ExitWriteLock(); }
+        if (changed) MarkNodeDoorsModified();
+    }
+    /// <summary>
+    /// Best-effort doors-modified mark (mirrors the Try* paths below and Python's
+    /// <c>try: nh.mark_doors_modified() except Exception: pass</c>). Lock-free when
+    /// no NodeHandler is current (e.g. unit tests, FromDto).
+    /// </summary>
+    private static void MarkNodeDoorsModified()
+    {
+        try
+        {
+            var nh = NodeHandler.GetCurrent();
+            if (nh == null) return;
+            nh.Lock3.EnterWriteLock();
+            try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); }
+        }
+        catch { }
+    }
 
     private readonly Dictionary<string, List<Func<GameObject, bool>>> _locks = new();
 
@@ -55,11 +108,12 @@ public class Door
         (int, int)? symbolCoord = null, string closedSymbol = "", string openSymbol = "",
         bool closed = true, bool locked = false)
     {
-        FromCoord = from; ToCoord = to; FromExit = fromExit; ToExit = toExit;
-        SymbolCoord = symbolCoord; ClosedSymbol = closedSymbol; OpenSymbol = openSymbol;
-        Closed = closed; Locked = locked;
-        Name = fromExit;
-        DoorDesc = "";
+        // Direct field init: a fresh door must not mark the handler dirty.
+        _fromCoord = from; _toCoord = to; _fromExit = fromExit; _toExit = toExit;
+        _symbolCoord = symbolCoord; _closedSymbol = closedSymbol; _openSymbol = openSymbol;
+        _closed = closed; _locked = locked;
+        _name = fromExit;
+        _doorDesc = "";
     }
 
     // Port of atheriz/objects/base_door.py:56 Door.create classmethod (verbatim)
@@ -74,16 +128,16 @@ public class Door
         bool closed = true, bool locked = false)
     {
         var d = new Door();
-        if (fromCoord != null) d.FromCoord = fromCoord.Value;
-        if (toCoord != null) d.ToCoord = toCoord.Value;
-        d.FromExit = fromExit ?? "";
-        d.ToExit = toExit ?? "";
-        d.SymbolCoord = symbolCoord;
-        d.ClosedSymbol = closedSymbol ?? "";
-        d.OpenSymbol = openSymbol ?? "";
-        d.Closed = closed;
-        d.Locked = locked;
-        d.Name = fromExit ?? "";
+        if (fromCoord != null) d._fromCoord = fromCoord.Value;
+        if (toCoord != null) d._toCoord = toCoord.Value;
+        d._fromExit = fromExit ?? "";
+        d._toExit = toExit ?? "";
+        d._symbolCoord = symbolCoord;
+        d._closedSymbol = closedSymbol ?? "";
+        d._openSymbol = openSymbol ?? "";
+        d._closed = closed;
+        d._locked = locked;
+        d._name = fromExit ?? "";
         return d;
     }
     // Compat overload
@@ -128,9 +182,9 @@ public class Door
     {
         using (ReadScope())
         {
-            var status = Closed ? "A closed" : "An open";
-            if (fromCoord.Equals(FromCoord)) return $"{status} door leading {FromExit}";
-            if (fromCoord.Equals(ToCoord)) return $"{status} door leading {ToExit}";
+            var status = _closed ? "A closed" : "An open";
+            if (fromCoord.Equals(_fromCoord)) return $"{status} door leading {_fromExit}";
+            if (fromCoord.Equals(_toCoord)) return $"{status} door leading {_toExit}";
             return "Door desc: unexpected coord.";
         }
     }
@@ -161,21 +215,13 @@ public class Door
             if (!Closed) status = "already_open";
             else if (Locked) status = "locked";
             else if (!Access(caller, "open")) status = "no_access";
-            else { Closed = false; status = "opened"; }
+            else { _closed = false; status = "opened"; }
         }
         finally { _lock.ExitWriteLock(); }
         if (status == "opened")
         {
-            try
-            {
-                var nh = NodeHandler.GetCurrent();
-                if (nh != null)
-                {
-                    nh.Lock3.EnterWriteLock();
-                    try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); }
-                }
-            }
-            catch { }
+            // Port of base_door.py:119-124 try/except around mark_doors_modified
+            MarkNodeDoorsModified();
         }
         if (status == "already_open")
         {
@@ -198,12 +244,14 @@ public class Door
         AtOpen(caller);
         return true;
     }
-    // Port of base_door.py:106 wrapper for spec
-    public bool Open(GameObject? caller = null) => caller != null ? TryOpen(caller) : TryOpenFallback();
-    private bool TryOpenFallback()
+    // Port of base_door.py:106 wrapper for spec.
+    // A null caller bypasses access/map/hooks, so the fallback is an explicit
+    // ForceOpen (audit F007); the no-arg form stays for compat.
+    public bool Open(GameObject? caller = null) => caller != null ? TryOpen(caller) : ForceOpen();
+    public bool ForceOpen()
     {
         _lock.EnterWriteLock();
-        try { if (Locked) return false; if (!Closed) return true; Closed = false; return true; }
+        try { if (_locked) return false; if (!_closed) return true; _closed = false; return true; }
         finally { _lock.ExitWriteLock(); }
     }
 
@@ -219,17 +267,12 @@ public class Door
         {
             if (Closed) status = "already_closed";
             else if (!Access(caller, "close")) status = "no_access";
-            else { Closed = true; status = "closed"; }
+            else { _closed = true; status = "closed"; }
         }
         finally { _lock.ExitWriteLock(); }
         if (status == "closed")
         {
-            try
-            {
-                var nh = NodeHandler.GetCurrent();
-                if (nh != null) { nh.Lock3.EnterWriteLock(); try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); } }
-            }
-            catch { }
+            MarkNodeDoorsModified();
         }
         if (status == "already_closed")
         {
@@ -248,11 +291,11 @@ public class Door
         AtClose(caller);
         return true;
     }
-    public bool Close(GameObject? caller = null) => caller != null ? TryClose(caller) : TryCloseFallback();
-    private bool TryCloseFallback()
+    public bool Close(GameObject? caller = null) => caller != null ? TryClose(caller) : ForceClose();
+    public bool ForceClose()
     {
         _lock.EnterWriteLock();
-        try { if (Closed) return false; Closed = true; return true; }
+        try { if (_closed) return false; _closed = true; return true; }
         finally { _lock.ExitWriteLock(); }
     }
 
@@ -267,12 +310,12 @@ public class Door
             if (!Access(caller, "lock")) status = "no_access";
             else if (!Closed) status = "not_closed";
             else if (Locked) status = "already_locked";
-            else { Locked = true; status = "locked"; }
+            else { _locked = true; status = "locked"; }
         }
         finally { _lock.ExitWriteLock(); }
         if (status == "locked")
         {
-            try { var nh = NodeHandler.GetCurrent(); if (nh != null) { nh.Lock3.EnterWriteLock(); try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); } } } catch { }
+            MarkNodeDoorsModified();
         }
         if (status == "no_access")
         {
@@ -304,13 +347,13 @@ public class Door
         try
         {
             if (!Access(caller, "unlock")) status = "no_access";
-            else if (Locked) { Locked = false; status = "unlocked"; }
+            else if (_locked) { _locked = false; status = "unlocked"; }
             else status = "already_unlocked";
         }
         finally { _lock.ExitWriteLock(); }
         if (status == "unlocked")
         {
-            try { var nh = NodeHandler.GetCurrent(); if (nh != null) { nh.Lock3.EnterWriteLock(); try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); } } } catch { }
+            MarkNodeDoorsModified();
         }
         if (status == "no_access")
         {
@@ -331,9 +374,10 @@ public class Door
     public void MapClose()
     {
         MapCloseCallCount++;
+        // Port of base_door.py map_close gate: settings.MAP_ENABLED only.
+        // (The old Default fallback + second Global check made the fallback dead.)
         var settings = AtherizSettings.Global;
-        if (!settings.MapEnabled) settings = AtherizSettings.Default;
-        if (!AtherizSettings.Global.MapEnabled || SymbolCoord == null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
+        if (!settings.MapEnabled || SymbolCoord == null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
         var mh = MapHandlerHolder.Get();
         if (mh == null) return;
         var seen = new HashSet<(string, int)>();
@@ -359,9 +403,9 @@ public class Door
     public void MapOpen()
     {
         MapOpenCallCount++;
+        // Port of base_door.py map_open gate: settings.MAP_ENABLED only (see MapClose).
         var settings = AtherizSettings.Global;
-        if (!settings.MapEnabled) settings = AtherizSettings.Default;
-        if (!AtherizSettings.Global.MapEnabled || SymbolCoord == null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
+        if (!settings.MapEnabled || SymbolCoord == null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
         var mh = MapHandlerHolder.Get();
         if (mh == null) return;
         var seen = new HashSet<(string, int)>();
@@ -409,29 +453,28 @@ public class Door
         {
             return new DoorDto
             {
-                FromCoord = FromCoord,
-                FromExit = FromExit,
-                ToCoord = ToCoord,
-                ToExit = ToExit,
-                SymbolCoord = SymbolCoord,
-                ClosedSymbol = ClosedSymbol,
-                OpenSymbol = OpenSymbol,
-                Closed = Closed,
-                Locked = Locked,
-                Name = Name,
-                Desc = DoorDesc,
-                KeyId = KeyId,
+                FromCoord = _fromCoord,
+                FromExit = _fromExit,
+                ToCoord = _toCoord,
+                ToExit = _toExit,
+                SymbolCoord = _symbolCoord,
+                ClosedSymbol = _closedSymbol,
+                OpenSymbol = _openSymbol,
+                Closed = _closed,
+                Locked = _locked,
+                Name = _name,
+                Desc = _doorDesc,
+                KeyId = _keyId,
             };
         }
     }
     public static Door FromDto(DoorDto dto)
     {
-        var d = new Door(dto.FromCoord, dto.ToCoord, dto.FromExit, dto.ToExit, dto.SymbolCoord, dto.ClosedSymbol, dto.OpenSymbol, dto.Closed, dto.Locked)
-        {
-            Name = dto.Name ?? dto.FromExit,
-            DoorDesc = dto.Desc ?? "",
-            KeyId = dto.KeyId,
-        };
+        var d = new Door(dto.FromCoord, dto.ToCoord, dto.FromExit, dto.ToExit, dto.SymbolCoord, dto.ClosedSymbol, dto.OpenSymbol, dto.Closed, dto.Locked);
+        // Direct field restore: a loaded door must not mark the handler dirty.
+        d._name = dto.Name ?? dto.FromExit;
+        d._doorDesc = dto.Desc ?? "";
+        d._keyId = dto.KeyId;
         return d;
     }
 }

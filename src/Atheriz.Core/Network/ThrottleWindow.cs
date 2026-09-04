@@ -11,9 +11,6 @@ public static class ThrottleWindow
 {
     private static double MonotonicNow() => global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
 
-    [Obsolete("Use TimeProvider.MonotonicSeconds()")]
-    public static double MonotonicNowObsolete() => global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
-
     /// <summary>
     /// Per-host throttling — mirrors <c>manager.py:17-24</c> and <c>websocket.py:20-27</c>.
     /// Returns true if log should be emitted (window elapsed), false if throttled.

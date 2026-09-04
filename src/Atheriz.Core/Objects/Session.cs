@@ -15,13 +15,13 @@ namespace Atheriz.Core.Objects;
 /// Thread-safe via <see cref="Lock"/> (mirrors Python RLock) guarding Puppet / PuppetStack / InputFuture.
 /// Scalar fields Term/Map dims + ScreenReader are atomic (no lock required) but writes are lock-guarded for consistency.
 /// </summary>
-public class Session
+public class Session : Atheriz.Core.Commands.ISessionProvider
 {
     // Port of session.py:16-38
     // Guards puppet / puppet_stack / input_future, which are written by game workers and read by per-connection input drain (#31).
     // Scalar fields (term/map dims, screenreader) are single atomic stores under the GIL and need no lock — we still guard writes.
     public readonly object Lock = new object(); // Port of session.py:21 lock = threading.RLock()
-    public object? Account; // Port of session.py:22 account: Account | None
+    public Account? Account; // Port of session.py:22 account: Account | None
     public int? AccountId; // Spec extra: mirror Account.Id for quick lookup (Python stores object, C# stores both)
     public BaseConnection? Connection; // Port of session.py:23 connection: Connection | None
     public GameObject? LastPuppet; // Port of session.py:24 last_puppet
@@ -29,6 +29,29 @@ public class Session
     // stack of (prev_puppet, target). Each target carries its own _puppet_restore manifest (excluded from pickling by __getstate__).
     // Lives on the session (never pickled) so transient restore state stays off saved objects. Port of session.py:29 puppet_stack
     public List<(GameObject? Prev, GameObject Target)> PuppetStack { get; } = new();
+    /// <summary>
+    /// Hot-reload rewire: point Puppet/LastPuppet/PuppetStack entries at the
+    /// replacement instance (matched by id). Python's __class__ swap preserves
+    /// identity; C# must rewire direct refs after AddObject replaces the id.
+    /// </summary>
+    public void ReplacePuppetRefs(GameObject replacement)
+    {
+        lock (Lock)
+        {
+            if (Puppet != null && Puppet.Id == replacement.Id && !ReferenceEquals(Puppet, replacement))
+                Puppet = replacement;
+            if (LastPuppet != null && LastPuppet.Id == replacement.Id && !ReferenceEquals(LastPuppet, replacement))
+                LastPuppet = replacement;
+            for (int i = 0; i < PuppetStack.Count; i++)
+            {
+                var (prev, target) = PuppetStack[i];
+                var nprev = (prev != null && prev.Id == replacement.Id && !ReferenceEquals(prev, replacement)) ? replacement : prev;
+                var ntarget = (target.Id == replacement.Id && !ReferenceEquals(target, replacement)) ? replacement : target;
+                if (!ReferenceEquals(nprev, prev) || !ReferenceEquals(ntarget, target))
+                    PuppetStack[i] = (nprev, ntarget);
+            }
+        }
+    }
     // Wontfix: puppet snapshot incomplete — only is_pc/privilege_level per puppet.py:110,138-142.
     // Do NOT store quelled/can_hear/is_mapable; document here. Port of puppet.py:110 restore_snapshot = {"is_pc":..., "privilege_level":...}
     public Dictionary<string, object> PuppetRestore { get; } = new(StringComparer.Ordinal); // spec extra, kept for parity but target holds actual snapshot
@@ -43,11 +66,14 @@ public class Session
     public DateTime ConnectedAt; // Spec extra: wall clock for C# convenience (mirrors ConnTime)
     public double SecondsPlayed; // Spec extra: accumulated seconds (mirrors GameObject._seconds_played but session tracks)
 
-    public Session(BaseConnection? connection = null, object? account = null)
+    // F001 typed seam: a session provides itself (satisfies ISessionProvider without reflection).
+    Session? Atheriz.Core.Commands.ISessionProvider.Session => this;
+
+    public Session(BaseConnection? connection = null, Account? account = null)
     {
         Connection = connection;
         Account = account;
-        if (account is Account acc) AccountId = acc.Id;
+        if (account != null) AccountId = account.Id;
         TermWidth = 78; // Port of settings.CLIENT_DEFAULT_WIDTH via session.py:30-31 + settings.py:121-122
         TermHeight = 45;
         ConnTime = 0.0; // Port of session.py:35 conn_time = 0.0
@@ -113,34 +139,21 @@ public class Session
             var (_, target) = stack[stack.Count - 1];
             stack.RemoveAt(stack.Count - 1);
             // Port of session.py:83-85 if restore := getattr(target, "_puppet_restore", None): target.__dict__.update(restore); del target._puppet_restore
-            // In C# GameObject stores PuppetRestoreSnapshot via internal field; unwind here.
+            // GameObject carries the snapshot as a typed internal member (same
+            // assembly) — no dynamic/reflection needed.
             // Wontfix: only is_pc/privilege_level per puppet.py:110 — handled in GameObject.RestorePuppetSnapshot
             try
             {
-                var restore = ((dynamic)target).GetPuppetRestore() as System.Collections.Generic.Dictionary<string, object>;
+                var restore = target.GetPuppetRestore();
                 if (restore != null)
                 {
-                    try { ((dynamic)target).RestorePuppetSnapshot((dynamic)restore); } catch { }
-                    try { ((dynamic)target).ClearPuppetRestore(); } catch { }
-                }
-                else
-                {
-                    // Try raw field fallback
-                    var field = target.GetType().GetField("_puppetRestore", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    if (field != null)
-                    {
-                        var val = field.GetValue(target) as System.Collections.Generic.Dictionary<string, object>;
-                        if (val != null)
-                        {
-                            try { ((dynamic)target).RestorePuppetSnapshot((dynamic)val); } catch { }
-                            try { field.SetValue(target, null); } catch { }
-                        }
-                    }
+                    target.RestorePuppetSnapshot(restore);
+                    target.ClearPuppetRestore();
                 }
             }
             catch
             {
-                // Fallback reflection if GameObject not yet patched — ignore
+                // One bad target must not break the unwind loop.
             }
         }
         // Port of session.py:86-114 if puppet: elapsed handling, puppet.session=None, seconds_played, at_disconnect, is_temporary cleanup
@@ -149,11 +162,13 @@ public class Session
             double elapsed = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - ConnTime; // Port of session.py:87 elapsed = time.time() - self.conn_time
             if (ConnTime > 0.0 && elapsed > 0) // Port of session.py:88 if self.conn_time >0 and elapsed>0
             {
-                try { ((dynamic)puppet).Session = null; } catch { } // Port of session.py:89 puppet.session = None
-                try { ((dynamic)puppet).SecondsPlayed = ((dynamic)puppet).SecondsPlayed + elapsed; } catch { } // Port of session.py:90 puppet.seconds_played += elapsed
+                puppet.Session = null; // Port of session.py:89 puppet.session = None
+                // NOTE: Session is nulled first so the SecondsPlayed getter returns
+                // the stored base (no live elapsed), matching Python's += elapsed.
+                puppet.SecondsPlayed = puppet.SecondsPlayed + elapsed; // Port of session.py:90 puppet.seconds_played += elapsed
                 SecondsPlayed += elapsed;
             }
-            try { ((dynamic)puppet).AtDisconnect(); } catch { } // Port of session.py:91 puppet.at_disconnect()
+            puppet.AtDisconnect(); // Port of session.py:91 puppet.at_disconnect()
             if (puppet.IsTemporary) // Port of session.py:92 if getattr(puppet, "is_temporary", False)
             {
                 // Port of session.py:93-114 temp PC cleanup: remove from location, remove_object, is_deleted
@@ -165,7 +180,7 @@ public class Session
                         var objs = Globals.ObjectRegistry.Get(ol.ObjectId);
                         if (objs.Count > 0)
                         {
-                            try { ((dynamic)objs[0]).RemoveObject((dynamic)puppet); } catch { try { objs[0].RemoveContent(puppet.Id); } catch { } }
+                            objs[0].RemoveObject(puppet);
                         }
                     }
                     else if (locRef is Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation)
@@ -189,14 +204,9 @@ public class Session
                 try { puppet.IsDeleted = true; } catch { }
             }
         }
-        if (Account is Account acc2) // Port of session.py:115-116 if self.account: self.account.at_disconnect()
+        if (Account != null) // Port of session.py:115-116 if self.account: self.account.at_disconnect()
         {
-            try { acc2.AtDisconnect(); } catch { }
-        }
-        else if (Account != null)
-        {
-            // Generic account with AtDisconnect method via reflection fallback
-            try { (Account as dynamic)?.AtDisconnect(); } catch { }
+            try { Account.AtDisconnect(); } catch { }
         }
         // Port of session.py at_disconnect mapedit discard: chains are valid
         // only while this session is open.
@@ -209,12 +219,13 @@ public class Session
         Connection?.Msg(text);
     }
 
-    // Full msg overload
+    // Full msg overload. Port of session.msg(*args, **kwargs) -> connection.msg:
+    // a msgType becomes the command (mirrors connection.py popping the kwarg key).
     public void Msg(string text, string? msgType = null)
     {
-        // Mirrors session.msg(*args, **kwargs) -> connection.msg
-        // For simplicity delegate to connection
-        Connection?.Msg(text);
+        if (Connection == null) return;
+        if (msgType == null) Connection.Msg(text);
+        else Connection.MsgKw(new Dictionary<string, object?> { [msgType] = text });
     }
 
     // Port of session.py:121-202 async def prompt(text: str, mask: bool = False) -> str

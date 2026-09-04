@@ -11,7 +11,7 @@ namespace Atheriz.Core.Objects;
 /// <c>base_flags.Flags</c>, <c>base_lock.AccessLock</c>, <c>base_db_ops.DbOps</c>.
 /// Thread-safe via ReaderWriterLockSlim (SupportsRecursion) mirroring Python RLock.
 /// </summary>
-public partial class GameObject : IMessageTarget
+public partial class GameObject : IMessageTarget, ISessionProvider
 {
     public static bool _is_thread_safe = true;
     // TODO: SupportsRecursion required for re-entrant hooks: Access -> IsSuperUser, Hookable callbacks and property getters re-enter via Read/Write helpers
@@ -64,8 +64,10 @@ public partial class GameObject : IMessageTarget
     private bool _noFollow;
     private int? _groupChannel;
 
-    // locks: name -> list of predicates
+    // locks: name -> list of predicates, with a parallel declarative policy name per
+    // predicate (F004: persisted as "name: policy|policy" and rebuilt via LockPolicies)
     private Dictionary<string, List<Func<GameObject, bool>>> _locks = [];
+    private Dictionary<string, List<string>> _lockPolicies = [];
 
     // hooks: funcName -> set of delegates tagged via attributes
     private Dictionary<string, HashSet<Delegate>> _hooks = [];
@@ -127,9 +129,9 @@ public partial class GameObject : IMessageTarget
 
     // --- properties (setters mark isModified) ---
     public int Id { get => Read(() => _id); set => Write(() => { if (_id != value) { _id = value; _flags.IsModified = true; } }); }
-    public string Name { get => Read(() => _name); set => Write(() => { if (_name != value) { _name = value; _flags.IsModified = true; } }); }
+    public virtual string Name { get => Read(() => _name); set => Write(() => { if (_name != value) { _name = value; _flags.IsModified = true; } }); }
     public string Desc { get => Read(() => _desc); set => Write(() => { if (_desc != value) { _desc = value; _flags.IsModified = true; } }); }
-    public string Symbol { get => Read(() => _symbol); set => Write(() => { if (_symbol != value) { _symbol = value; _flags.IsModified = true; } }); }
+    public virtual string Symbol { get => Read(() => _symbol); set => Write(() => { if (_symbol != value) { _symbol = value; _flags.IsModified = true; } }); }
     public string MoveVerb { get => Read(() => _moveVerb); set => Write(() => { _moveVerb = value; _flags.IsModified = true; }); }
     public Privilege PrivilegeLevel { get => Read(() => _privilege); set => Write(() => { if (_privilege != value) { _privilege = value; _flags.IsModified = true; } }); }
     public bool IsPc { get => Read(() => _flags.IsPc); set => SetFlag("is_pc", value); }
@@ -138,7 +140,7 @@ public partial class GameObject : IMessageTarget
     public bool IsMapable { get => Read(() => _flags.IsMapable); set => Write(() => { _flags.IsMapable = value; _mapEnabled = value; _flags.IsModified = true; }); }
     public bool IsContainer { get => Read(() => _flags.IsContainer); set => SetFlag("is_container", value); }
     public bool IsScript { get => Read(() => _flags.IsScript); set => SetFlag("is_script", value); }
-    public bool IsTickable { get => Read(() => _flags.IsTickable); set => SetFlag("is_tickable", value); }
+    public virtual bool IsTickable { get => Read(() => _flags.IsTickable); set => SetFlag("is_tickable", value); }
     public bool IsAccount { get => Read(() => _flags.IsAccount); set => SetFlag("is_account", value); }
     public bool IsChannel { get => Read(() => _flags.IsChannel); set => SetFlag("is_channel", value); }
     public bool IsNode { get => Read(() => _flags.IsNode); set => SetFlag("is_node", value); }
@@ -155,7 +157,7 @@ public partial class GameObject : IMessageTarget
     public bool MapEnabled { get => Read(() => _mapEnabled); set => Write(() => { _mapEnabled = value; _flags.IsMapable = value; _flags.IsModified = true; }); }
     public double? LastMapTime { get => Read(() => _lastMapTime); set => Write(() => _lastMapTime = value); }
     public string Gender { get => Read(() => _gender); set => Write(() => { if (_gender != value) { _gender = value; _flags.IsModified = true; } }); }
-    public double TickSeconds { get => Read(() => _tickSeconds); set => Write(() => { _tickSeconds = value; _flags.IsModified = true; }); }
+    public virtual double TickSeconds { get => Read(() => _tickSeconds); set => Write(() => { _tickSeconds = value; _flags.IsModified = true; }); }
 
     // --- map hooks (port of base_obj.py:767 at_map_update, 750 at_legend_update, 805 at_pre_map_render) ---
     public virtual Dictionary<(int X, int Y), string> AtPreMapRender(Dictionary<(int X, int Y), string> grid)
@@ -292,6 +294,17 @@ public partial class GameObject : IMessageTarget
         finally { _lock.ExitWriteLock(); }
     }
 
+    // Identity is the registry id (atheriz/objects/nodes.py:85-93 defines it for Node;
+    // ids are registry-unique so this holds for all objects). Transient Id == -1 objects
+    // only equal themselves, mirroring Python's identity fallback.
+    public override bool Equals(object? obj)
+    {
+        if (ReferenceEquals(this, obj)) return true;
+        if (obj is GameObject o) return Id != -1 && Id == o.Id;
+        return false;
+    }
+    public override int GetHashCode() => Id.GetHashCode();
+
 
     // --- tag ops ---
     public void AddTag(string tag) => AddTags([tag]);
@@ -373,10 +386,8 @@ public partial class GameObject : IMessageTarget
         finally { _lock.ExitWriteLock(); }
     }
 
-    // --- locks ---(int id) => Write(() => { _contents.Remove(id); _flags.IsModified = true; });
-
     // --- locks ---
-    public void AddLock(string lockName, Func<GameObject, bool> predicate)
+    public void AddLock(string lockName, Func<GameObject, bool> predicate, string policy = LockPolicies.Custom)
     {
         Write(() =>
         {
@@ -386,9 +397,15 @@ public partial class GameObject : IMessageTarget
                 _locks[lockName] = lst;
             }
             lst.Add(predicate);
+            if (!_lockPolicies.TryGetValue(lockName, out var pols))
+            {
+                pols = [];
+                _lockPolicies[lockName] = pols;
+            }
+            pols.Add(policy);
         });
     }
-    public void ClearLocksByName(string lockName) => Write(() => _locks.Remove(lockName));
+    public void ClearLocksByName(string lockName) => Write(() => { _locks.Remove(lockName); _lockPolicies.Remove(lockName); });
 
     /// <summary>
     /// Mirrors <c>base_lock.AccessLock.access</c>: self-delete/get block, superuser bypass, then iterate locks[name].
@@ -447,6 +464,11 @@ public partial class GameObject : IMessageTarget
         var objs = Globals.ObjectRegistry.Get(scriptId);
         if (objs.Count>0 && objs[0] is Script s) s.RemoveHooks(this);
     }
+    // Typed _scripts-set writers (single SyncRoot; replaces _scripts reflection in Script/NodeHandler).
+    internal void AddScriptId(int id) => Write(() => { if (_scripts.Add(id)) _flags.IsModified = true; });
+    internal void RemoveScriptId(int id) => Write(() => { _scripts.Remove(id); _flags.IsModified = true; });
+    // Load-path bulk restore (mirrors __setstate__ raw-dict restore: no dirty-marking; caller clears flags).
+    internal void RestoreScriptIds(IEnumerable<int> ids) => Write(() => { _scripts.Clear(); foreach (var id in ids) _scripts.Add(id); });
     public bool HasScriptType(string scriptType)
     {
         HashSet<int> ids;
@@ -523,7 +545,7 @@ public partial class GameObject : IMessageTarget
     // Faithful: if _puppetRestore present, use original is_pc/privilege_level for serialization (never persist puppeted state)
     private GameObjectDto BuildDto() => Persistence.Converters.GameObjectDtoConverter.BuildDto(this);
 
-    public GameObjectDto ToDto() => Read(() => BuildDto());
+    public virtual GameObjectDto ToDto() => Read(() => BuildDto());
 
     internal static void ApplyDtoFields(GameObject o, GameObjectDto dto, bool? isNodeOverride)
     {
@@ -540,6 +562,9 @@ public partial class GameObject : IMessageTarget
         o._flags.IsTemporary = dto.IsTemporary;
         o._flags.IsDeleted = dto.IsDeleted;
         o._flags.IsModified = dto.IsModified;
+        // Channel keeps a separate delete guard for its listener fast path; the
+        // direct flag restore above bypasses its IsDeleted override, so re-sync.
+        if (o is Channel ch) ch.SyncDeletedGuard(dto.IsDeleted);
         o._privilege = dto.PrivilegeLevel;
         o._gender = dto.Gender ?? "neutral";
         o._location = dto.Location ?? LocationRef.NullLocation.Instance;
@@ -548,7 +573,41 @@ public partial class GameObject : IMessageTarget
         o._scripts = new HashSet<int>(dto.Scripts ?? []);
         o._channels = new List<int>(dto.Channels ?? []);
         o._extra = new Dictionary<string, JsonElement>(dto.Extra ?? new());
+        // Restore locks from declarative policies (F004). Unknown policies are dropped
+        // with a loud log — never silently weakened, never executed from the save file.
+        o._locks.Clear();
+        o._lockPolicies.Clear();
+        if (dto.Locks != null)
+        {
+            foreach (var ld in dto.Locks)
+            {
+                if (ld == null || string.IsNullOrEmpty(ld.Name)) continue;
+                foreach (var raw in (ld.Policy ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var pol = raw.Trim();
+                    if (string.IsNullOrEmpty(pol)) continue;
+                    if (LockPolicies.TryResolve(pol, o, out var pred))
+                    {
+                        if (!o._locks.TryGetValue(ld.Name, out var lst)) { lst = []; o._locks[ld.Name] = lst; }
+                        lst.Add(pred);
+                        if (!o._lockPolicies.TryGetValue(ld.Name, out var pols)) { pols = []; o._lockPolicies[ld.Name] = pols; }
+                        pols.Add(pol);
+                    }
+                    else AtherizLogger.LogError($"Unknown lock policy '{pol}' on lock '{ld.Name}' for object {dto.Id}; lock dropped.");
+                }
+            }
+        }
     }
+
+    /// <summary>
+    /// Registers a game-defined <see cref="GameObject"/> subtype for persistence round-trips (F004).
+    /// Replaces the old <c>Type.GetType + assembly scan + Activator</c> path: only explicitly
+    /// registered full names are ever instantiated from save data; anything else loads as its
+    /// base kind with a loud log. Games register their <c>Custom*</c> types at startup; tests
+    /// register their doubles in fixtures.
+    /// </summary>
+    public static void RegisterPersistedSubtype(string fullName, Type type, Func<GameObject> factory)
+        => Persistence.Converters.GameObjectDtoConverter.RegisterSubtype(fullName, type, factory);
 
     public static GameObject FromDto(GameObjectDto dto) => Persistence.Converters.GameObjectDtoConverter.FromDto(dto);
 
@@ -563,8 +622,7 @@ public partial class GameObject : IMessageTarget
 
     // --- factory (mirrors Object.create) ---
     // Fix for test_account.py:88 — use unified IdGenerator counter (mirrors get_unique_id)
-    private static int _nextId = 0; // kept for backwards compat but delegates
-    public static int GetNextId() { _ = _nextId; return Globals.IdGenerator.GetUniqueId(); }
+    public static int GetNextId() => Globals.IdGenerator.GetUniqueId();
     public static void SetNextId(int v) => Globals.IdGenerator.SetId(v);
 
     public static GameObject Create(string name, string desc = "", IEnumerable<string>? aliases = null,
@@ -594,13 +652,13 @@ public partial class GameObject : IMessageTarget
         if (isPc)
         {
             // view: not is_pc or (is_pc and is_connected) — simplified as: if target is_pc, require is_connected
-            obj.AddLock("view", accessing => !obj.IsPc || accessing.IsConnected || obj.IsConnected);
-            obj.AddLock("get", accessing => accessing.IsBuilder);
+            obj.AddLock("view", accessing => !obj.IsPc || accessing.IsConnected || obj.IsConnected, LockPolicies.PcView);
+            obj.AddLock("get", accessing => accessing.IsBuilder, LockPolicies.Builder);
         }
         if (isNpc)
-            obj.AddLock("get", accessing => accessing.IsBuilder);
+            obj.AddLock("get", accessing => accessing.IsBuilder, LockPolicies.Builder);
 
-        obj.AddLock("delete", accessing => accessing.Id != obj.Id);
+        obj.AddLock("delete", accessing => accessing.Id != obj.Id, LockPolicies.NotSelf);
         // puppet lock faithful to base_obj.py:185-193 — is_npc or superuser or owned character via session.account
         obj.AddLock("puppet", accessing =>
         {
@@ -608,18 +666,8 @@ public partial class GameObject : IMessageTarget
             if (accessing.IsSuperUser) return true;
             var sess = accessing.Session;
             if (sess?.Account is Account acc && acc.Characters.Contains(obj.Id)) return true;
-            // fallback via dynamic Account without strong type if needed
-            try
-            {
-                var dynAcc = sess?.Account as dynamic;
-                if (dynAcc != null)
-                {
-                    var chars = dynAcc.Characters as System.Collections.IEnumerable;
-                    if (chars != null) foreach (var cid in chars) if (cid is int id && id == obj.Id) return true;
-                }
-            } catch {}
             return false;
-        });
+        }, LockPolicies.PuppetOwner);
 
         return obj;
     }
@@ -633,6 +681,7 @@ public partial class GameObject : IMessageTarget
     }
     internal Dictionary<string, System.Text.Json.JsonElement> GetExtraSnapshot() => Read(() => new Dictionary<string, System.Text.Json.JsonElement>(_extra));
     internal Dictionary<string, List<Func<GameObject, bool>>> GetLocksSnapshot() => Read(() => new Dictionary<string, List<Func<GameObject, bool>>>(_locks));
+    internal Dictionary<string, List<string>> GetLockPoliciesSnapshot() => Read(() => new Dictionary<string, List<string>>(_lockPolicies));
     internal void IncrementTrackerInternal() => IncrementTracker();
     internal Persistence.Dto.GameObjectDto ToDtoUnsafeInternal() => BuildDto();
     // Raw IsModified access without re-entering lock (caller must hold write lock) — used by GetSaveOps to ensure exactly one tracker increment
@@ -654,6 +703,38 @@ public partial class GameObject : IMessageTarget
     }
     public void SetExtraJson(string key, System.Text.Json.JsonElement value) => Write(() => { _extra[key] = value; _flags.IsModified = true; });
     public bool TryRemoveExtraJson(string key) => Write(() => { var r = _extra.Remove(key); if (r) _flags.IsModified = true; return r; });
+    // F010 note: intentionally internal, not public. PortedHelpPrivilegeTests.Set_TargetMe:318 probes
+    // GetMethod("HasExtra") with public-only binding flags and takes the no-check branch when absent;
+    // widening this to public flips the test into its NonPublic-invoke branch and NREs. Same-assembly
+    // callers (SetHelper) work fine with internal.
+    internal bool HasExtra(string key) => Read(() => _extra.ContainsKey(key));
+
+    // Typed follower ops (F001: replaces _followers reflection in Follow/Exit/Nofollow commands).
+    // Callers that already hold the target write lock mutate via the raw helpers below.
+    public void AddFollower(int id) => Write(() => { if (_followers.Add(id)) _flags.IsModified = true; });
+    public void RemoveFollower(int id) => Write(() => { if (_followers.Remove(id)) _flags.IsModified = true; });
+    public void ClearFollowersExcept(HashSet<int>? keep = null) => Write(() => { _followers.RemoveWhere(id => keep == null || !keep.Contains(id)); _flags.IsModified = true; });
+    internal void AddFollowerRawNoLock(int id) { if (_followers.Add(id)) _flags.IsModified = true; }
+    internal void RemoveFollowerRawNoLock(int id) { if (_followers.Remove(id)) _flags.IsModified = true; }
+    internal void ClearFollowersRawNoLock(HashSet<int>? keep = null) { _followers.RemoveWhere(id => keep == null || !keep.Contains(id)); _flags.IsModified = true; }
+
+    // Typed channel-id ops (F001: replaces _channels reflection in GroupExtensions).
+    internal void AddChannelId(int chId) => Write(() => { if (!_channels.Contains(chId)) { _channels.Add(chId); _flags.IsModified = true; } });
+    internal void RemoveChannelId(int chId) => Write(() => { if (_channels.Remove(chId)) _flags.IsModified = true; });
+
+    // Ban reason for any object (F001: replaces BanReason/_extra reflection in Ban/Connect commands).
+    // Stored under the "ban_reason" extra key (BanCommand spelling); the legacy "banReason"
+    // spelling is read as a fallback. Account overrides this with its field-backed store.
+    public virtual string BanReason
+    {
+        get => Read(() =>
+        {
+            if (_extra.TryGetValue("ban_reason", out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String) return v.GetString() ?? "";
+            if (_extra.TryGetValue("banReason", out var v2) && v2.ValueKind == System.Text.Json.JsonValueKind.String) return v2.GetString() ?? "";
+            return "";
+        });
+        set => Write(() => { _extra["ban_reason"] = System.Text.Json.JsonSerializer.SerializeToElement(value); _flags.IsModified = true; });
+    }
 
     // --- messaging helpers for converter wrappers kept thin ---
 }

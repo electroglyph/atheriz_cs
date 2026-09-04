@@ -340,7 +340,7 @@ public class PortedServerIntegrationTests
         // client_ready should trigger welcome + prompt
         await SendAsync("client_ready", Array.Empty<object>());
         var welcomeMsgs = await RecvAllAsync(2000);
-        Assert.Contains(welcomeMsgs, m => m.Contains("AtheriZ") || m.Contains("Welcome"));
+        Assert.Contains(welcomeMsgs, m => m.Contains("ATHERIZ VERSION"));
         Assert.Contains(welcomeMsgs, m => m.Contains("prompt"));
         // connect
         await SendAsync("text", new object[] { $"connect {account} {password}" });
@@ -462,10 +462,10 @@ public class PortedServerIntegrationTests
             return sb.ToString();
         }
         // Initial welcome
-        var welcome = await ReadUntilAsync("Welcome", 5000);
-        if (!welcome.Contains("AtheriZ", StringComparison.OrdinalIgnoreCase))
-            Console.WriteLine($"[Telnet] welcome missing AtheriZ: {welcome.Substring(0, Math.Min(1000, welcome.Length)).Replace("\n","\\n")}");
-        Assert.Contains("AtheriZ", welcome);
+        var welcome = await ReadUntilAsync("ATHERIZ VERSION", 5000);
+        if (!welcome.Contains("ATHERIZ VERSION", StringComparison.OrdinalIgnoreCase))
+            Console.WriteLine($"[Telnet] welcome missing ATHERIZ VERSION: {welcome.Substring(0, Math.Min(1000, welcome.Length)).Replace("\n","\\n")}");
+        Assert.Contains("ATHERIZ VERSION", welcome);
         // connect
         await writer.WriteLineAsync($"connect {account} {password}");
         await writer.FlushAsync();

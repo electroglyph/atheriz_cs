@@ -25,7 +25,7 @@ public sealed class SpamCommand : Command
         if (count > 1000) { go.Msg("Maximum count is 1000."); return; }
         go.Msg($"Creating {count} accounts and characters...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var settings = AtherizSettings.Default;
+        var settings = AtherizSettings.Global;
         var home = go.ResolveLocationObject();
         var created = new List<(string a, string p, string c)>();
         for (int idx = 1; idx <= count; idx++)

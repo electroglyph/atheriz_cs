@@ -36,15 +36,8 @@ public sealed class GroupCommand : Command
             if (gc == null) { go.Msg("You are not in a group."); return; }
             var channel = ObjectRegistry.Get(gc.Value).FirstOrDefault() as Channel;
             if (channel == null) { go.Msg("Error: Group channel not found."); return; }
-            // check leader
-            var createdByField = channel.GetType().GetField("_createdBy", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            int createdBy = channel.Id; // fallback
-            // try property CreatedBy via reflection
-            var prop = channel.GetType().GetProperty("CreatedBy");
-            if (prop != null) createdBy = (int)(prop.GetValue(channel) ?? createdBy);
-            // alternative: check via Tag? For simplicity allow if caller is in group and we treat first as leader
-            // Instead use channel's stored CreatedBy via dynamic
-            try { createdBy = (int)((dynamic)channel).CreatedBy; } catch { }
+            // check leader (typed: Channel.CreatedBy, F001)
+            int createdBy = channel.CreatedBy;
             if (createdBy != go.Id) { go.Msg("You are not the leader of this group."); return; }
             var targetName = list[1];
             var matches = ContentUtils.Search(go, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
@@ -80,8 +73,7 @@ public sealed class GroupCommand : Command
             if (gc == null) { go.Msg("You are not in a group."); return; }
             var channel = ObjectRegistry.Get(gc.Value).FirstOrDefault() as Channel;
             if (channel == null) { ClearGroupChannel(go); go.Msg("Error: Group channel not found."); return; }
-            bool wasLeader = false;
-            try { wasLeader = (int)((dynamic)channel).CreatedBy == go.Id; } catch { }
+            bool wasLeader = channel.CreatedBy == go.Id;
             channel.Msg($"{go.GetDisplayName(null)} left the group.");
             channel.RemoveListener(go);
             ClearGroupChannel(go);
@@ -89,7 +81,7 @@ public sealed class GroupCommand : Command
             if (wasLeader && channel.Listeners.Count > 0)
             {
                 var newLeader = channel.Listeners.First();
-                try { ((dynamic)channel).CreatedBy = newLeader; } catch { }
+                channel.CreatedBy = newLeader;
             }
             if (channel.Listeners.Count == 0)
             {
@@ -201,7 +193,7 @@ public sealed class GroupCommand : Command
             {
                 channel = ObjectRegistry.Get(gc.Value).FirstOrDefault() as Channel;
                 if (channel == null) { go.Msg("Error: Group channel not found."); return; }
-                try { if ((int)((dynamic)channel).CreatedBy != go.Id) { go.Msg("You are not the leader of this group."); return; } } catch { }
+                if (channel.CreatedBy != go.Id) { go.Msg("You are not the leader of this group."); return; }
             }
             channel.AddListener(tgt);
             channel.Msg($"{go.GetDisplayName(null)} added {tgt.GetDisplayName(null)} to the group.");
@@ -216,29 +208,9 @@ public sealed class GroupCommand : Command
         if (ch2 == null) { go.Msg("Error: Group channel not found."); return; }
         ch2.Msg(message, go);
     }
-    private static int? GetGroupChannelId(GameObject go)
-    {
-        try { return (int?)((dynamic)go).GroupChannel; } catch { }
-        // fallback via tag or field
-        var f = go.GetType().GetField("_groupChannel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        if (f != null) return f.GetValue(go) as int?;
-        // try property GroupChannel via extra dict
-        var prop = go.GetType().GetProperty("GroupChannel");
-        if (prop != null) return prop.GetValue(go) as int?;
-        return null;
-    }
-    private static void SetGroupChannel(GameObject go, int id)
-    {
-        try { ((dynamic)go).GroupChannel = id; return; } catch { }
-        var f = go.GetType().GetField("_groupChannel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        if (f != null) f.SetValue(go, id);
-    }
-    private static void ClearGroupChannel(GameObject go)
-    {
-        try { ((dynamic)go).GroupChannel = null; return; } catch { }
-        var f = go.GetType().GetField("_groupChannel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        if (f != null) f.SetValue(go, null);
-    }
+    private static int? GetGroupChannelId(GameObject go) => go.GroupChannel;
+    private static void SetGroupChannel(GameObject go, int id) { go.GroupChannel = id; }
+    private static void ClearGroupChannel(GameObject go) { go.GroupChannel = null; }
 }
 
 // extension helpers for Channel/GameObject group handling
@@ -246,27 +218,15 @@ internal static class GroupExtensions
 {
     public static void RemoveGroupChannel(this GameObject go)
     {
-        try { ((dynamic)go).GroupChannel = null; } catch { }
+        go.GroupChannel = null;
     }
     public static void AddChannel(this GameObject go, int chId)
     {
-        // GameObject channels list
-        go.SyncRoot.EnterWriteLock();
-        try
-        {
-            var f = go.GetType().GetField("_channels", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (f?.GetValue(go) is List<int> lst && !lst.Contains(chId)) { lst.Add(chId); go.IsModified = true; }
-        }
-        finally { go.SyncRoot.ExitWriteLock(); }
+        // GameObject channels list (typed internal helper, F001)
+        go.AddChannelId(chId);
     }
     public static void RemoveChannel(this GameObject go, int chId)
     {
-        go.SyncRoot.EnterWriteLock();
-        try
-        {
-            var f = go.GetType().GetField("_channels", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (f?.GetValue(go) is List<int> lst) { lst.Remove(chId); go.IsModified = true; }
-        }
-        finally { go.SyncRoot.ExitWriteLock(); }
+        go.RemoveChannelId(chId);
     }
 }

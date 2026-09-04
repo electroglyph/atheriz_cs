@@ -110,7 +110,7 @@ public static class AtherizDbContextFactory
     // Parameterless overload using default settings SavePath
     public static void DoSetup()
     {
-        var savePath = AtherizSettings.Default.SavePath;
+        var savePath = AtherizSettings.Global.SavePath;
         DoSetup(savePath);
     }
 }

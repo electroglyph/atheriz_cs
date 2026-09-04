@@ -18,16 +18,19 @@ public static class CommandDispatcher
     public static void SetThreadPool(AsyncThreadPool pool) => _pool = pool;
 
     // Lag gate hook — set by GrottoLagGate.Install without reflection; mirrors Python monkey-patch
+    // F010 note: BOTH this and Command.GlobalLagCheck point at the same predicate (GrottoLagGate.CheckLag)
+    // by design, not accident — this check runs at dispatch time (pre-queue), the Execute wrapper re-checks
+    // at run time after queue wait (lag may accrue in between). Idempotent boolean, keep both.
     public static Func<IMessageTarget, bool>? LagCheck { get; set; }
 
     // for tests: expose last dispatch result
     public sealed record Job(Action<IMessageTarget, object?> Func, IMessageTarget Caller, object? Args);
 
-    /// <summary>
-    /// Mirrors <c>dispatch_loggedin(puppet, text, immediate)</c> (inputfuncs.py:88).
-    /// If <paramref name="immediate"/> is false, queues on threadpool and returns null.
-    /// </summary>
-    public static Job? DispatchLoggedIn(GameObject puppet, string text, bool immediate = false)
+    // F010: shared raw-line parse (verbatim inputfuncs.py: stripped/split(None,1)/lower).
+    // Returns null for null/empty/whitespace input (both callers return null there).
+    internal sealed record ParsedInput(string Stripped, string RawCmdKey, string CmdArgs, string MatchedAlias);
+
+    internal static ParsedInput? ParseRaw(string? text)
     {
         if (string.IsNullOrEmpty(text)) return null;
         var stripped = text.Trim(" \t\r\n".ToCharArray());
@@ -38,7 +41,47 @@ public static class CommandDispatcher
         string cmdArgs;
         if (firstSpace < 0) { rawCmdKey = stripped.ToLowerInvariant(); cmdArgs = ""; }
         else { rawCmdKey = stripped[..firstSpace].ToLowerInvariant(); cmdArgs = stripped[(firstSpace + 1)..].TrimStart(" \t\r\n".ToCharArray()); }
-        string matchedAlias = rawCmdKey;
+        return new ParsedInput(stripped, rawCmdKey, cmdArgs, rawCmdKey);
+    }
+
+    // F010: shared auto-alias prefix scan (sorted keys, ignored-keys skip).
+    // socialsFallback=true reproduces the Q5 two-pass rule (non-socials first, social fallback);
+    // false is the plain scan for cmdsets without socials (unlogged-in path).
+    internal static (Command? cmd, string matchedAlias) AutoAlias(CmdSet cmdset, string rawCmdKey, bool socialsFallback)
+    {
+        Command? socialFallback = null;
+        string socialFallbackKey = "";
+        foreach (var key in cmdset.GetKeys().OrderBy(k => k, StringComparer.Ordinal))
+        {
+            if (_settings.AutoAliasIgnoredKeys.Contains(key)) continue;
+            if (key.StartsWith(rawCmdKey, StringComparison.Ordinal))
+            {
+                var candidate = cmdset.Get(key);
+                if (socialsFallback && candidate is LoggedIn.SocialsCommand)
+                {
+                    socialFallback ??= candidate;
+                    if (socialFallbackKey == "") socialFallbackKey = key;
+                    continue;
+                }
+                return (candidate, key);
+            }
+        }
+        if (socialsFallback && socialFallback is not null) return (socialFallback, socialFallbackKey);
+        return (null, rawCmdKey);
+    }
+
+    /// <summary>
+    /// Mirrors <c>dispatch_loggedin(puppet, text, immediate)</c> (inputfuncs.py:88).
+    /// If <paramref name="immediate"/> is false, queues on threadpool and returns null.
+    /// </summary>
+    public static Job? DispatchLoggedIn(GameObject puppet, string text, bool immediate = false)
+    {
+        var parsed = ParseRaw(text);
+        if (parsed is null) return null;
+        var stripped = parsed.Stripped;
+        var rawCmdKey = parsed.RawCmdKey;
+        var cmdArgs = parsed.CmdArgs;
+        string matchedAlias = parsed.MatchedAlias;
 
         Command? cmd = null;
         if (puppet.InternalCmdSet is not null) cmd = puppet.InternalCmdSet.Get(rawCmdKey);
@@ -54,7 +97,8 @@ public static class CommandDispatcher
                 {
                     matchedAlias = first;
                     // glued args: parts[0][1:] + remainder
-                    string rawFirstToken = firstSpace < 0 ? stripped : stripped[..firstSpace];
+                    int ws = stripped.IndexOfAny([' ', '\t', '\r', '\n']);
+                    string rawFirstToken = ws < 0 ? stripped : stripped[..ws];
                     string gluedRemainder = rawFirstToken.Length > 1 ? rawFirstToken[1..] : "";
                     if (!string.IsNullOrEmpty(cmdArgs)) gluedRemainder = gluedRemainder.Length > 0 ? gluedRemainder + " " + cmdArgs : cmdArgs;
                     cmdArgs = gluedRemainder.TrimStart(" \t\r\n".ToCharArray());
@@ -93,16 +137,9 @@ public static class CommandDispatcher
                     puppet.Msg("You can't do that.");
                     return null;
                 }
-                foreach (var key in CommandRegistry.LoggedIn.GetKeys().OrderBy(k => k, StringComparer.Ordinal))
-                {
-                    if (_settings.AutoAliasIgnoredKeys.Contains(key)) continue;
-                    if (key.StartsWith(rawCmdKey, StringComparison.Ordinal))
-                    {
-                        cmd = CommandRegistry.LoggedIn.Get(key);
-                        matchedAlias = key;
-                        break;
-                    }
-                }
+                // Deliberate divergence from Python: non-social commands take priority over socials
+                // (Else "sa"→salute would shadow "say", etc. Owner decision 2026-09-04, audit Appendix B Q5.)
+                (cmd, matchedAlias) = AutoAlias(CommandRegistry.LoggedIn, rawCmdKey, socialsFallback: true);
             }
             if (cmd is null)
             {
@@ -137,30 +174,19 @@ public static class CommandDispatcher
 
     public static Job? ResolveUnloggedIn(IMessageTarget connection, string text)
     {
-        var stripped = text.Trim(" \t\r\n".ToCharArray());
-        if (string.IsNullOrEmpty(stripped)) return null;
-        int firstSpace = stripped.IndexOfAny([' ', '\t', '\r', '\n']);
-        string rawCmdKey;
-        string cmdArgs;
-        if (firstSpace < 0) { rawCmdKey = stripped.ToLowerInvariant(); cmdArgs = ""; }
-        else { rawCmdKey = stripped[..firstSpace].ToLowerInvariant(); cmdArgs = stripped[(firstSpace + 1)..].TrimStart(" \t\r\n".ToCharArray()); }
-        string matchedAlias = rawCmdKey;
+        var parsed = ParseRaw(text);
+        if (parsed is null) return null;
+        var stripped = parsed.Stripped;
+        var rawCmdKey = parsed.RawCmdKey;
+        var cmdArgs = parsed.CmdArgs;
+        string matchedAlias = parsed.MatchedAlias;
         var cmdset = CommandRegistry.UnloggedIn;
         var cmd = cmdset.Get(rawCmdKey);
         if (cmd is null)
         {
             if (_settings.AutoCommandAliasing)
             {
-                foreach (var key in cmdset.GetKeys().OrderBy(k => k, StringComparer.Ordinal))
-                {
-                    if (_settings.AutoAliasIgnoredKeys.Contains(key)) continue;
-                    if (key.StartsWith(rawCmdKey, StringComparison.Ordinal))
-                    {
-                        cmd = cmdset.Get(key);
-                        matchedAlias = key;
-                        break;
-                    }
-                }
+                (cmd, matchedAlias) = AutoAlias(cmdset, rawCmdKey, socialsFallback: false);
             }
             if (cmd is null)
             {

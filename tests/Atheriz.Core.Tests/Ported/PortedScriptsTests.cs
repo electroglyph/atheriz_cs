@@ -9,6 +9,15 @@ namespace Atheriz.Core.Tests.Ported;
 [Collection("Ported")]
 public class PortedScriptsTests
 {
+    // Persistence round-trips only restore explicitly registered subtypes (F004) —
+    // register the test doubles once per class instead of relying on type-name scanning.
+    static PortedScriptsTests()
+    {
+        GameObject.RegisterPersistedSubtype(typeof(DummyObj).FullName!, typeof(DummyObj), () => new DummyObj());
+        GameObject.RegisterPersistedSubtype(typeof(DummyNode).FullName!, typeof(DummyNode), () => new DummyNode(new Coord("limbo", 0, 0, 0)));
+        GameObject.RegisterPersistedSubtype(typeof(DummyBeforeScript).FullName!, typeof(DummyBeforeScript), () => new DummyBeforeScript());
+        GameObject.RegisterPersistedSubtype(typeof(DummyAfterScript).FullName!, typeof(DummyAfterScript), () => new DummyAfterScript());
+    }
     // Port of test_scripts.py:23 DummyObj — hookable at_test_hook returns "original_result" and logs
     class DummyObj : GameObject
     {

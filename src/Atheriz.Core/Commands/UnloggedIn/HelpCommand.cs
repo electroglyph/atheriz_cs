@@ -35,6 +35,7 @@ public sealed class HelpCommand : Command
                     sr = bc.Session.ScreenReader;
                     tw = bc.Session.TermWidth - 2; if (tw < 20) tw = 20;
                 }
+                else if (caller is ISessionProvider sp && sp.Session is Objects.Session s2) { sr = s2.ScreenReader; tw = s2.TermWidth - 2; if (tw < 20) tw = 20; }
                 else
                 {
                     try { var sess = ((dynamic)caller).Session as Objects.Session; if (sess != null) { sr = sess.ScreenReader; tw = sess.TermWidth - 2; if (tw < 20) tw = 20; } } catch { }

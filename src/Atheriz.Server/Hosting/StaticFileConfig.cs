@@ -92,6 +92,11 @@ public static class StaticFileConfig
         app.MapGet("/atheriz_draw/", ServeDraw);
         app.MapGet("/atheriz_draw/index.html", ServeDraw);
         app.MapGet("/health", () => Results.Json(new { status = "ok", server = settings.ServerName }));
+        // Readiness probe: /health stays unconditional liveness (webclient relies on it);
+        // /ready reports whether DoStartup ran to completion.
+        app.MapGet("/ready", () => ServerLifecycle.StartupSucceeded
+            ? Results.Json(new { status = "ok", server = settings.ServerName })
+            : Results.Json(new { status = "starting", server = settings.ServerName }, statusCode: 503));
         return (staticCandidate, templatesCandidate);
     }
 }

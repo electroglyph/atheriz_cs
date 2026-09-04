@@ -11,19 +11,5 @@ public enum Privilege
     Builder = 4,
     Admin = 5,
 }
-
-public enum Month
-{
-    Ianuarius = 1,
-    Februarius = 2,
-    Martius = 3,
-    Aprilis = 4,
-    Maius = 5,
-    Iunius = 6,
-    Iulius = 7,
-    Augustus = 8,
-    September = 9,
-    October = 10,
-    November = 11,
-    December = 12,
-}
+// NOTE (F016): the game-calendar Month enum used to live here; it now lives next to its
+// only consumer in Globals/GameTime.cs (same namespace, so no using changes).

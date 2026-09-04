@@ -42,37 +42,32 @@ public static class ServerEvents
         else InvokeHooks("at_server_reload");
     }
 
-    // Port of server_events.py:19 def at_char_create(account_name, char_name, password) CLI helper
-    public static void AtCharCreate(string accountName, string charName, string password)
+    // Port of server_events.py:19 def at_char_create(account_name, char_name, password) CLI helper.
+    // The optional output mirrors Python's redirect_stdout capture in the
+    // /_internal/create_account endpoint: null keeps Console output (CLI/tests).
+    public static void AtCharCreate(string accountName, string charName, string password, TextWriter? output = null)
     {
+        void Out(string s) => (output ?? Console.Out).WriteLine(s);
         // Port of server_events.py:19-96 faithful validation + creation, console output replaces print
         var err = Commands.UnloggedIn.Validation.ValidatePassword(password);
-        if (err != null) { Console.WriteLine(err); return; }
+        if (err != null) { Out(err); return; }
         err = Commands.UnloggedIn.Validation.ValidateCharacterName(charName);
-        if (err != null) { Console.WriteLine(err); return; }
+        if (err != null) { Out(err); return; }
         var existsLc = charName.ToLowerInvariant();
         if (ObjectRegistry.FilterBy(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == existsLc).Count > 0)
         {
-            Console.WriteLine($"Character name '{charName}' already exists.");
+            Out($"Character name '{charName}' already exists.");
             return;
         }
-        var settings = AtherizSettings.Default;
+        var settings = AtherizSettings.Global;
         var results = ObjectRegistry.FilterBy(o => o.IsAccount && (o.Name ?? "").ToLowerInvariant() == accountName.ToLowerInvariant());
-        // Port of server_events.py:47 get_node_handler + DEFAULT_HOME
-        Node? home = null;
-        try { home = GlobalServices.GetNodeHandler().GetNode(settings.DefaultHome); } catch { }
+        // Port of server_events.py:47 get_node_handler + DEFAULT_HOME (direct call, errors surface).
+        // C# tests use real Nodes without handler indexing (no mocks), so also consult the live registry.
+        Node? home = GlobalServices.GetNodeHandler().GetNode(settings.DefaultHome);
+        home ??= ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(settings.DefaultHome)).FirstOrDefault() as Node;
         if (home == null)
         {
-            try
-            {
-                var cands = ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(settings.DefaultHome));
-                home = cands.FirstOrDefault() as Node;
-            }
-            catch { }
-        }
-        if (home == null)
-        {
-            Console.WriteLine($"Default home {settings.DefaultHome} not found; aborting char create");
+            Out($"Default home {settings.DefaultHome} not found; aborting char create");
             return;
         }
         if (results.Count > 0)
@@ -82,43 +77,67 @@ public static class ServerEvents
                 if (r is not Account acc) continue;
                 if (!acc.CheckPassword(password))
                 {
-                    Console.WriteLine($"Account '{accountName}' already exists with a different password...");
+                    Out($"Account '{accountName}' already exists with a different password...");
                     return;
                 }
                 if (acc.Characters.Count >= settings.MaxCharacters)
                 {
-                    Console.WriteLine($"Account '{accountName}' already has {settings.MaxCharacters} characters...");
+                    Out($"Account '{accountName}' already has {settings.MaxCharacters} characters...");
                     return;
                 }
                 var character = GameObject.Create(charName, isPc: true);
+                // Port of create() auto-add: add-then-move (matches InitialSetup order).
+                ObjectRegistry.AddObject(character);
                 character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord);
                 acc.AddCharacter(character);
-                try { character.MoveTo(home); } catch { try { home.AddObject(character); } catch { } }
-                ObjectRegistry.AddObject(character);
-                try { ObjectRegistry.SaveObjects(settings.SavePath); } catch { }
-                Console.WriteLine("Success! Character created.");
+                if (LostPcNameRace(existsLc, character.Id))
+                {
+                    acc.RemoveCharacter(character);
+                    ObjectRegistry.RemoveObject(character);
+                    Out($"Character name '{charName}' already exists.");
+                    return;
+                }
+                character.MoveTo(home);
+                ObjectRegistry.SaveObjects();
+                acc.IsModified = true; // Port of server_events.py object.__setattr__(r, "is_modified", True) after save
+                Out("Success! Character created.");
                 // Port of hook invocation for at_char_create
                 AtCharCreate(ObjectRegistry.FilterBy(o => o.Name == charName && o.IsPc).FirstOrDefault()!, results[0] as Account ?? new Account { Name = accountName });
                 return;
             }
         }
         err = Commands.UnloggedIn.Validation.ValidateAccountName(accountName);
-        if (err != null) { Console.WriteLine(err); return; }
-        Console.WriteLine($"Creating account '{accountName}'...");
+        if (err != null) { Out(err); return; }
+        Out($"Creating account '{accountName}'...");
         Account account;
         try { account = Account.Create(accountName, password); }
-        catch (InvalidOperationException) { Console.WriteLine($"Account '{accountName}' already exists."); return; }
-        if (account == null) { Console.WriteLine($"Account '{accountName}' already exists."); return; }
+        catch (InvalidOperationException) { Out($"Account '{accountName}' already exists."); return; }
+        if (account == null) { Out($"Account '{accountName}' already exists."); return; }
         ObjectRegistry.AddObject(account);
-        Console.WriteLine($"Creating character '{charName}'...");
+        Out($"Creating character '{charName}'...");
         var ch2 = GameObject.Create(charName, isPc: true);
+        ObjectRegistry.AddObject(ch2);
+        if (LostPcNameRace(existsLc, ch2.Id))
+        {
+            ObjectRegistry.RemoveObject(ch2);
+            Out($"Character name '{charName}' already exists.");
+            return;
+        }
         ch2.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord);
         account.AddCharacter(ch2);
-        try { ch2.MoveTo(home); } catch { try { home.AddObject(ch2); } catch { } }
-        ObjectRegistry.AddObject(ch2);
-        try { ObjectRegistry.SaveObjects(settings.SavePath); } catch { }
-        Console.WriteLine("Success! Account and character created.");
+        ch2.MoveTo(home);
+        ObjectRegistry.SaveObjects();
+        account.IsModified = true; // Port of server_events.py object.__setattr__(account, "is_modified", True) after save
+        Out("Success! Account and character created.");
         AtCharCreate(ch2, account);
+    }
+
+    // Port of server_events.py:19 _lost_pc_name_race — lowest id wins so concurrent
+    // creators converge deterministically no matter how the re-checks interleave.
+    private static bool LostPcNameRace(string charNameLower, int myId)
+    {
+        var dupes = ObjectRegistry.FilterBy(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == charNameLower && o.Id != myId);
+        return dupes.Any(d => d.Id < myId);
     }
 
     // Spec overload: AtCharCreate(GameObject character, Account account)

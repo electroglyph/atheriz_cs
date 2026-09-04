@@ -24,6 +24,8 @@ public static class IdGenerator
 
     public static int GetUniqueId()
     {
-        lock (Lock) return ++_id;
+        // Checked: wrap-around would silently reuse live ids (Python is unbounded).
+        // 2^31 ids per boot is unreachable in practice; fail loudly instead of corrupting.
+        lock (Lock) return checked(++_id);
     }
 }

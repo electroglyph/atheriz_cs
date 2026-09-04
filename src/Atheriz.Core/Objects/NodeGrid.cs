@@ -23,15 +23,47 @@ public sealed class NodeGrid
     }
     // Port of nodes.py:979
     public override string ToString() => $"NodeGrid(z={Z}, area={Area})";
-    // Port of nodes.py:982
+    // Port of nodes.py:987 — Python dict == is order-insensitive; JsonElement has no
+    // value equality in C#, so data compares by canonical raw text. Hash combines the
+    // same components in sorted order so equal grids hash equal.
     public override bool Equals(object? obj)
     {
         if (obj is not NodeGrid o) return false;
-        return Area == o.Area && Z == o.Z && Nodes.SequenceEqual(o.Nodes) && Data.SequenceEqual(o.Data);
+        if (Area != o.Area || Z != o.Z) return false;
+        if (Nodes.Count != o.Nodes.Count || Data.Count != o.Data.Count) return false;
+        foreach (var kv in Nodes)
+            if (!o.Nodes.TryGetValue(kv.Key, out var n) || !kv.Value.Equals(n)) return false;
+        foreach (var kv in Data)
+            if (!o.Data.TryGetValue(kv.Key, out var je) || kv.Value.GetRawText() != je.GetRawText()) return false;
+        return true;
     }
-    public override int GetHashCode() => HashCode.Combine(Area, Z);
+    public override int GetHashCode()
+    {
+        var h = new HashCode();
+        h.Add(Area);
+        h.Add(Z);
+        foreach (var k in Nodes.Keys.OrderBy(k => k)) { h.Add(k); h.Add(Nodes[k]); }
+        foreach (var k in Data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(Data[k].GetRawText()); }
+        return h.ToHashCode();
+    }
     // Port of nodes.py:987
     public int Count { get { Lock.EnterReadLock(); try { return Nodes.Count; } finally { Lock.ExitReadLock(); } } }
+    /// <summary>
+    /// Hot-reload rewire: swap a stale node instance for its replacement (matched
+    /// by id, kept at its coord key). Python's __class__ swap preserves identity;
+    /// C# must rewire direct refs after AddObject replaces the id.
+    /// </summary>
+    public void ReplaceNodeValue(Node replacement)
+    {
+        Lock.EnterWriteLock();
+        try
+        {
+            foreach (var k in Nodes.Keys.ToList())
+                if (Nodes[k] is Node cur && cur.Id == replacement.Id && !ReferenceEquals(cur, replacement))
+                    Nodes[k] = replacement;
+        }
+        finally { Lock.ExitWriteLock(); }
+    }
     // Port of nodes.py:990
     public void SetData(string key, System.Text.Json.JsonElement value)
     {

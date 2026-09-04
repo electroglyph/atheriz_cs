@@ -214,7 +214,7 @@ public partial class GameObject
             }
         }
 
-        // Resolve old location (with fallback to ever-created for concurrent ClearAll race)
+        // Resolve old location (live map only — F005 removed the ever-created resurrection cache)
         GameObject? oldLoc = ResolveLocationObject();
         if (oldLoc == null && Location is LocationRef.ObjectLocation olLoc)
             oldLoc = ObjectRegistry.GetEver(olLoc.ObjectId);

@@ -16,7 +16,7 @@ public sealed class NoneCommand : Command
         if (pa != null) text = string.Join(" ", pa.GetList("none"));
         else text = (args as string ?? "").Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; }
-        var ignored = AtherizSettings.Default.AutoAliasIgnoredKeys;
+        var ignored = AtherizSettings.Global.AutoAliasIgnoredKeys;
         var cmds = CommandRegistry.UnloggedIn.GetKeys().Where(k => !ignored.Contains(k)).ToList();
         if (cmds.Count == 0) { caller.Msg($"Command \"{text}\" not found."); return; }
         string? best = StringDistance.BestMatch(text.Split(' ')[0].ToLowerInvariant(), cmds);

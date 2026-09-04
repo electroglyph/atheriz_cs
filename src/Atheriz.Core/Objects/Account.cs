@@ -38,31 +38,41 @@ public class Account : GameObject
         return true; // Fix for test_account.py:88 Account.at_delete is unconditional true, not access-gated
     }
     public virtual bool AtPrePuppet(GameObject character) => Hookable("at_pre_puppet", () => true, character); // Fix for test_account.py:408 port of base_account.py:76 at_pre_puppet
-    // Account-specific Delete returns bool (Python) — hides GameObject tuple version
+    // Account-specific Delete returns bool (Python) — hides GameObject tuple version.
+    // NOTE: C# cannot override with a different return type, so a GameObject-typed
+    // reference still dispatches to the base tuple Delete. That path converges via
+    // del ops at the next save; this bool path deletes the row immediately.
     public new bool Delete(GameObject? caller = null, bool unused = true)
     {
-        // Port of base_account.py:53 delete — Fix for test_account.py:161, test_persistence.py:81
+        // Port of base_account.py:53 delete.
         if (!AtDelete(caller!)) return false;
-        if (!IsTemporary)
-        {
-            try
-            {
-                var path = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
-                if (!string.IsNullOrEmpty(path))
-                {
-                    using var db = new Persistence.AtherizDbContext(path);
-                    DbTransactionHelper.WithGateAndTransaction(db, ctx =>
-                    {
-                        var existing = ctx.Objects.Find(Id);
-                        if (existing != null) ctx.Objects.Remove(existing);
-                    });
-                }
-            }
-            catch { /* best-effort: still mark deleted even if DB fails */ }
-        }
+        var ops = new List<(string Sql, object[] Params)>();
+        if (!IsTemporary) ops.Add(GetDelOps());
+        // Mark deleted and unregister BEFORE the DB delete so a concurrent
+        // checkpoint cannot resurrect the row. Mirrors Node.delete.
         SyncRoot.EnterWriteLock();
         try { IsDeleted = true; } finally { SyncRoot.ExitWriteLock(); }
         ObjectRegistry.RemoveObject(this);
+        if (ops.Count > 0)
+        {
+            try
+            {
+                // Shared save-path resolution (same as ObjectRegistry.SaveObjects()):
+                // ATHERIZ_SAVE_PATH override, else configured SavePath.
+                var savePath = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? Settings.AtherizSettings.Global.SavePath;
+                using var db = new Persistence.AtherizDbContext(savePath);
+                db.Database.EnsureCreated();
+                ObjectRegistry.DeleteObjects(db, ops);
+            }
+            catch
+            {
+                // DB failure: roll back so the account stays live (base_account.py:78-82).
+                SyncRoot.EnterWriteLock();
+                try { IsDeleted = false; } finally { SyncRoot.ExitWriteLock(); }
+                ObjectRegistry.AddObject(this);
+                throw;
+            }
+        }
         return true;
     }
 
@@ -72,7 +82,7 @@ public class Account : GameObject
         private set => WriteHash(value);
     }
     public IReadOnlyList<int> Characters => ReadChars();
-    public string BanReason { get => ReadBan(); set => WriteBan(value); }
+    public override string BanReason { get => ReadBan(); set => WriteBan(value); }
     public bool LoggedIn { get => ReadLogged(); private set => WriteLogged(value); }
 
     private string ReadHash() { SyncRoot.EnterReadLock(); try { return _passwordHash; } finally { SyncRoot.ExitReadLock(); } }
@@ -106,16 +116,22 @@ public class Account : GameObject
 
     public bool Login(string name, string password, string? saltOverride = null)
     {
+        // Snapshot under a read lock, verify outside: PBKDF2 is ~100ms of CPU and
+        // must not block all readers under the write lock (audit F007). Python
+        // holds its RLock throughout, but C# readers would starve; last-writer-wins
+        // on _loggedIn preserves the observable outcome.
+        string curName;
+        string curHash;
+        SyncRoot.EnterReadLock();
+        try { curName = Name; curHash = _passwordHash; }
+        finally { SyncRoot.ExitReadLock(); }
+        var hash = HashPassword(password, saltOverride);
+        bool ok = string.Equals(curName, name, StringComparison.OrdinalIgnoreCase)
+            && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(hash), Encoding.UTF8.GetBytes(curHash));
         SyncRoot.EnterWriteLock();
-        try
-        {
-            if (string.Equals(Name, name, StringComparison.OrdinalIgnoreCase) && CheckPassword(password, saltOverride))
-            {
-                _loggedIn = true; return true;
-            }
-            _loggedIn = false; return false;
-        }
+        try { _loggedIn = ok; }
         finally { SyncRoot.ExitWriteLock(); }
+        return ok;
     }
 
     public void AddCharacter(GameObject character)
@@ -202,7 +218,7 @@ public class Account : GameObject
 
     // DTO extension: store account fields in Extra for persistence simplicity
     // Fix for test_persistence.py:227 logged_in not persisted — mirrors __getstate__ setting logged_in=False
-    public new GameObjectDto ToDto()
+    public override GameObjectDto ToDto()
     {
         var dto = base.ToDto();
         dto.Type = "account";

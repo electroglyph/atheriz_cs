@@ -285,6 +285,7 @@ public sealed class DropCommand : Command
         if (string.IsNullOrWhiteSpace(dropName)) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject();
         if (loc == null) { go.Msg("You can't drop something here!"); return; }
+        // Intentional: Drop checks the "put" lock, not "drop" — verbatim atheriz/commands/loggedin/drop.py:26.
         if (!loc.Access(go, "put")) { go.Msg("You can't drop something here!"); return; }
         dropName = dropName!.Trim();
         if (dropName == "all")

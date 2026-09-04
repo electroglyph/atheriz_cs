@@ -35,14 +35,8 @@ public static class SetHelper
     {
         if (FindProp(o, attr) != null) return true;
         if (o.GetType().GetField(attr, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance) != null) return true;
-        try
-        {
-            var f = typeof(GameObject).GetField("_extra", BindingFlags.NonPublic | BindingFlags.Instance);
-            var dict = f?.GetValue(o) as Dictionary<string, JsonElement>;
-            if (dict != null && dict.ContainsKey(attr)) return true;
-        }
-        catch { }
-        return false;
+        // Typed extra check (F001: no _extra reflection).
+        return o.HasExtra(attr);
     }
 
     public static void SetAttr(GameObject o, string attr, object? val)
@@ -56,50 +50,17 @@ public static class SetHelper
             return;
         }
         if (prop != null && !prop.CanWrite) throw new InvalidOperationException();
-        try
-        {
-            var f = typeof(GameObject).GetField("_extra", BindingFlags.NonPublic | BindingFlags.Instance);
-            var dict = f?.GetValue(o) as Dictionary<string, JsonElement>;
-            if (dict != null)
-            {
-                JsonElement je = JsonSerializer.SerializeToElement(val);
-                dict[attr] = je;
-                return;
-            }
-        }
-        catch { }
-        var f2 = o.GetType().GetField(attr, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
-        if (f2 != null) { f2.SetValue(o, val); return; }
-        try
-        {
-            var pascalField = "_" + attr.Split('_').Select((p,i)=> i==0? p.ToLowerInvariant(): char.ToUpperInvariant(p[0])+p.Substring(1)).Aggregate((a,b)=>a+b);
-            var f3 = o.GetType().GetField(pascalField, BindingFlags.NonPublic | BindingFlags.Instance);
-            if (f3 != null) { f3.SetValue(o, val); return; }
-        }
-        catch { }
-        throw new InvalidOperationException();
+        // Typed extra store (F001: no _extra reflection). Property lookup above stays
+        // reflective on purpose: `set` assigns arbitrary attrs like Python setattr.
+        JsonElement je = JsonSerializer.SerializeToElement(val);
+        o.SetExtraJson(attr, je);
+        return;
     }
 
     public static bool TryRemoveExtra(GameObject target, string attr)
     {
-        bool had = false;
-        try
-        {
-            var f = target.GetType().GetField("_extra", BindingFlags.NonPublic | BindingFlags.Instance);
-            var dict = f?.GetValue(target) as System.Collections.IDictionary;
-            if (dict != null && dict.Contains(attr)) had = true;
-        }
-        catch { }
-        try { had |= ((dynamic)target).HasExtra(attr); } catch { }
-        if (!had) return false;
-        try { ((dynamic)target).RemoveExtra(attr); } catch { }
-        try
-        {
-            var f = target.GetType().GetField("_extra", BindingFlags.NonPublic | BindingFlags.Instance);
-            var dict = f?.GetValue(target) as System.Collections.IDictionary;
-            dict?.Remove(attr);
-        }
-        catch { }
-        return true;
+        // Typed (F001: no _extra reflection, no dynamic).
+        if (!target.HasExtra(attr)) return false;
+        return target.TryRemoveExtraJson(attr);
     }
 }

@@ -35,7 +35,7 @@ public sealed class WebSocketConnection : BaseConnection
     public WebSocketConnection(System.Net.WebSockets.WebSocket websocket, string? sessionId = null, AtherizSettings? settings = null, string? clientHost = null) : base(sessionId)
     {
         WebSocket = websocket;
-        _settings = settings ?? AtherizSettings.Default;
+        _settings = settings ?? AtherizSettings.Global;
         ClientHost = clientHost ?? "?"; // port of websocket.py:36
         _limiter = new PendingLimiter(_settings.WebsocketMaxPendingBytes, _settings.WebsocketMaxPendingSends);
     }
@@ -165,6 +165,9 @@ public sealed class WebSocketProtocol : Protocol
     // Port of websocket.py:153-199 WebSocketProtocol.setup
     // Original uses @app.websocket("/ws") decorator; in C# we support both:
     // - Python-style MagicMock with app.websocket("/ws") for legacy test compatibility
+    //   (pinned by PortedWebSocketTests FakeApp/MockWsEndpoint — the dynamic/reflection
+    //   below is mock-compat only; the typed System.Net.WebSockets.WebSocket branch
+    //   inside the endpoint delegate always runs first for real connections).
     // - Real WebApplication is handled directly in Server's Program.cs (explicit Map), not here.
     // This Setup therefore only handles the mock case; real server registers /ws explicitly.
     public override void Setup(object app)

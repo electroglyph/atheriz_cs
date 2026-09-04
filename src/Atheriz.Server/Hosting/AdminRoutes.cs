@@ -85,12 +85,9 @@ public static class AdminRoutes
             if (!CheckAdmin(ctx, "account creation", out var err))
                 return Results.Json(new { status = "error", message = err }, statusCode: 403);
 
-            JsonDocument doc;
-            try
-            {
-                doc = await JsonDocument.ParseAsync(ctx.Request.Body);
-            }
-            catch
+            // Size-capped body read: reject oversized payloads without allocating them.
+            using var doc = await ReadCappedJsonBodyAsync(ctx, 64 * 1024);
+            if (doc == null)
             {
                 return Results.Json(new { status = "error", message = "Invalid JSON body." });
             }
@@ -106,26 +103,14 @@ public static class AdminRoutes
 
             try
             {
-                var exists = ObjectRegistry.FilterBy(o => o.IsAccount && string.Equals(o.Name, accountName, StringComparison.OrdinalIgnoreCase)).Any();
-                if (exists) return Results.Json(new { status = "error", message = $"Account with this name ({accountName}) already exists." });
-                var existingChar = ObjectRegistry.FilterBy(o => o.IsPc && string.Equals(o.Name, charName, StringComparison.OrdinalIgnoreCase)).Any();
-                if (existingChar) return Results.Json(new { status = "error", message = $"Character with this name ({charName}) already exists." });
-
-                var acc = Account.Create(accountName, password);
-                ObjectRegistry.AddObject(acc);
-                var hero = GameObject.Create(charName, isPc: true, privilege: Privilege.Player);
-                acc.AddCharacter(hero);
-                hero.Home = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(new Coord(settings.DefaultHome.Area, settings.DefaultHome.X, settings.DefaultHome.Y, settings.DefaultHome.Z));
-                ObjectRegistry.AddObject(hero);
-                try
-                {
-                    using var db = new AtherizDbContext(settings.SavePath);
-                    db.Database.EnsureCreated();
-                    ObjectRegistry.SaveObjects(db);
-                }
-                catch { }
-
-                return Results.Json(new { status = "ok", message = $"Account '{accountName}' and character '{charName}' created." });
+                // Port of atheriz.py create_account_endpoint: run at_char_create and
+                // return its printed output (StringWriter = redirect_stdout).
+                var sb = new StringBuilder();
+                using var sw = new StringWriter(sb);
+                ServerEvents.AtCharCreate(accountName, charName, password, sw);
+                var message = sb.ToString().Trim();
+                if (string.IsNullOrEmpty(message)) message = "Account created.";
+                return Results.Json(new { status = "ok", message });
             }
             catch (Exception ex)
             {
@@ -134,28 +119,42 @@ public static class AdminRoutes
         });
     }
 
-    private static string? ValidateAccountName(string name, AtherizSettings s)
+    /// <summary>
+    /// Reads the request body as JSON with a hard size cap. Returns null when the body
+    /// is missing, oversized, or not valid JSON. Chunked bodies (no Content-Length)
+    /// are copied through a bounded buffer so they cannot OOM the server.
+    /// </summary>
+    private static async Task<JsonDocument?> ReadCappedJsonBodyAsync(HttpContext ctx, long maxBytes)
     {
-        if (string.IsNullOrWhiteSpace(name)) return "Account name must not be empty.";
-        if (name.Length > s.MaxAccountNameLength) return $"Account name too long (max {s.MaxAccountNameLength}).";
-        if (name.Length < 2) return "Account name too short.";
-        if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z0-9_]+$")) return "Account name must be alphanumeric/underscore.";
-        return null;
+        try
+        {
+            if (ctx.Request.ContentLength > maxBytes) return null;
+            if (ctx.Request.ContentLength is null)
+            {
+                using var ms = new MemoryStream();
+                var buf = new byte[8192];
+                int n;
+                long total = 0;
+                while ((n = await ctx.Request.Body.ReadAsync(buf)) > 0)
+                {
+                    total += n;
+                    if (total > maxBytes) return null;
+                    ms.Write(buf, 0, n);
+                }
+                ms.Position = 0;
+                return await JsonDocument.ParseAsync(ms);
+            }
+            return await JsonDocument.ParseAsync(ctx.Request.Body);
+        }
+        catch { return null; }
     }
+
+    private static string? ValidateAccountName(string name, AtherizSettings s)
+        => AccountValidation.ValidateAccountName(name, s);
 
     private static string? ValidateCharacterName(string name, AtherizSettings s)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "Character name must not be empty.";
-        if (name.Length > s.MaxCharacterNameLength) return $"Character name too long (max {s.MaxCharacterNameLength}).";
-        if (name.Length < 2) return "Character name too short.";
-        if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z0-9_]+$")) return "Character name must be alphanumeric/underscore.";
-        return null;
-    }
+        => AccountValidation.ValidateCharacterName(name, s);
 
     private static string? ValidatePassword(string pw, AtherizSettings s)
-    {
-        if (pw.Length < s.MinPasswordLength) return $"Password too short (min {s.MinPasswordLength}).";
-        if (pw.Length > s.MaxPasswordLength) return $"Password too long (max {s.MaxPasswordLength}).";
-        return null;
-    }
+        => AccountValidation.ValidatePassword(pw, s);
 }

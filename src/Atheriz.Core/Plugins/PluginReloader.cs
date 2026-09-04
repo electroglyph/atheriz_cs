@@ -11,7 +11,7 @@ public static class PluginReloader
 {
     // Port of atheriz/reloader.py:14 _EXCLUDED_MODULES
     public static readonly HashSet<string> ExcludedAssemblies = new(StringComparer.OrdinalIgnoreCase)
-    { "Microsoft.*", "System.*", "Atheriz.Core", "netstandard" };
+    { "Microsoft.*", "System.*", "Atheriz.Core", "netstandard", "xunit.*" };
     // Port of atheriz/reloader.py:326 _reload_lock = _SHARED_WORLD_LOCK
     private static readonly object _reloadLock = new();
     private static readonly SemaphoreSlim _reloadGate = new(1,1);
@@ -33,17 +33,20 @@ public static class PluginReloader
     // Port of reloader.py:249 _apply_patch transient preserves
     private static readonly HashSet<string> _transientFields = new(StringComparer.Ordinal)
     { "session","_session","listeners","_listeners","command","_command","_lock","_hooks","_msgLog" };
-    private static bool IsExcluded(string p)
+    // Shared exclusion check (also used by PluginLoader): exact filename match only.
+    // Never substring-match the full path — "MySystem.Game.dll" must not match "System.*".
+    internal static bool IsExcludedAssembly(string p)
     {
         var n = Path.GetFileNameWithoutExtension(p) ?? "";
         foreach (var pat in ExcludedAssemblies)
         {
             if (pat.EndsWith(".*", StringComparison.Ordinal))
-            { var pre = pat[..^2]; if (n.StartsWith(pre, StringComparison.OrdinalIgnoreCase) || p.Contains(pre, StringComparison.OrdinalIgnoreCase)) return true; }
+            { var pre = pat[..^2]; if (n.StartsWith(pre, StringComparison.OrdinalIgnoreCase)) return true; }
             else if (string.Equals(n, pat, StringComparison.OrdinalIgnoreCase)) return true;
         }
         return false;
     }
+    private static bool IsExcluded(string p) => IsExcludedAssembly(p);
     private static int ScanAssembly(Assembly asm)
     {
         int f = 0;
@@ -52,7 +55,8 @@ public static class PluginReloader
         catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Scan failed: {ex.Message}"); }
         return f;
     }
-    // Port of atheriz/reloader.py:340 _reload_game_logic — ALC double-pass: first reload, second to fix forward refs (documented: second ALC reload mirrors importlib.reload second pass 204/381)
+    // Port of atheriz/reloader.py:340 _reload_game_logic — single pass per assembly
+    // (the C# "second pass to fix forward refs" loaded+unloaded without scanning, so it was deleted).
     public static async Task<bool> ReloadAsync(string assemblyPath, AsyncTicker ticker, AsyncThreadPool pool)
     {
         if (string.IsNullOrWhiteSpace(assemblyPath)) return false;
@@ -80,8 +84,10 @@ public static class PluginReloader
             return true;
         } finally { ExitGate(); }
     }
-    // Port of atheriz/reloader.py:249 _apply_patch preserves dict, skips __init__ side effects
-    // In C# we cannot swap __class__ directly; document limitation and instead create new instance via GetUninitializedObject and copy fields, then ObjectRegistry.AddObject replaces.
+    // Port of atheriz/reloader.py:249 _apply_patch preserves dict, skips __init__ side effects.
+    // C# cannot swap __class__ in place: build the replacement via GetUninitializedObject
+    // (bypasses ctor like Python skipping __init__), copy state, AddObject-replace by id,
+    // then RewireReferences swaps instance-valued stores (channels/map/nodes/sessions).
     public static int PatchLiveObjects(Type oldType, Type newType)
     {
         if(oldType==null||newType==null) return 0;
@@ -89,10 +95,43 @@ public static class PluginReloader
         if(live.Count==0) return 0;
         int patched=0;
         foreach(var obj in live.ToList()){ try{if(PatchSingleObject(obj,newType))patched++;}catch(Exception ex){Console.Error.WriteLine($"[HotReload] patch {obj.Id}: {ex.Message}");} }
-        foreach(var obj in live){ try{ var mi=obj.GetType().GetMethod("ResolveRelations",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic); mi?.Invoke(obj,null);}catch{}}
+        // Only the live replacements need ResolveRelations (old instances are detached after AddObject rewire).
         var newLive=ObjectRegistry.FilterBy(o=>o.GetType()==newType);
         foreach(var obj in newLive){ try{ var mi=obj.GetType().GetMethod("ResolveRelations",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic); mi?.Invoke(obj,null);}catch{}}
         return patched;
+    }
+    /// <summary>
+    /// Rewire direct object refs from the pre-patch instance to its replacement
+    /// (same id). Id-keyed stores (registry/contents/followers/locations) need no
+    /// fix; instance-valued stores do: channel listeners, map infos, node grids,
+    /// and the patched object's own session puppet refs.
+    /// </summary>
+    private static void RewireReferences(GameObject oldObj, GameObject newObj)
+    {
+        foreach (var c in ObjectRegistry.FilterBy(o => o.IsChannel))
+            try { if (c is Channel ch) ch.ReplaceListener(newObj); } catch { }
+        try { GlobalServices.GetMapHandler()?.ReplaceMapEntries(oldObj.Id, newObj); } catch { }
+        if (newObj is Node nn)
+        {
+            try
+            {
+                var nh = GlobalServices.GetNodeHandler();
+                List<NodeArea> areas;
+                nh.Lock.EnterReadLock();
+                try { areas = nh.GetAreas(); } finally { nh.Lock.ExitReadLock(); }
+                foreach (var area in areas)
+                {
+                    List<NodeGrid> grids;
+                    area.Lock.EnterReadLock();
+                    try { grids = area.Grids.Values.ToList(); } finally { area.Lock.ExitReadLock(); }
+                    foreach (var g in grids) try { g.ReplaceNodeValue(nn); } catch { }
+                }
+            }
+            catch { }
+        }
+        // Own session (transient _session was restored onto newObj above).
+        // Cross-session puppet-stack Prev refs are out of contract (no session registry).
+        try { newObj.Session?.ReplacePuppetRefs(newObj); } catch { }
     }
     private static bool PatchSingleObject(GameObject oldObj, Type newType)
     {
@@ -114,10 +153,29 @@ public static class PluginReloader
                 try{ var v=fOld.GetValue(oldObj); if(v==null||fNew.FieldType.IsAssignableFrom(v.GetType())||fNew.FieldType.IsAssignableFrom(fOld.FieldType)||fNew.FieldType==typeof(object)) fNew.SetValue(newObj,v); else try{fNew.SetValue(newObj,v);}catch{}}catch{}
             }
             foreach(var kv in saved){ var fNew=FindField(newType,kv.Key); if(fNew!=null&&!fNew.IsInitOnly) try{fNew.SetValue(newObj,kv.Value);}catch{} }
+            // GetUninitializedObject skips field initializers, so readonly fields (e.g. _flags)
+            // stay null — the copy loop above skips init-only fields. Backfill them from the
+            // old instance (shared refs are safe: the old instance is detached after rewire).
+            foreach (var fOld in oldFields)
+            {
+                if (!newByName.TryGetValue(fOld.Name, out var fNew) || !fNew.IsInitOnly) continue;
+                try
+                {
+                    if (fNew.GetValue(newObj) == null)
+                    {
+                        var v = fOld.GetValue(oldObj);
+                        if (v != null) fNew.SetValue(newObj, v);
+                    }
+                }
+                catch { }
+            }
             var lf=FindField(newType,"_lock");
             if(lf!=null) try{ var cur=lf.GetValue(newObj); if(cur==null) lf.SetValue(newObj,saved.TryGetValue("_lock",out var v)?v:new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion)); }catch{}
             try{newObj.Id=oldObj.Id;}catch{}
             ObjectRegistry.AddObject(newObj);
+            // C# cannot swap __class__ in place like Python: AddObject replaced the id,
+            // so rewire direct refs (channels/map/nodes/sessions hold instances, not ids).
+            try { RewireReferences(oldObj, newObj); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Rewire {oldObj.Id}: {ex.Message}"); }
             return true;
         }catch{
             try{ foreach(var kv in origSnap) try{kv.Key.SetValue(oldObj,kv.Value);}catch{}}catch{}
@@ -157,36 +215,47 @@ public static class PluginReloader
     }
     private static void RemoveTickDelegatesFor(AsyncTicker ticker, List<GameObject> tickables)
     {
-        try{
-            var sf=typeof(AsyncTicker).GetField("_slots",BindingFlags.Instance|BindingFlags.NonPublic); if(sf==null) return;
-            var slotsObj=sf.GetValue(ticker); if(slotsObj is not System.Collections.IDictionary dict) return;
-            var slotType=typeof(AsyncTicker).GetNestedType("TimeSlot",BindingFlags.Public|BindingFlags.NonPublic); if(slotType==null) return;
-            var cf=slotType.GetField("_coros",BindingFlags.Instance|BindingFlags.NonPublic);
-            var lf=slotType.GetField("_lock",BindingFlags.Instance|BindingFlags.NonPublic); if(cf==null) return;
-            foreach(var key in dict.Keys.Cast<object>().ToList()){
-                var slot=dict[key]; if(slot==null) continue;
-                object? sl=null; try{sl=lf?.GetValue(slot);}catch{}
-                bool ent=false; try{
-                    if(sl!=null){Monitor.Enter(sl); ent=true;}
-                    var coros=cf.GetValue(slot) as System.Collections.ICollection; if(coros==null) continue;
-                    var toRem=new List<Delegate>();
-                    foreach(var dObj in coros.Cast<Delegate>().ToList()){
-                        var tar=dObj.Target; if(tar==null) continue;
-                        foreach(var obj in tickables){
-                            if(ReferenceEquals(tar,obj)){toRem.Add(dObj); break;}
-                            try{ var fs=tar.GetType().GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);
-                                foreach(var f in fs) if(typeof(GameObject).IsAssignableFrom(f.FieldType)){ var v=f.GetValue(tar); if(ReferenceEquals(v,obj)){toRem.Add(dObj); break;}}
-                                if(toRem.Contains(dObj)) break;
-                            }catch{}
-                        }
-                    }
-                    if(coros is System.Collections.Generic.HashSet<Delegate> hs) foreach(var r in toRem) hs.Remove(r);
-                }finally{if(ent&&sl!=null) Monitor.Exit(sl);}
+        // Public ticker surface only (Slots/Coros/RemoveCoro) — never poke _slots/_coros privates (breaks on rename).
+        IReadOnlyDictionary<double, AsyncTicker.TimeSlot> slots;
+        try { slots = ticker.Slots; }
+        catch (Exception ex) { Console.Error.WriteLine($"[HotReload] RemoveTickDelegates: {ex.Message}"); return; }
+        foreach (var kv in slots.ToList())
+        {
+            IReadOnlySet<Delegate> coros;
+            try { coros = kv.Value.Coros; } catch { continue; }
+            foreach (var d in coros.ToList())
+            {
+                if (!TargetsTickable(d.Target, tickables)) continue;
+                try
+                {
+                    var iv = TimeSpan.FromSeconds(kv.Key);
+                    if (d is Action a) ticker.RemoveCoro(a, iv);
+                    else if (d is Func<Task> f) ticker.RemoveCoro(f, iv);
+                }
+                catch { }
             }
-        }catch(Exception ex){Console.Error.WriteLine($"[HotReload] RemoveTickDelegates: {ex.Message}");}
+        }
+    }
+    private static bool TargetsTickable(object? target, List<GameObject> tickables)
+    {
+        if (target == null) return false;
+        foreach (var obj in tickables)
+        {
+            if (ReferenceEquals(target, obj)) return true;
+            // Compiler-generated closure capturing the tickable (e.g. () => obj.AtTick()).
+            try
+            {
+                foreach (var f in target.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (typeof(GameObject).IsAssignableFrom(f.FieldType) && ReferenceEquals(f.GetValue(target), obj))
+                        return true;
+            }
+            catch { }
+        }
+        return false;
     }
     // Port of atheriz/reloader.py:58 _discover_new_atheriz_modules + 93 _discover_new_game_modules — scan plugins + game project
-    // Game project discovery: look for *.csproj in CWD / SavePath parent, build and add its dll (mirrors Python game folder import)
+    // Game project discovery: look for already-built dlls near CWD / SavePath parent (mirrors Python game folder import).
+    // Never builds: Python imports source (no build step); a dropped-in .csproj must not trigger compilation on reload.
     public static int DiscoverGameAssembly(AtherizSettings settings, List<string> outList)
     {
         int added = 0;
@@ -237,35 +306,12 @@ public static class PluginReloader
                     }
                     catch { }
                 }
+                // Reload never shells a compiler (pipe-deadlock + trust: a dropped-in
+                // .csproj must not trigger compilation). Only use already-built dlls.
                 if (needBuild)
                 {
-                    try
-                    {
-                        Console.Error.WriteLine($"[HotReload] Building game project {Path.GetFileName(csproj)}...");
-                        var psi = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = "dotnet",
-                            Arguments = $"build \"{csproj}\" -c Release --nologo -v q",
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            UseShellExecute = false,
-                            WorkingDirectory = dir,
-                        };
-                        using var proc = System.Diagnostics.Process.Start(psi)!;
-                        var outTask = proc.StandardOutput.ReadToEndAsync();
-                        var errTask = proc.StandardError.ReadToEndAsync();
-                        if (!proc.WaitForExit(30000)) { try { proc.Kill(entireProcessTree: true); } catch { } Console.Error.WriteLine($"[HotReload] Build timeout for {csproj}"); }
-                        else
-                        {
-                            var stdout = outTask.Result;
-                            var stderr = errTask.Result;
-                            if (proc.ExitCode != 0) Console.Error.WriteLine($"[HotReload] Build failed {csproj} exit {proc.ExitCode}: {stdout} {stderr}");
-                            else Console.Error.WriteLine($"[HotReload] Build succeeded {csproj}");
-                        }
-                        if (File.Exists(dllRelease)) dll = dllRelease;
-                        else if (File.Exists(dllDebug)) dll = dllDebug;
-                    }
-                    catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Build exception {csproj}: {ex.Message}"); }
+                    Console.Error.WriteLine($"[HotReload] Skipping {name}: no up-to-date built dll (run 'dotnet build' first; reload never builds).");
+                    continue;
                 }
                 if (dll != null && File.Exists(dll) && !outList.Contains(dll, StringComparer.OrdinalIgnoreCase) && !IsExcluded(dll))
                 {
@@ -339,7 +385,7 @@ public static class PluginReloader
     // Port of atheriz/reloader.py:306 reload_game_logic orchestrates Unload→Load→Patch→Reregister→ MapEdit clear (double pass 381-389 fix forward refs)
     public static async Task<string> ReloadGameLogicAsync(AsyncTicker ticker, AsyncThreadPool pool, AtherizSettings settings)
     {
-        settings??=AtherizSettings.Default; ticker??=GlobalServices.GetAsyncTicker(); pool??=GlobalServices.GetAsyncThreadPool();
+        settings??=AtherizSettings.Global; ticker??=GlobalServices.GetAsyncTicker(); pool??=GlobalServices.GetAsyncThreadPool();
         if(!TryEnterGate()) return "Reload already in progress; skipping.";
         try{
             Console.Error.WriteLine("Server reload initiated.");
@@ -350,10 +396,8 @@ public static class PluginReloader
             cands=cands.Where(p=>!IsExcluded(p)&&File.Exists(p)).Distinct().ToList();
             Console.Error.WriteLine($"[HotReload] Found {cands.Count} plugin assemblies.");
             foreach(var p in cands){ try{ if(await ReloadAsync(p,ticker,pool)) reloaded++; }catch(Exception ex){ var m=$"Failed {p}: {ex.Message}"; Console.Error.WriteLine($"[HotReload] {m}"); errors.Add(m);} }
-            foreach(var p in cands.ToList()){
-                try{ var alc=new AssemblyLoadContext($"game_reload2_{Guid.NewGuid():N}",true); try{alc.LoadFromAssemblyPath(Path.GetFullPath(p));}catch(Exception ex){errors.Add($"Second pass {p}: {ex.Message}");} finally{try{alc.Unload();}catch{} GC.Collect();} }catch{}
-            }
-            if(_loader!=null) foreach(var kv in _loader.Replacements.ToList()) try{PatchLiveObjects(kv.Key,kv.Value);}catch(Exception ex){errors.Add($"Re-inject {kv.Value.Name}: {ex.Message}");}
+            // No dead second pass (load-then-immediately-unload scanned nothing) and no
+            // double patch: ReloadAsync already patched each assembly's replacements.
             if(cands.Count==0) try{ReregisterTicks(ticker);}catch(Exception ex){errors.Add($"ReregisterTicks: {ex.Message}");}
             try{ PatchChannelsFirstAndRest(); }catch(Exception ex){errors.Add($"Channel patch: {ex.Message}");}
             try{ ReinitGlobalCmdSets(); }catch(Exception ex){errors.Add($"CmdSet reinit: {ex.Message}");}

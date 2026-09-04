@@ -55,7 +55,7 @@ public static class AdminToken
             using var fs = new FileStream(tokenFile, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             var data = Encoding.UTF8.GetBytes(token);
             fs.Write(data, 0, data.Length);
-            fs.Flush();
+            fs.Flush(true); // fsync before return — token must survive a crash
             FsUtil.TryChmod0600(tokenFile);
             // Also try chmod 0o600 fallthrough — atheriz.py:599-602
             FsUtil.TryChmod0600(tokenFile);
@@ -63,30 +63,15 @@ public static class AdminToken
         }
         catch (IOException) when (File.Exists(tokenFile))
         {
-            // Race: another process created it — read existing (like spawn_daemon concurrent)
+            // Race: another process created it — read back the winner, never truncate
+            // a valid token (truncating here would DoS the running server's token).
             try
             {
                 var existing = File.ReadAllText(tokenFile, Encoding.UTF8).Trim();
                 if (!string.IsNullOrEmpty(existing)) return existing;
             }
             catch { }
-            // If we raced and file exists but unreadable, return generated? fallback to reading again
             throw new InvalidOperationException($"Admin token file already exists at {tokenFile} but could not be read.");
-        }
-        catch (IOException)
-        {
-            // POSIX fallback without insecure window — atheriz.py:585-598 fallback to O_TRUNC with 0o600
-            // We try Create with Truncate if CreateNew failed for other reason
-            try
-            {
-                using var fs2 = new FileStream(tokenFile, FileMode.Create, FileAccess.Write, FileShare.None);
-                var data2 = Encoding.UTF8.GetBytes(token);
-                fs2.Write(data2, 0, data2.Length);
-                fs2.Flush();
-                FsUtil.TryChmod0600(tokenFile);
-                return token;
-            }
-            catch { throw; }
         }
     }
 
@@ -154,11 +139,24 @@ public static class AdminToken
         try { expected = File.ReadAllText(tokenFile, Encoding.UTF8).Trim(); }
         catch { return "Token file not found."; }
 
-        if (remoteIp is null || (remoteIp != "127.0.0.1" && remoteIp != "::1" && remoteIp != "::ffff:127.0.0.1"))
+        if (!IsLoopbackIp(remoteIp))
             return $"Remote {action} not allowed.";
 
         if (!ValidateToken(providedToken, expected))
             return "Invalid token.";
         return null;
+    }
+
+    /// <summary>
+    /// Loopback check covering the whole <c>127/8</c> range plus IPv4-mapped forms
+    /// (the old string list missed <c>127.0.0.2</c>, <c>::ffff:7f00:1</c>, etc.).
+    /// </summary>
+    internal static bool IsLoopbackIp(string? remoteIp)
+    {
+        if (remoteIp is null) return false;
+        if (!System.Net.IPAddress.TryParse(remoteIp, out var ip)) return false;
+        if (System.Net.IPAddress.IsLoopback(ip)) return true;
+        if (ip.IsIPv4MappedToIPv6 && System.Net.IPAddress.IsLoopback(ip.MapToIPv4())) return true;
+        return false;
     }
 }
