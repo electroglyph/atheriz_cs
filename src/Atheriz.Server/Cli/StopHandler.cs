@@ -292,6 +292,8 @@ public static class StopHandler
             {
                 if (watchPorts.Contains(ep.Port))
                 {
+                    // Our own server holds these ports; it is stopped below. Anything else aborts.
+                    if (isRunning && pid != null && PidFile.IsProcessListeningOnPort(pid.Value, ep.Port)) continue;
                     Console.WriteLine($"Port {ep.Port} still listening; abort");
                     return;
                 }
@@ -328,8 +330,8 @@ public static class StopHandler
         Console.WriteLine("Setting up new world...");
         try
         {
-            Atheriz.Core.Persistence.AtherizDbContextFactory.DoSetup(savePath);
-            Atheriz.Core.Globals.ObjectRegistry.ClearAll();
+            // Port of atheriz.py reset: local initial_setup.do_setup() with no superuser (limbo world only).
+            Atheriz.Core.InitialSetup.DoSetup(savePath);
             Console.WriteLine("Success! New world created.");
         }
         catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); return; }
