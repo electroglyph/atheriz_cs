@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using Atheriz.Core;
 using Atheriz.Core.Settings;
 using Atheriz.Server.Infrastructure;
 using Microsoft.Extensions.Configuration;
@@ -10,6 +12,7 @@ namespace Atheriz.Server.Cli;
 
 public static class StopHandler
 {
+    internal static AtherizSettings EffectiveSettingsValue => EffectiveSettings;
     private static AtherizSettings? _effectiveCache;
     private static AtherizSettings EffectiveSettings => _effectiveCache ??= LoadEffectiveSettings();
     private static AtherizSettings LoadEffectiveSettings()
@@ -83,13 +86,21 @@ public static class StopHandler
             Console.WriteLine($"Scanning for process listening on port {port}...");
             if (PidFile.TryFindPidListeningOnPort(port, out var foundPid))
             {
-                Console.WriteLine($"Found process {foundPid} listening on port {port}...");
+                string foundName = "process";
+                try { using var pn = Process.GetProcessById(foundPid); foundName = pn.ProcessName; } catch { }
+                Console.WriteLine($"Found process {foundName} (PID: {foundPid}) listening on port {port}...");
                 try
                 {
                     var proc2 = Process.GetProcessById(foundPid);
                     Console.Write($"Stopping server process with PID: {foundPid}...");
-                    try { proc2.Kill(entireProcessTree: false); } catch (Exception ex) { Console.WriteLine($" Failed: {ex.Message}"); return; }
-                    await ProcessHelper.KillProcessWithDots(proc2);
+                    RequestTerminate(proc2);
+                    if (!await WaitForExitDotsAsync(proc2, 30))
+                    {
+                        Console.WriteLine();
+                        Console.Write("Process did not stop in time. Killing...");
+                        try { proc2.Kill(entireProcessTree: false); } catch (Exception ex) { Console.WriteLine($" Failed: {ex.Message}"); return; }
+                        await WaitForExitDotsAsync(proc2, 30);
+                    }
                     Console.WriteLine(" Done.");
                     try
                     {
@@ -108,7 +119,9 @@ public static class StopHandler
         if (pid != null)
         {
             Process? proc = null;
-            try { proc = Process.GetProcessById(pid.Value); } catch { Console.WriteLine("Process from PID file not found; removing stale PID file."); try { File.Delete(pidFilePath); } catch { } return; }
+            try { proc = Process.GetProcessById(pid.Value); }
+            catch (ArgumentException) { Console.WriteLine("Process from PID file not found; removing stale PID file."); try { File.Delete(pidFilePath); } catch { } return; }
+            catch (Exception ex) { Console.WriteLine($"Could not inspect PID {pid.Value}: {ex.Message}"); return; }
             bool listening = PidFile.IsProcessListeningOnPort(pid.Value, port);
             if (!listening) listening = IsPortListeningStatic(port) && PidFile.IsServerProcess(pid.Value);
             if (!listening)
@@ -123,8 +136,13 @@ public static class StopHandler
                 return;
             }
             Console.Write($"Stopping server process with PID: {pid}...");
-            try { proc.Kill(entireProcessTree: false); } catch (Exception ex) { Console.WriteLine($" Failed: {ex.Message}"); return; }
-            await ProcessHelper.KillProcessWithDots(proc);
+            RequestTerminate(proc);
+            if (!await WaitForExitDotsAsync(proc, 50))
+            {
+                Console.Write(" Timeout! Force killing...");
+                try { proc.Kill(entireProcessTree: false); } catch (Exception ex) { Console.WriteLine($" Failed: {ex.Message}"); return; }
+                await WaitForExitDotsAsync(proc, 30);
+            }
             Console.WriteLine(" Done.");
             if (File.Exists(pidFilePath))
             {
@@ -133,11 +151,42 @@ public static class StopHandler
                     bool stillRunning = false;
                     try { stillRunning = !proc.HasExited; } catch { }
                     if (!stillRunning) File.Delete(pidFilePath);
-                    else Console.WriteLine("Warning: Process still exists after kill.");
+                    else Console.WriteLine("\nWarning: Process still exists after kill.");
                 }
                 catch { }
             }
         }
+    }
+
+    // Port of atheriz.py stop_server terminate() (SIGTERM) before kill() (SIGKILL).
+    private static void RequestTerminate(Process proc)
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                if (NativeMethods.kill(proc.Id, 15) == 0) return;
+            }
+        }
+        catch { }
+        try { proc.Kill(entireProcessTree: false); } catch { }
+    }
+
+    private static async Task<bool> WaitForExitDotsAsync(Process proc, int tenths)
+    {
+        for (int i = 0; i < tenths; i++)
+        {
+            try { if (proc.HasExited) return true; } catch { return true; }
+            await Task.Delay(100);
+            Console.Write(".");
+        }
+        try { return proc.HasExited; } catch { return true; }
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("libc", SetLastError = true)]
+        internal static extern int kill(int pid, int sig);
     }
 
     public static async Task HandleReloadAsync(string[] a)
@@ -179,7 +228,9 @@ public static class StopHandler
         catch (Exception ex) { Console.WriteLine($"Error connecting to server: {ex.Message}"); }
     }
 
-    public static async Task HandleRestartAsync(string[] a)
+    // Port of atheriz.py:1112-1161 restart: stop, wait for old PID, then start again.
+    // Returns true when --foreground was given (caller falls through to foreground start).
+    public static async Task<bool> HandleRestartAsync(string[] a)
     {
         var port = ArgumentParser.ParsePort(a);
         var host = ArgumentParser.ParseHost(a);
@@ -201,18 +252,20 @@ public static class StopHandler
         }
         else await Task.Delay(500);
 
-        var startArgs = new List<string> { "start" };
-        if (port != null) { startArgs.Add("--port"); startArgs.Add(port.ToString()!); }
-        if (host != null) { startArgs.Add("--host"); startArgs.Add(host); }
-        if (fg) startArgs.Add("--foreground");
+        if (fg) { Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms"); return true; }
+        var spawnArgs = new List<string>();
+        if (port != null) { spawnArgs.Add("--port"); spawnArgs.Add(port.ToString()!); }
+        if (host != null) { spawnArgs.Add("--host"); spawnArgs.Add(host); }
+        await SpawnDaemonAsync(spawnArgs.ToArray(), Directory.GetCurrentDirectory());
         Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms");
-        Console.WriteLine("Restart: use `dotnet run -- start --foreground` to start again (daemon spawn stub).");
+        return false;
     }
 
     public static async Task HandleResetAsync(string[] a)
     {
         bool force = ArgumentParser.HasFlag(a, "--force", "-f") || ArgumentParser.HasFlag(a, "--yes", null) || ArgumentParser.HasFlag(a, "-y", null);
         var port = ArgumentParser.ParsePort(a) ?? EffectiveSettings.WebserverPort;
+        var host = ArgumentParser.ParseHost(a);
         var savePath = EffectiveSettings.SavePath;
         var pidPath = Path.Combine(savePath, "server.pid");
         bool isRunning = false;
@@ -233,12 +286,14 @@ public static class StopHandler
         {
             var props = IPGlobalProperties.GetIPGlobalProperties();
             var listeners = props.GetActiveTcpListeners();
+            var watchPorts = new List<int> { port };
+            if (EffectiveSettings.TelnetEnabled) watchPorts.Add(EffectiveSettings.TelnetPort);
             foreach (var ep in listeners)
             {
-                if (ep.Port == port)
+                if (watchPorts.Contains(ep.Port))
                 {
-                    Console.WriteLine($"Port {port} still listening; abort");
-                    if (isRunning) return;
+                    Console.WriteLine($"Port {ep.Port} still listening; abort");
+                    return;
                 }
             }
         }
@@ -277,9 +332,12 @@ public static class StopHandler
             Atheriz.Core.Globals.ObjectRegistry.ClearAll();
             Console.WriteLine("Success! New world created.");
         }
-        catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); }
+        catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); return; }
 
-        Console.WriteLine("Reset complete. Start with `dotnet run -- start --foreground`.");
+        // Port of atheriz.py:1629 reset always daemonizes after setup.
+        var resetSpawnArgs = new List<string> { "--port", port.ToString() };
+        if (host != null) { resetSpawnArgs.Add("--host"); resetSpawnArgs.Add(host); }
+        await SpawnDaemonAsync(resetSpawnArgs.ToArray(), Directory.GetCurrentDirectory());
     }
 
     public static async Task HandleCreateAsync(string[] a)
@@ -288,8 +346,9 @@ public static class StopHandler
         var filtered = a.Where((v, i) => !(v == "--port" && i + 1 < a.Length) && !(i > 0 && a[i - 1] == "--port") && !v.StartsWith("--port=", StringComparison.Ordinal)).ToArray();
         if (filtered.Length < 3)
         {
-            Console.WriteLine("Usage: create <accountname> <charactername> <password> [--port N]");
-            return;
+            Console.Error.WriteLine("Usage: atheriz create <accountname> <charactername> <password> [--port N]");
+            Console.Error.WriteLine("atheriz: error: the following arguments are required: accountname, charactername, password");
+            Environment.Exit(2);
         }
         var accName = filtered[0]; var charName = filtered[1]; var pw = filtered[2];
         var portVal = port ?? EffectiveSettings.WebserverPort;
@@ -333,21 +392,8 @@ public static class StopHandler
             Atheriz.Core.Globals.ObjectRegistry.LoadObjects(savePath);
         }
         catch (Exception ex) { Console.WriteLine($"Load failed: {ex.Message}"); }
-        try
-        {
-            var vErr = ValidateAccountName(accName, EffectiveSettings) ?? ValidateCharacterName(charName, EffectiveSettings) ?? ValidatePassword(pw, EffectiveSettings);
-            if (vErr != null) { Console.WriteLine(vErr); return; }
-            var acc = Atheriz.Core.Objects.Account.Create(accName, pw);
-            Atheriz.Core.Globals.ObjectRegistry.AddObject(acc);
-            var hero = Atheriz.Core.Objects.GameObject.Create(charName, isPc: true);
-            acc.AddCharacter(hero);
-            Atheriz.Core.Globals.ObjectRegistry.AddObject(hero);
-            using var db2 = new Atheriz.Core.Persistence.AtherizDbContext(savePath);
-            db2.Database.EnsureCreated();
-            Atheriz.Core.Globals.ObjectRegistry.SaveObjects(db2);
-            Console.WriteLine($"Account '{accName}' and character '{charName}' created (offline).");
-        }
-        catch (Exception ex) { Console.WriteLine($"Failed: {ex.Message}"); }
+        // Port of atheriz.py:1456-1459 offline path: at_char_create against the database.
+        ServerEvents.AtCharCreate(accName, charName, pw);
     }
 
     public static async Task<bool> HandleNewAsync(string[] a)
@@ -362,8 +408,9 @@ public static class StopHandler
         ).ToArray();
         if (filtered.Length < 1)
         {
-            Console.WriteLine("Usage: atheriz-cs new <name>");
-            return false;
+            Console.Error.WriteLine("Usage: atheriz new <foldername> [--port N] [--host HOST] [--foreground|-f]");
+            Console.Error.WriteLine("atheriz: error: the following arguments are required: foldername");
+            Environment.Exit(2);
         }
         var folder = filtered[0];
         var gameName = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -387,7 +434,8 @@ public static class StopHandler
         }
     }
 
-    private static async Task SpawnDaemonAsync(string[] origArgs, string folder)
+    // Port of atheriz.py:1285 spawn_daemon: Popen start --foreground with stdout/stderr to save/server.log.
+    public static async Task SpawnDaemonAsync(string[] origArgs, string folder)
     {
         try
         {
@@ -418,6 +466,7 @@ public static class StopHandler
             var escapedDll = dll.Replace("\"", "\\\"", StringComparison.Ordinal);
             var escapedArgs = string.Join(" ", argList.Select(a => $"\"{a.Replace("\"", "\\\"", StringComparison.Ordinal)}\""));
             var escapedLog = saveLog.Replace("\"", "\\\"", StringComparison.Ordinal).Replace("$", "\\$", StringComparison.Ordinal).Replace("`", "\\`", StringComparison.Ordinal);
+            Console.WriteLine($"Spawning server in background. Logging to: {saveLog}");
             var innerCmd = $"dotnet \"{escapedDll}\" {escapedArgs}";
             var shellCmd = $"nohup {innerCmd} >> \"{escapedLog}\" 2>&1 & echo $!";
             var psi = new ProcessStartInfo
@@ -470,6 +519,7 @@ public static class StopHandler
             }
             if (daemonPid != -1)
             {
+                Console.WriteLine($"Server started with PID: {daemonPid}");
                 Console.WriteLine($"Server starting in background (PID {daemonPid}), log: {saveLog}");
                 var effSettings = EffectiveSettings;
                 int effPort = port ?? effSettings.WebserverPort;
@@ -477,6 +527,8 @@ public static class StopHandler
                 string dispHost = effHost.Contains(':') ? $"[{effHost}]" : effHost;
                 bool hasSsl = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ATHERIZ_SSL_CERTFILE")) || !string.IsNullOrEmpty(effSettings.SslCertFile);
                 string effScheme = hasSsl ? "https" : "http";
+                if (effHost == "0.0.0.0" || effHost == "::") Console.WriteLine($"Web server running on {effScheme}://localhost:{effPort}");
+                else Console.WriteLine($"Web server running on {effScheme}://{dispHost}:{effPort}");
                 Console.WriteLine($"Web server listening on {effScheme}://{dispHost}:{effPort}");
                 if (effSettings.WebsocketEnabled)
                 {
@@ -492,6 +544,8 @@ public static class StopHandler
 
     public static void HandleTest(string[] a)
     {
+        // Port of atheriz.py test: leading 'core' selects the core suite (here: the solution tests).
+        if (a.Length > 0 && a[0] == "core") a = a.Skip(1).ToArray();
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -592,30 +646,5 @@ public static class StopHandler
         }
         catch { }
         return false;
-    }
-
-    private static string? ValidateAccountName(string name, AtherizSettings s)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "Account name must not be empty.";
-        if (name.Length > s.MaxAccountNameLength) return $"Account name too long (max {s.MaxAccountNameLength}).";
-        if (name.Length < 2) return "Account name too short.";
-        if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z0-9_]+$")) return "Account name must be alphanumeric/underscore.";
-        return null;
-    }
-
-    private static string? ValidateCharacterName(string name, AtherizSettings s)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "Character name must not be empty.";
-        if (name.Length > s.MaxCharacterNameLength) return $"Character name too long (max {s.MaxCharacterNameLength}).";
-        if (name.Length < 2) return "Character name too short.";
-        if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z0-9_]+$")) return "Character name must be alphanumeric/underscore.";
-        return null;
-    }
-
-    private static string? ValidatePassword(string pw, AtherizSettings s)
-    {
-        if (pw.Length < s.MinPasswordLength) return $"Password too short (min {s.MinPasswordLength}).";
-        if (pw.Length > s.MaxPasswordLength) return $"Password too long (max {s.MaxPasswordLength}).";
-        return null;
     }
 }

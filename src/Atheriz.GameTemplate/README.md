@@ -25,9 +25,9 @@ dotnet run --project ../src/Atheriz.Server -- --foreground
 Each <100 lines, `namespace MyGame;`, referencing `Atheriz.Core`. They demonstrate the injection pattern via `[EntityReplacement]` attributes processed by `Atheriz.Core.Plugins.PluginLoader`.
 
 Sample instance: `test/` at the repo root is a live game folder generated from this template
-(`test/test.csproj`, `save/`, `secret/`, `web/`). It is included in `Atheriz.sln` under
-solution folder `samples` — `dotnet build Atheriz.sln` builds both the template (`src/Atheriz.GameTemplate`)
-and the sample (`test`). Both share `namespace MyGame`; template is the scaffold source
+(`test/test.csproj`, `save/`, `secret/`, `web/`). It is private owner code: excluded from
+`Atheriz.sln` and the main build per AGENTS.md — build it directly
+(`dotnet build test/test.csproj`) when needed. Both share `namespace MyGame`; template is the scaffold source
 (`GameTemplateGenerator` copies these stubs), sample is the runnable instance.
 
 ## How template discovery works

@@ -6,42 +6,110 @@ using Atheriz.Server.Infrastructure;
 string[] rawArgs = args;
 string command;
 string[] rest;
-if (rawArgs.Length == 0) { command = "start"; rest = Array.Empty<string>(); }
+if (rawArgs.Length == 0) { command = "--help"; rest = Array.Empty<string>(); }
 else if (rawArgs.Length == 1 && (rawArgs[0] == "--help" || rawArgs[0] == "-h")) { command = "--help"; rest = Array.Empty<string>(); }
-else if (rawArgs[0].StartsWith("-", StringComparison.Ordinal)) { command = "start"; rest = rawArgs; }
+else if (rawArgs[0].StartsWith("-", StringComparison.Ordinal)) { Console.Error.WriteLine($"atheriz: error: unrecognized arguments: {string.Join(' ', rawArgs)}"); Environment.Exit(2); command = ""; rest = Array.Empty<string>(); }
 else { command = rawArgs[0]; rest = rawArgs.Skip(1).ToArray(); }
+// Port of atheriz.py:962 main() ArgumentParser: description + subcommands + env-var epilog.
 void PrintHelp()
 {
-    Console.WriteLine("AtheriZ — Text-based multiplayer game server (C# port)");
+    Console.WriteLine("AtheriZ - Text-based multiplayer game server");
     Console.WriteLine("Usage: Atheriz.Server <command> [options]");
-    Console.WriteLine("Commands:");
-    Console.WriteLine("  start [--foreground|-f] [--port N] [--host HOST]   Start server (foreground by default)");
-    Console.WriteLine("  stop [--port N]                                     Stop running server");
-    Console.WriteLine("  restart [--foreground] [--port N] [--host HOST]    Restart server");
-    Console.WriteLine("  reload [--port N]                                    Hot-reload game logic via internal API");
-    Console.WriteLine("  reset [--yes|-f|--force] [--port N] [--host HOST]  Delete all game data and start fresh");
-    Console.WriteLine("  create <account> <char> <password> [--port N]      Create account (delegates to running server if available)");
-    Console.WriteLine("  new <folder> [--overwrite]               Create game folder from template (ports atheriz/new.py:784)");
-    Console.WriteLine("  test [args...]                                       Delegate to `dotnet test`");
-    Console.WriteLine("  --help, -h                                           Show help");
+    Console.WriteLine("Available commands:");
+    Console.WriteLine("  start      Start the AtheriZ server");
+    Console.WriteLine("  restart    Restart the AtheriZ server");
+    Console.WriteLine("  stop       Stop the AtheriZ server");
+    Console.WriteLine("  reload     Hot reload game logic");
+    Console.WriteLine("  reset      Delete all game data and start fresh");
+    Console.WriteLine("  create     Create a new account and character");
+    Console.WriteLine("  new        Create a new game folder with template classes");
+    Console.WriteLine("  test       Run tests. Runs game tests by default, or core tests with 'test core'.");
+    Console.WriteLine("Environment variables (used by 'reset' and 'new'):");
+    Console.WriteLine("  ATHERIZ_SUPERUSER_USERNAME  Superuser username (otherwise prompted).");
+    Console.WriteLine("  ATHERIZ_SUPERUSER_PASSWORD  Superuser password (otherwise prompted).");
+}
+void PrintCommandHelp(string cmd)
+{
+    var defPort = new AtherizSettings().WebserverPort;
+    switch (cmd)
+    {
+        case "start":
+        case "restart":
+            Console.WriteLine($"Usage: Atheriz.Server {cmd} [--port N] [--host HOST] [--foreground|-f]");
+            Console.WriteLine(cmd == "start" ? "  Start the AtheriZ server" : "  Restart the AtheriZ server");
+            Console.WriteLine($"  --port N            Override the webserver port (default: {defPort})");
+            Console.WriteLine("  --host HOST         Override the host interface to bind to");
+            Console.WriteLine("  --foreground, -f    Run the server in the foreground");
+            break;
+        case "stop":
+        case "reload":
+            Console.WriteLine($"Usage: Atheriz.Server {cmd} [--port N]");
+            Console.WriteLine(cmd == "stop" ? "  Stop the AtheriZ server" : "  Hot reload game logic");
+            Console.WriteLine($"  --port N            Override default port (default: {defPort})");
+            break;
+        case "reset":
+            Console.WriteLine($"Usage: Atheriz.Server reset [-f|--force] [--port N] [--host HOST]");
+            Console.WriteLine("  Delete all game data and start fresh");
+            Console.WriteLine("  -f, --force         Skip confirmation prompt");
+            Console.WriteLine($"  --port N            Override default port (default: {defPort})");
+            Console.WriteLine("  --host HOST         Override the host interface to bind to");
+            break;
+        case "create":
+            Console.WriteLine($"Usage: Atheriz.Server create <accountname> <charactername> <password> [--port N]");
+            Console.WriteLine("  Create a new account and character");
+            Console.WriteLine($"  --port N            Override the webserver port of the running server (default: {defPort})");
+            break;
+        case "new":
+            Console.WriteLine($"Usage: Atheriz.Server new <foldername> [--port N] [--host HOST] [--foreground|-f]");
+            Console.WriteLine("  Create a new game folder with template classes, then start the server");
+            Console.WriteLine($"  --port N            Override the webserver port (default: {defPort})");
+            Console.WriteLine("  --host HOST         Override the host interface to bind to");
+            Console.WriteLine("  --foreground, -f    Run the server in the foreground");
+            break;
+        case "test":
+            Console.WriteLine("Usage: Atheriz.Server test [core] [args...]");
+            Console.WriteLine("  Run tests. Runs game tests by default, or core tests with 'test core'.");
+            Console.WriteLine("  Use 'core' as the first argument to run core AtheriZ tests. Any other arguments are passed to dotnet test.");
+            break;
+        default: PrintHelp(); break;
+    }
+}
+if (rest.Contains("--help", StringComparer.Ordinal) || rest.Contains("-h", StringComparer.Ordinal)) { PrintCommandHelp(command); return; }
+// Port of argparse type=int for --port: non-int port is a usage error (exit 2).
+{
+    var badPort = ArgumentParser.ParsePort(rest) == null ? ArgumentParser.InvalidPortValue(rest) : null;
+    if (badPort != null) { Console.Error.WriteLine($"atheriz: error: argument --port: invalid int value: '{badPort}'"); Environment.Exit(2); }
 }
 switch (command)
 {
     case "stop": await StopHandler.HandleStopAsync(rest); return;
     case "reload": await StopHandler.HandleReloadAsync(rest); return;
-    case "restart": await StopHandler.HandleRestartAsync(rest); return;
+    case "restart": { bool fgRestart = await StopHandler.HandleRestartAsync(rest); if (fgRestart) { command = "start"; break; } return; }
     case "reset": await StopHandler.HandleResetAsync(rest); return;
     case "create": await StopHandler.HandleCreateAsync(rest); return;
     case "new": { bool fg = await StopHandler.HandleNewAsync(rest); if (fg) { command = "start"; break; } return; }
     case "test": StopHandler.HandleTest(rest); return;
-    case "--help": case "-h": case "help": PrintHelp(); return;
+    case "--help": case "-h": PrintHelp(); return;
     case "start": break;
-    default: Console.WriteLine($"Unknown command: {command}"); PrintHelp(); return;
+    default: Console.Error.WriteLine($"Unknown command: {command}"); PrintHelp(); Environment.Exit(2); return;
 }
 int? portOverride = ArgumentParser.ParsePort(rest);
 string? hostOverride = ArgumentParser.ParseHost(rest);
 bool foreground = ArgumentParser.HasFlag(rest, "--foreground", "-f");
-if (!foreground && command == "start") { Console.WriteLine("[Server] --foreground not specified; running in foreground (spawn_daemon stub)."); foreground = true; }
+if (!foreground && command == "start")
+{
+    // Port of atheriz.py start default: daemonize unless --foreground (spawn_daemon).
+    var effSpawn = StopHandler.EffectiveSettingsValue;
+    try { Atheriz.Core.Utils.PathGuards.GuardSavePath(effSpawn.SavePath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); return; }
+    try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(effSpawn.SecretPath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); return; }
+    Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(effSpawn.SavePath);
+    Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(effSpawn.SecretPath);
+    int spawnPort = portOverride ?? effSpawn.WebserverPort;
+    if (!PidFile.TryAcquire(effSpawn.SavePath, out var spawnPid, out var spawnReason, spawnPort)) { Console.WriteLine(spawnReason ?? "Failed to acquire PID file."); return; }
+    spawnPid?.Release();
+    await StopHandler.SpawnDaemonAsync(rest, Directory.GetCurrentDirectory());
+    return;
+}
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<AtherizSettings>(builder.Configuration.GetSection("Atheriz"));
 builder.Services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<AtherizSettings>, AtherizSettingsValidator>();

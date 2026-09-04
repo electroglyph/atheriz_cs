@@ -28,6 +28,14 @@ public static class ArgumentParser
         return null;
     }
 
+    // Port of argparse type=int failure for --port (exit 2): raw value present but not an int.
+    public static string? InvalidPortValue(string[] a)
+    {
+        var v = GetOptionValue(a, "--port", "-p", PortPrefix);
+        if (v != null && !int.TryParse(v, out _)) return v;
+        return null;
+    }
+
     public static int? ParseTelnetPort(string[] a)
     {
         var v = GetOptionValue(a, "--telnet-port", null, TelnetPortPrefix);
