@@ -1,5 +1,3 @@
-this is just an experiment with letting a clanker mess around
-
 # AtheriZ — C# Port
 
 C# port of `atheriz` (Python MUD server, v0.9.0) on **.NET 8**. Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included.
@@ -74,15 +72,18 @@ dotnet src/Atheriz.Server/bin/Debug/net8.0/Atheriz.Server.dll create myaccount M
 
 The server also supports `restart` and `test`.
 
+`/health` is liveness; `/ready` returns `ok` only after startup completes (503 while starting).
+
 ## Test
 
 From the repo root:
 
 ```bash
-dotnet test Atheriz.sln              # all ~1955 tests, ~90s
-dotnet test --filter Ported          # just the ported suite (144 Python files)
-dotnet test --filter PortedAccountTests
+dotnet test Atheriz.sln -c Release              # full suite (required after server changes)
+dotnet test tests/Atheriz.Core.Tests/Atheriz.Core.Tests.csproj -c Release --filter FullyQualifiedName~PortedAccountTests
 ```
+
+During iteration, use `--filter` for focused tests; run the full suite once at the end.
 
 ## Configuration
 
@@ -98,11 +99,11 @@ Game folders require `GameSettings.cs` + `*.csproj` (created by `new`). Running 
 Atheriz.sln
 src/
   Atheriz.Core/          # engine
-  Atheriz.Server/        # server + webclient (wwwroot/, web/templates/)
+  Atheriz.Server/        # host (wwwroot/, web/)
   Atheriz.GameTemplate/  # template for `new`
-  webclient/             # webclient source (vite, xterm.js, drawing editor)
+webclient/               # webclient source (vite, xterm.js, drawing editor)
 tests/
-  Atheriz.Core.Tests/    # ported + infra tests
+  Atheriz.Core.Tests/    # engine + server tests
 atheriz.sh / atheriz.cmd # launch wrappers
 build.sh / build.cmd     # build webclient + server
 ```

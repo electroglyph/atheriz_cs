@@ -34,11 +34,11 @@ Sample instance: `test/` at the repo root is a live game folder generated from t
 
 `Atheriz.Server.Infrastructure.GameTemplateGenerator.CreateGameFolder` scaffolds a new folder either by copying these source files (when available) or generating equivalent stubs inline. It mirrors `new.py:create_game_folder` checks: validates folder name is identifier, refuses if target exists and not empty unless `--overwrite`, creates `save/` (POSIX chmod 0o700 try/catch, no Windows ACLs), prints next-steps.
 
-`PluginLoader` (`src/Atheriz.Core/Plugins/PluginLoader.cs`) is the C# analogue of `atheriz/atheriz.py:103 setup_game_folder` + `reloader.py:536` hot-reload. It uses collectible `AssemblyLoadContext(isCollectible:true)` scanning for `[EntityReplacement]` attributes, registering `Dictionary<Type,Type> Replacements`, with `Unload()` + `PatchLiveObjects` stub commenting live FieldInfo copy mirroring `reloader._apply_patch`.
+`PluginLoader` (`src/Atheriz.Core/Plugins/PluginLoader.cs`) is the C# analogue of `atheriz/atheriz.py:103 setup_game_folder` + `reloader.py:536` hot-reload. It uses collectible `AssemblyLoadContext(isCollectible:true)` scanning for `[EntityReplacement]` attributes, registering `Dictionary<Type,Type> Replacements`, with `Unload()`. Live patching lives in `PluginReloader.PatchLiveObjects` + `RewireReferences`, mirroring `reloader._apply_patch` (copy fields into the old instance to preserve identity, then rewire instance-valued stores).
 
 ## Discovery
 
-At runtime, `setup_game_folder` equivalent would call `PluginLoader.Load("MyGame.dll")` to register replacements via DI. Hot-reload: `Unload` + `Load` + `PatchLiveObjects` (reflection FieldInfo copy, skipping session/listeners/command, re-ResolveRelations, excluded `Microsoft.*`/`Atheriz.Core` like `reloader._EXCLUDED_MODULES`). Webclient sync check stays off (`WEBCLIENT_SYNC_CHECK=False`) per spec.
+At runtime, `setup_game_folder` equivalent would call `PluginLoader.Load("MyGame.dll")` to register replacements via DI. Hot-reload: `Unload` + `Load`, then `PluginReloader` patches live objects and rewires references; plugin assemblies outside the exclusion list are loaded like `reloader` loads game modules. Webclient sync check stays off (`WEBCLIENT_SYNC_CHECK=False`) per spec.
 
 ## Conventions
 
