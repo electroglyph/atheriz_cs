@@ -32,7 +32,7 @@ public class AuditSourceRulesShouldBeTests
     }
 
     private static List<(string File, int Line, string Text)> Scan(
-        string[] areas, string pattern, string[]? excludeFiles = null)
+        string[] areas, string pattern, string[]? excludeFiles = null, string? fileNameContains = null)
     {
         var root = SrcRoot();
         var rx = new Regex(pattern);
@@ -45,6 +45,7 @@ public class AuditSourceRulesShouldBeTests
             {
                 if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
                     file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                if (fileNameContains != null && !Path.GetFileName(file).Contains(fileNameContains)) continue;
                 if (excludeFiles != null && excludeFiles.Any(e => file.EndsWith(e))) continue;
                 var lines = File.ReadAllLines(file);
                 bool inBlock = false;
@@ -235,4 +236,52 @@ public class AuditSourceRulesShouldBeTests
     [Fact] public void Org_JsonTableLoader_TwoHelpers() =>
         Assert.True(Scan(["Atheriz.Core/Persistence"], @"public static .*Load\w+").Count <= 2,
             "JsonTableLoader keeps two helpers (buffered + lock-aware), not four");
+
+    // --- §6 D8 leftovers with zero behavioral delta (structural oracles) ---
+
+    [Fact] public void Dup_JsonConverters_Unified() =>
+        Assert.True(Scan(["Atheriz.Core/Network"], @"static\s+\S.*\sJsonElementTo(Object|List|Dict)\s*\(").Count <= 1,
+            "JsonElement converters must be one family, not Local + List/Dict/Object");
+
+    [Fact] public void Dup_MapWebSocketAlias_Removed() =>
+        Assert.True(Scan(["Atheriz.Server/Hosting"], @"MapWebSocketAsync").Count == 0,
+            "MapWebSocketAsync duplicates the entry point; delete the alias");
+
+    [Fact] public void Dup_GameTemplateCtorOverload_Removed() =>
+        Assert.True(Scan(["Atheriz.Server/Infrastructure"], @"public static void CreateGameFolder").Count <= 1,
+            "the (string,string,bool) CreateGameFolder overload is a pointless alias");
+
+    [Fact] public void Dup_SeqConsumeAck_Unified() =>
+        Assert.True(Scan(["Atheriz.Core/Network"], @"ConsumeOrReply").Count > 0,
+            "the 3x seq/key/consume/ack cycle must be one ConsumeOrReply() helper");
+
+    [Fact] public void Dup_GetAllDistinct_Removed() =>
+        Assert.True(Scan(["Atheriz.Core/Commands"], @"GetAllDistinct").Count == 0,
+            "unused GetAllDistinct duplicates GetAll; delete it");
+
+    [Fact] public void Dup_CommandKeys_SingleCaseInsensitiveDict() =>
+        Assert.True(Scan(["Atheriz.Core/Network"], @"OrdinalIgnoreCase", fileNameContains: "ConnectionManager.cs").Count > 0,
+            "case-insensitive dispatch must be one OrdinalIgnoreCase dict, not Pascal+lower key triplication");
+
+    // --- §7 host nits with structural oracles ---
+
+    [Fact] public void Host_KestrelBadHost_ThrowsInsteadOfBindingAnywhere() =>
+        Assert.True(Scan(["Atheriz.Server/Hosting"], @"ip = IPAddress\.Any", fileNameContains: "KestrelConfig.cs").Count == 0,
+            "unparseable listen host must throw, not silently bind 0.0.0.0");
+
+    [Fact] public void Host_ShutdownClient_Unified() =>
+        Assert.True(Scan(["Atheriz.Server/Cli"], @"PostAdminAsync").Count > 0,
+            "the 3x HTTP shutdown client must be one PostAdminAsync helper");
+
+    [Fact] public void Host_NoEnvironmentExit_InCli() =>
+        Assert.True(Scan(["Atheriz.Server/Cli"], @"Environment\.Exit").Count == 0,
+            "Environment.Exit must not live in a library method (HandleTest)");
+
+    [Fact] public void Host_RestartForwardsForegroundFlag() =>
+        Assert.True(Scan(["Atheriz.Server/Cli"], @"Task<bool> HandleRestartAsync", fileNameContains: "RestartHandler.cs").Count > 0,
+            "RestartHandler must preserve StopHandler's Task<bool> foreground flag");
+
+    [Fact] public void Host_PidFile_Fsyncs() =>
+        Assert.True(Scan(["Atheriz.Server/Infrastructure"], @"Flush\(true\)", fileNameContains: "PidFile.cs").Count > 0,
+            "pid file must Flush(true) like AdminToken (crash can leave an empty pid file)");
 }

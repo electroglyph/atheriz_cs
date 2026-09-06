@@ -7,6 +7,9 @@ using Atheriz.Core.Settings;
 using Atheriz.Core.Tests;
 using Atheriz.Core.Tests.Ported;
 using Atheriz.Server.Cli;
+using Atheriz.Server.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Atheriz.Server.Infrastructure;
 
 namespace Atheriz.Core.Tests.Audit;
@@ -328,5 +331,132 @@ public class AuditSocketLoopbackShouldBeTests
         finally { Console.SetOut(orig); }
         var text = sw.ToString();
         Assert.DoesNotContain("Python identifier", text);
+    }
+
+    // --- B29: fragmented-accumulation working set (Kestrel pump path) ---
+
+    private sealed class StaticWsFeature : IHttpWebSocketFeature
+    {
+        private readonly WebSocket _ws;
+        public StaticWsFeature(WebSocket ws) => _ws = ws;
+        public bool IsWebSocketRequest => true;
+        public Task<WebSocket> AcceptAsync(WebSocketAcceptContext context) => Task.FromResult(_ws);
+    }
+
+    [Fact]
+    public async Task Ws_FragmentedOversize_StreamsWithoutAccumulating()
+    {
+        // audit B29: HandleAsync appends every fragment to a MemoryStream and
+        // checks the size only after EndOfMessage — a 3 MB fragmented message
+        // allocates payload + ToArray + string (~12 MB) before rejection. A
+        // streaming gate must reject with only fragment-sized working set.
+        // Drives the REAL pump via DefaultHttpContext + injected socket
+        // feature (no Kestrel needed); measures process heap, so the 20x
+        // margin absorbs background noise.
+        var listener = new HttpListener();
+        int port = FreePort();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/ws/");
+        listener.Start();
+        var mgr = PortedHelpers.MakeManager();
+        ConnectionManager.GlobalInstance = mgr;
+        ClientWebSocket? client = null;
+        WebSocket? serverWs = null;
+        try
+        {
+            var acceptTask = listener.GetContextAsync();
+            client = new ClientWebSocket();
+            await client.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws/"), CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            var ctx = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+            serverWs = (await ctx.AcceptWebSocketAsync(subProtocol: null).WaitAsync(TimeSpan.FromSeconds(5))).WebSocket;
+
+            var settings = new AtherizSettings { WebsocketMaxMessageSize = 100_000 };
+            var http = new DefaultHttpContext();
+            http.Connection.RemoteIpAddress = IPAddress.Loopback;
+            http.Features.Set<IHttpWebSocketFeature>(new StaticWsFeature(serverWs));
+            var payload = new byte[3_000_000];
+            Array.Fill(payload, (byte)'x');
+
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true);
+            long before = GC.GetTotalMemory(true);
+            var handleTask = WebSocketHandler.HandleAsync(http, settings);
+            await client.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+            WebSocketReceiveResult? closeResult = null;
+            try
+            {
+                closeResult = await client.ReceiveAsync(new ArraySegment<byte>(new byte[1024]), CancellationToken.None)
+                    .WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (TimeoutException) { }
+            await handleTask.WaitAsync(TimeSpan.FromSeconds(10));
+            long after = GC.GetTotalMemory(true);
+            Assert.NotNull(closeResult);
+            Assert.Equal(WebSocketMessageType.Close, closeResult!.MessageType);
+            Assert.True(after - before < 600_000,
+                $"fragmented oversize must stream, allocated {after - before} bytes for a 3 MB message");
+        }
+        finally
+        {
+            try { client?.Abort(); } catch { }
+            try { serverWs?.Abort(); } catch { }
+            try { client?.Dispose(); } catch { }
+            try { serverWs?.Dispose(); } catch { }
+            try { listener.Stop(); } catch { }
+            mgr.Atp.Stop(wait: false);
+            ConnectionManager.GlobalInstance = null;
+        }
+    }
+
+    // --- B30: parser complexity ---
+
+    [Fact]
+    public async Task Telnet_LongLine_ParsesInLinearTime()
+    {
+        // audit B30: buf += chunk / Substring per line is O(n²). An 8 MB
+        // single line must parse in linear time (quadratic needs ~10 s+ here;
+        // linear needs < 1 s). Calibrated red: fails while quadratic.
+        var input = new string('a', 8 << 20) + "\n";
+        var sw = Stopwatch.StartNew();
+        int count = 0;
+        await foreach (var line in TelnetProtocol.ReadCappedLines(new System.IO.StringReader(input), 1 << 24))
+        {
+            count++;
+            Assert.NotNull(line);
+        }
+        sw.Stop();
+        Assert.Equal(1, count);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(8), $"8 MB line took {sw.Elapsed} (quadratic)");
+    }
+
+    // --- B33/host: prompted create on closed stdin ---
+
+    [Fact]
+    public void GameTemplate_PromptedCreate_CompletesOnClosedStdin()
+    {
+        // Pin: with stdin at EOF, the existing-folder prompt aborts instead of
+        // hanging. (A real terminal with no input blocks in ReadLine — that
+        // needs a pty and is environmental, not unit-testable.)
+        var dir = Path.Combine(Path.GetTempPath(), "atheriz_tmplin_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var origIn = Console.In;
+        var origOut = Console.Out;
+        var sb = new StringWriter();
+        Console.SetIn(new StringReader(""));
+        Console.SetOut(sb);
+        try
+        {
+            var task = Task.Run(() => GameTemplateGenerator.CreateGameFolder(dir));
+            Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "prompted create must not hang on closed stdin");
+            Assert.Contains("Aborted", sb.ToString());
+        }
+        finally
+        {
+            Console.SetIn(origIn);
+            Console.SetOut(origOut);
+            try { Directory.Delete(dir, true); } catch { }
+        }
     }
 }
