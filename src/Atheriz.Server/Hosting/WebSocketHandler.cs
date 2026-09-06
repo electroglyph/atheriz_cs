@@ -39,7 +39,7 @@ public static class WebSocketHandler
         try
         {
             var buffer = new byte[8192];
-            // Streaming size gate (audit B29): fragments are measured as they
+            // Streaming size gate: fragments are measured as they
             // arrive and the message is abandoned as soon as it exceeds the
             // limit — never accumulate an unbounded MemoryStream before the
             // post-hoc check below (which stays as a backstop).

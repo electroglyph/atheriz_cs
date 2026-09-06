@@ -103,7 +103,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     private void SetFlag(string name, bool value) => Write(() => { if (_flags.TrySet(name, value)) _flags.IsModified = true; });
 
-    // --- scoped lock helpers (audit P2-10: hide public Lock via private + scoped helpers) ---
+    // --- scoped lock helpers (private lock with scoped read/write helpers) ---
     public IDisposable ReadScope()
     {
         _lock.EnterReadLock();

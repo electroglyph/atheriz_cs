@@ -58,7 +58,7 @@ public sealed class WebSocketConnection : BaseConnection
     private void TaskDone(Task task)
     {
         _limiter.Release(task);
-        // Avoid GetAwaiter().GetResult() blocking; inspect fault directly (fix audit: blocking call)
+        // Avoid GetAwaiter().GetResult() blocking; inspect fault directly
         if (task.IsFaulted)
         {
             var ex = task.Exception?.InnerException ?? task.Exception;
@@ -69,7 +69,7 @@ public sealed class WebSocketConnection : BaseConnection
     }
 
     // port of websocket.py:68-70 _locked_send — bounded: a hung peer must not
-    // pin _sendLock (and stall all later sends) forever (audit B29).
+    // pin _sendLock (and stall all later sends) forever.
     private async Task LockedSendAsync(string data)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -144,7 +144,7 @@ public sealed class WebSocketConnection : BaseConnection
         }
         try
         {
-            // Bounded close handshake (audit B29): a peer that never answers
+            // Bounded close handshake: a peer that never answers
             // must not hang Close forever. Abort past the deadline.
             if (WebSocket.State == WebSocketState.Open)
             {
@@ -411,7 +411,7 @@ public sealed class WebSocketProtocol : Protocol
     private sealed class FallbackConnection : BaseConnection
     {
         public FallbackConnection(string? sid) : base(sid) { }
-        // No real peer exists: dropping silently loses messages, so log loudly (audit B29).
+        // No real peer exists: dropping silently loses messages, so log loudly.
         public override void SendCommand(string cmd, List<object?>? args = null, Dictionary<string, object?>? kwargs = null)
         {
             try { Atheriz.Core.AtherizLogger.LogWarning($"[WebSocket] dropping command '{cmd}': no real peer (fallback connection)"); }

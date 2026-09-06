@@ -6,8 +6,11 @@ using System.Reflection;
 
 namespace Atheriz.Core.Tests.Ported;
 
+// Behavior pins for command dispatch and object state: quit aliases, screenreader
+// silence, help aliases, ban-reason extra fields, unpuppet messaging, give offline
+// handling, and create-to-inventory placement.
 [Collection("Ported")]
-public class DeepAuditTests
+public class ObjectExtraFieldTests
 {
     private static void SetExtra(GameObject obj, string key, object? value)
     {
@@ -107,7 +110,7 @@ public class DeepAuditTests
     public void Puppet_UnpuppetNoMessage()
     {
         using var env = GlobalTestEnv.Enter();
-        // Verify Unpuppet does not send "You return..." 
+        // Verify Unpuppet does not send "You return..."
         var cmd = CommandRegistry.LoggedIn.Get("unpuppet");
         Assert.NotNull(cmd);
         // run with no puppet should give "You are not puppeting anything."

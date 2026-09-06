@@ -9,13 +9,11 @@ using Atheriz.Core.Persistence.Dto;
 using Atheriz.Core.Settings;
 using Atheriz.Core.Tests;
 
-namespace Atheriz.Core.Tests.Audit;
+namespace Atheriz.Core.Tests.Features.Commands;
 
-// Should-be tests for audit §2 B2/B4-B10 (+B6 door settings, B1-adjacent parser
-// coverage lives in AuditContainmentMoveShouldBeTests). Fails while the bug is
-// present, passes once fixed. Production code is untouched.
+// Tests for logged-in command behavior: set/unset guards, channel/spam/door/say/emote/unban commands, CmdSet dispatch.
 [Collection("Ported")]
-public class AuditCommandShouldBeTests
+public class LoggedInCommandTests
 {
     private static void RunJob(CommandDispatcher.Job? job)
     {
@@ -23,14 +21,14 @@ public class AuditCommandShouldBeTests
         job!.Func(job.Caller, job.Args);
     }
 
-    // --- B2: set/unset protected-attribute bypass ---
+    // --- set/unset protected-attribute guards ---
 
     [Fact]
     public void Set_CaseVariantOfProtectedFlag_DoesNotEscalate()
     {
-        // audit B2: the Protected guard is case-insensitive while property
-        // resolution stays case-sensitive (Python parity for junk attrs), so
-        // no spelling of a protected flag can be set by a non-superuser.
+        // Protected guard is case-insensitive while property resolution stays
+        // case-sensitive (Python parity for junk attrs), so no spelling of a
+        // protected flag can be set by a non-superuser.
         ObjectRegistry.ClearAll();
         try
         {
@@ -47,7 +45,7 @@ public class AuditCommandShouldBeTests
     [Fact]
     public void Set_QuelledCaseVariant_DoesNotEscalate()
     {
-        // audit B2: same guard for the quelled flag (which gates IsBuilder /
+        // Same guard covers the quelled flag (which gates IsBuilder /
         // IsSuperUser themselves).
         ObjectRegistry.ClearAll();
         try
@@ -65,7 +63,7 @@ public class AuditCommandShouldBeTests
     [Fact]
     public void Set_LowercaseProtectedFlag_IsRejectedForNonSuperuser()
     {
-        // Pin: the exact-lowercase spelling is already guarded.
+        // Exact-lowercase spelling is already guarded.
         ObjectRegistry.ClearAll();
         try
         {
@@ -82,11 +80,11 @@ public class AuditCommandShouldBeTests
     [Fact]
     public void Set_LocationGuard_LowercaseRedirects_CanonicalIsReadOnly()
     {
-        // audit B2: the location guard list is Ordinal (as in set.py:154), so
-        // lowercase "location" redirects to move/teleport. "Location" is the
-        // canonical C# property name, so it resolves — but a string can never
-        // convert to LocationRef, hence read-only. Either way the location is
-        // never set directly.
+        // Location guard list is Ordinal (as in set.py:154), so lowercase
+        // "location" redirects to move/teleport. "Location" is the canonical
+        // C# property name, so it resolves — but a string can never convert
+        // to LocationRef, hence read-only. Either way the location is never
+        // set directly.
         ObjectRegistry.ClearAll();
         try
         {
@@ -107,9 +105,9 @@ public class AuditCommandShouldBeTests
     [Fact]
     public void Unset_LocationGuard_LowercaseRedirects_CanonicalIsReadOnly()
     {
-        // audit B2: lowercase "location" redirects (unset.py:230); the
-        // canonical C# property resolves but is not removable — read-only.
-        // Either way it is never removed directly.
+        // Lowercase "location" redirects (unset.py:230); the canonical C#
+        // property resolves but is not removable — read-only. Either way it
+        // is never removed directly.
         ObjectRegistry.ClearAll();
         try
         {
@@ -129,7 +127,7 @@ public class AuditCommandShouldBeTests
     [Fact]
     public void Unset_LowercaseProtectedFlag_IsReadOnlyForNonSuperuser()
     {
-        // Pin: exact-lowercase unset of a protected flag is already refused.
+        // Exact-lowercase unset of a protected flag is already refused.
         ObjectRegistry.ClearAll();
         try
         {
@@ -142,13 +140,13 @@ public class AuditCommandShouldBeTests
         finally { ObjectRegistry.ClearAll(); }
     }
 
-    // --- B4: ChannelCommand phantom channel ---
+    // --- channel handling ---
 
     [Fact]
     public void Channel_NonChannelRegistryObject_IsNotCachedAsTransient()
     {
-        // audit B4: when the registry object has IsChannel set but is not a
-        // Channel instance, a fabricated transient is cached under the name.
+        // When the registry object has IsChannel set but is not a Channel
+        // instance, no fabricated transient is cached under the name.
         ObjectRegistry.ClearAll();
         ChannelCommand.ClearCache();
         try
@@ -167,13 +165,13 @@ public class AuditCommandShouldBeTests
         finally { ChannelCommand.ClearCache(); ObjectRegistry.ClearAll(); }
     }
 
-    // --- B5: SpamCommand validation ---
+    // --- spam command ---
 
     [Fact]
     public void Spam_ZeroCount_ReportsCreatedZero()
     {
-        // audit B5, corrected for Python parity (spam.py: has no count<=0
-        // validation; the loop simply runs zero times and reports Created 0).
+        // Python parity (spam.py: has no count<=0 validation; the loop simply
+        // runs zero times and reports Created 0).
         using var env = GlobalTestEnv.Enter();
         var origSave = AtherizSettings.Global.SavePath;
         var tmp = Path.Combine(env.TempPath, "spamdir");
@@ -191,13 +189,13 @@ public class AuditCommandShouldBeTests
         finally { AtherizSettings.Global.SavePath = origSave; }
     }
 
-    // --- B6: DoorCommand stale-default settings ---
+    // --- door glyph settings ---
 
     [Fact]
     public void Door_Create_UsesGlobalGlyphSettings()
     {
-        // audit B6: DoorCommand reads AtherizSettings.Default while MapOpen /
-        // MapClose use Global, so mutated Global glyphs are ignored at create.
+        // Door creation uses the current Global glyph settings, matching
+        // MapOpen / MapClose.
         using var env = GlobalTestEnv.Enter();
         var orig = AtherizSettings.Global.NsClosedDoor;
         AtherizSettings.Global.NsClosedDoor = "GLOBTEST";
@@ -222,27 +220,26 @@ public class AuditCommandShouldBeTests
         finally { AtherizSettings.Global.NsClosedDoor = orig; NodeHandler.SetCurrent(null); }
     }
 
-    // --- B7: dispatcher NoAlias omits x ---
+    // --- dispatcher NoAlias commands ---
 
     [Fact]
     public void Dispatcher_NoAliasCommands_MatchesPython()
     {
-        // audit B7, corrected: Python's _NO_ALIAS_COMMANDS (inputfuncs.py:16)
-        // is exactly ["n","s","e","w","u","d"] — "x" is a build direction but
-        // is NOT no-alias in either implementation. Pins parity.
+        // Python's _NO_ALIAS_COMMANDS (inputfuncs.py:16) is exactly
+        // ["n","s","e","w","u","d"] — "x" is a build direction but is NOT
+        // no-alias in either implementation. Pins parity.
         var f = typeof(CommandDispatcher).GetField("NoAliasCommands", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(f);
         var arr = Assert.IsAssignableFrom<string[]>(f!.GetValue(null));
         Assert.Equal(new[] { "n", "s", "e", "w", "u", "d" }, arr);
     }
 
-    // --- B8: CmdSet case + registry staleness ---
+    // --- CmdSet lookup and registry freshness ---
 
     [Fact]
     public void CmdSet_Get_IsCaseInsensitive()
     {
-        // audit B8: the dict is Ordinal; only the dispatcher's lower-casing
-        // hides it. Mixed-case alias lookups break.
+        // Lookups are case-insensitive, so mixed-case alias lookups succeed.
         var set = new CmdSet();
         set.Add(new SayCommand());
         Assert.NotNull(set.Get("SAY"));
@@ -252,10 +249,9 @@ public class AuditCommandShouldBeTests
     [Fact]
     public void Registry_UnloggedIn_ReflectsDisabledGuestSetting()
     {
-        // audit B8: RegisterUnloggedIn snapshots Global.*Enabled once; later
-        // flips (e.g. disabling guests) had no effect until ResetForTesting.
-        // Fixed at dispatch time: a disabled verb falls through to the none
-        // fallback ("not found") instead of running the stale command.
+        // A disabled verb falls through to the none fallback ("not found")
+        // instead of running a stale command, even after Global.*Enabled
+        // flips (e.g. disabling guests).
         using var env = GlobalTestEnv.Enter();
         var orig = AtherizSettings.Global.GuestEnabled;
         AtherizSettings.Global.GuestEnabled = true;
@@ -274,13 +270,13 @@ public class AuditCommandShouldBeTests
         finally { AtherizSettings.Global.GuestEnabled = orig; CommandRegistry.ResetForTesting(); }
     }
 
-    // --- B9: silent returns + none fallback ---
+    // --- say/emote refusal and unknown-command fallback ---
 
     [Fact]
     public void Say_NonPuppetCaller_GetsRefusalMessage()
     {
-        // audit B9: SayCommand silently returns for non-GameObject callers;
-        // every other command sends "You can't do that."
+        // SayCommand sends "You can't do that." for non-GameObject callers,
+        // like every other command.
         var conn = new TestConnection();
         var cmd = new SayCommand();
         var (func, caller, args) = cmd.Execute(conn, "hi there");
@@ -292,7 +288,7 @@ public class AuditCommandShouldBeTests
     [Fact]
     public void Emote_NonPuppetCaller_GetsRefusalMessage()
     {
-        // audit B9: same silent return in EmoteCommand.
+        // Same refusal behavior in EmoteCommand.
         var conn = new TestConnection();
         var cmd = new EmoteCommand();
         var (func, caller, args) = cmd.Execute(conn, "smiles");
@@ -304,8 +300,8 @@ public class AuditCommandShouldBeTests
     [Fact]
     public void None_UnknownCommand_SuggestsClosestMatch()
     {
-        // Pin: the UseParser=false fallback suggests the closest verb
-        // (covers StringDistance.BestMatch end to end).
+        // The UseParser=false fallback suggests the closest verb (covers
+        // StringDistance.BestMatch end to end).
         ObjectRegistry.ClearAll();
         try
         {
@@ -318,13 +314,13 @@ public class AuditCommandShouldBeTests
         finally { ObjectRegistry.ClearAll(); }
     }
 
-    // --- B10: Unban dead privates ---
+    // --- unban helpers and ban clearing ---
 
     [Fact]
     public void UnbanCommand_DeadPrivateReasonHelpers_AreRemoved()
     {
-        // audit B10: UnbanCommand.ClearBanReason/SetBanReason are never called
-        // (the live path uses BanReasonHelper, which diverges); dead code must go.
+        // UnbanCommand has no ClearBanReason/SetBanReason helpers; the live
+        // path uses BanReasonHelper.
         var t = typeof(UnbanCommand);
         Assert.Null(t.GetMethod("ClearBanReason", BindingFlags.NonPublic | BindingFlags.Static));
         Assert.Null(t.GetMethod("SetBanReason", BindingFlags.NonPublic | BindingFlags.Static));
@@ -333,7 +329,7 @@ public class AuditCommandShouldBeTests
     [Fact]
     public void Unban_ClearsBanReasonExtra()
     {
-        // Pin: the live helper path clears the ban_reason extra.
+        // The live helper path clears the ban_reason extra.
         ObjectRegistry.ClearAll();
         try
         {

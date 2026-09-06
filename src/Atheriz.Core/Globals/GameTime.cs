@@ -17,7 +17,7 @@ namespace Atheriz.Core.Globals;
 /// </summary>
 public class GameTime
 {
-    // Audit P2-10: GameTime previously SupportsRecursion exposed as public Lock; now hidden behind private _lock with SupportsRecursion for re-entrant test paths (Ticks setter inside Lock)
+    // Private _lock with SupportsRecursion for re-entrant paths (Ticks setter inside Lock)
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);
     public ReaderWriterLockSlim SyncRoot => _lock;
     // Compat: keep public Lock for Ported tests (now delegates to private _lock); new code should use SyncRoot/ReadScope/WriteScope
@@ -107,7 +107,7 @@ public class GameTime
             try { dto = JsonSerializer.Deserialize<GameTimePersistDto>(row.Data, JsonOptions.Default); }
             catch (Exception ex)
             {
-                // Per-row report (audit B20): corrupt ticks zero out loudly, not silently.
+                // Per-row report: corrupt ticks zero out loudly, not silently.
                 try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch { }
                 _lock.EnterWriteLock();
                 try { _ticks = 0; _alarms.Clear(); }
@@ -269,7 +269,7 @@ public class GameTime
         minute = minute.ToString();
         // Clone elements on the way in: JsonElement borrows its source
         // JsonDocument, so storing the caller's dictionary would dangle once
-        // the caller disposes its document (audit B24). Clone throws here for
+        // the caller disposes its document. Clone throws here for
         // already-dead input — fail fast at the boundary, not at save time.
         Dictionary<string, JsonElement>? owned = null;
         if (data != null)
@@ -410,7 +410,7 @@ public class GameTime
     {
         // Same lock discipline as Start/Stop: only clear state when stopping
         // the ticker this instance runs on, so concurrent Start(t)/Stop(other)
-        // cannot orphan the coro (audit B24).
+        // cannot orphan the coro.
         bool ours;
         lock (_startLock)
         {

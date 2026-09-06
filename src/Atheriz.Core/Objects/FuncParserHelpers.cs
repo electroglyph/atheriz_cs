@@ -173,7 +173,7 @@ public static class FuncParserHelpers
     public static IEnumerable<object?> MakeIter(object? o) => IsIter(o) ? ((System.Collections.IEnumerable)o!).Cast<object?>() : new[] { o };
 
     // Unified on GameUtils.CopyWordCase (verbatim port of utils.py:895
-    // copy_word_case); the local variant diverged subtly (audit D8).
+    // copy_word_case); the local variant had diverged subtly, so delegate to the single implementation.
     public static string CopyWordCase(string src, string dst) =>
         global::Atheriz.Core.Utils.GameUtils.CopyWordCase(src, dst);
 

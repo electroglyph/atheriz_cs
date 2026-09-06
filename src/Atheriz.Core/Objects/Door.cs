@@ -246,7 +246,7 @@ public class Door
     }
     // Port of base_door.py:106 wrapper for spec.
     // A null caller bypasses access/map/hooks, so the fallback is an explicit
-    // ForceOpen (audit F007); the no-arg form stays for compat.
+    // ForceOpen explicitly; the no-arg form stays for compat.
     public bool Open(GameObject? caller = null) => caller != null ? TryOpen(caller) : ForceOpen();
     public bool ForceOpen()
     {

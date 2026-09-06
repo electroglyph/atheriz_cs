@@ -158,7 +158,7 @@ public class MapInfo
     public List<LegendEntry> LegendEntries { get; } = new();
     public Dictionary<int, GameObject> Objects { get; } = new();
     public Dictionary<int, GameObject> Listeners { get; } = new();
-    // Audit P2-10: hide public Lock, use NoRecursion (no re-entrant path; snapshots used)
+    // Lock uses NoRecursion (no re-entrant path; snapshots used)
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     public ReaderWriterLockSlim SyncRoot => _lock;
     // Compat: keep public Lock for Ported tests (now delegates to private _lock); new code should use SyncRoot/ReadScope/WriteScope
@@ -840,7 +840,7 @@ public class MapInfo
 /// </summary>
 public class MapHandler
 {
-    // Audit P2-10: hide public Lock, use NoRecursion (no re-entrant path; snapshots used)
+    // Lock uses NoRecursion (no re-entrant path; snapshots used)
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     public ReaderWriterLockSlim SyncRoot => _lock;
     // Compat: keep public Lock for Ported tests (now delegates to private _lock); new code should use SyncRoot/ReadScope/WriteScope
@@ -896,7 +896,7 @@ public class MapHandler
             var buffer = new Dictionary<(string, int), MapInfo>();
             JsonTableLoader.LoadList(db.MapData, json => JsonSerializer.Deserialize<MapInfo.MapInfoPersistDto>(json, JsonOptions.Default), (dto, row) =>
             {
-                // Per-row report (audit B20): corrupt chunks are skipped, never silent.
+                // Per-row report: corrupt chunks are skipped, never silent.
                 try
                 {
                     var mi = dto!.ToDomain(_settings);

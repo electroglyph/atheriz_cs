@@ -62,7 +62,7 @@ public static class StartStop
             Console.Error.WriteLine($"DoStartup LoadObjects failed:\n{ex}");
         }
 
-        // Crash-consistency check (audit A7): a dirty journal means the
+        // Crash-consistency check: a dirty journal means the
         // previous checkpoint died between tables — the world may be torn.
         // Boot continues (availability), but the torn state is surfaced loudly.
         try
@@ -455,7 +455,7 @@ public static class StartStop
     // Faithful: uses ShutdownStep per save, mirroring Python _shutdown_step
     private static void SaveWorld(AtherizSettings settings)
     {
-        // Crash-consistency journal (audit A7): see AutosaveTick.
+        // Crash-consistency journal: see AutosaveTick.
         Persistence.CheckpointJournal.MarkDirty(settings.SavePath);
         bool ok = true;
         ShutdownStep("save_objects", () =>

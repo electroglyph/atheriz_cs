@@ -7,7 +7,7 @@ public static class ProcessHelper
     public static async Task KillProcessWithDots(Process proc)
     {
         // Actually terminate first (the old code only waited); then wait for
-        // exit with progress dots (audit B33).
+        // exit with progress dots.
         try { if (!proc.HasExited) proc.Kill(); } catch { }
         for (int i = 0; i < 50; i++)
         {

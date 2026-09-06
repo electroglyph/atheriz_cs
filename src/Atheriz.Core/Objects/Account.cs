@@ -117,7 +117,7 @@ public class Account : GameObject
     public bool Login(string name, string password, string? saltOverride = null)
     {
         // Snapshot under a read lock, verify outside: PBKDF2 is ~100ms of CPU and
-        // must not block all readers under the write lock (audit F007). Python
+        // must not block all readers under the write lock. Python
         // holds its RLock throughout, but C# readers would starve; last-writer-wins
         // on _loggedIn preserves the observable outcome.
         string curName;

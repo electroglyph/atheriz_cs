@@ -4,14 +4,13 @@ using Atheriz.Core.Settings;
 using Atheriz.Core.Utils;
 using TimeProvider = Atheriz.Core.Utils.TimeProvider;
 
-namespace Atheriz.Core.Tests;
+namespace Atheriz.Core.Tests.Features.Utils;
 
-// Should-be tests for audit §3.1 (zero-behavioral-test files) + D1/D2 validator + guard
-// duplication. Each test asserts the behavior the code SHOULD have; a failure confirms
-// the audit finding is real. Pure functions only — no engine globals touched.
-public sealed class AuditUtilsShouldBeTests
+// Behavior specifications for validation and parsing helpers: each test asserts
+// the behavior the code should have. Pure functions only — no engine globals touched.
+public sealed class ValidationTests
 {
-    // --- CryptoRandom (audit §3.1: UInt64String/UrlSafeToken/HexToken unpinned) ---
+    // --- CryptoRandom: unpredictable decimal, URL-safe, and hex token generation ---
 
     [Fact]
     public void CryptoRandom_UInt64String_IsDecimalUInt64()
@@ -54,13 +53,13 @@ public sealed class AuditUtilsShouldBeTests
     [Fact]
     public void CryptoRandom_NegativeBytes_ThrowsArgumentOutOfRange()
     {
-        // Should-be: public int-bytes API validates input with ArgumentOutOfRangeException,
+        // Contract: public int-bytes API validates input with ArgumentOutOfRangeException,
         // not OverflowException/OutOfMemoryException from `new byte[bytes]`.
         Assert.Throws<ArgumentOutOfRangeException>(() => CryptoRandom.UrlSafeToken(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => CryptoRandom.HexToken(-1));
     }
 
-    // --- StringDistance (audit §3.1: Levenshtein/BestMatch entirely unpinned) ---
+    // --- StringDistance: edit distance and closest-match selection ---
 
     [Fact]
     public void StringDistance_Levenshtein_KnownDistances()
@@ -88,14 +87,14 @@ public sealed class AuditUtilsShouldBeTests
     [Fact]
     public void StringDistance_NullInput_ThrowsArgumentNull()
     {
-        // Should-be: non-nullable string params guard with ArgumentNullException, not NRE.
+        // Contract: non-nullable string params guard with ArgumentNullException, not NRE.
         Assert.Throws<ArgumentNullException>(() => StringDistance.Levenshtein(null!, "a"));
         Assert.Throws<ArgumentNullException>(() => StringDistance.Levenshtein("a", null!));
         Assert.Throws<ArgumentNullException>(() => StringDistance.BestMatch(null!, new[] { "a" }));
         Assert.Throws<ArgumentNullException>(() => StringDistance.BestMatch("a", null!));
     }
 
-    // --- Coord.TryParse (audit §3.2: only 2 equality facts, 6 parse branches unpinned) ---
+    // --- Coord.TryParse: area and coordinate parsing across supported forms ---
 
     [Fact]
     public void Coord_TryParse_AreaParenForm()
@@ -144,7 +143,7 @@ public sealed class AuditUtilsShouldBeTests
         Assert.Equal(orig, back);
     }
 
-    // --- TimeProvider seam (audit §3.1: Default/SystemTimeProvider seam has 0 tests) ---
+    // --- TimeProvider seam: replaceable clock for monotonic time ---
 
     private sealed class FakeClock : ITimeProvider
     {
@@ -181,9 +180,8 @@ public sealed class AuditUtilsShouldBeTests
         Assert.Equal(a, TimeProvider.Now(), precision: 3);
     }
 
-    // --- Validators D1 (audit §6 D1: unified on Commands/UnloggedIn/Validation,
-    // verbatim port of validation.py; the contradictory Settings duplicate is
-    // deleted). These pin the single ruleset, incl. settings overloads.
+    // --- Validators: single account and character-name ruleset (port of validation.py),
+    // including settings overloads ---
 
     [Fact]
     public void Validators_SingleSourceOfTruth_AgreeOnShortName()
@@ -224,7 +222,7 @@ public sealed class AuditUtilsShouldBeTests
         Assert.Throws<ArgumentNullException>(() => Validation.ValidateAccountName(null!));
     }
 
-    // --- PathGuards D2 (audit §6 D2: Core impl + Server wrapper + legacy spelling) ---
+    // --- PathGuards: absolute-path guards plus legacy spellings ---
 
     [Fact]
     public void PathGuards_AbsoluteSavePath_PassesGuard()
@@ -237,7 +235,7 @@ public sealed class AuditUtilsShouldBeTests
     [Fact]
     public void PathGuards_LegacyEnsureSavePathValid_MatchesGuardMessage()
     {
-        // Should-be: the legacy kind= overload is the same guard, not a divergent message.
+        // Contract: the legacy kind= overload is the same guard, not a divergent message.
         const string rel = "definitely_not_absolute_atheriz_test_dir_xyz";
         string? guardMsg = null, legacyMsg = null;
         try { PathGuards.GuardSavePath(rel); } catch (InvalidOperationException ex) { guardMsg = ex.Message; }
@@ -257,7 +255,7 @@ public sealed class AuditUtilsShouldBeTests
         if (guardMsg is not null) Assert.Equal(guardMsg, aliasMsg);
     }
 
-    // --- TlsCertLoader (audit §3.1: 0 tests) ---
+    // --- TlsCertLoader: certificate and key loading failures ---
 
     [Fact]
     public void TlsCertLoader_MissingCertFile_ThrowsFileNotFound()
@@ -288,14 +286,14 @@ public sealed class AuditUtilsShouldBeTests
         Assert.Throws<ArgumentNullException>(() => TlsCertLoader.Load(null!, null));
     }
 
-    // --- AtherizSettingsValidator (audit §3.1: ~25 branches, 0 dedicated tests) ---
+    // --- AtherizSettingsValidator: startup settings validation ---
 
     [Fact]
     public void SettingsValidator_DefaultSettings_Passes()
     {
         var v = new AtherizSettingsValidator();
-        // Absolute paths: relative defaults depend on CWD-is-game-folder (audit §3.1 notes
-        // the CWD dependence is flaky by design, so pin it out here).
+        // Absolute paths: relative defaults depend on CWD-is-game-folder, so pin
+        // absolute paths here to avoid CWD dependence.
         var s = new AtherizSettings
         {
             SavePath = Path.Combine(Path.GetTempPath(), "atheriz_shouldbe_save"),

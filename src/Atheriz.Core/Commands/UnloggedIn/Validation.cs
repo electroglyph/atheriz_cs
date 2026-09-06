@@ -24,7 +24,7 @@ public static class Validation
     }
     public static string? ValidateAccountName(string name) => ValidateName(name, AtherizSettings.Global.MaxAccountNameLength);
     public static string? ValidateCharacterName(string name) => ValidateName(name, AtherizSettings.Global.MaxCharacterNameLength);
-    // Settings-aware overloads (single source of truth, audit D1 — the
+    // Settings-aware overloads (single source of truth — the
     // duplicate Settings/AccountValidation.cs is deleted).
     public static string? ValidateAccountName(string name, AtherizSettings s) => ValidateName(name, s.MaxAccountNameLength);
     public static string? ValidateCharacterName(string name, AtherizSettings s) => ValidateName(name, s.MaxCharacterNameLength);

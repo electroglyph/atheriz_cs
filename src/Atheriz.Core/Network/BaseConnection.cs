@@ -27,7 +27,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     private bool _disposed;
 
     /// <summary>Releases owned resources (queues/sessions; subclasses add
-    /// sockets/semaphores). Audit B32: connections were never disposable.</summary>
+    /// sockets/semaphores).</summary>
     public void Dispose()
     {
         Dispose(true);

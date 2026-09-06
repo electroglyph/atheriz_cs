@@ -307,7 +307,7 @@ public class AsyncThreadPool : IDisposable
     {
         while (true)
         {
-            // Sleep in slices so Stop can exit quickly (fix audit: Thread.Sleep on watchdog delays shutdown 5s)
+            // Sleep in slices so Stop can exit quickly instead of blocking up to 5s in one sleep
             // Use 50ms slice to respect small watchdog intervals in tests (e.g. 0.1s)
             var slice = TimeSpan.FromMilliseconds(50);
             var total = TimeSpan.Zero;

@@ -361,7 +361,7 @@ public sealed class TelnetStreamWriter : ITelnetWriter
     public TelnetStreamWriter(Stream stream, TcpClient client) { _stream = stream; _client = client; }
     public void Write(string text)
     {
-        // Bounded write (audit B30): a peer that never drains must not stall
+        // Bounded write: a peer that never drains must not stall
         // the game thread forever. SendTimeout turns a wedged peer into a
         // SocketException instead of an indefinite block.
         try { _client.SendTimeout = 2000; } catch { }
@@ -393,7 +393,7 @@ public sealed class TelnetProtocol : Protocol
     {
         // Linear-time port: StringBuilder accumulation plus a checkedUpTo
         // cursor, so a huge line costs O(n) total instead of O(n^2) repeated
-        // string concatenation/rescan (audit B30). State machine mirrors the
+        // string concatenation/rescan. State machine mirrors the
         // original exactly: split-CRLF holdback, overlong dropping (null
         // yield), \r\n / \r\x00 stripping, EOF tail.
         var buf = new System.Text.StringBuilder();

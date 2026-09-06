@@ -138,7 +138,7 @@ public static class CommandDispatcher
                     return null;
                 }
                 // Deliberate divergence from Python: non-social commands take priority over socials
-                // (Else "sa"→salute would shadow "say", etc. Owner decision 2026-09-04, audit Appendix B Q5.)
+                // (Else "sa"→salute would shadow "say", etc. Owner decision 2026-09-04.)
                 (cmd, matchedAlias) = AutoAlias(CommandRegistry.LoggedIn, rawCmdKey, socialsFallback: true);
             }
             if (cmd is null)
@@ -173,7 +173,7 @@ public static class CommandDispatcher
     }
 
     // Port of unloggedin/cmdset.py:14-26 conditionals, evaluated at dispatch
-    // time so settings flips take effect without a registry reset (audit B8).
+    // time so settings flips take effect without a registry reset.
     private static bool IsUnloggedInEnabled(Command cmd)
     {
         var g = AtherizSettings.Global;
@@ -207,7 +207,7 @@ public static class CommandDispatcher
             }
         }
         // cmdset.py:14-26 conditionals are evaluated at registration; settings
-        // flips afterwards must take effect without a reset (audit B8).
+        // flips afterwards must take effect without a reset.
         if (cmd is not null && !IsUnloggedInEnabled(cmd)) cmd = cmdset.Get("none") ?? cmd;
         if (cmd is null) return null;
         if (!cmd.Access(connection))

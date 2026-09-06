@@ -93,7 +93,7 @@ public static class ObjectRegistry
         }
         /// <summary>
         /// Atomic remove-if-value-matches under the dict lock: expiry cleanup
-        /// must not delete a concurrently refreshed entry (audit A3).
+        /// must not delete a concurrently refreshed entry.
         /// </summary>
         public bool RemoveIfEqual(TKey key, TValue expected)
         {
@@ -137,7 +137,7 @@ public static class ObjectRegistry
     {
         var t = now ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         // Expiry cleanup is remove-if-equal: a BanIp landing between the read
-        // and the cleanup must not delete the fresh ban (audit A3).
+        // and the cleanup must not delete the fresh ban.
         if (!TempBannedIps.TryGetValue(host, out var exp)) return false;
         if (t < exp) return true;
         TempBannedIps.RemoveIfEqual(host, exp);
@@ -317,7 +317,7 @@ public static class ObjectRegistry
         {
             // Buffer rows first (no locks held during deserialization), then
             // convert row by row. Corrupt rows are SKIPPED but REPORTED with
-            // their row id — never silently dropped (audit B20).
+            // their row id — never silently dropped.
             var rows = JsonTableLoader.LoadRows(db.Objects);
             foreach (var row in rows)
             {

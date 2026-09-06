@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Atheriz.Core.Persistence;
 
 /// <summary>
-/// Crash-consistency journal for multi-table checkpoints (audit A7).
+/// Crash-consistency journal for multi-table checkpoints.
 /// A full checkpoint marks the row dirty BEFORE writing tables and clean AFTER
 /// all tables commit. A dirty row at startup means the previous checkpoint died
 /// mid-way and tables may be torn. Single-table saves never touch the journal.

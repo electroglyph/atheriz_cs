@@ -12,7 +12,7 @@ namespace Atheriz.Core.Globals;
 /// </summary>
 public partial class NodeHandler
 {
-    // Audit P2-10: hide public Lock/Lock2/Lock3, use SupportsRecursion for re-entrant test paths (AddArea inside WriteLock, Reregister nested reads)
+    // Private locks with SupportsRecursion for re-entrant paths (AddArea inside WriteLock, Reregister nested reads)
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);   // areas
     private readonly ReaderWriterLockSlim _lock2 = new(LockRecursionPolicy.SupportsRecursion); // transitions
     private readonly ReaderWriterLockSlim _lock3 = new(LockRecursionPolicy.SupportsRecursion); // doors
@@ -66,14 +66,14 @@ public partial class NodeHandler
             db.Database.EnsureCreated();
             JsonTableLoader.LoadInto(db.Areas, Lock, json => JsonSerializer.Deserialize<NodeAreaDto>(json, JsonOptions.Default), (dto, row) =>
             {
-                // Per-row report (audit B20): corrupt areas are skipped, never silent.
+                // Per-row report: corrupt areas are skipped, never silent.
                 // (LoadInto still swallows after we log, preserving flow.)
                 try
                 {
                     var na = dto!.ToDomain();
                     // Evict the replaced area's nodes from the registry: otherwise
-                    // they leak as stale ids while the handler no longer owns them
-                    // (audit B21). Mirrors RemoveArea/Clear eviction below.
+                    // they leak as stale ids while the handler no longer owns them.
+                    // Mirrors RemoveArea/Clear eviction below.
                     if (_areas.TryGetValue(na.Name, out var old) && !ReferenceEquals(old, na))
                     {
                         foreach (var g in old.Grids.Values)

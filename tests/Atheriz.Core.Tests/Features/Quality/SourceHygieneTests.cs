@@ -1,16 +1,16 @@
 using System.Text.RegularExpressions;
 
-namespace Atheriz.Core.Tests.Audit;
+namespace Atheriz.Core.Tests.Features.Quality;
 
-// Should-be tests for audit §5 (banned patterns: reflection/dynamic/sleeps/
-// console/bare-catch in production) and §6 D3-D5/O9 (test seams in prod) plus
-// §4 O1-O9 (prescribed file organization). Each FAILS while the violation is
-// present and PASSES once removed. Production code is untouched.
+// Source-hygiene policy suite for production code: bans reflection/dynamic/
+// sleeps/console/bare-catch patterns and test-only seams in production, and
+// prescribes file organization. Each test FAILS while the violation is present
+// and PASSES once removed. Production code is untouched.
 //
 // Method: source scan of src/ (comments stripped). Absolute path with CWD
 // fallback mirrors PortedAtherizMainTests / PortedCriticalFixesTests precedent.
 [Collection("Ported")]
-public class AuditSourceRulesShouldBeTests
+public class SourceHygieneTests
 {
     private static string SrcRoot()
     {
@@ -100,7 +100,7 @@ public class AuditSourceRulesShouldBeTests
     private const string ReflectionPat =
         @"\.GetMethod\(|\.GetProperty\(|\.GetField\(|Activator\.CreateInstance|GetTypes\(\)|\.DynamicInvoke\(|Type\.GetType\(";
 
-    // --- §5 reflection (AGENTS.md: never in production, tests-only) ---
+    // --- Reflection guard: production uses explicit typed members, never reflection ---
 
     [Fact] public void NoReflection_Commands() =>
         AssertNoHits(Scan(Commands, ReflectionPat), "reflection in Commands");
@@ -117,7 +117,7 @@ public class AuditSourceRulesShouldBeTests
     [Fact] public void NoReflection_ServerUtils() =>
         AssertNoHits(Scan(ServerUtils, ReflectionPat), "reflection in Server/Utils");
 
-    // --- §5 dynamic ---
+    // --- Dynamic guard: production uses static typing, never dynamic dispatch ---
 
     [Fact] public void NoDynamic_Network() =>
         AssertNoHits(Scan(NetConcurrency, @"\(\(dynamic\)|\bFunc<dynamic,"),
@@ -127,7 +127,7 @@ public class AuditSourceRulesShouldBeTests
         AssertNoHits(Scan(["Atheriz.Core/Objects", "Atheriz.Core/Commands"], @"\(\(dynamic\)"),
             "((dynamic)) casts in Objects/Commands");
 
-    // --- §5 Thread.Sleep / Console / bare catch ---
+    // --- Sleep/console/bare-catch guard: no blocking sleeps, console logging, or empty catches ---
 
     [Fact] public void NoThreadSleep_Production() =>
         AssertNoHits(Scan(["Atheriz.Core", "Atheriz.Server"], @"Thread\.Sleep\("),
@@ -146,7 +146,7 @@ public class AuditSourceRulesShouldBeTests
     [Fact] public void NoBareCatch_GlobalsPersistence() =>
         AssertNoHits(Scan(GlobalsPersist, @"catch\s*\{\s*\}"), "bare catch{} in Globals/Persistence");
 
-    // --- §6 D3/D4/D5 + §4 O9: test seams and duplicated helpers in prod ---
+    // --- Test-seam guard: production holds no test-only hooks or duplicated helpers ---
 
     [Fact] public void NoTestSeams_Production() =>
         AssertNoHits(Scan(["Atheriz.Core", "Atheriz.Server"],
@@ -165,7 +165,7 @@ public class AuditSourceRulesShouldBeTests
         Assert.True(Scan(Commands, @"RequirePuppet").Count > 0,
             "the ~35x RequirePuppet guard must be extracted to one helper");
 
-    // --- §4 O1-O9: prescribed organization ---
+    // --- File organization: prescribed file and folder layout ---
 
     private static bool ProdFileExists(params string[] parts)
     {
@@ -237,7 +237,7 @@ public class AuditSourceRulesShouldBeTests
         Assert.True(Scan(["Atheriz.Core/Persistence"], @"public static .*Load\w+").Count <= 2,
             "JsonTableLoader keeps two helpers (buffered + lock-aware), not four");
 
-    // --- §6 D8 leftovers with zero behavioral delta (structural oracles) ---
+    // --- Structural oracles: duplicated helpers with zero behavioral delta ---
 
     [Fact] public void Dup_JsonConverters_Unified() =>
         Assert.True(Scan(["Atheriz.Core/Network"], @"static\s+\S.*\sJsonElementTo(Object|List|Dict)\s*\(").Count <= 1,
@@ -263,7 +263,7 @@ public class AuditSourceRulesShouldBeTests
         Assert.True(Scan(["Atheriz.Core/Network"], @"OrdinalIgnoreCase", fileNameContains: "ConnectionManager.cs").Count > 0,
             "case-insensitive dispatch must be one OrdinalIgnoreCase dict, not Pascal+lower key triplication");
 
-    // --- §7 host nits with structural oracles ---
+    // --- Host behavior: structural oracles for CLI and hosting ---
 
     [Fact] public void Host_KestrelBadHost_ThrowsInsteadOfBindingAnywhere() =>
         Assert.True(Scan(["Atheriz.Server/Hosting"], @"ip = IPAddress\.Any", fileNameContains: "KestrelConfig.cs").Count == 0,

@@ -59,7 +59,7 @@ public sealed class GameTimeRow : IJsonEntity
 }
 
 /// <summary>
-/// Crash-consistency journal for multi-table checkpoints (audit A7).
+/// Crash-consistency journal for multi-table checkpoints.
 /// A full checkpoint (AutosaveTick/SaveWorld) marks the row dirty BEFORE
 /// writing tables and clean AFTER all commit. A dirty row at startup means
 /// the previous checkpoint died mid-way: tables may be torn.

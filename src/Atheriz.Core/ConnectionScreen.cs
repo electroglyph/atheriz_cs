@@ -109,7 +109,7 @@ public static class ConnectionScreen
         }
 
         // Byte-faithful to connection_screen.py:79-94 render — SCREEN/SCREEN2 only, no extra
-        // header/footer/banner lines (removed 2026-09-04 per audit Appendix B Q10).
+        // header/footer/banner lines (removed 2026-09-04).
         var full = raw;
 
         // Port of utils.wrap_truecolor for non-screenreader — via GameUtils.WrapTruecolor

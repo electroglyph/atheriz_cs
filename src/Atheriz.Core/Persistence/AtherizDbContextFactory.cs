@@ -24,8 +24,8 @@ public static class AtherizDbContextFactory
 
     // Port of database_setup.py:56 get_database() — creates context with guard and directory ensure.
     // Guard violations (bad save path) PROPAGATE: silently substituting an
-    // ephemeral :memory: database makes writes succeed and go nowhere
-    // (audit B23). Tests needing memory use CreateForTests() explicitly.
+    // ephemeral :memory: database makes writes succeed and go nowhere.
+    // Tests needing memory use CreateForTests() explicitly.
     public static AtherizDbContext Create(string savePath)
     {
         // Guard mirrors get_database raising if _CLOSED

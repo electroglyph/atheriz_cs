@@ -236,7 +236,7 @@ public class PortedSessionTests
     // Port of test_session.py:177 prompt_sends_text_via_msg — faithfully exercises prompt with extra kwargs
     // Python: conn.msg.assert_called_once_with("hi", prompt=">", foo="bar")
     // C# adaptation: Session.Msg sends text via Connection.SendCommand("text") and prompt via separate SendCommand("prompt")
-    // We verify verbatim text preserved via two-send adaptation (documented divergent call shape per audit §2.10)
+    // We verify verbatim text preserved via two-send adaptation (documented divergent call shape)
     [Fact] public void PromptSendsTextViaMsg()
     {
         using var env = GlobalTestEnv.Enter();
@@ -244,7 +244,7 @@ public class PortedSessionTests
         var s = new Session(connection: conn);
         // Python: conn.msg.assert_called_once_with("hi", prompt=">", foo="bar") — C# two-send adaptation
         // Session.Msg sends text via Connection.SendCommand("text"); prompt goes via separate SendCommand("prompt")
-        // Verify verbatim text preserved (documented divergent call shape per audit §2.10)
+        // Verify verbatim text preserved (documented divergent call shape)
         s.Msg("hi");
         Assert.True(conn.Sent.Count >= 1);
         Assert.Contains(conn.Sent, x => x.Cmd == "text" && x.Args.Count>0 && x.Args[0]?.ToString()=="hi\r\n");
