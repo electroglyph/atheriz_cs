@@ -62,6 +62,22 @@ public static class StartStop
             Console.Error.WriteLine($"DoStartup LoadObjects failed:\n{ex}");
         }
 
+        // Crash-consistency check (audit A7): a dirty journal means the
+        // previous checkpoint died between tables — the world may be torn.
+        // Boot continues (availability), but the torn state is surfaced loudly.
+        try
+        {
+            if (Persistence.CheckpointJournal.IsDirty(settings.SavePath))
+            {
+                var msg = "Torn checkpoint detected: previous save did not complete; world tables may be inconsistent.";
+                try { AtherizLogger.LogError(msg); } catch { Console.Error.WriteLine(msg); }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"DoStartup checkpoint check failed:\n{ex}");
+        }
+
         // Port of startstop.py:35-38 get_async_threadpool/get_map_handler/get_node_handler/get_async_ticker
         try
         {
@@ -439,6 +455,9 @@ public static class StartStop
     // Faithful: uses ShutdownStep per save, mirroring Python _shutdown_step
     private static void SaveWorld(AtherizSettings settings)
     {
+        // Crash-consistency journal (audit A7): see AutosaveTick.
+        Persistence.CheckpointJournal.MarkDirty(settings.SavePath);
+        bool ok = true;
         ShutdownStep("save_objects", () =>
         {
             try
@@ -447,7 +466,7 @@ public static class StartStop
                 db.Database.EnsureCreated();
                 ObjectRegistry.SaveObjects(db);
             }
-            catch (Exception ex) { Console.Error.WriteLine($"save_objects failed:\n{ex}"); }
+            catch (Exception ex) { ok = false; Console.Error.WriteLine($"save_objects failed:\n{ex}"); }
         });
         ShutdownStep("map_save", () =>
         {
@@ -458,7 +477,7 @@ public static class StartStop
                 db.Database.EnsureCreated();
                 mh.Save(db);
             }
-            catch { try { GlobalServices.GetMapHandler().Save(); } catch { } }
+            catch { ok = false; try { GlobalServices.GetMapHandler().Save(); } catch { } }
         });
         ShutdownStep("node_save", () =>
         {
@@ -469,8 +488,9 @@ public static class StartStop
                 db.Database.EnsureCreated();
                 nh.Save(db);
             }
-            catch { try { GlobalServices.GetNodeHandler().Save(); } catch { } }
+            catch { ok = false; try { GlobalServices.GetNodeHandler().Save(); } catch { } }
         });
+        if (ok) Persistence.CheckpointJournal.MarkClean(settings.SavePath);
     }
 
     // Helpers to avoid creating singletons unnecessarily during shutdown

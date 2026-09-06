@@ -14,7 +14,7 @@ public sealed class EmoteCommand : Command
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject p) return;
+        if (caller is not GameObject p) { caller.Msg("You can't do that."); return; }
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { p.Msg(PrintHelp()); return; }
         var lst = pa.GetList("text");

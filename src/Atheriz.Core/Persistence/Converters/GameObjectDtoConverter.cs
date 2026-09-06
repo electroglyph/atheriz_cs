@@ -211,20 +211,9 @@ internal static class GameObjectDtoConverter
             {
                 try
                 {
-                    var list = JsonSerializer.Deserialize<List<string>>(he.GetRawText(), JsonOptions.Default);
-                    if (list != null) ch.RestoreHistory(list);
+                    ch.RestoreHistory(ParseChannelHistory(he));
                 }
-                catch
-                {
-                    // fallback: try as JsonElement array of strings
-                    try
-                    {
-                        var list2 = new List<string>();
-                        if (he.ValueKind == JsonValueKind.Array) foreach (var el in he.EnumerateArray()) if (el.ValueKind == JsonValueKind.String) list2.Add(el.GetString() ?? "");
-                        ch.RestoreHistory(list2);
-                    }
-                    catch (Exception ex2) { AtherizLogger.LogError($"Channel {dto.Id} history unrestorable; starting empty.", ex2); }
-                }
+                catch (Exception ex2) { AtherizLogger.LogError($"Channel {dto.Id} history unrestorable; starting empty.", ex2); }
             }
             // Clear IsModified after load? Original __setstate__ sets modified false via SaveObjects? Keep as per DTO
             return ch;
@@ -299,5 +288,30 @@ internal static class GameObjectDtoConverter
             if (!clearing) obj.SetIsModifiedRawNoLock(had);
             obj.SyncRoot.ExitWriteLock();
         }
+    }
+
+    // History entries persist as [timestamp, sender, message] triples mirroring
+    // the Python (timestamp, sender, message) tuples. Pre-triple saves stored
+    // plain strings; those restore as sender-less entries (timestamp 0).
+    private static List<ChannelHistoryEntry> ParseChannelHistory(JsonElement he)
+    {
+        var entries = new List<ChannelHistoryEntry>();
+        if (he.ValueKind != JsonValueKind.Array) return entries;
+        foreach (var el in he.EnumerateArray())
+        {
+            if (el.ValueKind == JsonValueKind.String)
+            {
+                entries.Add(new ChannelHistoryEntry(0, "", el.GetString() ?? ""));
+            }
+            else if (el.ValueKind == JsonValueKind.Array)
+            {
+                var parts = el.EnumerateArray().ToList();
+                int ts = parts.Count > 0 && parts[0].ValueKind == JsonValueKind.Number && parts[0].TryGetInt32(out var t) ? t : 0;
+                string sender = parts.Count > 1 && parts[1].ValueKind == JsonValueKind.String ? parts[1].GetString() ?? "" : "";
+                string msg = parts.Count > 2 && parts[2].ValueKind == JsonValueKind.String ? parts[2].GetString() ?? "" : "";
+                entries.Add(new ChannelHistoryEntry(ts, sender, msg));
+            }
+        }
+        return entries;
     }
 }

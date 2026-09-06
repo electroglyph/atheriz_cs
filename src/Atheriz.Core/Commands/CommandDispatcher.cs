@@ -172,6 +172,17 @@ public static class CommandDispatcher
         return null;
     }
 
+    // Port of unloggedin/cmdset.py:14-26 conditionals, evaluated at dispatch
+    // time so settings flips take effect without a registry reset (audit B8).
+    private static bool IsUnloggedInEnabled(Command cmd)
+    {
+        var g = AtherizSettings.Global;
+        if (cmd is UnloggedIn.CreateAccountCommand) return g.AccountCreationEnabled;
+        if (cmd is UnloggedIn.NewCharacterCommand) return g.CharCreationEnabled;
+        if (cmd is UnloggedIn.GuestCommand) return g.GuestEnabled;
+        return true;
+    }
+
     public static Job? ResolveUnloggedIn(IMessageTarget connection, string text)
     {
         var parsed = ParseRaw(text);
@@ -195,6 +206,9 @@ public static class CommandDispatcher
                 cmdArgs = stripped;
             }
         }
+        // cmdset.py:14-26 conditionals are evaluated at registration; settings
+        // flips afterwards must take effect without a reset (audit B8).
+        if (cmd is not null && !IsUnloggedInEnabled(cmd)) cmd = cmdset.Get("none") ?? cmd;
         if (cmd is null) return null;
         if (!cmd.Access(connection))
         {

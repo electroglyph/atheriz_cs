@@ -18,11 +18,11 @@ public static class GameTemplateGenerator
         if (string.IsNullOrEmpty(raw)) raw = trimmed;
         if (string.IsNullOrEmpty(raw) || raw == "." || !Regex.IsMatch(raw, @"^[A-Za-z_][A-Za-z0-9_]*$") || Keywords.Contains(raw) || char.IsDigit(raw[0]))
         {
-            Console.WriteLine($"Error: '{raw}' is not a valid Python identifier (hyphens/digits/spaces not allowed).");
+            Console.WriteLine($"Error: '{raw}' is not a valid C# identifier (hyphens/digits/spaces not allowed).");
             return;
         }
         var gName = string.IsNullOrWhiteSpace(gameName) ? raw : gameName!.Trim();
-        if (!IsValidId(gName)) { Console.WriteLine($"Error: '{gName}' is not a valid Python identifier (hyphens/digits/spaces not allowed)."); return; }
+        if (!IsValidId(gName)) { Console.WriteLine($"Error: '{gName}' is not a valid C# identifier (hyphens/digits/spaces not allowed)."); return; }
         if (GameUtils.IsInGameFolder()) Console.WriteLine("Warning: already inside a game folder; creating nested game folder is not recommended.");
         var folderPath = Path.GetFullPath(targetPath);
         bool folderExistsInitially = Directory.Exists(folderPath);

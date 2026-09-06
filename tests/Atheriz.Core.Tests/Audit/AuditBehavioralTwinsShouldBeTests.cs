@@ -14,11 +14,12 @@ namespace Atheriz.Core.Tests.Audit;
 public class AuditBehavioralTwinsShouldBeTests
 {
     [Fact]
-    public void AddLink_Twins_AgreeOnDuplicateName()
+    public void AddLink_Twins_KeepPythonAsymmetry()
     {
-        // audit D8: AddLink dedups Name+Coord while AddLinkIfAbsent dedups
-        // Name-only, so the same "add north->B when north->A exists" intent gets
-        // different verdicts from the two APIs.
+        // audit D8, corrected for Python parity (nodes.py:662-691): add_link
+        // dedups (name, coord) while add_link_if_absent dedups name-only —
+        // DELIBERATELY different. Same-name-different-coord is ADDED by
+        // AddLink and REFUSED by AddLinkIfAbsent. Pins the asymmetry.
         ObjectRegistry.ClearAll();
         try
         {
@@ -30,13 +31,11 @@ public class AuditBehavioralTwinsShouldBeTests
             if (ObjectRegistry.Get(n2.Id).Count == 0) ObjectRegistry.AddObject(n2);
             n1.AddLink(new NodeLink("north", coordA, new List<string> { "n" }));
             n2.AddLink(new NodeLink("north", coordA, new List<string> { "n" }));
-            // Same duplicate-name situation through both APIs:
             n1.AddLink(new NodeLink("north", coordB, new List<string> { "n" }));
             bool absentAdded = n2.AddLinkIfAbsent("north", () => new NodeLink("north", coordB, new List<string> { "n" }));
-            int dupes = n1.GetLinks().Count(l => l.Name == "north");
-            Assert.True(dupes == 1 && !absentAdded || dupes > 1 && absentAdded,
-                $"twin APIs disagree: AddLink left {dupes} 'north' links, AddLinkIfAbsent added={absentAdded}");
-            Assert.Equal(1, dupes);
+            Assert.Equal(2, n1.GetLinks().Count(l => l.Name == "north"));
+            Assert.False(absentAdded);
+            Assert.Single(n2.GetLinks(), l => l.Name == "north");
         }
         finally { ObjectRegistry.ClearAll(); }
     }

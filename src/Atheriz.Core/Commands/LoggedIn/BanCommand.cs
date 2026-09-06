@@ -144,18 +144,6 @@ public sealed class UnbanCommand : Command
         string scope = account && acct != null ? "account" : "character";
         go.Msg($"Unbanned {target.Name} ({scope}).");
     }
-    private static void ClearBanReason(GameObject c)
-    {
-        // Typed (F001): ban reason lives on the BanReason property (Account field-backed,
-        // plain objects extra-backed); both legacy extra spellings are dropped too.
-        c.BanReason = "";
-        c.TryRemoveExtraJson("ban_reason");
-        c.TryRemoveExtraJson("banReason");
-    }
-    private static void SetBanReason(GameObject c, string reason)
-    {
-        c.BanReason = reason;
-    }
 }
 
 internal static class BanReasonHelper

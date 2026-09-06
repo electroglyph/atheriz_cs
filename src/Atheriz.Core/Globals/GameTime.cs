@@ -77,7 +77,7 @@ public class GameTime
             {
                 CallerId = e.CallerId,
                 Repeat = e.Repeat,
-                Data = e.Data == null ? null : new Dictionary<string, JsonElement>(e.Data)
+                Data = e.Data == null ? null : e.Data.ToDictionary(kv => kv.Key, kv => kv.Value.Clone())
             }).ToList();
         }
         var json = JsonSerializer.Serialize(dto, JsonOptions.Default);
@@ -105,8 +105,10 @@ public class GameTime
             }
             GameTimePersistDto? dto;
             try { dto = JsonSerializer.Deserialize<GameTimePersistDto>(row.Data, JsonOptions.Default); }
-            catch
+            catch (Exception ex)
             {
+                // Per-row report (audit B20): corrupt ticks zero out loudly, not silently.
+                try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch { }
                 _lock.EnterWriteLock();
                 try { _ticks = 0; _alarms.Clear(); }
                 finally { _lock.ExitWriteLock(); }
@@ -205,7 +207,15 @@ public class GameTime
             _lock.EnterWriteLock();
             try { _ticks = ticks; _alarms.Clear(); foreach (var kv in alarms) _alarms[kv.Key] = kv.Value; }
             finally { _lock.ExitWriteLock(); }
-            try { Save(); } catch { return false; }
+            // Migrate into THIS instance's configured save path (not the
+            // process-default factory path), or the ticks land in the wrong DB.
+            try
+            {
+                using var migDb = new AtherizDbContext(_settings.SavePath);
+                migDb.Database.EnsureCreated();
+                Save(migDb);
+            }
+            catch { return false; }
             try { File.Delete(path); } catch { }
             return true;
         }
@@ -257,6 +267,17 @@ public class GameTime
         if (minute == null) throw new ArgumentNullException(nameof(minute));
         hour = hour.ToString();
         minute = minute.ToString();
+        // Clone elements on the way in: JsonElement borrows its source
+        // JsonDocument, so storing the caller's dictionary would dangle once
+        // the caller disposes its document (audit B24). Clone throws here for
+        // already-dead input — fail fast at the boundary, not at save time.
+        Dictionary<string, JsonElement>? owned = null;
+        if (data != null)
+        {
+            try { owned = data.ToDictionary(kv => kv.Key, kv => kv.Value.Clone()); }
+            catch (ObjectDisposedException ex)
+            { throw new ArgumentException("alarm data borrows a disposed JsonDocument", nameof(data), ex); }
+        }
         // validate data is dict or null — typed already
         _lock.EnterWriteLock();
         try
@@ -267,7 +288,7 @@ public class GameTime
                 list = new List<AlarmEntry>();
                 _alarms[key] = list;
             }
-            list.Add(new AlarmEntry { CallerId = callerId, Repeat = repeat, Data = data });
+            list.Add(new AlarmEntry { CallerId = callerId, Repeat = repeat, Data = owned });
         }
         finally { _lock.ExitWriteLock(); }
     }
@@ -343,13 +364,19 @@ public class GameTime
     // settings.TIME_UPDATE_SECONDS at call time).
     private readonly object _startLock = new();
     private AsyncTicker? _runningTicker;
+    // Owned fallbacks: created once and reused (never per-start/per-tick),
+    // stopped when this instance stops. Singletons/overrides are never owned.
+    private AsyncTicker? _ownedTicker;
+    private AsyncThreadPool? _ownedPool;
+    private AsyncThreadPool OwnedPool() => _poolOverride ?? (_ownedPool ??= new AsyncThreadPool());
+    private AsyncTicker OwnedTicker() => _ownedTicker ??= new AsyncTicker(OwnedPool());
 
     public void Start()
     {
         lock (_startLock)
         {
             if (Started) return;
-            var ticker = _tickerOverride ?? GlobalServices.TryGetTicker() ?? new AsyncTicker(_poolOverride ?? new AsyncThreadPool());
+            var ticker = _tickerOverride ?? GlobalServices.TryGetTicker() ?? OwnedTicker();
             ticker.AddCoro(OnTick, _settings.TimeUpdateSeconds);
             _runningTicker = ticker;
             Started = true;
@@ -376,13 +403,31 @@ public class GameTime
             Started = false;
         }
         ticker?.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
+        StopOwnedFallbacks();
         try { Save(); } catch { }
     }
     public void Stop(AsyncTicker ticker)
     {
-        ticker.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
+        // Same lock discipline as Start/Stop: only clear state when stopping
+        // the ticker this instance runs on, so concurrent Start(t)/Stop(other)
+        // cannot orphan the coro (audit B24).
+        bool ours;
+        lock (_startLock)
+        {
+            ours = _runningTicker == null || ReferenceEquals(_runningTicker, ticker);
+            if (ours) { _runningTicker = null; Started = false; }
+        }
+        if (ours) ticker.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
+        StopOwnedFallbacks();
         try { Save(); } catch { }
-        Started = false;
+    }
+
+    private void StopOwnedFallbacks()
+    {
+        var t = Interlocked.Exchange(ref _ownedTicker, null);
+        if (t != null) try { t.Stop(); } catch { }
+        var p = Interlocked.Exchange(ref _ownedPool, null);
+        if (p != null) try { p.Stop(wait: false); } catch { }
     }
 
     public bool SunUp()
@@ -422,7 +467,8 @@ public class GameTime
 
         if (callers.Count > 0)
         {
-            var pool = _poolOverride ?? GlobalServices.TryGetPool() ?? new AsyncThreadPool();
+            // Reuse the owned pool instead of creating (and leaking) one per tick.
+            var pool = _poolOverride ?? GlobalServices.TryGetPool() ?? OwnedPool();
             foreach (var (key, entry) in callers)
             {
                 if (!entry.Repeat) RemoveAlarmEntry(key.Hour, key.Minute, entry);

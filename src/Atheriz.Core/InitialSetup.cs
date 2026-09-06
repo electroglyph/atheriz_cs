@@ -232,7 +232,8 @@ public static class InitialSetup
         ObjectRegistry.AddObject(alarmObj);
         try { alarmObj.MoveTo(alarmNode); } catch {}
 
-        var gt = new Globals.GameTime();
+        var gtSettings = new AtherizSettings { SavePath = absSave };
+        var gt = new Globals.GameTime(gtSettings, autoLoad: false);
         gt.AddAlarm("?", "0", alarmObj, repeat: true);
         using (var db = AtherizDbContextFactory.Create(absSave)) gt.Save(db);
 

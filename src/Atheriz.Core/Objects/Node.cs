@@ -222,9 +222,10 @@ public partial class Node : GameObject
     // Port of nodes.py:394 delete
     public override (int count, List<object> ops)? Delete(GameObject? caller, bool recursive = false)
     {
-        List<object> execDeleteRecursive(Node obj)
+        (List<object> ops, int count) execDeleteRecursive(Node obj)
         {
             var allOps = new List<object>();
+            int count = 0;
             var seen = new HashSet<int>();
             var contents = obj.GetContents();
             foreach (var content in contents.ToList())
@@ -233,12 +234,14 @@ public partial class Node : GameObject
                 var res = content.Delete(caller, true);
                 if (res == null) continue;
                 allOps.AddRange(res.Value.ops);
+                count += res.Value.count;
             }
-            return allOps;
+            return (allOps, count);
         }
-        List<object> execMoveContents(Node obj)
+        (List<object> ops, int count) execMoveContents(Node obj)
         {
             var allOps = new List<object>();
+            int count = 0;
             var contents = obj.GetContents().ToList();
             foreach (var content in contents)
             {
@@ -280,10 +283,10 @@ public partial class Node : GameObject
                         try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch { }
                     }
                     var res = content.Delete(caller, true);
-                    if (res != null) allOps.AddRange(res.Value.ops);
+                    if (res != null) { allOps.AddRange(res.Value.ops); count += res.Value.count; }
                 }
             }
-            return allOps;
+            return (allOps, count);
         }
         void execSelfDelete()
         {
@@ -301,9 +304,9 @@ public partial class Node : GameObject
             IsDeleted = true;
         }
         finally { SyncRoot.ExitWriteLock(); }
-        var ops = recursive ? execDeleteRecursive(this) : execMoveContents(this);
+        var (ops, kids) = recursive ? execDeleteRecursive(this) : execMoveContents(this);
         execSelfDelete();
-        return (1, ops);
+        return (1 + kids, ops);
     }
 
     // Port of nodes.py:479

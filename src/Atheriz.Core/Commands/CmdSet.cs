@@ -6,7 +6,7 @@ namespace Atheriz.Core.Commands;
 public class CmdSet
 {
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);
-    private readonly Dictionary<string, Command> _commands = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Command> _commands = new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<Command> GetAll()
     {
@@ -32,7 +32,7 @@ public class CmdSet
         _lock.EnterWriteLock();
         try
         {
-            var claimed = new Dictionary<string, Command>(StringComparer.Ordinal);
+            var claimed = new Dictionary<string, Command>(StringComparer.OrdinalIgnoreCase);
             foreach (var cmd in list)
             {
                 foreach (var name in new[] { cmd.Key }.Concat(cmd.Aliases ?? []))

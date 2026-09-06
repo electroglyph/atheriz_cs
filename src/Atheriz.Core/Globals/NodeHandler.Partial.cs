@@ -84,7 +84,7 @@ public partial class NodeHandler
                 Lock.EnterWriteLock();
                 try
                 {
-                    if (!_areas.TryGetValue(node.Coord.Area, out var raced)) { _areas[area.Name] = area; _modified = true; }
+                    if (!_areas.TryGetValue(node.Coord.Area, out var raced)) { _areas[area.Name] = area; _modified = true; _areaGen++; }
                     else area = raced;
                 }
                 finally { Lock.ExitWriteLock(); }
@@ -94,21 +94,21 @@ public partial class NodeHandler
         var grid=area.GetOrAddGrid(node.Coord.Z);
         grid.AddNode(node);
         Lock.EnterWriteLock();
-        try { _modified=true; }
+        try { _modified=true; _areaGen++; }
         finally { Lock.ExitWriteLock(); }
         ObjectRegistry.AddObject(node);
     }
     public void AddArea(NodeArea area)
     {
         Lock.EnterWriteLock();
-        try { _areas[area.Name]=area; _modified=true; }
+        try { _areas[area.Name]=area; _modified=true; _areaGen++; }
         finally { Lock.ExitWriteLock(); }
     }
     public void RemoveArea(string name)
     {
         NodeArea? area=null;
         Lock.EnterWriteLock();
-        try { _areas.Remove(name,out area); _modified=true; }
+        try { _areas.Remove(name,out area); _modified=true; _areaGen++; }
         finally { Lock.ExitWriteLock(); }
         if(area!=null)
         {
@@ -127,7 +127,7 @@ public partial class NodeHandler
                 foreach(var g in a.Grids.Values)
                     foreach(var n in g.Nodes.Values)
                         ObjectRegistry.RemoveObject(n);
-            _areas.Clear(); _modified=true;
+            _areas.Clear(); _modified=true; _areaGen++;
         }
         finally { Lock.ExitWriteLock(); }
         Lock2.EnterWriteLock();

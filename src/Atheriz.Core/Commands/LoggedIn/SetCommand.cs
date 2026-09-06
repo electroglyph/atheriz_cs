@@ -80,7 +80,7 @@ public sealed class SetCommand : Command
         }
         catch { value = raw; }
         if (value == null && raw.Trim() != "None" && raw.Trim() != "null") value = raw;
-        if (attr.StartsWith("_") || SetHelper.Protected.Contains(attr))
+        if (SetHelper.IsProtected(attr))
         {
             if (!go.IsSuperUser) { go.Msg($"'{attr}' is protected and cannot be set."); return; }
         }
@@ -131,7 +131,8 @@ public sealed class UnsetCommand : Command
         var target = SetHelper.ResolveTarget(go, targetStr);
         if (target == null) return;
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }
-        if (attr.StartsWith("_") || SetHelper.Protected.Contains(attr) || attr == "is_builder" || attr == "is_superuser")
+        // Port of unset.py:226 — only the shared protected set is checked.
+        if (SetHelper.IsProtected(attr))
         {
             if (!go.IsSuperUser) { go.Msg($"'{attr}' is a read-only attribute and cannot be removed."); return; }
         }

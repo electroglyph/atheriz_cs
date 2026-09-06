@@ -5,6 +5,7 @@ using Atheriz.Core.Commands;
 using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Persistence.Dto;
 using Atheriz.Core.Settings;
 using Atheriz.Core.Tests;
 
@@ -25,11 +26,11 @@ public class AuditCommandShouldBeTests
     // --- B2: set/unset protected-attribute bypass ---
 
     [Fact]
-    public void Set_CaseVariantOfProtectedFlag_IsRejectedForNonSuperuser()
+    public void Set_CaseVariantOfProtectedFlag_DoesNotEscalate()
     {
-        // audit B2: Protected is Ordinal and FindProp is IgnoreCase, so any
-        // non-lowercase spelling (Is_Pc, IS_PC, ...) bypasses the guard and
-        // sets a protected flag as a mere builder.
+        // audit B2: the Protected guard is case-insensitive while property
+        // resolution stays case-sensitive (Python parity for junk attrs), so
+        // no spelling of a protected flag can be set by a non-superuser.
         ObjectRegistry.ClearAll();
         try
         {
@@ -44,9 +45,9 @@ public class AuditCommandShouldBeTests
     }
 
     [Fact]
-    public void Set_QuelledCaseVariant_IsRejectedForNonSuperuser()
+    public void Set_QuelledCaseVariant_DoesNotEscalate()
     {
-        // audit B2: same bypass for the quelled flag (which gates IsBuilder /
+        // audit B2: same guard for the quelled flag (which gates IsBuilder /
         // IsSuperUser themselves).
         ObjectRegistry.ClearAll();
         try
@@ -79,11 +80,13 @@ public class AuditCommandShouldBeTests
     }
 
     [Fact]
-    public void Set_LocationGuard_IsCaseInsensitive()
+    public void Set_LocationGuard_LowercaseRedirects_CanonicalIsReadOnly()
     {
-        // audit B2: the location guard list uses Ordinal Contains, so "Location"
-        // falls through to a different ("read-only") message instead of the
-        // move/teleport redirect.
+        // audit B2: the location guard list is Ordinal (as in set.py:154), so
+        // lowercase "location" redirects to move/teleport. "Location" is the
+        // canonical C# property name, so it resolves — but a string can never
+        // convert to LocationRef, hence read-only. Either way the location is
+        // never set directly.
         ObjectRegistry.ClearAll();
         try
         {
@@ -91,18 +94,22 @@ public class AuditCommandShouldBeTests
             ObjectRegistry.AddObject(admin);
             var j1 = CommandDispatcher.DispatchLoggedIn(admin, "set me location null", immediate: true);
             RunJob(j1);
+            Assert.Contains("use move/teleport instead", string.Join("\n", admin.PeekMessages()));
             admin.ClearMessages();
             var j2 = CommandDispatcher.DispatchLoggedIn(admin, "set me Location null", immediate: true);
             RunJob(j2);
-            Assert.Contains("use move/teleport instead", string.Join("\n", admin.PeekMessages()));
+            Assert.Contains("read-only attribute", string.Join("\n", admin.PeekMessages()));
+            Assert.IsType<LocationRef.NullLocation>(admin.Location);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
 
     [Fact]
-    public void Unset_LocationGuard_IsCaseInsensitive()
+    public void Unset_LocationGuard_LowercaseRedirects_CanonicalIsReadOnly()
     {
-        // audit B2: same Ordinal mismatch on the unset path.
+        // audit B2: lowercase "location" redirects (unset.py:230); the
+        // canonical C# property resolves but is not removable — read-only.
+        // Either way it is never removed directly.
         ObjectRegistry.ClearAll();
         try
         {
@@ -114,7 +121,7 @@ public class AuditCommandShouldBeTests
             admin.ClearMessages();
             var j2 = CommandDispatcher.DispatchLoggedIn(admin, "unset me Location", immediate: true);
             RunJob(j2);
-            Assert.Contains("cannot be removed directly", string.Join("\n", admin.PeekMessages()));
+            Assert.Contains("read-only attribute", string.Join("\n", admin.PeekMessages()));
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -163,9 +170,10 @@ public class AuditCommandShouldBeTests
     // --- B5: SpamCommand validation ---
 
     [Fact]
-    public void Spam_ZeroCount_IsRejected_NotReportedAsCreated()
+    public void Spam_ZeroCount_ReportsCreatedZero()
     {
-        // audit B5: count<=0 is unvalidated; `spam 0` reports "Created 0".
+        // audit B5, corrected for Python parity (spam.py: has no count<=0
+        // validation; the loop simply runs zero times and reports Created 0).
         using var env = GlobalTestEnv.Enter();
         var origSave = AtherizSettings.Global.SavePath;
         var tmp = Path.Combine(env.TempPath, "spamdir");
@@ -178,8 +186,7 @@ public class AuditCommandShouldBeTests
             var job = CommandDispatcher.DispatchLoggedIn(admin, "spam 0", immediate: true);
             RunJob(job);
             var msgs = string.Join("\n", admin.PeekMessages());
-            Assert.DoesNotContain("Created 0 accounts", msgs);
-            Assert.Matches("(?i)(positive|at least|greater|invalid|usage)", msgs);
+            Assert.Contains("Created 0 accounts", msgs);
         }
         finally { AtherizSettings.Global.SavePath = origSave; }
     }
@@ -218,15 +225,15 @@ public class AuditCommandShouldBeTests
     // --- B7: dispatcher NoAlias omits x ---
 
     [Fact]
-    public void Dispatcher_NoAliasCommands_IncludesX()
+    public void Dispatcher_NoAliasCommands_MatchesPython()
     {
-        // audit B7: NoAliasCommands lacks "x" although x is a Build direction,
-        // so a lone "x" falls into auto-alias prefix search instead of the
-        // NoAlias refusal every other single-char direction gets.
+        // audit B7, corrected: Python's _NO_ALIAS_COMMANDS (inputfuncs.py:16)
+        // is exactly ["n","s","e","w","u","d"] — "x" is a build direction but
+        // is NOT no-alias in either implementation. Pins parity.
         var f = typeof(CommandDispatcher).GetField("NoAliasCommands", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(f);
         var arr = Assert.IsAssignableFrom<string[]>(f!.GetValue(null));
-        Assert.Contains("x", arr);
+        Assert.Equal(new[] { "n", "s", "e", "w", "u", "d" }, arr);
     }
 
     // --- B8: CmdSet case + registry staleness ---
@@ -246,7 +253,9 @@ public class AuditCommandShouldBeTests
     public void Registry_UnloggedIn_ReflectsDisabledGuestSetting()
     {
         // audit B8: RegisterUnloggedIn snapshots Global.*Enabled once; later
-        // flips (e.g. disabling guests) have no effect until ResetForTesting.
+        // flips (e.g. disabling guests) had no effect until ResetForTesting.
+        // Fixed at dispatch time: a disabled verb falls through to the none
+        // fallback ("not found") instead of running the stale command.
         using var env = GlobalTestEnv.Enter();
         var orig = AtherizSettings.Global.GuestEnabled;
         AtherizSettings.Global.GuestEnabled = true;
@@ -257,7 +266,10 @@ public class AuditCommandShouldBeTests
         {
             var conn = new TestConnection();
             var job = CommandDispatcher.ResolveUnloggedIn(conn, "guest");
-            Assert.Null(job);
+            Assert.NotNull(job);
+            job!.Func(job.Caller, job.Args);
+            var text = string.Join("\n", conn.Sent.SelectMany(t => t.Args.Select(a => a?.ToString() ?? "")));
+            Assert.Contains("not found", text, StringComparison.OrdinalIgnoreCase);
         }
         finally { AtherizSettings.Global.GuestEnabled = orig; CommandRegistry.ResetForTesting(); }
     }

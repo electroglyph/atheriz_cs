@@ -936,7 +936,17 @@ public class ConnectionManager
                 return;
             }
             var cmdElement = root[0];
-            var cmd = cmdElement.GetString() ?? cmdElement.ToString(); // port of manager.py:202
+            // Non-string commands are malformed input (port of manager.py:194):
+            // GetString() would throw for numbers/arrays, routing them to the
+            // error path instead of the malformed path. Reject them cleanly.
+            if (cmdElement.ValueKind != JsonValueKind.String)
+            {
+                var host2 = connection.ClientHost ?? "?";
+                if (ShouldLogMalformed(host2))
+                    try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Invalid message format from {host2} ({rawMessage.Length} bytes): {SummarizeRaw(rawMessage)}"); } catch { Console.Error.WriteLine($"[Network] Invalid message format from {host2} ({rawMessage.Length} bytes): {SummarizeRaw(rawMessage)}"); }
+                return;
+            }
+            var cmd = cmdElement.GetString()!;
             List<object?> args = new(); // port of manager.py:203
             Dictionary<string, object?> kwargs = new(); // port of manager.py:204
             if (root.GetArrayLength() > 1) args = JsonElementToList(root[1]);

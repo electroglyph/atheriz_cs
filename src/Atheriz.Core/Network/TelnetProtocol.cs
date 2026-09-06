@@ -58,6 +58,16 @@ public class TelnetConnection : BaseConnection
         catch { }
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            try { if (Writer is IDisposable wd) wd.Dispose(); } catch { }
+            try { if (Reader is System.IO.TextReader tr) tr.Dispose(); } catch { }
+        }
+        base.Dispose(disposing);
+    }
+
     // Port of telnet.py:138-156 _get_write_buffer_size
     public virtual int? GetWriteBufferSize()
     {
@@ -349,7 +359,15 @@ public sealed class TelnetStreamWriter : ITelnetWriter
     private readonly object _writeLock = new object();
     private Action<int,int>? _nawsCallback;
     public TelnetStreamWriter(Stream stream, TcpClient client) { _stream = stream; _client = client; }
-    public void Write(string text) { var bytes = Encoding.UTF8.GetBytes(text); lock (_writeLock) _stream.Write(bytes, 0, bytes.Length); }
+    public void Write(string text)
+    {
+        // Bounded write (audit B30): a peer that never drains must not stall
+        // the game thread forever. SendTimeout turns a wedged peer into a
+        // SocketException instead of an indefinite block.
+        try { _client.SendTimeout = 2000; } catch { }
+        var bytes = Encoding.UTF8.GetBytes(text);
+        lock (_writeLock) _stream.Write(bytes, 0, bytes.Length);
+    }
     public void Iac(byte cmd, byte opt) { var bytes = new byte[] { 255, cmd, opt }; lock (_writeLock) _stream.Write(bytes, 0, bytes.Length); }
     public void Close() { try { _stream.Close(); } catch { } try { _client.Close(); } catch { } }
     // Port of telnet.py: get_write_buffer_size returns pending bytes, not SO_SNDBUF. Returning null skips the OS buffer check which was misusing SendBufferSize (2626560) vs TelnetMaxPendingBytes (1M) and causing false closes.
@@ -370,40 +388,76 @@ public sealed class TelnetProtocol : Protocol
     }
 
     private static string TelnetText(string text) => text.Replace("\r\n", "\n").Replace("\n", "\r\n");
-    private static int FindEol(string buf)
-    {
-        var idx = buf.IndexOf('\r');
-        var nl = buf.IndexOf('\n');
-        if (idx == -1) return nl;
-        if (nl == -1) return idx;
-        return Math.Min(idx, nl);
-    }
 
     public static async IAsyncEnumerable<string?> ReadCappedLines(TextReader reader, int maxLine)
     {
-        var buf = ""; var dropping = false; var eof = false;
+        // Linear-time port: StringBuilder accumulation plus a checkedUpTo
+        // cursor, so a huge line costs O(n) total instead of O(n^2) repeated
+        // string concatenation/rescan (audit B30). State machine mirrors the
+        // original exactly: split-CRLF holdback, overlong dropping (null
+        // yield), \r\n / \r\x00 stripping, EOF tail.
+        var buf = new System.Text.StringBuilder();
+        var dropping = false; var eof = false;
+        int checkedUpTo = 0; // buf[0..checkedUpTo) holds no EOL
         char[] chunkBuf = new char[TELNET_INPUT_CHUNK];
         while (true)
         {
-            int read = 0; try { read = await reader.ReadAsync(chunkBuf, 0, TELNET_INPUT_CHUNK); } catch { read = 0; }
-            string chunk = read > 0 ? new string(chunkBuf, 0, read) : "";
-            if (string.IsNullOrEmpty(chunk)) { eof = true; break; }
-            buf += chunk;
+            int read = 0;
+            try { read = await reader.ReadAsync(chunkBuf, 0, TELNET_INPUT_CHUNK); }
+            catch (OperationCanceledException) { read = 0; }
+            catch (Exception ex)
+            {
+                // Read errors surface instead of masquerading as clean EOF:
+                // a broken transport must not look like a graceful disconnect.
+                // Drained buffered lines were already yielded above.
+                throw new IOException($"telnet input read failed: {ex.Message}", ex);
+            }
+            if (read <= 0) { eof = true; break; }
+            buf.Append(chunkBuf, 0, read);
+            // Extract complete lines; scan only the unchecked tail.
             while (true)
             {
-                var i = FindEol(buf); if (i == -1) break;
-                if (buf[i] == '\r' && i + 1 >= buf.Length && !eof) break;
-                var line = buf.Substring(0, i); var rest = buf.Substring(i + 1);
-                if (buf[i] == '\r' && rest.Length > 0 && (rest[0] == '\n' || rest[0] == '\x00')) rest = rest.Substring(1);
-                buf = rest;
+                var i = FindEolIn(buf, checkedUpTo);
+                if (i == -1) { checkedUpTo = buf.Length; break; }
+                // Lone trailing \r with more data possibly coming: hold back.
+                if (buf[i] == '\r' && i + 1 >= buf.Length && !eof) { checkedUpTo = i; break; }
+                var line = buf.ToString(0, i);
+                int consume = i + 1;
+                if (buf[i] == '\r' && consume < buf.Length && (buf[consume] == '\n' || buf[consume] == '\x00')) consume++;
+                buf.Remove(0, consume);
+                checkedUpTo = 0; // removal shifts content; remainder is small in the multi-line case
                 if (dropping || line.Length > maxLine) { yield return null; dropping = false; } else yield return line;
             }
             var effectiveLen = buf.Length;
-            if (!eof && buf.EndsWith("\r") && FindEol(buf) == buf.Length - 1) effectiveLen--;
-            if (effectiveLen > maxLine) { dropping = true; buf = ""; }
+            if (!eof && effectiveLen > 0 && buf[effectiveLen - 1] == '\r' && FindEolIn(buf, 0) == effectiveLen - 1) effectiveLen--;
+            if (effectiveLen > maxLine) { dropping = true; buf.Clear(); checkedUpTo = 0; }
         }
-        while (true) { var i = FindEol(buf); if (i == -1) break; var line = buf.Substring(0, i); var rest = buf.Substring(i + 1); if (buf[i] == '\r' && rest.Length > 0 && (rest[0] == '\n' || rest[0] == '\x00')) rest = rest.Substring(1); buf = rest; if (dropping || line.Length > maxLine) { yield return null; dropping = false; } else yield return line; }
-        if (!string.IsNullOrEmpty(buf) && !dropping) { if (buf == "\r") { } else { if (buf.EndsWith("\r")) buf = buf.Substring(0, buf.Length - 1); if (!string.IsNullOrEmpty(buf)) yield return buf; } }
+        while (true)
+        {
+            var i = FindEolIn(buf, 0);
+            if (i == -1) break;
+            var line = buf.ToString(0, i);
+            int consume = i + 1;
+            if (buf[i] == '\r' && consume < buf.Length && (buf[consume] == '\n' || buf[consume] == '\x00')) consume++;
+            buf.Remove(0, consume);
+            if (dropping || line.Length > maxLine) { yield return null; dropping = false; } else yield return line;
+        }
+        if (buf.Length > 0 && !dropping)
+        {
+            var tail = buf.ToString();
+            if (tail != "\r")
+            {
+                if (tail.EndsWith("\r")) tail = tail.Substring(0, tail.Length - 1);
+                if (!string.IsNullOrEmpty(tail)) yield return tail;
+            }
+        }
+    }
+
+    private static int FindEolIn(System.Text.StringBuilder buf, int start)
+    {
+        for (int i = start; i < buf.Length; i++)
+            if (buf[i] == '\r' || buf[i] == '\n') return i;
+        return -1;
     }
 
     // F016: single TextReader overload (StreamReader binds here implicitly). Read errors are

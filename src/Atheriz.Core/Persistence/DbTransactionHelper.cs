@@ -1,7 +1,87 @@
 // Port of atheriz/database_setup.py:Database.lock RLock scaffold + do_setup transaction
+using Atheriz.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Persistence;
+
+/// <summary>
+/// Crash-consistency journal for multi-table checkpoints (audit A7).
+/// A full checkpoint marks the row dirty BEFORE writing tables and clean AFTER
+/// all tables commit. A dirty row at startup means the previous checkpoint died
+/// mid-way and tables may be torn. Single-table saves never touch the journal.
+/// The journal itself must never break a save: all methods swallow errors.
+/// </summary>
+public static class CheckpointJournal
+{
+    private const int RowId = 0;
+
+    private static string ResolveDefaultPath() =>
+        Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? AtherizSettings.Global.SavePath;
+
+    /// <summary>Dirty-mark using the same default-path resolution as parameterless factory/saves.</summary>
+    public static void MarkDirty() => MarkDirty(ResolveDefaultPath());
+
+    /// <summary>Clean-mark using the same default-path resolution as parameterless factory/saves.</summary>
+    public static void MarkClean() => MarkClean(ResolveDefaultPath());
+
+    /// <summary>Dirty-check using the same default-path resolution as parameterless factory/saves.</summary>
+    public static bool IsDirty() => IsDirty(ResolveDefaultPath());
+
+    public static void MarkDirty(string savePath)
+    {
+        try
+        {
+            using var db = AtherizDbContextFactory.Create(savePath);
+            db.Database.EnsureCreated();
+            Upsert(db, "dirty");
+        }
+        catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal dirty-mark failed: {ex.Message}"); } catch { } }
+    }
+
+    public static void MarkClean(string savePath)
+    {
+        try
+        {
+            using var db = AtherizDbContextFactory.Create(savePath);
+            db.Database.EnsureCreated();
+            Upsert(db, "clean");
+        }
+        catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal clean-mark failed: {ex.Message}"); } catch { } }
+    }
+
+    /// <summary>True when a previous checkpoint died mid-way. Missing row/table (first boot) counts as clean.</summary>
+    public static bool IsDirty(string savePath)
+    {
+        try
+        {
+            using var db = AtherizDbContextFactory.Create(savePath);
+            db.Database.EnsureCreated();
+            var row = db.Checkpoints.Find(RowId);
+            return row != null && row.State == "dirty";
+        }
+        catch { return false; }
+    }
+
+    private static void Upsert(AtherizDbContext db, string state)
+    {
+        var row = db.Checkpoints.Find(RowId);
+        if (row == null)
+            db.Checkpoints.Add(new Entities.CheckpointRow
+            {
+                Id = RowId,
+                State = state,
+                Token = Guid.NewGuid().ToString("N"),
+                SavedAtUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            });
+        else
+        {
+            row.State = state;
+            row.Token = Guid.NewGuid().ToString("N");
+            row.SavedAtUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        }
+        db.SaveChanges();
+    }
+}
 
 /// <summary>
 /// Deduplicates the 4× (plus ObjectRegistry) <c>DbWriteGate.Enter / EnsureCreated / BeginTransaction / SaveChanges / Commit / Rollback / Exit</c>

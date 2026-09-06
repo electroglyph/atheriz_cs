@@ -13,6 +13,8 @@ public static class StringDistance
     /// </summary>
     public static int Levenshtein(string a, string b)
     {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
         var d = new int[a.Length + 1, b.Length + 1];
         for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
         for (int j = 0; j <= b.Length; j++) d[0, j] = j;
@@ -29,6 +31,8 @@ public static class StringDistance
     public static string? BestMatch(string query, IEnumerable<string> candidates)
     {
         // Spec: candidates.OrderBy(k=>Levenshtein(query,k)).FirstOrDefault() or null if empty.
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(candidates);
         return candidates.OrderBy(k => Levenshtein(query, k)).FirstOrDefault();
     }
 }

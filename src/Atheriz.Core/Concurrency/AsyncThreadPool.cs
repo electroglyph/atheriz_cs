@@ -51,6 +51,10 @@ public class AsyncThreadPool : IDisposable
         _watchdogThreshold = watchdogSeconds ?? TimeSpan.FromSeconds(30);
         _watchdogInterval = watchdogInterval ?? TimeSpan.FromSeconds(5);
 
+        // Port of Python pool layout: threads[0] is the async thread and
+        // threads[1:] are the fixed workers, so maxThreads counts the async
+        // slot plus (maxThreads-1) workers. The Threads property exposes the
+        // same alignment (dummy async placeholder + fixed workers).
         for (int i = 0; i < _maxThreads - 1; i++)
         {
             var t = new Thread(WorkLoop) { IsBackground = true, Name = $"AtherizWorker-{i}" };

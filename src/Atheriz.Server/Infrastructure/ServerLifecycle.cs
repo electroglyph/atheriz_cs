@@ -13,10 +13,9 @@ namespace Atheriz.Server.Infrastructure;
 /// </summary>
 public static class ServerLifecycle
 {
-    // Port of startstop.py:17 _WORLD_LOCK
+    // Port of startstop.py:17 _WORLD_LOCK (+ :18 _shutdown_lock = _WORLD_LOCK alias)
     private static readonly object WorldLock = new();
-    // Port of startstop.py:18 _shutdown_lock = _WORLD_LOCK
-    private static readonly object ShutdownLock = new();
+    private static readonly object ShutdownLock = WorldLock;
     // Port of startstop.py:19 _shutdown_completed
     private static bool _shutdownCompleted = false;
     // Readiness flag for /ready (liveness stays /health per AGENTS webclient constraint).
@@ -55,9 +54,15 @@ public static class ServerLifecycle
         catch (Exception ex) { Console.Error.WriteLine($"DoStartup EnsureCreated failed: {ex}"); }
 
         // Port of startstop.py:30-46 delegate faithful — loads objects, handlers, server_events, gametime, autosave
-        // Delegates to StartStop which uses GlobalServices double-checked singletons
+        // Delegates to StartStop which uses GlobalServices double-checked singletons.
+        // Readiness reports success ONLY when startup actually succeeded.
         try { StartStop.DoStartup(null, null, settings); }
-        catch (Exception ex) { Console.Error.WriteLine($"StartStop.DoStartup failed:\n{ex}"); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"StartStop.DoStartup failed:\n{ex}");
+            _startupSucceeded = false;
+            return;
+        }
 
         Console.Error.WriteLine("[Lifecycle] DoStartup completed."); // Port of lifecycle log
         _startupSucceeded = true;
@@ -112,6 +117,7 @@ public static class ServerLifecycle
     public static void ResetForTesting()
     {
         lock (ShutdownLock) _shutdownCompleted = false;
+        _startupSucceeded = false;
         try { StartStop.ResetForTesting(); } catch { }
     }
 }

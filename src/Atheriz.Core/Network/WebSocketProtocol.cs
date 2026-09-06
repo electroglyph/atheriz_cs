@@ -40,14 +40,21 @@ public sealed class WebSocketConnection : BaseConnection
         _limiter = new PendingLimiter(_settings.WebsocketMaxPendingBytes, _settings.WebsocketMaxPendingSends);
     }
 
-    // port of websocket.py:46-53 _track_task — now via PendingLimiter sole accounting
-    private void TrackTask(Task task, int nb)
+    protected override void Dispose(bool disposing)
     {
-        _limiter.Track(task, nb);
-        try { _ = task.ContinueWith(t => TaskDone(t)); } catch { }
+        if (disposing)
+        {
+            try { WebSocket.Abort(); } catch { }
+            try { WebSocket.Dispose(); } catch { }
+            try { _sendLock.Dispose(); } catch { }
+        }
+        base.Dispose(disposing);
     }
 
+    // port of websocket.py:46-53 _track_task — now via PendingLimiter sole accounting
+    // (SendCommand reserves/tracks inline below; this helper was dead code.)
     // port of websocket.py:55-66 _task_done — now via PendingLimiter sole accounting
+    // (see TaskDone below).
     private void TaskDone(Task task)
     {
         _limiter.Release(task);
@@ -61,16 +68,23 @@ public sealed class WebSocketConnection : BaseConnection
         else if (task.IsCanceled) { }
     }
 
-    // port of websocket.py:68-70 _locked_send
+    // port of websocket.py:68-70 _locked_send — bounded: a hung peer must not
+    // pin _sendLock (and stall all later sends) forever (audit B29).
     private async Task LockedSendAsync(string data)
     {
-        await _sendLock.WaitAsync();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await _sendLock.WaitAsync(cts.Token);
         try
         {
             var bytes = Encoding.UTF8.GetBytes(data);
-            await WebSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+            await WebSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
         }
-        finally { _sendLock.Release(); }
+        catch (OperationCanceledException)
+        {
+            try { WebSocket.Abort(); } catch { }
+            throw;
+        }
+        finally { try { _sendLock.Release(); } catch { } }
     }
 
     public bool IsClosing => _limiter.IsClosing || _closing;
@@ -119,17 +133,27 @@ public sealed class WebSocketConnection : BaseConnection
         {
             try
             {
-                // port of websocket.py:120-130 wait_for gather with 0.25 timeout
+                // port of websocket.py:120-130 wait_for gather with 0.25 timeout.
+                // WaitAsync(CancellationToken) raises OperationCanceledException
+                // (not TimeoutException) on deadline — that is the expected path.
                 using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
                 await Task.WhenAll(pending).WaitAsync(cts.Token);
             }
-            catch (TimeoutException)
-            {
-                foreach (var pt in pending) try { } catch { } // port of websocket.py:132-133 cancel pending
-            }
+            catch (OperationCanceledException) { } // deadline elapsed; pendings release via TaskDone on completion
             catch { }
         }
-        try { if (WebSocket.State == WebSocketState.Open) await WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); } catch { } // port of websocket.py:135
+        try
+        {
+            // Bounded close handshake (audit B29): a peer that never answers
+            // must not hang Close forever. Abort past the deadline.
+            if (WebSocket.State == WebSocketState.Open)
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                try { await WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); }
+                catch (OperationCanceledException) { try { WebSocket.Abort(); } catch { } }
+            }
+        }
+        catch { } // port of websocket.py:135
     }
 
     // port of websocket.py:139-150 close — now via limiter sole accounting
@@ -143,8 +167,10 @@ public sealed class WebSocketConnection : BaseConnection
         _closing = true;
         try
         {
-            // port of websocket.py:145-148 _is_on_loop_thread branching — scheduled via Task.Run
+            // port of websocket.py:145-148 _is_on_loop_thread branching — scheduled via Task.Run.
+            // Observe the task: an unobserved close fault must reach the log, not the finalizer.
             _closeTask = Task.Run(() => CloseWebSocketAsync());
+            _ = _closeTask.ContinueWith(t => TaskDone(t), TaskScheduler.Default);
         }
         catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Error closing connection: {e}"); } catch { Console.Error.WriteLine($"[WebSocket] Error closing connection: {e}"); } } // port of websocket.py:149-150
     }
@@ -385,7 +411,16 @@ public sealed class WebSocketProtocol : Protocol
     private sealed class FallbackConnection : BaseConnection
     {
         public FallbackConnection(string? sid) : base(sid) { }
-        public override void SendCommand(string cmd, List<object?>? args = null, Dictionary<string, object?>? kwargs = null) { }
-        public override void Close() { }
+        // No real peer exists: dropping silently loses messages, so log loudly (audit B29).
+        public override void SendCommand(string cmd, List<object?>? args = null, Dictionary<string, object?>? kwargs = null)
+        {
+            try { Atheriz.Core.AtherizLogger.LogWarning($"[WebSocket] dropping command '{cmd}': no real peer (fallback connection)"); }
+            catch { Console.Error.WriteLine($"[WebSocket] dropping command '{cmd}': no real peer (fallback connection)"); }
+        }
+        public override void Close()
+        {
+            try { Atheriz.Core.AtherizLogger.LogWarning("[WebSocket] close on fallback connection (no real peer)"); }
+            catch { Console.Error.WriteLine("[WebSocket] close on fallback connection (no real peer)"); }
+        }
     }
 }

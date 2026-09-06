@@ -558,6 +558,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         o._flags.IsItem = dto.IsItem;
         o._flags.IsContainer = dto.IsContainer;
         o._flags.IsMapable = dto.IsMapable;
+        // Keep the twin field in sync (setters assign both; restore both).
+        o._mapEnabled = dto.IsMapable;
         o._flags.IsNode = isNodeOverride ?? dto.IsNode;
         o._flags.IsTemporary = dto.IsTemporary;
         o._flags.IsDeleted = dto.IsDeleted;

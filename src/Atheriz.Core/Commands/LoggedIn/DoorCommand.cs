@@ -65,7 +65,7 @@ public sealed class DoorCommand : Command
             if (down) TryRemove("down","d");
             return;
         }
-        var settings = AtherizSettings.Default;
+        var settings = AtherizSettings.Global;
         var defs = new (string flag, string longName, string shortName, int dx,int dy,int dz, string closed, string open)[]
         {
             ("north","north","n",0,1,0, settings.NsClosedDoor, settings.NsOpenDoor1),

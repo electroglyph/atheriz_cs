@@ -250,9 +250,12 @@ public class Door
     public bool Open(GameObject? caller = null) => caller != null ? TryOpen(caller) : ForceOpen();
     public bool ForceOpen()
     {
+        bool opened;
         _lock.EnterWriteLock();
-        try { if (_locked) return false; if (!_closed) return true; _closed = false; return true; }
+        try { if (_locked) return false; if (!_closed) return true; _closed = false; opened = true; }
         finally { _lock.ExitWriteLock(); }
+        if (opened) MarkNodeDoorsModified();
+        return true;
     }
 
     // Port of base_door.py:165 try_close
@@ -294,9 +297,12 @@ public class Door
     public bool Close(GameObject? caller = null) => caller != null ? TryClose(caller) : ForceClose();
     public bool ForceClose()
     {
+        bool closed;
         _lock.EnterWriteLock();
-        try { if (_closed) return false; _closed = true; return true; }
+        try { if (_closed) return false; _closed = true; closed = true; }
         finally { _lock.ExitWriteLock(); }
+        if (closed) MarkNodeDoorsModified();
+        return true;
     }
 
     // Port of base_door.py:220 try_lock

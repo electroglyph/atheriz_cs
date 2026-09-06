@@ -150,7 +150,22 @@ public sealed class PutCommand : Command
         if (caller is not GameObject goCaller) { caller.Msg(PrintHelp()); return; }
         string? objName = null;
         string? destName = null;
-        if (args != null)
+        // Port of put.py:25-42 — live ParsedArgs carry the `args` list.
+        if (args is GameArgumentParser.ParsedArgs pa)
+        {
+            var tokens = pa.GetList("args");
+            if (tokens.Count > 0)
+            {
+                int split = tokens.FindIndex(s => s.Equals("in", StringComparison.OrdinalIgnoreCase) || s.Equals("into", StringComparison.OrdinalIgnoreCase));
+                if (split < 0) { caller.Msg(PrintHelp()); return; }
+                var objParts = tokens.Take(split).ToList();
+                var destParts = tokens.Skip(split + 1).ToList();
+                if (objParts.Count == 0 || destParts.Count == 0) { caller.Msg(PrintHelp()); return; }
+                objName = string.Join(" ", objParts);
+                destName = string.Join(" ", destParts);
+            }
+        }
+        if (objName == null && args != null)
         {
             var t = args.GetType();
             var propArgs = t.GetProperty("Args") ?? t.GetProperty("args");

@@ -233,6 +233,7 @@ public partial class Node
             foreach (var o in objs) { o.IsModified = true; }
         }
         finally { SyncRoot.ExitWriteLock(); }
+        foreach (var o in objs) try { o.Location = new Persistence.Dto.LocationRef.CoordLocation(Coord); } catch { }
         foreach (var o in objs) try { AddExits(o); } catch { }
     }
     // Port of nodes.py:747 add_object
@@ -241,6 +242,8 @@ public partial class Node
         SyncRoot.EnterWriteLock();
         try { AddContent(obj.Id); obj.IsModified = true; IsModified = true; }
         finally { SyncRoot.ExitWriteLock(); }
+        // Like MoveTo into a node, membership implies the node's coord.
+        try { obj.Location = new Persistence.Dto.LocationRef.CoordLocation(Coord); } catch { }
         try { AddExits(obj); } catch { }
     }
     // Port of nodes.py:759 remove_object
@@ -249,6 +252,12 @@ public partial class Node
         SyncRoot.EnterWriteLock();
         try { RemoveContent(obj.Id); IsModified = true; }
         finally { SyncRoot.ExitWriteLock(); }
+        try
+        {
+            if (obj.Location is Persistence.Dto.LocationRef.CoordLocation cl && cl.Coord.Equals(Coord))
+                obj.Location = Persistence.Dto.LocationRef.NullLocation.Instance;
+        }
+        catch { }
         try { obj.InternalCmdSet?.RemoveByTag("exits"); } catch { }
     }
 

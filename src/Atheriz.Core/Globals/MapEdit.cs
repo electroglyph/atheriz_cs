@@ -204,6 +204,20 @@ public static class MapEdit
         finally { Lock.ExitWriteLock(); }
     }
 
+    // Copy-on-write snapshot: readers (incl. GetChain holders) never observe
+    // torn in-place rotation, and external holders cannot corrupt store state.
+    // Consume stores + returns the same fresh instance, so the existing
+    // result.Chain.Validation write-through keeps working.
+    private static MapEditChain CopyOf(MapEditChain c) => new(c.Key, c.Ip, c.Area, c.Z, c.Session)
+    {
+        PreviousKey = c.PreviousKey,
+        Seq = c.Seq,
+        Validation = c.Validation == null ? null : new List<int>(c.Validation),
+        Chain = new List<Coord>(c.Chain),
+        CreatedAt = c.CreatedAt,
+        CreatedMonotonic = c.CreatedMonotonic,
+    };
+
     // Spec wrapper: AddChain(ip,area,z) => Grant
     public static string AddChain(string ip, string area, int z, Session? session = null) => Grant(ip, area, z, session);
 
@@ -218,9 +232,11 @@ public static class MapEdit
             EvictLocked(GetMonotonic());
             if (_chains.TryGetValue(key, out var existing))
             {
-                existing.Chain = new List<Coord>(chain);
-                existing.CreatedAt = DateTime.UtcNow;
-                existing.CreatedMonotonic = GetMonotonic();
+                var updated = CopyOf(existing);
+                updated.Chain = new List<Coord>(chain);
+                updated.CreatedAt = DateTime.UtcNow;
+                updated.CreatedMonotonic = GetMonotonic();
+                _chains[key] = updated;
             }
             else
             {
@@ -286,14 +302,17 @@ public static class MapEdit
                 string oldKey = chain.Key;
                 _chains.Remove(oldKey);
                 _previous.Remove(oldKey);
-                chain.PreviousKey = oldKey;
-                chain.Key = newKey;
-                chain.Seq = seq;
-                chain.CreatedAt = DateTime.UtcNow;
-                chain.CreatedMonotonic = GetMonotonic();
-                _chains[newKey] = chain;
+                // Rotate by swapping in a fresh instance (never mutate in
+                // place — holders of the previous snapshot must not tear).
+                var rotated = CopyOf(chain);
+                rotated.PreviousKey = oldKey;
+                rotated.Key = newKey;
+                rotated.Seq = seq;
+                rotated.CreatedAt = DateTime.UtcNow;
+                rotated.CreatedMonotonic = GetMonotonic();
+                _chains[newKey] = rotated;
                 _previous[oldKey] = newKey;
-                return new MapEditResult(MapEditStatus.Processed, newKey: newKey, chain: chain);
+                return new MapEditResult(MapEditStatus.Processed, newKey: newKey, chain: rotated);
             }
             if (seq <= chain.Seq)
                 return new MapEditResult(MapEditStatus.Reject, reason: "replay");
@@ -302,14 +321,15 @@ public static class MapEdit
         finally { Lock.ExitWriteLock(); }
     }
 
-    // Port of spec: GetChain
+    // Port of spec: GetChain — returns a snapshot copy, never the live store
+    // reference, so holders cannot corrupt state or observe torn rotation.
     public static MapEditChain? GetChain(string key)
     {
         Lock.EnterReadLock();
         try
         {
-            if (_chains.TryGetValue(key, out var c)) return c;
-            if (_previous.TryGetValue(key, out var cur) && _chains.TryGetValue(cur, out var c2)) return c2;
+            if (_chains.TryGetValue(key, out var c)) return CopyOf(c);
+            if (_previous.TryGetValue(key, out var cur) && _chains.TryGetValue(cur, out var c2)) return CopyOf(c2);
             return null;
         }
         finally { Lock.ExitReadLock(); }

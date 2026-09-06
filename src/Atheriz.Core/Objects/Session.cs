@@ -21,7 +21,14 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     // Guards puppet / puppet_stack / input_future, which are written by game workers and read by per-connection input drain (#31).
     // Scalar fields (term/map dims, screenreader) are single atomic stores under the GIL and need no lock — we still guard writes.
     public readonly object Lock = new object(); // Port of session.py:21 lock = threading.RLock()
-    public Account? Account; // Port of session.py:22 account: Account | None
+    public Account? Account
+    {
+        get => _account;
+        // Spec extra mirror: keep AccountId in sync (it is otherwise set only
+        // in the ctor and goes stale on later swaps).
+        set { _account = value; AccountId = value?.Id; }
+    }
+    private Account? _account;
     public int? AccountId; // Spec extra: mirror Account.Id for quick lookup (Python stores object, C# stores both)
     public BaseConnection? Connection; // Port of session.py:23 connection: Connection | None
     public GameObject? LastPuppet; // Port of session.py:24 last_puppet

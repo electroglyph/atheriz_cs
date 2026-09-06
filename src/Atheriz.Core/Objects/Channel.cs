@@ -10,7 +10,10 @@ public class Channel : GameObject
 {
     public new static bool _is_thread_safe = true;
     private readonly object _histLock = new();
-    private readonly LinkedList<string> _history = [];
+    // Port of base_channel.py history entries: (timestamp, sender, message)
+    // tuples. Listeners receive the FormatMessage form; History projects the
+    // raw messages; GetHistory formats on replay — so replay matches live.
+    private readonly LinkedList<ChannelHistoryEntry> _history = [];
     private readonly Dictionary<int, GameObject> _listeners = new();
     private readonly int _historyLimit;
     private bool _channelDeleted = false;
@@ -68,7 +71,8 @@ public class Channel : GameObject
     }
     public IReadOnlyList<string> History
     {
-        get { lock (_histLock) return _history.ToList(); }
+        // Raw-message projection of the (timestamp, sender, message) entries.
+        get { lock (_histLock) return _history.Select(e => e.Message).ToList(); }
     }
 
     public void AddListener(GameObject obj)
@@ -169,15 +173,19 @@ public class Channel : GameObject
     {
         string senderName = from?.Name ?? "";
         int timestamp = (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        // Port of base_channel.py:262-264 — history keeps the
+        // (timestamp, sender, message) entry; listeners receive the formatted
+        // form, and GetHistory re-formats on replay so both match.
+        var entry = new ChannelHistoryEntry(timestamp, senderName, text);
+        string formatted = FormatMessage(timestamp, senderName, text);
         List<GameObject> listeners;
         lock (_histLock)
         {
-            _history.AddLast(text);
+            _history.AddLast(entry);
             while (_history.Count > _historyLimit) _history.RemoveFirst();
             IsModified = true;
             listeners = _listeners.Values.ToList();
         }
-        string formatted = FormatMessage(timestamp, senderName, text);
         foreach (var listener in listeners)
         {
             // FormatMessage is a pure function of (timestamp, sender, text), so
@@ -196,7 +204,7 @@ public class Channel : GameObject
     {
         int limit = Settings.AtherizSettings.Global.ChannelHistoryLimit;
         count = Math.Max(0, Math.Min(count, limit));
-        List<string> entries;
+        List<ChannelHistoryEntry> entries;
         lock (_histLock)
         {
             if (count == 0) return "";
@@ -204,9 +212,9 @@ public class Channel : GameObject
             if (count < entries.Count) entries = entries.Skip(entries.Count - count).ToList();
         }
         var lines = new List<string>();
-        foreach (var msg in entries)
+        foreach (var e in entries)
         {
-            lines.Add(msg + "\n");
+            lines.Add(FormatMessage(e.Timestamp, e.Sender, e.Message) + "\n");
         }
         return string.Join("", lines);
     }
@@ -232,7 +240,7 @@ public class Channel : GameObject
     private (string Sql, object[] Params) BuildSaveOps(bool clearing)
     {
         IncrementTracker();
-        List<string> histSnap;
+        List<ChannelHistoryEntry> histSnap;
         lock (_histLock) { histSnap = _history.ToList(); }
         bool had = false;
         string json;
@@ -262,16 +270,19 @@ public class Channel : GameObject
 
     public override GameObjectDto ToDto()
     {
-        List<string> histSnap;
+        List<ChannelHistoryEntry> histSnap;
         lock (_histLock) { histSnap = _history.ToList(); }
         return BuildDto(histSnap);
     }
 
-    private GameObjectDto BuildDto(List<string> history)
+    private GameObjectDto BuildDto(List<ChannelHistoryEntry> history)
     {
         var dto = base.ToDto();
         dto.Type = "channel";
-        dto.Extra["history"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(history)).RootElement.Clone();
+        // Persisted as [timestamp, sender, message] triples mirroring the
+        // Python (timestamp, sender, message) history tuples.
+        var triples = history.Select(e => new object[] { e.Timestamp, e.Sender, e.Message }).ToList();
+        dto.Extra["history"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(triples)).RootElement.Clone();
         // listeners intentionally excluded per __getstate__ (pop listeners)
         // lock also excluded (not in DTO)
         dto.Extra.Remove("listeners");
@@ -282,7 +293,7 @@ public class Channel : GameObject
         return dto;
     }
 
-    internal void RestoreHistory(List<string> hist)
+    internal void RestoreHistory(List<ChannelHistoryEntry> hist)
     {
         lock (_histLock)
         {
@@ -292,3 +303,10 @@ public class Channel : GameObject
         }
     }
 }
+
+/// <summary>
+/// One channel history entry: port of the
+/// <c>(timestamp, sender, message)</c> tuples in
+/// <c>atheriz/objects/base_channel.py</c>.
+/// </summary>
+internal sealed record ChannelHistoryEntry(int Timestamp, string Sender, string Message);

@@ -79,6 +79,18 @@ public partial class GameObject
         _lock.EnterWriteLock();
         try { _contents.Remove(obj.Id); _flags.IsModified = true; }
         finally { _lock.ExitWriteLock(); }
+        // Mirror AddObject: Location was pointed at this container, so clear
+        // it (base_obj.py leaves location alone, but C# maintains Location on
+        // add — leaving it would resolve a stale location via the registry).
+        if (!obj.IsNode)
+        {
+            try
+            {
+                if (obj.Location is LocationRef.ObjectLocation ol && ol.ObjectId == this.Id)
+                    obj.Location = LocationRef.NullLocation.Instance;
+            }
+            catch { }
+        }
     }
 
     /// <summary>
@@ -194,14 +206,14 @@ public partial class GameObject
             // Also check direct dest is self
             if (destObj.Id == this.Id) return false;
             // Additional contents-recursion guard for flaky parallel tests (registry pollution may break location chain)
+            // No iteration cap: the visited set guarantees termination, and a
+            // cap silently allows cycles in wide containers.
             if (IsContainer)
             {
                 var visited = new HashSet<int>();
                 var stack = new Stack<int>(ContentsSnapshot);
-                int iter = 0;
-                while (stack.Count > 0 && iter < 100)
+                while (stack.Count > 0)
                 {
-                    iter++;
                     var cid = stack.Pop();
                     if (!visited.Add(cid)) continue;
                     if (cid == destObj.Id) return false;

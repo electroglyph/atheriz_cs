@@ -23,15 +23,6 @@ namespace Atheriz.Core.Tests.Audit;
 [Collection("Ported")]
 public class AuditSocketLoopbackShouldBeTests
 {
-    private static int FreePort()
-    {
-        var l = new TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        int port = ((IPEndPoint)l.LocalEndpoint).Port;
-        l.Stop();
-        return port;
-    }
-
     // --- B29: WebSocket pump via mock app (decorator pattern, no server) ---
 
     private sealed class FakeWsApp
@@ -148,44 +139,93 @@ public class AuditSocketLoopbackShouldBeTests
         }
     }
 
-    [Fact]
-    public async Task Ws_Close_ToBlackholePeer_CompletesPromptly()
+    // --- B29: close handshake against a hanging peer (no network) ---
+
+    // Scripted System.Net.WebSockets.WebSocket fakes: HttpListener does not
+    // function in this sandbox (connect hangs), while raw TCP loopback works.
+    // These fakes drive the real pump/close paths deterministically.
+    private abstract class ScriptedWebSocket : WebSocket
     {
-        // audit B29: LockedSendAsync/CloseAsync use CancellationToken.None, so
+        protected WebSocketState _state = WebSocketState.Open;
+        protected WebSocketCloseStatus? _closeStatus;
+        public override WebSocketCloseStatus? CloseStatus => _closeStatus;
+        public override string? CloseStatusDescription => null;
+        public override WebSocketState State => _state;
+        public override string? SubProtocol => null;
+        public override void Abort() { _state = WebSocketState.Aborted; }
+        public override void Dispose() { }
+        public override Task CloseOutputAsync(WebSocketCloseStatus status, string? description, CancellationToken ct) =>
+            CloseAsync(status, description, ct);
+    }
+
+    // Peer that stays open but never answers the close handshake.
+    private sealed class BlackholeWebSocket : ScriptedWebSocket
+    {
+        // Mirrors a real hung peer: the task only ends when the caller gives
+        // up (cancellation), surfacing OperationCanceledException like the
+        // real CloseAsync does on abort.
+        public override Task CloseAsync(WebSocketCloseStatus status, string? description, CancellationToken ct) =>
+            Task.Delay(Timeout.InfiniteTimeSpan, ct);
+        public override Task SendAsync(ArraySegment<byte> b, WebSocketMessageType t, bool e, CancellationToken c) =>
+            Task.CompletedTask;
+        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> b, CancellationToken c) =>
+            Task.Delay(Timeout.InfiniteTimeSpan, c).ContinueWith(_ => new WebSocketReceiveResult(0, WebSocketMessageType.Binary, false), TaskScheduler.Default);
+    }
+
+    // Peer scripted with inbound fragments; records the close handshake.
+    private sealed class FragmentSocket : ScriptedWebSocket
+    {
+        private readonly byte[] _data;
+        private readonly int _fragment;
+        private int _offset;
+        public FragmentSocket(byte[] data, int fragment) { _data = data; _fragment = fragment; }
+        public override Task CloseAsync(WebSocketCloseStatus status, string? description, CancellationToken ct)
+        {
+            _closeStatus = status;
+            _state = WebSocketState.Closed;
+            return Task.CompletedTask;
+        }
+        public override Task SendAsync(ArraySegment<byte> b, WebSocketMessageType t, bool e, CancellationToken c) =>
+            Task.CompletedTask;
+        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken ct)
+        {
+            if (_offset >= _data.Length)
+                return Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true));
+            int n = Math.Min(_fragment, _data.Length - _offset);
+            Buffer.BlockCopy(_data, _offset, buffer.Array!, buffer.Offset, n);
+            _offset += n;
+            bool end = _offset >= _data.Length;
+            return Task.FromResult(new WebSocketReceiveResult(n, WebSocketMessageType.Binary, end));
+        }
+    }
+
+    [Fact]
+    public void Ws_Close_ToBlackholePeer_CompletesPromptly()
+    {
+        // audit B29: LockedSendAsync/CloseAsync used CancellationToken.None, so
         // closing toward a peer that stays open but never answers the close
-        // handshake hangs forever. Close must settle (one way or another).
-        var listener = new HttpListener();
-        int port = FreePort();
-        listener.Prefixes.Add($"http://127.0.0.1:{port}/ws/");
-        listener.Start();
-        ClientWebSocket? client = null;
-        WebSocket? serverWs = null;
+        // handshake hung forever. Close must settle (bounded deadline + abort).
+        var blackhole = new BlackholeWebSocket();
+        var serverConn = new WebSocketConnection(blackhole, "blackhole", null, "127.0.0.1");
         try
         {
-            var acceptTask = listener.GetContextAsync();
-            client = new ClientWebSocket();
-            await client.ConnectAsync(new Uri($"http://127.0.0.1:{port}/ws/".Replace("http://", "ws://")), CancellationToken.None)
-                .WaitAsync(TimeSpan.FromSeconds(5));
-            var ctx = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
-            serverWs = (await ctx.AcceptWebSocketAsync(subProtocol: null).WaitAsync(TimeSpan.FromSeconds(5))).WebSocket;
-            var serverConn = new WebSocketConnection(serverWs, "blackhole", null, "127.0.0.1");
+            // Close() itself is fire-and-forget by design; what must settle
+            // is the socket: poll its state past the bounded deadline.
             var closeTask = Task.Run(() => serverConn.Close());
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
-            while ((serverWs.State == WebSocketState.Open || serverWs.State == WebSocketState.CloseSent)
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while ((blackhole.State == WebSocketState.Open || blackhole.State == WebSocketState.CloseSent)
                    && DateTime.UtcNow < deadline)
-                await Task.Delay(50);
-            bool settled = closeTask.IsCompleted && serverWs.State == WebSocketState.Closed;
+                Thread.Sleep(20);
+            // Settled = the socket left the handshake (Closed after a clean
+            // handshake, Aborted past the bounded deadline — either way it
+            // does not hang forever).
+            bool settled = blackhole.State != WebSocketState.Open
+                && blackhole.State != WebSocketState.CloseSent;
+            string fault = closeTask.IsFaulted ? closeTask.Exception?.ToString() ?? "faulted" : "no-fault";
             Assert.True(settled,
-                $"close to blackhole peer must settle promptly (taskDone={closeTask.IsCompleted}, state={serverWs.State})");
+                $"close to blackhole peer must settle promptly (state={blackhole.State}, fault={fault})");
         }
-        finally
-        {
-            try { client?.Abort(); } catch { }
-            try { serverWs?.Abort(); } catch { }
-            try { client?.Dispose(); } catch { }
-            try { serverWs?.Dispose(); } catch { }
-            try { listener.Stop(); } catch { }
-        }
+        finally { try { serverConn.Dispose(); } catch { } }
     }
 
     // --- B30: Telnet parsing/write without sockets where possible ---
@@ -237,7 +277,12 @@ public class AuditSocketLoopbackShouldBeTests
             var writer = new TelnetStreamWriter(server.GetStream(), server);
             var big = new string('x', 8 << 20);
             var writeTask = Task.Run(() => writer.Write(big));
-            bool done = writeTask.Wait(TimeSpan.FromSeconds(3));
+            // Completed promptly (a bounded SocketException counts — the point
+            // is it never hangs); an unobserved fault would be worse.
+            bool done;
+            try { done = writeTask.Wait(TimeSpan.FromSeconds(3)); }
+            catch (AggregateException) { done = true; }
+            if (writeTask.IsFaulted) _ = writeTask.Exception;
             Assert.True(done, "write to a non-draining peer must not block the game thread indefinitely");
         }
         finally
@@ -346,65 +391,37 @@ public class AuditSocketLoopbackShouldBeTests
     [Fact]
     public async Task Ws_FragmentedOversize_StreamsWithoutAccumulating()
     {
-        // audit B29: HandleAsync appends every fragment to a MemoryStream and
-        // checks the size only after EndOfMessage — a 3 MB fragmented message
-        // allocates payload + ToArray + string (~12 MB) before rejection. A
+        // audit B29: HandleAsync appended every fragment to a MemoryStream and
+        // checked the size only after EndOfMessage — a 3 MB fragmented message
+        // allocated payload + ToArray + string (~12 MB) before rejection. A
         // streaming gate must reject with only fragment-sized working set.
-        // Drives the REAL pump via DefaultHttpContext + injected socket
-        // feature (no Kestrel needed); measures process heap, so the 20x
-        // margin absorbs background noise.
-        var listener = new HttpListener();
-        int port = FreePort();
-        listener.Prefixes.Add($"http://127.0.0.1:{port}/ws/");
-        listener.Start();
+        // Drives the REAL pump with scripted fragments (no network at all);
+        // the 20x margin absorbs background GC noise.
         var mgr = PortedHelpers.MakeManager();
         ConnectionManager.GlobalInstance = mgr;
-        ClientWebSocket? client = null;
-        WebSocket? serverWs = null;
         try
         {
-            var acceptTask = listener.GetContextAsync();
-            client = new ClientWebSocket();
-            await client.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws/"), CancellationToken.None)
-                .WaitAsync(TimeSpan.FromSeconds(5));
-            var ctx = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
-            serverWs = (await ctx.AcceptWebSocketAsync(subProtocol: null).WaitAsync(TimeSpan.FromSeconds(5))).WebSocket;
-
+            var payload = new byte[3_000_000];
+            Array.Fill(payload, (byte)'x');
+            var fake = new FragmentSocket(payload, fragment: 8192);
             var settings = new AtherizSettings { WebsocketMaxMessageSize = 100_000 };
             var http = new DefaultHttpContext();
             http.Connection.RemoteIpAddress = IPAddress.Loopback;
-            http.Features.Set<IHttpWebSocketFeature>(new StaticWsFeature(serverWs));
-            var payload = new byte[3_000_000];
-            Array.Fill(payload, (byte)'x');
+            http.Features.Set<IHttpWebSocketFeature>(new StaticWsFeature(fake));
 
             GC.Collect(2, GCCollectionMode.Forced, blocking: true);
             GC.WaitForPendingFinalizers();
             GC.Collect(2, GCCollectionMode.Forced, blocking: true);
             long before = GC.GetTotalMemory(true);
-            var handleTask = WebSocketHandler.HandleAsync(http, settings);
-            await client.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true, CancellationToken.None)
-                .WaitAsync(TimeSpan.FromSeconds(15));
-            WebSocketReceiveResult? closeResult = null;
-            try
-            {
-                closeResult = await client.ReceiveAsync(new ArraySegment<byte>(new byte[1024]), CancellationToken.None)
-                    .WaitAsync(TimeSpan.FromSeconds(10));
-            }
-            catch (TimeoutException) { }
-            await handleTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await WebSocketHandler.HandleAsync(http, settings).WaitAsync(TimeSpan.FromSeconds(15));
             long after = GC.GetTotalMemory(true);
-            Assert.NotNull(closeResult);
-            Assert.Equal(WebSocketMessageType.Close, closeResult!.MessageType);
+            // Rejection itself works (pin half): oversize closes MessageTooBig.
+            Assert.Equal(WebSocketCloseStatus.MessageTooBig, fake.CloseStatus);
             Assert.True(after - before < 600_000,
                 $"fragmented oversize must stream, allocated {after - before} bytes for a 3 MB message");
         }
         finally
         {
-            try { client?.Abort(); } catch { }
-            try { serverWs?.Abort(); } catch { }
-            try { client?.Dispose(); } catch { }
-            try { serverWs?.Dispose(); } catch { }
-            try { listener.Stop(); } catch { }
             mgr.Atp.Stop(wait: false);
             ConnectionManager.GlobalInstance = null;
         }

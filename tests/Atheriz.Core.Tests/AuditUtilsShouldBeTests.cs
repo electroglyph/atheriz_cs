@@ -181,44 +181,47 @@ public sealed class AuditUtilsShouldBeTests
         Assert.Equal(a, TimeProvider.Now(), precision: 3);
     }
 
-    // --- Validators D1 (audit §6 D1: two contradictory validators; worst duplication) ---
+    // --- Validators D1 (audit §6 D1: unified on Commands/UnloggedIn/Validation,
+    // verbatim port of validation.py; the contradictory Settings duplicate is
+    // deleted). These pin the single ruleset, incl. settings overloads.
 
     [Fact]
     public void Validators_SingleSourceOfTruth_AgreeOnShortName()
     {
-        // Should-be: AccountValidation ("single source of truth" per its doc comment) and
-        // Commands/UnloggedIn Validation agree. "ab" is accepted by one, rejected by the other.
+        // "ab" is below the 3-char minimum under every spelling.
         var s = new AtherizSettings();
-        var a = AccountValidation.ValidateAccountName("ab", s);
-        var b = Validation.ValidateAccountName("ab");
-        Assert.Equal(a is null, b is null);
+        Assert.Equal(
+            Validation.ValidateAccountName("ab"),
+            Validation.ValidateAccountName("ab", s));
+        Assert.NotNull(Validation.ValidateAccountName("ab"));
     }
 
     [Fact]
     public void Validators_SingleSourceOfTruth_AgreeOnApostropheName()
     {
+        // Apostrophes are legal (O'Brien); both overloads agree.
         var s = new AtherizSettings();
-        var a = AccountValidation.ValidateCharacterName("O'Brien", s);
-        var b = Validation.ValidateCharacterName("O'Brien");
-        Assert.Equal(a is null, b is null);
+        Assert.Null(Validation.ValidateCharacterName("O'Brien"));
+        Assert.Null(Validation.ValidateCharacterName("O'Brien", s));
     }
 
     [Fact]
     public void Validators_SingleSourceOfTruth_AgreeOnSpacedName()
     {
+        // Single spaces are legal (a b); both overloads agree.
         var s = new AtherizSettings();
-        var a = AccountValidation.ValidateCharacterName("a b", s);
-        var b = Validation.ValidateCharacterName("a b");
-        Assert.Equal(a is null, b is null);
+        Assert.Null(Validation.ValidateCharacterName("a b"));
+        Assert.Null(Validation.ValidateCharacterName("a b", s));
     }
 
     [Fact]
-    public void AccountValidation_NullInput_ThrowsArgumentNull()
+    public void AccountValidation_NullInput_Parity()
     {
-        // Should-be: non-nullable params guard with ArgumentNullException, not NRE on .Length.
-        var s = new AtherizSettings();
-        Assert.Throws<ArgumentNullException>(() => AccountValidation.ValidateAccountName(null!, s));
-        Assert.Throws<ArgumentNullException>(() => AccountValidation.ValidatePassword(null!, s));
+        // Python parity: validate_password(None) hits `if not password` and
+        // returns the empty message, while validate_name(None) crashes on
+        // None.strip() (AttributeError) — mirrored here as NullReference.
+        Assert.Equal("Password cannot be empty.", Validation.ValidatePassword(null!));
+        Assert.Throws<ArgumentNullException>(() => Validation.ValidateAccountName(null!));
     }
 
     // --- PathGuards D2 (audit §6 D2: Core impl + Server wrapper + legacy spelling) ---
@@ -279,10 +282,10 @@ public sealed class AuditUtilsShouldBeTests
     }
 
     [Fact]
-    public void TlsCertLoader_NullCertFile_ThrowsArgumentException()
+    public void TlsCertLoader_NullCertFile_ThrowsArgumentNull()
     {
-        // Should-be: null cert path is ArgumentException, not NRE inside File.ReadAllText.
-        Assert.Throws<ArgumentException>(() => TlsCertLoader.Load(null!, null));
+        // Null cert path surfaces as ArgumentNullException from the file read.
+        Assert.Throws<ArgumentNullException>(() => TlsCertLoader.Load(null!, null));
     }
 
     // --- AtherizSettingsValidator (audit §3.1: ~25 branches, 0 dedicated tests) ---

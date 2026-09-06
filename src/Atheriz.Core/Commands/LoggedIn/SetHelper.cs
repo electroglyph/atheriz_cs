@@ -19,15 +19,39 @@ public static class SetHelper
         return Commands.CommandHelpers.ResolveObject(caller, s);
     }
 
+    // Faithful to Python hasattr/getattr: attribute lookup is case-SENSITIVE.
+    // Exact property name first, then all-lowercase snake_case mapped to
+    // PascalCase (is_pc -> IsPc). Mixed-case spellings (Is_Pc, Quelled) do NOT
+    // resolve: like Python's setattr creating a junk attribute, they fall
+    // through to the extras store instead of hitting the real property.
     public static PropertyInfo? FindProp(GameObject o, string attr)
     {
-        var prop = o.GetType().GetProperty(attr, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        var prop = o.GetType().GetProperty(attr, flags);
         if (prop != null) return prop;
+        if (!IsLowerSnake(attr)) return null;
         var parts = attr.Split('_', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) return null;
         var pascal = string.Concat(parts.Select(p => char.ToUpperInvariant(p[0]) + p.Substring(1)));
-        return o.GetType().GetProperty(pascal, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        return o.GetType().GetProperty(pascal, flags);
     }
+
+    private static bool IsLowerSnake(string s) =>
+        s.Length > 0 && s.All(c => char.IsLower(c) || char.IsDigit(c) || c == '_');
+
+    // Canonical privilege names have no settable property (get-only IsBuilder/
+    // IsSuperUser) but must still be guarded case-insensitively.
+    private static readonly HashSet<string> ProtectedCanonical =
+        new(StringComparer.OrdinalIgnoreCase) { "is_builder", "is_superuser" };
+
+    // Port of set.py:75-76 _is_protected, hardened: the guard itself is
+    // case-insensitive (frozen set is Ordinal like Python's frozenset, so
+    // compare explicitly). Resolution stays case-sensitive (FindProp): unknown
+    // spellings fall through to extras like Python's setattr junk attribute.
+    public static bool IsProtected(string attr) =>
+        attr.StartsWith("_") ||
+        Protected.Any(p => p.Equals(attr, StringComparison.OrdinalIgnoreCase)) ||
+        ProtectedCanonical.Contains(attr);
 
     public static PropertyInfo? FindPropUnset(GameObject o, string attr) => FindProp(o, attr);
 

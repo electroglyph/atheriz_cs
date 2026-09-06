@@ -60,10 +60,11 @@ public class AuditContainmentMoveShouldBeTests
     }
 
     [Fact]
-    public void Node_AddObject_SetsObjectLocation()
+    public void Node_AddObject_SetsCoordLocation()
     {
-        // audit A2: Node.AddObject/AddObjects never assign obj.Location (only
-        // MoveTo writes CoordLocation), leaving stale/Null locations behind.
+        // audit A2: Node.AddObject/AddObjects never assigned obj.Location (only
+        // MoveTo wrote CoordLocation). Membership in a node implies the node's
+        // coord, mirroring MoveTo.
         ObjectRegistry.ClearAll();
         try
         {
@@ -72,8 +73,11 @@ public class AuditContainmentMoveShouldBeTests
             RegisterAll(node, coin);
             node.AddObject(coin);
             Assert.Contains(coin.Id, node.ContentsSnapshot);
-            var loc = Assert.IsType<LocationRef.ObjectLocation>(coin.Location);
-            Assert.Equal(node.Id, loc.ObjectId);
+            var loc = Assert.IsType<LocationRef.CoordLocation>(coin.Location);
+            Assert.Equal(node.Coord, loc.Coord);
+            node.RemoveObject(coin);
+            Assert.DoesNotContain(coin.Id, node.ContentsSnapshot);
+            Assert.IsType<LocationRef.NullLocation>(coin.Location);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -127,10 +131,11 @@ public class AuditContainmentMoveShouldBeTests
     // --- A4: MoveTo hook gaps ---
 
     [Fact]
-    public void MoveTo_NullDestination_RespectsLeaveVeto()
+    public void MoveTo_NullDestination_VanishesWithoutLeaveVeto()
     {
-        // audit A4: MoveTo(null) removes from locObj._contents directly and only
-        // calls AtPostMove — AtPreObjectLeave veto is bypassed when vanishing.
+        // audit A4, corrected for Python parity (base_obj.py:1155-1163: the
+        // None path calls loc.remove_object + at_post_move only; there is no
+        // leave veto on vanish, only the at_pre_move exit-access gate).
         ObjectRegistry.ClearAll();
         try
         {
@@ -139,16 +144,19 @@ public class AuditContainmentMoveShouldBeTests
             RegisterAll(room, item);
             Assert.True(item.MoveTo(room));
             room.AtPreObjectLeaveOverride = (dest, exit) => false;
-            Assert.False(item.MoveTo(null));
-            Assert.Contains(item.Id, room.ContentsSnapshot);
+            Assert.True(item.MoveTo(null));
+            Assert.DoesNotContain(item.Id, room.ContentsSnapshot);
+            Assert.IsType<LocationRef.NullLocation>(item.Location);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
 
     [Fact]
-    public void MoveTo_ContainerToContainer_RespectsReceiveVeto()
+    public void MoveTo_ContainerToContainer_IgnoresReceiveVeto()
     {
-        // audit A4: container->container transfers fire no hooks at all.
+        // audit A4, corrected for Python parity (base_obj.py:1238-1259: leave/
+        // receive hooks fire only when old/new loc is_node). Container moves
+        // consult no object hooks, only the at_pre_move gate.
         ObjectRegistry.ClearAll();
         try
         {
@@ -158,16 +166,17 @@ public class AuditContainmentMoveShouldBeTests
             RegisterAll(src, dst, item);
             Assert.True(item.MoveTo(src));
             dst.AtPreObjectReceiveOverride = (s, e) => false;
-            Assert.False(item.MoveTo(dst));
-            Assert.Contains(item.Id, src.ContentsSnapshot);
-            Assert.DoesNotContain(item.Id, dst.ContentsSnapshot);
+            Assert.True(item.MoveTo(dst));
+            Assert.DoesNotContain(item.Id, src.ContentsSnapshot);
+            Assert.Contains(item.Id, dst.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
 
     [Fact]
-    public void MoveTo_ContainerToContainer_RespectsLeaveVeto()
+    public void MoveTo_ContainerToContainer_IgnoresLeaveVeto()
     {
+        // Same Python parity as above (base_obj.py:1238-1259).
         ObjectRegistry.ClearAll();
         try
         {
@@ -177,17 +186,18 @@ public class AuditContainmentMoveShouldBeTests
             RegisterAll(src, dst, item);
             Assert.True(item.MoveTo(src));
             src.AtPreObjectLeaveOverride = (d, e) => false;
-            Assert.False(item.MoveTo(dst));
-            Assert.Contains(item.Id, src.ContentsSnapshot);
-            Assert.DoesNotContain(item.Id, dst.ContentsSnapshot);
+            Assert.True(item.MoveTo(dst));
+            Assert.DoesNotContain(item.Id, src.ContentsSnapshot);
+            Assert.Contains(item.Id, dst.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
 
     [Fact]
-    public void MoveTo_DeletedMover_IsDenied()
+    public void MoveTo_DeletedMover_IsAllowed_LikePython()
     {
-        // audit A4: only destObj.IsDeleted is checked; a deleted mover can move.
+        // audit A4, corrected for Python parity (base_obj.py:1233: only
+        // destination.is_deleted is checked). A deleted mover can move.
         ObjectRegistry.ClearAll();
         try
         {
@@ -196,8 +206,8 @@ public class AuditContainmentMoveShouldBeTests
             RegisterAll(dst, item);
             Assert.NotNull(item.Delete(null, recursive: false));
             Assert.True(item.IsDeleted);
-            Assert.False(item.MoveTo(dst));
-            Assert.DoesNotContain(item.Id, dst.ContentsSnapshot);
+            Assert.True(item.MoveTo(dst));
+            Assert.Contains(item.Id, dst.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -234,10 +244,11 @@ public class AuditContainmentMoveShouldBeTests
     // --- B3: GiveCommand inventory bypass ---
 
     [Fact]
-    public void Give_RoomObject_IsRefused_NotMoved()
+    public void Give_RoomObject_MovesToTarget()
     {
-        // audit B3: Give resolves via SearchWithFallback (room+inv), so a room
-        // object can be given away directly. Only inventory may be given.
+        // audit B3, corrected for Python parity (give.py:162
+        // objs_to_give = caller.search(obj_name), and search covers the room
+        // the caller stands in): giving a room object works, like Python.
         ObjectRegistry.ClearAll();
         try
         {
@@ -254,9 +265,9 @@ public class AuditContainmentMoveShouldBeTests
             var (func, caller, args) = cmd.Execute(giver, "coin to box");
             Assert.NotNull(func);
             func!(caller!, args);
-            Assert.Contains("You don't have that.", giver.PeekMessages());
-            Assert.Contains(coin.Id, room.ContentsSnapshot);
-            Assert.DoesNotContain(coin.Id, box.ContentsSnapshot);
+            Assert.Contains("You give coin to box.", giver.PeekMessages());
+            Assert.Contains(coin.Id, box.ContentsSnapshot);
+            Assert.DoesNotContain(coin.Id, room.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -264,10 +275,10 @@ public class AuditContainmentMoveShouldBeTests
     // --- B11: hear veto/addressing/desc-only ---
 
     [Fact]
-    public void EmitSound_DescOnly_ReachesListeners()
+    public void EmitSound_DescOnly_ReachesNobody()
     {
-        // audit B11: AtEmitSound returns early on empty soundMsg, so desc-only
-        // sounds never propagate.
+        // audit B11, corrected for Python parity (base_obj.py:1893-1894: early
+        // return on empty soundMsg). Desc-only sounds never propagate.
         ObjectRegistry.ClearAll();
         try
         {
@@ -279,7 +290,7 @@ public class AuditContainmentMoveShouldBeTests
             Assert.True(hearer.MoveTo(room));
             hearer.ClearMessages();
             emitter.AtEmitSound("a loud crash", "", 60.0, false);
-            Assert.Contains(hearer.PeekMessages(), m => m.Contains("a loud crash"));
+            Assert.Empty(hearer.PeekMessages());
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -315,19 +326,23 @@ public class AuditContainmentMoveShouldBeTests
     }
 
     [Fact]
-    public void Node_AtHear_Vetoed_ReturnsNonPositive()
+    public void Node_AtHear_Vetoed_ReturnsAttenuated_WithoutLocalDelivery()
     {
-        // audit B11: Node.AtHear returns loudness-attenuation even when the
-        // pre-hear veto denies, so AtEmitSound's BFS (which forwards on ret>0)
-        // propagates vetoed sound.
+        // audit B11, corrected for Python parity (nodes.py:325-326,335): a
+        // vetoed node returns loudness-attenuation (still positive, so BFS may
+        // forward) but delivers to nothing locally.
         ObjectRegistry.ClearAll();
         try
         {
             var node = new VetoNode(new Coord("limbo", 1, 0, 0));
             var emitter = GameObject.Create("emitter");
-            RegisterAll(node, emitter);
+            var hearer = GameObject.Create("hearer", isPc: true);
+            RegisterAll(node, emitter, hearer);
+            Assert.True(hearer.MoveTo(node));
+            hearer.ClearMessages();
             double ret = node.AtHear(emitter, "boom", "loud!", 60.0, false);
-            Assert.True(ret <= 0, $"vetoed AtHear must not return positive propagation loudness, got {ret}");
+            Assert.Equal(50.0, ret);
+            Assert.Empty(hearer.PeekMessages());
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -528,17 +543,20 @@ public class AuditContainmentMoveShouldBeTests
     // --- B18: Node.Name no-op ---
 
     [Fact]
-    public void Node_Name_Roundtrips()
+    public void Node_Name_IsCoordString_SetterIgnored()
     {
-        // audit B18: the Name setter is a no-op while the getter returns
-        // Coord.ToString(), so room names can never be stored or read back.
+        // audit B18, corrected for Python parity (nodes.py:616-619: name is a
+        // read-only property returning str(coord); rooms are coord-identified,
+        // get_display_name is "" for non-builders). The C# no-op setter mirrors
+        // the read-only property for the base-class contract.
         ObjectRegistry.ClearAll();
         try
         {
             var node = new Node(new Coord("limbo", 3, 0, 0));
             if (ObjectRegistry.Get(node.Id).Count == 0) ObjectRegistry.AddObject(node);
+            Assert.Equal(node.Coord.ToString(), node.Name);
             node.Name = "Tavern";
-            Assert.Equal("Tavern", node.Name);
+            Assert.Equal(node.Coord.ToString(), node.Name);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -548,8 +566,10 @@ public class AuditContainmentMoveShouldBeTests
     [Fact]
     public void Channel_History_ContainsSenderAndTimestamp()
     {
-        // audit B19: history stores the raw text while live listeners get the
-        // FormatMessage form — replay loses sender/timestamp.
+        // audit B19, corrected for Python parity (base_channel.py): history
+        // keeps (timestamp, sender, message) entries; History projects the raw
+        // messages while GetHistory re-formats on replay, so replay matches
+        // what live listeners received.
         ObjectRegistry.ClearAll();
         try
         {
@@ -557,6 +577,7 @@ public class AuditContainmentMoveShouldBeTests
             var sender = GameObject.Create("Alice");
             RegisterAll(sender);
             ch.Msg("hello", sender);
+            Assert.Contains("hello", ch.History);
             var h = ch.GetHistory(10);
             Assert.Contains("hello", h);
             Assert.Contains("Alice", h);
@@ -568,12 +589,13 @@ public class AuditContainmentMoveShouldBeTests
     public void GameObject_MsgLog_IsBounded()
     {
         // audit B19: _msgLog grows without bound (Channel caps history at 50);
-        // long-lived NPCs leak memory.
+        // long-lived NPCs leak memory. Bound is 200 (exam dumps ~60 lines, so
+        // whole multi-screen outputs must survive in PeekMessages).
         var o = GameObject.Create("npc");
         try
         {
-            for (int i = 0; i < 100; i++) o.Msg($"m{i}");
-            Assert.True(MsgLogCount(o) <= 60, $"msg log should be bounded, has {MsgLogCount(o)} entries");
+            for (int i = 0; i < 300; i++) o.Msg($"m{i}");
+            Assert.True(MsgLogCount(o) <= 200, $"msg log should be bounded, has {MsgLogCount(o)} entries");
         }
         finally { ObjectRegistry.ClearAll(); }
     }

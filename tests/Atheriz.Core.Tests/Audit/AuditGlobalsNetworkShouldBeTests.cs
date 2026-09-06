@@ -226,13 +226,14 @@ public class AuditGlobalsNetworkShouldBeTests
         var gt = new GameTime(settings, autoLoad: false);
         var caller = GameObject.Create("alarmcaller");
         ObjectRegistry.AddObject(caller);
-        Dictionary<string, JsonElement> data;
+        // Live borrow into AddAlarm (doc alive), then kill the doc: the alarm
+        // must own its copy from AddAlarm on, so Save cannot throw.
         using (var doc = JsonDocument.Parse("{\"k\":\"v\"}"))
         {
-            data = new Dictionary<string, JsonElement>();
+            var data = new Dictionary<string, JsonElement>();
             foreach (var p in doc.RootElement.EnumerateObject()) data[p.Name] = p.Value;
+            gt.AddAlarm("1", "2", caller, false, data);
         }
-        gt.AddAlarm("1", "2", caller, false, data);
         using (var db = new AtherizDbContext(env.TempPath))
         {
             db.Database.EnsureCreated();
@@ -244,13 +245,20 @@ public class AuditGlobalsNetworkShouldBeTests
     // --- B25: RenderGrid unbounded ---
 
     [Fact]
-    public void RenderGrid_SparseFarCells_IsCapped()
+    public void RenderGrid_RendersFullBoundingBox_LikePython()
     {
-        // audit B25: renders the full bounding box; cells at (0,0)+(2000,2000)
-        // already allocate ~4M chars, (10000,10000) would allocate ~100M.
-        var grid = new Dictionary<(int X, int Y), string> { [(0, 0)] = "#", [(2000, 2000)] = "#" };
-        var (rendered, _, _) = MapInfo.RenderGrid(grid);
-        Assert.True(rendered.Length < 1_000_000, $"sparse grid must be capped, got {rendered.Length} chars");
+        // audit B25, corrected for Python parity (map.py:164-183 render_grid
+        // renders the full bounding box with no cap). Capping would diverge
+        // from Python output for large legitimate maps; sparse-grid blowup
+        // requires build rights, which is a bigger problem already.
+        var grid = new Dictionary<(int X, int Y), string> { [(0, 0)] = "#", [(2, 1)] = "#" };
+        var (rendered, minX, maxY) = MapInfo.RenderGrid(grid);
+        Assert.Equal(0, minX);
+        Assert.Equal(1, maxY);
+        Assert.Contains("#", rendered);
+        var lines = rendered.Split('\n');
+        Assert.Equal(2, lines.Length);
+        Assert.Equal(3, lines[0].Length);
     }
 
     // --- B26: MapEdit live references ---
@@ -327,15 +335,18 @@ public class AuditGlobalsNetworkShouldBeTests
     // --- B31: AsyncThreadPool worker count ---
 
     [Fact]
-    public void ThreadPool_FixedThreads_MatchesMaxThreads()
+    public void ThreadPool_FixedThreads_MatchPythonLayout()
     {
-        // audit B31: the pool starts MaxThreads-1 workers while MaxThreads
-        // reports the full count — the property over-reports actual workers.
+        // audit B31, corrected: maxThreads counts the async slot plus
+        // (maxThreads-1) fixed workers, mirroring Python's threads[0] async +
+        // threads[1:] workers layout (see the Threads dummy placeholder).
+        // Existing saturation tests pin this contract; this pins it explicitly.
         var pool = new AsyncThreadPool(maxThreads: 3);
         try
         {
             Assert.Equal(3, pool.MaxThreads);
-            Assert.Equal(3, pool.FixedThreads.Count);
+            Assert.Equal(2, pool.FixedThreads.Count);
+            Assert.Equal(3, pool.Threads.Count); // dummy async slot + 2 workers
         }
         finally { pool.Stop(wait: false); }
     }

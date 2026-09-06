@@ -22,32 +22,22 @@ public static class AtherizDbContextFactory
     // Alias for Python Database.close() marking closed
     public static void CloseDatabase() => AtherizDbContext.CloseDatabase();
 
-    // Port of database_setup.py:56 get_database() — creates context with guard and directory ensure
+    // Port of database_setup.py:56 get_database() — creates context with guard and directory ensure.
+    // Guard violations (bad save path) PROPAGATE: silently substituting an
+    // ephemeral :memory: database makes writes succeed and go nowhere
+    // (audit B23). Tests needing memory use CreateForTests() explicitly.
     public static AtherizDbContext Create(string savePath)
     {
         // Guard mirrors get_database raising if _CLOSED
         if (IsClosed) throw new InvalidOperationException("database is closed; refusing to reopen");
-        try
-        {
-            var ctx = new AtherizDbContext(savePath);
-            // WAL pragma handled in EnsureCreated; fallback logged there
-            return ctx;
-        }
-        catch (InvalidOperationException)
-        {
-            // Port of shadow fallback in NodeHandler.cs:399 — in-memory fallback for tests / non-game-folder relative SavePath
-            var opts = new DbContextOptionsBuilder<AtherizDbContext>().UseSqlite("Data Source=:memory:").Options;
-            var ctx = new AtherizDbContext(opts);
-            ctx.Database.OpenConnection();
-            ctx.Database.EnsureCreated();
-            return ctx;
-        }
+        return new AtherizDbContext(savePath);
     }
 
-    // Port of shadow fallback — parameterless uses ATHERIZ_SAVE_PATH or "save" with same in-memory fallback
+    // Parameterless: same default-path resolution as ObjectRegistry.SaveObjects
+    // (ATHERIZ_SAVE_PATH else configured SavePath) — never a divergent file.
     public static AtherizDbContext Create()
     {
-        var savePath = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? "save";
+        var savePath = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? AtherizSettings.Global.SavePath;
         return Create(savePath);
     }
 

@@ -21,6 +21,7 @@ public sealed class AtherizDbContext : DbContext
     public DbSet<TransitionRow> Transitions => Set<TransitionRow>();
     public DbSet<DoorRow> Doors => Set<DoorRow>();
     public DbSet<GameTimeRow> GameTime => Set<GameTimeRow>();
+    public DbSet<CheckpointRow> Checkpoints => Set<CheckpointRow>();
 
     // Shared write gate (mirrors Database.lock). Static to serialize across contexts in same process.
     // NOTE: new code should use DbWriteGate.Enter/Exit (re-entrant RLock semantics). Gate kept for tests.
@@ -98,6 +99,10 @@ public sealed class AtherizDbContext : DbContext
         b.Entity<GameTimeRow>().ToTable("gametime");
         b.Entity<GameTimeRow>().HasKey(x => x.Id);
         b.Entity<GameTimeRow>().Property(x => x.Id).ValueGeneratedNever();
+
+        b.Entity<CheckpointRow>().ToTable("checkpoints");
+        b.Entity<CheckpointRow>().HasKey(x => x.Id);
+        b.Entity<CheckpointRow>().Property(x => x.Id).ValueGeneratedNever();
     }
 
     private void ApplyWalPragmas()

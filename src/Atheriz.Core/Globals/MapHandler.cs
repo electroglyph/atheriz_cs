@@ -896,11 +896,21 @@ public class MapHandler
             var buffer = new Dictionary<(string, int), MapInfo>();
             JsonTableLoader.LoadList(db.MapData, json => JsonSerializer.Deserialize<MapInfo.MapInfoPersistDto>(json, JsonOptions.Default), (dto, row) =>
             {
-                var mi = dto.ToDomain(_settings);
-                buffer[(row.Area, row.Z)] = mi;
+                // Per-row report (audit B20): corrupt chunks are skipped, never silent.
+                try
+                {
+                    var mi = dto!.ToDomain(_settings);
+                    buffer[(row.Area, row.Z)] = mi;
+                }
+                catch (Exception ex)
+                {
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt map chunk {row.Area}:{row.Z}: {ex.GetType().Name}"); } catch { }
+                }
             });
+            // Clear-then-swap (mirrors ObjectRegistry.LoadObjects): rows deleted
+            // from the DB must not resurrect from memory on the next save.
             Lock.EnterWriteLock();
-            try { foreach (var kv in buffer) _data[kv.Key] = kv.Value; }
+            try { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; }
             finally { Lock.ExitWriteLock(); }
         }
         catch { }

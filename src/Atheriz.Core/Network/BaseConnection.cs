@@ -16,7 +16,7 @@ namespace Atheriz.Core.Network;
 /// Abstract interface for all network connections. Mirrors <c>atheriz/network/connection.py:BaseConnection</c> (207 LOC).
 /// Thread-safe FIFO input pipeline via _inputQueue, bounded by CONNECTION_INPUT_QUEUE_LIMIT (100).
 /// </summary>
-public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Atheriz.Core.Commands.ISessionProvider
+public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Atheriz.Core.Commands.ISessionProvider, IDisposable
 {
     // port of connection.py:23-40 __init__
     public string? SessionId { get; }
@@ -24,6 +24,22 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     public int ThreadId { get; } // port of connection.py:31 threading.get_ident()
     public readonly object Lock = new object(); // port of connection.py:32 RLock
     public int FailedLoginAttempts; // port of connection.py:33
+    private bool _disposed;
+
+    /// <summary>Releases owned resources (queues/sessions; subclasses add
+    /// sockets/semaphores). Audit B32: connections were never disposable.</summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing) _disposed = true;
+    }
+
+    protected bool IsDisposed => _disposed;
 
     // Per-connection input pipeline (issue #31) — connection.py:34-40
     private readonly Queue<(Delegate Handler, List<object?> Args, Dictionary<string, object?> Kwargs)> _inputQueue = new();

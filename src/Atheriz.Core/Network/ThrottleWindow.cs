@@ -19,6 +19,18 @@ public static class ThrottleWindow
     {
         lock (syncLock)
         {
+            // TTL eviction: drop fully-expired hosts so per-host dicts cannot
+            // grow without bound (DoS memory). O(n) scan, fine for logging
+            // paths; the alternative (no eviction) leaks an entry per host.
+            if (last.Count > 0)
+            {
+                List<string>? expired = null;
+                foreach (var kv in last)
+                    if (now - kv.Value >= window)
+                        (expired ??= new List<string>()).Add(kv.Key);
+                if (expired != null)
+                    foreach (var k in expired) last.Remove(k);
+            }
             if (last.TryGetValue(host, out var prev) && now - prev < window) return false;
             last[host] = now;
             return true;

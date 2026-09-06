@@ -43,7 +43,8 @@ public partial class GameObject
             try { fromObj.AtMsgSend(parsed, this, msgType); } catch { }
         }
         _lock.EnterWriteLock();
-        try { _msgLog.Add(parsed); }
+        // Bounded like Channel history (limit 50) — see AppendMessage below.
+        try { _msgLog.Add(parsed); while (_msgLog.Count > MsgLogLimit) _msgLog.RemoveAt(0); }
         finally { _lock.ExitWriteLock(); }
         // Forward to session if puppeted — mirrors base_obj.py:904 if self.session is not None: self.session.msg(*args, **kwargs)
         Session? sess = null;
@@ -127,6 +128,12 @@ public partial class GameObject
         }
     }
 
+    // Inspection buffer bound: PeekMessages is test/support surface, but
+    // long-lived NPCs must not accumulate unbounded logs. 200 keeps whole
+    // multi-screen outputs (exam dumps ~60 lines) while bounding memory.
+    // Oldest entries drop first.
+    private const int MsgLogLimit = 200;
+
     /// <summary>
     /// Port of <c>atheriz/objects/base_obj.py:934</c> <c>msg_contents</c>.
     /// Emits <paramref name="text"/> to all objects inside this, handling both actor-stance
@@ -171,7 +178,9 @@ public partial class GameObject
         try { if (!AtMsgReceive(text, fromObj, msgType)) return; } catch { }
         if (fromObj != null) try { fromObj.AtMsgSend(text, this, msgType); } catch { }
         _lock.EnterWriteLock();
-        try { _msgLog.Add(text); }
+        // Bounded like Channel history (limit 50): long-lived NPCs must not
+        // accumulate unbounded message logs. Oldest entries drop first.
+        try { _msgLog.Add(text); while (_msgLog.Count > MsgLogLimit) _msgLog.RemoveAt(0); }
         finally { _lock.ExitWriteLock(); }
     }
 }

@@ -54,6 +54,10 @@ public static class Autosave
         settings ??= _cachedSettings ?? AtherizSettings.Global;
         var failures = new List<string>();
 
+        // Crash-consistency journal (audit A7): dirty before tables, clean
+        // after all commit. A crash between tables leaves dirty behind.
+        CheckpointJournal.MarkDirty();
+
         // objects
         try
         {
@@ -113,6 +117,7 @@ public static class Autosave
         }
         else
         {
+            CheckpointJournal.MarkClean();
             try { AtherizLogger.LogInformation("Autosave completed."); } catch { Console.Error.WriteLine("Autosave completed."); }
             try { var ch = GlobalServices.GetServerChannel(); if (ch != null) ch.Msg("Autosave completed."); } catch { }
         }

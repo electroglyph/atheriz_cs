@@ -47,7 +47,7 @@ public sealed class SpamCommand : Command
                 account.AddCharacter(character);
                 ObjectRegistry.AddObject(account);
                 ObjectRegistry.AddObject(character);
-                ObjectRegistry.SaveObjects("save");
+                ObjectRegistry.SaveObjects(settings.SavePath);
                 created.Add((an, pw, cn));
             }
             catch (InvalidOperationException) { go.Msg($"Account '{an}' already exists, skipping..."); }

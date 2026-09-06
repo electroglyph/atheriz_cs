@@ -111,7 +111,10 @@ public sealed class FakeSession
 // Fixed to use lock + AsyncLocal routing to avoid process-global race.
 public sealed class CaptureAtherizLog : IDisposable
 {
-    private static readonly object _captureLock = new();
+    // Semaphore (not Monitor): capture is used across awaits, and Monitor is
+    // thread-affine — disposing on a different thread than construction threw
+    // SynchronizationLockException. A semaphore is thread-agnostic.
+    private static readonly SemaphoreSlim _captureLock = new(1, 1);
     private static readonly AsyncLocal<StringWriter?> _asyncWriter = new();
     private static StringWriter? _globalWriter;
     private sealed class RoutingWriter : TextWriter
@@ -148,7 +151,7 @@ public sealed class CaptureAtherizLog : IDisposable
 
     public CaptureAtherizLog()
     {
-        Monitor.Enter(_captureLock);
+        _captureLock.Wait();
         _locked = true;
         _writer = new StringWriter();
         _asyncWriter.Value = _writer;
@@ -176,7 +179,7 @@ public sealed class CaptureAtherizLog : IDisposable
     {
         _asyncWriter.Value = null;
         if (_globalWriter == _writer) _globalWriter = null;
-        if (_locked) { Monitor.Exit(_captureLock); _locked = false; }
+        if (_locked) { _locked = false; try { _captureLock.Release(); } catch { } }
         // Do not dispose immediately if other thread may still write; keep for read but dispose on next capture
         // Keep writer alive for a moment; dispose after lock released
         _writer.Dispose();

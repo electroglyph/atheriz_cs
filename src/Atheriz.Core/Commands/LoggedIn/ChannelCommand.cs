@@ -61,9 +61,8 @@ public sealed class ChannelCommand : Command
         {
             var result = ObjectRegistry.FilterBy(x => x.IsChannel && x.Name.Equals(chName, StringComparison.OrdinalIgnoreCase));
             if (result.Count == 0) { go.Msg($"Channel {chName} not found."); return; }
-            channel = result[0] as Channel ?? new Channel { Name = result[0].Name, Desc = result[0].Desc };
-            // ensure channel object is correct instance
-            if (result[0] is Channel ch2) channel = ch2;
+            if (result[0] is not Channel ch2) { go.Msg($"Channel {chName} not found."); return; }
+            channel = ch2;
             if (channel.IsDeleted) { go.Msg($"Channel {chName} not found."); return; }
             lock (CacheLock)
             {

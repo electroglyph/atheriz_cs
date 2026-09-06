@@ -39,10 +39,16 @@ public static class WebSocketHandler
         try
         {
             var buffer = new byte[8192];
+            // Streaming size gate (audit B29): fragments are measured as they
+            // arrive and the message is abandoned as soon as it exceeds the
+            // limit — never accumulate an unbounded MemoryStream before the
+            // post-hoc check below (which stays as a backstop).
+            var maxMessageSize = settings.WebsocketMaxMessageSize;
             while (true)
             {
                 string rawMessage;
                 bool isClose = false;
+                bool tooBig = false;
                 using (var ms = new MemoryStream())
                 {
                     System.Net.WebSockets.WebSocketReceiveResult result;
@@ -56,10 +62,25 @@ public static class WebSocketHandler
                             isClose = true;
                             break;
                         }
+                        if (ms.Length + result.Count > maxMessageSize) { tooBig = true; break; }
                         ms.Write(buffer, 0, result.Count);
                     } while (!result.EndOfMessage);
                     if (isClose) break;
-                    rawMessage = Encoding.UTF8.GetString(ms.ToArray());
+                    if (!tooBig) rawMessage = Encoding.UTF8.GetString(ms.ToArray());
+                    else rawMessage = "";
+                }
+                if (isClose) break;
+                if (tooBig)
+                {
+                    bool shouldLog = ThrottleWindow.ShouldLog(_wsOversizeLast, _wsOversizeLock, clientHost, 5.0);
+                    if (shouldLog)
+                    {
+                        var msg = $"[WebSocket] Message too large from {clientHost} (over {maxMessageSize} bytes)";
+                        try { Atheriz.Core.AtherizLogger.LogWarning(msg); } catch { }
+                        Console.Error.WriteLine(msg);
+                    }
+                    try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.MessageTooBig, "Message too large", CancellationToken.None); } catch { }
+                    break;
                 }
 
                 var byteCount = Encoding.UTF8.GetByteCount(rawMessage);

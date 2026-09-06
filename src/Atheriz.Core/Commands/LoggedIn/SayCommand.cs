@@ -17,7 +17,7 @@ public sealed class SayCommand : Command
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject puppet) return;
+        if (caller is not GameObject puppet) { caller.Msg("You can't do that."); return; }
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { puppet.Msg(PrintHelp()); return; }
         var lst = pa.GetList("text");

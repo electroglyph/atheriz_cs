@@ -172,13 +172,10 @@ public static class FuncParserHelpers
     public static bool IsIter(object? o) => o is System.Collections.IEnumerable && o is not string;
     public static IEnumerable<object?> MakeIter(object? o) => IsIter(o) ? ((System.Collections.IEnumerable)o!).Cast<object?>() : new[] { o };
 
-    public static string CopyWordCase(string src, string dst)
-    {
-        if (string.IsNullOrEmpty(src) || string.IsNullOrEmpty(dst)) return dst;
-        if (src.All(char.IsUpper)) return dst.ToUpperInvariant();
-        if (char.IsUpper(src[0])) return char.ToUpperInvariant(dst[0]) + (dst.Length > 1 ? dst.Substring(1) : "");
-        return dst;
-    }
+    // Unified on GameUtils.CopyWordCase (verbatim port of utils.py:895
+    // copy_word_case); the local variant diverged subtly (audit D8).
+    public static string CopyWordCase(string src, string dst) =>
+        global::Atheriz.Core.Utils.GameUtils.CopyWordCase(src, dst);
 
     // --- Safe arithmetic with exponent guard (port of funcparser_helpers._safe_arith_eval + _safe_pow) ---
     public static double SafeArithEval(string inp)

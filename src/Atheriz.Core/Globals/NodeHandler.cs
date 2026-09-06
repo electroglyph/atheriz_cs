@@ -44,7 +44,7 @@ public partial class NodeHandler
     private bool _modified, _modified2, _modified3;
     // Port of node.py:42-43 _trans_gen/_door_gen: mutation counters so Save
     // only clears _modified2/_modified3 when nothing changed since the snapshot.
-    private long _transGen, _doorGen;
+    private long _transGen, _doorGen, _areaGen;
 
     private static NodeHandler? _current;
     private static readonly object _currentLock = new();
@@ -66,8 +66,27 @@ public partial class NodeHandler
             db.Database.EnsureCreated();
             JsonTableLoader.LoadInto(db.Areas, Lock, json => JsonSerializer.Deserialize<NodeAreaDto>(json, JsonOptions.Default), (dto, row) =>
             {
-                var na = dto.ToDomain();
-                _areas[na.Name] = na;
+                // Per-row report (audit B20): corrupt areas are skipped, never silent.
+                // (LoadInto still swallows after we log, preserving flow.)
+                try
+                {
+                    var na = dto!.ToDomain();
+                    // Evict the replaced area's nodes from the registry: otherwise
+                    // they leak as stale ids while the handler no longer owns them
+                    // (audit B21). Mirrors RemoveArea/Clear eviction below.
+                    if (_areas.TryGetValue(na.Name, out var old) && !ReferenceEquals(old, na))
+                    {
+                        foreach (var g in old.Grids.Values)
+                            foreach (var n in g.Nodes.Values)
+                                try { ObjectRegistry.RemoveObject(n); } catch { }
+                    }
+                    _areas[na.Name] = na;
+                }
+                catch (Exception ex)
+                {
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt area row {row.Name}: {ex.GetType().Name}"); } catch { }
+                    throw;
+                }
             });
             JsonTableLoader.LoadInto(db.Transitions, Lock2, json => JsonSerializer.Deserialize<Transition>(json, JsonOptions.Default), (dto, row) => _transitions[dto.ToCoord] = dto);
             JsonTableLoader.LoadInto(db.Doors, Lock3, json => JsonSerializer.Deserialize<Dictionary<string, Door>>(json, JsonOptions.Default), (dto, row) => _doors[new Coord(row.Area, row.X, row.Y, row.Z)] = dto);
@@ -170,7 +189,8 @@ public partial class NodeHandler
         // Snapshot refs (using scoped helpers)
         List<NodeArea> areaRefs;
         bool handlerWas;
-        using (ReadScope()) { areaRefs = _areas.Values.ToList(); handlerWas = _modified; }
+        long areaGen0;
+        using (ReadScope()) { areaRefs = _areas.Values.ToList(); handlerWas = _modified; areaGen0 = _areaGen; }
         var transRefs = new List<Transition>();
         bool transWas;
         long transGen0;
@@ -334,7 +354,9 @@ public partial class NodeHandler
         // for the next checkpoint instead of being lost.
         void MarkHandlerClean()
         {
-            if (handlerWas) { Lock.EnterWriteLock(); try { _modified = false; } finally { Lock.ExitWriteLock(); } }
+            // Area branch is gen-guarded like transitions/doors: a concurrent
+            // AddArea/AddNode between snapshot and clean must survive.
+            if (handlerWas) { Lock.EnterWriteLock(); try { if (_areaGen == areaGen0) _modified = false; } finally { Lock.ExitWriteLock(); } }
             if (transWas) { Lock2.EnterWriteLock(); try { if (_transGen == transGen0) _modified2 = false; } finally { Lock2.ExitWriteLock(); } }
             if (doorsWas) { Lock3.EnterWriteLock(); try { if (_doorGen == doorGen0) _modified3 = false; } finally { Lock3.ExitWriteLock(); } }
         }

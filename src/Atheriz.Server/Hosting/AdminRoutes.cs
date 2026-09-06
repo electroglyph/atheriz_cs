@@ -150,11 +150,11 @@ public static class AdminRoutes
     }
 
     private static string? ValidateAccountName(string name, AtherizSettings s)
-        => AccountValidation.ValidateAccountName(name, s);
+        => Atheriz.Core.Commands.UnloggedIn.Validation.ValidateAccountName(name, s);
 
     private static string? ValidateCharacterName(string name, AtherizSettings s)
-        => AccountValidation.ValidateCharacterName(name, s);
+        => Atheriz.Core.Commands.UnloggedIn.Validation.ValidateCharacterName(name, s);
 
     private static string? ValidatePassword(string pw, AtherizSettings s)
-        => AccountValidation.ValidatePassword(pw, s);
+        => Atheriz.Core.Commands.UnloggedIn.Validation.ValidatePassword(pw, s);
 }

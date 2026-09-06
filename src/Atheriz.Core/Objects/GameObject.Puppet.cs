@@ -56,8 +56,10 @@ public partial class GameObject
     public bool Puppet(Session session, GameObject npc)
     {
         if (session == null || npc == null) return false;
-        // Port of puppet.py:84-110 checks
+        // Port of puppet.py:84-110 checks (`target is caller` plus same-id
+        // reload instances, which share identity through the registry).
         if (npc == this) return false;
+        if (npc.Id != -1 && npc.Id == this.Id) return false;
         if (npc.IsAccount || npc.IsChannel || npc.IsNode) return false; // Port of _puppetable
         if (!npc.Access(this, "puppet")) return false; // Port of puppet.py:94
         Dictionary<string, object> snapshot;
@@ -520,6 +522,7 @@ public partial class GameObject
             try { contentIds = new List<int>(_contents); }
             finally { _lock.ExitReadLock(); }
             var contentObjs = contentIds.Select(id => ObjectRegistry.Get(id).FirstOrDefault()).Where(o => o != null).Cast<GameObject>().ToList();
+            int deletedKids = 0;
             foreach (var content in contentObjs.ToList())
             {
                 bool moved = false;
@@ -546,7 +549,7 @@ public partial class GameObject
                     }
                     // then collect recursively (delete content and its children)
                     var r = content.Delete(caller, true);
-                    if (r != null) ops.AddRange(r.Value.ops);
+                    if (r != null) { ops.AddRange(r.Value.ops); deletedKids += r.Value.count; }
                 }
                 else
                 {
@@ -574,9 +577,9 @@ public partial class GameObject
             // include self in count
             ObjectRegistry.RemoveObject(this);
             // toDelete includes self plus any recursively deleted via Move failure path already added to ops
-            // count is 1 + number of recursively deleted via ops? But ops already includes their del ops; count should be 1 plus those counts? Simplify: count = 1 + (ops.Count) // but ops.Count includes one per deleted object
-            // For non-recursive test, we just return 1
-            return (1, ops);
+            // count is 1 plus the recursively deleted children above.
+            ObjectRegistry.RemoveObject(this);
+            return (1 + deletedKids, ops);
         }
     }
 }

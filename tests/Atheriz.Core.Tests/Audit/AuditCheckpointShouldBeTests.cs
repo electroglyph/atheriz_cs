@@ -78,6 +78,10 @@ public class AuditCheckpointShouldBeTests
             blocker.Proceed.Set();
             saveTask.Wait(TimeSpan.FromSeconds(20));
             Assert.True(saveTask.IsCompletedSuccessfully, "save task faulted: " + saveTask.Exception);
+            // The concurrent add must have SURVIVED as dirty (gen guard skips
+            // the clean), so a follow-up incremental save persists it. (Without
+            // the guard the flag is wiped and no later save recovers it.)
+            nh.Save(force: false);
             using var db2 = new AtherizDbContext(env.TempPath);
             var probe = new NodeHandler(autoLoad: false);
             probe.Load(db2);
@@ -184,6 +188,9 @@ public class AuditCheckpointShouldBeTests
                 db.MapData.RemoveRange(rows);
                 db.SaveChanges();
             }
+            // Crash residue: the checkpoint journal still says dirty.
+            CheckpointJournal.MarkDirty(env.TempPath);
+            Assert.True(CheckpointJournal.IsDirty(env.TempPath), "journal roundtrip must report dirty");
             GlobalServices.ResetForTesting();
             NodeHandler.SetCurrent(null);
             Exception? ex;

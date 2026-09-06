@@ -88,14 +88,33 @@ public static class ObjectRegistry
             lock (_lock)
             {
                 _dict.Remove(key);
-                // Purge the FIFO queue too — otherwise eviction later removes the wrong live key (F005).
-                if (_order.Count > 0)
-                {
-                    var kept = new Queue<TKey>(_order.Count);
-                    foreach (var k in _order) if (!EqualityComparer<TKey>.Default.Equals(k, key)) kept.Enqueue(k);
-                    _order.Clear();
-                    foreach (var k in kept) _order.Enqueue(k);
-                }
+                PurgeLocked(key);
+            }
+        }
+        /// <summary>
+        /// Atomic remove-if-value-matches under the dict lock: expiry cleanup
+        /// must not delete a concurrently refreshed entry (audit A3).
+        /// </summary>
+        public bool RemoveIfEqual(TKey key, TValue expected)
+        {
+            lock (_lock)
+            {
+                if (!_dict.TryGetValue(key, out var cur)) return false;
+                if (!EqualityComparer<TValue>.Default.Equals(cur, expected)) return false;
+                _dict.Remove(key);
+                PurgeLocked(key);
+                return true;
+            }
+        }
+        private void PurgeLocked(TKey key)
+        {
+            // Purge the FIFO queue too — otherwise eviction later removes the wrong live key (F005).
+            if (_order.Count > 0)
+            {
+                var kept = new Queue<TKey>(_order.Count);
+                foreach (var k in _order) if (!EqualityComparer<TKey>.Default.Equals(k, key)) kept.Enqueue(k);
+                _order.Clear();
+                foreach (var k in kept) _order.Enqueue(k);
             }
         }
         public void Clear() { lock (_lock) { _dict.Clear(); _order.Clear(); } }
@@ -117,10 +136,11 @@ public static class ObjectRegistry
     public static bool IsIpBanned(string host, double? now = null)
     {
         var t = now ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        // Single atomic check+expiry on the dict's own lock (F005) — no O(N) snapshot, no outer lock.
+        // Expiry cleanup is remove-if-equal: a BanIp landing between the read
+        // and the cleanup must not delete the fresh ban (audit A3).
         if (!TempBannedIps.TryGetValue(host, out var exp)) return false;
         if (t < exp) return true;
-        TempBannedIps.Remove(host);
+        TempBannedIps.RemoveIfEqual(host, exp);
         return false;
     }
     public static void BanIp(string host, double? expires = null)
@@ -138,7 +158,7 @@ public static class ObjectRegistry
         var key = CooldownKey(host);
         if (!CreationCooldowns.TryGetValue(key, out var exp)) return false;
         if (exp > now) return true;
-        CreationCooldowns.Remove(key);
+        CreationCooldowns.RemoveIfEqual(key, exp);
         return false;
     }
     public static void ApplyCreationCooldown(string op, string host, double now, double cooldown)
@@ -295,24 +315,38 @@ public static class ObjectRegistry
         var maxId = -1;
         try
         {
-            JsonTableLoader.LoadList(db.Objects, json =>
+            // Buffer rows first (no locks held during deserialization), then
+            // convert row by row. Corrupt rows are SKIPPED but REPORTED with
+            // their row id — never silently dropped (audit B20).
+            var rows = JsonTableLoader.LoadRows(db.Objects);
+            foreach (var row in rows)
             {
+                Persistence.Dto.GameObjectDto? dto;
                 try
                 {
-                    var dto = GameObjectDtoSerializer.FromJson(json);
-                    return GameObjectDtoSerializer.Migrate(dto);
+                    dto = GameObjectDtoSerializer.Migrate(GameObjectDtoSerializer.FromJson(row.Data));
                 }
-                catch { return null; }
-            }, (dto, row) =>
-            {
+                catch (Exception ex)
+                {
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt object row {row.Id}: {ex.GetType().Name}"); } catch { }
+                    continue;
+                }
+                if (dto == null)
+                {
+                    try { AtherizLogger.LogWarning($"[Load] skipping null object row {row.Id}"); } catch { }
+                    continue;
+                }
                 try
                 {
-                    var obj = GameObject.FromDto(dto!);
+                    var obj = GameObject.FromDto(dto);
                     objects[row.Id] = obj;
                     if (row.Id > maxId) maxId = row.Id;
                 }
-                catch { }
-            });
+                catch (Exception ex)
+                {
+                    try { AtherizLogger.LogWarning($"[Load] skipping unrestorable object row {row.Id}: {ex.GetType().Name}"); } catch { }
+                }
+            }
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
         {
