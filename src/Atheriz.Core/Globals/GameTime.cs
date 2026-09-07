@@ -551,7 +551,9 @@ public class GameTime
 
         double tickDurationSeconds = _settings.TickMinutes * _settings.SecondsPerMinute;
         double totalSeconds = current * tickDurationSeconds;
-        long totalDays = (long)(totalSeconds / _settings.SecondsPerDay);
+        // Port of time.py:390 // floor division: truncation differs for
+        // negative ticks (C# (long)(a/b) rounds toward zero).
+        long totalDays = (long)Math.Floor(totalSeconds / _settings.SecondsPerDay);
 
         double remainingSecondsInDay = totalSeconds % _settings.SecondsPerDay;
         if (remainingSecondsInDay < 0) remainingSecondsInDay += _settings.SecondsPerDay;
@@ -560,9 +562,8 @@ public class GameTime
         int calcMinute = (int)(remainingInHour / _settings.SecondsPerMinute);
         int calcSecond = (int)(remainingInHour % _settings.SecondsPerMinute);
 
-        long yearOffset = totalDays / _settings.DaysPerYear;
-        long dayOfYear = totalDays % _settings.DaysPerYear;
-        if (dayOfYear < 0) { dayOfYear += _settings.DaysPerYear; yearOffset--; }
+        long yearOffset = totalDays >= 0 ? totalDays / _settings.DaysPerYear : -((-totalDays + _settings.DaysPerYear - 1) / _settings.DaysPerYear);
+        long dayOfYear = totalDays - yearOffset * _settings.DaysPerYear;
         long calcMonth = dayOfYear / _settings.DaysPerMonth;
         long calcDay = dayOfYear % _settings.DaysPerMonth;
         long dayInLunar = totalDays % _settings.LunarCycleDays;

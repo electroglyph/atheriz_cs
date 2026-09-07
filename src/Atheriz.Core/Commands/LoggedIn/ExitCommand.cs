@@ -151,7 +151,10 @@ public sealed class LoggedInExitCommand : Command
         go.MoveTo(dest, null, false, true, ExitName);
     }
 
-    private static void ClearFollowing(GameObject c)
+    // Shared with Objects.ExitCommand (exit objects move through the same
+    // follow-breaking rule): internal so both exit paths use one port of
+    // exit.py:95-103.
+    internal static void ClearFollowing(GameObject c)
     {
         if (c.Following == null) return;
         var leader = ObjectRegistry.Get(c.Following.Value).FirstOrDefault();
@@ -170,8 +173,10 @@ public sealed class LoggedInExitCommand : Command
                 finally { leader.SyncRoot.ExitWriteLock(); }
             }
             catch { }
-            try { if (leader.Access(c, "view")) leader.Msg($"{c.GetDisplayName(leader)} is no longer following you."); } catch {}
-            try { if (c.Access(leader, "view")) c.Msg($"You are no longer following {leader.GetDisplayName(c)}."); } catch {}
+            // Port of exit.py:100-103 — the leader's notice is gated on the
+            // follower's view of the leader, and vice versa.
+            try { if (c.Access(leader, "view")) leader.Msg($"{c.GetDisplayName(leader)} is no longer following you."); } catch {}
+            try { if (leader.Access(c, "view")) c.Msg($"You are no longer following {leader.GetDisplayName(c)}."); } catch {}
         }
         c.Following = null;
     }

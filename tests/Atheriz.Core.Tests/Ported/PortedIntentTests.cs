@@ -225,7 +225,7 @@ public class PortedIntentTests
     {
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c);
-        var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target);
+        var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target); target.IsConnected=true;
         var coord=new Coord("test",0,0,0); var room=new Node(coord); room.AddObject(target); // put target in room for search fallback
         c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         // also ensure caller search finds target
@@ -260,7 +260,7 @@ public class PortedIntentTests
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c); c.GroupChannel=null;
         var coord=new Coord("test",0,0,0); var room=new Node(coord); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
-        var t1=GameObject.Create("x", isPc:true); var t2=GameObject.Create("x", isPc:true); ObjectRegistry.AddObject(t1); ObjectRegistry.AddObject(t2); room.AddObject(t1); room.AddObject(t2);
+        var t1=GameObject.Create("x", isPc:true); var t2=GameObject.Create("x", isPc:true); t1.IsConnected=true; t2.IsConnected=true; ObjectRegistry.AddObject(t1); ObjectRegistry.AddObject(t2); room.AddObject(t1); room.AddObject(t2);
         var cmd=new GroupCommand(); var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"add","x"};
         cmd.Run(c, pa);
         Assert.Contains(c.PeekMessages(), m=>m=="Multiple matches found for 'x'.");
@@ -270,7 +270,7 @@ public class PortedIntentTests
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c); c.GroupChannel=null;
         var coord=new Coord("test",0,0,0); var room=new Node(coord); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
-        var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target); room.AddObject(target);
+        var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target); target.IsConnected=true; room.AddObject(target);
         var fField=typeof(GameObject).GetField("_followers", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
         var set=(HashSet<int>)fField!.GetValue(c)!; set.Add(target.Id);
         var cmd=new GroupCommand(); var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"add","bob"};
@@ -287,7 +287,7 @@ public class PortedIntentTests
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c);
         var coord=new Coord("test",0,0,0); var room=new Node(coord); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
-        var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target); room.AddObject(target);
+        var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target); target.IsConnected=true; room.AddObject(target);
         var chan=new Channel(); chan.Name="Group"; chan.Id=99; chan.CreatedBy=50;
         chan.AddListener(c); ObjectRegistry.AddObject(chan);
         c.GroupChannel=99;
@@ -592,7 +592,9 @@ public class PortedIntentTests
         var pa=new GameArgumentParser.ParsedArgs();
         pa["channel"]="public"; pa["unsubscribe"]=true; pa["subscribe"]=false; pa["replay"]=false; pa["list"]=false; pa["message"]=new List<string>();
         cmd.Run(c, pa);
-        Assert.Contains(c.PeekMessages(), m=>m.Contains("Unsubscribed"));
+        // Port of channel.py:110-111 — unsubscribing is silent (this test
+        // previously pinned a C#-only confirmation message).
+        Assert.Empty(c.PeekMessages());
         Assert.DoesNotContain(c.Id, chan.Listeners);
     }
 

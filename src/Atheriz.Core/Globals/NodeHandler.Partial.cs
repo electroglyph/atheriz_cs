@@ -110,13 +110,10 @@ public partial class NodeHandler
         Lock.EnterWriteLock();
         try { _areas.Remove(name,out area); _modified=true; _areaGen++; }
         finally { Lock.ExitWriteLock(); }
-        if(area!=null)
-        {
-            foreach(var g in area.Grids.Values)
-                foreach(var n in g.Nodes.Values.ToList())
-                    ObjectRegistry.RemoveObject(n);
-            area.Clear();
-        }
+        // Port of node.py:639-644 — pop + area.clear() only. Nodes stay
+        // registered (Python leaks them from _ALL_OBJECTS); only clear()
+        // evicts, mirroring Python.
+        area?.Clear();
     }
     public void Clear()
     {

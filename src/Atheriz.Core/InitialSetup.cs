@@ -282,7 +282,9 @@ public static class InitialSetup
 
         using (var db = AtherizDbContextFactory.Create(absSave))
         {
-            ObjectRegistry.SaveObjects(db, force: true);
+            // Port of initial_setup.py:171 save_objects() — default force=False:
+            // persist only modified objects.
+            ObjectRegistry.SaveObjects(db, force: false);
         }
         using (var db = AtherizDbContextFactory.Create(absSave))
         {

@@ -69,12 +69,95 @@ public partial class GameObject
     {
         Hookable("at_say", () =>
         {
-            if (msgSelf) Msg($"You say, \"{text}\"");
-            var loc = ResolveLocationObject();
-            if (loc is Node node) node.MsgContents($"{Name} says, \"{text}\"", fromObj: this, exclude: msgSelf ? new List<GameObject>{this} : null);
-            else if (loc != null) loc.MsgContents($"{Name} says, \"{text}\"", fromObj: this, exclude: msgSelf ? new List<GameObject>{this} : null);
+            AtSayFull(text, msgSelf);
             return 0;
         }, text, msgSelf);
+    }
+
+    /// <summary>
+    /// Full port of <c>base_obj.py:1976-2115 at_say</c>: say/whisper modes,
+    /// per-receiver mapping, location exclude of self+receivers, msg_type
+    /// forwarding. The `(text, msgSelf)` override above is the
+    /// backwards-compatible entry point (existing overrides keep working).
+    /// </summary>
+    public virtual void AtSayFull(string message, object? msgSelf = null, string? msgLocation = null, IEnumerable<GameObject>? receivers = null, string? msgReceivers = null, string? msgType = null, bool whisper = false, IDictionary<string, object?>? mapping = null)
+    {
+        Hookable("at_say", () =>
+        {
+            var recvList = receivers?.ToList();
+            if (recvList != null && recvList.Count == 0) recvList = null;
+            string type;
+            object? selfText = msgSelf;
+            string? locText = msgLocation;
+            string? recvText = msgReceivers;
+            if (whisper)
+            {
+                type = "whisper";
+                if (selfText is true) selfText = "{self} whisper to {all_receivers}, \"\x1b[1;37m{speech}\x1b[0m\"";
+                recvText ??= "{object} whispers: \"\x1b[1;37m{speech}\x1b[0m\"";
+                locText = null;
+            }
+            else
+            {
+                type = "say";
+                if (selfText is true) selfText = "{self} say, \"\x1b[1;37m{speech}\x1b[0m\"";
+                locText ??= "{object} says, \"\x1b[1;37m{speech}\x1b[0m\"";
+                recvText ??= message;
+            }
+            var custom = mapping ?? new Dictionary<string, object?>(StringComparer.Ordinal);
+            var loc = ResolveLocationObject();
+            string allRecvSelf = recvList != null ? string.Join(", ", recvList.Select(r => r.GetDisplayName(this))) : null!;
+            if (selfText is string selfStr && !string.IsNullOrEmpty(selfStr))
+            {
+                var selfMapping = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["self"] = "You",
+                    ["object"] = GetDisplayName(this),
+                    ["location"] = loc != null ? loc.GetDisplayName(this) : null,
+                    ["receiver"] = null,
+                    ["all_receivers"] = allRecvSelf,
+                    ["speech"] = message,
+                };
+                foreach (var kv in custom) selfMapping[kv.Key] = kv.Value;
+                Msg(selfStr, this, selfMapping, false, type);
+            }
+            if (recvList != null && !string.IsNullOrEmpty(recvText))
+            {
+                foreach (var receiver in recvList)
+                {
+                    var rMapping = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["self"] = "You",
+                        ["object"] = GetDisplayName(receiver),
+                        ["location"] = loc != null ? loc.GetDisplayName(receiver) : null,
+                        ["receiver"] = receiver.GetDisplayName(receiver),
+                        ["all_receivers"] = string.Join(", ", recvList.Select(r => r.GetDisplayName(r))),
+                        ["speech"] = message,
+                    };
+                    foreach (var kv in custom) rMapping[kv.Key] = kv.Value;
+                    receiver.Msg(recvText, this, rMapping, false, type);
+                }
+            }
+            if (loc != null && !string.IsNullOrEmpty(locText))
+            {
+                var locMapping = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["self"] = "You",
+                    ["object"] = GetDisplayName(this),
+                    ["location"] = loc.GetDisplayName(this),
+                    ["all_receivers"] = recvList != null ? string.Join(", ", recvList.Select(r => r.ToString())) : null,
+                    ["receiver"] = null,
+                    ["speech"] = message,
+                };
+                foreach (var kv in custom) locMapping[kv.Key] = kv.Value;
+                var exclude = new List<GameObject>();
+                if (selfText is string s2 && !string.IsNullOrEmpty(s2)) exclude.Add(this);
+                if (recvList != null) exclude.AddRange(recvList);
+                if (loc is Node node) node.MsgContents(locText, fromObj: this, mapping: locMapping, exclude: exclude, msgType: type);
+                else loc.MsgContents(locText, fromObj: this, mapping: locMapping, exclude: exclude, msgType: type);
+            }
+            return 0;
+        }, message, msgSelf, msgLocation, receivers, msgReceivers, msgType, whisper, mapping);
     }
 
     public IReadOnlyList<string> PeekMessages()
@@ -89,7 +172,14 @@ public partial class GameObject
         try { _msgLog.Clear(); }
         finally { _lock.ExitWriteLock(); }
     }
-    public virtual string GetDisplayName(GameObject? looker) => Name;
+    // Port of base_obj.py:1428-1437 get_display_name.
+    public virtual string GetDisplayName(GameObject? looker)
+    {
+        if (IsPc && !IsConnected) return $"{Name} (offline)";
+        if (looker == null) return Name;
+        if (Access(looker, "view")) return Name;
+        return IsPc || IsNpc ? "Someone" : "Something";
+    }
 
     /// <summary>
     /// Port of <c>atheriz/objects/base_obj.py:908</c> <c>for_contents</c>.

@@ -372,11 +372,11 @@ public partial class GameObject
 
     public virtual void AtSolarEvent(string message) // Port of time.py solar
     {
-        Hookable("at_solar_event", () => 0, message);
+        Hookable("at_solar_event", () => { try { Msg(message); } catch { } return 0; }, message);
     }
     public virtual void AtLunarEvent(string message) // Port of time.py lunar
     {
-        Hookable("at_lunar_event", () => 0, message);
+        Hookable("at_lunar_event", () => { try { Msg(message); } catch { } return 0; }, message);
     }
     public virtual void AtAlarm(Globals.GameTime.GameTimeInfo time, Dictionary<string, System.Text.Json.JsonElement>? data) // Port of time.py alarm
     {
@@ -430,6 +430,15 @@ public partial class GameObject
                     if (content == null) continue;
                     if (seen.Contains(content.Id)) continue;
                     if (truncated.Any(t => t.Id == content.Id)) continue;
+                    // Port of base_obj.py:320-325 — honor each child's delete
+                    // veto: a vetoed subtree is skipped, not force-deleted.
+                    // Exceptions mean "not vetoed" (mirrors Python).
+                    if (caller != null)
+                    {
+                        bool vetoed = false;
+                        try { vetoed = !content.AtDelete(caller); } catch { vetoed = false; }
+                        if (vetoed) continue;
+                    }
                     if (depth + 1 >= maxDepth)
                     {
                         truncated.Add(content);
@@ -510,6 +519,7 @@ public partial class GameObject
                     finally { obj._lock.ExitWriteLock(); }
                 } catch {}
                 ObjectRegistry.RemoveObject(obj);
+                TeardownDeleted(obj);
             }
             // ops already collected; return
             return (toDelete.Count, ops);
@@ -578,10 +588,72 @@ public partial class GameObject
                 ops.Add(this.GetDelOps());
             // include self in count
             ObjectRegistry.RemoveObject(this);
+            TeardownDeleted(this);
             // toDelete includes self plus any recursively deleted via Move failure path already added to ops
             // count is 1 plus the recursively deleted children above.
             ObjectRegistry.RemoveObject(this);
             return (1 + deletedKids, ops);
         }
+    }
+
+    // Port of base_obj.py:349-426 _delete_object teardown: leave no dangling
+    // follows, channel memberships, sessions, or tick slots. Shared by the
+    // recursive walk above and the non-recursive self-delete tail.
+    private static void TeardownDeleted(GameObject obj)
+    {
+        try
+        {
+            var leaderId = obj.Following;
+            if (leaderId.HasValue)
+            {
+                try { obj.Following = null; } catch { }
+                try
+                {
+                    var leader = ObjectRegistry.Get(leaderId.Value).FirstOrDefault();
+                    try { leader?.RemoveFollower(obj.Id); } catch { }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        try
+        {
+            foreach (var fid in obj.FollowersSnapshot.ToList())
+            {
+                try
+                {
+                    var follower = ObjectRegistry.Get(fid).FirstOrDefault();
+                    if (follower != null && follower.Following == obj.Id)
+                        try { follower.Following = null; } catch { }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        try
+        {
+            foreach (var chId in obj.ChannelsSnapshot.ToList())
+            {
+                try
+                {
+                    var ch = ObjectRegistry.Get(chId).FirstOrDefault() as Channel;
+                    if (ch != null) try { ch.RemoveListener(obj); } catch { }
+                }
+                catch { }
+                try { obj.UnsubscribeById(chId); } catch { }
+            }
+        }
+        catch { }
+        try
+        {
+            var sess = obj.Session;
+            if (sess != null)
+            {
+                try { obj.AtDisconnect(); } catch { }
+                try { sess.Connection?.Close(); } catch { }
+            }
+        }
+        catch { }
+        try { Objects.GlobalTickerHolder.Get()?.RemoveCoro(obj.AtTick, obj.TickSeconds); } catch { }
     }
 }

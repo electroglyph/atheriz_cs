@@ -237,7 +237,12 @@ public class PortedSessionTestsPart2
         Assert.True(rec.Ran.Wait(2000));
         pool.Stop(wait:false);
     }
-    [Fact] public void InlineFallbackWhenPoolRejects()
+    // Port of test_disconnect_offloop.py
+    // test_pool_full_disconnect_defers_teardown_off_loop: when the pool
+    // rejects, teardown must be deferred off the calling thread — never run
+    // synchronously inside disconnect. (This test previously pinned a C#-only
+    // inline fallback; corrected to ground truth.)
+    [Fact] public void PoolFullDisconnectDefersTeardown()
     {
         using var env = GlobalTestEnv.Enter();
         var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 1);
@@ -249,8 +254,8 @@ public class PortedSessionTestsPart2
         conn.Session.Puppet = rec; rec.Session = conn.Session; conn.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds()-1;
         mgr.RegisterConnection("c1", conn);
         mgr.Disconnect(conn);
-        Assert.Equal(1, rec.Calls);
-        Assert.True(rec.Ran.IsSet);
+        Assert.Equal(0, rec.Calls);
+        Assert.False(rec.Ran.IsSet);
         pool.Stop(wait:false);
     }
     [Fact] public void TeardownRunsExactlyOnceAcrossDoubleDisconnect()

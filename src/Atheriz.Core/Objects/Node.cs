@@ -383,7 +383,13 @@ public sealed class ExitCommand : Command
         if (caller is GameObject go)
         {
             var dest = NodeHandler.GetCurrent()?.GetNode(Destination);
-            if (dest != null) go.MoveTo(dest);
+            if (dest != null)
+            {
+                // Port of exit.py:95-103 via the shared helper: moving
+                // through an exit breaks following like any other move.
+                try { Commands.LoggedIn.LoggedInExitCommand.ClearFollowing(go); } catch { }
+                go.MoveTo(dest);
+            }
             else go.Msg("You can't go that way.");
         }
     }

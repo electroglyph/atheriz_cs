@@ -63,6 +63,7 @@ public static class CommandRegistry
             new LoggedIn.DeleteCommand(),
             new LoggedIn.DescCommand(),
             new LoggedIn.DoorCommand(),
+            new LoggedIn.DrawCommand(),
             new LoggedIn.DropCommand(),
             new LoggedIn.EmoteCommand(),
             new LoggedIn.ExamCommand(),

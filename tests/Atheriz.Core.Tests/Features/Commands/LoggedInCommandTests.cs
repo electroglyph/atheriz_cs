@@ -125,9 +125,10 @@ public class LoggedInCommandTests
     }
 
     [Fact]
-    public void Unset_LowercaseProtectedFlag_IsReadOnlyForNonSuperuser()
+    public void Unset_LowercaseProtectedFlag_IsProtectedForNonSuperuser()
     {
-        // Exact-lowercase unset of a protected flag is already refused.
+        // Exact-lowercase unset of a protected flag is refused with the
+        // protected wording (set.py:226-228), not the read-only wording.
         ObjectRegistry.ClearAll();
         try
         {
@@ -135,7 +136,7 @@ public class LoggedInCommandTests
             ObjectRegistry.AddObject(builder);
             var job = CommandDispatcher.DispatchLoggedIn(builder, "unset me is_pc", immediate: true);
             RunJob(job);
-            Assert.Contains("read-only attribute", string.Join("\n", builder.PeekMessages()));
+            Assert.Contains("is protected and cannot be removed", string.Join("\n", builder.PeekMessages()));
         }
         finally { ObjectRegistry.ClearAll(); }
     }

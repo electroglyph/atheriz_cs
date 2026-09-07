@@ -26,7 +26,9 @@ public static class AdminRoutes
         app.MapPost("/_internal/hot_reload", async (HttpContext ctx) =>
         {
             if (!CheckAdmin(ctx, "reload", out var err))
-                return Results.Json(new { status = "error", message = err }, statusCode: 403);
+                // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
+                // {status: error} so the CLI reads data.status (IsSuccess path).
+                return Results.Json(new { status = "error", message = err });
             try
             {
                 string msg;
@@ -54,7 +56,9 @@ public static class AdminRoutes
         app.MapPost("/_internal/shutdown", (HttpContext ctx, IHostApplicationLifetime lifetime) =>
         {
             if (!CheckAdmin(ctx, "shutdown", out var err))
-                return Results.Json(new { status = "error", message = err }, statusCode: 403);
+                // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
+                // {status: error} so the CLI reads data.status (IsSuccess path).
+                return Results.Json(new { status = "error", message = err });
 
             Console.Error.WriteLine("Internal shutdown request received. Running shutdown tasks...");
 
@@ -83,7 +87,9 @@ public static class AdminRoutes
         app.MapPost("/_internal/create_account", async (HttpContext ctx) =>
         {
             if (!CheckAdmin(ctx, "account creation", out var err))
-                return Results.Json(new { status = "error", message = err }, statusCode: 403);
+                // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
+                // {status: error} so the CLI reads data.status (IsSuccess path).
+                return Results.Json(new { status = "error", message = err });
 
             // Size-capped body read: reject oversized payloads without allocating them.
             using var doc = await ReadCappedJsonBodyAsync(ctx, 64 * 1024);

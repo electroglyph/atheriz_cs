@@ -77,8 +77,8 @@ public sealed class ChannelCommand : Command
         }
         if (pa.GetBool("unsubscribe"))
         {
+            // Port of channel.py:110-111 — silent, no confirmation message.
             go.Unsubscribe(channel);
-            go.Msg($"Unsubscribed from channel {channel.Name}.");
             return;
         }
         else if (pa.GetBool("subscribe"))
@@ -95,7 +95,9 @@ public sealed class ChannelCommand : Command
         {
             var msgs = pa.GetList("message");
             var message = string.Join(" ", msgs);
-            if (string.IsNullOrWhiteSpace(message)) { go.Msg(PrintHelp()); return; }
+            // Port of channel.py:122 elif args.message — an empty message
+            // list is falsy and falls through silently (no help text).
+            if (string.IsNullOrWhiteSpace(message)) return;
             if (!channel.Access(go, "send")) { go.Msg("You do not have permission to send to this channel."); return; }
             channel.Send(message, go);
         }

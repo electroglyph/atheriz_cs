@@ -25,15 +25,13 @@ internal sealed class PathNode : IComparable<PathNode>
     // Port of pathfind.py:20 __eq__ via position
     public override bool Equals(object? obj) => obj is PathNode o && Position.Coord.Equals(o.Position.Coord);
     public override int GetHashCode() => Position.Coord.GetHashCode();
-    // Port of pathfind.py:23 __lt__/__gt__ via f
+    // Port of pathfind.py:23 __lt__/__gt__ via f — F-only, like heapq.
+    // (H/seq tiebreaks were dead: the queue keys on F and never consults
+    // CompareTo, so they only misled readers about expansion order.)
     public int CompareTo(PathNode? other)
     {
         if (other is null) return 1;
-        int c = F.CompareTo(other.F);
-        if (c != 0) return c;
-        c = H.CompareTo(other.H);
-        if (c != 0) return c;
-        return _seq.CompareTo(other._seq);
+        return F.CompareTo(other.F);
     }
 }
 
@@ -128,20 +126,13 @@ public static class Pathfind
         // Port of pathfind.py:106 grid = start.grid
         var grid = start.Grid;
         if (grid == null) return (false, [], []);
-        // Port of pathfind.py:109 max_iterations = settings.MAX_ASTAR_ITERATIONS (honor env via AtherizSettings)
+        // Port of pathfind.py:109 max_iterations = settings.MAX_ASTAR_ITERATIONS.
         int maxIterations;
         if (maxIterationsOverride.HasValue) maxIterations = maxIterationsOverride.Value;
         else
         {
-            // honor MAX_ASTAR_ITERATIONS env override via AtherizSettings
-            var env = Environment.GetEnvironmentVariable("MAX_ASTAR_ITERATIONS")
-                   ?? Environment.GetEnvironmentVariable("ATHERIZ_MAX_ASTAR_ITERATIONS");
-            if (env != null && int.TryParse(env, out var v)) maxIterations = v;
-            else
-            {
-                try { maxIterations = AtherizSettings.Global.MaxAstarIterations; }
-                catch { maxIterations = 50000; }
-            }
+            try { maxIterations = AtherizSettings.Global.MaxAstarIterations; }
+            catch { maxIterations = 50000; }
         }
         // Port of pathfind.py:110 heapify + heappush start
         openQueue.Enqueue(startNode, startNode.F);
@@ -233,22 +224,16 @@ public static class Pathfind
         var s = handler.GetNode(start);
         var e = handler.GetNode(goal);
         if (s == null || e == null) return null;
-        // honor env override if default untouched
+        // Port of pathfind.py:109 — settings value only, no env inputs.
         int effective = maxIterations;
         if (maxIterations == 50000)
         {
-            var env = Environment.GetEnvironmentVariable("MAX_ASTAR_ITERATIONS")
-                   ?? Environment.GetEnvironmentVariable("ATHERIZ_MAX_ASTAR_ITERATIONS");
-            if (env != null && int.TryParse(env, out var v)) effective = v;
-            else
+            try
             {
-                try
-                {
-                    var cfg = AtherizSettings.Global.MaxAstarIterations;
-                    if (cfg != 50000) effective = cfg;
-                }
-                catch { }
+                var cfg = AtherizSettings.Global.MaxAstarIterations;
+                if (cfg != 50000) effective = cfg;
             }
+            catch { }
         }
         var (found, path, _) = AStar(s, e, caller, handler, effective);
         if (!found) return null;

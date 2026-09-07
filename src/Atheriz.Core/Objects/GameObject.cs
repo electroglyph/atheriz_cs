@@ -356,6 +356,11 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         if (already) return;
         if (channel.IsDeleted) return;
         channel.AddListener(this);
+        // Record first (peer lock only), install the command after (channel
+        // locks only): acquiring the channel lock while holding the peer
+        // write lock nests peer → channel and deadlocks against Msg
+        // delivery (channel → peer). Mirrors the B-OBJ-14 discipline.
+        bool added = false;
         _lock.EnterWriteLock();
         try
         {
@@ -371,19 +376,50 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             {
                 _channels.Add(channel.Id);
                 _flags.IsModified = true;
+                added = true;
             }
+        }
+        finally { _lock.ExitWriteLock(); }
+        if (added)
+        {
+            // Port of base_obj.py:762-763: subscribed channels install their
+            // command on the internal cmdset (removed again on unsubscribe).
+            try
+            {
+                var cmd = channel.GetCommand();
+                if (cmd != null)
+                {
+                    var cs = InternalCmdSet;
+                    if (cs == null) { cs = new Commands.CmdSet(); InternalCmdSet = cs; }
+                    try { cs.Add(cmd); }
+                    catch (InvalidOperationException) { /* already installed */ }
+                }
+            }
+            catch { }
+        }
+    }
+    /// <summary>
+    /// Id-based half of <see cref="Unsubscribe(Channel)"/> for teardown paths
+    /// where the channel object itself may already be gone.
+    /// </summary>
+    public void UnsubscribeById(int channelId)
+    {
+        _lock.EnterWriteLock();
+        try
+        {
+            if (_channels.Remove(channelId)) _flags.IsModified = true;
         }
         finally { _lock.ExitWriteLock(); }
     }
     public void Unsubscribe(Channel channel)
-    {
-        if (channel == null) return;
+    {        if (channel == null) return;
         bool had;
         _lock.EnterReadLock();
         try { had = _channels.Contains(channel.Id); }
         finally { _lock.ExitReadLock(); }
         if (!had) return;
         channel.RemoveListener(this);
+        bool removed = false;
         _lock.EnterWriteLock();
         try
         {
@@ -391,9 +427,17 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             {
                 _channels.Remove(channel.Id);
                 _flags.IsModified = true;
+                removed = true;
             }
         }
         finally { _lock.ExitWriteLock(); }
+        if (removed)
+        {
+            // Port of base_obj.py:775-777: drop the channel command again.
+            // Channel locks only (see Subscribe) — never under the peer lock.
+            try { var cmd = channel.GetCommand(); if (cmd != null) InternalCmdSet?.Remove(cmd); }
+            catch { }
+        }
     }
 
     // --- locks ---
@@ -673,8 +717,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         // mirrors Python create locks
         if (isPc)
         {
-            // view: not is_pc or (is_pc and is_connected) — simplified as: if target is_pc, require is_connected
-            obj.AddLock("view", accessing => !obj.IsPc || accessing.IsConnected || obj.IsConnected, LockPolicies.PcView);
+            // Port of base_obj.py:164 — tests only the *target's* connection.
+            obj.AddLock("view", _ => obj.IsConnected, LockPolicies.PcView);
             obj.AddLock("get", accessing => accessing.IsBuilder, LockPolicies.Builder);
         }
         if (isNpc)
@@ -690,6 +734,19 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             if (sess?.Account is Account acc && acc.Characters.Contains(obj.Id)) return true;
             return false;
         }, LockPolicies.PuppetOwner);
+
+        // Port of base_obj.py:181-186 create tail: per-instance cmdsets and the
+        // at_create hook. Registration stays explicit (AddObject/AddObjectUnique
+        // at the call site — auto-adding here would double-register); ticker
+        // enrolment mirrors get_async_ticker().add_coro for fresh tickables
+        // (load path re-registers via ResolveRelations).
+        obj._internalCmdSet = new Commands.CmdSet();
+        obj._externalCmdSet = new Commands.CmdSet();
+        try { obj.AtCreate(); } catch { }
+        if (isTickable)
+        {
+            try { Objects.GlobalTickerHolder.Get()?.AddCoro(obj.AtTick, tickSeconds); } catch { }
+        }
 
         return obj;
     }

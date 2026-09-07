@@ -194,4 +194,20 @@ public class PortedGiveTests
         var locId = (item.Location as Persistence.Dto.LocationRef.ObjectLocation)?.ObjectId;
         Assert.Equal(giver.Id, locId);
     }
+
+    // Port of give.py:142-157 — no connectivity gate beyond view-filtered
+    // search: a superuser bypasses the offline view lock (base_lock.py
+    // superuser bypass), finds the receiver, and the give succeeds.
+    [Fact] public void GiveToOfflineCharSucceedsAsSuperuser()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (giver, receiver, _) = SetupGiveScenario("give13");
+        giver.PrivilegeLevel = Privilege.Admin;
+        receiver.IsConnected = false;
+        var item = GameObject.Create("apple", isItem: true); ObjectRegistry.AddObject(item); item.MoveTo(giver);
+        var cmd = new GiveCommand();
+        cmd.Run(giver, cmd.Parser!.ParseArgs(new[] { "apple", "receiver" }));
+        var locId = (item.Location as Persistence.Dto.LocationRef.ObjectLocation)?.ObjectId;
+        Assert.Equal(receiver.Id, locId);
+    }
 }

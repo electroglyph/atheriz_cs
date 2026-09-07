@@ -75,7 +75,8 @@ public sealed class GiveCommand : Command
         if (tgtMatches.Count > 1) { go.Msg($"Multiple matches found for '{targetName}'."); return; }
         var target = tgtMatches[0];
         if (target.Id == go.Id) { go.Msg("You already have that!"); return; }
-        if (target.IsPc && !target.IsConnected) { go.Msg($"Could not find '{targetName}' here."); return; }
+        // No connectivity gate (give.py:142-157): search is view-filtered
+        // only, so offline PCs that Python can give to stay reachable here.
         if (!target.IsContainer && !target.IsNpc && !target.IsPc) { go.Msg($"You can't give anything to {target.GetDisplayName(go)}."); return; }
         List<GameObject> objsToGive;
         if (objName == "all") objsToGive = ObjectRegistry.Get(go.ContentsSnapshot.ToList());
@@ -90,7 +91,8 @@ public sealed class GiveCommand : Command
         foreach (var obj in objsToGive.ToList())
         {
             if (obj.Id == target.Id) continue;
-            if (!obj.AtPreGive(go, target)) continue;
+            // Port of give.py:172-177 — a veto reports, then skips the item.
+            if (!obj.AtPreGive(go, target)) { go.Msg($"You can't give {obj.GetDisplayName(go)} to {target.GetDisplayName(go)}."); continue; }
             if (obj.MoveTo(target))
             {
                 obj.AtGive(go, target);

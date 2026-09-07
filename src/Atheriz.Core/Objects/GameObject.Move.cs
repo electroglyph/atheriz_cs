@@ -495,42 +495,50 @@ public partial class GameObject
     public void AnnounceMoveFrom(GameObject destination, string? fromExit) // Port of base_obj.py:1514 announce_move_from
     {
         if (destination == null) return;
+        // Hoisted: an inline index-initializer mapping followed by further
+        // named args misparses (Roslyn reads `{ ["mover"]` as a collection
+        // element); a local avoids it. Announces carry type="move"
+        // (base_obj.py:1572-1579).
+        var moveMapping = new Dictionary<string, object?> { ["mover"] = this };
+        var moveExclude = new List<GameObject> { this };
         // Need destination's msg_contents
         if (destination is Node destNode)
         {
             if (string.IsNullOrEmpty(fromExit))
-                destNode.MsgContents($"$You(mover) $conj({MoveVerb}) in.", fromObj: this, mapping: new Dictionary<string, object?> { ["mover"] = this }, exclude: new List<GameObject> { this });
+                destNode.MsgContents($"$You(mover) $conj({MoveVerb}) in.", fromObj: this, mapping: moveMapping, exclude: moveExclude, msgType: "move");
             else
             {
                 string fromStr = fromExit == "up" ? "from above" : fromExit == "down" ? "from below" : $"from the {fromExit}";
-                destNode.MsgContents($"$You(mover) $conj({MoveVerb}) in {fromStr}.", fromObj: this, mapping: new Dictionary<string, object?> { ["mover"] = this }, exclude: new List<GameObject> { this });
+                destNode.MsgContents($"$You(mover) $conj({MoveVerb}) in {fromStr}.", fromObj: this, mapping: moveMapping, exclude: moveExclude, msgType: "move");
             }
         }
         else
         {
             // Generic object destination: just msg_contents if container
             if (destination.IsContainer)
-                destination.MsgContents($"$You(mover) $conj({MoveVerb}) in.", fromObj: this, mapping: new Dictionary<string, object?> { ["mover"] = this }, exclude: new List<GameObject> { this });
+                destination.MsgContents($"$You(mover) $conj({MoveVerb}) in.", fromObj: this, mapping: moveMapping, exclude: moveExclude, msgType: "move");
         }
     }
 
     public void AnnounceMoveTo(GameObject sourceLocation, string? toExit) // Port of base_obj.py:1550 announce_move_to
     {
         if (sourceLocation == null) return;
+        var moveMapping = new Dictionary<string, object?> { ["mover"] = this };
+        var moveExclude = new List<GameObject> { this };
         if (sourceLocation is Node srcNode)
         {
             if (string.IsNullOrEmpty(toExit))
-                srcNode.MsgContents($"$You(mover) $conj({MoveVerb}) away.", fromObj: this, mapping: new Dictionary<string, object?> { ["mover"] = this }, exclude: new List<GameObject> { this });
+                srcNode.MsgContents($"$You(mover) $conj({MoveVerb}) away.", fromObj: this, mapping: moveMapping, exclude: moveExclude, msgType: "move");
             else
             {
                 string toStr = toExit == "up" ? "upwards" : toExit == "down" ? "downwards" : $"to the {toExit}";
-                srcNode.MsgContents($"$You(mover) $conj({MoveVerb}) {toStr}.", fromObj: this, mapping: new Dictionary<string, object?> { ["mover"] = this }, exclude: new List<GameObject> { this });
+                srcNode.MsgContents($"$You(mover) $conj({MoveVerb}) {toStr}.", fromObj: this, mapping: moveMapping, exclude: moveExclude, msgType: "move");
             }
         }
         else
         {
             if (sourceLocation.IsContainer)
-                sourceLocation.MsgContents($"$You(mover) $conj({MoveVerb}) away.", fromObj: this, mapping: new Dictionary<string, object?> { ["mover"] = this }, exclude: new List<GameObject> { this });
+                sourceLocation.MsgContents($"$You(mover) $conj({MoveVerb}) away.", fromObj: this, mapping: moveMapping, exclude: moveExclude, msgType: "move");
         }
     }
 

@@ -53,6 +53,15 @@ public static class SaltProvider
                 _salt = raw;
                 return _salt;
             }
+            catch (UnauthorizedAccessException)
+            {
+                // Port of salt.py:65-66 except OSError fallback: a non-race OS
+                // error (permissions/FS) falls back to a plain write rather
+                // than propagating.
+                try { File.WriteAllText(saltFile, val); } catch { }
+                _salt = val;
+                return _salt;
+            }
             FsUtil.TryChmod0600(saltFile);
             _salt = val;
             return _salt;

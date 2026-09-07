@@ -67,17 +67,10 @@ public static class AtherizDbContextFactory
         ctx.EnsureCreated();
         // WAL pragma already applied in EnsureCreated with fallback log; extra attempt for safety
         try { ctx.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;"); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback in DoSetup: {ex.Message}"); try { ctx.Database.ExecuteSqlRaw("PRAGMA journal_mode=DELETE;"); } catch { } }
-        // Seed GameTime row id 0 if missing (mirrors gametime table primary key)
-        try
-        {
-            var exists = ctx.GameTime.AsNoTracking().Any(x => x.Id == 0);
-            if (!exists)
-            {
-                ctx.GameTime.Add(new GameTimeRow { Id = 0, Data = "{}" });
-                ctx.SaveChanges();
-            }
-        }
-        catch (Exception ex) { Console.Error.WriteLine($"DoSetup seed gametime failed: {ex.Message}"); }
+        // No gametime row seed (database_setup.py:92-111 do_setup creates
+        // tables only): GameTime.Save upserts, and a seeded "{}" row would
+        // shadow legacy save/time migration (time.py:72-74 migrates only
+        // when the row is missing).
     }
 
     public static async Task DoSetupAsync(string savePath, CancellationToken ct = default)

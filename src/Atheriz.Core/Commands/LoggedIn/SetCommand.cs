@@ -114,9 +114,16 @@ public sealed class SetCommand : Command
                 }
                 catch { value = raw; }
             }
-            else if (raw.TrimStart().StartsWith("\"") || raw.TrimStart().StartsWith("'") || trimmed == "True" || trimmed == "False" || trimmed == "None" || (trimmed.Length > 0 && char.IsDigit(trimmed[0])) || trimmed.StartsWith("[") || trimmed.StartsWith("{"))
+            // Port of set.py:141-143 unconditional literal_eval: a leading
+            // sign or dot still denotes a number (JSON parses "-5" natively;
+            // "+5"/".5" are normalized first since JSON rejects them).
+            else if (raw.TrimStart().StartsWith("\"") || raw.TrimStart().StartsWith("'") || trimmed == "True" || trimmed == "False" || trimmed == "None" || (trimmed.Length > 0 && (char.IsDigit(trimmed[0]) || trimmed[0] == '-' || trimmed[0] == '+' || trimmed[0] == '.')) || trimmed.StartsWith("[") || trimmed.StartsWith("{"))
             {
-                try { value = JsonSerializer.Deserialize<JsonElement>(raw); }
+                string candidate = raw;
+                string candTrim = candidate.TrimStart();
+                if (candTrim.StartsWith("+")) candidate = candidate.Replace("+", "", StringComparison.Ordinal);
+                else if (candTrim.StartsWith(".")) candidate = "0" + candidate.TrimStart();
+                try { value = JsonSerializer.Deserialize<JsonElement>(candidate); }
                 catch { value = null; }
                 if (value is null)
                 {
@@ -199,7 +206,7 @@ public sealed class UnsetCommand : Command
         // Port of unset.py:226 — only the shared protected set is checked.
         if (SetHelper.IsProtected(attr))
         {
-            if (!go.IsSuperUser) { go.Msg($"'{attr}' is a read-only attribute and cannot be removed."); return; }
+            if (!go.IsSuperUser) { go.Msg($"'{attr}' is protected and cannot be removed."); return; }
         }
         if (new[] { "location","home","_contents","group_channel","contents" }.Contains(attr)) { go.Msg($"'{attr}' cannot be removed directly."); return; }
         try

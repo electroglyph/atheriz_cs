@@ -94,11 +94,14 @@ public sealed class GetCommand : Command
             List<GameObject> srcContents = source is Node ns ? ns.GetContents() : ObjectRegistry.Get(source.ContentsSnapshot.ToList());
             foreach (var obj in srcContents.ToList())
             {
-                if (!obj.AtPreGet(go) || obj.Id == go.Id) continue;
-                if (!obj.MoveTo(go)) { go.Msg($"You can't get {obj.Name}."); continue; }
-                if (loc is Node ln) ln.MsgContents($"{go.Name} picked up {obj.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
-                else loc.MsgContents($"{go.Name} picked up {obj.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
-                go.Msg($"You picked up: {obj.Name}");
+                // Parity with the named path (view-filtered search): a hidden
+                // item must not be swept up by `get all` (get.py:112-117).
+                if (!obj.AtPreGet(go) || obj.Id == go.Id || !obj.Access(go, "view")) continue;
+                if (!obj.MoveTo(go)) { go.Msg($"You can't get {obj.GetDisplayName(go)}."); continue; }
+                var takeMapping = new Dictionary<string, object?> { ["giver"] = go, ["item"] = obj };
+                if (loc is Node ln) ln.MsgContents("$You(giver) $conj(take) $obj(item).", fromObj: go, mapping: takeMapping, exclude: new List<GameObject> { go }, msgType: "get");
+                else loc.MsgContents("$You(giver) $conj(take) $obj(item).", fromObj: go, mapping: takeMapping, exclude: new List<GameObject> { go }, msgType: "get");
+                go.Msg($"You picked up: {obj.GetDisplayName(go)}");
                 obj.AtGet(go);
             }
             return;

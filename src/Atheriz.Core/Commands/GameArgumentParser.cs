@@ -258,6 +258,20 @@ public sealed class GameArgumentParser
             }
             else if (tok.StartsWith("-") && tok.Length > 1)
             {
+                // Port of argparse negative-number handling: when no defined
+                // optional looks like a negative number, a "-5"/"-.5" token
+                // is positional (so `set me score -5` parses the value).
+                // (C# commands never define digit options, like Python's.)
+                if (System.Text.RegularExpressions.Regex.IsMatch(tok, @"^-\d+$|^-\d*\.\d+$"))
+                {
+                    if (posIdx >= positionalDefs.Count)
+                        throw new CommandError($"unrecognized arguments: {tok}");
+                    var pdNum = positionalDefs[posIdx];
+                    result.Set(pdNum.Dest, tok);
+                    posIdx++;
+                    i++;
+                    continue;
+                }
                 // unknown optional — in Python this would error; mirror by throwing CommandError
                 throw new CommandError($"unrecognized arguments: {tok}");
             }

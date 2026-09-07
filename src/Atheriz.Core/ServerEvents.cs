@@ -16,11 +16,12 @@ public static class ServerEvents
     private static readonly object _charCreateLock = new();
     // Port of server_events.py:8 def at_server_start()
     public static void AtServerStart() => AtServerStart(null);
-    // Port of server_events.py:8 preserve hook signature at_server_start(sender)
+    // Port of server_events.py:8 preserve hook signature at_server_start(sender).
+    // Python is pass; C# logs for operator visibility but sends no channel
+    // broadcast. The hook walk stays as the game-code extension point.
     public static void AtServerStart(object? sender)
     {
         AtherizLogger.LogInformation("Server starting..."); // Port of server_events.py:8 minimal log
-        TryBroadcast("Server is starting...");
         if (sender != null) InvokeHooks("at_server_start", sender); // Port of base_obj hookable iteration
         else InvokeHooks("at_server_start");
     }
@@ -31,7 +32,6 @@ public static class ServerEvents
     public static void AtServerStop(object? sender)
     {
         AtherizLogger.LogInformation("Server stopping..."); // Port of server_events.py:12
-        TryBroadcast("Server is shutting down...");
         if (sender != null) InvokeHooks("at_server_stop", sender);
         else InvokeHooks("at_server_stop");
     }
@@ -42,7 +42,6 @@ public static class ServerEvents
     public static void AtServerReload(object? sender)
     {
         AtherizLogger.LogInformation("Server reloading..."); // Port of server_events.py:16
-        TryBroadcast("Server is reloading...");
         if (sender != null) InvokeHooks("at_server_reload", sender);
         else InvokeHooks("at_server_reload");
     }
@@ -151,14 +150,12 @@ public static class ServerEvents
     }
 
     // Spec overload: AtCharCreate(GameObject character, Account account)
+    // Port of server_events.py:96 — Python only prints (the caller already
+    // printed "Success! …"); no broadcast, no hook fan-out.
     public static void AtCharCreate(GameObject character, Account account)
     {
         if (character == null || account == null) return;
-        AtherizLogger.LogInformation($"Character '{character.Name}' created for account '{account.Name}'."); // Port of server_events.py:19 hook
-        TryBroadcast($"{character.Name} has been created.");
-        InvokeHooks("at_char_create", character, account);
-        // Also try virtual override if subclass overrides AtCharCreate
-        TryInvokeVirtual("AtCharCreate", character, account);
+        AtherizLogger.LogInformation($"Character '{character.Name}' created for account '{account.Name}'.");
     }
 
     private static void TryBroadcast(string msg)

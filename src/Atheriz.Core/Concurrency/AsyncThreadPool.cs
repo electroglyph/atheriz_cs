@@ -399,7 +399,14 @@ public class AsyncThreadPool : IDisposable
     // Port of asyncthreadpool.py: run() executes sync inline and logs exceptions without raising
     public virtual void Run(Delegate del, params object?[] args)
     {
-        try { del.DynamicInvoke(args); } catch (Exception ex) { Console.Error.WriteLine(ex.ToString()); }
+        try
+        {
+            var r = del.DynamicInvoke(args);
+            // A returned Task is not a loop coroutine (no loop exists here),
+            // but it must not go unobserved: log faults like _do_async does.
+            if (r is Task t) _ = t.ContinueWith(ct => { if (ct.IsFaulted && ct.Exception != null) try { Console.Error.WriteLine(ct.Exception.ToString()); } catch { } }, TaskScheduler.Default);
+        }
+        catch (Exception ex) { Console.Error.WriteLine(ex.ToString()); }
     }
     public virtual void Run(Action action)
     {
@@ -441,12 +448,26 @@ public class AsyncThreadPool : IDisposable
         return true;
     }
 
+    // Port of asyncthreadpool.py delay stale-pool guard: a reload that
+    // swapped the global pool drops this pool's delayed tasks (a cleared
+    // global — standalone/test pools — still fires).
+    private bool IsStalePool()
+    {
+        try
+        {
+            var cur = Globals.GlobalServices.TryGetPool();
+            return cur != null && !ReferenceEquals(cur, this);
+        }
+        catch { return false; }
+    }
+
     public void Delay(TimeSpan delay, Action action)
     {
         if (action is null) return;
         _ = Task.Delay(delay).ContinueWith(_ =>
         {
             lock (_lock) if (_stopped) return;
+            if (IsStalePool()) return;
             AddTask(action);
         }, TaskScheduler.Default);
     }
@@ -456,6 +477,7 @@ public class AsyncThreadPool : IDisposable
         _ = Task.Delay(delay).ContinueWith(_ =>
         {
             lock (_lock) if (_stopped) return;
+            if (IsStalePool()) return;
             AddTask(asyncFunc);
         }, TaskScheduler.Default);
     }

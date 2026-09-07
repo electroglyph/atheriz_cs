@@ -44,7 +44,11 @@ public class InputFuncs
             if (attr != null)
             {
                 var name = attr.Name ?? m.Name;
-                // Store both original and lower for case-insensitive dispatch (webclient sends snake_case lower, tests check PascalCase)
+                // Key set stays doubled (method-name + attr-name + lower):
+                // PortedInputFuncsTests pins PascalCase key presence. Dispatch
+                // itself is exact (RegisterHandler/lookup), so all-caps input
+                // like TEXT no longer routes; exact PascalCase method names
+                // remain routable as a pinned C# extension.
                 var lower = name.ToLowerInvariant();
                 // Create delegate of signature Action<BaseConnection, List<object?>, Dictionary<string,object?>>
                 try
@@ -852,8 +856,13 @@ public class ConnectionManager
             // port of manager.py:144-148 run session teardown on game threadpool
             if (!Atp.AddTask(() => DoSessionDisconnect(session)))
             {
-                try { session.AtDisconnect(); }
-                catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Session teardown failed during disconnect: {e}"); } catch { Console.Error.WriteLine($"[Network] Session teardown failed during disconnect: {e}"); } }
+                // Pool full/stopped: never run teardown inline — disconnect()
+                // executes on the network event loop and at_disconnect()
+                // checkpoints the DB. Re-schedule with a short delay (same
+                // pattern as GameTime alarms); the delayed task re-queues
+                // onto the pool once it drains.
+                try { Atp.Delay(0.05, () => DoSessionDisconnect(session)); }
+                catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Session teardown could not be deferred during disconnect: {e}"); } catch { Console.Error.WriteLine($"[Network] Session teardown could not be deferred during disconnect: {e}"); } }
             }
         }
         try { connection.Close(); } // port of manager.py:149-152
@@ -897,8 +906,9 @@ public class ConnectionManager
     // Port of manager.py:181-183 register_handler
     public void RegisterHandler(string messageType, Delegate handler)
     {
+    // Port of manager.py:181-183 register_handler — exact match only.
         _lock.EnterWriteLock();
-        try { _messageHandlers[messageType] = handler; _messageHandlers[messageType.ToLowerInvariant()] = handler; } // port of manager.py:183
+        try { _messageHandlers[messageType] = handler; } // port of manager.py:183
         finally { _lock.ExitWriteLock(); }
     }
 
@@ -987,9 +997,8 @@ public class ConnectionManager
             if (boxed is Dictionary<string, object?> d) kwargs = d;
         }
         Delegate? handler = null;
-        var lowerCmd = cmd.ToLowerInvariant();
         _lock.EnterReadLock();
-        try { _messageHandlers.TryGetValue(lowerCmd, out handler); } // port of manager.py:225
+        try { _messageHandlers.TryGetValue(cmd, out handler); } // port of manager.py:225 exact .get(cmd)
         finally { _lock.ExitReadLock(); }
         if (handler != null) // port of manager.py:226-227
         {

@@ -73,7 +73,9 @@ public partial class GameObject
             {
                 try { newResult = h.DynamicInvoke(args); invoked = true; } catch { }
             }
-            if (invoked && newResult is T t) result = t;
+            // Port of base_obj.py:64-66 — an after-hook replaces the result
+            // unconditionally, including with null (reference types).
+            if (invoked && (newResult is T t || (newResult == null && default(T) == null))) result = (T)newResult!;
             else if (invoked && newResult != null && typeof(T) == typeof(string) && newResult is string s) result = (T)(object)s;
         }
         // Hookable error handling: if hooks exist but none marked before/after/replace, raise (mirrors Python ValueError) — however wontfix says don't abort?

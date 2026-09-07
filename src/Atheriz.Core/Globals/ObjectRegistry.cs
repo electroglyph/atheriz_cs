@@ -195,11 +195,14 @@ public static class ObjectRegistry
 
     public static List<GameObject> GetByTag(object tag, bool all = false)
     {
+        // Port of objects.py:169 set(tag): non-string/non-iterable tags raise
+        // (TypeError → ArgumentException per BCL convention) instead of
+        // silently matching everything (empty-set subset is vacuously true).
         HashSet<string> tags = tag switch
         {
             string s => [s],
             IEnumerable<string> e => new HashSet<string>(e),
-            _ => []
+            _ => throw new ArgumentException($"tag must be a string or list/set of strings, got {tag?.GetType().Name ?? "null"}")
         };
         if (all)
             return FilterBy(o => tags.IsSubsetOf(o.TagsSnapshot));
