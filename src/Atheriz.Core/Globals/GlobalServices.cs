@@ -192,6 +192,11 @@ public static class GlobalServices
             // Note: Python clears only those three under _SINGLETON_LOCK; we also clear channel cache lazily on next call
             // For completeness also clear channel cache
             _serverChannel = null;
+            // Shutdown must release world handlers so the next boot reloads
+            // instead of resurrecting stale in-memory world (like ResetForTesting).
+            _nodeHandler = null;
+            _mapHandler = null;
+            _gameTime = null;
         }
         finally { _singletonLock.ExitWriteLock(); }
     }
@@ -229,6 +234,18 @@ public static class GlobalServices
     public static GameTime? TryGetGameTime()
     {
         try { var snap = Volatile.Read(ref _gameTime); return snap; } catch { return null; }
+    }
+    public static MapHandler? TryGetMapHandler()
+    {
+        try { var snap = Volatile.Read(ref _mapHandler); return snap; } catch { return null; }
+    }
+    public static NodeHandler? TryGetNodeHandler()
+    {
+        try { var snap = Volatile.Read(ref _nodeHandler); return snap; } catch { return null; }
+    }
+    public static ConnectionManager? TryGetConnectionManager()
+    {
+        try { var snap = Volatile.Read(ref _connectionManager); return snap; } catch { return null; }
     }
 
     // Typed singleton override (F001: replaces GlobalServices._nodeHandler/_mapHandler

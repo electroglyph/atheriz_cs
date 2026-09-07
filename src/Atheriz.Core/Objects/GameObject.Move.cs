@@ -189,6 +189,8 @@ public partial class GameObject
         // Port of base_obj.py:1118-1130 if destination is not Node: cycle guard
         // Python: if dest is not Node: walk chain via location until Node or None checking self
         // Note: no depth limit — seen set prevents infinite, and deep chains beyond 100 must still be detected (test_containment:105)
+        // Self/cycle guard also applies to Node destinations (B-OBJ-2).
+        if (ReferenceEquals(destObj, this) || destObj.Id == this.Id) return false;
         if (!destObj.IsNode)
         {
             var cur = destObj;
@@ -267,6 +269,37 @@ public partial class GameObject
             return a.Id.CompareTo(b.Id);
         });
 
+        // B-OBJ-3: pre-gates run with NO location locks held (user hooks can
+        // move things and take other locks, so they must not run under the
+        // sort_locks order established below).
+        if (oldLoc != null)
+        {
+            if (oldLoc.IsNode)
+            {
+                bool preOk = oldLoc is Node oldNode
+                    ? oldNode.AtPreObjectLeave(destObj, toExit)
+                    : oldLoc.AtPreObjectLeave(destObj, toExit);
+                if (!preOk) return false;
+            }
+            if (destObj.IsNode)
+            {
+                bool preOk2 = destObj is Node dnPre
+                    ? dnPre.AtPreObjectReceive(oldLoc, null)
+                    : destObj.AtPreObjectReceive(oldLoc, null);
+                if (!preOk2) return false;
+            }
+        }
+        else
+        {
+            if (destObj.IsNode)
+            {
+                bool preOk = destObj is Node dnPre
+                    ? dnPre.AtPreObjectReceive(null, null)
+                    : destObj.AtPreObjectReceive(null, null);
+                if (!preOk) return false;
+            }
+        }
+
         // Try to acquire locks in order (deadlock avoidance)
         // For C# we use ReaderWriterLockSlim EnterWriteLock with recursion; acquire all, do move, release reverse
         // We do not have NodeGrid locks accessible, so we only lock GameObject/Node SyncRoots.
@@ -295,43 +328,9 @@ public partial class GameObject
                 }
             }
 
-            // Port of base_obj.py:1193-1213 at_pre_object_leave/receive hooks
+            // Update _contents sets — Port of base_obj.py:1203-1206
             if (oldLoc != null)
             {
-                // old loc is Node? Python: if loc.is_node: loc.at_pre_object_leave(...)
-                // For C# we call hook if method exists (virtual)
-                if (oldLoc.IsNode)
-                {
-                    if (oldLoc is Node oldNode)
-                    {
-                        // Node's AtPreObjectLeave may be overridden
-                        if (!oldNode.AtPreObjectLeave(destObj, toExit)) return false;
-                    }
-                    else if (!oldLoc.AtPreObjectLeave(destObj, toExit)) return false;
-                }
-                // Also destination at_pre_object_receive if destination is Node
-                if (destObj.IsNode)
-                {
-                    if (destObj is Node dn)
-                    {
-                        if (!dn.AtPreObjectReceive(oldLoc, null)) return false;
-                    }
-                    else if (!destObj.AtPreObjectReceive(oldLoc, null)) return false;
-                }
-
-                // Call at_object_leave/receive (advisory)
-                if (oldLoc.IsNode)
-                {
-                    if (oldLoc is Node on) on.AtObjectLeave(destObj, toExit);
-                    else oldLoc.AtObjectLeave(destObj, toExit);
-                }
-                if (destObj.IsNode)
-                {
-                    if (destObj is Node dn) dn.AtObjectReceive(oldLoc, null);
-                    else destObj.AtObjectReceive(oldLoc, null);
-                }
-
-                // Update _contents sets — Port of base_obj.py:1203-1206
                 oldLoc._contents.Remove(this.Id);
                 destObj._contents.Add(this.Id);
                 oldLoc.IsModified = true;
@@ -340,19 +339,6 @@ public partial class GameObject
             else
             {
                 // No old loc — just add to destination
-                if (destObj.IsNode)
-                {
-                    if (destObj is Node dn)
-                    {
-                        if (!dn.AtPreObjectReceive(null, null)) return false;
-                        dn.AtObjectReceive(null, null);
-                    }
-                    else
-                    {
-                        if (!destObj.AtPreObjectReceive(null, null)) return false;
-                        destObj.AtObjectReceive(null, null);
-                    }
-                }
                 destObj._contents.Add(this.Id);
                 destObj.IsModified = true;
             }
@@ -397,6 +383,30 @@ public partial class GameObject
         }
 
         if (!success) return false;
+
+        // B-OBJ-3: advisory leave/receive hooks run AFTER location locks are
+        // released (oldLoc/destObj locals stay valid). No locks held here.
+        if (oldLoc != null)
+        {
+            if (oldLoc.IsNode)
+            {
+                if (oldLoc is Node on) on.AtObjectLeave(destObj, toExit);
+                else oldLoc.AtObjectLeave(destObj, toExit);
+            }
+            if (destObj.IsNode)
+            {
+                if (destObj is Node dn) dn.AtObjectReceive(oldLoc, null);
+                else destObj.AtObjectReceive(oldLoc, null);
+            }
+        }
+        else
+        {
+            if (destObj.IsNode)
+            {
+                if (destObj is Node dn) dn.AtObjectReceive(null, null);
+                else destObj.AtObjectReceive(null, null);
+            }
+        }
 
         // Trigger at_post_move — Port of base_obj.py:1253 / 1360
         AtPostMove(destObj, toExit);

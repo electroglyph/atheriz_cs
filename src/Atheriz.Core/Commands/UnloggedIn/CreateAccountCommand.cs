@@ -14,6 +14,13 @@ public sealed class CreateAccountCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!Settings.AtherizSettings.Global.AccountCreationEnabled) { caller.Msg("Account creation is not enabled."); return; }
+        {
+            string host = (caller as BaseConnection)?.ClientHost ?? "?";
+            string rateKey = caller is BaseConnection bc ? (host != "?" ? host : bc.SessionId ?? bc.GetHashCode().ToString()) : "?";
+            double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            if (!ObjectRegistry.TryReserveCreationCooldown("account", rateKey, now, Settings.AtherizSettings.Global.CreationCooldown))
+            { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return; }
+        }
         // Sync stub: expects args as string "name password" for test convenience; real flow is async prompts via Session.Prompt
         var text = args as string ?? "";
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);

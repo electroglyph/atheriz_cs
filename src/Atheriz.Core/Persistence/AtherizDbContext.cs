@@ -119,12 +119,20 @@ public sealed class AtherizDbContext : DbContext
     public async Task EnsureCreatedAsync(CancellationToken ct = default)
     {
         await DbWriteGate.EnterAsync(ct);
+        int ownerThread = Environment.CurrentManagedThreadId;
         try
         {
             await Database.EnsureCreatedAsync(ct);
             try { ApplyWalPragmas(); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback: {ex.Message}"); }
         }
-        finally { DbWriteGate.Exit(); }
+        finally
+        {
+            // The awaits above may resume on another pool thread; Exit only
+            // releases on the taker thread (a stray cross-thread exit must not
+            // free another flow's slot), so take the hop-aware path when we hopped.
+            if (Environment.CurrentManagedThreadId == ownerThread) DbWriteGate.Exit();
+            else DbWriteGate.ExitAfterThreadHop();
+        }
     }
 
     public void EnsureCreated()

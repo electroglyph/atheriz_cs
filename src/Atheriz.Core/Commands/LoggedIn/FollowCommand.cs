@@ -24,7 +24,6 @@ public sealed class FollowCommand : Command
         if (!target.IsPc && !target.IsNpc) { go.Msg("You can't follow that!"); return; }
         if (target.NoFollow && !go.IsBuilder) { go.Msg($"{target.Name} will not lead you."); return; }
         if (go.Following == target.Id) { go.Msg($"You are already following {target.Name}!"); return; }
-        go.Following = target.Id;
         target.SyncRoot.EnterWriteLock();
         try
         {
@@ -38,6 +37,7 @@ public sealed class FollowCommand : Command
                 Atheriz.Core.Globals.ObjectRegistry.AddObject(s);
                 target.AddScript(s);
             }
+            go.Following = target.Id;
         }
         finally { target.SyncRoot.ExitWriteLock(); }
         var loc2 = go.ResolveLocationObject();

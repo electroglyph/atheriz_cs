@@ -143,6 +143,7 @@ public partial class GameObject
     public void MsgContents(string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, IEnumerable<GameObject>? exclude = null, bool raiseErrors = false, string? msgType = null, Func<int, GameObject?>? resolver = null)
     {
         if (text == null) text = "";
+        if (mapping != null) mapping = new Dictionary<string, object?>(mapping, StringComparer.Ordinal);
         mapping ??= new Dictionary<string, object?>(StringComparer.Ordinal);
         var you = fromObj ?? this;
         if (!mapping.ContainsKey("you")) mapping["you"] = you;

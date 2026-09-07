@@ -8,21 +8,21 @@ public static class GameTemplateGenerator
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {"False","None","True","and","as","assert","async","await","break","class","continue","def","del","elif","else","except","finally","for","from","global","if","import","in","is","lambda","nonlocal","not","or","pass","raise","return","try","while","with","yield","abstract","base","bool","byte","case","catch","char","checked","const","decimal","default","delegate","do","double","enum","event","explicit","extern","false","fixed","float","foreach","goto","implicit","int","interface","internal","lock","long","namespace","new","null","object","operator","out","override","params","private","protected","public","readonly","ref","sbyte","sealed","short","sizeof","stackalloc","static","string","struct","switch","this","throw","true","typeof","uint","ulong","unchecked","unsafe","ushort","using","virtual","void","volatile"};
     private static bool IsValidId(string n) => !string.IsNullOrEmpty(n) && n != "." && !char.IsDigit(n[0]) && Regex.IsMatch(n, @"^[A-Za-z_][A-Za-z0-9_]*$") && !Keywords.Contains(n);
-    public static void CreateGameFolder(string targetPath, string gameName, bool overwrite = false) => CreateInternal(targetPath, gameName, overwrite);
-    public static void CreateGameFolder(string targetPath, bool overwrite = false) => CreateInternal(targetPath, null, overwrite);
-    private static void CreateInternal(string targetPath, string? gameName, bool overwrite)
+    public static bool CreateGameFolder(string targetPath, string gameName, bool overwrite = false) => CreateInternal(targetPath, gameName, overwrite);
+    public static bool CreateGameFolder(string targetPath, bool overwrite = false) => CreateInternal(targetPath, null, overwrite);
+    private static bool CreateInternal(string targetPath, string? gameName, bool overwrite)
     {
-        if (string.IsNullOrWhiteSpace(targetPath)) { Console.WriteLine("Error: folder name cannot be empty."); return; }
+        if (string.IsNullOrWhiteSpace(targetPath)) { Console.WriteLine("Error: folder name cannot be empty."); return false; }
         var trimmed = targetPath.Trim();
         var raw = Path.GetFileName(trimmed.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (string.IsNullOrEmpty(raw)) raw = trimmed;
         if (string.IsNullOrEmpty(raw) || raw == "." || !Regex.IsMatch(raw, @"^[A-Za-z_][A-Za-z0-9_]*$") || Keywords.Contains(raw) || char.IsDigit(raw[0]))
         {
             Console.WriteLine($"Error: '{raw}' is not a valid C# identifier (hyphens/digits/spaces not allowed).");
-            return;
+            return false;
         }
         var gName = string.IsNullOrWhiteSpace(gameName) ? raw : gameName!.Trim();
-        if (!IsValidId(gName)) { Console.WriteLine($"Error: '{gName}' is not a valid C# identifier (hyphens/digits/spaces not allowed)."); return; }
+        if (!IsValidId(gName)) { Console.WriteLine($"Error: '{gName}' is not a valid C# identifier (hyphens/digits/spaces not allowed)."); return false; }
         if (GameUtils.IsInGameFolder()) Console.WriteLine("Warning: already inside a game folder; creating nested game folder is not recommended.");
         var folderPath = Path.GetFullPath(targetPath);
         bool folderExistsInitially = Directory.Exists(folderPath);
@@ -33,7 +33,7 @@ public static class GameTemplateGenerator
             if (ans != "y")
             {
                 Console.WriteLine("Aborted.");
-                return;
+                return false;
             }
         }
         // Decide if we need to (re)create world — fresh folder OR overwrite forces fresh DB
@@ -64,14 +64,14 @@ public static class GameTemplateGenerator
                 if (overwrite && folderExistsInitially && Console.IsInputRedirected)
                 {
                     Console.Error.WriteLine("Error: ATHERIZ_SUPERUSER_USERNAME must be set for non-interactive overwrite.");
-                    return;
+                    return false;
                 }
                 Console.Write("Enter superuser username: ");
                 username = Console.ReadLine()?.Trim();
                 if (string.IsNullOrEmpty(username))
                 {
                     Console.WriteLine("Error: Username cannot be empty.");
-                    return;
+                    return false;
                 }
             }
             password = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
@@ -80,7 +80,7 @@ public static class GameTemplateGenerator
                 if (overwrite && folderExistsInitially && Console.IsInputRedirected)
                 {
                     Console.Error.WriteLine("Error: ATHERIZ_SUPERUSER_PASSWORD must be set for non-interactive overwrite.");
-                    return;
+                    return false;
                 }
                 Console.Write("Enter superuser password: ");
                 try
@@ -99,13 +99,13 @@ public static class GameTemplateGenerator
                 if (string.IsNullOrEmpty(password))
                 {
                     Console.WriteLine("Error: Password cannot be empty.");
-                    return;
+                    return false;
                 }
             }
         }
         Console.WriteLine($"Creating game folder: {targetPath}");
         Directory.CreateDirectory(folderPath);
-        try { Scaffold(folderPath, gName); } catch (Exception ex) { Console.Error.WriteLine($"Error scaffolding game folder: {ex.Message}"); return; }
+        try { Scaffold(folderPath, gName); } catch (Exception ex) { Console.Error.WriteLine($"Error scaffolding game folder: {ex.Message}"); return false; }
         // Port of new.py:731 copy_web_folder — copy web (templates + static)
         try { CopyWebFolder(folderPath); } catch (Exception ex) { Console.Error.WriteLine($"Warning: could not copy web folder: {ex.Message}"); }
         var savePath = Path.Combine(folderPath, "save"); Directory.CreateDirectory(savePath);
@@ -140,6 +140,7 @@ public static class GameTemplateGenerator
             Console.WriteLine($"    - Superuser account: {username}");
             Console.WriteLine($"    - Starting room at {Atheriz.Core.Settings.AtherizSettings.Global.DefaultHome}");
         }
+        return true;
     }
     private static void Scaffold(string folderPath, string gameName)
     {

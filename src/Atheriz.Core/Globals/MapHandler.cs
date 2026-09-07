@@ -909,8 +909,25 @@ public class MapHandler
             });
             // Clear-then-swap (mirrors ObjectRegistry.LoadObjects): rows deleted
             // from the DB must not resurrect from memory on the next save.
+            // But a failed load (all rows corrupt / I/O error) must preserve
+            // live state: only an explicitly empty DB is a legitimate wipe.
             Lock.EnterWriteLock();
-            try { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; }
+            try
+            {
+                if (buffer.Count == 0)
+                {
+                    bool dbHasRows = false;
+                    bool dbCheckFailed = false;
+                    try { dbHasRows = db.MapData.AsNoTracking().Any(); }
+                    catch { dbCheckFailed = true; }
+                    if (dbCheckFailed || dbHasRows)
+                    {
+                        try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch { }
+                    }
+                    else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; }
+                }
+                else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; }
+            }
             finally { Lock.ExitWriteLock(); }
         }
         catch { }

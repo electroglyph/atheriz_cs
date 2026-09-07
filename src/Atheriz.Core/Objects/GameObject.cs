@@ -37,6 +37,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     private double _secondsPlayed; // Port of base_obj.py:103-104 _seconds_played + seconds_played property
 
     // --- identity ---
+    private static long s_nextHashId;
+    private readonly long _hashId = System.Threading.Interlocked.Increment(ref s_nextHashId);
     private int _id = -1;
     private string _name = "";
     private string _desc = "";
@@ -303,7 +305,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         if (obj is GameObject o) return Id != -1 && Id == o.Id;
         return false;
     }
-    public override int GetHashCode() => Id.GetHashCode();
+    public override int GetHashCode() => _hashId.GetHashCode();
 
 
     // --- tag ops ---
@@ -357,7 +359,15 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         _lock.EnterWriteLock();
         try
         {
-            if (!_channels.Contains(channel.Id))
+            // B-OBJ-14: re-check under write lock; a channel deleted in the race
+            // must not land in _channels. Uses the lock-free snapshot: taking
+            // _histLock here (via IsDeleted) would nest peer → channel and
+            // deadlock against Msg delivery (channel → peer).
+            if (channel.IsDeletedSnapshot())
+            {
+                try { channel.RemoveListener(this); } catch { }
+            }
+            else if (!_channels.Contains(channel.Id))
             {
                 _channels.Add(channel.Id);
                 _flags.IsModified = true;
@@ -564,6 +574,16 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         o._flags.IsTemporary = dto.IsTemporary;
         o._flags.IsDeleted = dto.IsDeleted;
         o._flags.IsModified = dto.IsModified;
+        // B-OBJ-6: restore roundtripped fields (missing in old saves → DTO defaults).
+        o._flags.CanHear = dto.CanHear;
+        o._flags.IsTickable = dto.IsTickable;
+        o._tickSeconds = dto.TickSeconds != 0 ? dto.TickSeconds : 1.0;
+        o._symbol = dto.Symbol ?? "X";
+        o._moveVerb = dto.MoveVerb ?? "walk";
+        o._quelled = dto.Quelled;
+        o._flags.IsBanned = dto.IsBanned;
+        o._noFollow = dto.NoFollow;
+        o._secondsPlayed = dto.SecondsPlayed;
         // Channel keeps a separate delete guard for its listener fast path; the
         // direct flag restore above bypasses its IsDeleted override, so re-sync.
         if (o is Channel ch) ch.SyncDeletedGuard(dto.IsDeleted);
@@ -646,8 +666,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         if (isNpc) obj._flags.CanHear = true;
         obj._flags.IsTickable = isTickable;
         obj._tickSeconds = tickSeconds;
-        obj._lastMapTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-        obj._mapEnabled = true;
+        obj._lastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+        obj._mapEnabled = isMapable || isPc;
         obj._flags.IsModified = true;
 
         // mirrors Python create locks

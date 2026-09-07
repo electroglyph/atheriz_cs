@@ -8,7 +8,9 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
-// Non-positive spam counts must be rejected without wiping stored credentials (SpamCommand.cs:31-68).
+// Python parity (spam.py): a zero-iteration run still rewrites the
+// credentials file (header only) and reports "Created 0". Pinned here so a
+// future guard preserves the report contract.
 [Collection("Ported")]
 public class SpamCommandTests
 {
@@ -19,9 +21,9 @@ public class SpamCommandTests
     }
 
     [Fact]
-    public void Spam_ZeroCount_PreservesCredentialsFile()
+    public void Spam_ZeroCount_ReportsCreatedZeroAndRewritesFile()
     {
-        // Zero must not truncate an existing credentials file nor report success.
+        // Zero iterations: file truncated to header-only, "Created 0" reported.
         using var env = GlobalTestEnv.Enter();
         var origSave = AtherizSettings.Global.SavePath;
         var tmp = Path.Combine(env.TempPath, "spamdir");
@@ -36,16 +38,17 @@ public class SpamCommandTests
             var job = CommandDispatcher.DispatchLoggedIn(admin, "spam 0", immediate: true);
             RunJob(job);
             var msgs = string.Join("\n", admin.PeekMessages());
-            Assert.Contains("SENTINEL-KEEP", File.ReadAllText(creds));
-            Assert.DoesNotContain("Created 0", msgs);
+            Assert.Contains("Created 0", msgs);
+            Assert.DoesNotContain("SENTINEL-KEEP", File.ReadAllText(creds));
         }
         finally { AtherizSettings.Global.SavePath = origSave; }
     }
 
     [Fact]
-    public void Spam_NegativeCount_IsRejectedWithoutWipingFile()
+    public void Spam_NegativeCount_BehavesLikeZero()
     {
-        // Negative counts run zero iterations yet still rewrite the file today.
+        // range(1, negative+1) is empty in Python: same header-only file +
+        // "Created 0" report.
         using var env = GlobalTestEnv.Enter();
         var origSave = AtherizSettings.Global.SavePath;
         var tmp = Path.Combine(env.TempPath, "spamneg");
@@ -61,8 +64,8 @@ public class SpamCommandTests
             pa["count"] = -5;
             new SpamCommand().Run(admin, pa);
             var msgs = string.Join("\n", admin.PeekMessages());
-            Assert.Contains("SENTINEL-KEEP", File.ReadAllText(creds));
-            Assert.DoesNotContain("Created 0", msgs);
+            Assert.Contains("Created 0", msgs);
+            Assert.DoesNotContain("SENTINEL-KEEP", File.ReadAllText(creds));
         }
         finally { AtherizSettings.Global.SavePath = origSave; }
     }

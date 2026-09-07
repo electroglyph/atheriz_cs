@@ -95,8 +95,16 @@ public static class MapEdit
     // Port of mapedit.py:38 _lock = RLock()
     public static readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.SupportsRecursion);
 
-    // Port of spec: Dictionary<string,MapEditChain> chains — expose for inspection (thread-safe snapshot via property, direct via field for compatibility)
-    public static Dictionary<string, MapEditChain> chains => _chains;
+    // Port of spec: Dictionary<string,MapEditChain> chains — snapshot copy (never the live dict).
+    public static Dictionary<string, MapEditChain> chains
+    {
+        get
+        {
+            Lock.EnterReadLock();
+            try { return new Dictionary<string, MapEditChain>(_chains); }
+            finally { Lock.ExitReadLock(); }
+        }
+    }
     // Also provide capitalized alias per spec naming
     public static IReadOnlyDictionary<string, MapEditChain> ChainsSnapshot
     {
@@ -204,10 +212,9 @@ public static class MapEdit
         finally { Lock.ExitWriteLock(); }
     }
 
-    // Copy-on-write snapshot: readers (incl. GetChain holders) never observe
-    // torn in-place rotation, and external holders cannot corrupt store state.
-    // Consume stores + returns the same fresh instance, so the existing
-    // result.Chain.Validation write-through keeps working.
+    // Copy-on-write snapshot: readers (incl. GetChain/Consume holders) never
+    // observe torn in-place rotation, and external holders cannot corrupt
+    // store state. Consume stores a fresh instance and returns a copy.
     private static MapEditChain CopyOf(MapEditChain c) => new(c.Key, c.Ip, c.Area, c.Z, c.Session)
     {
         PreviousKey = c.PreviousKey,
@@ -285,7 +292,7 @@ public static class MapEdit
             if (previousHit)
             {
                 if (seq == chain.Seq)
-                    return new MapEditResult(MapEditStatus.Retry, newKey: chain.Key, chain: chain);
+                    return new MapEditResult(MapEditStatus.Retry, newKey: chain.Key, chain: CopyOf(chain));
                 return new MapEditResult(MapEditStatus.Reject, reason: "replay");
             }
             if (seq == chain.Seq + 1)
@@ -312,7 +319,7 @@ public static class MapEdit
                 rotated.CreatedMonotonic = GetMonotonic();
                 _chains[newKey] = rotated;
                 _previous[oldKey] = newKey;
-                return new MapEditResult(MapEditStatus.Processed, newKey: newKey, chain: rotated);
+                return new MapEditResult(MapEditStatus.Processed, newKey: newKey, chain: CopyOf(rotated));
             }
             if (seq <= chain.Seq)
                 return new MapEditResult(MapEditStatus.Reject, reason: "replay");

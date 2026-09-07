@@ -215,7 +215,7 @@ public static class StopHandler
             {
                 try
                 {
-                    var doc = JsonDocument.Parse(body);
+                    using var doc = JsonDocument.Parse(body);
                     var status = doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : "ok";
                     var msg = doc.RootElement.TryGetProperty("message", out var m) ? m.GetString() : body;
                     if (status == "ok") { Console.WriteLine($"Success! {msg}"); Console.WriteLine($"Reload took {sw.Elapsed.TotalMilliseconds:F2}ms"); }
@@ -372,7 +372,7 @@ public static class StopHandler
                 var body = await resp.Content.ReadAsStringAsync();
                 try
                 {
-                    var doc = JsonDocument.Parse(body);
+                    using var doc = JsonDocument.Parse(body);
                     var status = doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : "error";
                     var msg = doc.RootElement.TryGetProperty("message", out var m) ? m.GetString() : body;
                     Console.WriteLine(msg);
@@ -393,7 +393,7 @@ public static class StopHandler
             db.Database.EnsureCreated();
             Atheriz.Core.Globals.ObjectRegistry.LoadObjects(savePath);
         }
-        catch (Exception ex) { Console.WriteLine($"Load failed: {ex.Message}"); }
+        catch (Exception ex) { Console.WriteLine($"Load failed: {ex.Message}"); return; }
         // Port of atheriz.py:1456-1459 offline path: at_char_create against the database.
         ServerEvents.AtCharCreate(accName, charName, pw);
     }
@@ -418,7 +418,7 @@ public static class StopHandler
         var gameName = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (string.IsNullOrWhiteSpace(gameName)) gameName = folder;
         var folderAbs = Path.GetFullPath(folder);
-        GameTemplateGenerator.CreateGameFolder(folderAbs, gameName, overwrite);
+        if (!GameTemplateGenerator.CreateGameFolder(folderAbs, gameName, overwrite)) return false;
 
         Console.WriteLine($"\nChanging directory to '{folder}'...");
         try { Directory.SetCurrentDirectory(folderAbs); } catch (Exception ex) { Console.Error.WriteLine($"Failed to change directory: {ex.Message}"); return false; }

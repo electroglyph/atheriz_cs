@@ -17,7 +17,8 @@ public static class KestrelConfig
         if (host == "::") ip = IPAddress.IPv6Any;
         else if (!IPAddress.TryParse(host, out ip!))
         {
-            ip = IPAddress.Any;
+            Console.Error.WriteLine($"WARNING: unparseable WebserverInterface '{host}'; falling back to loopback.");
+            ip = IPAddress.Loopback;
         }
 
         opts.Listen(ip, port, listen =>

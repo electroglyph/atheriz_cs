@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
@@ -26,24 +25,31 @@ public class ChannelLockOrderTests
                 .GetField("_histLock", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .GetValue(ch)!;
 
-            // Pin SyncRoot so Msg blocks at IsModified=true (Channel.cs:186)
-            // while already inside lock (_histLock).
-            ch.SyncRoot.EnterWriteLock();
+            // Pin SyncRoot READ: shared with Msg's Name read, so Msg advances
+            // to the dirty mark (Channel.cs IsModified runs outside the history
+            // lock) and blocks there on the write upgrade. The entry must still
+            // become visible: that proves Msg appended and RELEASED the history
+            // lock before blocking. Under the old nesting (dirty mark inside
+            // the lock), History deadlocks here.
+            // NOTE: a write pin cannot be used — Msg reads Name first and
+            // would block before ever reaching the history lock in both impls.
+            ch.SyncRoot.EnterReadLock();
             var msgTask = Task.Run(() => ch.Msg("hello"));
             try
             {
-                // Wait until the Msg thread is inside the history lock.
-                var sw = Stopwatch.StartNew();
-                bool observedHeld = false;
-                var spinner = new SpinWait();
-                while (sw.Elapsed < TimeSpan.FromSeconds(5))
+                var historyTask = Task.Run(() =>
                 {
-                    if (msgTask.IsCompleted) break;
-                    if (!Monitor.TryEnter(histLock)) { observedHeld = true; break; }
-                    Monitor.Exit(histLock);
-                    spinner.SpinOnce();
-                }
-                Assert.True(observedHeld, "setup: Msg thread never reached the history lock");
+                    var spinner = new SpinWait();
+                    while (true)
+                    {
+                        if (ch.History.Count > 0) return;
+                        spinner.SpinOnce();
+                    }
+                });
+                Assert.True(historyTask.Wait(TimeSpan.FromSeconds(5)),
+                    "Msg entry never became visible: history lock is pinned while Msg waits");
+                Assert.False(msgTask.IsCompleted,
+                    "Msg finished while SyncRoot pinned (expected it blocked at the dirty mark)");
 
                 // History lock must be acquirable while Msg waits on SyncRoot.
                 bool free = Monitor.TryEnter(histLock, TimeSpan.FromMilliseconds(500));
@@ -52,7 +58,7 @@ public class ChannelLockOrderTests
             }
             finally
             {
-                ch.SyncRoot.ExitWriteLock();
+                ch.SyncRoot.ExitReadLock();
                 Assert.True(msgTask.Wait(TimeSpan.FromSeconds(5)), "Msg did not finish after SyncRoot release");
             }
         }

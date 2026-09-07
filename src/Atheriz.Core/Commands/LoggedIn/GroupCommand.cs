@@ -24,7 +24,8 @@ public sealed class GroupCommand : Command
             if (gc == null) { go.Msg("You are not in a group."); return; }
             var chObjs = ObjectRegistry.Get(gc.Value);
             if (chObjs.Count == 0) { go.Msg("Error: Group channel not found."); return; }
-            var channel = chObjs[0] as Channel ?? (Channel)chObjs[0];
+            var channel = chObjs[0] as Channel;
+            if (channel == null) { go.Msg("Error: Group channel not found."); return; }
             var names = channel.Listeners.Select(id => ObjectRegistry.Get(id).FirstOrDefault()?.GetDisplayName(go) ?? id.ToString()).ToList();
             go.Msg($"Group members: {string.Join(", ", names)}");
             return;

@@ -93,6 +93,10 @@ public class Door
     }
 
     private readonly Dictionary<string, List<Func<GameObject, bool>>> _locks = new();
+    private readonly Dictionary<string, List<string>> _lockPolicies = new();
+    // Declarative policy names parallel to _locks (mirrors GameObject._lockPolicies):
+    // persisted in DoorDto and rebuilt via LockPolicies.TryResolve. Bare-lambda
+    // "custom" entries are kept in memory but dropped on save with a loud log.
 
     // Test instrumentation: call counts for faithful port of test_door_revert (mock_try_close / mock_map_close)
     public int TryOpenCallCount { get; private set; }
@@ -149,11 +153,15 @@ public class Door
 
     // Port of base_lock AccessLock add_lock/access pattern
     public void AddLock(string name, Func<GameObject, bool> pred)
+        => AddLock(name, pred, LockPolicies.Custom);
+    public void AddLock(string name, Func<GameObject, bool> pred, string policy)
     {
         using (WriteScope())
         {
             if (!_locks.TryGetValue(name, out var lst)) { lst = []; _locks[name] = lst; }
             lst.Add(pred);
+            if (!_lockPolicies.TryGetValue(name, out var pols)) { pols = []; _lockPolicies[name] = pols; }
+            pols.Add(policy);
         }
     }
     // Port of base_lock.py access
@@ -471,6 +479,14 @@ public class Door
                 Name = _name,
                 Desc = _doorDesc,
                 KeyId = _keyId,
+                Locks = _locks.Select(kv =>
+                {
+                    _lockPolicies.TryGetValue(kv.Key, out var pols);
+                    var names = pols != null && pols.Count == kv.Value.Count
+                        ? pols
+                        : Enumerable.Repeat(LockPolicies.Custom, kv.Value.Count);
+                    return $"{kv.Key}: {string.Join("|", names)}";
+                }).ToList(),
             };
         }
     }
@@ -481,6 +497,21 @@ public class Door
         d._name = dto.Name ?? dto.FromExit;
         d._doorDesc = dto.Desc ?? "";
         d._keyId = dto.KeyId;
+        foreach (var entry in dto.Locks ?? [])
+        {
+            int sep = entry.IndexOf(':');
+            if (sep < 0) continue;
+            string lockName = entry.Substring(0, sep).Trim();
+            if (string.IsNullOrEmpty(lockName)) continue;
+            foreach (var raw in entry.Substring(sep + 1).Split('|', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var pol = raw.Trim();
+                if (string.IsNullOrEmpty(pol)) continue;
+                if (LockPolicies.TryResolve(pol, out var pred))
+                    d.AddLock(lockName, pred, pol);
+                else Atheriz.Core.AtherizLogger.LogError($"Unknown lock policy '{pol}' on door lock '{lockName}'; lock dropped.");
+            }
+        }
         return d;
     }
 }
@@ -499,6 +530,9 @@ public sealed class DoorDto
     public string Name { get; set; } = "";
     public string Desc { get; set; } = "";
     public int? KeyId { get; set; }
+    // Persisted lock policies as "name: policy|policy" (mirrors GameObject
+    // LockDefDto; bare-lambda "custom" entries are dropped with a loud log).
+    public List<string> Locks { get; set; } = [];
 }
 
 public static class MapHandlerHolder

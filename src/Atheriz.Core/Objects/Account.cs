@@ -40,12 +40,18 @@ public class Account : GameObject
     public virtual bool AtPrePuppet(GameObject character) => Hookable("at_pre_puppet", () => true, character); // Fix for test_account.py:408 port of base_account.py:76 at_pre_puppet
     // Account-specific Delete returns bool (Python) — hides GameObject tuple version.
     // NOTE: C# cannot override with a different return type, so a GameObject-typed
-    // reference still dispatches to the base tuple Delete. That path converges via
-    // del ops at the next save; this bool path deletes the row immediately.
+    // reference dispatches to the base tuple Delete. That path converges via
+    // DeleteImmediate below (same immediate row delete), keeping both static types unified.
     public new bool Delete(GameObject? caller = null, bool unused = true)
     {
+        return DeleteImmediate(caller) != null;
+    }
+
+    // Shared immediate-delete core for both static types (B-OBJ-13).
+    internal (int count, List<object> ops)? DeleteImmediate(GameObject? caller)
+    {
         // Port of base_account.py:53 delete.
-        if (!AtDelete(caller!)) return false;
+        if (!AtDelete(caller!)) return null;
         var ops = new List<(string Sql, object[] Params)>();
         if (!IsTemporary) ops.Add(GetDelOps());
         // Mark deleted and unregister BEFORE the DB delete so a concurrent
@@ -73,7 +79,9 @@ public class Account : GameObject
                 throw;
             }
         }
-        return true;
+        var boxed = new List<object>(ops.Count);
+        foreach (var op in ops) boxed.Add(op);
+        return (1, boxed);
     }
 
     public string PasswordHash

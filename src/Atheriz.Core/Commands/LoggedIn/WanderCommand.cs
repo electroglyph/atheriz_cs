@@ -19,6 +19,8 @@ public sealed class WanderCommand : Command
         int count = 10;
         if (pa != null && pa["count"] is int iv) count = iv;
         else if (pa != null && int.TryParse(pa.GetString("count"), out var parsed)) count = parsed;
+        if (count <= 0) { go.Msg("Count must be a positive number."); return; }
+        if (count > 1000) { go.Msg("Maximum count is 1000."); return; }
         var loc = go.ResolveLocationObject() as Node;
         if (loc == null) { go.Msg("You must be in a room to spawn wanderers."); return; }
         var nh = NodeHandler.GetCurrent();

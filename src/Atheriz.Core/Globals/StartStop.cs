@@ -477,7 +477,11 @@ public static class StartStop
                 db.Database.EnsureCreated();
                 mh.Save(db);
             }
-            catch { ok = false; try { GlobalServices.GetMapHandler().Save(); } catch { } }
+            catch
+            {
+                try { GlobalServices.GetMapHandler().Save(); }
+                catch { ok = false; }
+            }
         });
         ShutdownStep("node_save", () =>
         {
@@ -488,7 +492,11 @@ public static class StartStop
                 db.Database.EnsureCreated();
                 nh.Save(db);
             }
-            catch { ok = false; try { GlobalServices.GetNodeHandler().Save(); } catch { } }
+            catch
+            {
+                try { GlobalServices.GetNodeHandler().Save(); }
+                catch { ok = false; }
+            }
         });
         if (ok) Persistence.CheckpointJournal.MarkClean(settings.SavePath);
     }
@@ -497,27 +505,27 @@ public static class StartStop
 
     private static AsyncTicker? TryGetTicker()
     {
-        try { return GlobalServices.GetAsyncTicker(); } catch { return null; }
+        try { return GlobalServices.TryGetTicker(); } catch { return null; }
     }
     private static AsyncThreadPool? TryGetPool()
     {
-        try { return GlobalServices.GetAsyncThreadPool(); } catch { return null; }
+        try { return GlobalServices.TryGetPool(); } catch { return null; }
     }
     private static GameTime? TryGetGameTime()
     {
-        try { return GlobalServices.GetGameTime(); } catch { return null; }
+        try { return GlobalServices.TryGetGameTime(); } catch { return null; }
     }
     private static MapHandler? TryGetMapHandler()
     {
-        try { return GlobalServices.GetMapHandler(); } catch { return null; }
+        try { return GlobalServices.TryGetMapHandler(); } catch { return null; }
     }
     private static NodeHandler? TryGetNodeHandler()
     {
-        try { return GlobalServices.GetNodeHandler(); } catch { return null; }
+        try { return GlobalServices.TryGetNodeHandler(); } catch { return null; }
     }
     private static ConnectionManager? TryGetConnectionManager()
     {
-        try { return GlobalServices.GetConnectionManager(); } catch { return null; }
+        try { return GlobalServices.TryGetConnectionManager(); } catch { return null; }
     }
 
     private static void TryInvokeServerEvent(string methodName)

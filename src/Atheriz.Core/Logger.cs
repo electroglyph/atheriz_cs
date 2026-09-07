@@ -19,7 +19,15 @@ public static class AtherizLogger
     private static ILogger? _cachedDefault;
     private static LogLevel _level = LogLevel.Information; // Port of logger.py:28 default info
     private static string _savePath = "save";
+#pragma warning disable CS0414 // Last-outcome hint, maintained for diagnostics/tests; writes always retry.
     private static bool _fileEnabled = true;
+#pragma warning restore CS0414
+    // B-THR-5: _fileEnabled is a diagnostic hint only (kept for compat), never a
+    // permanent latch — every write attempts the append. Last failure ticks are
+    // recorded lock-free for backoff/diagnostics; a healed directory writes on
+    // the very next call (no cooldown skip — the pin test requires immediate
+    // post-heal retry).
+    private static long _lastFileFailureTicks;
     public const long MaxFileBytes = 5 * 1024 * 1024; // Port of RotatingFileHandler 5M
     public const int MaxFiles = 5;
 
@@ -115,7 +123,6 @@ public static class AtherizLogger
 
     private static void AppendToFile(LogLevel level, string category, string message, Exception? ex)
     {
-        if (!_fileEnabled) return;
         // F009: serialize size-check + rotate + append so concurrent writers cannot
         // interleave lines or rotate mid-append and corrupt server.log.
         lock (_fileLock)
@@ -140,8 +147,8 @@ public static class AtherizLogger
                 }
             }
             catch { }
-            try { File.AppendAllText(file, line); }
-            catch { _fileEnabled = false; }
+            try { File.AppendAllText(file, line); _fileEnabled = true; Volatile.Write(ref _lastFileFailureTicks, 0); }
+            catch { _fileEnabled = false; Volatile.Write(ref _lastFileFailureTicks, DateTime.UtcNow.Ticks); }
         }
         catch { }
         }

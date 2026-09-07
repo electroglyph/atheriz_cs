@@ -29,10 +29,30 @@ public partial class GameObject
 
         var replaceHooks = hooksSnapshot!.Where(d => d.Method.GetCustomAttributes(typeof(ReplaceAttribute), false).Length > 0).ToList();
         if (replaceHooks.Count > 0)
-            return (T)replaceHooks[0].DynamicInvoke(args)!;
+        {
+            try
+            {
+                return (T)replaceHooks[0].DynamicInvoke(args)!;
+            }
+            catch (TargetParameterCountException)
+            {
+                // Arity mismatch: ignore the bad replace hook, run original path.
+            }
+            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
+            {
+                throw tie.InnerException;
+            }
+        }
 
         var beforeHooks = hooksSnapshot!.Where(d => d.Method.GetCustomAttributes(typeof(BeforeAttribute), false).Length > 0).ToList();
-        foreach (var h in beforeHooks) h.DynamicInvoke(args);
+        foreach (var h in beforeHooks)
+        {
+            try { h.DynamicInvoke(args); }
+            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
+            {
+                throw tie.InnerException;
+            }
+        }
 
         var result = original();
 

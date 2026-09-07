@@ -15,6 +15,13 @@ public sealed class NewCharacterCommand : Command
     {
         var settings = Settings.AtherizSettings.Global;
         if (!settings.CharCreationEnabled) { caller.Msg("Character creation is not enabled."); return; }
+        {
+            string host = (caller as BaseConnection)?.ClientHost ?? "?";
+            string rateKey = caller is BaseConnection bc ? (host != "?" ? host : bc.SessionId ?? bc.GetHashCode().ToString()) : "?";
+            double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            if (!ObjectRegistry.TryReserveCreationCooldown("character", rateKey, now, settings.CreationCooldown))
+            { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return; }
+        }
         // sync stub for tests: expects "name gender desc"
         var text = args as string ?? "";
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);

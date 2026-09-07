@@ -8,6 +8,13 @@ namespace Atheriz.Core.Settings;
 /// </summary>
 public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
 {
+    // B-UTL-5: valid vocabulary per Logger.cs:47-50 (unknown levels silently fall back
+    // to Information there, so reject them here).
+    private static readonly HashSet<string> ValidLogLevels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "debug", "info", "warning", "error", "critical",
+    };
+
     public ValidateOptionsResult Validate(string? name, AtherizSettings options)
     {
         var failures = new List<string>();
@@ -88,6 +95,10 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
             failures.Add($"MaxSearchDepth must be >0 (was {options.MaxSearchDepth}).");
         if (options.MaxAstarIterations <= 0)
             failures.Add($"MaxAstarIterations must be >0 (was {options.MaxAstarIterations}).");
+        if (string.IsNullOrWhiteSpace(options.LogLevel) || !ValidLogLevels.Contains(options.LogLevel.Trim()))
+            failures.Add($"LogLevel must be one of debug/info/warning/error/critical (was '{options.LogLevel}').");
+        if (options.SecondsPerMinute <= 0)
+            failures.Add($"SecondsPerMinute must be >0 (was {options.SecondsPerMinute}).");
 
         return failures.Count == 0
             ? ValidateOptionsResult.Success

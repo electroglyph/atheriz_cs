@@ -73,12 +73,31 @@ public partial class NodeHandler
                     var na = dto!.ToDomain();
                     // Evict the replaced area's nodes from the registry: otherwise
                     // they leak as stale ids while the handler no longer owns them.
-                    // Mirrors RemoveArea/Clear eviction below.
+                    // Mirrors RemoveArea/Clear eviction below. Live-modified nodes
+                    // are grafted into the replacement grid instead: a stale row
+                    // must not clobber newer in-memory edits.
                     if (_areas.TryGetValue(na.Name, out var old) && !ReferenceEquals(old, na))
                     {
                         foreach (var g in old.Grids.Values)
                             foreach (var n in g.Nodes.Values)
-                                try { ObjectRegistry.RemoveObject(n); } catch { }
+                            {
+                                bool grafted = false;
+                                try
+                                {
+                                    if (n.IsModified)
+                                    {
+                                        var ng = na.GetGrid(n.Coord.Z);
+                                        if (ng != null && ng.Nodes.ContainsKey((n.Coord.X, n.Coord.Y)))
+                                        {
+                                            ng.Nodes[(n.Coord.X, n.Coord.Y)] = n;
+                                            grafted = true;
+                                        }
+                                    }
+                                }
+                                catch { grafted = false; }
+                                if (!grafted)
+                                    try { ObjectRegistry.RemoveObject(n); } catch { }
+                            }
                     }
                     _areas[na.Name] = na;
                 }
@@ -90,6 +109,61 @@ public partial class NodeHandler
             });
             JsonTableLoader.LoadInto(db.Transitions, Lock2, json => JsonSerializer.Deserialize<Transition>(json, JsonOptions.Default), (dto, row) => _transitions[dto.ToCoord] = dto);
             JsonTableLoader.LoadInto(db.Doors, Lock3, json => JsonSerializer.Deserialize<Dictionary<string, Door>>(json, JsonOptions.Default), (dto, row) => _doors[new Coord(row.Area, row.X, row.Y, row.Z)] = dto);
+            // Evict rows deleted from the DB (full-table load): absent keys must
+            // not resurrect. Raw row keys (not successful deserializations)
+            // distinguish deletion (DB empty) from corruption (DB has rows but
+            // all failed) — corrupt preserves live.
+            try
+            {
+                HashSet<string>? dbAreaNames = null;
+                try { dbAreaNames = new HashSet<string>(db.Areas.AsNoTracking().Select(r => r.Name).ToList()); } catch { dbAreaNames = null; }
+                if (dbAreaNames != null)
+                {
+                    List<string> toRemove;
+                    Lock.EnterWriteLock();
+                    try { toRemove = _areas.Keys.Where(k => !dbAreaNames.Contains(k)).ToList(); }
+                    finally { Lock.ExitWriteLock(); }
+                    foreach (var name in toRemove)
+                    {
+                        NodeArea? removed = null;
+                        Lock.EnterWriteLock();
+                        try { if (_areas.TryGetValue(name, out var a)) { _areas.Remove(name); removed = a; } }
+                        finally { Lock.ExitWriteLock(); }
+                        if (removed != null)
+                        {
+                            foreach (var g in removed.Grids.Values)
+                                foreach (var n in g.Nodes.Values.ToList())
+                                    try { ObjectRegistry.RemoveObject(n); } catch { }
+                            try { AtherizLogger.LogWarning($"[Load] evicting deleted area {name}"); } catch { }
+                        }
+                    }
+                }
+                HashSet<(string, int, int, int)>? dbTransKeys = null;
+                try { dbTransKeys = new HashSet<(string, int, int, int)>(db.Transitions.AsNoTracking().Select(r => new ValueTuple<string, int, int, int>(r.ToArea, r.ToX, r.ToY, r.ToZ)).ToList()); } catch { dbTransKeys = null; }
+                if (dbTransKeys != null)
+                {
+                    Lock2.EnterWriteLock();
+                    try
+                    {
+                        var tRem = _transitions.Keys.Where(k => !dbTransKeys.Contains((k.Area, k.X, k.Y, k.Z))).ToList();
+                        foreach (var k in tRem) _transitions.Remove(k);
+                    }
+                    finally { Lock2.ExitWriteLock(); }
+                }
+                HashSet<(string, int, int, int)>? dbDoorKeys = null;
+                try { dbDoorKeys = new HashSet<(string, int, int, int)>(db.Doors.AsNoTracking().Select(r => new ValueTuple<string, int, int, int>(r.Area, r.X, r.Y, r.Z)).ToList()); } catch { dbDoorKeys = null; }
+                if (dbDoorKeys != null)
+                {
+                    Lock3.EnterWriteLock();
+                    try
+                    {
+                        var dRem = _doors.Keys.Where(k => !dbDoorKeys.Contains((k.Area, k.X, k.Y, k.Z))).ToList();
+                        foreach (var k in dRem) _doors.Remove(k);
+                    }
+                    finally { Lock3.ExitWriteLock(); }
+                }
+            }
+            catch { }
         }
         catch { return; }
 
@@ -116,7 +190,13 @@ public partial class NodeHandler
                     var existing = ObjectRegistry.Get(node.Id);
                     if (existing.Count > 0 && !ReferenceEquals(existing[0], node))
                     {
-                        // collision warning
+                        bool liveModified = false;
+                        try { liveModified = existing[0].IsModified; } catch { }
+                        if (liveModified)
+                        {
+                            try { AtherizLogger.LogWarning($"[Load] skipping stale node row {node.Id} (live modified)"); } catch { }
+                            continue;
+                        }
                     }
                     ObjectRegistry.AddObject(node);
                     // Port of node.py:84-86 node.resolve_relations() — reinstall script hooks, ticker, at_init
@@ -124,8 +204,14 @@ public partial class NodeHandler
                 }
             }
         }
-        if (maxNodeId != 0 && maxNodeId > IdGenerator.GetId())
-            IdGenerator.SetId(maxNodeId);
+        if (maxNodeId != 0)
+        {
+            lock (IdGenerator.LockObj)
+            {
+                if (maxNodeId > IdGenerator.GetId())
+                    IdGenerator.SetId(maxNodeId);
+            }
+        }
     }
 
     private bool IsDirty()
@@ -480,7 +566,7 @@ public partial class NodeHandler
                                 inst.LegendDesc = nd.LegendDesc;
                                 inst.Links = nd.Links ?? new List<NodeLink>();
                                 inst.Nouns = nd.Nouns ?? new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
-                                inst.Id = nd.Id;
+                                inst.SetIdRaw(nd.Id);
                                 // Restore scripts into the shared base scripts set (typed; was _nodeScripts/_scripts reflection)
                                 if (nd.Scripts != null && nd.Scripts.Count > 0)
                                     inst.RestoreScriptIds(nd.Scripts);
@@ -491,18 +577,18 @@ public partial class NodeHandler
                             }
                         }
                     }
-                    node=new Node(nd.Coord, nd.Name, nd.Desc, nd.Theme, nd.Symbol)
-                    {
-                        LegendDesc=nd.LegendDesc,
-                        Links=nd.Links,
-                        Nouns=nd.Nouns,
-                    };
-                    // Remove auto-registered temp node from registry (Node ctor adds)
-                    try { ObjectRegistry.RemoveObject(node); } catch {}
-                    node.Id=nd.Id;
+                    node = Node.CreateForLoad(nd.Coord);
+                    node.Name = nd.Name;
+                    node.Desc = nd.Desc;
+                    node.Theme = nd.Theme ?? "";
+                    node.Symbol = nd.Symbol ?? "";
+                    node.LegendDesc = nd.LegendDesc;
+                    node.Links = nd.Links ?? new List<NodeLink>();
+                    node.Nouns = nd.Nouns ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    node.SetIdRaw(nd.Id);
                     if (nd.Scripts != null && nd.Scripts.Count > 0)
                         node.RestoreScriptIds(nd.Scripts);
-                    node.IsModified=false;
+                    node.IsModified = false;
                     grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
                 }
                 area.Grids[z]=grid;

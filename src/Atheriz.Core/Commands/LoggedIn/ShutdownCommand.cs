@@ -19,7 +19,6 @@ public sealed class ShutdownCommand : Command
     {
         if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
         go.Msg("Initiating server shutdown...");
-        try { Atheriz.Core.ServerEvents.AtServerStop(); } catch { }
         var settings = AtherizSettings.Global;
         int port = settings.WebserverPort;
         string secretPath = settings.SecretPath;
@@ -29,6 +28,7 @@ public sealed class ShutdownCommand : Command
             go.Msg("Error: admin.token not found.");
             return;
         }
+        try { Atheriz.Core.ServerEvents.AtServerStop(); } catch { }
         string token;
         try { token = File.ReadAllText(tokenFile).Trim(); }
         catch (Exception ex) { go.Msg($"Error reading token: {ex.Message}"); return; }

@@ -71,8 +71,8 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // Settings helper — mirrors settings.CONNECTION_INPUT_QUEUE_LIMIT at settings.py:81
     private static AtherizSettings DefaultSettings => AtherizSettings.Global;
     private static int ConnectionInputQueueLimit => DefaultSettings.ConnectionInputQueueLimit;
-    private static AsyncThreadPool? _fallbackPool;
-    private static AsyncThreadPool FallbackPool => _fallbackPool ??= new AsyncThreadPool();
+    private static readonly Lazy<AsyncThreadPool> _fallbackPool = new(() => new AsyncThreadPool());
+    private static AsyncThreadPool FallbackPool => _fallbackPool.Value;
 
     private AsyncThreadPool ResolvePool()
     {

@@ -21,6 +21,7 @@ public static class Autosave
     private static MapHandler? _cachedMap;
     private static NodeHandler? _cachedNodes;
     private static GameTime? _cachedTime;
+    private static AsyncTicker? _globalTicker;
 
     public static bool AutosaveStarted
     {
@@ -147,11 +148,31 @@ public static class Autosave
 
     /// <summary>
     /// Parameterless global ticker overload (creates ticker if needed) — convenience.
+    /// Keeps the ticker handle so it can be stopped; repeated starts reuse
+    /// the existing ticker instead of accumulating.
     /// </summary>
     public static void StartAutosave(AtherizSettings? settings = null)
     {
-        var ticker = new AsyncTicker();
-        StartAutosave(ticker, settings);
+        AsyncTicker? ticker;
+        lock (_lock)
+        {
+            if (_autosaveStarted && _globalTicker != null) return;
+            if (_autosaveStarted) return;
+            if (_globalTicker == null)
+                _globalTicker = new AsyncTicker();
+            ticker = _globalTicker;
+        }
+        StartAutosave(ticker!, settings);
+    }
+
+    public static void StopAutosave()
+    {
+        AsyncTicker? ticker;
+        lock (_lock) { ticker = _globalTicker; }
+        if (ticker != null)
+        {
+            try { StopAutosave(ticker); } catch { }
+        }
     }
 
     public static void StopAutosave(AsyncTicker ticker)
@@ -195,6 +216,7 @@ public static class Autosave
     /// <summary>For tests: reset static state.</summary>
     public static void ResetForTesting()
     {
+        AsyncTicker? gt = null;
         lock (_lock)
         {
             _autosaveStarted = false;
@@ -203,6 +225,13 @@ public static class Autosave
             _cachedMap = null;
             _cachedNodes = null;
             _cachedTime = null;
+            gt = _globalTicker;
+            _globalTicker = null;
+        }
+        if (gt != null)
+        {
+            try { gt.Clear(); } catch { }
+            try { gt.Stop(); } catch { }
         }
     }
 }

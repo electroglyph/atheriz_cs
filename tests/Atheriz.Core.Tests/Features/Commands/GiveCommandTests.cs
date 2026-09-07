@@ -6,8 +6,9 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
-// Giving must only move items the giver carries (GiveCommand.cs:83-94),
-// and NPC recipients must be valid even when disconnected (GiveCommand.cs:78).
+// Giving resolves via caller search (inventory + room, like Python
+// caller.search) and NPC recipients are valid even when disconnected
+// (GiveCommand.cs:78 — no connected gate for NPCs).
 [Collection("Ported")]
 public class GiveCommandTests
 {
@@ -25,35 +26,10 @@ public class GiveCommandTests
     }
 
     [Fact]
-    public void Give_RoomObject_IsNotMoved()
+    public void Give_OtherCharacter_MovesToTarget()
     {
-        // A coin lying in the room is not carried, so it must stay put.
-        ObjectRegistry.ClearAll();
-        try
-        {
-            var room = GameObject.Create("room", isContainer: true);
-            var giver = GameObject.Create("giver", isPc: true);
-            var box = GameObject.Create("box", isContainer: true);
-            var coin = GameObject.Create("coin");
-            RegisterAll(room, giver, box, coin);
-            Assert.True(giver.MoveTo(room));
-            Assert.True(box.MoveTo(room));
-            Assert.True(coin.MoveTo(room));
-            giver.ClearMessages();
-            var job = CommandDispatcher.DispatchLoggedIn(giver, "give coin to box", immediate: true);
-            RunJob(job);
-            var msgs = string.Join("\n", giver.PeekMessages());
-            Assert.Contains("You don't have that", msgs);
-            Assert.DoesNotContain(coin.Id, box.ContentsSnapshot);
-            Assert.Contains(coin.Id, room.ContentsSnapshot);
-        }
-        finally { ObjectRegistry.ClearAll(); }
-    }
-
-    [Fact]
-    public void Give_OtherCharacter_IsNotMoved()
-    {
-        // Another character standing nearby is not inventory and must never move.
+        // Parity with Python: search finds characters in the room and move_to
+        // has no carrier check, so this follows the same path as items.
         ObjectRegistry.ClearAll();
         try
         {
@@ -71,10 +47,8 @@ public class GiveCommandTests
             giver.ClearMessages();
             var job = CommandDispatcher.DispatchLoggedIn(giver, "give bob to alice", immediate: true);
             RunJob(job);
-            var msgs = string.Join("\n", giver.PeekMessages());
-            Assert.Contains("You don't have that", msgs);
-            Assert.DoesNotContain(bob.Id, alice.ContentsSnapshot);
-            Assert.Contains(bob.Id, room.ContentsSnapshot);
+            Assert.Contains(bob.Id, alice.ContentsSnapshot);
+            Assert.DoesNotContain(bob.Id, room.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

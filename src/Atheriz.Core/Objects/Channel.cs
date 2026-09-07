@@ -52,6 +52,13 @@ public class Channel : GameObject
     }
 
     /// <summary>
+    /// Lock-free delete-guard read for use while holding a peer lock (taking
+    /// _histLock there would invert the peer → channel order used by Delete
+    /// detach vs Msg delivery). May be microscopically stale; callers needing
+    /// exactness must take _histLock via IsDeleted.
+    /// </summary>
+    internal bool IsDeletedSnapshot() => Volatile.Read(ref _channelDeleted);
+    /// <summary>
     /// Re-syncs the delete guard after <c>GameObject.ApplyDtoFields</c> restores
     /// <c>_flags.IsDeleted</c> directly (bypassing this override). Called with the
     /// restored value; takes only _histLock so no lock order is violated.
@@ -183,9 +190,9 @@ public class Channel : GameObject
         {
             _history.AddLast(entry);
             while (_history.Count > _historyLimit) _history.RemoveFirst();
-            IsModified = true;
             listeners = _listeners.Values.ToList();
         }
+        IsModified = true;
         foreach (var listener in listeners)
         {
             // FormatMessage is a pure function of (timestamp, sender, text), so

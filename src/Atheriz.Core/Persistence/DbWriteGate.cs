@@ -6,12 +6,28 @@ namespace Atheriz.Core.Persistence;
 /// <summary>
 /// Re-entrant gate mirroring Python `RLock`. Same logical flow may re-enter
 /// without deadlock (StartStop.DoShutdown → SaveWorld → nested SaveObjects).
-/// Uses AsyncLocal recursion count + underlying SemaphoreSlim(1,1).
+/// Re-entrancy is tracked per async-flow via AsyncLocal; exclusion via
+/// SemaphoreSlim(1,1). A stray Exit with no matching Enter on its flow is a
+/// no-op, and a thread that never took the gate cannot release it (a Release
+/// on the 1→0 step happens only on the taker thread), so neither can free
+/// another flow's slot.
+/// Take is deliberately synchronous (EnterAsync returns a completed task):
+/// AsyncLocal writes made after an await inside the taker land in a forked
+/// ExecutionContext and never propagate back to the caller's flow, so the
+/// matching Exit would see count 0 and leak the permit (a permanent hang
+/// under any contention). Recording the hold with no await in between keeps
+/// it visible to the caller's flow, including across later await thread-hops
+/// (paired with ExitAfterThreadHop at the async call site when a hop happened).
 /// </summary>
 public static class DbWriteGate
 {
     private static readonly SemaphoreSlim _sem = new(1, 1);
     private static readonly AsyncLocal<int> _recursion = new();
+    // Taker identity for the outermost hold. ExecutionContext flows AsyncLocal
+    // values to child threads, so the recursion count alone cannot tell a
+    // same-flow re-entry from an inherited copy on a thread that never called
+    // Enter — the holder thread id can.
+    private static int _holderThreadId;
 
     public static SemaphoreSlim SemaphoreForTesting => _sem;
 
@@ -26,30 +42,66 @@ public static class DbWriteGate
         }
         _sem.Wait();
         _recursion.Value = 1;
+        Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
     }
 
-    public static async Task EnterAsync(CancellationToken ct = default)
+    public static Task EnterAsync(CancellationToken ct = default)
     {
         if (_recursion.Value > 0)
         {
             _recursion.Value++;
-            return;
+            return Task.CompletedTask;
         }
-        await _sem.WaitAsync(ct);
+        _sem.Wait(ct);
         _recursion.Value = 1;
+        Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
+        return Task.CompletedTask;
     }
 
     public static void Exit()
     {
         var c = _recursion.Value;
-        if (c <= 1)
+        if (c <= 0)
         {
             _recursion.Value = 0;
-            _sem.Release();
+            return;
         }
-        else
+        if (c > 1)
         {
             _recursion.Value = c - 1;
+            return;
         }
+        if (Environment.CurrentManagedThreadId != Volatile.Read(ref _holderThreadId))
+        {
+            // Inherited copy on a thread that never took the gate: drop our
+            // forked count but never free another flow's slot.
+            _recursion.Value = 0;
+            return;
+        }
+        _recursion.Value = 0;
+        _sem.Release();
+    }
+
+    /// <summary>
+    /// Paired exit for <see cref="EnterAsync"/> when awaits between take and
+    /// exit may have resumed on a different pool thread (same flow, new
+    /// thread). Mirrors <see cref="Exit"/> unwinding but attests ownership via
+    /// the caller's take/exit pairing instead of the taker-thread check.
+    /// </summary>
+    internal static void ExitAfterThreadHop()
+    {
+        var c = _recursion.Value;
+        if (c <= 0)
+        {
+            _recursion.Value = 0;
+            return;
+        }
+        if (c > 1)
+        {
+            _recursion.Value = c - 1;
+            return;
+        }
+        _recursion.Value = 0;
+        _sem.Release();
     }
 }

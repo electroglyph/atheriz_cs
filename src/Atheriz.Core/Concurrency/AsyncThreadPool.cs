@@ -256,15 +256,21 @@ public class AsyncThreadPool : IDisposable
     {
         // F009: faults go through AtherizLogger (server.log) instead of bare Console.Error.
         // AtherizLogger still echoes to Console.Error, so test log-capture keeps working.
+        // B-THR-2: the worker slot (Busy count + watchdog entry) is held for the
+        // whole async operation, not just the sync prefix: an incomplete task is
+        // waited on inline (matching Python holding the worker for the coro
+        // lifetime), so maxThreads/queue-limit/relief/watchdog observe real async
+        // load instead of seeing Busy==0 while CLR-pool threads do the work.
         try
         {
             var task = item.Runner();
             if (!task.IsCompleted)
             {
-                _ = task.ContinueWith(t =>
+                try { task.Wait(); }
+                catch
                 {
-                    if (t.IsFaulted && t.Exception != null) try { AtherizLogger.LogError(t.Exception.ToString()); } catch { Console.Error.WriteLine(t.Exception.ToString()); }
-                }, TaskScheduler.Default);
+                    if (task.IsFaulted && task.Exception != null) try { AtherizLogger.LogError(task.Exception.ToString()); } catch { Console.Error.WriteLine(task.Exception.ToString()); }
+                }
             }
             else if (task.IsFaulted && task.Exception != null)
             {
@@ -330,6 +336,10 @@ public class AsyncThreadPool : IDisposable
             double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
             if (saturated)
             {
+                // B-THR-3: snapshot under the lock, log after releasing it —
+                // LogStarvation does file I/O and must not stall AddInternal/Stop.
+                Dictionary<long, (string, double)>? snapshot = null;
+                double saturatedFor = 0;
                 lock (_lock)
                 {
                     _saturatedSince ??= now;
@@ -337,10 +347,12 @@ public class AsyncThreadPool : IDisposable
                         now - _lastStarvationLog >= _watchdogThreshold.TotalSeconds)
                     {
                         _lastStarvationLog = now;
-                        var snapshot = new Dictionary<long, (string, double)>(_currentTasks);
-                        LogStarvation(qsize, busy, now - _saturatedSince.Value, snapshot);
+                        saturatedFor = now - _saturatedSince.Value;
+                        snapshot = new Dictionary<long, (string, double)>(_currentTasks);
                     }
                 }
+                if (snapshot != null)
+                    LogStarvation(qsize, busy, saturatedFor, snapshot);
             }
             else
             {

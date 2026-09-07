@@ -858,6 +858,7 @@ public class ConnectionManager
         }
         try { connection.Close(); } // port of manager.py:149-152
         catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Connection cleanup failed: {e}"); } catch { Console.Error.WriteLine($"[Network] Connection cleanup failed: {e}"); } }
+        try { (connection as IDisposable)?.Dispose(); } catch { }
         try { Atheriz.Core.AtherizLogger.LogInformation($"[Network] Connection closed: {connId} (total: {ConnectionCount})"); } catch { Console.Error.WriteLine($"[Network] Connection closed: {connId} (total: {ConnectionCount})"); } // port of manager.py:153
     }
 
@@ -926,7 +927,7 @@ public class ConnectionManager
     {
         try
         {
-            var doc = JsonDocument.Parse(rawMessage);
+            using var doc = JsonDocument.Parse(rawMessage);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 1) // port of manager.py:194
             {

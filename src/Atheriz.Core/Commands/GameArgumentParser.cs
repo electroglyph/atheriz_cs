@@ -237,7 +237,11 @@ public sealed class GameArgumentParser
                         string val = argList[i++];
                         // type conversion
                         object conv = val;
-                        if (opt.Type == typeof(int) && int.TryParse(val, out var iv)) conv = iv;
+                        if (opt.Type == typeof(int))
+                        {
+                            if (int.TryParse(val, out var iv)) conv = iv;
+                            else throw new CommandError($"argument {tok}: invalid int value: '{val}'");
+                        }
                         else if (opt.Type == typeof(float) && float.TryParse(val, out var fv)) conv = fv;
                         // choices
                         if (opt.Choices is not null && !opt.Choices.Contains(val))
@@ -293,7 +297,11 @@ public sealed class GameArgumentParser
                 else // None single value
                 {
                     object conv = tok;
-                    if (pd.Type == typeof(int) && int.TryParse(tok, out var iv)) conv = iv;
+                    if (pd.Type == typeof(int))
+                    {
+                        if (int.TryParse(tok, out var iv)) conv = iv;
+                        else throw new CommandError($"argument {pd.Names[0]}: invalid int value: '{tok}'");
+                    }
                     if (pd.Choices is not null && !pd.Choices.Contains(tok))
                         throw new CommandError($"argument {pd.Names[0]}: invalid choice: '{tok}'");
                     result.Set(pd.Dest, conv);

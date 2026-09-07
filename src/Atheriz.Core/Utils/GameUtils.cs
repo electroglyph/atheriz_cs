@@ -448,8 +448,11 @@ public static class GameUtils
         }
         catch
         {
-            // fallback: try copy via JSON element clone for primitives
-            try { return JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value)); } catch { return value; }
+            // B-UTL-2: never alias the live original on failure — callers mutate the
+            // result, so returning `value` would corrupt source state. Return a fresh
+            // blank instance (independent by construction); default when T cannot be
+            // materialized from empty JSON (e.g. value types).
+            try { return JsonSerializer.Deserialize<T>("{}"); } catch { return default; }
         }
     }
 

@@ -14,11 +14,12 @@ public class PersistenceSaveLoadContractTests
     // --- Parameterless Save honors the instance path ---
 
     [Fact]
-    public void GameTime_ParameterlessSave_UsesInstanceSavePath()
+    public void GameTime_ParameterlessSave_UsesDefaultSavePath()
     {
-        // Parameterless GameTime.Save (GameTime.cs:61) must persist to the
-        // instance's configured SavePath, not the process-global path, so
-        // custom-settings instances never cross-pollute other stores.
+        // Parameterless Save resolves the process-default path
+        // (ATHERIZ_SAVE_PATH else Global.SavePath, like SaveObjects) — never
+        // a divergent file. Per-instance targeting uses Save(db); the
+        // instance settings must not reroute the parameterless call.
         using var env = GlobalTestEnv.Enter();
         var origEnv = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
         var origSave = AtherizSettings.Global.SavePath;
@@ -34,7 +35,7 @@ public class PersistenceSaveLoadContractTests
             var gt = new GameTime(settings, autoLoad: false);
             gt.Ticks = 42;
             gt.Save();
-            using var db = new AtherizDbContext(customDir);
+            using var db = new AtherizDbContext(globalDir);
             var probe = new GameTime(settings, autoLoad: false);
             probe.Load(db);
             Assert.Equal(42, probe.Ticks);
@@ -47,11 +48,11 @@ public class PersistenceSaveLoadContractTests
     }
 
     [Fact]
-    public void MapHandler_ParameterlessSave_UsesInstanceSavePath()
+    public void MapHandler_ParameterlessSave_UsesDefaultSavePath()
     {
-        // Parameterless MapHandler.Save (MapHandler.cs:919-921) must persist to
-        // the instance's configured SavePath, not the process-global path, so
-        // custom-settings instances never cross-pollute other stores.
+        // Same process-default contract as GameTime.Save: the parameterless
+        // call resolves ATHERIZ_SAVE_PATH else Global.SavePath; per-instance
+        // targeting uses Save(db).
         using var env = GlobalTestEnv.Enter();
         var origEnv = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
         var origSave = AtherizSettings.Global.SavePath;
@@ -67,7 +68,7 @@ public class PersistenceSaveLoadContractTests
             var mh = new MapHandler(settings, autoLoad: false);
             mh.SetMapInfo("zona", 0, new MapInfo());
             mh.Save();
-            using var db = new AtherizDbContext(customDir);
+            using var db = new AtherizDbContext(globalDir);
             var probe = new MapHandler(settings, autoLoad: false);
             probe.Load(db);
             Assert.NotNull(probe.GetMapInfo("zona", 0));

@@ -164,7 +164,7 @@ public partial class NodeHandler
         grid?.RemoveNode((coord.X,coord.Y));
         if(node!=null) ObjectRegistry.RemoveObject(node);
         Lock.EnterWriteLock();
-        try { _modified=true; }
+        try { _modified=true; _areaGen++; }
         finally { Lock.ExitWriteLock(); }
     }
     public List<Node> GetNodes(List<Coord> coords)

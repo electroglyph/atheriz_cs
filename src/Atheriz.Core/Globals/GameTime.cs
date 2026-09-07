@@ -97,7 +97,7 @@ public class GameTime
             var row = db.GameTime.AsNoTracking().FirstOrDefault(r => r.Id == 0);
             if (row == null)
             {
-                if (TryLoadLegacyFile()) return;
+                if (TryLoadLegacyFile(db)) return;
                 _lock.EnterWriteLock();
                 try { _ticks = 0; _alarms.Clear(); }
                 finally { _lock.ExitWriteLock(); }
@@ -150,7 +150,7 @@ public class GameTime
         }
     }
 
-    private bool TryLoadLegacyFile()
+    private bool TryLoadLegacyFile(AtherizDbContext db)
     {
         try
         {
@@ -207,13 +207,11 @@ public class GameTime
             _lock.EnterWriteLock();
             try { _ticks = ticks; _alarms.Clear(); foreach (var kv in alarms) _alarms[kv.Key] = kv.Value; }
             finally { _lock.ExitWriteLock(); }
-            // Migrate into THIS instance's configured save path (not the
-            // process-default factory path), or the ticks land in the wrong DB.
+            // Migrate into the caller's context (not a fresh file-path
+            // context), so Load(db) callers observe the result in THEIR db.
             try
             {
-                using var migDb = new AtherizDbContext(_settings.SavePath);
-                migDb.Database.EnsureCreated();
-                Save(migDb);
+                Save(db);
             }
             catch { return false; }
             try { File.Delete(path); } catch { }
@@ -366,10 +364,13 @@ public class GameTime
     private AsyncTicker? _runningTicker;
     // Owned fallbacks: created once and reused (never per-start/per-tick),
     // stopped when this instance stops. Singletons/overrides are never owned.
+    // B-THR-4 (see also B-NET-7): lock-guarded init so concurrent first starts
+    // cannot build two pools/tickers and orphan one (whose threads would leak).
+    private readonly object _ownedLock = new();
     private AsyncTicker? _ownedTicker;
     private AsyncThreadPool? _ownedPool;
-    private AsyncThreadPool OwnedPool() => _poolOverride ?? (_ownedPool ??= new AsyncThreadPool());
-    private AsyncTicker OwnedTicker() => _ownedTicker ??= new AsyncTicker(OwnedPool());
+    private AsyncThreadPool OwnedPool() { lock (_ownedLock) return _poolOverride ?? (_ownedPool ??= new AsyncThreadPool()); }
+    private AsyncTicker OwnedTicker() { lock (_ownedLock) return _ownedTicker ??= new AsyncTicker(OwnedPool()); }
 
     public void Start()
     {

@@ -237,3 +237,4 @@ webclient/.webclient-revision.json
 **/bin/
 **/obj/
 *.trx
+**/TestResults/

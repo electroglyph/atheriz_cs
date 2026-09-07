@@ -30,6 +30,17 @@ public sealed class GameObjectDto
     public bool IsDeleted { get; set; }
     public bool IsModified { get; set; } = true;
 
+    // B-OBJ-6: roundtripped fields (additive, default-tolerant for old saves).
+    public bool CanHear { get; set; }
+    public bool IsTickable { get; set; }
+    public double TickSeconds { get; set; } = 1.0;
+    public string Symbol { get; set; } = "X";
+    public string MoveVerb { get; set; } = "walk";
+    public bool Quelled { get; set; }
+    public bool IsBanned { get; set; }
+    public bool NoFollow { get; set; }
+    public double SecondsPlayed { get; set; }
+
     public Privilege PrivilegeLevel { get; set; } = Privilege.Guest;
     public string Gender { get; set; } = "neutral";
 

@@ -132,15 +132,15 @@ public static class AdminToken
     /// </summary>
     public static string? CheckAdmin(string secretPath, string? remoteIp, string? providedToken, string action)
     {
+        if (!IsLoopbackIp(remoteIp))
+            return $"Remote {action} not allowed.";
+
         var tokenFile = Path.Combine(secretPath, TokenFileName);
         if (!File.Exists(tokenFile))
             return "Token file not found.";
         string expected;
         try { expected = File.ReadAllText(tokenFile, Encoding.UTF8).Trim(); }
         catch { return "Token file not found."; }
-
-        if (!IsLoopbackIp(remoteIp))
-            return $"Remote {action} not allowed.";
 
         if (!ValidateToken(providedToken, expected))
             return "Invalid token.";

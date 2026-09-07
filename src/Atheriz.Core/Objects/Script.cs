@@ -33,12 +33,14 @@ public class Script : GameObject
     public void InstallHooks(GameObject child)
     {
         // Port of base_script.py:191-193 with self.lock: if self.child is not None and self.child is not child: raise ValueError
-        lock (SyncRoot)
+        SyncRoot.EnterWriteLock();
+        try
         {
             if (_child != null && !ReferenceEquals(_child, child))
                 throw new InvalidOperationException($"Script {Id} already attached to {_child} cannot be attached to {child}");
             _child = child;
         }
+        finally { SyncRoot.ExitWriteLock(); }
         // Port of base_script.py:194-203 at_funcs = [(d, getattr(self,d)) for d in dir(self) if d.startswith("at_") and (is_before or is_after or is_replace)]
         var methods = GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         var atFuncs = new List<(string Name, MethodInfo Method)>();
@@ -138,6 +140,14 @@ public class Script : GameObject
             6 => typeof(Action<,,,,,>).MakeGenericType(paramTypes),
             7 => typeof(Action<,,,,,,>).MakeGenericType(paramTypes),
             8 => typeof(Action<,,,,,,,>).MakeGenericType(paramTypes),
+            9 => typeof(Action<,,,,,,,,>).MakeGenericType(paramTypes),
+            10 => typeof(Action<,,,,,,,,,>).MakeGenericType(paramTypes),
+            11 => typeof(Action<,,,,,,,,,,>).MakeGenericType(paramTypes),
+            12 => typeof(Action<,,,,,,,,,,,>).MakeGenericType(paramTypes),
+            13 => typeof(Action<,,,,,,,,,,,,>).MakeGenericType(paramTypes),
+            14 => typeof(Action<,,,,,,,,,,,,,>).MakeGenericType(paramTypes),
+            15 => typeof(Action<,,,,,,,,,,,,,,>).MakeGenericType(paramTypes),
+            16 => typeof(Action<,,,,,,,,,,,,,,,>).MakeGenericType(paramTypes),
             _ => null
         };
     }
@@ -156,6 +166,14 @@ public class Script : GameObject
             5 => typeof(Func<,,,,,>).MakeGenericType(allTypes),
             6 => typeof(Func<,,,,,,>).MakeGenericType(allTypes),
             7 => typeof(Func<,,,,,,,>).MakeGenericType(allTypes),
+            8 => typeof(Func<,,,,,,,,>).MakeGenericType(allTypes),
+            9 => typeof(Func<,,,,,,,,,>).MakeGenericType(allTypes),
+            10 => typeof(Func<,,,,,,,,,,>).MakeGenericType(allTypes),
+            11 => typeof(Func<,,,,,,,,,,,>).MakeGenericType(allTypes),
+            12 => typeof(Func<,,,,,,,,,,,,>).MakeGenericType(allTypes),
+            13 => typeof(Func<,,,,,,,,,,,,,>).MakeGenericType(allTypes),
+            14 => typeof(Func<,,,,,,,,,,,,,,>).MakeGenericType(allTypes),
+            15 => typeof(Func<,,,,,,,,,,,,,,,>).MakeGenericType(allTypes),
             _ => null
         };
     }
@@ -237,9 +255,11 @@ public class Script : GameObject
         // Also remove from child's scripts set
         child.RemoveScriptId(this.Id);
 
-        lock (SyncRoot)
+        SyncRoot.EnterWriteLock();
+        try
         {
             if (ReferenceEquals(_child, child)) _child = null; // Port of base_script.py:133 object.__setattr__(self, "child", None)
         }
+        finally { SyncRoot.ExitWriteLock(); }
     }
 }

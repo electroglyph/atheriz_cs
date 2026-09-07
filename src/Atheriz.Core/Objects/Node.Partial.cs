@@ -265,6 +265,7 @@ public partial class Node
     public void MsgContents(string? text, List<GameObject>? exclude = null, GameObject? fromObj = null, Dictionary<string, object?>? mapping = null, bool raiseErrors = false, string? msgType = null)
     {
         if (text == null) text = "";
+        if (mapping != null) mapping = new Dictionary<string, object?>(mapping, StringComparer.Ordinal);
         mapping ??= new Dictionary<string, object?>();
         var you = fromObj ?? this;
         if (!mapping.ContainsKey("you")) mapping["you"] = you;

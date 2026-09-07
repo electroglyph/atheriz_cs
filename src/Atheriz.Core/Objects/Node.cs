@@ -54,6 +54,36 @@ public partial class Node : GameObject
     public HashSet<int> ScriptsSet => ScriptsSnapshot;
 
     public Node() : this(new Coord("limbo", 0, 0, 0)) { }
+    // Load path: initializes defaults WITHOUT consuming an id (leave -1) and
+    // WITHOUT publishing to the registry (no phantom). Caller must SetIdRaw +
+    // explicit AddObject (via swap/second-phase) after filling fields.
+    internal static Node CreateForLoad(Coord coord)
+    {
+        var n = new Node(NoIdMarker.Instance, coord);
+        return n;
+    }
+    private sealed class NoIdMarker
+    {
+        public static readonly NoIdMarker Instance = new();
+        private NoIdMarker() { }
+    }
+    private Node(NoIdMarker _, Coord coord)
+    {
+        Coord = coord;
+        base.Name = "room";
+        Desc = "";
+        Theme = "";
+        Symbol = "";
+        LegendDesc = null;
+        Links = [];
+        base.TickSeconds = 1.0;
+        OpenAttenuation = 10.0;
+        EnclosedAttenuation = 20.0;
+        AmbientSoundLevel = 5.0;
+        IsNode = true;
+        IsModified = true;
+        // leave Id == -1, do not AddObject
+    }
     // Port of nodes.py:122
     public Node(Coord coord, string name = "room", string desc = "", string? theme = null, string? symbol = null, string? legendDesc = null, List<NodeLink>? links = null, double tickSeconds = 1.0)
     {

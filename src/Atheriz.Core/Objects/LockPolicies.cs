@@ -17,6 +17,20 @@ public static class LockPolicies
     public const string Custom = "custom";
 
     /// <summary>
+    /// Target-independent subset (for holders like <c>Door</c> that are not
+    /// <c>GameObject</c>s): only policies that don't bind the target resolve.
+    /// </summary>
+    public static bool TryResolve(string policy, out Func<GameObject, bool> predicate)
+    {
+        if (policy == Builder)
+        {
+            predicate = accessing => accessing.IsBuilder;
+            return true;
+        }
+        predicate = _ => false;
+        return false;
+    }
+    /// <summary>
     /// Resolves a persisted policy name to a predicate bound to <paramref name="target"/>.
     /// Returns false for unknown policies (caller must log loudly and skip).
     /// </summary>

@@ -462,15 +462,20 @@ public static class ObjectRegistry
                 pending.Add((obj, json));
                 cleared.Add(obj);
             }
-            catch
+            catch (Exception ex)
             {
-                foreach (var c in cleared)
+                // Skip-and-report: one poison row must not abort siblings.
+                // The poison object stays dirty (BuildSaveJson restores on
+                // failure); ensure it explicitly, then continue with the rest.
+                try { AtherizLogger.LogWarning($"[Save] skipping poison object row {obj.Id}: {ex.GetType().Name}"); } catch { }
+                try
                 {
-                    c.SyncRoot.EnterWriteLock();
-                    try { c.IsModified = true; }
-                    finally { c.SyncRoot.ExitWriteLock(); }
+                    obj.SyncRoot.EnterWriteLock();
+                    try { obj.IsModified = true; }
+                    finally { obj.SyncRoot.ExitWriteLock(); }
                 }
-                throw;
+                catch { }
+                continue;
             }
         }
 

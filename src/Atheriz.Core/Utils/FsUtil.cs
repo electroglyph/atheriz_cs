@@ -12,13 +12,13 @@ public static class FsUtil
     /// <summary>Best-effort <c>chmod 0o600</c> via <c>File.SetUnixFileMode(UserRead|UserWrite)</c>.</summary>
     public static void TryChmod0600(string path)
     {
-        try { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); } catch { }
+        try { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException) { }
     }
 
     /// <summary>Best-effort <c>chmod 0o700</c> via <c>File.SetUnixFileMode(UserRead|UserWrite|UserExecute)</c>.</summary>
     public static void TryChmod0700(string path)
     {
-        try { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); } catch { }
+        try { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException) { }
     }
 
     // Aliases per task spec (TrySet0600/TrySet0700)

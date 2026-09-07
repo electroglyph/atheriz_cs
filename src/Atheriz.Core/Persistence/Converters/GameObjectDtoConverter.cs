@@ -86,6 +86,15 @@ internal static class GameObjectDtoConverter
             IsTemporary = obj.IsTemporary,
             IsDeleted = obj.IsDeleted,
             IsModified = obj.IsModified,
+            CanHear = obj.CanHear,
+            IsTickable = obj.IsTickable,
+            TickSeconds = obj.TickSeconds,
+            Symbol = obj.Symbol,
+            MoveVerb = obj.MoveVerb,
+            Quelled = obj.Quelled,
+            IsBanned = obj.IsBanned,
+            NoFollow = obj.NoFollow,
+            SecondsPlayed = obj.RawSecondsPlayed,
             PrivilegeLevel = serPriv,
             Gender = obj.Gender,
             Location = loc,
@@ -229,8 +238,7 @@ internal static class GameObjectDtoConverter
         if (isNode)
         {
             Coord coord = ExtractCoord(dto);
-            var node = new Node(coord);
-            try { ObjectRegistry.RemoveObject(node); } catch (Exception ex) { AtherizLogger.LogError($"Node cleanup failed for object {dto.Id}.", ex); }
+            var node = Node.CreateForLoad(coord);
             node.SetIdRaw(dto.Id);
             node.Desc = dto.Desc;
             node.IsModified = dto.IsModified;

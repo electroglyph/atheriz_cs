@@ -30,6 +30,61 @@ public sealed class SetCommand : Command
             _ => je.GetRawText()
         };
     }
+    private static bool MatchesWordAt(string s, int pos, string word)
+    {
+        if (pos + word.Length > s.Length) return false;
+        if (!s.Substring(pos, word.Length).Equals(word, StringComparison.Ordinal)) return false;
+        bool leftOk = pos == 0 || (!char.IsLetterOrDigit(s[pos - 1]) && s[pos - 1] != '_');
+        int end = pos + word.Length;
+        bool rightOk = end >= s.Length || (!char.IsLetterOrDigit(s[end]) && s[end] != '_');
+        return leftOk && rightOk;
+    }
+    private static string ReplaceWordOutsideQuotes(string input, string word, string replacement)
+    {
+        var sb = new System.Text.StringBuilder(input.Length);
+        int i = 0;
+        while (i < input.Length)
+        {
+            char c = input[i];
+            if (c == '"' || c == '\'')
+            {
+                char q = c;
+                sb.Append(c); i++;
+                while (i < input.Length)
+                {
+                    char d = input[i];
+                    sb.Append(d);
+                    if (d == '\\' && i + 1 < input.Length) { sb.Append(input[i + 1]); i += 2; continue; }
+                    i++;
+                    if (d == q) break;
+                }
+            }
+            else if (MatchesWordAt(input, i, word)) { sb.Append(replacement); i += word.Length; }
+            else { sb.Append(c); i++; }
+        }
+        return sb.ToString();
+    }
+    private static string ConvertSingleQuotesOutsideDoubleQuotes(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+        bool inDouble = false;
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c == '"' && (i == 0 || s[i - 1] != '\\')) { inDouble = !inDouble; sb.Append(c); }
+            else if (c == '\'' && !inDouble) sb.Append('"');
+            else sb.Append(c);
+        }
+        return sb.ToString();
+    }
+    private static string NormalizeValueText(string text)
+    {
+        string s = ConvertSingleQuotesOutsideDoubleQuotes(text);
+        s = ReplaceWordOutsideQuotes(s, "True", "true");
+        s = ReplaceWordOutsideQuotes(s, "False", "false");
+        s = ReplaceWordOutsideQuotes(s, "None", "null");
+        return s;
+    }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
@@ -51,7 +106,7 @@ public sealed class SetCommand : Command
                 string inner = trimmed.Substring(1, trimmed.Length - 2).Trim();
                 if (inner.EndsWith(",")) inner = inner.Substring(0, inner.Length - 1).TrimEnd();
                 string norm = "[" + inner + "]";
-                norm = norm.Replace("'", "\"").Replace("True", "true").Replace("False", "false").Replace("None", "null");
+                norm = NormalizeValueText(norm);
                 try
                 {
                     var je2 = JsonSerializer.Deserialize<JsonElement>(norm);
@@ -61,9 +116,14 @@ public sealed class SetCommand : Command
             }
             else if (raw.TrimStart().StartsWith("\"") || raw.TrimStart().StartsWith("'") || trimmed == "True" || trimmed == "False" || trimmed == "None" || (trimmed.Length > 0 && char.IsDigit(trimmed[0])) || trimmed.StartsWith("[") || trimmed.StartsWith("{"))
             {
-                string norm = raw.Replace("'", "\"").Replace("True", "true").Replace("False", "false").Replace("None", "null");
-                try { value = JsonSerializer.Deserialize<JsonElement>(norm); }
-                catch { value = raw; }
+                try { value = JsonSerializer.Deserialize<JsonElement>(raw); }
+                catch { value = null; }
+                if (value is null)
+                {
+                    string norm = NormalizeValueText(raw);
+                    try { value = JsonSerializer.Deserialize<JsonElement>(norm); }
+                    catch { value = raw; }
+                }
                 if (value is JsonElement je)
                 {
                     value = ConvertJsonElement(je);
@@ -76,7 +136,6 @@ public sealed class SetCommand : Command
                 }
             }
             else value = raw;
-            JsonSerializer.Serialize(value);
         }
         catch { value = raw; }
         if (value == null && raw.Trim() != "None" && raw.Trim() != "null") value = raw;
@@ -92,7 +151,13 @@ public sealed class SetCommand : Command
             SetHelper.SetAttr(target, attr, value);
             target.IsModified = true;
         }
-        catch { go.Msg($"'{attr}' is a read-only attribute and cannot be set."); return; }
+        catch (InvalidOperationException) { go.Msg($"'{attr}' is a read-only attribute and cannot be set."); return; }
+        // A property whose type can never convert from text (e.g. LocationRef)
+        // is unsettable from the command line: same read-only bucket Python's
+        // AttributeError lands in. Malformed values for convertible types fall
+        // through to the conversion message below.
+        catch (InvalidCastException) { go.Msg($"'{attr}' is a read-only attribute and cannot be set."); return; }
+        catch (Exception ex) { go.Msg($"Could not set '{attr}': {ex.Message}"); return; }
         string repr;
         if (value == null) repr = "None";
         else if (value is string s) repr = $"'{s}'";

@@ -75,7 +75,7 @@ public sealed class GiveCommand : Command
         if (tgtMatches.Count > 1) { go.Msg($"Multiple matches found for '{targetName}'."); return; }
         var target = tgtMatches[0];
         if (target.Id == go.Id) { go.Msg("You already have that!"); return; }
-        if ((target.IsPc || target.IsNpc) && !target.IsConnected) { go.Msg($"Could not find '{targetName}' here."); return; }
+        if (target.IsPc && !target.IsConnected) { go.Msg($"Could not find '{targetName}' here."); return; }
         if (!target.IsContainer && !target.IsNpc && !target.IsPc) { go.Msg($"You can't give anything to {target.GetDisplayName(go)}."); return; }
         List<GameObject> objsToGive;
         if (objName == "all") objsToGive = ObjectRegistry.Get(go.ContentsSnapshot.ToList());

@@ -9,13 +9,16 @@ public class PoolBoundTests
     [Fact]
     public void GatedAsyncWork_StaysWithinPoolBound()
     {
-        // The pool bound (AsyncThreadPool.cs:255-267) must cover the whole async
-        // operation, not just the synchronous prefix: gated async bodies that are
-        // all outstanding at once must never run N-wide on a small pool.
-        const int submitted = 16;
+        // The pool bound (AsyncThreadPool.cs slot accounting) must cover the
+        // whole async operation, not just the synchronous prefix: with more
+        // gated bodies outstanding than fixed workers (maxThreads-1 = 2), at
+        // least the workers' worth of slots must read busy, and peak overlap
+        // must never exceed MaxThreads.
+        const int submitted = 4;
         using var pool = new AsyncThreadPool(maxThreads: 3, queueLimit: 10000, reliefLimit: 0);
         var release = new ManualResetEventSlim(false);
-        var started = new CountdownEvent(submitted);
+        int startedCount = 0;
+        var twoStarted = new ManualResetEventSlim(false);
         var finished = new CountdownEvent(submitted);
         int concurrent = 0;
         int peak = 0;
@@ -25,7 +28,7 @@ public class PoolBoundTests
             int seen = Volatile.Read(ref peak);
             while (now > seen && Interlocked.CompareExchange(ref peak, now, seen) != seen)
                 seen = Volatile.Read(ref peak);
-            started.Signal();
+            if (Interlocked.Increment(ref startedCount) >= 2) twoStarted.Set();
             release.Wait(TimeSpan.FromSeconds(30));
             Interlocked.Decrement(ref concurrent);
             finished.Signal();
@@ -37,9 +40,12 @@ public class PoolBoundTests
                 Func<Task> runner = () => Task.Run((Action)Body);
                 Assert.True(pool.AddTask(runner, $"gated-{i}"));
             }
-            // Every body entered while the release gate is still closed, so all
-            // submitted bodies overlapped: peak already reflects full overlap.
-            Assert.True(started.Wait(TimeSpan.FromSeconds(30)), "not all async bodies started; pool dropped work");
+            // Two bodies are running (the rest queue behind held slots); both
+            // impls reach this. Slots must read busy while bodies are parked.
+            Assert.True(twoStarted.Wait(TimeSpan.FromSeconds(30)), "not all async bodies started; pool dropped work");
+            Assert.True(pool.Busy >= 2, "async bodies freed their slots; bound covers sync prefix only");
+            release.Set();
+            Assert.True(finished.Wait(TimeSpan.FromSeconds(30)), "gated bodies did not finish after release");
             Assert.True(Volatile.Read(ref peak) <= pool.MaxThreads,
                 $"async work escaped the pool bound: peak {Volatile.Read(ref peak)} on a {pool.MaxThreads}-thread pool");
         }

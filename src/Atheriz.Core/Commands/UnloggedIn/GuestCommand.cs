@@ -15,6 +15,13 @@ public sealed class GuestCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!Settings.AtherizSettings.Global.GuestEnabled) { caller.Msg("Guest accounts are not enabled."); return; }
+        {
+            string host = (caller as BaseConnection)?.ClientHost ?? "?";
+            string rateKey = caller is BaseConnection bc ? (host != "?" ? host : bc.SessionId ?? bc.GetHashCode().ToString()) : "?";
+            double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            if (!ObjectRegistry.TryReserveCreationCooldown("guest", rateKey, now, Settings.AtherizSettings.Global.CreationCooldown))
+            { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return; }
+        }
         var text = args as string ?? "";
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         string name = parts.Length > 0 ? parts[0] : "";

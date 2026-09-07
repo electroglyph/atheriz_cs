@@ -9,6 +9,11 @@ namespace Atheriz.Core;
 // Port of atheriz/server_events.py:8 static hook points
 public static class ServerEvents
 {
+    // B-UTL-1: serializes concurrent AtCharCreate check-then-insert sequences so two
+    // creators cannot both pass the pre-check and insert duplicate PC names. Dedicated
+    // root lock (never taken elsewhere, always outermost); LostPcNameRace stays as the
+    // deterministic tiebreak for non-AtCharCreate writers.
+    private static readonly object _charCreateLock = new();
     // Port of server_events.py:8 def at_server_start()
     public static void AtServerStart() => AtServerStart(null);
     // Port of server_events.py:8 preserve hook signature at_server_start(sender)
@@ -54,6 +59,10 @@ public static class ServerEvents
         err = Commands.UnloggedIn.Validation.ValidateCharacterName(charName);
         if (err != null) { Out(err); return; }
         var existsLc = charName.ToLowerInvariant();
+        // B-UTL-1: pre-check + insert are one critical section per creator; concurrent
+        // AtCharCreate calls serialize so the second sees the first's committed PC.
+        lock (_charCreateLock)
+        {
         if (ObjectRegistry.FilterBy(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == existsLc).Count > 0)
         {
             Out($"Character name '{charName}' already exists.");
@@ -130,6 +139,7 @@ public static class ServerEvents
         account.IsModified = true; // Port of server_events.py object.__setattr__(account, "is_modified", True) after save
         Out("Success! Account and character created.");
         AtCharCreate(ch2, account);
+        }
     }
 
     // Port of server_events.py:19 _lost_pc_name_race — lowest id wins so concurrent

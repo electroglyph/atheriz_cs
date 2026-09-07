@@ -28,7 +28,7 @@ internal sealed class PathNode : IComparable<PathNode>
     // Port of pathfind.py:23 __lt__/__gt__ via f
     public int CompareTo(PathNode? other)
     {
-        if (other is null) return -1;
+        if (other is null) return 1;
         int c = F.CompareTo(other.F);
         if (c != 0) return c;
         c = H.CompareTo(other.H);
@@ -255,14 +255,15 @@ public static class Pathfind
         return path.Select(n => n.Coord).ToList();
     }
 
-    // Port of pathfind.py neighbors via Links + doors
-    public static List<Coord> GetNeighbors(Coord c, NodeHandler? handler = null)
+    // Port of pathfind.py neighbors via Links + doors (door-aware like AStar:
+    // a link sealed by a closed door the caller cannot open is not a usable move).
+    public static List<Coord> GetNeighbors(Coord c, NodeHandler? handler = null, GameObject? caller = null)
     {
         var nh = handler ?? NodeHandler.GetCurrent();
         if (nh == null) return [];
         var node = nh.GetNode(c);
         if (node == null) return [];
-        var neighbors = GetLinkNodes(node, nh);
+        var neighbors = GetLinkNodesCaller(node, nh, caller);
         return neighbors.Select(n => n.Coord).ToList();
     }
 

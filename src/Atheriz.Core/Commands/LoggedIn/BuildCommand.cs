@@ -299,10 +299,9 @@ public sealed class BuildCommand : Command
                     else
                     {
                         newNode = new Node(newCoord, desc: nd);
-                        // Need to add via grid.AddNode (which also handles transitions)
-                        // But we already have lock; use direct to avoid deadlock? grid.AddNode will try to acquire lock again (SupportsRecursion) ok.
-                        grid.Lock.ExitWriteLock();
-                        try { grid.AddNode(newNode); } finally { grid.Lock.EnterWriteLock(); }
+                        // Hold the grid write lock across creation+insert (no exit/re-enter window).
+                        // Grid lock is SupportsRecursion so re-entrant AddNode does not deadlock.
+                        grid.AddNode(newNode);
                         caller.Msg($"Created new node at {newCoord}.");
                     }
                 }

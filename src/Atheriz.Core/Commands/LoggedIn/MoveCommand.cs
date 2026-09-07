@@ -35,7 +35,7 @@ public sealed class MoveCommand : Command
         var nh = NodeHandler.GetCurrent();
         var node = nh?.GetNode(coord);
         if (node == null) { go.Msg($"No node found at {coord}."); return; }
-        go.MoveTo(node, force: true);
-        go.Msg($"Moved to {coord}.");
+        if (go.MoveTo(node, force: true)) go.Msg($"Moved to {coord}.");
+        else go.Msg($"Could not move to {coord}.");
     }
 }

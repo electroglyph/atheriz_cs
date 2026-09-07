@@ -176,10 +176,8 @@ public partial class GameObject
                         var ch = chObjs[0];
                         if (ch is Channel channelObj)
                             channelObj.AddListener(this);
-                        else if (ch.IsChannel)
-                        {
-                            try { ((dynamic)ch).AddListener((dynamic)this); } catch { }
-                        }
+                        // B-OBJ-15: non-Channel IsChannel objects are ignored
+                        // (no dynamic dispatch, no throw).
                     }
                 }
                 catch { }
@@ -393,6 +391,10 @@ public partial class GameObject
     // Port of base_obj.py:467 delete + object deletion lifecycle — caller optional for Account parity
     public virtual (int count, List<object> ops)? Delete(GameObject? caller = null, bool recursive = false)
     {
+        // B-OBJ-13: Account row delete is immediate regardless of static type.
+        // (C# cannot override with a different return type, so the bool Delete
+        // hides this method; route the base dispatch to the same immediate core.)
+        if (this is Account acc) return acc.DeleteImmediate(caller);
         if (caller != null && !AtDelete(caller)) return null;
         // quick check already deleted
         _lock.EnterReadLock();

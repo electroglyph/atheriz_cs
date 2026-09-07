@@ -363,12 +363,21 @@ public sealed class TelnetStreamWriter : ITelnetWriter
     {
         // Bounded write: a peer that never drains must not stall
         // the game thread forever. SendTimeout turns a wedged peer into a
-        // SocketException instead of an indefinite block.
+        // SocketException instead of an indefinite block. Socket.SendTimeout
+        // has no effect on SslStream, so TLS writes get an explicit timeout.
         try { _client.SendTimeout = 2000; } catch { }
         var bytes = Encoding.UTF8.GetBytes(text);
-        lock (_writeLock) _stream.Write(bytes, 0, bytes.Length);
+        lock (_writeLock)
+        {
+            if (_stream is SslStream)
+            {
+                var wt = _stream.WriteAsync(bytes, 0, bytes.Length);
+                if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out");
+            }
+            else _stream.Write(bytes, 0, bytes.Length);
+        }
     }
-    public void Iac(byte cmd, byte opt) { var bytes = new byte[] { 255, cmd, opt }; lock (_writeLock) _stream.Write(bytes, 0, bytes.Length); }
+    public void Iac(byte cmd, byte opt) { var bytes = new byte[] { 255, cmd, opt }; lock (_writeLock) { if (_stream is SslStream) { var wt = _stream.WriteAsync(bytes, 0, bytes.Length); if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out"); } else _stream.Write(bytes, 0, bytes.Length); } }
     public void Close() { try { _stream.Close(); } catch { } try { _client.Close(); } catch { } }
     // Port of telnet.py: get_write_buffer_size returns pending bytes, not SO_SNDBUF. Returning null skips the OS buffer check which was misusing SendBufferSize (2626560) vs TelnetMaxPendingBytes (1M) and causing false closes.
     public int? GetWriteBufferSize() => null;
@@ -660,9 +669,9 @@ public sealed class TelnetProtocol : Protocol
                 {
                     byte[] peek = new byte[2];
                     int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek);
-                    if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert); stream = sslStream; }
+                    if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)); stream = sslStream; }
                 }
-                else if (client.Available == 0) { await Task.Delay(100); if (client.Available >= 2) { byte[] peek = new byte[2]; int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek); if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert); stream = sslStream; } } }
+                else if (client.Available == 0) { await Task.Delay(100); if (client.Available >= 2) { byte[] peek = new byte[2]; int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek); if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)); stream = sslStream; } } }
             }
             catch (Exception ex) { Console.Error.WriteLine($"[Telnet] TLS autodetect failed for {host}: {ex}"); stream = netStream; }
         }
@@ -687,7 +696,13 @@ public sealed class TelnetProtocol : Protocol
             }
             line = line.Trim();
             if (string.IsNullOrEmpty(line)) continue;
-            Console.Error.WriteLine($"[Telnet] recv '{line}' from {connId} host={host}");
+            var logLine = line;
+            if (line.StartsWith("connect ", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                logLine = parts.Length >= 2 ? $"connect {parts[1]} ***" : "connect ***";
+            }
+            Console.Error.WriteLine($"[Telnet] recv '{logLine}' from {connId} host={host}");
             manager.Dispatch(connection, "text", new List<object?> { line }, new Dictionary<string, object?>()); } }
         catch (OperationCanceledException) { } catch (Exception e) { Console.Error.WriteLine($"[Telnet] Error in shell for {connId}: {e}"); }
         finally { manager.Disconnect(connection); try { writer.Close(); } catch { } try { client.Close(); } catch { } }
