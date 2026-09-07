@@ -62,7 +62,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Connect_AccountNotFoundMsgInvalidPassword()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var conn = new FakeConnection();
         conn.ClientHost = "1.2.3.4";
         var cmd = new ConnectCommand();
@@ -78,7 +78,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Connect_WrongPasswordIncrementsAttempts()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "correct");
         ObjectRegistry.AddObject(acc);
         var conn = new FakeConnection();
@@ -97,7 +97,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Connect_TooManyFailuresBansIp()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "correct");
         ObjectRegistry.AddObject(acc);
         var conn = new FakeConnection();
@@ -120,7 +120,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Connect_BannedAccountClosed()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "correct");
         acc.IsBanned = true;
         acc.BanReason = "spam";
@@ -141,7 +141,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Connect_TimingOracleMitigated_DoesHash()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var conn = new FakeConnection();
         var cmd = new ConnectCommand();
         var parsed = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs();
@@ -158,7 +158,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Connect_TimingOracleUsesDummyHash600k()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var conn = new FakeConnection();
         var parsed = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs();
         parsed["account_name"] = "no_such_user";
@@ -177,7 +177,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void CharSelection_HasCharFalseWithoutCreation()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var settings = new Atheriz.Core.Settings.AtherizSettings();
         // Simulate char creation disabled + no chars => would show "no characters"
         var acc = Account.Create("alice", "secret");
@@ -195,7 +195,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void CharSelection_HintWithCharsEnabled()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "secret");
         var ch = GameObject.Create("Hob", isPc:true);
         ObjectRegistry.AddObject(ch);
@@ -288,7 +288,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Create_DuplicateAccount()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "secret");
         ObjectRegistry.AddObject(acc);
         var conn = new FakeConnection();
@@ -303,7 +303,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Create_CreatesAndAutoLogsIn()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var conn = new FakeConnection();
         var cmd = new CreateAccountCommand();
         cmd.Run(conn, "bob hunter22");
@@ -340,7 +340,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void New_CreatesPersistentCharacter_Verbatim()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "secret");
         ObjectRegistry.AddObject(acc);
         var conn = new FakeConnection();

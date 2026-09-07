@@ -33,7 +33,7 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
             {
                 // "Area(X,Y,Z)"
                 if (inside.Length != 3) return false;
-                area = head.Trim('(').Trim();
+                area = head.Trim();
                 nums = inside;
             }
             if (string.IsNullOrEmpty(area)) return false;

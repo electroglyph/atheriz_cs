@@ -21,9 +21,13 @@ public static class MenuPrompt
         {
             using var cts = new CancellationTokenSource(timeout);
             var promptTask = session.Prompt(display);
+            // Capture the live future so the timeout path can cancel it (no orphaned
+            // InputFuture). Prompt's synchronous prefix runs to completion on call, so the
+            // field is already set. Mirrors asyncio.wait_for cancelling the prompt coroutine.
+            var pending = session.InputFuture;
             var delayTask = Task.Delay(timeout, cts.Token);
             var done = await Task.WhenAny(promptTask, delayTask).ConfigureAwait(false);
-            if (done != promptTask) return null;
+            if (done != promptTask) { try { session.CancelPrompt(pending); } catch { } return null; }
             try { cts.Cancel(); } catch { }
             return await promptTask.ConfigureAwait(false);
         }

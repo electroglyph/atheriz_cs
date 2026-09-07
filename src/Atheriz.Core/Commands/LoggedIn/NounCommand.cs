@@ -13,15 +13,15 @@ public sealed class NounCommand : Command
     protected override void SetupParser(GameArgumentParser p)
     {
         p.AddArgument("noun", help: "noun to add or change");
-        p.AddArgument("desc", nargs: "*", help: "desc to set for the noun");
+        p.AddArgument("desc", nargs: "REMAINDER", help: "desc to set for the noun");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null || string.IsNullOrWhiteSpace(pa.GetString("noun")) || pa.GetList("desc").Count == 0) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject() as Node;
-        if (loc == null) { go.Msg("No."); return; }
+        if (loc == null) { CommandHelpers.MsgNo(go); return; }
         string noun = pa.GetString("noun")!;
         string desc = string.Join(" ", pa.GetList("desc"));
         string mode = loc.GetNoun(noun) != null ? "Updated" : "Added";

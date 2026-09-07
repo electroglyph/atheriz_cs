@@ -90,26 +90,26 @@ public class PortedSqliteTests
         nh2.Load(new AtherizDbContext(env.TempPath)); // fixed
         Assert.True(nh2.GetAreas().ToDictionary(a=>a.Name).ContainsKey("TestArea"));
     }
+    private sealed class RecordingNodeHandler : NodeHandler
+    {
+        public readonly List<object> Dumped = new();
+        public RecordingNodeHandler() : base(autoLoad: false) { }
+        protected override string SerializeSnapshot(object dto) { Dumped.Add(dto); return base.SerializeSnapshot(dto); }
+    }
+
     [Fact] public void SaveSnapshots_AreDeepCopies()
     {
         using var env = GlobalTestEnv.Enter();
-        var nh = GlobalServices.GetNodeHandler();
+        var nh = new RecordingNodeHandler();
         var t = new Transition(new Coord("OtherArea",0,0,0), new Coord("TestArea",1,1,0), "path");
         nh.AddTransition(t);
         var floor = new Coord("TestArea",5,5,0);
         var door = new Door(floor, new Coord("TestArea",6,5,0), "exit", "entrance");
         nh.AddDoor(door);
-        var dumped = new List<object>();
-        var origHook = NodeHandler.TestSerializeHook;
-        NodeHandler.TestSerializeHook = o => { dumped.Add(o); return System.Text.Json.JsonSerializer.Serialize(o, Persistence.JsonOptions.Default); };
-        try
-        {
-            using(var db=new AtherizDbContext(env.TempPath)){ db.Database.EnsureCreated(); nh.Save(db); }
-        }
-        finally { NodeHandler.TestSerializeHook = origHook; }
+        using(var db=new AtherizDbContext(env.TempPath)){ db.Database.EnsureCreated(); nh.Save(db); }
         // Live objects must not be serialized directly (they'd be torn by concurrent mutation while dill.dumps walks them outside the locks).
-        Assert.DoesNotContain(t, dumped);
-        Assert.DoesNotContain(door, dumped);
+        Assert.DoesNotContain(t, nh.Dumped);
+        Assert.DoesNotContain(door, nh.Dumped);
     }
     [Fact] public void LoadedObjects_Threadsafe()
     {

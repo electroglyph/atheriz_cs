@@ -18,6 +18,13 @@ public class Script : GameObject
 
     public GameObject? Child => _child;
 
+    public override IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
+    {
+        foreach (var m in base.GetExamMembers()) yield return m;
+        object? Safe(Func<object?> f) { try { return f(); } catch { return "<error>"; } }
+        yield return ("Child", Safe(() => (object?)Child), true);
+    }
+
     /// <summary>
     /// Port of <c>atheriz/objects/base_script.py:170 at_install</c> — called when script is installed on object.
     /// </summary>
@@ -57,23 +64,28 @@ public class Script : GameObject
         // Port of base_script.py:204-208 with child.lock: for name, func in at_funcs: s = child.hooks.get(name,set()); s.add(func); child.hooks[name]=s
         foreach (var (name, method) in atFuncs)
         {
-            // Create delegate bound to this script instance — need to handle any signature via Delegate.CreateDelegate with method
-            Delegate? del = null;
+            // Bind a closed delegate to this script instance. The delegate's
+            // Method is the original method, so Hookable sees the
+            // [Before]/[After]/[Replace] marker. A signature that cannot be
+            // expressed as Action/Func (>16 params, byref-like types, open
+            // generics) cannot be honored: log loudly and skip — never install
+            // a marker-less wrapper that Hookable would silently ignore.
+            Delegate? del;
             try
             {
-                // Try to create closed delegate via method's signature — fallback to MethodInfo invocation wrapper
-                // We create a delegate that matches the method's signature dynamically via Delegate.CreateDelegate
-                // For generic cases, create Func/Action with object[]? Instead we wrap via hook that invokes via reflection
-                // Simpler: create delegate of type Delegate by binding `this` and method via CreateDelegate with specific delegate type inferred from method
-                // We will use a helper that creates a delegate calling method via reflection when signature unknown.
-                // For Hookable to work, it checks attribute on MethodInfo, not delegate type, so we can store a wrapper delegate that has the attribute?
-                // Instead store the MethodInfo directly as delegate stub: create a DynamicMethod-like wrapper with attribute copied
-                // Easiest: store a delegate that invokes method via reflection and copy attributes via helper type
                 del = CreateHookDelegate(method);
             }
-            catch { continue; }
-            if (del != null)
-                child.InstallHook(name, del);
+            catch (Exception ex)
+            {
+                AtherizLogger.LogError($"Script {Id}: cannot bind hook {GetType().Name}.{method.Name}: {ex.Message}; hook skipped.");
+                continue;
+            }
+            if (del == null)
+            {
+                AtherizLogger.LogError($"Script {Id}: cannot bind hook {GetType().Name}.{method.Name} (signature not expressible as Action/Func); hook skipped.");
+                continue;
+            }
+            child.InstallHook(name, del);
         }
 
         // Port of base_script.py:108-118 create handling of scripts set? For Script.attach, base_script install_hooks is called via GameObject.add_script which adds to scripts set.
@@ -84,46 +96,40 @@ public class Script : GameObject
         AtInstall(); // Port of base_script.py:209 self.at_install()
     }
 
-    private Delegate CreateHookDelegate(MethodInfo method)
+    private Delegate? CreateHookDelegate(MethodInfo method)
     {
-        // Create a delegate that forwards to method on this instance, preserving attributes for Hookable to detect before/after/replace
-        // We do this by generating a delegate type matching the method signature, or fallback to a generic wrapper with attribute forwarding.
-        // For Hookable, it inspects delegate.Method.GetCustomAttributes(typeof(BeforeAttribute)...), so the MethodInfo must have the attribute.
-        // Our delegate's Method will be the target method itself if we bind correctly.
-        // Try to create delegate of type matching method signature (open/closed)
-        // We attempt to infer delegate type: if method returns void, use Action<...>, else Func<...>
-        // For simplicity, use reflection to create a delegate via MethodInfo.CreateDelegate with appropriate type.
-        var parameters = method.GetParameters();
-        Type? delegateType;
-        if (parameters.Length == 0)
-        {
-            if (method.ReturnType == typeof(void))
-                delegateType = typeof(Action);
-            else
-                delegateType = typeof(Func<>).MakeGenericType(method.ReturnType);
-        }
-        else if (method.ReturnType == typeof(void))
-        {
-            // Action with params
-            var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
-            delegateType = GetActionType(paramTypes);
-            if (delegateType == null) return CreateReflectionWrapper(method);
-        }
-        else
-        {
-            var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
-            var all = paramTypes.Concat(new[] { method.ReturnType }).ToArray();
-            delegateType = GetFuncType(all);
-            if (delegateType == null) return CreateReflectionWrapper(method);
-        }
-
+        // Create a closed delegate bound to this instance. delegate.Method is
+        // the original method, preserving the marker attribute for Hookable.
+        // Returns null when the signature cannot be expressed as Action/Func;
+        // the caller logs loudly (a marker-less wrapper would be silently ignored).
         try
         {
+            var parameters = method.GetParameters();
+            Type? delegateType;
+            if (parameters.Length == 0)
+            {
+                delegateType = method.ReturnType == typeof(void)
+                    ? typeof(Action)
+                    : typeof(Func<>).MakeGenericType(method.ReturnType);
+            }
+            else if (method.ReturnType == typeof(void))
+            {
+                var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
+                delegateType = GetActionType(paramTypes);
+                if (delegateType == null) return null;
+            }
+            else
+            {
+                var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
+                var all = paramTypes.Concat(new[] { method.ReturnType }).ToArray();
+                delegateType = GetFuncType(all);
+                if (delegateType == null) return null;
+            }
             return method.CreateDelegate(delegateType!, this);
         }
         catch
         {
-            return CreateReflectionWrapper(method);
+            return null;
         }
     }
 
@@ -176,34 +182,6 @@ public class Script : GameObject
             15 => typeof(Func<,,,,,,,,,,,,,,,>).MakeGenericType(allTypes),
             _ => null
         };
-    }
-
-    private Delegate CreateReflectionWrapper(MethodInfo method)
-    {
-        // Fallback: create a delegate that invokes method via reflection; we attach attribute to wrapper method via dynamic type would be complex.
-        // Simpler: return a delegate to a lambda that calls method, but Hookable will inspect delegate.Method which would be lambda, not original.
-        // So we copy attributes by creating a wrapper method in a dynamic holder that has same attributes?
-        // For now, create a small holder type with method that forwards.
-        // We store the MethodInfo directly in a HookDelegate wrapper that Hookable can unwrap via __self__? In Python, hooks are stored as bound methods with __self__.
-        // In C# Hookable checks delegate.Method.GetCustomAttributes; we need the attribute on that method.
-        // We'll manually ensure Hookable can see attribute by checking both delegate.Method and delegate.Target's method? Hookable already checks delegate.Method.
-        // To preserve attribute, we create a delegate directly to the original method (already has attribute) — our CreateDelegate above does that.
-        // If that failed due to signature mismatch, we can't preserve attribute easily; fallback to storing MethodInfo in a custom delegate holder that has attribute via wrapper.
-        // For fallback, create an Action<object?[]> that invokes via reflection but we artificially mark it with attribute by using a helper method with attribute?
-        // Simplify: just store a delegate to the method via Delegate.CreateDelegate with Func<object?[], object?> and use MethodInfo's attribute via Target inspection fallback in Hookable?
-        // Our Hookable checks delegate.Method.GetCustomAttributes — if we wrap, it will miss. So we modify Hookable to also check Target?
-        // For now, create a simple Action that forwards and then manually copy attribute via reflection emit is too complex; instead we rely on Hookable checking both delegate.Target and Method for attributes (we will patch Hookable to also check target instance type).
-        // Quick path: return a delegate that is the MethodInfo itself wrapped as Func that calls method.invoke — but Hookable will not detect attribute.
-        // Instead we can install the attribute on the wrapper by using a pre-defined wrapper methods with attributes matching the original.
-        bool isBefore = method.GetCustomAttribute<BeforeAttribute>() != null;
-        bool isAfter = method.GetCustomAttribute<AfterAttribute>() != null;
-        bool isReplace = method.GetCustomAttribute<ReplaceAttribute>() != null;
-
-        // Use a closure delegate with attribute copied via a helper holder
-        if (isBefore) return new Action<object?[]>(args => method.Invoke(this, args));
-        if (isAfter) return new Action<object?[]>(args => method.Invoke(this, args));
-        if (isReplace) return new Action<object?[]>(args => method.Invoke(this, args));
-        return new Action<object?[]>(args => method.Invoke(this, args));
     }
 
     /// <summary>

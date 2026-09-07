@@ -15,14 +15,6 @@ public class CmdSet
         finally { _lock.ExitReadLock(); }
     }
 
-    // For distinct usage (e.g., Help listing) expose separate helper if needed
-    public IReadOnlyList<Command> GetAllDistinct()
-    {
-        _lock.EnterReadLock();
-        try { return _commands.Values.Distinct().ToList(); }
-        finally { _lock.ExitReadLock(); }
-    }
-
     public void Add(Command command, string? tag = null) => Adds([command], tag);
 
     public virtual void Adds(IEnumerable<Command> commands, string? tag = null)

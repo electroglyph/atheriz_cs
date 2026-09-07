@@ -13,7 +13,7 @@ public sealed class GroupCommand : Command
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("args", nargs: "REMAINDER", help: "Subcommand (add, kick, leave, list) or a message to group."); }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         var list = pa?.GetList("args") ?? [];
         if (list.Count == 0) { go.Msg(PrintHelp()); return; }
@@ -41,28 +41,8 @@ public sealed class GroupCommand : Command
             int createdBy = channel.CreatedBy;
             if (createdBy != go.Id) { go.Msg("You are not the leader of this group."); return; }
             var targetName = list[1];
-            var matches = ContentUtils.Search(go, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-            GameObject? locForKick = null;
-            if (matches.Count == 0) { var locTmp2 = go.ResolveLocationObject() as GameObject; if (locTmp2 != null && locTmp2.Access(go, "view")) locForKick = locTmp2; }
-            else locForKick = go.ResolveLocationObject() as GameObject;
-            if (matches.Count == 0 && locForKick != null)
-                matches = locForKick is Node n ? n.Search(targetName, true, go) : ContentUtils.Search(locForKick, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-            if (matches.Count == 1)
-            {
-                try {
-                    var goAllK = ContentUtils.Search(go, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-                    if (goAllK.Count > 1) matches = goAllK;
-                    else if (locForKick != null)
-                    {
-                        var locAllK = locForKick is Node nAllK ? nAllK.Search("all " + targetName, true, go) : ContentUtils.Search(locForKick, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-                        if (locAllK.Count > 1) matches = locAllK;
-                    }
-                } catch (Exception) { }
-            }
-            if (matches.Count == 0) { go.Msg($"Could not find '{targetName}'."); return; }
-            if (matches.Count > 1) { go.Msg($"Multiple matches found for '{targetName}'."); return; }
-            var tgt = matches[0];
-            if (tgt == go) { go.Msg("You can't kick yourself!"); return; }
+            var tgt = ResolveMember(go, targetName, "You can't kick yourself!");
+            if (tgt == null) return;
             channel.Msg($"{go.GetDisplayName(null)} kicked {tgt.GetDisplayName(null)} from the group.");
             channel.RemoveListener(tgt);
             try { tgt.RemoveGroupChannel(); } catch { ClearGroupChannel(tgt); }
@@ -94,79 +74,15 @@ public sealed class GroupCommand : Command
         {
             if (list.Count < 2) { go.Msg("Usage: group add <name>"); return; }
             var targetName = list[1];
-            var matches = ContentUtils.Search(go, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-            GameObject? locForAdd = null;
-            if (matches.Count == 0) { var locTmp = go.ResolveLocationObject() as GameObject; if (locTmp != null && locTmp.Access(go, "view")) locForAdd = locTmp; }
-            else locForAdd = go.ResolveLocationObject() as GameObject;
-            if (matches.Count == 0 && locForAdd != null)
-                matches = locForAdd is Node n2 ? n2.Search(targetName, true, go) : ContentUtils.Search(locForAdd, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-            // Detect hidden multiples when Search returns first match only (port of Python mocked multiple handling) — check exhaustive "all" query
-            if (matches.Count == 1)
-            {
-                List<GameObject> all = new();
-                try {
-                    // Try go container first
-                    var goAll = ContentUtils.Search(go, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-                    if (goAll.Count > 1) all = goAll;
-                    else if (locForAdd != null)
-                    {
-                        var locAll = locForAdd is Node nAll ? nAll.Search("all " + targetName, true, go) : ContentUtils.Search(locForAdd, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-                        if (locAll.Count > 1) all = locAll;
-                    }
-                } catch (Exception) { }
-                if (all.Count > 1) matches = all;
-            }
-            if (matches.Count == 0) { go.Msg($"Could not find '{targetName}'."); return; }
-            if (matches.Count > 1) { go.Msg($"Multiple matches found for '{targetName}'."); return; }
-            var tgt = matches[0];
-            if (tgt == go) { go.Msg("You can't add yourself!"); return; }
+            var tgt = ResolveMember(go, targetName, "You can't add yourself!");
+            if (tgt == null) return;
             if (!go.FollowersSnapshot.Contains(tgt.Id)) { go.Msg($"{tgt.GetDisplayName(go)} is not following you."); return; }
             var gc = GetGroupChannelId(go);
             Channel? channel = null;
             if (gc == null)
             {
-                try
-                {
-                    channel = Channel.Create($"{go.Name}'s group", go);
-                }
-                catch (InvalidOperationException)
-                {
-                    // ValueError retry 5 times with random suffix
-                    channel = null;
-                    for (int r = 0; r < 5; r++)
-                    {
-                        try
-                        {
-                            channel = Channel.Create($"{go.Name}'s group {Random.Shared.Next(0, 100)}", go);
-                            break;
-                        }
-                        catch (InvalidOperationException) { continue; }
-                        catch (ArgumentException) { continue; }
-                    }
-                    if (channel == null)
-                    {
-                        go.Msg("Could not create a group channel; try again.");
-                        return;
-                    }
-                }
-                catch (ArgumentException)
-                {
-                    channel = null;
-                    for (int r = 0; r < 5; r++)
-                    {
-                        try
-                        {
-                            channel = Channel.Create($"{go.Name}'s group {Random.Shared.Next(0, 100)}", go);
-                            break;
-                        }
-                        catch { continue; }
-                    }
-                    if (channel == null)
-                    {
-                        go.Msg("Could not create a group channel; try again.");
-                        return;
-                    }
-                }
+                channel = CreateGroupChannel(go);
+                if (channel == null) return;
                 // leaked handling: if caller already has group_channel after creation (race)
                 var afterGc = GetGroupChannelId(go);
                 if (afterGc != null)
@@ -209,6 +125,55 @@ public sealed class GroupCommand : Command
         if (ch2 == null) { go.Msg("Error: Group channel not found."); return; }
         ch2.Msg(message, go);
     }
+    // Shared member resolution for add/kick: inventory, then viewable location,
+    // then hidden-multiple detection. Msgs and returns null on any failure.
+    private static GameObject? ResolveMember(GameObject go, string targetName, string selfMsg)
+    {
+        var matches = ContentUtils.Search(go, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
+        GameObject? loc = null;
+        if (matches.Count == 0) { var locTmp = go.ResolveLocationObject() as GameObject; if (locTmp != null && locTmp.Access(go, "view")) loc = locTmp; }
+        else loc = go.ResolveLocationObject() as GameObject;
+        if (matches.Count == 0 && loc != null)
+            matches = loc is Node n ? n.Search(targetName, true, go) : ContentUtils.Search(loc, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
+        // Detect hidden multiples when Search returns first match only (port of Python mocked multiple handling) — check exhaustive "all" query
+        if (matches.Count == 1)
+        {
+            try {
+                var goAll = ContentUtils.Search(go, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
+                if (goAll.Count > 1) matches = goAll;
+                else if (loc != null)
+                {
+                    var locAll = loc is Node nAll ? nAll.Search("all " + targetName, true, go) : ContentUtils.Search(loc, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
+                    if (locAll.Count > 1) matches = locAll;
+                }
+            } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GroupCommand.ResolveMember: " + logEx.Message, "GroupCommand"); }
+        }
+        if (matches.Count == 0) { go.Msg($"Could not find '{targetName}'."); return null; }
+        if (matches.Count > 1) { CommandHelpers.MsgMultipleMatchesFound(go, targetName); return null; }
+        var tgt = matches[0];
+        if (tgt == go) { go.Msg(selfMsg); return null; }
+        return tgt;
+    }
+
+    // Channel.Create throws on name collision (ValueError in Python: retry 5
+    // times with random suffix). The two original catch sites (duplicate-name
+    // vs invalid-name) ran near-identical retry loops; unified here — the retry
+    // logs-and-continues on any failure and the caller gets the same message.
+    private static Channel? CreateGroupChannel(GameObject go)
+    {
+        try { return Channel.Create($"{go.Name}'s group", go); }
+        catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException)
+        {
+            for (int r = 0; r < 5; r++)
+            {
+                try { return Channel.Create($"{go.Name}'s group {Random.Shared.Next(0, 100)}", go); }
+                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GroupCommand.CreateGroupChannel: " + logEx.Message, "GroupCommand"); }
+            }
+            go.Msg("Could not create a group channel; try again.");
+            return null;
+        }
+    }
+
     private static int? GetGroupChannelId(GameObject go) => go.GroupChannel;
     private static void SetGroupChannel(GameObject go, int id) { go.GroupChannel = id; }
     private static void ClearGroupChannel(GameObject go) { go.GroupChannel = null; }
@@ -220,14 +185,5 @@ internal static class GroupExtensions
     public static void RemoveGroupChannel(this GameObject go)
     {
         go.GroupChannel = null;
-    }
-    public static void AddChannel(this GameObject go, int chId)
-    {
-        // GameObject channels list (typed internal helper, F001)
-        go.AddChannelId(chId);
-    }
-    public static void RemoveChannel(this GameObject go, int chId)
-    {
-        go.RemoveChannelId(chId);
     }
 }

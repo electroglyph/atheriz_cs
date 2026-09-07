@@ -14,7 +14,7 @@ public sealed class ReloadCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var channel = GlobalServices.GetServerChannel();
         if (channel != null)
         {

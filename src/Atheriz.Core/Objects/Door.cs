@@ -82,7 +82,7 @@ public class Door
             nh.Lock3.EnterWriteLock();
             try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); }
         }
-        catch (Exception) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Door.MarkNodeDoorsModified: " + logEx.Message, "Door"); }
     }
 
     private readonly Dictionary<string, List<Func<GameObject, bool>>> _locks = new();
@@ -90,13 +90,6 @@ public class Door
     // Declarative policy names parallel to _locks (mirrors GameObject._lockPolicies):
     // persisted in DoorDto and rebuilt via LockPolicies.TryResolve. Bare-lambda
     // "custom" entries are kept in memory but dropped on save with a loud log.
-
-    // Test instrumentation: call counts for faithful port of test_door_revert (mock_try_close / mock_map_close)
-    public int TryOpenCallCount { get; private set; }
-    public int TryCloseCallCount { get; private set; }
-    public int MapOpenCallCount { get; private set; }
-    public int MapCloseCallCount { get; private set; }
-    public void ResetCallCounts() { TryOpenCallCount = 0; TryCloseCallCount = 0; MapOpenCallCount = 0; MapCloseCallCount = 0; }
 
     // Port of atheriz/objects/base_door.py:17
     public Door() { }
@@ -206,16 +199,20 @@ public class Door
     // Port of base_door.py:106 try_open
     public virtual bool TryOpen(GameObject caller)
     {
-        TryOpenCallCount++;
         var (fromNode, toNode) = GetNodes();
         var loc = caller.ResolveLocationObject();
+        // Lock order handler -> object: access predicates are game code that may
+        // take other locks (incl. the handler door lock RemapDoors holds), so they
+        // run BEFORE the door write lock. A lock added in the gap admits one stale
+        // open; Python has no such atomicity either.
+        bool canAccess = Access(caller, "open");
         string status;
         _lock.EnterWriteLock();
         try
         {
             if (!Closed) status = "already_open";
             else if (Locked) status = "locked";
-            else if (!Access(caller, "open")) status = "no_access";
+            else if (!canAccess) status = "no_access";
             else { _closed = false; status = "opened"; }
         }
         finally { _lock.ExitWriteLock(); }
@@ -262,15 +259,16 @@ public class Door
     // Port of base_door.py:165 try_close
     public virtual bool TryClose(GameObject caller)
     {
-        TryCloseCallCount++;
         var (fromNode, toNode) = GetNodes();
         var loc = caller.ResolveLocationObject();
+        // Access predicates run before the door write lock (see TryOpen).
+        bool canAccess = Access(caller, "close");
         string status;
         _lock.EnterWriteLock();
         try
         {
             if (Closed) status = "already_closed";
-            else if (!Access(caller, "close")) status = "no_access";
+            else if (!canAccess) status = "no_access";
             else { _closed = true; status = "closed"; }
         }
         finally { _lock.ExitWriteLock(); }
@@ -310,11 +308,13 @@ public class Door
     public virtual bool TryLock(GameObject caller)
     {
         var loc = caller.ResolveLocationObject();
+        // Access predicates run before the door write lock (see TryOpen).
+        bool canAccess = Access(caller, "lock");
         string status;
         _lock.EnterWriteLock();
         try
         {
-            if (!Access(caller, "lock")) status = "no_access";
+            if (!canAccess) status = "no_access";
             else if (!Closed) status = "not_closed";
             else if (Locked) status = "already_locked";
             else { _locked = true; status = "locked"; }
@@ -349,11 +349,13 @@ public class Door
     {
         var (fromNode, toNode) = GetNodes();
         var loc = caller.ResolveLocationObject();
+        // Access predicates run before the door write lock (see TryOpen).
+        bool canAccess = Access(caller, "unlock");
         string status;
         _lock.EnterWriteLock();
         try
         {
-            if (!Access(caller, "unlock")) status = "no_access";
+            if (!canAccess) status = "no_access";
             else if (_locked) { _locked = false; status = "unlocked"; }
             else status = "already_unlocked";
         }
@@ -378,14 +380,13 @@ public class Door
     public bool Unlock(GameObject? caller = null) => caller != null ? TryUnlock(caller) : false;
 
     // Port of base_door.py:313 map_close
-    public void MapClose()
+    public virtual void MapClose()
     {
-        MapCloseCallCount++;
         // Port of base_door.py map_close gate: settings.MAP_ENABLED only.
         // (The old Default fallback + second Global check made the fallback dead.)
         var settings = AtherizSettings.Global;
         if (!settings.MapEnabled || SymbolCoord == null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
-        var mh = MapHandlerHolder.Get();
+        var mh = MapHandlerSingleton.Get();
         if (mh == null) return;
         var seen = new HashSet<(string, int)>();
         foreach (var coord in new[] { FromCoord, ToCoord })
@@ -407,13 +408,12 @@ public class Door
         }
     }
     // Port of base_door.py:331 map_open
-    public void MapOpen()
+    public virtual void MapOpen()
     {
-        MapOpenCallCount++;
         // Port of base_door.py map_open gate: settings.MAP_ENABLED only (see MapClose).
         var settings = AtherizSettings.Global;
         if (!settings.MapEnabled || SymbolCoord == null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
-        var mh = MapHandlerHolder.Get();
+        var mh = MapHandlerSingleton.Get();
         if (mh == null) return;
         var seen = new HashSet<(string, int)>();
         foreach (var coord in new[] { FromCoord, ToCoord })
@@ -526,12 +526,4 @@ public sealed class DoorDto
     // Persisted lock policies as "name: policy|policy" (mirrors GameObject
     // LockDefDto; bare-lambda "custom" entries are dropped with a loud log).
     public List<string> Locks { get; set; } = [];
-}
-
-public static class MapHandlerHolder
-{
-    private static MapHandler? _instance;
-    private static readonly object _lock = new();
-    public static MapHandler? Get() { lock (_lock) return _instance; }
-    public static void Set(MapHandler h) { lock (_lock) _instance = h; }
 }

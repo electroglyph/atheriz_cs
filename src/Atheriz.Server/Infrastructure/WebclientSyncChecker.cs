@@ -7,7 +7,9 @@ namespace Atheriz.Server.Infrastructure;
 public static class WebclientSyncChecker
 {
     // Mirrors atheriz/atheriz.py:214 _file_hash + 205 _collect_files
-    private static Dictionary<string, string> CollectFiles(string root)
+    // excludeDirNames is opt-in (default none = verbatim Python rglob parity):
+    // skips any file under a directory with a matching name (e.g. ".git").
+    private static Dictionary<string, string> CollectFiles(string root, IReadOnlyCollection<string>? excludeDirNames = null)
     {
         var dict = new Dictionary<string, string>(StringComparer.Ordinal);
         if (!Directory.Exists(root)) return dict;
@@ -16,6 +18,11 @@ public static class WebclientSyncChecker
             var rel = Path.GetRelativePath(root, f);
             // Normalize to forward slashes like Python Path.relative_to
             rel = rel.Replace(Path.DirectorySeparatorChar, '/');
+            if (excludeDirNames != null && excludeDirNames.Count > 0)
+            {
+                var dir = Path.GetDirectoryName(rel)?.Replace(Path.DirectorySeparatorChar, '/');
+                if (!string.IsNullOrEmpty(dir) && dir.Split('/').Any(seg => excludeDirNames.Contains(seg))) continue;
+            }
             dict[rel] = f;
         }
         return dict;
@@ -30,20 +37,22 @@ public static class WebclientSyncChecker
     }
 
     // Mirrors atheriz/atheriz.py:224 check_webclient_sync(game, engine_web=None)
+    // settings is optional (defaults to Global = old behavior); excludeDirNames
+    // is opt-in (default none = verbatim parity, see CollectFiles).
     public static Dictionary<string, Dictionary<string, List<string>>>? CheckSync(string gameCwd, string? engineWebOverride = null)
     {
         // Derive contentRoot from game parent if not supplied – for backward compat
         string contentRoot = Path.GetDirectoryName(Path.GetFullPath(gameCwd)) ?? Path.GetFullPath(gameCwd);
-        return CheckSync(gameCwd, contentRoot, engineWebOverride);
+        return CheckSync(gameCwd, contentRoot, engineWebOverride, null, null);
     }
-    public static Dictionary<string, Dictionary<string, List<string>>>? CheckSync(string gameCwd, string contentRoot, string? engineWebOverride = null)
+    public static Dictionary<string, Dictionary<string, List<string>>>? CheckSync(string gameCwd, string contentRoot, string? engineWebOverride = null, Atheriz.Core.Settings.AtherizSettings? settings = null, IReadOnlyCollection<string>? excludeDirNames = null)
     {
         // Respect WEBCLIENT_SYNC_CHECK — mirrors `if not getattr(settings, "WEBCLIENT_SYNC_CHECK", True): return None`
         // We read via AtherizSettings.Default default true, but caller should gate; here we just check env var fallback.
         // For faithful, we check both env and settings.Global.
         try
         {
-            var gs = Atheriz.Core.Settings.AtherizSettings.Global;
+            var gs = settings ?? Atheriz.Core.Settings.AtherizSettings.Global;
             if (!gs.WebclientSyncCheck) return null;
         }
         catch { }
@@ -60,20 +69,20 @@ public static class WebclientSyncChecker
             // Try engineWeb/area/webclient; fallback for C# static at wwwroot/webclient
             var engineAreaRoot = Path.Combine(engineWeb, area, "webclient");
             var gameAreaRoot = Path.Combine(gameWeb, area, "webclient");
-            var engineFiles = CollectFiles(engineAreaRoot);
-            var gameFiles = CollectFiles(gameAreaRoot);
+            var engineFiles = CollectFiles(engineAreaRoot, excludeDirNames);
+            var gameFiles = CollectFiles(gameAreaRoot, excludeDirNames);
 
             // C# fallback: engine static may live at wwwroot/webclient instead of web/static/webclient
             if (area == "static" && engineFiles.Count == 0)
             {
                 var altEngine = Path.Combine(contentRoot, "wwwroot", "webclient");
                 if (Directory.Exists(altEngine))
-                    engineFiles = CollectFiles(altEngine);
+                    engineFiles = CollectFiles(altEngine, excludeDirNames);
                 else
                 {
                     var baseAlt = Path.Combine(AppContext.BaseDirectory, "wwwroot", "webclient");
                     if (Directory.Exists(baseAlt))
-                        engineFiles = CollectFiles(baseAlt);
+                        engineFiles = CollectFiles(baseAlt, excludeDirNames);
                 }
             }
 

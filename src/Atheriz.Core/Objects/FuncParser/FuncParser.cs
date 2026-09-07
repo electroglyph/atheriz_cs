@@ -3,9 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Atheriz.Core.Objects.VerbConjugation;
-
-namespace Atheriz.Core.Objects;
+using Atheriz.Core;
+using Atheriz.Core.Objects.VerbConjugation;namespace Atheriz.Core.Objects;
 
 /// <summary>
 /// Port of <c>atheriz/objects/funcparser.py</c> (1723 LOC) compressed to ~500 C#.
@@ -99,7 +98,7 @@ public class FuncParser
             ["random"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ if(a[0].Contains('.')){ double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); return rnd.NextDouble()*mx; } int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } { double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn); double.TryParse(a[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); bool isFloat=a[0].Contains('.')||a[1].Contains('.'); if(isFloat) return mn + (mx-mn)*rnd.NextDouble(); return rnd.Next((int)mn,(int)mx+1); } },
             ["randint"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } int.TryParse(a[0], out var mn2); int.TryParse(a[1], out var mx3); return rnd.Next(mn2,mx3+1); },
             ["choice"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; var rnd=Random.Shared;
-                if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[")&&single.EndsWith("]")){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch (Exception) { } } try{
+                if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[")&&single.EndsWith("]")){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.GenericCallable: " + logEx.Message, "ParsedFunc"); } } try{
                         var conv = FuncParserHelpers.SafeConvertToTypes( (new object[]{"py"}, new Dictionary<string,object>()), new object?[]{single}, new Dictionary<string,object?>(), ctx.RaiseErrors); if(conv.args.Length>0 && conv.args[0] is System.Collections.IEnumerable en && !(conv.args[0] is string)){ var list=en.Cast<object?>().ToArray(); if(list.Length>0) return list[rnd.Next(list.Length)]?.ToString()??""; } }catch{ if(ctx.RaiseErrors) throw; } if(ctx.RaiseErrors){
                         // For single non-list like "a", py conversion will have thrown if raiseErrors, so propagate
                         // Check if single was not list and not int, try py conversion for validation
@@ -188,7 +187,7 @@ public class FuncParser
             if(v is string str) return str;
             if(v is System.Collections.IList list) return "["+string.Join(",", list.Cast<object?>())+"]";
             return v?.ToString()??"";
-        }catch (Exception) { }
+        }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.SafePyEval: " + logEx.Message, "ParsedFunc"); }
         if(int.TryParse(s, out var i2)) return i2.ToString();
         if(double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d2)) return d2.ToString(System.Globalization.CultureInfo.InvariantCulture);
         if(s.StartsWith("[")&&s.EndsWith("]")) return s;
@@ -263,9 +262,8 @@ public class FuncParser
         bool plural=false;
         if(obj!=null)
         {
-            var g = obj.Gender;
+            string? g = obj is IGenderProvider gp ? gp.GetGender() : obj.Gender;
             if(!string.IsNullOrEmpty(g)) plural = g.Equals("plural", StringComparison.OrdinalIgnoreCase);
-            else { try{ foreach(var prop in obj.GetType().GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)){ if(prop.Name!="Gender") continue; try{ var gv=prop.GetValue(obj); if(gv is Delegate dg){ var r=dg.DynamicInvoke(); if(r is string rs) { plural=rs=="plural"; if(plural) break; } } else if(gv is string gs) { plural=gs=="plural"; if(plural) break; } }catch (Exception) { } } }catch (Exception) { } }
         }
         var (second, third) = Conjugate.VerbActorStanceComponents(verb, plural:plural);
         return obj == ctx.Receiver ? second : third;
@@ -288,21 +286,8 @@ public class FuncParser
         else if(options.Count>1) optObj = options;
         string? defaultGender = "neutral";
         if(obj!=null){
-            try{
-                var g = obj.Gender;
-                if(!string.IsNullOrEmpty(g)) defaultGender = g;
-                else {
-                    // Look for any Gender property that returns delegate (callable gender) – handles mock hiding base
-                    foreach(var pi in obj.GetType().GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)){
-                        if(pi.Name!="Gender") continue;
-                        try{
-                            var gv = pi.GetValue(obj);
-                            if(gv is Delegate d){ var r=d.DynamicInvoke(); if(r is string rs && !string.IsNullOrEmpty(rs)){ defaultGender=rs; break; } }
-                            else if(gv is string s && !string.IsNullOrEmpty(s)){ defaultGender=s; break; }
-                        }catch (Exception) { }
-                    }
-                }
-            }catch (Exception) { }
+            string? g = obj is IGenderProvider gp ? gp.GetGender() : obj.Gender;
+            if(!string.IsNullOrEmpty(g)) defaultGender = g;
         }
         string defaultViewpoint = "2nd person";
         if(kwargs.TryGetValue("viewpoint", out var vp)) defaultViewpoint = vp;
@@ -355,8 +340,9 @@ public class FuncParser
             ParserCallable wrapper = (a,k,ctx,raw) => {
                 // Build merged kwargs for forwarding: need to include caller/receiver/mapping etc.
                 // For generic callables tests, they expect to receive *args as string[] and **kwargs merged
-                // We'll call delegate via reflection with args array and kwargs dict
-                try{
+                // The delegate is invoked through the compiled typed invoker (no DynamicInvoke);
+                // shape sniffing below is unchanged.
+                {
                     var method = del.Method;
                     var pars = method.GetParameters();
                     // Try to invoke with (string[] args, Dictionary<string,object?> kwargs) or similar
@@ -370,17 +356,17 @@ public class FuncParser
                         if(ctx.Caller!=null) kwargsObj["caller"]=ctx.Caller;
                         if(ctx.Receiver!=null) kwargsObj["receiver"]=ctx.Receiver;
                         if(ctx.Mapping!=null) kwargsObj["mapping"]=ctx.Mapping;
-                        return del.DynamicInvoke(new object?[]{ a, kwargsObj });
+                        return DelegateInvoker.Invoke(del, new object?[]{ a, kwargsObj });
                     }
                     if(pars.Length==1 && pars[0].ParameterType.IsArray){
-                        return del.DynamicInvoke(new object?[]{ a });
+                        return DelegateInvoker.Invoke(del, new object?[]{ a });
                     }
                     if(pars.Length==0){
-                        return del.DynamicInvoke();
+                        return DelegateInvoker.Invoke(del, Array.Empty<object?>());
                     }
                     // generic *args, **kwargs as params object[] ?
-                    return del.DynamicInvoke(a.Cast<object?>().ToArray());
-                }catch(System.Reflection.TargetInvocationException tie){ throw tie.InnerException ?? tie; }
+                    return DelegateInvoker.Invoke(del, a.Cast<object?>().ToArray());
+                }
             };
             _callables[kv.Key]=wrapper;
         }
@@ -401,7 +387,7 @@ public class FuncParser
             if(kv.Value is ParserCallable pc) _callables[kv.Key]=pc;
             else if(kv.Value is Delegate d){ genDict[kv.Key]=d; _hasGeneric=true; _genericCallables[kv.Key]=d;
                 ParserCallable wrapper = (a,k,ctx,raw) => {
-                    try{
+                    {
                         var method=d.Method;
                         var pars=method.GetParameters();
                         if(pars.Length>=2 ){
@@ -413,10 +399,10 @@ public class FuncParser
                             if(ctx.Receiver!=null) kwargsObj["receiver"]=ctx.Receiver;
                             if(ctx.Mapping!=null) kwargsObj["mapping"]=ctx.Mapping;
                             // try to match signature that expects string[] + Dictionary
-                            return d.DynamicInvoke(new object?[]{ a, kwargsObj });
+                            return DelegateInvoker.Invoke(d, new object?[]{ a, kwargsObj });
                         }
-                        return d.DynamicInvoke(new object?[]{ a });
-                    }catch(System.Reflection.TargetInvocationException tie){ throw tie.InnerException ?? tie; }
+                        return DelegateInvoker.Invoke(d, new object?[]{ a });
+                    }
                 };
                 _callables[kv.Key]=wrapper;
             }
@@ -460,7 +446,7 @@ public class FuncParser
         foreach(var kv in callables){
             var del = kv.Value;
             System.Reflection.MethodInfo method;
-            try{ method = del.Method; }catch(Exception ex){ Console.Error.WriteLine($"Could not run getfullargspec on {kv.Key}: {ex}"); continue; }
+            try{ method = del.Method; }catch(Exception ex){ try { AtherizLogger.LogError($"Could not run getfullargspec on {kv.Key}: {ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.ValidateGenericCallables: " + logEx.Message, "ParsedFunc"); } continue; }
             var pars = method.GetParameters();
             bool hasVarArgs = pars.Any(p=> p.GetCustomAttributes(typeof(ParamArrayAttribute), false).Length>0 || p.ParameterType.IsArray);
             // also consider params array via IsArray as varargs

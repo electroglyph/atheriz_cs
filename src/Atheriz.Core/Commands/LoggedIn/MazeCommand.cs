@@ -22,7 +22,7 @@ public sealed class MazeCommand : Command
 
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         int width = 30, height = 30;
         var tuple1 = GenMapAndGrid(width, height, "maze1");
@@ -76,7 +76,6 @@ public sealed class MazeCommand : Command
             else mh = globalMh;
         }
         catch { mh = MapHandlerFactory(); }
-        try { MapHandlerHolder.Set(mh); } catch (Exception) { }
         try { Atheriz.Core.Objects.MapHandlerSingleton.Set(mh); } catch (Exception) { }
         GlobalServices.SetMapHandler(mh);
         var maze1Exit = tuple1.grid.GetRandomNode();

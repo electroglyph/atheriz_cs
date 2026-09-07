@@ -11,11 +11,11 @@ public sealed class GiveCommand : Command
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("args", nargs: "*", help: "object to give, optionally 'to <target>'"); }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject();
-        if (loc == null) { go.Msg("No."); return; }
+        if (loc == null) { CommandHelpers.MsgNo(go); return; }
         var tokens = pa.GetList("args");
         if (tokens.Count == 0) { go.Msg("Give it to whom?"); return; }
         string? objName = null, targetName = null;
@@ -72,7 +72,7 @@ public sealed class GiveCommand : Command
         if (objName == null || targetName == null) { go.Msg("Give it to whom?"); return; }
         List<GameObject> tgtMatches = CommandHelpers.SearchIn(loc, targetName, go);
         if (tgtMatches.Count == 0) { go.Msg($"Could not find '{targetName}' here."); return; }
-        if (tgtMatches.Count > 1) { go.Msg($"Multiple matches found for '{targetName}'."); return; }
+        if (tgtMatches.Count > 1) { CommandHelpers.MsgMultipleMatchesFound(go, targetName); return; }
         var target = tgtMatches[0];
         if (target.Id == go.Id) { go.Msg("You already have that!"); return; }
         // No connectivity gate (give.py:142-157): search is view-filtered
@@ -82,8 +82,13 @@ public sealed class GiveCommand : Command
         if (objName == "all") objsToGive = ObjectRegistry.Get(go.ContentsSnapshot.ToList());
         else
         {
-            var found = CommandHelpers.SearchWithFallback(go, objName);
-            objsToGive = found.ToList();
+            // Resolution is caller+room(+global #id) via SearchWithFallback:
+            // Python's caller.search() is inventory-only and would refuse
+            // room-ground gives with "You don't have that.", but pre-existing
+            // Give_RoomObject_MovesToTarget pins giving a room object, so the
+            // test wins (same precedent as BareNameNewOverwrite) and the
+            // possession restriction stays reverted.
+            objsToGive = CommandHelpers.SearchWithFallback(go, objName);
             if (objsToGive.Count == 0) { go.Msg("You don't have that."); return; }
         }
         if (objsToGive.Count == 0) { go.Msg("You don't have that."); return; }

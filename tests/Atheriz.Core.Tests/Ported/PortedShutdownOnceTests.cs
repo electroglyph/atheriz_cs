@@ -9,7 +9,7 @@ public class PortedShutdownOnceTests
     [Fact] public void SecondShutdownCall_IsNoop()
     {
         using var env = GlobalTestEnv.Enter();
-        StartStop.ResetForTesting();
+        StartStop.Reset();
         var ticker = GlobalServices.GetAsyncTicker();
         var pool = GlobalServices.GetAsyncThreadPool();
         // First shutdown
@@ -18,6 +18,6 @@ public class PortedShutdownOnceTests
         var ex = Record.Exception(() => StartStop.DoShutdown(ticker: ticker, pool: pool));
         Assert.Null(ex);
         Assert.True(StartStop.ShuttingDown); // at least no double run
-        StartStop.ResetForTesting();
+        StartStop.Reset();
     }
 }

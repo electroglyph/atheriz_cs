@@ -220,19 +220,22 @@ public class PortedAccountTestsPart2
         Assert.True(acc.IsDeleted);
         Assert.DoesNotContain(acc, ObjectRegistry.FilterBy(_=>true));
     }
+    private sealed class ToggleAccount : Account
+    {
+        public bool AllowDelete;
+        public override bool AtDelete(GameObject? caller) => AllowDelete;
+    }
+
     [Fact] public void SubclassHooksCanVeto()
     {
         using var env=GlobalTestEnv.Enter();
-        var orig=Account.AtDeleteHook;
-        Account.AtDeleteHook=_=>false;
-        var a=Account.Create("sam2","pw");
+        var a = Account.Create<ToggleAccount>("sam2","pw");
         if(ObjectRegistry.Get(a.Id).Count==0) ObjectRegistry.AddObject(a);
-        try{
-            Assert.False(a.Delete());
-            Assert.Contains(a, ObjectRegistry.FilterBy(_=>true));
-            Account.AtDeleteHook=_=>true;
-            Assert.True(a.Delete());
-        } finally { Account.AtDeleteHook=orig; }
+        a.AllowDelete = false;
+        Assert.False(a.Delete());
+        Assert.Contains(a, ObjectRegistry.FilterBy(_=>true));
+        a.AllowDelete = true;
+        Assert.True(a.Delete());
     }
 
     // Port of test_account.py:575 TestAccountRemoveCharacter
@@ -289,7 +292,7 @@ public class PortedAccountTestsPart2
     {
         using var env=GlobalTestEnv.Enter();
         var orig=SaltProvider.GetSalt();
-        SaltProvider.SetSaltForTesting("globalsalt");
+        SaltProvider.SetSalt("globalsalt");
         try{
             var a1=Account.Create("u1","pw123456");
             if(ObjectRegistry.Get(a1.Id).Count==0) ObjectRegistry.AddObject(a1);
@@ -298,6 +301,6 @@ public class PortedAccountTestsPart2
             Assert.Equal(a1.PasswordHash, a2.PasswordHash);
             var h=Account.HashPassword("x", "globalsalt");
             Assert.Equal(64, h.Length);
-        } finally { SaltProvider.SetSaltForTesting(orig); }
+        } finally { SaltProvider.SetSalt(orig); }
     }
 }

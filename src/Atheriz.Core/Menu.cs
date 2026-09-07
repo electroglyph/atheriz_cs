@@ -59,13 +59,16 @@ public sealed class MenuEngine{
 // Port of atheriz/menu.py:135 run_menu + spec Menu class
 public sealed class Menu{
  public string Prompt{get;set;}=""; // spec
- public Dictionary<string,Func<Session,string,Task<bool>>> Options{get;}=new(StringComparer.OrdinalIgnoreCase);
+  public Dictionary<string,Func<Session,string,Task<bool>>> Options{get;}=new(StringComparer.OrdinalIgnoreCase);
+  // Optional per-option descriptions (spec-Menu has no Python original; the Options dict
+  // shape is spec-fixed, so descs ride alongside instead of changing the value type).
+  public Dictionary<string,string> OptionDescs{get;}=new(StringComparer.OrdinalIgnoreCase);
  public TimeSpan Timeout{get;set;}=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); // Port of settings.py:140
  public Menu(){} public Menu(string p,Dictionary<string,Func<Session,string,Task<bool>>>? opts=null,TimeSpan? to=null){Prompt=p;if(opts!=null)foreach(var kv in opts)Options[kv.Key]=kv.Value;if(to.HasValue)Timeout=to.Value;}
  public async Task<bool> Run(Session session,string promptText){ // Port of menu.py:135-149
   string cur=string.IsNullOrEmpty(promptText)?Prompt:promptText;
   while(true){
-   var display=cur; if(Options.Count>0){var lines=new List<string>{$"\n{display}"}; foreach(var kv in Options)lines.Add($"  [{kv.Key}]"); display=string.Join("\r\n",lines);}
+    var display=cur; if(Options.Count>0){var lines=new List<string>{$"\n{display}"}; foreach(var kv in Options)lines.Add(OptionDescs.TryGetValue(kv.Key,out var dd)?$"  [{kv.Key}] {dd}":$"  [{kv.Key}]"); display=string.Join("\r\n",lines);}
    var inp = await MenuPrompt.PromptWithTimeoutAsync(session, display, Timeout); if(inp==null)break; // Port of menu.py:153-156 via MenuPrompt
    var clean=inp.ToLowerInvariant().Trim(); if(!Options.TryGetValue(clean,out var h))continue; // Port of menu.py:82
    try{var keep=await h(session,inp); if(!keep)return false;}catch(Exception ex){try{AtherizLogger.LogError($"menu handle_input failed: {ex}");}catch{} break;} // Port of menu.py:85

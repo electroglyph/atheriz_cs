@@ -16,7 +16,7 @@ public sealed class MoveCommand : Command
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null || pa.GetList("coord").Count == 0) { go.Msg(PrintHelp()); return; }
         var raw = string.Join(" ", pa.GetList("coord")).Trim();

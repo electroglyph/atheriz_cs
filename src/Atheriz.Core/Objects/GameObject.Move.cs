@@ -13,7 +13,6 @@ public partial class GameObject
     // Spec: advisory before cannot abort except AtPreMove specialized — here AtPreMove itself is gate.
     public virtual bool AtPreMove(GameObject? destination, string? toExit = null)
     {
-        if (AtPreMoveOverride != null) return AtPreMoveOverride(destination, toExit);
         // Hookable wrapper: before hooks advisory, replace hooks override
         return Hookable("at_pre_move", () =>
         {
@@ -28,29 +27,24 @@ public partial class GameObject
     // Port of base_obj.py:1074 at_post_move — advisory hookable
     public virtual void AtPostMove(GameObject? destination, string? toExit = null)
     {
-        if (AtPostMoveOverride != null) { AtPostMoveOverride(destination, toExit); return; }
         Hookable("at_post_move", () => 0, destination, toExit);
     }
 
     // Port of nodes.py:332-357 / base_obj move handling for leaves/receive
     public virtual bool AtPreObjectLeave(GameObject? destination, string? toExit = null)
     {
-        if (AtPreObjectLeaveOverride != null) return AtPreObjectLeaveOverride(destination, toExit);
         return Hookable("at_pre_object_leave", () => true, destination, toExit);
     }
     public virtual void AtObjectLeave(GameObject? destination, string? toExit = null)
     {
-        if (AtObjectLeaveOverride != null) { AtObjectLeaveOverride(destination, toExit); return; }
         Hookable("at_object_leave", () => 0, destination, toExit);
     }
     public virtual bool AtPreObjectReceive(GameObject? source, string? fromExit = null)
     {
-        if (AtPreObjectReceiveOverride != null) return AtPreObjectReceiveOverride(source, fromExit);
         return Hookable("at_pre_object_receive", () => true, source, fromExit);
     }
     public virtual void AtObjectReceive(GameObject? source, string? fromExit = null)
     {
-        if (AtObjectReceiveOverride != null) { AtObjectReceiveOverride(source, fromExit); return; }
         Hookable("at_object_receive", () => 0, source, fromExit);
     }
 
@@ -89,7 +83,7 @@ public partial class GameObject
                 if (obj.Location is LocationRef.ObjectLocation ol && ol.ObjectId == this.Id)
                     obj.Location = LocationRef.NullLocation.Instance;
             }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.RemoveObject: " + logEx.Message, "GameObject"); }
         }
     }
 
@@ -179,7 +173,7 @@ public partial class GameObject
                 try { locObj._contents.Remove(this.Id); locObj._flags.IsModified = true; }
                 finally { locObj._lock.ExitWriteLock(); }
             }
-            EnterWriteLockTracked();
+            _lock.EnterWriteLock();
             try { _location = LocationRef.NullLocation.Instance; _flags.IsModified = true; }
             finally { _lock.ExitWriteLock(); }
             AtPostMove(null, toExit);
@@ -348,7 +342,7 @@ public partial class GameObject
             {
                 if (destObj is Node dn)
                 {
-                    try { dn.AddExitsForObject(this); } catch (Exception) { }
+                    try { dn.AddExitsForObject(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
                 }
             }
 
@@ -362,7 +356,7 @@ public partial class GameObject
             // Need to update own fields without deadlock (we already hold dest/old locks, need own lock)
             // Release ordering: we hold old/dest locks, now acquire own lock
             // To avoid double-lock ordering issues, we already hold old/dest; acquiring self lock after is okay because self not in toLock (unless old/dest == self which cycle would have aborted)
-            EnterWriteLockTracked();
+            _lock.EnterWriteLock();
             try
             {
                 _location = newLocRef;
@@ -378,7 +372,7 @@ public partial class GameObject
             // Release in reverse order
             for (int i = toLock.Count - 1; i >= 0; i--)
             {
-                try { toLock[i].SyncRoot.ExitWriteLock(); } catch (Exception) { }
+                try { toLock[i].SyncRoot.ExitWriteLock(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
             }
         }
 
@@ -453,7 +447,7 @@ public partial class GameObject
                     }
                 }
             }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
         }
 
         // Follow/wander invalidation — Port spec: clear followers if needed
@@ -470,7 +464,7 @@ public partial class GameObject
                 var appearance = AtLook(destObj);
                 if (!string.IsNullOrEmpty(appearance)) Msg(appearance);
             }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
         }
 
         return true;
@@ -488,7 +482,7 @@ public partial class GameObject
                 if (l.Coord.Equals(from.Coord)) return l.Name;
             }
         }
-        catch (Exception) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.GetReverseLinkName: " + logEx.Message, "GameObject"); }
         return null;
     }
 
@@ -542,56 +536,6 @@ public partial class GameObject
         }
     }
 
-    // Port of base_obj.py:862 execute_cmd — delegates to CommandDispatcher.DispatchLoggedIn with puppet check (mirrors base_obj.execute_cmd)
-    public void ExecuteCommand(string raw, Session? session = null)
-    {
-        if (string.IsNullOrEmpty(raw)) return; // Port of base_obj.py:874 if not raw_string: return
-        // Port of base_obj.py:876-878 from atheriz.inputfuncs import dispatch_loggedin; dispatch_loggedin(self, raw_string)
-        // In C# we use Commands.CommandDispatcher
-        // session param ignored for compatibility; this object's own session is used for message routing (but we just dispatch)
-        try { Commands.CommandDispatcher.DispatchLoggedIn(this, raw); } catch (Exception) { }
-    }
-
-    // Port of base_obj.py:2073 at_look
-    public virtual string AtLook(GameObject? target)
-    {
-        return Hookable("at_look", () =>
-        {
-            if (target == null) return "You see nothing here."; // Port of base_obj.py:2085
-            if (!target.Access(this, "view")) return $"You can't look at '{target.GetDisplayName(this)}'."; // Port of base_obj.py:2087
-            string desc;
-            if (target is Node node) desc = node.ReturnAppearance(this);
-            else desc = target.ReturnAppearance(this);
-            try { target.AtDesc(this); } catch (Exception) { } // Port of base_obj.py:2090 target.at_desc
-            return desc;
-        }, target);
-    }
-
-    public virtual string ReturnAppearance(GameObject? looker)
-    {
-        return Hookable("return_appearance", () =>
-        {
-            if (looker == null) return "";
-            // Simplified appearance: name + desc + things
-            var name = GetDisplayName(looker);
-            var desc = Desc;
-            var things = GetDisplayThings(looker);
-            // Use appearance_template = "{name}: {desc}{things}" from base_obj.py:78
-            return $"{name}: {desc}{things}".Trim();
-        }, looker);
-    }
-
-    public virtual string GetDisplayThings(GameObject? looker)
-    {
-        var contents = ObjectRegistry.Get(ContentsSnapshot.ToList());
-        var visible = contents.Where(c => c.Access(looker, "view")).ToList();
-        if (IsContainer && visible.Count > 0)
-        {
-            var grouped = ContentUtils.GroupByName(visible, looker);
-            return "\n\nInside you see: " + grouped;
-        }
-        return "";
-    }
 
     // Helper for Node AddExits
     internal void AddExitsForObject(GameObject obj)

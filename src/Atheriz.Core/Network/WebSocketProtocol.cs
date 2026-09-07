@@ -44,9 +44,11 @@ public sealed class WebSocketConnection : BaseConnection
     {
         if (disposing)
         {
-            try { WebSocket.Abort(); } catch { }
-            try { WebSocket.Dispose(); } catch { }
-            try { _sendLock.Dispose(); } catch { }
+            // Let in-flight sends finish (bounded) before Abort/Dispose.
+            SpinWait.SpinUntil(() => { try { return _limiter.SnapshotTasks().Count == 0; } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Dispose: " + logEx.Message, "WebSocketConnection"); return true; } }, 250);
+            try { WebSocket.Abort(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.Dispose: " + logEx.Message, "WebSocketConnection"); }
+            try { WebSocket.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.Dispose: " + logEx.Message, "WebSocketConnection"); }
+            try { _sendLock.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.Dispose: " + logEx.Message, "WebSocketConnection"); }
         }
         base.Dispose(disposing);
     }
@@ -63,25 +65,35 @@ public sealed class WebSocketConnection : BaseConnection
         {
             var ex = task.Exception?.InnerException ?? task.Exception;
             if (ex is OperationCanceledException) { }
+            else if (ex is ObjectDisposedException) { } // post-dispose race: socket already gone
             else if (ex != null) try { Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Async task failed: {ex}"); } catch { Console.Error.WriteLine($"[WebSocket] Async task failed: {ex}"); }
         }
         else if (task.IsCanceled) { }
     }
 
     // port of websocket.py:68-70 _locked_send — bounded: a hung peer must not
-    // pin _sendLock (and stall all later sends) forever.
+    // pin _sendLock (and stall all later sends) forever. Lock-wait and send
+    // use separate deadlines: a lock timeout only skips this message (the
+    // holder still owns a live send), while a send timeout Aborts.
     private async Task LockedSendAsync(string data)
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await _sendLock.WaitAsync(cts.Token);
+        var bytes = Encoding.UTF8.GetBytes(data);
+        using var lockCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try { await _sendLock.WaitAsync(lockCts.Token); }
+        catch (OperationCanceledException)
+        {
+            // Lock busy for 5s: drop this message quietly. Do NOT Abort — the
+            // lock holder's send may still complete.
+            throw;
+        }
         try
         {
-            var bytes = Encoding.UTF8.GetBytes(data);
-            await WebSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+            using var sendCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await WebSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, sendCts.Token);
         }
         catch (OperationCanceledException)
         {
-            try { WebSocket.Abort(); } catch { }
+            try { WebSocket.Abort(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.LockedSendAsync: " + logEx.Message, "WebSocketConnection"); }
             throw;
         }
         finally { try { _sendLock.Release(); } catch { } }
@@ -111,18 +123,20 @@ public sealed class WebSocketConnection : BaseConnection
         Task? task = null;
         try
         {
-            // port of websocket.py:93-97
+            // port of websocket.py:93-97 — reserve -> schedule -> Track in one
+            // guarded span: if Track itself throws, the reservation is released
+            // and the task observed (the old split leaked the limiter slot).
             task = Task.Run(() => LockedSendAsync(data));
+            _limiter.Track(task, nb);
         }
         catch (Exception e) // port of websocket.py:99-103
         {
             _limiter.ReleaseSync(nb);
+            if (task != null) try { task.ContinueWith(t => TaskDone(t), TaskScheduler.Default); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.SendCommand: " + logEx.Message, "WebSocketConnection"); }
             Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Error sending command: {e}");
             return;
         }
-        // Track task for later Release via limiter
-        _limiter.Track(task, nb);
-        try { _ = task.ContinueWith(t => TaskDone(t)); } catch { } // port of websocket.py:106-109
+        try { _ = task.ContinueWith(t => TaskDone(t)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.SendCommand: " + logEx.Message, "WebSocketConnection"); } // port of websocket.py:106-109
     }
 
     // port of websocket.py:116-137 _close_websocket — now via limiter snapshot
@@ -140,7 +154,7 @@ public sealed class WebSocketConnection : BaseConnection
                 await Task.WhenAll(pending).WaitAsync(cts.Token);
             }
             catch (OperationCanceledException) { } // deadline elapsed; pendings release via TaskDone on completion
-            catch { }
+            catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.CloseWebSocketAsync: " + logEx.Message, "WebSocket"); }
         }
         try
         {
@@ -153,7 +167,7 @@ public sealed class WebSocketConnection : BaseConnection
                 catch (OperationCanceledException) { try { WebSocket.Abort(); } catch { } }
             }
         }
-        catch { } // port of websocket.py:135
+        catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.CloseWebSocketAsync: " + logEx.Message, "WebSocket"); } // port of websocket.py:135
     }
 
     // port of websocket.py:139-150 close — now via limiter sole accounting
@@ -200,7 +214,7 @@ public interface IWebSocketApp
 /// <summary>Marker for clean peer disconnects (port of WebSocketDisconnect).</summary>
 public interface IWebSocketDisconnect { }
 
-public sealed class WebSocketProtocol : Protocol
+public sealed class WebSocketProtocol : BaseProtocol
 {
     // Oversize throttling — port of websocket.py:15-27 (now via ThrottleWindow)
     private static readonly object _oversizeLock = new object();
@@ -221,7 +235,7 @@ public sealed class WebSocketProtocol : Protocol
         AtherizSettings settings = AtherizSettings.Global;
         if (app is IHost host)
         {
-            try { settings = host.Services.GetRequiredService<AtherizSettings>(); } catch { }
+            try { settings = host.Services.GetRequiredService<AtherizSettings>(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
         }
 
         if (!settings.WebsocketEnabled) return; // port of websocket.py:160-161
@@ -238,11 +252,11 @@ public sealed class WebSocketProtocol : Protocol
                     // is_ip_banned check (port of websocket.py:166)
                     try {
                         if (Atheriz.Core.Globals.ObjectRegistry.IsIpBanned(clientHost)) {
-                            try { await peer.CloseAsync(0, null); } catch { }
+                            try { await peer.CloseAsync(0, null); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
                             return;
                         }
-                    } catch { }
-                    try { await peer.AcceptAsync(); } catch { }
+                    } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+                    try { await peer.AcceptAsync(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
                     var mgr = ConnectionManager.GlobalInstance ?? new ConnectionManager(settings: settings);
                     string connId = mgr.GenerateConnectionId();
                     // Peer doubles have no real socket: the fallback connection drops
@@ -259,9 +273,9 @@ public sealed class WebSocketProtocol : Protocol
                             {
                                 // oversize handling port of websocket.py:181-192 — throttled via ThrottleWindow (5s per host)
                                 bool shouldLog = true;
-                                try { shouldLog = ShouldLogOversize(clientHost); } catch { }
+                                try { shouldLog = ShouldLogOversize(clientHost); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
                                 if (shouldLog) Atheriz.Core.AtherizLogger.LogWarning($"[WebSocket] Message too large from {clientHost} ({byteCount} bytes > {settings.WebsocketMaxMessageSize} bytes)");
-                                try { await peer.CloseAsync(1009, "Message too large"); } catch { }
+                                try { await peer.CloseAsync(1009, "Message too large"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
                                 break;
                             }
                             mgr.HandleCommand(connection!, raw);
@@ -278,7 +292,7 @@ public sealed class WebSocketProtocol : Protocol
                     }
                     finally
                     {
-                        try { mgr.Disconnect(connection!); } catch { }
+                        try { mgr.Disconnect(connection!); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
                     }
                 };
                 // Register the endpoint against the typed app contract.

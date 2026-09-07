@@ -80,12 +80,12 @@ public class PortedWorldPersistenceTests
     [Fact] public void Shutdown_StopsGameTime_BeforeTickerAndPool()
     {
         using var env = GlobalTestEnv.Enter();
-        StartStop.ResetForTesting();
+        StartStop.Reset();
         var ticker = GlobalServices.GetAsyncTicker();
         var pool = GlobalServices.GetAsyncThreadPool();
         // Verify ordering: StartStop.DoShutdown stops gameTime before ticker/pool via ShutdownStep
         var ex = Record.Exception(() => StartStop.DoShutdown(ticker: ticker, pool: pool));
         Assert.Null(ex);
-        StartStop.ResetForTesting();
+        StartStop.Reset();
     }
 }

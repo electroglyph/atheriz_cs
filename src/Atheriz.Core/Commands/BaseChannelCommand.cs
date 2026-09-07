@@ -1,41 +1,13 @@
 using Atheriz.Core.Globals;
-using Atheriz.Core.Commands;
+using Atheriz.Core.Objects;
 
-namespace Atheriz.Core.Objects;
+namespace Atheriz.Core.Commands;
 
 /// <summary>
 /// Port of atheriz/objects/base_channel.py:BaseChannelCommand
 /// </summary>
 public class BaseChannelCommand : Command
 {
-    static BaseChannelCommand()
-    {
-        // Ensure Type.GetType("Atheriz.Core.Objects.BaseChannelCommand") works from test assembly (which doesn't have assembly-qualified name)
-        // Hook TypeResolve so that non-qualified lookup succeeds
-        try
-        {
-            AppDomain.CurrentDomain.TypeResolve += (sender, args) =>
-            {
-                var name = args.Name;
-                if (name == "Atheriz.Core.Objects.BaseChannelCommand" || name == "Atheriz.Core.Commands.LoggedIn.BaseChannelCommand")
-                    return typeof(BaseChannelCommand).Assembly;
-                // also handle without namespace? but test uses full name
-                if (name != null && name.Contains("BaseChannelCommand"))
-                    return typeof(BaseChannelCommand).Assembly;
-                return null;
-            };
-        } catch (Exception) { }
-        // Also ensure AssemblyResolve for completeness
-        try
-        {
-            AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
-            {
-                if (args.Name != null && args.Name.Contains("BaseChannelCommand")) return typeof(BaseChannelCommand).Assembly;
-                return null;
-            };
-        } catch (Exception) { }
-    }
-
     private string _key = "__base_channel";
     private string _desc = "Command for accessing channel";
     public override string Key => _key;
@@ -164,8 +136,8 @@ public class BaseChannelCommand : Command
         }
     }
 
-    // Simulate __getstate__/__setstate__ exclusion of _channel
-    public Dictionary<string, object?> __getstate__()
+    // State save/restore excluding the live _channel reference.
+    public Dictionary<string, object?> GetState()
     {
         var d = new Dictionary<string, object?>();
         // In real dill, _channel popped; we simulate by not including
@@ -173,7 +145,7 @@ public class BaseChannelCommand : Command
         // other fields like Key etc not needed
         return d;
     }
-    public void __setstate__(Dictionary<string, object?> state)
+    public void SetState(Dictionary<string, object?> state)
     {
         if (state.TryGetValue("id", out var v) && v is int i) id = i;
         _channel = null;

@@ -22,7 +22,7 @@ public static class GlobalTestEnv
         var absTemp = Path.GetFullPath(temp); // absolute for guard Port 66
         Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", absTemp); // Port 103 settings.SAVE_PATH = temp
         if (origSalt is null)
-            SaltProvider.SetSaltForTesting("testsalt"); // Port 104-105
+            SaltProvider.SetSalt("testsalt"); // Port 104-105
 
         // Port 108-115 fresh DB
         try { AtherizDbContextFactory.CloseDatabase(); } catch { }
@@ -30,13 +30,14 @@ public static class GlobalTestEnv
         AtherizDbContextFactory.DoSetup(absTemp); // Port 115 do_setup
 
         // Port 118-183 clear globals
-        ObjectRegistry.ClearAll(); // Port 119 _clear_all_objects_nonblocking
+        ObjectRegistry.ClearAll();
+        ObjectRegistry.AlwaysSaveAll = false; // P2: save-bypass flag must not leak across tests // Port 119 _clear_all_objects_nonblocking
         IdGenerator.SetId(-1); // Port 163
         ClearTickerIfExists(); // Port 47 _clear_ticker
-        GlobalServices.ResetForTesting(); // Port 166-172 _NODE_HANDLER etc
+        GlobalServices.Reset(); // Port 166-172 _NODE_HANDLER etc
         ConnectionManager.GlobalInstance = null; // Port 172
-        Autosave.ResetForTesting(); // Port 306 reset_autosave
-        try { StartStop.ResetForTesting(); } catch { } // Port 186 _shutdown_completed
+        Autosave.Reset(); // Port 306 reset_autosave
+        try { StartStop.Reset(); } catch { }
         try { NodeHandler.SetCurrent(null); } catch { }
 
         // Port 201-209 watchdog 25s
@@ -72,15 +73,17 @@ public static class GlobalTestEnv
         try { if (Directory.Exists(scope.TempPath)) Directory.Delete(scope.TempPath, recursive: true); } catch (Exception ex) { Console.Error.WriteLine($"rmtree failed: {ex}"); } // Port 232
 
         Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", scope.OrigEnvSavePath); // Port 238
-        if (scope.OrigSalt is not null) SaltProvider.SetSaltForTesting(scope.OrigSalt); else SaltProvider.Clear(); // Port 239
+        SaltProvider.Clear(); // P2: wipe legacy slot AND per-path dict
+        if (scope.OrigSalt is not null) SaltProvider.SetSalt(scope.OrigSalt); // Port 239
 
-        ObjectRegistry.ClearAll(); // Port 240
+        ObjectRegistry.ClearAll();
+        ObjectRegistry.AlwaysSaveAll = false; // P2: save-bypass flag must not leak across tests // Port 240
         IdGenerator.SetId(-1);
         ClearTickerIfExists();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         ConnectionManager.GlobalInstance = null;
-        Autosave.ResetForTesting();
-        try { StartStop.ResetForTesting(); } catch { }
+        Autosave.Reset();
+        try { StartStop.Reset(); } catch { }
         try { NodeHandler.SetCurrent(null); } catch { }
         // Port 302 leave
     }
@@ -100,15 +103,17 @@ public static class GlobalTestEnv
         try { if (Directory.Exists(scope.TempPath)) Directory.Delete(scope.TempPath, recursive: true); } catch (Exception ex) { Console.Error.WriteLine($"rmtree failed: {ex}"); }
 
         Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", scope.OrigEnvSavePath);
-        if (scope.OrigSalt is not null) SaltProvider.SetSaltForTesting(scope.OrigSalt); else SaltProvider.Clear();
+        SaltProvider.Clear(); // P2: wipe legacy slot AND per-path dict
+        if (scope.OrigSalt is not null) SaltProvider.SetSalt(scope.OrigSalt);
 
         ObjectRegistry.ClearAll();
+        ObjectRegistry.AlwaysSaveAll = false; // P2: save-bypass flag must not leak across tests
         IdGenerator.SetId(-1);
         ClearTickerIfExists();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         ConnectionManager.GlobalInstance = null;
-        Autosave.ResetForTesting();
-        try { StartStop.ResetForTesting(); } catch { }
+        Autosave.Reset();
+        try { StartStop.Reset(); } catch { }
         try { NodeHandler.SetCurrent(null); } catch { }
     }
 

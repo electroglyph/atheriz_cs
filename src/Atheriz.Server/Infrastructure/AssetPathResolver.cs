@@ -49,38 +49,34 @@ public static class AssetPathResolver
         return null;
     }
 
+    // Single ordered resolution table (P1-16): each row is (base selector, sub-path).
+    // Bases resolve lazily per call (CWD can move); rows keep the historical
+    // priority order contentRoot > CWD > engine > appBaseDir; dups collapse in
+    // ResolveCandidates via Distinct. Sub-path "" means the base itself.
+    private static IEnumerable<string?> ResolveTable(string contentRoot, string appBaseDir, string? engineDir, string? engineFallback, string subA, string subB)
+    {
+        yield return Path.Combine(contentRoot, subA);
+        yield return Path.Combine(contentRoot, subB);
+        yield return Path.Combine(Directory.GetCurrentDirectory(), subA);
+        yield return Path.Combine(Directory.GetCurrentDirectory(), subB);
+        if (engineDir != null) yield return engineDir;
+        else if (engineFallback != null) yield return engineFallback;
+        yield return Path.Combine(appBaseDir, subA);
+        yield return Path.Combine(appBaseDir, subB);
+    }
+
     public static string? ResolveWwwRoot(string contentRoot, string appBaseDir)
     {
         var engineWwwroot = ResolveEngineWwwRoot();
-        var candidates = new[]
-        {
-            Path.Combine(contentRoot, "wwwroot"),
-            Path.Combine(contentRoot, "web", "static"),
-            Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"),
-            Path.Combine(Directory.GetCurrentDirectory(), "web", "static"),
-            engineWwwroot ?? "wwwroot",
-            Path.Combine(appBaseDir, "wwwroot"),
-            Path.Combine(appBaseDir, "web", "static"),
-            "wwwroot",
-            Path.Combine(appBaseDir, "wwwroot"),
-        };
-        return ResolveCandidates(candidates);
+        // Historical order kept: the old table's trailing bare "wwwroot" was
+        // identical to the CWD entry (both resolve against the process CWD).
+        return ResolveCandidates(ResolveTable(contentRoot, appBaseDir, engineWwwroot, "wwwroot", "wwwroot", Path.Combine("web", "static")));
     }
 
     public static string? ResolveTemplates(string contentRoot, string appBaseDir)
     {
         var engineTemplates = ResolveEngineTemplates();
-        var candidates = new[]
-        {
-            Path.Combine(contentRoot, "web", "templates"),
-            Path.Combine(contentRoot, "templates"),
-            Path.Combine(Directory.GetCurrentDirectory(), "web", "templates"),
-            Path.Combine(Directory.GetCurrentDirectory(), "templates"),
-            engineTemplates ?? string.Empty,
-            Path.Combine(appBaseDir, "web", "templates"),
-            Path.Combine(appBaseDir, "web", "templates"),
-        };
-        var result = ResolveCandidates(candidates);
+        var result = ResolveCandidates(ResolveTable(contentRoot, appBaseDir, engineTemplates, null, Path.Combine("web", "templates"), "templates"));
         if (result == null && engineTemplates != null && Directory.Exists(engineTemplates))
             return engineTemplates;
         return result;

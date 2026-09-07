@@ -17,6 +17,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- Direct ref (same version as EFCore.Sqlite's transitive dep) so saves can
+         detect SQLITE_BUSY/SQLITE_LOCKED for bounded retry without reflection. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>

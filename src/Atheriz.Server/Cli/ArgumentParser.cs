@@ -10,8 +10,17 @@ public static class ArgumentParser
     {
         for (int i = 0; i < a.Length; i++)
         {
-            if ((a[i] == longFlag || (shortFlag != null && a[i] == shortFlag)) && i + 1 < a.Length)
-                return a[i + 1];
+            if (a[i] == longFlag || (shortFlag != null && a[i] == shortFlag))
+                // Missing value is invalid (argparse: "expected one argument"),
+                // not a silent fall back to the default port.
+                return i + 1 < a.Length ? a[i + 1] : string.Empty;
+            // Glued short form: -p1234 / -p=1234 (argparse allows -p1234).
+            if (shortFlag != null && a[i].Length > shortFlag.Length + 1 && a[i].StartsWith(shortFlag, StringComparison.Ordinal))
+            {
+                var rest = a[i].Substring(shortFlag.Length);
+                if (rest.StartsWith("=", StringComparison.Ordinal)) rest = rest.Substring(1);
+                return rest;
+            }
         }
         foreach (var s in a)
         {
@@ -36,6 +45,13 @@ public static class ArgumentParser
         return null;
     }
 
+    public static string? InvalidTelnetPortValue(string[] a)
+    {
+        var v = GetOptionValue(a, "--telnet-port", null, TelnetPortPrefix);
+        if (v != null && !int.TryParse(v, out _)) return v;
+        return null;
+    }
+
     public static int? ParseTelnetPort(string[] a)
     {
         var v = GetOptionValue(a, "--telnet-port", null, TelnetPortPrefix);
@@ -53,4 +69,9 @@ public static class ArgumentParser
 
     public static bool HasFlag(string[] a, string longFlag, string? shortFlag = null)
         => a.Contains(longFlag, StringComparer.Ordinal) || (shortFlag != null && a.Contains(shortFlag, StringComparer.Ordinal));
+
+    // Glued short-port form (-p1234 / -p=1234), for stripping port flags out of
+    // positional filters in the create/new handlers.
+    internal static bool IsGluedShortPort(string v)
+        => v.Length > 2 && v[0] == '-' && v[1] == 'p' && (v[2] == '=' || char.IsDigit(v[2]));
 }

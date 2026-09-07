@@ -27,7 +27,7 @@ public partial class NodeHandler
         // nesting). MapClose/MapOpen already implement the post_grid (+pre_grid
         // if non-empty) stamp + render; the MapEnabled gate only skips render
         // work when maps are disabled.
-        try { if (door.Closed) door.MapClose(); else door.MapOpen(); } catch (Exception) { }
+        try { if (door.Closed) door.MapClose(); else door.MapOpen(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.AddDoor: " + logEx.Message, "NodeHandler"); }
     }
     // Port of node.py remove_door: entries are removed by VALUE (v == door),
     // not by exit-name key.
@@ -45,6 +45,9 @@ public partial class NodeHandler
             if(_doors.TryGetValue(door.FromCoord,out var d)) RemoveDoorValue(d, door);
             if(_doors.TryGetValue(door.ToCoord,out var d2)) RemoveDoorValue(d2, door);
             _modified3=true;
+            // Gen bump (AddDoor parity — see RemoveTransition). No tombstone:
+            // doors are values inside the per-coord dict row, which Save
+            // rewrites wholesale, so the removal persists without a delete.
             _doorGen++;
         }
         finally { Lock3.ExitWriteLock(); }
@@ -56,7 +59,7 @@ public partial class NodeHandler
         // render per (area,z)); after releasing Lock3, no lock nesting.
         try
         {
-            var mh = MapHandlerHolder.Get();
+            var mh = MapHandlerSingleton.Get();
             if (mh != null && door.SymbolCoord != null)
             {
                 var seen = new HashSet<(string, int)>();
@@ -68,7 +71,7 @@ public partial class NodeHandler
                 }
             }
         }
-        catch (Exception) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemoveDoor: " + logEx.Message, "NodeHandler"); }
     }
     public void AddNode(Node node)
     {
@@ -108,7 +111,7 @@ public partial class NodeHandler
     {
         NodeArea? area=null;
         Lock.EnterWriteLock();
-        try { _areas.Remove(name,out area); _modified=true; _areaGen++; }
+        try { _areas.Remove(name,out area); _modified=true; _areaGen++; _removedAreas.Add(name); }
         finally { Lock.ExitWriteLock(); }
         // Port of node.py:639-644 — pop + area.clear() only. Nodes stay
         // registered (Python leaks them from _ALL_OBJECTS); only clear()
@@ -117,21 +120,28 @@ public partial class NodeHandler
     }
     public void Clear()
     {
+        // Lock order handler -> registry: collect under the handler lock,
+        // evict after release (RemoveObject takes the registry AllLock).
+        List<Node> evict;
         Lock.EnterWriteLock();
         try
         {
-            foreach(var a in _areas.Values)
-                foreach(var g in a.Grids.Values)
-                    foreach(var n in g.Nodes.Values)
-                        ObjectRegistry.RemoveObject(n);
-            _areas.Clear(); _modified=true; _areaGen++;
+            evict = new List<Node>();
+            foreach (var a in _areas.Values)
+                foreach (var g in a.Grids.Values)
+                    foreach (var n in g.Nodes.Values)
+                        evict.Add(n);
+            foreach (var k in _areas.Keys) _removedAreas.Add(k);
+            _areas.Clear(); _modified = true; _areaGen++;
         }
         finally { Lock.ExitWriteLock(); }
+        foreach (var n in evict)
+            try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Clear: " + logEx.Message, "NodeHandler"); }
         Lock2.EnterWriteLock();
-        try { _transitions.Clear(); _modified2=true; _transGen++; }
+        try { foreach (var k in _transitions.Keys) _removedTrans.Add(k); _transitions.Clear(); _modified2=true; _transGen++; }
         finally { Lock2.ExitWriteLock(); }
         Lock3.EnterWriteLock();
-        try { _doors.Clear(); _modified3=true; _doorGen++; }
+        try { foreach (var k in _doors.Keys) _removedDoors.Add(k); _doors.Clear(); _modified3=true; _doorGen++; }
         finally { Lock3.ExitWriteLock(); }
     }
     public NodeArea? GetArea(string name)
@@ -179,7 +189,9 @@ public partial class NodeHandler
     public void RemoveTransition(Coord dest)
     {
         Lock2.EnterWriteLock();
-        try { _transitions.Remove(dest); _modified2=true; _transGen++; }
+        // Gen bump (AddTransition parity): without it a concurrent save can
+        // snapshot, then clear _modified2 post-commit and lose this removal.
+        try { _transitions.Remove(dest); _modified2=true; _transGen++; _removedTrans.Add(dest); }
         finally { Lock2.ExitWriteLock(); }
     }
     public List<Transition> FindTransitions(int? fromZ=null,int? toZ=null,string? fromArea=null,string? toArea=null)
@@ -217,6 +229,9 @@ public partial class NodeHandler
                 {
                     _doors.Remove(oldFull);
                     relocated[oldToNewFull[oldFull]] = dict;
+                    // The old-coord row must die in the DB or the next Load
+                    // resurrects the pre-move dict alongside the relocated one.
+                    _removedDoors.Add(oldFull);
                 }
             }
             foreach (var (newFull, doorsDict) in relocated)
@@ -235,19 +250,26 @@ public partial class NodeHandler
                     door.Lock.EnterWriteLock();
                     try
                     {
-                        int dx = 0, dy = 0;
+                        int fdx = 0, fdy = 0, tdx = 0, tdy = 0;
                         if (oldToNewFull.TryGetValue(door.FromCoord, out var newFrom))
                         {
-                            dx = newFrom.X - door.FromCoord.X;
-                            dy = newFrom.Y - door.FromCoord.Y;
+                            fdx = newFrom.X - door.FromCoord.X;
+                            fdy = newFrom.Y - door.FromCoord.Y;
                             door.FromCoord = newFrom;
                         }
                         if (oldToNewFull.TryGetValue(door.ToCoord, out var newTo))
                         {
-                            dx = newTo.X - door.ToCoord.X;
-                            dy = newTo.Y - door.ToCoord.Y;
+                            tdx = newTo.X - door.ToCoord.X;
+                            tdy = newTo.Y - door.ToCoord.Y;
                             door.ToCoord = newTo;
                         }
+                        // The symbol cell is stamped into both endpoint grids,
+                        // but it is a single coord: it cannot follow two
+                        // different deltas. The From side anchors door identity
+                        // (exit naming, MapClose order), so its delta wins;
+                        // the To delta applies only when From did not move.
+                        int dx = (fdx != 0 || fdy != 0) ? fdx : tdx;
+                        int dy = (fdx != 0 || fdy != 0) ? fdy : tdy;
                         if (door.SymbolCoord != null && (dx != 0 || dy != 0))
                             door.SymbolCoord = (door.SymbolCoord.Value.X + dx, door.SymbolCoord.Value.Y + dy);
                     }
@@ -278,6 +300,8 @@ public partial class NodeHandler
                     _transitions[newFull] = trans;
                     _modified2 = true;
                     _transGen++;
+                    // Old-coord row must die in the DB (see RemapDoors).
+                    _removedTrans.Add(oldFull);
                 }
             }
         }

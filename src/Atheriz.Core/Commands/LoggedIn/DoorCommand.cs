@@ -25,7 +25,7 @@ public sealed class DoorCommand : Command
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { go.Msg(PrintHelp()); return; }
         bool north = pa.GetBool("north"), south = pa.GetBool("south"), east = pa.GetBool("east"), west = pa.GetBool("west"), up = pa.GetBool("up"), down = pa.GetBool("down");
@@ -43,7 +43,7 @@ public sealed class DoorCommand : Command
             return;
         }
         var loc = go.ResolveLocationObject() as Node;
-        if (loc == null) { go.Msg("You have an invalid location."); return; }
+        if (loc == null) { CommandHelpers.MsgInvalidLocation(go); return; }
         var nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();
         if (remove)
         {
@@ -75,6 +75,21 @@ public sealed class DoorCommand : Command
             ("up","up","u",0,0,1, settings.UdClosedDoor, settings.UdOpenDoor),
             ("down","down","d",0,0,-1, settings.UdClosedDoor, settings.UdOpenDoor),
         };
+        // Atomicity pre-check (deliberate improvement over Python's sequential
+        // apply): without -a, a missing destination for a LATER direction must
+        // fail before ANY door is created, not after earlier ones were applied
+        // with success messages already sent. Mirrors the in-loop message.
+        if (!auto)
+        {
+            foreach (var def in defs)
+            {
+                bool active = def.flag switch { "north"=>north, "south"=>south, "east"=>east, "west"=>west, "up"=>up, "down"=>down, _=>false };
+                if (!active) continue;
+                var preCoord = new Coord(loc.Coord.Area, loc.Coord.X + def.dx*2, loc.Coord.Y + def.dy*2, loc.Coord.Z + def.dz*2);
+                if (nh.GetNode(preCoord) == null)
+                { go.Msg($"There is no node at the destination coord {preCoord}, use -a to auto-create it."); return; }
+            }
+        }
         foreach (var def in defs)
         {
             bool active = def.flag switch { "north"=>north, "south"=>south, "east"=>east, "west"=>west, "up"=>up, "down"=>down, _=>false };
@@ -150,6 +165,10 @@ public sealed class DoorCommand : Command
         foreach (var obj in node.GetContents().ToList())
         {
             obj.MoveTo(fallback, force:true, announce:false);
+            // Python moves occupants silently; tell them what happened.
+            // (Authorization is the command-level builder gate; per-occupant
+            // consent hooks don't exist in either codebase.)
+            try { obj.Msg($"A door is being placed where you stand; you are moved to {fallback.Name}."); } catch (Exception) { }
         }
         nh.RemoveNode(doorCoord);
         caller.Msg($"Removed node at {doorCoord} since a door is being placed there.");

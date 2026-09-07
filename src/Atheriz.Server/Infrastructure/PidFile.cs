@@ -56,9 +56,13 @@ public sealed class PidFile : IDisposable
                 var ml = mod.ToLowerInvariant();
                 if (ml.Contains("atheriz"))
                     return true;
-                // dotnet host: only trust when the command line shows this is our server
+                // dotnet host: only trust when the command line names the server
+                // assembly itself. A bare "Atheriz" substring is NOT enough: the
+                // test host loads Atheriz.Server.dll but its command line names
+                // the test assembly, so `stop` can never terminate a test run
+                // on pid reuse.
                 if (ml.Contains("dotnet") || lower.Contains("dotnet"))
-                    return HasAtherizCmdline(pid);
+                    return HasServerCmdline(pid);
             }
             catch { }
             return false;
@@ -73,17 +77,18 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
-    /// Reads <c>/proc/{pid}/cmdline</c> and reports whether it mentions Atheriz.
+    /// Reads <c>/proc/{pid}/cmdline</c> and reports whether it names the server
+    /// assembly (<c>Atheriz.Server.dll</c>).
     /// Non-Linux or unreadable → false (fail closed).
     /// </summary>
-    private static bool HasAtherizCmdline(int pid)
+    private static bool HasServerCmdline(int pid)
     {
         try
         {
             var cmdline = $"/proc/{pid}/cmdline";
             if (!File.Exists(cmdline)) return false;
             var text = File.ReadAllText(cmdline);
-            return text.Contains("Atheriz", StringComparison.OrdinalIgnoreCase);
+            return text.Contains("Atheriz.Server.dll", StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }
@@ -92,8 +97,9 @@ public sealed class PidFile : IDisposable
     /// Check if any TCP listener is on port — approximates <c>atheriz/atheriz.py:782-800 _process_listening_by_port</c> + <c>psutil.net_connections</c>.
     /// Uses <c>IPGlobalProperties.GetActiveTcpListeners</c> (process-agnostic) as fallback.
     /// If port is not listening at all, we consider it safe to overwrite stale PID.
+    /// Public: single home for the port-listening check (StopHandler used to dup it).
     /// </summary>
-    private static bool IsPortListening(int port)
+    public static bool IsPortListening(int port)
     {
         try
         {
@@ -282,6 +288,46 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
+    /// Locate the server.pid governing <paramref name="port"/>: the save-dir
+    /// file first, then the cwd of the listener process, then a walk up the
+    /// current directory tree. Returns a path that may not exist (caller decides).
+    /// </summary>
+    public static string LocateServerPidFile(int port, string savePath)
+    {
+        var pidFilePath = Path.Combine(savePath, "server.pid");
+        if (!File.Exists(pidFilePath))
+        {
+            try
+            {
+                if (TryFindPidListeningOnPort(port, out var lpid2))
+                {
+                    try
+                    {
+                        var cwdLink = new FileInfo($"/proc/{lpid2}/cwd").LinkTarget;
+                        if (!string.IsNullOrEmpty(cwdLink))
+                        {
+                            var alt = Path.Combine(cwdLink, "save", "server.pid");
+                            if (File.Exists(alt)) pidFilePath = alt;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            if (!File.Exists(pidFilePath))
+            {
+                try
+                {
+                    var cur = new DirectoryInfo(Directory.GetCurrentDirectory());
+                    for (int i = 0; i < 6 && cur != null; i++) { var p = Path.Combine(cur.FullName, "save", "server.pid"); if (File.Exists(p)) { pidFilePath = p; break; } cur = cur.Parent; }
+                }
+                catch { }
+            }
+        }
+        return pidFilePath;
+    }
+
+    /// <summary>
     /// Attempts to atomically acquire the PID file at <c>{savePath}/server.pid</c>.
     /// Mirrors <c>atheriz/atheriz.py:486-555 start_server</c> PID race:
     ///   - if file exists: read old_pid, if IsServerProcess → fail ("already running")
@@ -295,9 +341,9 @@ public sealed class PidFile : IDisposable
         pidFile = null;
         reason = null;
 
-        // Guard — atheriz/atheriz.py:508-512 + PathGuards
-        PathGuards.GuardSavePath(savePath);
-        PathGuards.EnsureSaveDirectory(savePath);
+        // Guard — atheriz/atheriz.py:508-512 + PathGuards (Core; Server wrapper deleted P1-16)
+        Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath);
+        Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(savePath);
 
         var pidPath = Path.Combine(savePath, "server.pid");
 
@@ -353,9 +399,14 @@ public sealed class PidFile : IDisposable
                 using var fs = new FileStream(pidPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
                 var pidBytes = System.Text.Encoding.UTF8.GetBytes(currentPid.ToString());
                 fs.Write(pidBytes, 0, pidBytes.Length);
-                fs.Flush();
+                // Durable before anyone reads it: a crash between write and
+                // flush can leave an empty pid file that later parses as invalid.
+                fs.Flush(true);
                 // UnixFileMode 0o600 — atheriz.py relies on os.open 0o600; we set via FsUtil per AGENTS POSIX best-effort
                 FsUtil.TryChmod0600(pidPath);
+                // Dirsync the save dir so the server.pid directory entry itself
+                // survives a crash (file fsync alone does not persist the entry).
+                DirSync(Path.GetDirectoryName(pidPath));
 
                 pidFile = new PidFile(pidPath, true, currentPid);
                 return true;
@@ -410,6 +461,23 @@ public sealed class PidFile : IDisposable
 
         reason = "Failed to acquire PID file after retries";
         return false;
+    }
+
+    // Best-effort POSIX dirsync: fsync the directory fd so a newly created
+    // pid-file entry is durable across a crash. No-op on non-POSIX
+    // platforms; never throws.
+    private static void DirSync(string? dir)
+    {
+        if (string.IsNullOrEmpty(dir)) return;
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        try
+        {
+            int fd = Cli.ProcessHelper.NativeMethods.open(dir, 0); // O_RDONLY
+            if (fd < 0) return;
+            try { Cli.ProcessHelper.NativeMethods.fsync(fd); }
+            finally { Cli.ProcessHelper.NativeMethods.close(fd); }
+        }
+        catch { }
     }
 
     private static int? TryReadPid(string pidPath)

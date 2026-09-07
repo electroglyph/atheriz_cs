@@ -14,33 +14,30 @@ public sealed class CreateAccountCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!Settings.AtherizSettings.Global.AccountCreationEnabled) { caller.Msg("Account creation is not enabled."); return; }
-        {
-            string host = (caller as BaseConnection)?.ClientHost ?? "?";
-            string rateKey = caller is BaseConnection bc ? (host != "?" ? host : bc.GetHashCode().ToString()) : "?";
-            double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
-            if (!ObjectRegistry.TryReserveCreationCooldown("account", rateKey, now, Settings.AtherizSettings.Global.CreationCooldown))
-            { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return; }
-        }
+        if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
         // Sync stub: expects args as string "name password" for test convenience; real flow is async prompts via Session.Prompt
         var text = args as string ?? "";
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 2)
         {
+            CreationCooldownHelper.Clear(caller);
             caller.Msg("Usage: create <account_name> <password> (interactive prompts in real server).");
             return;
         }
         string name = parts[0];
-        string password = parts[1];
+        // Passwords may contain spaces (Python prompts the whole line) — join, don't truncate.
+        string password = string.Join(" ", parts.Skip(1));
         var err = Validation.ValidateAccountName(name);
-        if (err != null) { caller.Msg(err); return; }
+        if (err != null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         err = Validation.ValidatePassword(password);
-        if (err != null) { caller.Msg(err); return; }
+        if (err != null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         try
         {
             // check uniqueness via ObjectRegistry
             var exists = ObjectRegistry.FilterBy(o => o.IsAccount && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0;
-            if (exists) { caller.Msg($"Account with this name ({name}) already exists."); return; }
+            if (exists) { CreationCooldownHelper.Clear(caller); caller.Msg($"Account with this name ({name}) already exists."); return; }
             var account = Account.Create(name, password);
+            CreationCooldownHelper.Apply(caller, "account");
             // Account.Create already does AddObjectUnique
             if (caller is BaseConnection conn && conn.Session != null)
             {
@@ -49,19 +46,16 @@ public sealed class CreateAccountCommand : Command
             }
             caller.Msg($"Account {name} created.");
         }
-        catch (InvalidOperationException ex) { caller.Msg(ex.Message); }
-        catch (ArgumentException ex) { caller.Msg(ex.Message); }
+        catch (InvalidOperationException ex) { CreationCooldownHelper.Clear(caller); caller.Msg(ex.Message); }
+        catch (ArgumentException ex) { CreationCooldownHelper.Clear(caller); caller.Msg(ex.Message); }
     }
     // Async version for real server (mirrors Python's async run)
     public async Task RunAsync(BaseConnection caller)
     {
         var settings = Settings.AtherizSettings.Global;
         if (!settings.AccountCreationEnabled) { caller.Msg("Account creation is not enabled."); return; }
-        string host = caller.ClientHost ?? "?";
-        string rateKey = host != "?" ? host : caller.GetHashCode().ToString();
-        double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
-        if (!ObjectRegistry.TryReserveCreationCooldown("account", rateKey, now, settings.CreationCooldown))
-        { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return; }
+        string rateKey = CreationCooldownHelper.RateKey(caller);
+        if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
         string name = await caller.Session.Prompt("Enter an account name:");
         name = name.Trim();
         var err = Validation.ValidateAccountName(name);

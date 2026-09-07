@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Atheriz.Core.Objects;
@@ -417,151 +416,41 @@ public class MapInfo
                 return false;
             }
         }
-        catch (Exception) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.TryGetLocationCoord: " + logEx.Message, "BatchScope"); }
         return false;
     }
 
-    private static bool GetMapEnabled(object listener)
+    private static bool GetMapEnabled(GameObject listener)
     {
-        try
-        {
-            var type = listener.GetType();
-            foreach (var f in type.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic))
-            {
-                if (f.Name.Equals("MapEnabled", StringComparison.OrdinalIgnoreCase) || f.Name.Equals("map_enabled", StringComparison.OrdinalIgnoreCase))
-                {
-                    var v = f.GetValue(listener);
-                    if (v is bool b) return b;
-                }
-            }
-            foreach (var p in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic))
-            {
-                if (p.Name.Equals("MapEnabled", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("map_enabled", StringComparison.OrdinalIgnoreCase))
-                {
-                    var v = p.GetValue(listener);
-                    if (v is bool b) return b;
-                }
-            }
-            if (listener is GameObject go) return go.MapEnabled;
-        }
-        catch (Exception) { }
+        try { return listener.MapEnabled; }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.GetMapEnabled: " + logEx.Message, "BatchScope"); }
         return true;
     }
 
-    private static double? GetLastMapTime(object listener)
+    private static double? GetLastMapTime(GameObject listener)
     {
-        try
-        {
-            var type = listener.GetType();
-            foreach (var f in type.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic))
-            {
-                if (f.Name.Equals("LastMapTime", StringComparison.OrdinalIgnoreCase) || f.Name.Equals("last_map_time", StringComparison.OrdinalIgnoreCase))
-                {
-                    var v = f.GetValue(listener);
-                    if (v == null) return null;
-                    if (v is double d) return d;
-                    if (v is float fl) return (double)fl;
-                    if (v is int ii) return (double)ii;
-                    if (v is long ll) return (double)ll;
-                    if (v is decimal dc) return (double)dc;
-                    try { return Convert.ToDouble(v); } catch (Exception) { }
-                }
-            }
-            foreach (var p in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic))
-            {
-                if (p.Name.Equals("LastMapTime", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("last_map_time", StringComparison.OrdinalIgnoreCase))
-                {
-                    var v = p.GetValue(listener);
-                    if (v == null) return null;
-                    if (v is double d) return d;
-                    if (v is float fl) return (double)fl;
-                    if (v is int ii) return (double)ii;
-                    if (v is long ll) return (double)ll;
-                    if (v is decimal dc) return (double)dc;
-                    try { return Convert.ToDouble(v); } catch (Exception) { }
-                }
-            }
-            if (listener is GameObject go) return go.LastMapTime;
-        }
-        catch (Exception) { }
+        try { return listener.LastMapTime; }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.GetLastMapTime: " + logEx.Message, "BatchScope"); }
         return null;
     }
 
-    private static Dictionary<(int X, int Y), string> CallAtPreMapRender(object listener, Dictionary<(int X, int Y), string> grid)
+    private static Dictionary<(int X, int Y), string> CallAtPreMapRender(GameObject listener, Dictionary<(int X, int Y), string> grid)
     {
-        try
-        {
-            var type = listener.GetType();
-            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance);
-            foreach (var m in methods)
-            {
-                if (m.Name.Equals("AtPreMapRender", StringComparison.OrdinalIgnoreCase) || m.Name.Equals("at_pre_map_render", StringComparison.OrdinalIgnoreCase))
-                {
-                    var pars = m.GetParameters();
-                    if (pars.Length == 1)
-                    {
-                        var res = m.Invoke(listener, new object[] { grid });
-                        if (res is Dictionary<(int X, int Y), string> d) return d;
-                        if (res != null)
-                        {
-                            try { return (Dictionary<(int X, int Y), string>)res; } catch (Exception) { }
-                        }
-                        return grid;
-                    }
-                }
-            }
-            if (listener is GameObject go) return go.AtPreMapRender(grid);
-        }
-        catch (Exception) { }
+        try { return listener.AtPreMapRender(grid); }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.GetLastMapTime: " + logEx.Message, "BatchScope"); }
         return grid;
     }
 
-    private static void CallAtMapUpdate(object listener, string mapStr, List<(string sym, string desc, (int x, int y) coord)> entries, int minX, int maxY, bool showLegend, string name)
+    private static void CallAtMapUpdate(GameObject listener, string mapStr, List<(string sym, string desc, (int x, int y) coord)> entries, int minX, int maxY, bool showLegend, string name)
     {
-        try
-        {
-            var type = listener.GetType();
-            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance);
-            foreach (var m in methods)
-            {
-                if (m.Name.Equals("AtMapUpdate", StringComparison.OrdinalIgnoreCase) || m.Name.Equals("at_map_update", StringComparison.OrdinalIgnoreCase))
-                {
-                    var pars = m.GetParameters();
-                    if (pars.Length == 6)
-                    {
-                        try { m.Invoke(listener, new object[] { mapStr, entries, minX, maxY, showLegend, name }); return; } catch (Exception) { }
-                    }
-                }
-            }
-            if (listener is GameObject go) { go.AtMapUpdate(mapStr, entries, minX, maxY, showLegend, name); return; }
-            try { ((dynamic)listener).AtMapUpdate(mapStr, entries, minX, maxY, showLegend, name); return; } catch (Exception) { }
-            try { ((dynamic)listener).at_map_update(mapStr, entries, minX, maxY, showLegend, name); return; } catch (Exception) { }
-        }
-        catch (Exception) { }
+        try { listener.AtMapUpdate(mapStr, entries, minX, maxY, showLegend, name); }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.CallAtMapUpdate: " + logEx.Message, "BatchScope"); }
     }
 
-    private static void CallAtLegendUpdate(object listener, List<(string sym, string desc, (int x, int y) coord)> entries, bool show, string area)
+    private static void CallAtLegendUpdate(GameObject listener, List<(string sym, string desc, (int x, int y) coord)> entries, bool show, string area)
     {
-        try
-        {
-            var type = listener.GetType();
-            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance);
-            foreach (var m in methods)
-            {
-                if (m.Name.Equals("AtLegendUpdate", StringComparison.OrdinalIgnoreCase) || m.Name.Equals("at_legend_update", StringComparison.OrdinalIgnoreCase))
-                {
-                    var pars = m.GetParameters();
-                    if (pars.Length == 3)
-                    {
-                        try { m.Invoke(listener, new object[] { entries, show, area }); return; } catch (Exception) { }
-                    }
-                }
-            }
-            if (listener is GameObject go) { go.AtLegendUpdate(entries, show, area); return; }
-            try { ((dynamic)listener).AtLegendUpdate(entries, show, area); return; } catch (Exception) { }
-            try { ((dynamic)listener).at_legend_update(entries, show, area); return; } catch (Exception) { }
-        }
-        catch (Exception) { }
+        try { listener.AtLegendUpdate(entries, show, area); }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.CallAtLegendUpdate: " + logEx.Message, "BatchScope"); }
     }
 
     public virtual void RenderLegend()
@@ -608,8 +497,8 @@ public class MapInfo
                 {
                     string sym = "";
                     string desc = "";
-                    try { sym = o.Symbol ?? ""; } catch (Exception) { }
-                    try { desc = o.Name ?? ""; } catch (Exception) { }
+                    try { sym = o.Symbol ?? ""; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.RenderLegend: " + logEx.Message, "BatchScope"); }
+                    try { desc = o.Name ?? ""; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.RenderLegend: " + logEx.Message, "BatchScope"); }
                     objEntries.Add((o.Id, (sym, desc, c)));
                 }
             }
@@ -658,8 +547,8 @@ public class MapInfo
             {
                 string sym = "";
                 string desc = "";
-                try { sym = o.Symbol ?? ""; } catch (Exception) { }
-                try { desc = o.Name ?? ""; } catch (Exception) { }
+                try { sym = o.Symbol ?? ""; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.Render: " + logEx.Message, "BatchScope"); }
+                try { desc = o.Name ?? ""; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.Render: " + logEx.Message, "BatchScope"); }
                 objEntries.Add((o.Id, (sym, desc, c)));
             }
         }
@@ -840,9 +729,11 @@ public class MapHandler
     public ReaderWriterLockSlim Lock => _lock;
     public IDisposable ReadScope() { _lock.EnterReadLock(); return new LockScope(_lock, false); }
     public IDisposable WriteScope() { _lock.EnterWriteLock(); return new LockScope(_lock, true); }
-    // Test hook for serialization lock verification
-    public static Func<object, string>? TestSerializeHook;
     private readonly Dictionary<(string Area, int Z), MapInfo> _data = new();
+    // Tombstones: keys removed via Clear() since the last successful save.
+    // Save() deletes these rows in the same transaction as the upserts, so a
+    // removed MapInfo cannot resurrect on the next Load. Guarded by Lock.
+    private readonly HashSet<(string Area, int Z)> _removedSinceSave = new();
     private readonly AtherizSettings _settings;
 
     public MapHandler() : this(null, true) { }
@@ -872,7 +763,7 @@ public class MapHandler
 
     public void Load()
     {
-        try { Load(AtherizDbContextFactory.Create()); } catch (Exception) { }
+        try { Load(AtherizDbContextFactory.Create()); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
     }
     public void Load(AtherizDbContext db)
     {
@@ -890,7 +781,7 @@ public class MapHandler
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt map chunk {row.Area}:{row.Z}: {ex.GetType().Name}"); } catch (Exception) { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt map chunk {row.Area}:{row.Z}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
                 }
             });
             // Clear-then-swap (mirrors ObjectRegistry.LoadObjects): rows deleted
@@ -908,16 +799,23 @@ public class MapHandler
                     catch { dbCheckFailed = true; }
                     if (dbCheckFailed || dbHasRows)
                     {
-                        try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch (Exception) { }
+                        try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
                     }
-                    else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; }
+                    else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; _removedSinceSave.RemoveWhere(k => _data.ContainsKey(k)); }
                 }
-                else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; }
+                else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; _removedSinceSave.RemoveWhere(k => _data.ContainsKey(k)); }
             }
             finally { Lock.ExitWriteLock(); }
         }
-        catch (Exception) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
     }
+
+    /// <summary>
+    /// Serializes one save snapshot DTO. Virtual so game code can customize
+    /// snapshot encoding (e.g. compression); the default is plain JSON.
+    /// Runs outside the DB gate — implementations must not take DbWriteGate.
+    /// </summary>
+    protected virtual string SerializeSnapshot(object dto) => JsonSerializer.Serialize(dto, JsonOptions.Default);
 
     public virtual void Save(bool force = false)
     {
@@ -935,8 +833,16 @@ public class MapHandler
         if (!force && !ObjectRegistry.AlwaysSaveAll && !_settings.AlwaysSaveAll && !IsDirty()) return;
 
         List<((string Area, int Z) Key, MapInfo Info)> refs;
+        HashSet<(string Area, int Z)> deletes;
         Lock.EnterReadLock();
-        try { refs = _data.Select(kv => (kv.Key, kv.Value)).ToList(); }
+        try
+        {
+            refs = _data.Select(kv => (kv.Key, kv.Value)).ToList();
+            // A key re-added after Clear() (SetMapInfo/GetOrCreate) is live
+            // again and must not be deleted.
+            deletes = new HashSet<(string Area, int Z)>(_removedSinceSave);
+            deletes.ExceptWith(_data.Keys);
+        }
         finally { Lock.ExitReadLock(); }
 
         var snapshot = new List<((string Area, int Z) Key, MapInfo.MapInfoPersistDto Dto, MapInfo Original)>();
@@ -966,12 +872,12 @@ public class MapHandler
                 snapshot.Add((k, dto, mi));
             }
 
-            if (snapshot.Count == 0) return;
+            if (snapshot.Count == 0 && deletes.Count == 0) return;
 
             // Serialize outside DB gate
             foreach (var (key, dto, _) in snapshot)
             {
-                var json = TestSerializeHook != null ? TestSerializeHook(dto) : JsonSerializer.Serialize(dto, JsonOptions.Default);
+                var json = SerializeSnapshot(dto);
                 jsons.Add((key, json));
             }
         }
@@ -993,6 +899,11 @@ public class MapHandler
                 foreach (var (key, json) in jsons)
                 {
                     DbTransactionHelper.UpsertJson(ctx.MapData, () => ctx.MapData.Find(key.Area, key.Z), () => new MapDataRow { Area = key.Area, Z = key.Z }, json);
+                }
+                foreach (var key in deletes)
+                {
+                    var row = ctx.MapData.Find(key.Area, key.Z);
+                    if (row != null) ctx.MapData.Remove(row);
                 }
             }, onRollback: () =>
             {
@@ -1030,6 +941,14 @@ public class MapHandler
             }
             return;
         }
+        // Success path only (every failure path above returns or throws):
+        // the tombstoned rows are now gone from the DB.
+        if (deletes.Count > 0)
+        {
+            Lock.EnterWriteLock();
+            try { _removedSinceSave.ExceptWith(deletes); }
+            finally { Lock.ExitWriteLock(); }
+        }
     }
 
     public void SetMapInfo(string area, int z, MapInfo mapInfo)
@@ -1065,17 +984,25 @@ public class MapHandler
 
     private MapInfo GetOrCreate(string area, int z)
     {
-        Lock.EnterWriteLock();
+        Lock.EnterUpgradeableReadLock();
         try
         {
             if (!_data.TryGetValue((area, z), out var mi))
             {
-                mi = new MapInfo { Name = area, Settings = _settings };
-                _data[(area, z)] = mi;
+                Lock.EnterWriteLock();
+                try
+                {
+                    if (!_data.TryGetValue((area, z), out mi))
+                    {
+                        mi = new MapInfo { Name = area, Settings = _settings };
+                        _data[(area, z)] = mi;
+                    }
+                }
+                finally { Lock.ExitWriteLock(); }
             }
             return mi;
         }
-        finally { Lock.ExitWriteLock(); }
+        finally { Lock.ExitUpgradeableReadLock(); }
     }
 
     public MapInfo GetOrCreatePublic(string area, int z) => GetOrCreate(area, z);
@@ -1148,7 +1075,7 @@ public class MapHandler
             var conn = listener.Session?.Connection;
             conn?.SendCommand("unbackground", new List<object?> { "" }, null);
         }
-        catch (Exception) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.SendUnbackground: " + logEx.Message, "MapHandler"); }
     }
 
     public void MoveMapable(GameObject mapable, Coord toCoord, Coord? fromCoord = null)
@@ -1228,7 +1155,11 @@ public class MapHandler
     public void Clear()
     {
         Lock.EnterWriteLock();
-        try { _data.Clear(); }
+        try
+        {
+            foreach (var k in _data.Keys) _removedSinceSave.Add(k);
+            _data.Clear();
+        }
         finally { Lock.ExitWriteLock(); }
     }
 

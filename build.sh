@@ -41,7 +41,11 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "error: dotnet 8.0.130+ required (see global.json)" >&2
+  echo "error: dotnet SDK 8.0.100+ required (see global.json)" >&2
+  exit 1
+fi
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "error: rsync required (used to stage webclient dist into wwwroot)" >&2
   exit 1
 fi
 
@@ -144,9 +148,11 @@ else
   fi
 fi
 
-# Always build .NET (cheap, ~3s)
-echo "Building .NET..."
+# Always build .NET (cheap, ~3s) — both configs: Release (atheriz.sh prefers it)
+# and Debug (integration tests + boot checks run the Debug DLL)
+echo "Building .NET (Release + Debug)..."
 dotnet build "$SCRIPT_DIR/Atheriz.sln" -c Release
+dotnet build "$SCRIPT_DIR/Atheriz.sln" -c Debug
 
 echo "Build complete — webclient $([ "$NEED_WEB_BUILD" -eq 0 ] && echo "unchanged" || echo "rebuilt") + engine built"
 echo "Run ./atheriz.sh --help  (or atheriz.cmd on Windows)"

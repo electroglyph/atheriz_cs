@@ -15,26 +15,22 @@ public sealed class NewCharacterCommand : Command
     {
         var settings = Settings.AtherizSettings.Global;
         if (!settings.CharCreationEnabled) { caller.Msg("Character creation is not enabled."); return; }
-        {
-            string host = (caller as BaseConnection)?.ClientHost ?? "?";
-            string rateKey = caller is BaseConnection bc ? (host != "?" ? host : bc.GetHashCode().ToString()) : "?";
-            double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
-            if (!ObjectRegistry.TryReserveCreationCooldown("character", rateKey, now, settings.CreationCooldown))
-            { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return; }
-        }
+        if (!CreationCooldownHelper.TryReserve(caller, "character")) return;
         // sync stub for tests: expects "name gender desc"
         var text = args as string ?? "";
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0) { caller.Msg("Usage: new <name> (interactive in real server)."); return; }
+        if (parts.Length == 0) { CreationCooldownHelper.Clear(caller); caller.Msg("Usage: new <name> (interactive in real server)."); return; }
         string name = parts[0];
         var err = Validation.ValidateCharacterName(name);
-        if (err != null) { caller.Msg(err); return; }
+        if (err != null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         if (caller is BaseConnection conn && conn.Session?.Account is Account acc)
         {
-            if (acc.Characters.Count >= settings.MaxCharacters) { caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
+            if (acc.Characters.Count >= settings.MaxCharacters) { CreationCooldownHelper.Clear(caller); caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
             var exists = ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0;
-            if (exists) { caller.Msg($"Character with this name ({name}) already exists."); return; }
-            var character = GameObject.Create(name, "", isPc: true);
+            if (exists) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
+            // Desc is the remainder after name+gender (was dropped as "" before).
+            string desc = parts.Length > 2 ? string.Join(" ", parts.Skip(2)) : "";
+            var character = GameObject.Create(name, desc, isPc: true);
             character.Gender = parts.Length > 1 ? parts[1] : "neutral";
             try
             {
@@ -42,34 +38,14 @@ public sealed class NewCharacterCommand : Command
             }
             catch (InvalidOperationException ex)
             {
+                CreationCooldownHelper.Clear(caller);
                 caller.Msg(ex.Message);
                 try { character.IsDeleted = true; } catch (Exception) { }
                 return;
             }
+            CreationCooldownHelper.Apply(caller, "character");
             acc.AddCharacter(character);
-            // puppet assignment with lock and AtPostPuppet
-            bool notAvail = false;
-            character.SyncRoot.EnterReadLock();
-            try { if (character.Session != null || character.IsDeleted) notAvail = true; }
-            finally { character.SyncRoot.ExitReadLock(); }
-            if (notAvail) { caller.Msg("This character is not available."); return; }
-            // set gender already
-            lock (conn.Session.Lock)
-            {
-                character.SyncRoot.EnterWriteLock();
-                try
-                {
-                    if (character.Session != null || character.IsDeleted) notAvail = true;
-                    else
-                    {
-                        conn.Session.Puppet = character;
-                        character.Session = conn.Session;
-                        conn.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    }
-                }
-                finally { character.SyncRoot.ExitWriteLock(); }
-            }
-            if (notAvail) { caller.Msg("This character is not available."); return; }
+            if (!SessionPuppetHelper.TryAttach(conn, character)) return;
             var nh = NodeHandler.GetCurrent();
             var home = nh?.GetNode(settings.DefaultHome);
             if (home != null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
@@ -91,11 +67,8 @@ public sealed class NewCharacterCommand : Command
         var account = caller.Session.Account as Account;
         if (account == null) { caller.Msg("You must be logged in first."); return; }
         if (account.Characters.Count >= settings.MaxCharacters) { caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
-        string host = caller.ClientHost ?? "?";
-        string rateKey = host != "?" ? host : caller.GetHashCode().ToString();
-        double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
-        if (!ObjectRegistry.TryReserveCreationCooldown("character", rateKey, now, settings.CreationCooldown))
-        { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return; }
+        string rateKey = CreationCooldownHelper.RateKey(caller);
+        if (!CreationCooldownHelper.TryReserve(caller, "character")) return;
         string name = await caller.Session.Prompt("Enter a name for your character:");
         name = name.Trim();
         var err = Validation.ValidateCharacterName(name);
@@ -122,28 +95,7 @@ public sealed class NewCharacterCommand : Command
         double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
         ObjectRegistry.ApplyCreationCooldown("character", rateKey, now2, settings.CreationCooldown);
         account.AddCharacter(character);
-        // puppet with lock
-        bool notAvail = false;
-        character.SyncRoot.EnterReadLock();
-        try { if (character.Session != null || character.IsDeleted) notAvail = true; }
-        finally { character.SyncRoot.ExitReadLock(); }
-        if (notAvail) { caller.Msg("This character is not available."); return; }
-        lock (caller.Session.Lock)
-        {
-            character.SyncRoot.EnterWriteLock();
-            try
-            {
-                if (character.Session != null || character.IsDeleted) notAvail = true;
-                else
-                {
-                    caller.Session.Puppet = character;
-                    character.Session = caller.Session;
-                    caller.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                }
-            }
-            finally { character.SyncRoot.ExitWriteLock(); }
-        }
-        if (notAvail) { caller.Msg("This character is not available."); return; }
+        if (!SessionPuppetHelper.TryAttach(caller, character)) return;
         var nh = NodeHandler.GetCurrent();
         var home = nh?.GetNode(settings.DefaultHome);
         if (home != null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }

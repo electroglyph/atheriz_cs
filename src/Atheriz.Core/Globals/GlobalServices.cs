@@ -193,7 +193,7 @@ public static class GlobalServices
             // For completeness also clear channel cache
             _serverChannel = null;
             // Shutdown must release world handlers so the next boot reloads
-            // instead of resurrecting stale in-memory world (like ResetForTesting).
+            // instead of resurrecting stale in-memory world (like Reset).
             _nodeHandler = null;
             _mapHandler = null;
             _gameTime = null;
@@ -202,7 +202,7 @@ public static class GlobalServices
     }
 
     // For tests / reset — clears all holders
-    public static void ResetForTesting()
+    public static void Reset()
     {
         _singletonLock.EnterWriteLock();
         try
@@ -219,7 +219,7 @@ public static class GlobalServices
         }
         finally { _singletonLock.ExitWriteLock(); }
         // Also reset underlying registries that are not singletons but global
-        try { CommandRegistry.ResetForTesting(); } catch (Exception) { }
+        try { CommandRegistry.Reset(); } catch (Exception) { }
         try { ConnectionManager.GlobalInstance = null; } catch (Exception) { }
     }
 

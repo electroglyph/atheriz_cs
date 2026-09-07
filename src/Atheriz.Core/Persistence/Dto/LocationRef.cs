@@ -33,13 +33,19 @@ public sealed class LocationRefConverter : JsonConverter<LocationRef>
         if (root.TryGetProperty("Area", out var areaProp))
         {
             var area = areaProp.GetString() ?? "";
-            var x = root.GetProperty("X").GetInt32();
-            var y = root.GetProperty("Y").GetInt32();
-            var z = root.GetProperty("Z").GetInt32();
-            return new LocationRef.CoordLocation(new Coord(area, x, y, z));
+            if (!root.TryGetProperty("X", out var xp) || !root.TryGetProperty("Y", out var yp) || !root.TryGetProperty("Z", out var zp)
+                || xp.ValueKind != JsonValueKind.Number || yp.ValueKind != JsonValueKind.Number || zp.ValueKind != JsonValueKind.Number)
+                throw new JsonException("Coord location requires numeric X/Y/Z.");
+            return new LocationRef.CoordLocation(new Coord(area, xp.GetInt32(), yp.GetInt32(), zp.GetInt32()));
         }
         if (root.TryGetProperty("ObjectId", out var oid))
-            return new LocationRef.ObjectLocation(oid.GetInt32());
+        {
+            // Loud contract: a non-numeric ObjectId is corrupt data, reported as
+            // JsonException like the X/Y/Z branch above (not InvalidOperationException).
+            if (oid.ValueKind == JsonValueKind.Number && oid.TryGetInt32(out var oidNum))
+                return new LocationRef.ObjectLocation(oidNum);
+            throw new JsonException("ObjectId location requires a numeric id.");
+        }
         return LocationRef.NullLocation.Instance;
     }
 

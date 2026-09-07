@@ -255,18 +255,26 @@ public sealed class NodeArea
     }
     public NodeGrid GetOrCreateGrid(int z)
     {
-        Lock.EnterWriteLock();
+        Lock.EnterUpgradeableReadLock();
         try
         {
             if (!Grids.TryGetValue(z, out var g))
             {
-                g = new NodeGrid(Name, z);
-                Grids[z] = g;
-                IsModified = true;
+                Lock.EnterWriteLock();
+                try
+                {
+                    if (!Grids.TryGetValue(z, out g))
+                    {
+                        g = new NodeGrid(Name, z);
+                        Grids[z] = g;
+                        IsModified = true;
+                    }
+                }
+                finally { Lock.ExitWriteLock(); }
             }
             return g;
         }
-        finally { Lock.ExitWriteLock(); }
+        finally { Lock.ExitUpgradeableReadLock(); }
     }
     public NodeGrid GetOrAddGrid(int z) => GetOrCreateGrid(z);
     // Port of nodes.py:1402 remove_grid

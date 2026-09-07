@@ -35,7 +35,7 @@ public class PortedDoorPathfindTests
         }
         // Ensure map handler for completeness
         var mh = new MapHandler(autoLoad:false);
-        MapHandlerHolder.Set(mh);
+        GlobalServices.SetMapHandler(mh);
         nh.AddDoor(door);
         NodeHandler.SetCurrent(nh);
         return (nh, n1, n2, door);
@@ -217,7 +217,7 @@ public class PortedDoorPathfindTests
     {
         using var env = GlobalTestEnv.Enter();
         var nh = new NodeHandler(autoLoad:false); NodeHandler.SetCurrent(nh);
-        var mh = new MapHandler(autoLoad:false); MapHandlerHolder.Set(mh);
+        var mh = new MapHandler(autoLoad:false); GlobalServices.SetMapHandler(mh);
         var area = new NodeArea("ExitArea");
         var grid = new NodeGrid("ExitArea", 0);
         var src = new Node(new Coord("ExitArea",0,0,0));
@@ -254,7 +254,7 @@ public class PortedDoorPathfindTests
     {
         using var env = GlobalTestEnv.Enter();
         var nh = new NodeHandler(autoLoad:false); NodeHandler.SetCurrent(nh);
-        var mh = new MapHandler(autoLoad:false); MapHandlerHolder.Set(mh);
+        var mh = new MapHandler(autoLoad:false); GlobalServices.SetMapHandler(mh);
         var area = new NodeArea("ExitArea2");
         var grid = new NodeGrid("ExitArea2", 0);
         var src = new Node(new Coord("ExitArea2",0,0,0));

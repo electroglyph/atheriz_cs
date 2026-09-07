@@ -101,7 +101,7 @@ public class GameTime
             catch (Exception ex)
             {
                 // Per-row report: corrupt ticks zero out loudly, not silently.
-                try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch (Exception) { }
+                try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.Load: " + logEx.Message, "GameTime"); }
                 _lock.EnterWriteLock();
                 try { _ticks = 0; _alarms.Clear(); }
                 finally { _lock.ExitWriteLock(); }
@@ -135,11 +135,12 @@ public class GameTime
             }
             finally { _lock.ExitWriteLock(); }
         }
-        catch
+        catch (Exception ex)
         {
-            _lock.EnterWriteLock();
-            try { _ticks = 0; _alarms.Clear(); }
-            finally { _lock.ExitWriteLock(); }
+            // Preserve live ticks/alarms: only the pinned missing-row and
+            // corrupt-row paths above reset to zero. An unexpected failure
+            // here must be loud, not a silent live-state wipe.
+            try { AtherizLogger.LogError($"[Load] unexpected gametime load failure; preserving live state: {ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.Load: " + logEx.Message, "GameTime"); }
         }
     }
 
@@ -207,7 +208,7 @@ public class GameTime
                 Save(db);
             }
             catch { return false; }
-            try { File.Delete(path); } catch (Exception) { }
+            try { File.Delete(path); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.TryLoadLegacyFile: " + logEx.Message, "GameTime"); }
             return true;
         }
         catch { return false; }
@@ -398,7 +399,7 @@ public class GameTime
         }
         ticker?.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
         StopOwnedFallbacks();
-        try { Save(); } catch (Exception) { }
+        try { Save(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, "GameTimePersistDto"); }
     }
     public void Stop(AsyncTicker ticker)
     {
@@ -413,15 +414,15 @@ public class GameTime
         }
         if (ours) ticker.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
         StopOwnedFallbacks();
-        try { Save(); } catch (Exception) { }
+        try { Save(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, "GameTimePersistDto"); }
     }
 
     private void StopOwnedFallbacks()
     {
         var t = Interlocked.Exchange(ref _ownedTicker, null);
-        if (t != null) try { t.Stop(); } catch (Exception) { }
+        if (t != null) try { t.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, "GameTimePersistDto"); }
         var p = Interlocked.Exchange(ref _ownedPool, null);
-        if (p != null) try { p.Stop(wait: false); } catch (Exception) { }
+        if (p != null) try { p.Stop(wait: false); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, "GameTimePersistDto"); }
     }
 
     public bool SunUp()
@@ -474,14 +475,23 @@ public class GameTime
                     var capturedAfter = after;
                     // Direct virtual dispatch (port of getattr(objs[0], "at_alarm")):
                     // every GameObject exposes AtAlarm, so no reflection is needed.
-                    Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch (Exception) { } };
+                    Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, "GameTimePersistDto"); } };
                     if (!pool.AddTask(act, $"alarm:{entry.CallerId}"))
                     {
                         AtherizLogger.LogWarning($"Task queue full; alarm for {target} retrying.");
                         pool.Delay(0.05, act);
                     }
                 }
-                else AtherizLogger.LogWarning($"obj not found for alarm: {entry.CallerId}");
+                else
+                {
+                    // Missing-caller prune: a repeat alarm whose caller id has
+                    // no live object can never fire again (ids are never
+                    // recycled — see IdGenerator). Python only warns here, so
+                    // a dead repeat alarm warns on EVERY tick forever while
+                    // leaking its entry. Prune it and warn once instead.
+                    AtherizLogger.LogWarning($"obj not found for alarm: {entry.CallerId}; pruning dead alarm.");
+                    RemoveAlarmEntry(key.Hour, key.Minute, entry);
+                }
             }
         }
 
@@ -492,7 +502,7 @@ public class GameTime
             var recv = _settings.LunarReceiverLambda ?? (o => o.IsPc && o.IsConnected);
             foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
             {
-                try { obj.AtLunarEvent($"A {afterPhase.ToLower()} moon rises."); } catch (Exception) { }
+                try { obj.AtLunarEvent($"A {afterPhase.ToLower()} moon rises."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, "GameTimePersistDto"); }
             }
         }
         if (beforeSun != afterSun)
@@ -501,7 +511,7 @@ public class GameTime
             var recv = _settings.SolarReceiverLambda ?? (o => o.IsPc && o.IsConnected);
             foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
             {
-                try { obj.AtSolarEvent(msg); } catch (Exception) { }
+                try { obj.AtSolarEvent(msg); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, "GameTimePersistDto"); }
             }
         }
     }
@@ -656,55 +666,65 @@ public class GameTime
         string lastWord = "ago";
         if (ticks < 0) { lastWord = "in the future"; ticks = -ticks; }
 
-        double leftover = ticks;
-        double tickMinutes = _settings.TickMinutes;
-        double tph = _settings.MinutesPerHour / tickMinutes;
-        double tpd = tph * _settings.HoursPerDay;
-        double tpw = tpd * _settings.DaysPerWeek;
-        double tpmo = tpd * _settings.DaysPerMonth;
-        double tpy = tpmo * _settings.MonthsPerYear;
+        // Port of time.py Fraction(str(TICK_MINUTES)): unit math must be
+        // EXACT, not double — a fractional TickMinutes like 0.1 makes
+        // MinutesPerHour/TickMinutes non-representable in binary (60/0.1 =
+        // 599.999...), silently shifting every (int) truncation by one.
+        // decimal parsed from the shortest round-trip string is exact for
+        // decimal fractions, mirroring Fraction(str(...)) — note G17 would
+        // give the full binary expansion ("0.10000000000000001"); the
+        // default G15 shortest form ("0.1") is Python str()'s equivalent.
+        // Doubles re-enter only at the final minutes formatting, exactly
+        // like float() in Python.
+        decimal tickMinutes = decimal.Parse(_settings.TickMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
+        decimal tph = _settings.MinutesPerHour / tickMinutes;
+        decimal tpd = tph * _settings.HoursPerDay;
+        decimal tpw = tpd * _settings.DaysPerWeek;
+        decimal tpmo = tpd * _settings.DaysPerMonth;
+        decimal tpy = tpmo * _settings.MonthsPerYear;
+        decimal dleftover = ticks;
 
         string formatted = "";
         int y = 0, m = 0, w = 0, d = 0, h = 0;
 
-        if (leftover >= tpy)
+        if (dleftover >= tpy)
         {
-            y = (int)(leftover / tpy);
+            y = (int)(dleftover / tpy);
             formatted = y > 1 ? $"{y} years" : "1 year";
-            leftover %= y * tpy;
+            dleftover %= y * tpy;
         }
-        if (leftover >= tpmo)
+        if (dleftover >= tpmo)
         {
             if (formatted != "") formatted += ", ";
-            m = (int)(leftover / tpmo);
+            m = (int)(dleftover / tpmo);
             formatted += m > 1 ? $"{m} months" : "1 month";
-            leftover %= m * tpmo;
+            dleftover %= m * tpmo;
         }
-        if (leftover >= tpw)
+        if (dleftover >= tpw)
         {
             if (formatted != "") formatted += ", ";
-            w = (int)(leftover / tpw);
+            w = (int)(dleftover / tpw);
             formatted += w > 1 ? $"{w} weeks" : "1 week";
-            leftover %= w * tpw;
+            dleftover %= w * tpw;
         }
-        if (leftover >= tpd)
+        if (dleftover >= tpd)
         {
             if (formatted != "") formatted += ", ";
-            d = (int)(leftover / tpd);
+            d = (int)(dleftover / tpd);
             formatted += d > 1 ? $"{d} days" : "1 day";
-            leftover %= d * tpd;
+            dleftover %= d * tpd;
         }
-        if (leftover >= tph)
+        if (dleftover >= tph)
         {
             if (formatted != "") formatted += ", ";
-            h = (int)(leftover / tph);
+            h = (int)(dleftover / tph);
             formatted += h > 1 ? $"{h} hours" : "1 hour";
-            leftover %= h * tph;
+            dleftover %= h * tph;
         }
-        if (leftover > 0)
+        if (dleftover > 0)
         {
             if (formatted != "") formatted += ", ";
-            double leftoverMinutes = leftover * tickMinutes;
+            double leftoverMinutes = (double)(dleftover * tickMinutes);
             formatted += $"{leftoverMinutes:0} minutes";
         }
         int comma = formatted.LastIndexOf(',');
@@ -715,7 +735,7 @@ public class GameTime
         return new TimeSpanInfo
         {
             Years = y, Months = m, Weeks = w, Days = d, Hours = h,
-            Minutes = leftover * tickMinutes,
+            Minutes = (double)(dleftover * tickMinutes),
             Desc = desc
         };
     }

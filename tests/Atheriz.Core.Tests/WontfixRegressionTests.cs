@@ -170,7 +170,7 @@ public class WontfixRegressionTests
     public void GluedAlias_ShadowsSingleChar()
     {
         ObjectRegistry.ClearAll();
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
         var _ = CommandRegistry.LoggedIn; // init with look l
         var room = GameObject.Create("room"); room.IsContainer = true;
         var custom = new CustomLCommand();
@@ -188,7 +188,7 @@ public class WontfixRegressionTests
         // look should win over external l — wontfix precedence
         Assert.DoesNotContain(msgs, m => m.Contains("custom-l"));
         Assert.Contains(msgs, m => m.ToLower().Contains("hero stands"));
-        CommandRegistry.ResetForTesting(); ObjectRegistry.ClearAll();
+        CommandRegistry.Reset(); ObjectRegistry.ClearAll();
     }
 
     // Port of AGENTS.md mixed Coord/tuple caller error wontfix: utils.py:362,373

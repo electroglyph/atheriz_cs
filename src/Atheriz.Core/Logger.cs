@@ -18,6 +18,7 @@ public static class AtherizLogger
     private static ILoggerFactory? _factory;
     private static ILogger? _cachedDefault;
     private static LogLevel _level = LogLevel.Information; // Port of logger.py:28 default info
+    private static LogLevel _appliedLevel = LogLevel.Information; // minimum level the live factory was built with
     private static string _savePath = "save";
 #pragma warning disable CS0414 // Last-outcome hint, maintained for diagnostics/tests; writes always retry.
     private static bool _fileEnabled = true;
@@ -39,6 +40,9 @@ public static class AtherizLogger
     }
 
     // Port of logger.py:19 apply_settings
+    // LEVEL CONTRACT: debug/info/warning/error/critical map case-insensitively; anything else
+    // falls back to Information here, but AtherizSettingsValidator rejects unknown LogLevel
+    // strings at config load — so an unknown level can only arrive via direct assignment.
     public static void ApplySettings(AtherizSettings? settings = null)
     {
         var s = settings ?? AtherizSettings.Global;
@@ -59,7 +63,18 @@ public static class AtherizLogger
             {
                 // level applied on next write via IsEnabled check
             }
+            // Factory-refresh: the console provider (and minimum level) freeze at first
+            // construction, so a changed level rebuilds the factory instead of silently
+            // sticking. Write() also re-checks _level per call, so in-flight writers stay correct.
+            if (_factory != null && _appliedLevel != _level)
+            {
+                try { _factory.Dispose(); } catch { }
+                _factory = null;
+                _cachedDefault = null;
+            }
         }
+        if (_factory == null) SetupLogger();
+        lock (_lock) { _appliedLevel = _level; }
     }
 
     // Port of logger.py:31 _setup_logger
@@ -73,8 +88,14 @@ public static class AtherizLogger
                 _factory = LoggerFactory.Create(b =>
                 {
                     b.SetMinimumLevel(_level);
-                    b.AddConsole(options => options.FormatterName = "simple");
-                    // File target handled manually via FileAppend below for save/server.log equivalence
+                    // Single-echo: no console provider here. Write() already echoes every
+                    // kept message to Console.Error (which CaptureAtherizLog routes) and
+                    // appends to save/server.log — a provider would print each line twice.
+                    // A sink provider is still required: with zero providers every
+                    // ILogger.IsEnabled returns false regardless of minimum level.
+                    // NullLoggerProvider honors the factory minimum level but drops all
+                    // records (Write() owns echo + file).
+                    b.AddProvider(new NullLoggerProvider(_level));
                 });
                 _cachedDefault = _factory.CreateLogger(DefaultCategory);
             }
@@ -101,6 +122,22 @@ public static class AtherizLogger
             SetupLogger();
             if (_factory != null) return _factory.CreateLogger(category);
             return new FallbackLogger(category);
+        }
+    }
+
+    private sealed class NullLoggerProvider : ILoggerProvider
+    {
+        private readonly LogLevel _min;
+        public NullLoggerProvider(LogLevel min) => _min = min;
+        public ILogger CreateLogger(string categoryName) => new NullLogger(_min);
+        public void Dispose() { }
+        private sealed class NullLogger : ILogger
+        {
+            private readonly LogLevel _min;
+            public NullLogger(LogLevel min) => _min = min;
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None && logLevel >= _min;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
         }
     }
 

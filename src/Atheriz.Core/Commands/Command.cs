@@ -62,8 +62,7 @@ public abstract class Command
     {
         var a = new List<string> { Key };
         a.AddRange(Aliases);
-        string aliasStr = Aliases.Count > 0 ? $"{Key}, {string.Join(", ", Aliases)}" : Key;
-        if (Parser is null) return $"\n{Desc}\n\nAliases: {aliasStr}\n" + ExtraDesc;
+        if (Parser is null) return HelpHelper.FormatNoParser(this);
         return Parser.FormatHelp() + $"\naliases: {string.Join(", ", a)}\n" + ExtraDesc;
     }
 
@@ -75,8 +74,6 @@ public abstract class Command
     // Shlex helper — mirrors Python's shlex.split( posix=True ) with escaping for Windows backslashes
     private static List<string> SplitArgs(string argsString)
     {
-        // keep os.name in source for cross-platform parity (no-op reference)
-        _ = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows);
         // replicate Python: re.sub(r'\\(?![\"\'\\])', r'\\\\', args_string)
         var escaped = Regex.Replace(argsString, @"\\(?![\""\'\\])", @"\\");
         // simple shlex posix split respecting quotes and backslash escapes
@@ -154,6 +151,10 @@ public abstract class Command
         }
         catch (CommandError)
         {
+            // Python base_cmd.py:189 shows help only on parser errors; the
+            // diagnosis in ce.Message is intentionally not surfaced: three
+            // pins (Execute_WithRequiredArgOmitted, Execute_ShlexStripsQuotes,
+            // Execute_ArgsWithSpacesSplit) assert exactly one message here.
             caller.Msg(PrintHelp());
             return (null, null, null);
         }

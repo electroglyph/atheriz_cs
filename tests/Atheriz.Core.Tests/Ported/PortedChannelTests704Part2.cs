@@ -1,6 +1,7 @@
 // Port of atheriz/tests/test_channel.py:1 part2 — faithful 80-test split part2 (40 tests)
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Commands;
 using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Settings;
 using Atheriz.Core.Persistence;
@@ -379,7 +380,7 @@ public class PortedChannelTests704Part2
         var chan = Channel.Create("picklecmd");
         var cmd = chan.GetCommand() as BaseChannelCommand;
         Assert.NotNull(cmd);
-        var state = cmd!.__getstate__();
+        var state = cmd!.GetState();
         Assert.DoesNotContain("_channel", state.Keys);
     }
 
@@ -390,9 +391,9 @@ public class PortedChannelTests704Part2
         var chan = Channel.Create("picklecmd2");
         var cmd = chan.GetCommand() as BaseChannelCommand;
         Assert.NotNull(cmd);
-        var state = cmd!.__getstate__();
+        var state = cmd!.GetState();
         var cmd2 = new BaseChannelCommand();
-        cmd2.__setstate__(state);
+        cmd2.SetState(state);
         Assert.Null(cmd2._channel);
     }
 
@@ -403,9 +404,9 @@ public class PortedChannelTests704Part2
         var ch = Channel.Create("testchan");
         var cmd = ch.GetCommand() as BaseChannelCommand;
         Assert.NotNull(cmd);
-        var state = cmd!.__getstate__();
+        var state = cmd!.GetState();
         var restored = new BaseChannelCommand();
-        restored.__setstate__(state);
+        restored.SetState(state);
         restored.id = ch.Id;
         restored._channel = null;
         Channel result = restored.channel;
@@ -564,13 +565,15 @@ public class PortedChannelTests704Part2
         chan.Desc = "desc";
         var cmd = new ChannelCommand();
         var name = chan.Name.ToLowerInvariant();
-        ChannelCommand.SetCacheForTesting(name, chan);
-        chan.IsDeleted = true;
         var caller = GameObject.Create("Caller");
         ObjectRegistry.AddObject(caller);
         caller.ClearMessages();
-        var pa = cmd.Parser!.ParseArgs(new[] { "-c", chan.Name });
-        cmd.Run(caller, pa);
+        // Prime the cache through the real lookup path (unsubscribe is silent).
+        cmd.Run(caller, cmd.Parser!.ParseArgs(new[] { "-c", chan.Name, "-u" }));
+        Assert.True(ChannelCommand.TryGetCached(name, out _));
+        chan.IsDeleted = true;
+        caller.ClearMessages();
+        cmd.Run(caller, cmd.Parser!.ParseArgs(new[] { "-c", chan.Name }));
         Assert.False(ChannelCommand.TryGetCached(name, out _));
         var outText = string.Join(" ", caller.PeekMessages()).ToLower();
         Assert.Contains("not found", outText);
@@ -586,15 +589,20 @@ public class PortedChannelTests704Part2
         chan.Desc = "desc";
         var cmd = new ChannelCommand();
         var name = chan.Name.ToLowerInvariant();
-        var other = Channel.Create("OtherChan");
-        other.Desc = "desc2";
-        ChannelCommand.SetCacheForTesting(name, other);
         var caller = GameObject.Create("Caller2");
         ObjectRegistry.AddObject(caller);
         caller.ClearMessages();
-        var pa = cmd.Parser!.ParseArgs(new[] { "-c", chan.Name, "-u" });
-        Assert.True(ChannelCommand.TryGetCached(name, out var before) && before == other);
-        cmd.Run(caller, pa);
+        // Prime the cache through the real lookup path.
+        cmd.Run(caller, cmd.Parser!.ParseArgs(new[] { "-c", chan.Name, "-u" }));
+        Assert.True(ChannelCommand.TryGetCached(name, out var before) && before == chan);
+        // Rename away: the cached entry no longer matches the lookup name.
+        chan.Name = "RenamedChan";
+        caller.ClearMessages();
+        cmd.Run(caller, cmd.Parser!.ParseArgs(new[] { "-c", "ValidChan", "-u" }));
+        Assert.False(ChannelCommand.TryGetCached(name, out _));
+        // Rename back: the next lookup revalidates to the live channel.
+        chan.Name = "ValidChan";
+        cmd.Run(caller, cmd.Parser!.ParseArgs(new[] { "-c", chan.Name, "-u" }));
         Assert.True(ChannelCommand.TryGetCached(name, out var cached));
         Assert.Same(chan, cached);
     }

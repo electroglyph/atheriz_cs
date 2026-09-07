@@ -29,7 +29,7 @@ public static class DbWriteGate
     // Enter — the holder thread id can.
     private static int _holderThreadId;
 
-    public static SemaphoreSlim SemaphoreForTesting => _sem;
+    public static SemaphoreSlim Semaphore => _sem;
 
     public static bool IsHeld => _recursion.Value > 0;
 
@@ -58,11 +58,33 @@ public static class DbWriteGate
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Bounded take: returns false instead of hanging forever when another
+    /// flow holds the gate past <paramref name="timeout"/>. Re-entrant on the
+    /// owning flow like <see cref="Enter"/>.
+    /// </summary>
+    public static bool TryEnter(TimeSpan timeout)
+    {
+        if (_recursion.Value > 0)
+        {
+            _recursion.Value++;
+            return true;
+        }
+        if (!_sem.Wait(timeout))
+            return false;
+        _recursion.Value = 1;
+        Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
+        return true;
+    }
+
     public static void Exit()
     {
         var c = _recursion.Value;
         if (c <= 0)
         {
+#if DEBUG
+            System.Diagnostics.Debug.Fail("DbWriteGate.Exit without a matching Enter on this flow.");
+#endif
             _recursion.Value = 0;
             return;
         }
@@ -75,6 +97,9 @@ public static class DbWriteGate
         {
             // Inherited copy on a thread that never took the gate: drop our
             // forked count but never free another flow's slot.
+#if DEBUG
+            System.Diagnostics.Debug.Fail("DbWriteGate.Exit on a thread that never took the gate (forked AsyncLocal copy).");
+#endif
             _recursion.Value = 0;
             return;
         }
@@ -93,6 +118,9 @@ public static class DbWriteGate
         var c = _recursion.Value;
         if (c <= 0)
         {
+#if DEBUG
+            System.Diagnostics.Debug.Fail("DbWriteGate.ExitAfterThreadHop without a matching EnterAsync on this flow (permit leaked).");
+#endif
             _recursion.Value = 0;
             return;
         }

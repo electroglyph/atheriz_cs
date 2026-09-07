@@ -17,7 +17,7 @@ public sealed class SpamCommand : Command
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("count", type: typeof(int), help: "Number of accounts to create"); }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { go.Msg("Usage: spam <count>"); return; }
         var countObj = pa["count"];

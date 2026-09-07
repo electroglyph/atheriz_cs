@@ -26,7 +26,7 @@ public class MapChainTests
         // GetChain returns a copy rather than the stored mutable chain, so
         // in-place Consume mutation of Key/Seq/PreviousKey never tears
         // concurrent readers.
-        MapEdit.ResetForTesting();
+        MapEdit.Reset();
         try
         {
             string key = MapEdit.Grant("9.9.9.9", "limbo", 0, session: null);
@@ -38,6 +38,6 @@ public class MapChainTests
             Assert.NotNull(c2);
             Assert.Equal(orig, c2!.Key);
         }
-        finally { MapEdit.ResetForTesting(); }
+        finally { MapEdit.Reset(); }
     }
 }

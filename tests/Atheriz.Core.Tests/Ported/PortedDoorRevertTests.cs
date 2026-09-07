@@ -8,7 +8,31 @@ namespace Atheriz.Core.Tests.Ported;
 [Collection("Ported")]
 public class PortedDoorRevertTests
 {
-    private static (Node n1, Node n2, Door door, NodeHandler nh) SetupTwoNodesWithDoor(bool closed=true, string area="TestArea")
+    // Recording test subclass: counts how often each door operation runs
+    // (replaces the removed CallCount prod seam; overrides are virtual).
+    private sealed class RecordingDoor : Door
+    {
+        public int TryOpenCalls, TryCloseCalls, MapOpenCalls, MapCloseCalls;
+        public RecordingDoor(Coord from, Coord to, string fromExit, string toExit,
+            (int, int)? symbolCoord, string closedSymbol, string openSymbol, bool closed, bool locked)
+            : base(from, to, fromExit, toExit, symbolCoord, closedSymbol, openSymbol, closed, locked) { }
+        public void ResetCounts() { TryOpenCalls = TryCloseCalls = MapOpenCalls = MapCloseCalls = 0; }
+        public override bool TryOpen(GameObject c) { TryOpenCalls++; return base.TryOpen(c); }
+        public override bool TryClose(GameObject c) { TryCloseCalls++; return base.TryClose(c); }
+        public override void MapOpen() { MapOpenCalls++; base.MapOpen(); }
+        public override void MapClose() { MapCloseCalls++; base.MapClose(); }
+    }
+
+    // [Replace]-attributed veto hooks (replaces the removed At*Override seam).
+    private sealed class VetoHooks
+    {
+        [Replace]
+        public bool DenyAll(GameObject? a, string? b) => false;
+        [Replace]
+        public bool BoomMove(GameObject? a, string? b) => throw new InvalidOperationException("boom");
+    }
+
+    private static (Node n1, Node n2, RecordingDoor door, NodeHandler nh) SetupTwoNodesWithDoor(bool closed=true, string area="TestArea")
     {
         var nh = new NodeHandler(autoLoad:false); NodeHandler.SetCurrent(nh);
         var areaObj = new NodeArea(area);
@@ -18,13 +42,13 @@ public class PortedDoorRevertTests
         n1.AddLink(new NodeLink("north", new Coord(area, 0, 2, 0)));
         n2.AddLink(new NodeLink("south", new Coord(area, 0, 0, 0)));
         grid.AddNode(n1); grid.AddNode(n2); areaObj.AddGrid(grid); nh.AddArea(areaObj);
-        var door = new Door(new Coord(area, 0, 0, 0), new Coord(area, 0, 2, 0), "north","south", (0,1), "X","O", closed,false);
+        var door = new RecordingDoor(new Coord(area, 0, 0, 0), new Coord(area, 0, 2, 0), "north","south", (0,1), "X","O", closed,false);
         // Need MapHandler for door.map_close; create minimal handler and stash via holder
         var mh = new MapHandler(autoLoad:false);
         var miFrom = new MapInfo(area); miFrom.PostGrid[(0,1)] = "X"; // placeholder
         var miTo = miFrom;
         mh.SetMapInfo(area, 0, miFrom);
-        MapHandlerHolder.Set(mh);
+        GlobalServices.SetMapHandler(mh);
         GlobalServices.GetMapHandler(); // ensure singleton aligns? Instead set via holder
         // Patch node handler for door storage
         nh.AddDoor(door);
@@ -44,7 +68,7 @@ public class PortedDoorRevertTests
         // Clear doors
         // nh doors already empty
         var mh = new MapHandler(autoLoad:false);
-        MapHandlerHolder.Set(mh);
+        GlobalServices.SetMapHandler(mh);
         return (n1,n2,nh);
     }
 
@@ -58,9 +82,9 @@ public class PortedDoorRevertTests
         caller.IsConnected = true;
         caller.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord);
         n1.AddObject(caller);
-        door.ResetCallCounts();
+        door.ResetCounts();
         // Mock: node2.at_pre_object_receive returns False -> MoveTo fails
-        n2.AtPreObjectReceiveOverride = (src, exit) => false;
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
         var ex = new LoggedInExitCommand();
         ex.CallerId = caller.Id;
         ex.Location = n1.Coord;
@@ -74,7 +98,7 @@ public class PortedDoorRevertTests
         Assert.NotNull(loc);
         Assert.Equal(n1.Coord, loc!.Coord);
         Assert.NotEqual(n2.Coord, loc.Coord);
-        Assert.True(door.TryCloseCallCount > 0 || door.MapCloseCallCount > 0);
+        Assert.True(door.TryCloseCalls > 0 || door.MapCloseCalls > 0);
     }
 
     [Fact]
@@ -86,7 +110,7 @@ public class PortedDoorRevertTests
         caller.IsConnected = true;
         caller.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord);
         n1.AddObject(caller);
-        door.ResetCallCounts();
+        door.ResetCounts();
         var ex = new LoggedInExitCommand();
         ex.CallerId = caller.Id;
         ex.Location = n1.Coord;
@@ -109,8 +133,8 @@ public class PortedDoorRevertTests
         caller.IsConnected = true;
         caller.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord);
         n1.AddObject(caller);
-        door.ResetCallCounts();
-        n2.AtPreObjectReceiveOverride = (s,e)=>false;
+        door.ResetCounts();
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
         var ex = new LoggedInExitCommand();
         ex.CallerId = caller.Id;
         ex.Location = n1.Coord;
@@ -120,8 +144,8 @@ public class PortedDoorRevertTests
         Assert.False(door.Closed);
         var loc = caller.Location as Persistence.Dto.LocationRef.CoordLocation;
         Assert.Equal(n1.Coord, loc!.Coord);
-        Assert.Equal(0, door.TryCloseCallCount);
-        Assert.Equal(0, door.MapCloseCallCount);
+        Assert.Equal(0, door.TryCloseCalls);
+        Assert.Equal(0, door.MapCloseCalls);
     }
 
     [Fact]
@@ -156,8 +180,8 @@ public class PortedDoorRevertTests
         caller.IsConnected = true;
         caller.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord);
         n1.AddObject(caller);
-        n2.AtPreObjectReceiveOverride = (s,e)=>false;
-        door.ResetCallCounts();
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
+        door.ResetCounts();
         // Mock try_close to return False via lock deny
         door.AddLock("close", _=>false);
         var ex = new LoggedInExitCommand();
@@ -167,7 +191,7 @@ public class PortedDoorRevertTests
         ex.ExitName = "north";
         ex.DoMove();
         Assert.True(door.Closed);
-        Assert.True(door.TryCloseCallCount > 0);
+        Assert.True(door.TryCloseCalls > 0);
     }
 
     [Fact]
@@ -179,8 +203,8 @@ public class PortedDoorRevertTests
         caller.IsConnected = true;
         caller.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord);
         n1.AddObject(caller);
-        // Patch caller.move_to to throw RuntimeError("boom") via AtPreMoveOverride
-        caller.AtPreMoveOverride = (dest, exit) => throw new InvalidOperationException("boom");
+        // Patch caller.move_to to throw RuntimeError("boom") via a [Replace] hook
+        caller.InstallHook("at_pre_move", (Func<GameObject?, string?, bool>)new VetoHooks().BoomMove);
         var ex = new LoggedInExitCommand();
         ex.CallerId = caller.Id;
         ex.Location = n1.Coord;

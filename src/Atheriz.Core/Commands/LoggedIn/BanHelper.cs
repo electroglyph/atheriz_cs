@@ -37,7 +37,7 @@ internal static class BanHelper
         }
         if (matches.Count > 1)
         {
-            caller.Msg($"Multiple matches for '{name}':");
+            CommandHelpers.MsgMultipleMatchesColon(caller, name);
             foreach (var m in matches) caller.Msg($"  #{m.Id} {m.Name}");
             return null;
         }

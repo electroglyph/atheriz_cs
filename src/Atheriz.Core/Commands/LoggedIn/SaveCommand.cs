@@ -16,7 +16,7 @@ public sealed class SaveCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         go.Msg("Saving...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
         // Port of save.py:32 faithful order: save_objects() + map.save() + node.save(force=True) + gametime.save.

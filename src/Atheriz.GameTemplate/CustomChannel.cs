@@ -1,6 +1,6 @@
 // Port of atheriz/new.py:522 ("channel","Channel","atheriz.objects.base_channel")
 #nullable enable
-namespace Atheriz.GameTemplate;
+namespace MyGame;
 using Atheriz.Core.Objects;
 /// <summary>Custom Channel — mirrors test/channel.py</summary>
 public class CustomChannel : Channel

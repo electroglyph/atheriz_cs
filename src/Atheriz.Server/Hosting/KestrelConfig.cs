@@ -13,15 +13,21 @@ public static class KestrelConfig
         var host = s.WebserverInterface ?? "0.0.0.0";
         var port = s.WebserverPort;
 
+        // Global request guardrails (per-route caps like create_account's 64KB
+        // still apply inside; these bound everything else Kestrel serves).
+        opts.Limits.MaxRequestBodySize = 4 * 1024 * 1024;
+        opts.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+        opts.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
+
+        // Fail fast on an unparseable interface: silently serving on loopback
+        // (or Any) would expose the admin token on an unintended interface.
         IPAddress ip;
         if (host == "::") ip = IPAddress.IPv6Any;
         else if (!IPAddress.TryParse(host, out ip!))
-        {
-            Console.Error.WriteLine($"WARNING: unparseable WebserverInterface '{host}'; falling back to loopback.");
-            ip = IPAddress.Loopback;
-        }
+            throw new InvalidOperationException($"Unparseable WebserverInterface '{host}'; refusing to bind an unintended interface.");
+        bool dualStackAny = host == "0.0.0.0";
 
-        opts.Listen(ip, port, listen =>
+        void ConfigureEndpoint(Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions listen)
         {
             var certFile = s.SslCertFile;
             var keyFile = s.SslKeyFile;
@@ -44,9 +50,18 @@ public static class KestrelConfig
             }
             else if (!string.IsNullOrEmpty(certFile))
             {
+                // Fail closed like the unloadable-cert path above: a configured
+                // cert that is not on disk must never silently serve plaintext.
+                if (!s.AllowInsecureTlsFallback)
+                    throw new InvalidOperationException($"SSL cert configured but not found ({certFile}); refusing insecure fallback.");
                 Console.WriteLine($"WARNING: SSL cert file not found: {certFile}");
                 Console.WriteLine("SSL is disabled (set SSL_CERTFILE to enable)");
             }
-        });
+        }
+
+        // Dual-stack: the 0.0.0.0 default binds IPv4 only via Listen(ip);
+        // ListenAnyIP adds the IPv6Any dual-mode socket alongside it.
+        if (dualStackAny) opts.ListenAnyIP(port, ConfigureEndpoint);
+        else opts.Listen(ip, port, ConfigureEndpoint);
     }
 }

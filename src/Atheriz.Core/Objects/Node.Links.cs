@@ -133,7 +133,7 @@ public partial class Node
         }
         finally { SyncRoot.ExitWriteLock(); }
         // notify occupants
-        foreach (var o in GetContents()) try { AddExits(o); } catch (Exception) { }
+        foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddLink: " + logEx.Message, "Node"); }
         if (link.Coord.Area != Coord.Area)
         {
             var nh = NodeHandler.GetCurrent();
@@ -158,7 +158,7 @@ public partial class Node
             IsModified = true;
         }
         finally { SyncRoot.ExitWriteLock(); }
-        foreach (var o in GetContents()) try { AddExits(o); } catch (Exception) { }
+        foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddLinkIfAbsent: " + logEx.Message, "Node"); }
         if (link.Coord.Area != Coord.Area)
         {
             var nh = NodeHandler.GetCurrent();
@@ -184,7 +184,7 @@ public partial class Node
         }
         // also remove exits from occupants
         if (found != null)
-            foreach (var o in GetContents()) try { o.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception) { }
+            foreach (var o in GetContents()) try { o.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveLink: " + logEx.Message, "Node"); }
     }
 
     // Port of nodes.py:711 add_exits
@@ -218,7 +218,7 @@ public partial class Node
         }
         var set = obj.InternalCmdSet;
         if (set == null) { set = new CmdSet(); obj.InternalCmdSet = set; }
-        try { set.Adds(cmds); } catch (Exception) { }
+        try { set.Adds(cmds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddExits: " + logEx.Message, "Node"); }
     }
     public new void AddExitsForObject(GameObject obj) => AddExits(obj);
 
@@ -233,8 +233,8 @@ public partial class Node
             foreach (var o in objs) { o.IsModified = true; }
         }
         finally { SyncRoot.ExitWriteLock(); }
-        foreach (var o in objs) try { o.Location = new Persistence.Dto.LocationRef.CoordLocation(Coord); } catch (Exception) { }
-        foreach (var o in objs) try { AddExits(o); } catch (Exception) { }
+        foreach (var o in objs) try { o.Location = new Persistence.Dto.LocationRef.CoordLocation(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObjects: " + logEx.Message, "Node"); }
+        foreach (var o in objs) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObjects: " + logEx.Message, "Node"); }
     }
     // Port of nodes.py:747 add_object
     public new void AddObject(GameObject obj)
@@ -243,8 +243,8 @@ public partial class Node
         try { AddContent(obj.Id); obj.IsModified = true; IsModified = true; }
         finally { SyncRoot.ExitWriteLock(); }
         // Like MoveTo into a node, membership implies the node's coord.
-        try { obj.Location = new Persistence.Dto.LocationRef.CoordLocation(Coord); } catch (Exception) { }
-        try { AddExits(obj); } catch (Exception) { }
+        try { obj.Location = new Persistence.Dto.LocationRef.CoordLocation(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }
+        try { AddExits(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }
     }
     // Port of nodes.py:759 remove_object
     public new void RemoveObject(GameObject obj)
@@ -257,8 +257,8 @@ public partial class Node
             if (obj.Location is Persistence.Dto.LocationRef.CoordLocation cl && cl.Coord.Equals(Coord))
                 obj.Location = Persistence.Dto.LocationRef.NullLocation.Instance;
         }
-        catch (Exception) { }
-        try { obj.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveObject: " + logEx.Message, "Node"); }
+        try { obj.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveObject: " + logEx.Message, "Node"); }
     }
 
     // Port of nodes.py:770 msg_contents
@@ -284,7 +284,7 @@ public partial class Node
                     // safe format map handled inside Parse already for {you}
                     receiver.Msg(formatted, fromObj, null, false, msgType);
                 }
-                catch (Exception) { }
+                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.MsgContents: " + logEx.Message, "Node"); }
             }
             else receiver.Msg("", fromObj, null, false, msgType);
         }

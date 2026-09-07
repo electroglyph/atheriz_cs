@@ -256,7 +256,7 @@ public class LoggedInCommandTests
         using var env = GlobalTestEnv.Enter();
         var orig = AtherizSettings.Global.GuestEnabled;
         AtherizSettings.Global.GuestEnabled = true;
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
         _ = CommandRegistry.UnloggedIn;
         AtherizSettings.Global.GuestEnabled = false;
         try
@@ -268,7 +268,7 @@ public class LoggedInCommandTests
             var text = string.Join("\n", conn.Sent.SelectMany(t => t.Args.Select(a => a?.ToString() ?? "")));
             Assert.Contains("not found", text, StringComparison.OrdinalIgnoreCase);
         }
-        finally { AtherizSettings.Global.GuestEnabled = orig; CommandRegistry.ResetForTesting(); }
+        finally { AtherizSettings.Global.GuestEnabled = orig; CommandRegistry.Reset(); }
     }
 
     // --- say/emote refusal and unknown-command fallback ---

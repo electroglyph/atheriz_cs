@@ -154,13 +154,52 @@ internal static class GameObjectDtoConverter
 
     public static GameObject FromDto(GameObjectDto dto)
     {
+        // Copy-on-read for subtype markers: the branches below strip
+        // __object_type / __script_type so they don't leak into obj.Extra, but
+        // the markers are restored in finally — a double-load of the same DTO
+        // instance keeps its subtype the second time, and the caller's dict is
+        // never left mutated.
+        JsonElement savedObjectType = default;
+        bool hasObjectType = false;
+        JsonElement savedScriptType = default;
+        bool hasScriptType = false;
+        if (dto.Extra != null)
+        {
+            if (dto.Extra.TryGetValue("__object_type", out var ot))
+            {
+                savedObjectType = ot;
+                hasObjectType = true;
+                dto.Extra.Remove("__object_type");
+            }
+            if (dto.Extra.TryGetValue("__script_type", out var te))
+            {
+                savedScriptType = te;
+                hasScriptType = true;
+                dto.Extra.Remove("__script_type");
+            }
+        }
+        try
+        {
+            return FromDtoCore(dto, savedObjectType, hasObjectType, savedScriptType, hasScriptType);
+        }
+        finally
+        {
+            if (dto.Extra != null)
+            {
+                if (hasObjectType) dto.Extra["__object_type"] = savedObjectType;
+                if (hasScriptType) dto.Extra["__script_type"] = savedScriptType;
+            }
+        }
+    }
+
+    private static GameObject FromDtoCore(GameObjectDto dto, JsonElement savedObjectType, bool hasObjectType, JsonElement savedScriptType, bool hasScriptType)
+    {
         // Explicit subtype registry only (F004): a registered full name restores the subtype,
         // anything else (including old AssemblyQualifiedName markers) loads as its base kind
         // with a loud log — save data is never allowed to pick a type to instantiate.
-        if (dto.Extra != null && dto.Extra.TryGetValue("__object_type", out var ot))
+        if (hasObjectType)
         {
-            string? typeName = ot.ValueKind == JsonValueKind.String ? ot.GetString() : null;
-            dto.Extra.Remove("__object_type");
+            string? typeName = savedObjectType.ValueKind == JsonValueKind.String ? savedObjectType.GetString() : null;
             if (!string.IsNullOrEmpty(typeName))
             {
                 if (TryCreateSubtype(typeName!, out var inst) && inst != null)
@@ -186,10 +225,9 @@ internal static class GameObjectDtoConverter
         if (string.Equals(dto.Type, "script", StringComparison.OrdinalIgnoreCase))
         {
             // Restore the concrete Script subclass only for explicitly registered types.
-            if (dto.Extra != null && dto.Extra.TryGetValue("__script_type", out var te))
+            if (hasScriptType)
             {
-                string? typeName = te.ValueKind == JsonValueKind.String ? te.GetString() : null;
-                dto.Extra.Remove("__script_type");
+                string? typeName = savedScriptType.ValueKind == JsonValueKind.String ? savedScriptType.GetString() : null;
                 if (!string.IsNullOrEmpty(typeName))
                 {
                     if (TryCreateSubtype(typeName!, out var scoped) && scoped != null)
@@ -274,9 +312,8 @@ internal static class GameObjectDtoConverter
     private static string BuildSaveJson(GameObject obj, bool clearing)
     {
         // Single save-serialization core (mirrors Python get_save_ops).
-        // Use raw IsModified access without re-entering Write lock to ensure exactly one tracker increment (test SaveUsesLock expects 1).
+        // Use raw IsModified access without re-entering Write lock.
         // Non-clearing restores the flag afterwards; clearing leaves it false (only restored on error).
-        obj.IncrementTrackerInternal();
         obj.SyncRoot.EnterWriteLock();
         bool had = obj.GetIsModifiedRawNoLock();
         obj.SetIsModifiedRawNoLock(false);

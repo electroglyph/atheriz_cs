@@ -31,10 +31,10 @@ public class PortedMapMoveRegressionTests
 
     private static void InjectMapHandler(MapHandler mh)
     {
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var f = typeof(GlobalServices).GetField("_mapHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         f!.SetValue(null, mh);
-        try { MapHandlerHolder.Set(mh); } catch { }
+        try { GlobalServices.SetMapHandler(mh); } catch { }
         // MapHandlerSingleton is internal; set via reflection
         try
         {

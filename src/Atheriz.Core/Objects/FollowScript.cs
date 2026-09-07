@@ -31,7 +31,7 @@ public sealed class FollowScript : Script
         if (child == null) { Delete(); return; }
         if (child.FollowersSnapshot.Count == 0) { Delete(); return; }
         var oldLoc = _oldLoc;
-        try { _oldLoc = null; } catch (Exception) { }
+        try { _oldLoc = null; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed FollowScript.at_post_move: " + logEx.Message, "FollowScript"); }
         if (oldLoc == null) return;
         List<int> followers;
         // Snapshot followers under lock via the typed snapshot (no reflection).

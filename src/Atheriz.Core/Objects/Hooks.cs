@@ -3,11 +3,23 @@ using System.Reflection;
 
 namespace Atheriz.Core.Objects;
 
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class BeforeAttribute : Attribute { }
+
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class AfterAttribute : Attribute { }
+
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class ReplaceAttribute : Attribute { }
+
 public partial class GameObject
 {
     /// <summary>
     /// Hookable wrapper: advisory before (ignore return), replace (first only), after (can mutate result).
     /// Mirrors <c>base_obj.hookable</c> semantics where before cannot abort.
+    /// Hooks run through a compiled, statically-typed invoker (no DynamicInvoke):
+    /// arity mismatches surface as <see cref="TargetParameterCountException"/> so call
+    /// sites keep their fallback behavior, and hook errors propagate unwrapped.
     /// </summary>
     public T Hookable<T>(string funcName, Func<T> original, params object?[] args)
     {
@@ -18,9 +30,7 @@ public partial class GameObject
         {
             if (_hooks.TryGetValue(funcName, out var hs) && hs.Count > 0)
             {
-                // Force enumeration via explicit iteration to ensure BlockingSet's GetEnumerator is invoked (HashSet ctor may optimize)
-                hooksSnapshot = new HashSet<Delegate>();
-                foreach (var d in hs) hooksSnapshot.Add(d);
+                hooksSnapshot = new HashSet<Delegate>(hs);
                 hasHooks = true;
             }
         }
@@ -32,26 +42,20 @@ public partial class GameObject
         {
             try
             {
-                return (T)replaceHooks[0].DynamicInvoke(args)!;
+                return (T)DelegateInvoker.Invoke(replaceHooks[0], args)!;
             }
             catch (TargetParameterCountException)
             {
                 // Arity mismatch: ignore the bad replace hook, run original path.
-            }
-            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
-            {
-                throw tie.InnerException;
             }
         }
 
         var beforeHooks = hooksSnapshot!.Where(d => d.Method.GetCustomAttributes(typeof(BeforeAttribute), false).Length > 0).ToList();
         foreach (var h in beforeHooks)
         {
-            try { h.DynamicInvoke(args); }
-            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
-            {
-                throw tie.InnerException;
-            }
+            // Advisory: return ignored. Hook errors propagate raw (previously
+            // TIE-unwrapped — same observable, no reflection wrapper).
+            DelegateInvoker.Invoke(h, args);
         }
 
         var result = original();
@@ -64,22 +68,22 @@ public partial class GameObject
             bool invoked = false;
             try
             {
-                newResult = h.DynamicInvoke(args.Append((object?)result).ToArray());
+                newResult = DelegateInvoker.Invoke(h, args.Append((object?)result).ToArray());
                 invoked = true;
             }
             catch (TargetParameterCountException) { }
             catch { invoked = true; }
             if (!invoked)
             {
-                try { newResult = h.DynamicInvoke(args); invoked = true; } catch (Exception) { }
+                try { newResult = DelegateInvoker.Invoke(h, args); invoked = true; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Hookable: " + logEx.Message, "GameObject"); }
             }
             // Port of base_obj.py:64-66 — an after-hook replaces the result
             // unconditionally, including with null (reference types).
             if (invoked && (newResult is T t || (newResult == null && default(T) == null))) result = (T)newResult!;
             else if (invoked && newResult != null && typeof(T) == typeof(string) && newResult is string s) result = (T)(object)s;
         }
-        // Hookable error handling: if hooks exist but none marked before/after/replace, raise (mirrors Python ValueError) — however wontfix says don't abort?
-        // Original raises ValueError when hooks present but none marked; C# currently silently returns original (adaptation for wontfix)
+        // Hooks present but none marked before/after/replace: silently run original
+        // (adaptation — Python raised ValueError; aborting here would break game code).
         return result;
     }
 }

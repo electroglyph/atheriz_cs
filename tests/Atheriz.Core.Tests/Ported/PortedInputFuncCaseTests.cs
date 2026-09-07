@@ -73,7 +73,7 @@ public class PortedInputFuncCaseTests
             AtherizSettings.Global.AutoCommandAliasing = origAliasing;
             CommandDispatcher.SetSettings(AtherizSettings.Global);
             field.SetValue(null, origCmdSet);
-            CommandRegistry.ResetForTesting();
+            CommandRegistry.Reset();
             var _ = CommandRegistry.LoggedIn;
             field.SetValue(null, origCmdSet);
         }

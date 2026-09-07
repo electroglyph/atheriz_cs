@@ -178,7 +178,7 @@ public class PortedBaseCmdSetTestsPart2
         Assert.Equal("t1", a.Tag);
     }
 
-    [Fact] public void LiveCmdSets_BuildWithoutCollision() { using var env = GlobalTestEnv.Enter(); CommandRegistry.ResetForTesting(); var cs = CommandRegistry.LoggedIn; Assert.True(cs.GetKeys().Count > 30); }
-    [Fact] public void LiveCmdSets_EveryRegisteredNameClaimedByItsCommand() { using var env = GlobalTestEnv.Enter(); CommandRegistry.ResetForTesting(); foreach (var cs in new[] { CommandRegistry.LoggedIn, CommandRegistry.UnloggedIn }) foreach (var name in cs.GetKeys()) { var cmd = cs.Get(name); Assert.NotNull(cmd); Assert.True(name == cmd!.Key || cmd.Aliases.Contains(name)); } }
-    [Fact] public void LiveCmdSets_NoCommandListsOwnKeyAsAlias() { using var env = GlobalTestEnv.Enter(); CommandRegistry.ResetForTesting(); foreach (var cs in new[] { CommandRegistry.LoggedIn, CommandRegistry.UnloggedIn }) foreach (var name in cs.GetKeys()) { var cmd = cs.Get(name); if (name == cmd!.Key) Assert.DoesNotContain(cmd.Key, cmd.Aliases); } }
+    [Fact] public void LiveCmdSets_BuildWithoutCollision() { using var env = GlobalTestEnv.Enter(); CommandRegistry.Reset(); var cs = CommandRegistry.LoggedIn; Assert.True(cs.GetKeys().Count > 30); }
+    [Fact] public void LiveCmdSets_EveryRegisteredNameClaimedByItsCommand() { using var env = GlobalTestEnv.Enter(); CommandRegistry.Reset(); foreach (var cs in new[] { CommandRegistry.LoggedIn, CommandRegistry.UnloggedIn }) foreach (var name in cs.GetKeys()) { var cmd = cs.Get(name); Assert.NotNull(cmd); Assert.True(name == cmd!.Key || cmd.Aliases.Contains(name)); } }
+    [Fact] public void LiveCmdSets_NoCommandListsOwnKeyAsAlias() { using var env = GlobalTestEnv.Enter(); CommandRegistry.Reset(); foreach (var cs in new[] { CommandRegistry.LoggedIn, CommandRegistry.UnloggedIn }) foreach (var name in cs.GetKeys()) { var cmd = cs.Get(name); if (name == cmd!.Key) Assert.DoesNotContain(cmd.Key, cmd.Aliases); } }
 }

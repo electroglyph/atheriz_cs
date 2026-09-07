@@ -21,10 +21,3 @@ public abstract class BaseProtocol
     /// </summary>
     public abstract void Setup(object app);
 }
-
-/// <summary>
-/// Alias for <see cref="BaseProtocol"/> matching task spec naming (<c>Protocol</c>).
-/// </summary>
-public abstract class Protocol : BaseProtocol
-{
-}

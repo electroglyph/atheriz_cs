@@ -30,20 +30,8 @@ public sealed class NoneCommand : Command
         // external verbs from location and inventory
         if (caller is Objects.GameObject go2)
         {
-            var loc = go2.ResolveLocationObject();
-            if (loc != null)
-                foreach (var id in loc.ContentsSnapshot)
-                {
-                    var o = Globals.ObjectRegistry.Get(id).FirstOrDefault();
-                    if (o?.ExternalCmdSet != null)
-                        foreach (var k in o.ExternalCmdSet.GetKeys()) if (!ignored.Contains(k) && !choices.Contains(k)) choices.Add(k);
-                }
-            foreach (var id in go2.ContentsSnapshot)
-            {
-                var o = Globals.ObjectRegistry.Get(id).FirstOrDefault();
-                if (o?.ExternalCmdSet != null)
-                    foreach (var k in o.ExternalCmdSet.GetKeys()) if (!ignored.Contains(k) && !choices.Contains(k)) choices.Add(k);
-            }
+            foreach (var set in CommandHelpers.LocalVerbSets(go2))
+                foreach (var k in set.GetKeys()) if (!ignored.Contains(k) && !choices.Contains(k)) choices.Add(k);
         }
         if (choices.Count > 0)
         {

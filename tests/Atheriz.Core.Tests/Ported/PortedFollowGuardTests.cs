@@ -269,9 +269,17 @@ public class PortedFollowGuardTests
         Assert.NotNull(script);
         var oldLocField = typeof(FollowScript).GetField("_oldLoc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         oldLocField.SetValue(script, n1);
-        follower.AtPreMoveOverride = (dest, exit) => false;
+        follower.InstallHook("at_pre_move", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
         follower.ClearMessages();
         script!.at_post_move(n2, "north");
         Assert.Contains(follower.PeekMessages(), m => m.Contains($"You can't follow {leader.Name} there!"));
+    }
+
+    // [Replace]-attributed veto hook (replaces the removed At*Override seam;
+    // lambdas cannot carry attributes, so a real method provides the marker).
+    private sealed class VetoHooks
+    {
+        [Replace]
+        public bool DenyAll(GameObject? a, string? b) => false;
     }
 }

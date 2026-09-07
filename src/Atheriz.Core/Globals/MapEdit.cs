@@ -451,7 +451,7 @@ public static class MapEdit
     }
 
     // For tests / reset
-    public static void ResetForTesting()
+    public static void Reset()
     {
         Lock.EnterWriteLock();
         try

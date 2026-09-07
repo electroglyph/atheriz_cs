@@ -41,7 +41,7 @@ public class WriteGateTests
         DbWriteGate.Enter();
         try
         {
-            Assert.Equal(0, DbWriteGate.SemaphoreForTesting.CurrentCount);
+            Assert.Equal(0, DbWriteGate.Semaphore.CurrentCount);
         }
         finally
         {
@@ -121,14 +121,14 @@ public class WriteGateTests
             thread.Start();
             Assert.True(done.Wait(TimeSpan.FromSeconds(30)), "probe thread did not finish; possible deadlock");
             Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
-            Assert.Equal(0, DbWriteGate.SemaphoreForTesting.CurrentCount);
+            Assert.Equal(0, DbWriteGate.Semaphore.CurrentCount);
         }
         finally
         {
             // Reclaim the leaked permit when the bug is present, then release the
             // matched hold, so later tests see a balanced gate either way.
-            if (DbWriteGate.SemaphoreForTesting.CurrentCount > 0)
-                DbWriteGate.SemaphoreForTesting.Wait(TimeSpan.FromSeconds(30));
+            if (DbWriteGate.Semaphore.CurrentCount > 0)
+                DbWriteGate.Semaphore.Wait(TimeSpan.FromSeconds(30));
             DbWriteGate.Exit();
         }
     }

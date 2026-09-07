@@ -1,4 +1,5 @@
 // Port of atheriz/objects/contents.py:search + atheriz/commands/loggedin/delete.py:47-65 + ban.py helpers (dedup)
+using System.Diagnostics.CodeAnalysis;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 
@@ -6,6 +7,39 @@ namespace Atheriz.Core.Commands;
 
 public static class CommandHelpers
 {
+    /// <summary>
+    /// Single shared implementation of the puppet guard repeated across every logged-in
+    /// command. Returns true with <paramref name="puppet"/> set when <paramref name="caller"/>
+    /// is a puppeted character; otherwise sends <paramref name="denyMessage"/> (unless null)
+    /// and returns false.
+    /// </summary>
+    public static bool RequirePuppet(IMessageTarget caller, [NotNullWhen(true)] out GameObject? puppet, string? denyMessage = "You can't do that.")
+    {
+        if (caller is GameObject g) { puppet = g; return true; }
+        puppet = null;
+        if (!string.IsNullOrEmpty(denyMessage)) caller.Msg(denyMessage);
+        return false;
+    }
+    /// <summary>
+    /// Shared "local verbs" scan: external cmdsets from location contents, then
+    /// inventory (mirrors inputfuncs.py loc.contents + puppet.contents order).
+    /// Single home for the scan repeated in dispatch, help, and none-suggest.
+    /// </summary>
+    public static IEnumerable<CmdSet> LocalVerbSets(GameObject go)
+    {
+        var loc = go.ResolveLocationObject();
+        if (loc != null)
+            foreach (var id in loc.ContentsSnapshot)
+            {
+                var o = ObjectRegistry.Get(id).FirstOrDefault();
+                if (o?.ExternalCmdSet != null) yield return o.ExternalCmdSet;
+            }
+        foreach (var id in go.ContentsSnapshot)
+        {
+            var o = ObjectRegistry.Get(id).FirstOrDefault();
+            if (o?.ExternalCmdSet != null) yield return o.ExternalCmdSet;
+        }
+    }
     /// <summary>
     /// Port of <c>atheriz/objects/contents.py:search</c> fallback + <c>delete.py:47-65</c> coord handling.
     /// Handles #id (global), "me", "here", coord "(area,x,y,z)", then caller search + loc fallback if view allowed.
@@ -86,15 +120,31 @@ public static class CommandHelpers
                 caller.Msg($"No object found with ID {id}.");
                 return null;
             }
-            caller.Msg($"No match found for '{query}'.");
+            MsgNoMatchFound(caller, query);
             return null;
         }
         if (list.Count > 1)
         {
-            caller.Msg($"Multiple matches for '{query}':");
+            MsgMultipleMatchesColon(caller, query);
             foreach (var m in list) caller.Msg($"  #{m.Id} {m.Name}");
             return null;
         }
         return list[0];
     }
+
+    // ----- Centralized message dialects (audit:152) -----
+    // The Python originals spell these differently per command; behavior is
+    // preserved exactly — one home for the literals, no unification.
+    public static void MsgNo(IMessageTarget go) => go.Msg("No.");
+    public static void MsgNowhere(IMessageTarget go) => go.Msg("You are nowhere.");
+    public static void MsgNowhereExclaim(IMessageTarget go) => go.Msg("You are nowhere!");
+    public static void MsgInvalidLocation(IMessageTarget go) => go.Msg("You have an invalid location.");
+    public static void MsgObjectNotFound(IMessageTarget go) => go.Msg("Object not found.");
+    public static string FormatNoMatchFound(string name) => $"No match found for '{name}'.";
+    public static void MsgNoMatchFound(IMessageTarget go, string name) => go.Msg(FormatNoMatchFound(name));
+    public static void MsgMultipleMatches(IMessageTarget go, string name) => go.Msg($"Multiple matches for '{name}'.");
+    public static void MsgMultipleMatchesColon(IMessageTarget go, string name) => go.Msg($"Multiple matches for '{name}':");
+    public static void MsgMultipleMatchesFound(IMessageTarget go, string name) => go.Msg($"Multiple matches found for '{name}'.");
+    public static string FormatMultipleMatchesIdList(IEnumerable<GameObject> matches)
+        => $"Multiple matches: {string.Join(", ", matches.Select(m => $"#{m.Id} {m.Name}"))}. Use #id to pick one.";
 }

@@ -67,7 +67,7 @@ public class WorldLoadingTests
             using (var db = new AtherizDbContext(env.TempPath)) { mh.Load(db); }
             Assert.Null(mh.GetMapInfo("zona", 0));
         }
-        finally { GlobalServices.ResetForTesting(); }
+        finally { GlobalServices.Reset(); }
     }
 
     // --- Load under lock / stale overwrite ---

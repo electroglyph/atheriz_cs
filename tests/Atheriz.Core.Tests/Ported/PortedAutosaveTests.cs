@@ -9,7 +9,7 @@ namespace Atheriz.Core.Tests.Ported;
 [Collection("Ported")]
 public class PortedAutosaveTests
 {
-    private static void Reset() => Autosave.ResetForTesting();
+    private static void Reset() => Autosave.Reset();
 
     [Fact]
     public void IntervalZero() { Reset(); Assert.Equal(0, new AtherizSettings{AutosaveMinutes=0}.AutosaveMinutes*60); }
@@ -330,7 +330,7 @@ public class PortedAutosaveTests
         var s = new AtherizSettings{ SavePath=env.TempPath, TimeSystemEnabled=false };
         var channel = new TestChannel("server");
         Atheriz.Core.Globals.ObjectRegistry.AddObject(channel);
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         Atheriz.Core.Globals.ObjectRegistry.AddObject(channel);
         // Need to ensure GetServerChannel picks up new instance after reset
         var ch = GlobalServices.GetServerChannel();
@@ -346,7 +346,7 @@ public class PortedAutosaveTests
         var s = new AtherizSettings{ SavePath=env.TempPath, TimeSystemEnabled=false };
         var channel = new TestChannel("server");
         Atheriz.Core.Globals.ObjectRegistry.AddObject(channel);
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         Atheriz.Core.Globals.ObjectRegistry.AddObject(channel);
         var ch = GlobalServices.GetServerChannel();
         var failingMh = new FailingMapHandler();
@@ -487,7 +487,7 @@ public class PortedAutosaveTests
         var s=new AtherizSettings{SavePath=env.TempPath, TimeSystemEnabled=false};
         // Ensure no server channel
         foreach(var ch in ObjectRegistry.FilterBy(o=>o.IsChannel)) try{ ObjectRegistry.RemoveObject(ch);}catch{}
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var ex=Record.Exception(()=> Autosave.AutosaveTick(s, GlobalServices.GetMapHandler(), GlobalServices.GetNodeHandler(), null));
         Assert.Null(ex);
     }
@@ -498,7 +498,7 @@ public class PortedAutosaveTests
         var s=new AtherizSettings{SavePath=env.TempPath, TimeSystemEnabled=false};
         // Force save_objects failure by closing DB; tick should not throw and should broadcast failure
         AtherizDbContextFactory.CloseDatabase();
-        var channel=new TestChannel("server"); ObjectRegistry.AddObject(channel); GlobalServices.ResetForTesting(); ObjectRegistry.AddObject(channel);
+        var channel=new TestChannel("server"); ObjectRegistry.AddObject(channel); GlobalServices.Reset(); ObjectRegistry.AddObject(channel);
         var ex=Record.Exception(()=> Autosave.AutosaveTick(s));
         Assert.Null(ex);
         // Failure message should contain Autosave failed (verbatim)

@@ -195,13 +195,6 @@ public class PortedContainmentTests
     }
 
     // ----- PutCommand tests -----
-    private class MockArgs
-    {
-        public string Object { get; set; } = "";
-        public List<string> Destination { get; set; } = new();
-        public MockArgs(string obj, List<string> dest) { Object=obj; Destination=dest; }
-    }
-
     [Fact]
     public void PutBlocksContainmentLoopWithMessage()
     {
@@ -229,7 +222,7 @@ public class PortedContainmentTests
         // we need to set contents of mockCaller to contain bag
         // Instead we directly test PutCommand's loop detection by using direct MoveTo already covered; for Put we simulate via manual IsLoop check
         // Simplified: test that PutCommand's IsLoop blocks
-        var args = new MockArgs("Bag", new List<string>{"pouch"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"Bag", "in", "pouch"} };
         // Use a test double for caller that returns specific search results
         var testCaller = new TestCallerForPut("Caller", bag, pouch);
         testCaller.Location = new Persistence.Dto.LocationRef.CoordLocation(room.Coord); room.AddObject(testCaller);
@@ -285,7 +278,7 @@ public class PortedContainmentTests
         bag.AddLock("put", _=>true);
         bag.MoveTo(caller);
         caller.Bag = bag;
-        var args = new MockArgs("Bag", new List<string>{"bag"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"Bag", "in", "bag"} };
         var cmd = new PutCommand();
         cmd.Run(caller, args);
         Assert.Contains(caller.Messages, m => m == "You can't put Bag in Bag - it would create a containment loop.");
@@ -321,7 +314,7 @@ public class PortedContainmentTests
         pouch.MoveTo(caller);
         caller.Bag = bag; caller.Pouch = pouch;
         // need dest search to return bag, obj search pouch
-        var args = new MockArgs("Pouch", new List<string>{"bag"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"Pouch", "in", "bag"} };
         // Actually Put expects object="Pouch", dest bag
         var cmd = new PutCommand();
         // caller.Search will be used for dest and obj; we need to mock correctly
@@ -364,7 +357,7 @@ public class PortedContainmentTests
         var apple = GameObject.Create("Apple", isItem:true); ObjectRegistry.AddObject(apple);
         apple.MoveTo(caller);
         caller.Bag = bag; caller.Pouch = pouch; caller.Apple = apple;
-        var args = new MockArgs("all", new List<string>{"pouch"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"all", "in", "pouch"} };
         var cmd = new PutCommand();
         cmd.Run(caller, args);
         Assert.Contains(caller.Messages, m => m == "You can't put Bag in Pouch - it would create a containment loop.");
@@ -468,7 +461,7 @@ public class PortedContainmentTests
         var deepest = parent;
         deepest.AddLock("put", _=>true);
         caller.Outer = outer; caller.Deepest = deepest;
-        var args = new MockArgs("OuterPut", new List<string>{"deepest"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"OuterPut", "in", "deepest"} };
         var cmd = new PutCommand();
         cmd.Run(caller, args);
         Assert.Contains(caller.Messages, m => m.ToLower().Contains("containment loop"));

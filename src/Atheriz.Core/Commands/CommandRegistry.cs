@@ -44,7 +44,7 @@ public static class CommandRegistry
         }
     }
 
-    public static void ResetForTesting()
+    public static void Reset()
     {
         lock (Lock) { _loggedIn = null; _unloggedIn = null; }
     }
@@ -107,14 +107,14 @@ public static class CommandRegistry
 
     private static void RegisterUnloggedIn(CmdSet cs)
     {
-        // Mirrors atheriz/commands/unloggedin/cmdset.py:14-26 conditional adds
+        // Mirrors atheriz/commands/unloggedin/cmdset.py:14-26 conditional adds,
+        // except all four verbs are ALWAYS registered: the dispatch gate
+        // (CommandDispatcher.IsUnloggedInEnabled) demotes disabled verbs to
+        // "none", so runtime re-enabling works without a registry reset.
         cs.Add(new UnloggedIn.ConnectCommand());
-        if (Atheriz.Core.Settings.AtherizSettings.Global.AccountCreationEnabled)
-            cs.Add(new UnloggedIn.CreateAccountCommand());
-        if (Atheriz.Core.Settings.AtherizSettings.Global.CharCreationEnabled)
-            cs.Add(new UnloggedIn.NewCharacterCommand());
-        if (Atheriz.Core.Settings.AtherizSettings.Global.GuestEnabled)
-            cs.Add(new UnloggedIn.GuestCommand());
+        cs.Add(new UnloggedIn.CreateAccountCommand());
+        cs.Add(new UnloggedIn.NewCharacterCommand());
+        cs.Add(new UnloggedIn.GuestCommand());
         cs.Add(new UnloggedIn.NoneCommand());
         cs.Add(new UnloggedIn.ScreenReaderCommand());
         cs.Add(new UnloggedIn.HelpCommand());

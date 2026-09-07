@@ -31,11 +31,11 @@ public class PortedMazeBackgroundRegressionTests
 
     private static void InjectMapHandler(MapHandler mh)
     {
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         // Re-inject map handler via reflection; also set NodeHandler current if needed separately
         var f = typeof(GlobalServices).GetField("_mapHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         f!.SetValue(null, mh);
-        try { MapHandlerHolder.Set(mh); } catch { }
+        try { GlobalServices.SetMapHandler(mh); } catch { }
         try
         {
             var t = typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton");
@@ -59,7 +59,7 @@ public class PortedMazeBackgroundRegressionTests
         fm!.SetValue(null, mh);
         var fn = typeof(GlobalServices).GetField("_nodeHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         fn!.SetValue(null, nh);
-        try { MapHandlerHolder.Set(mh); } catch { }
+        try { GlobalServices.SetMapHandler(mh); } catch { }
         try
         {
             var t = typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton");

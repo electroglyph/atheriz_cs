@@ -201,7 +201,7 @@ public static class GameUtils
 
     public const int MaxSphereRadius = 100;
 
-    public static List<(int X, int Y, int Z)> GetPointsInSphere((int X, int Y, int Z) center, double radius, bool ignoreCenter = false)
+    public static List<(int X, int Y, int Z)> GetPointsInSphere((int X, int Y, int Z) center, double radius, bool ignoreCenter = false, int maxResults = int.MaxValue)
     {
         if (radius < 0 || radius > MaxSphereRadius) throw new ArgumentOutOfRangeException(nameof(radius), $"radius {radius} out of bounds [0, {MaxSphereRadius}]");
         var (cx, cy, cz) = center;
@@ -214,7 +214,13 @@ public static class GameUtils
                 {
                     if (ignoreCenter && x == cx && y == cy && z == cz) continue;
                     var distSq = (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz);
-                    if (distSq <= r2) points.Add((x, y, z));
+                    if (distSq <= r2)
+                    {
+                        points.Add((x, y, z));
+                        // Pagination guard: r=100 fills ~4M points in one alloc;
+                        // callers that page stop the enumeration early here.
+                        if (points.Count >= maxResults) return points;
+                    }
                 }
         return points;
     }
@@ -223,36 +229,48 @@ public static class GameUtils
     // C# addition: also accepts C# game folder (any *.csproj at cwd, e.g. MyGame.csproj + GameSettings.cs from `new`) so that
     // `dotnet run --project src/Atheriz.Server -- new` + `create`/`start` work without Python settings.py.
     public static bool IsInGameFolder() => IsInGameFolder(OperatingSystem.IsWindows() ? "nt" : "posix");
+    // No cache by design: callers are CLI-op-frequency guard paths, and markers
+    // are created/deleted between calls. A directory-mtime-keyed cache proved
+    // stale here — .NET's GetLastWriteTimeUtc does not observe File.Delete on
+    // this platform (empirically mtime-equal across a delete), and any key
+    // omitting osName poisons the nt/posix branches against each other.
     public static bool IsInGameFolder(string osName)
     {
-        var cwd = Directory.GetCurrentDirectory();
+        string? cwd;
+        try { cwd = Directory.GetCurrentDirectory(); }
+        catch { cwd = null; }
+        return CheckGameFolder(osName, cwd);
+    }
+    private static bool CheckGameFolder(string osName, string? cwd)
+    {
+        var dir = cwd ?? Directory.GetCurrentDirectory();
         bool isNt = string.Equals(osName, "nt", StringComparison.OrdinalIgnoreCase);
         bool isPython;
         // Port of utils.py:49-55 nt branch uses _exists_exact_str case-insensitive
         if (isNt)
         {
-            isPython = ExistsExact(Path.Combine(cwd, "settings.py"), "nt")
-                && ExistsExact(Path.Combine(cwd, "__init__.py"), "nt")
-                && !ExistsExact(Path.Combine(cwd, "atheriz.py"), "nt");
+            isPython = ExistsExact(Path.Combine(dir, "settings.py"), "nt")
+                && ExistsExact(Path.Combine(dir, "__init__.py"), "nt")
+                && !ExistsExact(Path.Combine(dir, "atheriz.py"), "nt");
         }
         else
         {
-            // Port of utils.py:56-61 posix branch — cwd / "settings.py" exists etc (case-sensitive)
-            isPython = File.Exists(Path.Combine(cwd, "settings.py"))
-                && File.Exists(Path.Combine(cwd, "__init__.py"))
-                && !File.Exists(Path.Combine(cwd, "atheriz.py"));
+            // Port of utils.py:56-61 posix branch — dir / "settings.py" exists etc (case-sensitive)
+            isPython = File.Exists(Path.Combine(dir, "settings.py"))
+                && File.Exists(Path.Combine(dir, "__init__.py"))
+                && !File.Exists(Path.Combine(dir, "atheriz.py"));
         }
         if (isPython) return true;
-        // C# game folder: `atheriz new` template creates <Name>.csproj + GameSettings.cs at cwd
+        // C# game folder: `atheriz new` template creates <Name>.csproj + GameSettings.cs at dir
         // Require both to avoid treating src/Atheriz.Server (csproj but no GameSettings.cs) as game folder
         try
         {
-            bool hasCsproj = Directory.EnumerateFiles(cwd, "*.csproj").Any();
+            bool hasCsproj = Directory.EnumerateFiles(dir, "*.csproj").Any();
             bool hasGameSettings;
             if (isNt)
-                hasGameSettings = ExistsExact(Path.Combine(cwd, "GameSettings.cs"), "nt");
+                hasGameSettings = ExistsExact(Path.Combine(dir, "GameSettings.cs"), "nt");
             else
-                hasGameSettings = File.Exists(Path.Combine(cwd, "GameSettings.cs"));
+                hasGameSettings = File.Exists(Path.Combine(dir, "GameSettings.cs"));
             if (hasCsproj && hasGameSettings) return true;
         }
         catch { }
@@ -370,33 +388,6 @@ public static class GameUtils
         return string.Join(normSep + " ", strs.Take(strs.Count - 1)) + normEnd + " " + strs[^1];
     }
 
-    // Port of atheriz/utils.py:605 is_empty_method — approximated via IL (handles debug locals/br)
-    public static bool IsEmptyMethod(MethodInfo? method)
-    {
-        if (method == null) return false;
-        try
-        {
-            var body = method.GetMethodBody();
-            if (body == null) return false;
-            var il = body.GetILAsByteArray();
-            if (il == null || il.Length == 0) return true;
-            var ops = new List<byte>();
-            for (int i = 0; i < il.Length;)
-            {
-                byte op = il[i++];
-                if (op == 0xFE) { if (i < il.Length) { ops.Add(il[i++]); } continue; }
-                ops.Add(op);
-                int sz = op switch { 0x13 or 0x11 or 0x2B or 0x1F => 1, 0x38 => 4, 0x20 or 0x28 or 0x72 or 0x73 => 4, 0x21 or 0x22 or 0x23 => 8, _ => 0 };
-                i += sz;
-            }
-            var trivial = new HashSet<byte>{0x00,0x14,0x2A,0x0A,0x0B,0x0C,0x0D,0x06,0x07,0x08,0x09,0x11,0x13,0x2B,0x38};
-            if (ops.Any(o => !trivial.Contains(o))) return false;
-            bool hasLdNull = ops.Contains((byte)0x14), hasRet = ops.Contains((byte)0x2A);
-            if (!hasRet) return false; return !hasLdNull || ops.Count(o => o == 0x14) == 1;
-        }
-        catch { return false; }
-    }
-
     // Port of atheriz/utils.py:642 _build_signature_from_code shim — in C# use MethodInfo.GetParameters
     public static ParameterInfo[] BuildSignature(Delegate del) => del.Method.GetParameters(); // Port of utils.py:642 shim
 
@@ -404,38 +395,6 @@ public static class GameUtils
 
     // Alias for Python name
     public static ParameterInfo[] BuildSignatureFromCode(MethodInfo method) => BuildSignature(method);
-
-    // Port of atheriz/utils.py:701 get_class_hooks
-    public static List<(string Name, ParameterInfo[] Signature, string? Doc, bool IsEmpty)> GetClassHooks(Type cls)
-    {
-        var result = new List<(string, ParameterInfo[], string?, bool)>();
-        var overridePrefixes = new[] { "at_", "access_", "format_", "pre_", "post_" };
-        var alwaysInclude = new HashSet<string>(StringComparer.Ordinal) { "setup_parser", "run", "SetupParser", "Run" };
-        var methods = cls.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.FlattenHierarchy);
-        foreach (var m in methods)
-        {
-            var name = m.Name;
-            if (name.StartsWith("_") && !alwaysInclude.Contains(name)) continue;
-            bool faithful = overridePrefixes.Any(p => name.StartsWith(p, StringComparison.Ordinal)) || alwaysInclude.Contains(name);
-            bool pascalHook = name.StartsWith("At", StringComparison.Ordinal) || name.StartsWith("Access", StringComparison.Ordinal)
-                || name.StartsWith("Format", StringComparison.Ordinal) || name.StartsWith("Pre", StringComparison.Ordinal) || name.StartsWith("Post", StringComparison.Ordinal);
-            if (!faithful && !pascalHook) continue;
-            // Skip object base methods
-            if (m.DeclaringType == typeof(object)) continue;
-            ParameterInfo[] sig;
-            try { sig = m.GetParameters(); } catch { sig = BuildSignature(m); }
-            string? doc = null;
-            try
-            {
-                var desc = m.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>();
-                doc = desc?.Description;
-            }
-            catch { }
-            bool isEmpty = IsEmptyMethod(m);
-            result.Add((name, sig, doc, isEmpty));
-        }
-        return result;
-    }
 
     // Port of atheriz/utils.py:141 detach — deepcopy via JSON roundtrip (mirrors dill roundtrip)
     public static T? Detach<T>(T value)

@@ -182,7 +182,7 @@ public static class StartStop
                 {
                     var t = ticker ?? TryGetTicker();
                     if (t != null) Autosave.StopAutosave(t);
-                    else Autosave.ResetForTesting(); // fallback placeholder
+                    else Autosave.Reset(); // fallback placeholder
                 }
                 catch (Exception) { }
             });
@@ -456,46 +456,60 @@ public static class StartStop
         // Crash-consistency journal: see AutosaveTick.
         Persistence.CheckpointJournal.MarkDirty(settings.SavePath);
         bool ok = true;
-        ShutdownStep("save_objects", () =>
+        // Atomic checkpoint: one shared context for all three groups — separate
+        // contexts allowed a crash between groups to tear the world. Every
+        // retry below also stays on settings.SavePath: the old per-step
+        // fallbacks used the ambient Factory path, which writes to the WRONG
+        // DB when the paths differ.
+        try
         {
-            try
+            using var db = new AtherizDbContext(settings.SavePath);
+            db.Database.EnsureCreated();
+            ShutdownStep("save_objects", () =>
             {
-                using var db = new AtherizDbContext(settings.SavePath);
-                db.Database.EnsureCreated();
-                ObjectRegistry.SaveObjects(db);
-            }
-            catch (Exception ex) { ok = false; Console.Error.WriteLine($"save_objects failed:\n{ex}"); }
-        });
-        ShutdownStep("map_save", () =>
-        {
-            try
+                try { ObjectRegistry.SaveObjects(db); }
+                catch (Exception ex) { ok = false; Console.Error.WriteLine($"save_objects failed:\n{ex}"); }
+            });
+            ShutdownStep("map_save", () =>
             {
-                var mh = GlobalServices.GetMapHandler();
-                using var db = new AtherizDbContext(settings.SavePath);
-                db.Database.EnsureCreated();
-                mh.Save(db);
-            }
-            catch
+                try
+                {
+                    var mh = GlobalServices.GetMapHandler();
+                    mh.Save(db);
+                }
+                catch
+                {
+                    try
+                    {
+                        var mh = GlobalServices.GetMapHandler();
+                        using var db2 = new AtherizDbContext(settings.SavePath);
+                        db2.Database.EnsureCreated();
+                        mh.Save(db2);
+                    }
+                    catch { ok = false; }
+                }
+            });
+            ShutdownStep("node_save", () =>
             {
-                try { GlobalServices.GetMapHandler().Save(); }
-                catch { ok = false; }
-            }
-        });
-        ShutdownStep("node_save", () =>
-        {
-            try
-            {
-                var nh = GlobalServices.GetNodeHandler();
-                using var db = new AtherizDbContext(settings.SavePath);
-                db.Database.EnsureCreated();
-                nh.Save(db);
-            }
-            catch
-            {
-                try { GlobalServices.GetNodeHandler().Save(); }
-                catch { ok = false; }
-            }
-        });
+                try
+                {
+                    var nh = GlobalServices.GetNodeHandler();
+                    nh.Save(db);
+                }
+                catch
+                {
+                    try
+                    {
+                        var nh = GlobalServices.GetNodeHandler();
+                        using var db2 = new AtherizDbContext(settings.SavePath);
+                        db2.Database.EnsureCreated();
+                        nh.Save(db2);
+                    }
+                    catch { ok = false; }
+                }
+            });
+        }
+        catch (Exception ex) { ok = false; Console.Error.WriteLine($"checkpoint context failed:\n{ex}"); }
         if (ok) Persistence.CheckpointJournal.MarkClean(settings.SavePath);
     }
 
@@ -568,8 +582,8 @@ public static class StartStop
         }
     }
 
-    // For tests — mirrors ServerLifecycle.ResetForTesting and Python _shutdown_completed reset
-    public static void ResetForTesting()
+    // For tests — mirrors ServerLifecycle.Reset and Python _shutdown_completed reset
+    public static void Reset()
     {
         lock (_shutdownLock)
         {
@@ -577,8 +591,9 @@ public static class StartStop
             _shuttingDown = false;
             _started = false;
         }
-        try { Autosave.ResetForTesting(); } catch (Exception) { }
-        try { GlobalServices.ResetForTesting(); } catch (Exception) { }
-        try { MapEdit.ResetForTesting(); } catch (Exception) { }
+        try { Autosave.Reset(); } catch (Exception) { }
+        try { GlobalServices.Reset(); } catch (Exception) { }
+        try { MapEdit.Reset(); } catch (Exception) { }
     }
+
 }

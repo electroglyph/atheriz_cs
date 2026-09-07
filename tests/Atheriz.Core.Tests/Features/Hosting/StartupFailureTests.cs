@@ -30,7 +30,7 @@ public class StartupFailureTests
         }
         finally
         {
-            ServerLifecycle.ResetForTesting();
+            ServerLifecycle.Reset();
             try { File.Delete(file); } catch { }
         }
     }

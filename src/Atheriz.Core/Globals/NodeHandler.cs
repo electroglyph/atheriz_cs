@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
+using Atheriz.Core.Persistence.Dto;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Globals;
@@ -29,8 +30,6 @@ public partial class NodeHandler
     public IDisposable WriteScope2() { _lock2.EnterWriteLock(); return new LockScope(_lock2, true); }
     public IDisposable ReadScope3() { _lock3.EnterReadLock(); return new LockScope(_lock3, false); }
     public IDisposable WriteScope3() { _lock3.EnterWriteLock(); return new LockScope(_lock3, true); }
-    // Test hook for serialization lock verification (port of dill.dumps monkeypatch)
-    public static Func<object, string>? TestSerializeHook;
     private readonly Dictionary<string, NodeArea> _areas = new();
     private readonly Dictionary<Coord, Transition> _transitions = new();
     private readonly Dictionary<Coord, Dictionary<string, Door>> _doors = new();
@@ -38,6 +37,16 @@ public partial class NodeHandler
     // Port of node.py:42-43 _trans_gen/_door_gen: mutation counters so Save
     // only clears _modified2/_modified3 when nothing changed since the snapshot.
     private long _transGen, _doorGen, _areaGen;
+    // Tombstones (MapHandler parity): keys removed since the last successful
+    // save. RemoveArea/RemoveTransition drop their rows, but Save otherwise
+    // only upserts — without deletes a removed key resurrects on the next
+    // process Load. RemoveDoor needs none (doors live as values inside the
+    // per-coord dict row, which Save rewrites wholesale); Remap* records the
+    // relocated-from keys instead. Guarded by the domain lock each set lives
+    // under (Lock / Lock2 / Lock3).
+    private readonly HashSet<string> _removedAreas = new();
+    private readonly HashSet<Coord> _removedTrans = new();
+    private readonly HashSet<Coord> _removedDoors = new();
 
     private static NodeHandler? _current;
     private static readonly object _currentLock = new();
@@ -57,6 +66,10 @@ public partial class NodeHandler
         try
         {
             db.Database.EnsureCreated();
+            // Lock order handler -> registry: evictions are collected under the
+            // handler lock and applied after release (LoadInto holds Lock while
+            // invoking this callback; RemoveObject takes the registry AllLock).
+            var loadEvict = new List<Node>();
             JsonTableLoader.LoadInto(db.Areas, Lock, json => JsonSerializer.Deserialize<NodeAreaDto>(json, JsonOptions.Default), (dto, row) =>
             {
                 // Per-row report: corrupt areas are skipped, never silent.
@@ -89,19 +102,33 @@ public partial class NodeHandler
                                 }
                                 catch { grafted = false; }
                                 if (!grafted)
-                                    try { ObjectRegistry.RemoveObject(n); } catch (Exception) { }
+                                    loadEvict.Add(n);
                             }
                     }
                     _areas[na.Name] = na;
+                    // A re-loaded row is live again: drop any tombstone so a
+                    // later Save does not delete the resurrected row.
+                    _removedAreas.Remove(na.Name);
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt area row {row.Name}: {ex.GetType().Name}"); } catch (Exception) { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt area row {row.Name}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
                     throw;
                 }
             });
-            JsonTableLoader.LoadInto(db.Transitions, Lock2, json => JsonSerializer.Deserialize<Transition>(json, JsonOptions.Default), (dto, row) => _transitions[dto.ToCoord] = dto);
-            JsonTableLoader.LoadInto(db.Doors, Lock3, json => JsonSerializer.Deserialize<Dictionary<string, Door>>(json, JsonOptions.Default), (dto, row) => _doors[new Coord(row.Area, row.X, row.Y, row.Z)] = dto);
+            foreach (var n in loadEvict)
+                try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+            JsonTableLoader.LoadInto(db.Transitions, Lock2, json => JsonSerializer.Deserialize<Transition>(json, JsonOptions.Default), (dto, row) =>
+            {
+                _transitions[dto.ToCoord] = dto;
+                _removedTrans.Remove(dto.ToCoord);
+            });
+            JsonTableLoader.LoadInto(db.Doors, Lock3, json => JsonSerializer.Deserialize<Dictionary<string, Door>>(json, JsonOptions.Default), (dto, row) =>
+            {
+                var key = new Coord(row.Area, row.X, row.Y, row.Z);
+                _doors[key] = dto;
+                _removedDoors.Remove(key);
+            });
             // Evict rows deleted from the DB (full-table load): absent keys must
             // not resurrect. Raw row keys (not successful deserializations)
             // distinguish deletion (DB empty) from corruption (DB has rows but
@@ -112,23 +139,26 @@ public partial class NodeHandler
                 try { dbAreaNames = new HashSet<string>(db.Areas.AsNoTracking().Select(r => r.Name).ToList()); } catch { dbAreaNames = null; }
                 if (dbAreaNames != null)
                 {
-                    List<string> toRemove;
+                    // Compute + remove under ONE write hold: the old split
+                    // (collect, release, per-name remove) let a concurrent
+                    // AddArea(name) land between collect and remove and lose
+                    // the new area. Removed areas are evicted after release
+                    // (RemoveObject takes the registry AllLock).
+                    List<(string name, NodeArea removed)> evictedAreas;
                     Lock.EnterWriteLock();
-                    try { toRemove = _areas.Keys.Where(k => !dbAreaNames.Contains(k)).ToList(); }
-                    finally { Lock.ExitWriteLock(); }
-                    foreach (var name in toRemove)
+                    try
                     {
-                        NodeArea? removed = null;
-                        Lock.EnterWriteLock();
-                        try { if (_areas.TryGetValue(name, out var a)) { _areas.Remove(name); removed = a; } }
-                        finally { Lock.ExitWriteLock(); }
-                        if (removed != null)
-                        {
-                            foreach (var g in removed.Grids.Values)
-                                foreach (var n in g.Nodes.Values.ToList())
-                                    try { ObjectRegistry.RemoveObject(n); } catch (Exception) { }
-                            try { AtherizLogger.LogWarning($"[Load] evicting deleted area {name}"); } catch (Exception) { }
-                        }
+                        evictedAreas = new List<(string, NodeArea)>();
+                        foreach (var k in _areas.Keys.Where(k => !dbAreaNames.Contains(k)).ToList())
+                            if (_areas.Remove(k, out var a) && a != null) evictedAreas.Add((k, a));
+                    }
+                    finally { Lock.ExitWriteLock(); }
+                    foreach (var (name, removed) in evictedAreas)
+                    {
+                        foreach (var g in removed.Grids.Values)
+                            foreach (var n in g.Nodes.Values.ToList())
+                                try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+                        try { AtherizLogger.LogWarning($"[Load] evicting deleted area {name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
                     }
                 }
                 HashSet<(string, int, int, int)>? dbTransKeys = null;
@@ -156,9 +186,14 @@ public partial class NodeHandler
                     finally { Lock3.ExitWriteLock(); }
                 }
             }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
         }
-        catch { return; }
+        catch (Exception ex)
+        {
+            // Load-swallow: a failed load keeps live state, but never silently.
+            try { AtherizLogger.LogWarning($"[Load] node load failed, keeping live state: {ex.GetType().Name} {ex.Message}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+            return;
+        }
 
         int maxNodeId = 0;
         List<NodeArea> areasSnap;
@@ -184,16 +219,16 @@ public partial class NodeHandler
                     if (existing.Count > 0 && !ReferenceEquals(existing[0], node))
                     {
                         bool liveModified = false;
-                        try { liveModified = existing[0].IsModified; } catch (Exception) { }
+                        try { liveModified = existing[0].IsModified; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
                         if (liveModified)
                         {
-                            try { AtherizLogger.LogWarning($"[Load] skipping stale node row {node.Id} (live modified)"); } catch (Exception) { }
+                            try { AtherizLogger.LogWarning($"[Load] skipping stale node row {node.Id} (live modified)"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
                             continue;
                         }
                     }
                     ObjectRegistry.AddObject(node);
                     // Port of node.py:84-86 node.resolve_relations() — reinstall script hooks, ticker, at_init
-                    try { node.ResolveRelations(); } catch (Exception) { }
+                    try { node.ResolveRelations(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
                 }
             }
         }
@@ -247,6 +282,13 @@ public partial class NodeHandler
         return false;
     }
 
+    /// <summary>
+    /// Serializes one save snapshot DTO. Virtual so game code can customize
+    /// snapshot encoding (e.g. compression); the default is plain JSON.
+    /// Runs outside the DB gate — implementations must not take DbWriteGate.
+    /// </summary>
+    protected virtual string SerializeSnapshot(object dto) => JsonSerializer.Serialize(dto, JsonOptions.Default);
+
     public virtual void Save(bool force = false)
     {
         if (!force && !ObjectRegistry.AlwaysSaveAll && !IsDirty()) return;
@@ -273,15 +315,18 @@ public partial class NodeHandler
         List<NodeArea> areaRefs;
         bool handlerWas;
         long areaGen0;
-        using (ReadScope()) { areaRefs = _areas.Values.ToList(); handlerWas = _modified; areaGen0 = _areaGen; }
+        HashSet<string> areaDeletes;
+        using (ReadScope()) { areaRefs = _areas.Values.ToList(); handlerWas = _modified; areaGen0 = _areaGen; areaDeletes = new HashSet<string>(_removedAreas); areaDeletes.ExceptWith(_areas.Keys); }
         var transRefs = new List<Transition>();
         bool transWas;
         long transGen0;
-        using (ReadScope2()) { transRefs = _transitions.Values.ToList(); transWas = _modified2; transGen0 = _transGen; }
+        HashSet<Coord> transDeletes;
+        using (ReadScope2()) { transRefs = _transitions.Values.ToList(); transWas = _modified2; transGen0 = _transGen; transDeletes = new HashSet<Coord>(_removedTrans); transDeletes.ExceptWith(_transitions.Keys); }
         List<(Coord, Dictionary<string, Door>)> doorsRefs;
         bool doorsWas;
         long doorGen0;
-        using (ReadScope3()) { doorsRefs = _doors.Select(kv => (kv.Key, new Dictionary<string, Door>(kv.Value))).ToList(); doorsWas = _modified3; doorGen0 = _doorGen; }
+        HashSet<Coord> doorDeletes;
+        using (ReadScope3()) { doorsRefs = _doors.Select(kv => (kv.Key, new Dictionary<string, Door>(kv.Value))).ToList(); doorsWas = _modified3; doorGen0 = _doorGen; doorDeletes = new HashSet<Coord>(_removedDoors); doorDeletes.ExceptWith(_doors.Keys); }
 
         // Detach copies (fresh locks, is_modified false)
         var transitionsSnap = transRefs.Select(t => new Transition(t.FromCoord, t.ToCoord, t.Name)).ToList();
@@ -390,7 +435,8 @@ public partial class NodeHandler
                 clearedNodes.AddRange(localNodes);
             }
 
-            if (areasDto.Count==0 && transitionsSnap.Count==0 && doorsSnap.Count==0)
+            if (areasDto.Count==0 && transitionsSnap.Count==0 && doorsSnap.Count==0
+                && areaDeletes.Count==0 && transDeletes.Count==0 && doorDeletes.Count==0)
             {
                 // restore if nothing to write
                 if (handlerWas) { Lock.EnterWriteLock(); try{ _modified=true;} finally{Lock.ExitWriteLock();} }
@@ -405,17 +451,17 @@ public partial class NodeHandler
             // Serialize outside DB gate
             foreach (var dto in areasDto)
             {
-                var json = TestSerializeHook != null ? TestSerializeHook(dto) : JsonSerializer.Serialize(dto, JsonOptions.Default);
+                var json = SerializeSnapshot(dto);
                 areaJsons.Add((dto, json));
             }
             foreach (var t in transitionsSnap)
             {
-                var json = TestSerializeHook != null ? TestSerializeHook(t) : JsonSerializer.Serialize(t, JsonOptions.Default);
+                var json = SerializeSnapshot(t);
                 transJsons.Add((t, json));
             }
             foreach (var item in doorsSnap)
             {
-                var json = TestSerializeHook != null ? TestSerializeHook(item.Item2) : JsonSerializer.Serialize(item.Item2, JsonOptions.Default);
+                var json = SerializeSnapshot(item.Item2);
                 doorsJsons.Add((item, json));
             }
         }
@@ -461,6 +507,22 @@ public partial class NodeHandler
                     var coord = item.coord;
                     DbTransactionHelper.UpsertJson(ctx.Doors, () => ctx.Doors.Find(coord.Area, coord.X, coord.Y, coord.Z), () => new Persistence.Entities.DoorRow { Area = coord.Area, X = coord.X, Y = coord.Y, Z = coord.Z }, json);
                 }
+                // Tombstone deletes ride the SAME transaction as the upserts.
+                foreach (var name in areaDeletes)
+                {
+                    var row = ctx.Areas.Find(name);
+                    if (row != null) ctx.Areas.Remove(row);
+                }
+                foreach (var key in transDeletes)
+                {
+                    var row = ctx.Transitions.Find(key.Area, key.X, key.Y, key.Z);
+                    if (row != null) ctx.Transitions.Remove(row);
+                }
+                foreach (var key in doorDeletes)
+                {
+                    var row = ctx.Doors.Find(key.Area, key.X, key.Y, key.Z);
+                    if (row != null) ctx.Doors.Remove(row);
+                }
             }, onRollback: () =>
             {
                 if (handlerWas) { Lock.EnterWriteLock(); try { _modified = true; } finally { Lock.ExitWriteLock(); } }
@@ -500,97 +562,10 @@ public partial class NodeHandler
             return;
         }
         MarkHandlerClean();
+        // Success path only (every failure path above returns or throws):
+        // the tombstoned rows are now gone from the DB.
+        if (areaDeletes.Count > 0) { Lock.EnterWriteLock(); try { _removedAreas.ExceptWith(areaDeletes); } finally { Lock.ExitWriteLock(); } }
+        if (transDeletes.Count > 0) { Lock2.EnterWriteLock(); try { _removedTrans.ExceptWith(transDeletes); } finally { Lock2.ExitWriteLock(); } }
+        if (doorDeletes.Count > 0) { Lock3.EnterWriteLock(); try { _removedDoors.ExceptWith(doorDeletes); } finally { Lock3.ExitWriteLock(); } }
     }
-
-    // DTO helpers for JSON persistence
-    private sealed class NodeDto
-    {
-        public Coord Coord { get; set; }
-        public string Name { get; set; } = "";
-        public string Desc { get; set; } = "";
-        public string Theme { get; set; } = "";
-        public string Symbol { get; set; } = "";
-        public string? LegendDesc { get; set; }
-        public List<NodeLink> Links { get; set; } = [];
-        public Dictionary<string,string> Nouns { get; set; } = new();
-        public int Id { get; set; }
-        public HashSet<int> Scripts { get; set; } = new();
-        public string? ObjectType { get; set; }
-    }
-    private sealed class NodeGridDto
-    {
-        public string Area { get; set; } = "";
-        public int Z { get; set; }
-        public Dictionary<string, NodeDto> Nodes { get; set; } = new();
-        public Dictionary<string, JsonElement> Data { get; set; } = new();
-    }
-    private sealed class NodeAreaDto
-    {
-        public string Name { get; set; } = "";
-        public string Theme { get; set; } = "";
-        public Dictionary<int, NodeGridDto> Grids { get; set; } = new();
-        public Dictionary<string, JsonElement> Data { get; set; } = new();
-        public HashSet<string>? LinkedAreas { get; set; }
-        public NodeArea ToDomain()
-        {
-            var area=new NodeArea(Name, Theme){ Data=Data, LinkedAreas=LinkedAreas, IsModified=false };
-            foreach(var (z,gdto) in Grids)
-            {
-                var grid=new NodeGrid(gdto.Area, gdto.Z, gdto.Data){ IsModified=false };
-                foreach(var kv in gdto.Nodes)
-                {
-                    var nd=kv.Value;
-                    Node node;
-                    // Preserve concrete Node subclass via ObjectType (dill-like fidelity) — mirrors GameObject.FromDto __object_type handling
-                    if (!string.IsNullOrEmpty(nd.ObjectType))
-                    {
-                        // Explicit subtype registry (replaces Type.GetType +
-                        // assembly scan + Activator): only registered names
-                        // reconstruct; anything else falls through to plain Node.
-                        Node? inst = null;
-                        try { Node.TryCreatePersistedSubtype(nd.ObjectType!, nd.Coord, out inst); } catch { inst = null; }
-                        if (inst != null)
-                        {
-                                // Remove from ObjectRegistry the auto-registered instance's temporary id collision
-                                try { ObjectRegistry.RemoveObject(inst); } catch (Exception) { }
-                                inst.Coord = nd.Coord;
-                                inst.Desc = nd.Desc;
-                                // base Name is coord string for Node, but preserve if needed
-                                inst.Theme = nd.Theme ?? "";
-                                inst.Symbol = nd.Symbol ?? "";
-                                inst.LegendDesc = nd.LegendDesc;
-                                inst.Links = nd.Links ?? new List<NodeLink>();
-                                inst.Nouns = nd.Nouns ?? new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
-                                inst.SetIdRaw(nd.Id);
-                                IdGenerator.EnsureAtLeast(nd.Id);
-                                // Restore scripts into the shared base scripts set (typed; was _nodeScripts/_scripts reflection)
-                                if (nd.Scripts != null && nd.Scripts.Count > 0)
-                                    inst.RestoreScriptIds(nd.Scripts);
-                                inst.IsModified=false;
-                                node = inst;
-                                grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
-                                continue;
-                            }
-                    }
-                    node = Node.CreateForLoad(nd.Coord);
-                    node.Name = nd.Name;
-                    node.Desc = nd.Desc;
-                    node.Theme = nd.Theme ?? "";
-                    node.Symbol = nd.Symbol ?? "";
-                    node.LegendDesc = nd.LegendDesc;
-                    node.Links = nd.Links ?? new List<NodeLink>();
-                    node.Nouns = nd.Nouns ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    node.SetIdRaw(nd.Id);
-                    IdGenerator.EnsureAtLeast(nd.Id);
-                    if (nd.Scripts != null && nd.Scripts.Count > 0)
-                        node.RestoreScriptIds(nd.Scripts);
-                    node.IsModified = false;
-                    grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
-                }
-                area.Grids[z]=grid;
-            }
-            return area;
-        }
-    }
-
 }

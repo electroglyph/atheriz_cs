@@ -224,17 +224,21 @@ public class PortedDatabaseTests
         obj.GetSaveOps();
         Assert.True(obj.IsModified);
     }
-    private sealed class LockCountTracker : IWriteLockTracker { public int Entries = 0; public void TrackWriteLock() => Entries++; }
     [Fact] public void SaveUsesLock()
     {
-        var obj=new DbHolder(); obj.Id=1;
-        var tracker = new LockCountTracker();
-        var trackerField = typeof(GameObject).GetField("_testTracker", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        trackerField!.SetValue(obj, tracker);
-        obj.GetSaveOps();
-        Assert.True(tracker.Entries > 0);
-        // Also ensure exactly one acquisition for faithful to Python's acquired == [True]
-        Assert.Equal(1, tracker.Entries);
+        // GetSaveOps serializes under the object's write lock — proven behaviorally:
+        // a worker GetSaveOps blocks while this thread holds SyncRoot for write.
+        var obj = new DbHolder(); obj.Id = 1;
+        obj.SyncRoot.EnterWriteLock();
+        (string Sql, object[] Params)? result = null;
+        var task = Task.Run(() => { result = obj.GetSaveOps(); });
+        try
+        {
+            Assert.False(task.Wait(TimeSpan.FromMilliseconds(300)), "GetSaveOps completed without acquiring the write lock");
+        }
+        finally { obj.SyncRoot.ExitWriteLock(); }
+        Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "GetSaveOps did not finish after the lock was released");
+        Assert.NotNull(result);
     }
     [Fact] public void FlagStaysDirtyAcrossRepeatedSaveOps()
     {
@@ -357,40 +361,42 @@ public class PortedDatabaseTests
         finally { GameObjectDtoSerializer.ToJsonHook = origHook; }
     }
 
+    // Recording subclasses: observe the snapshot-serialization boundary through
+    // the virtual SerializeSnapshot step (replaces the removed TestSerializeHook).
+    private sealed class RecordingMapHandler : MapHandler
+    {
+        public readonly List<bool> Held = new();
+        public RecordingMapHandler() : base(autoLoad: false) { }
+        protected override string SerializeSnapshot(object dto) { Held.Add(IsDbLocked()); return base.SerializeSnapshot(dto); }
+    }
+
+    private sealed class RecordingNodeHandler : NodeHandler
+    {
+        public readonly List<bool> Held = new();
+        public RecordingNodeHandler() : base(autoLoad: false) { }
+        protected override string SerializeSnapshot(object dto) { Held.Add(IsDbLocked()); return base.SerializeSnapshot(dto); }
+    }
+
     // Port of test_database.py:421 test_map_handler_save_releases_db_lock_before_serialization
     [Fact] public void MapHandlerSaveReleasesDbLockBeforeSerialization()
     {
         using var env=GlobalTestEnv.Enter();
-        var mh=GlobalServices.GetMapHandler();
+        var mh = new RecordingMapHandler();
         var mi=new MapInfo("ProbeMapSave"); mi.PreGrid[(1,1)]="Y"; mh.SetMapInfo("ProbeMapSave",0, mi);
-        var held=new List<bool>();
-        var orig = MapHandler.TestSerializeHook;
-        MapHandler.TestSerializeHook = o => { held.Add(IsDbLocked()); return System.Text.Json.JsonSerializer.Serialize(o, Persistence.JsonOptions.Default); };
-        try
-        {
-            mh.Save(force:true);
-            Assert.NotEmpty(held);
-            Assert.DoesNotContain(true, held);
-        }
-        finally { MapHandler.TestSerializeHook = orig; }
+        mh.Save(force:true);
+        Assert.NotEmpty(mh.Held);
+        Assert.DoesNotContain(true, mh.Held);
     }
 
     // Port of test_database.py:445 test_node_handler_save_releases_db_lock_before_serialization
     [Fact] public void NodeHandlerSaveReleasesDbLockBeforeSerialization()
     {
         using var env=GlobalTestEnv.Enter();
-        var nh=GlobalServices.GetNodeHandler();
+        var nh = new RecordingNodeHandler();
         var n=new Node(new Coord("ProbeNodeSave",0,0,0), desc:"n"); nh.AddNode(n);
-        var held=new List<bool>();
-        var orig = NodeHandler.TestSerializeHook;
-        NodeHandler.TestSerializeHook = o => { held.Add(IsDbLocked()); return System.Text.Json.JsonSerializer.Serialize(o, Persistence.JsonOptions.Default); };
-        try
-        {
-            nh.Save(force:true);
-            Assert.NotEmpty(held);
-            Assert.DoesNotContain(true, held);
-        }
-        finally { NodeHandler.TestSerializeHook = orig; }
+        nh.Save(force:true);
+        Assert.NotEmpty(nh.Held);
+        Assert.DoesNotContain(true, nh.Held);
     }
 
     [Fact] public void BusyTimeoutIsConfigured()

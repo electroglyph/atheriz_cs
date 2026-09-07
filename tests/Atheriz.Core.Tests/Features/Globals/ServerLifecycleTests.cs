@@ -21,10 +21,10 @@ public class ServerLifecycleTests
     // --- ServerLifecycle readiness ---
 
     [Fact]
-    public void ServerLifecycle_ResetForTesting_ClearsStartupFlag()
+    public void ServerLifecycle_Reset_ClearsStartupFlag()
     {
         // DoStartup records startup success only on success, and
-        // ResetForTesting clears the flag, so /ready never reports ok for a
+        // Reset clears the flag, so /ready never reports ok for a
         // failed startup.
         using var env = GlobalTestEnv.Enter();
         var settings = new AtherizSettings { SavePath = env.TempPath, TimeSystemEnabled = false, AutosaveMinutes = 0 };
@@ -32,7 +32,7 @@ public class ServerLifecycleTests
         {
             ServerLifecycle.DoStartup(settings);
             Assert.True(ServerLifecycle.StartupSucceeded);
-            ServerLifecycle.ResetForTesting();
+            ServerLifecycle.Reset();
             Assert.False(ServerLifecycle.StartupSucceeded);
         }
         finally { try { ServerLifecycle.DoShutdown(settings); } catch { } }

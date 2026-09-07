@@ -26,13 +26,6 @@ public static class ServerLifecycle
     private static volatile bool _startupSucceeded = false;
     public static bool StartupSucceeded => _startupSucceeded;
 
-    // Port of startstop.py:22 _shutdown_step
-    private static void ShutdownStep(string name, Action fn)
-    {
-        try { fn(); }
-        catch (Exception ex) { Console.Error.WriteLine($"Shutdown step '{name}' failed:\n{ex}"); }
-    }
-
     /// <summary>
     /// Mirrors <c>do_startup()</c> at startstop.py:30-46.
     /// Delegates to <c>StartStop.DoStartup</c> faithful implementation.
@@ -46,7 +39,7 @@ public static class ServerLifecycle
 
         // Guard paths — atheriz/atheriz.py:508 etc already done in Program, but repeat for direct calls
         // Port of database_setup.py:66 SAVE_PATH guard
-        try { PathGuards.GuardSavePath(settings.SavePath); } catch { throw; }
+        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(settings.SavePath); } catch { throw; }
         // Ensure DB created — mirrors get_database() at database_setup.py:66-88
         try
         {
@@ -79,22 +72,22 @@ public static class ServerLifecycle
     {
         settings ??= AtherizSettings.Global;
         // Port of startstop.py:49 with _WORLD_LOCK + _shutdown_lock idempotent
+        // (single hold; Monitor re-entrancy makes the old nested lock redundant).
+        // Shutdown in progress => not ready: /ready must stop reporting ok.
         lock (StartStop.WorldLock)
         {
-            lock (StartStop.WorldLock)
+            if (_shutdownCompleted)
             {
-                if (_shutdownCompleted)
-                {
-                    Console.Error.WriteLine("Shutdown already completed; skipping."); // Port of logger.info
-                    return;
-                }
-                _shutdownCompleted = true;
+                Console.Error.WriteLine("Shutdown already completed; skipping."); // Port of logger.info
+                return;
             }
+            _shutdownCompleted = true;
+            _startupSucceeded = false;
 
             // Port of startstop.py:49-82 faithful delegate
             try { StartStop.DoShutdown(settings); }
             catch (Exception ex) { Console.Error.WriteLine($"StartStop.DoShutdown failed:\n{ex}"); }
-            // No reset here — preserve idempotence until explicit ResetForTesting; StartStop already handled channel msg, at_server_stop, autosave, gametime, ticker, threadpool, save, msg_all, singleton clear, db_close.
+            // No reset here — preserve idempotence until explicit Reset; StartStop already handled channel msg, at_server_stop, autosave, gametime, ticker, threadpool, save, msg_all, singleton clear, db_close.
         }
     }
 
@@ -117,10 +110,10 @@ public static class ServerLifecycle
     /// Resets shutdown flag — for tests / restart.
     /// Port of test helper resetting _shutdownCompleted.
     /// </summary>
-    public static void ResetForTesting()
+    public static void Reset()
     {
         lock (StartStop.WorldLock) _shutdownCompleted = false;
         _startupSucceeded = false;
-        try { StartStop.ResetForTesting(); } catch { }
+        try { StartStop.Reset(); } catch { }
     }
 }

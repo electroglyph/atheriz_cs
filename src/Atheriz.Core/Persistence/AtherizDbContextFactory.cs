@@ -10,10 +10,6 @@ namespace Atheriz.Core.Persistence;
 /// </summary>
 public static class AtherizDbContextFactory
 {
-    // Gate forwarding to DbWriteGate (mirrors Database.lock) — obsolete alias for tests
-    [Obsolete("Use DbWriteGate.SemaphoreForTesting")]
-    public static System.Threading.SemaphoreSlim Gate => DbWriteGate.SemaphoreForTesting;
-
     public static bool IsClosed => AtherizDbContext.IsClosed;
 
     // Port of database_setup.py:45 reopen_database() — clears _CLOSED for reset command (atheriz.py:1474)
@@ -78,16 +74,11 @@ public static class AtherizDbContextFactory
         await using var ctx = Create(savePath);
         await ctx.EnsureCreatedAsync(ct);
         try { await ctx.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", ct); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback in DoSetupAsync: {ex.Message}"); }
-        try
-        {
-            var exists = await ctx.GameTime.AsNoTracking().AnyAsync(x => x.Id == 0, ct);
-            if (!exists)
-            {
-                ctx.GameTime.Add(new GameTimeRow { Id = 0, Data = "{}" });
-                await ctx.SaveChangesAsync(ct);
-            }
-        }
-        catch (Exception ex) { Console.Error.WriteLine($"DoSetupAsync seed failed: {ex.Message}"); }
+        // No gametime row seed — parity with sync DoSetup above (and Python
+        // do_setup, tables-only): GameTime.Save upserts, and a seeded "{}" row
+        // would shadow legacy save/time migration (time.py:72-74 migrates only
+        // when the row is missing). The old check-then-add also raced
+        // concurrent setups into PK conflicts.
     }
 
     // Parameterless overload using default settings SavePath

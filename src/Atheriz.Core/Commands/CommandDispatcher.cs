@@ -107,28 +107,14 @@ public static class CommandDispatcher
             if (cmd is null)
             {
                 // check location and inventory external cmdsets — faithful to inputfuncs.py loc.contents + puppet.contents
-                // location: both ObjectLocation and CoordLocation
+                foreach (var set in CommandHelpers.LocalVerbSets(puppet))
+                {
+                    if ((cmd = set.Get(rawCmdKey)) is not null) break;
+                }
+                // also if loc itself has external (unlikely but for completeness)
                 GameObject? locObj = puppet.ResolveLocationObject();
-                if (locObj != null)
-                {
-                    // scan loc's contents for external commands (props in room)
-                    foreach (var cid in locObj.ContentsSnapshot)
-                    {
-                        var obj = ObjectRegistry.Get(cid).FirstOrDefault();
-                        if (obj?.ExternalCmdSet is not null && (cmd = obj.ExternalCmdSet.Get(rawCmdKey)) is not null) break;
-                    }
-                    // also if loc itself has external (unlikely but for completeness)
-                    if (cmd is null && locObj is not null && locObj.ExternalCmdSet is not null)
-                        cmd = locObj.ExternalCmdSet.Get(rawCmdKey);
-                }
-                if (cmd is null)
-                {
-                    foreach (var cid in puppet.ContentsSnapshot)
-                    {
-                        var obj = ObjectRegistry.Get(cid).FirstOrDefault();
-                        if (obj?.ExternalCmdSet is not null && (cmd = obj.ExternalCmdSet.Get(rawCmdKey)) is not null) break;
-                    }
-                }
+                if (cmd is null && locObj is not null && locObj.ExternalCmdSet is not null)
+                    cmd = locObj.ExternalCmdSet.Get(rawCmdKey);
             }
             if (cmd is null && _settings.AutoCommandAliasing)
             {
@@ -173,13 +159,17 @@ public static class CommandDispatcher
     }
 
     // Port of unloggedin/cmdset.py:14-26 conditionals, evaluated at dispatch
-    // time so settings flips take effect without a registry reset.
+    // time so settings flips take effect without a registry reset. Single
+    // effective source: a verb is gated off when EITHER the dispatch settings
+    // (_settings, honored by the aliasing paths above) or the live Global
+    // settings disables it (both default enabled; Global flips and
+    // SetSettings flips both take effect).
     private static bool IsUnloggedInEnabled(Command cmd)
     {
         var g = AtherizSettings.Global;
-        if (cmd is UnloggedIn.CreateAccountCommand) return g.AccountCreationEnabled;
-        if (cmd is UnloggedIn.NewCharacterCommand) return g.CharCreationEnabled;
-        if (cmd is UnloggedIn.GuestCommand) return g.GuestEnabled;
+        if (cmd is UnloggedIn.CreateAccountCommand) return _settings.AccountCreationEnabled && g.AccountCreationEnabled;
+        if (cmd is UnloggedIn.NewCharacterCommand) return _settings.CharCreationEnabled && g.CharCreationEnabled;
+        if (cmd is UnloggedIn.GuestCommand) return _settings.GuestEnabled && g.GuestEnabled;
         return true;
     }
 

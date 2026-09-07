@@ -4,11 +4,11 @@ using Atheriz.Server.Cli;
 using Atheriz.Server.Hosting;
 using Atheriz.Server.Infrastructure;
 string[] rawArgs = args;
-string command;
-string[] rest;
+string command = "--help";
+string[] rest = Array.Empty<string>();
 if (rawArgs.Length == 0) { command = "--help"; rest = Array.Empty<string>(); }
 else if (rawArgs.Length == 1 && (rawArgs[0] == "--help" || rawArgs[0] == "-h")) { command = "--help"; rest = Array.Empty<string>(); }
-else if (rawArgs[0].StartsWith("-", StringComparison.Ordinal)) { Console.Error.WriteLine($"atheriz: error: unrecognized arguments: {string.Join(' ', rawArgs)}"); Environment.Exit(2); command = ""; rest = Array.Empty<string>(); }
+else if (rawArgs[0].StartsWith("-", StringComparison.Ordinal)) { Console.Error.WriteLine($"atheriz: error: unrecognized arguments: {string.Join(' ', rawArgs)}"); Environment.Exit(2); }
 else { command = rawArgs[0]; rest = rawArgs.Skip(1).ToArray(); }
 // Port of atheriz.py:962 main() ArgumentParser: description + subcommands + env-var epilog.
 void PrintHelp()
@@ -79,20 +79,26 @@ if (rest.Contains("--help", StringComparer.Ordinal) || rest.Contains("-h", Strin
 {
     var badPort = ArgumentParser.ParsePort(rest) == null ? ArgumentParser.InvalidPortValue(rest) : null;
     if (badPort != null) { Console.Error.WriteLine($"atheriz: error: argument --port: invalid int value: '{badPort}'"); Environment.Exit(2); }
+    var badTelnet = ArgumentParser.InvalidTelnetPortValue(rest);
+    if (badTelnet != null) { Console.Error.WriteLine($"atheriz: error: argument --telnet-port: invalid int value: '{badTelnet}'"); Environment.Exit(2); }
 }
+try
+{
 switch (command)
 {
     case "stop": await StopHandler.HandleStopAsync(rest); return;
-    case "reload": await StopHandler.HandleReloadAsync(rest); return;
-    case "restart": { bool fgRestart = await StopHandler.HandleRestartAsync(rest); if (fgRestart) { command = "start"; break; } return; }
-    case "reset": await StopHandler.HandleResetAsync(rest); return;
-    case "create": await StopHandler.HandleCreateAsync(rest); return;
-    case "new": { bool fg = await StopHandler.HandleNewAsync(rest); if (fg) { command = "start"; break; } return; }
-    case "test": StopHandler.HandleTest(rest); return;
+    case "reload": await ReloadHandler.HandleReloadAsync(rest); return;
+    case "restart": { bool fgRestart = await RestartHandler.HandleRestartAsync(rest); if (fgRestart) { command = "start"; break; } return; }
+    case "reset": await ResetHandler.HandleResetAsync(rest); return;
+    case "create": await CreateHandler.HandleCreateAsync(rest); return;
+    case "new": { bool fg = await NewHandler.HandleNewAsync(rest); if (fg) { command = "start"; break; } return; }
+    case "test": Environment.Exit(TestHandler.HandleTest(rest)); return;
     case "--help": case "-h": PrintHelp(); return;
     case "start": break;
     default: Console.Error.WriteLine($"Unknown command: {command}"); PrintHelp(); Environment.Exit(2); return;
 }
+}
+catch (CliExitException ex) { Environment.Exit(ex.ExitCode); return; }
 int? portOverride = ArgumentParser.ParsePort(rest);
 string? hostOverride = ArgumentParser.ParseHost(rest);
 bool foreground = ArgumentParser.HasFlag(rest, "--foreground", "-f");
@@ -107,7 +113,7 @@ if (!foreground && command == "start")
     int spawnPort = portOverride ?? effSpawn.WebserverPort;
     if (!PidFile.TryAcquire(effSpawn.SavePath, out var spawnPid, out var spawnReason, spawnPort)) { Console.WriteLine(spawnReason ?? "Failed to acquire PID file."); return; }
     spawnPid?.Release();
-    await StopHandler.SpawnDaemonAsync(rest, Directory.GetCurrentDirectory());
+    await DaemonSpawner.SpawnDaemonAsync(rest, Directory.GetCurrentDirectory());
     return;
 }
 var builder = WebApplication.CreateBuilder(args);
@@ -136,6 +142,7 @@ var settings = app.Services.GetRequiredService<AtherizSettings>();
     }
 }
 AtherizSettings.Global = settings;
+try { Atheriz.Core.AtherizLogger.ApplySettings(settings); } catch { }
 try { Atheriz.Core.Utils.PathGuards.GuardSavePath(settings.SavePath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); return; }
 try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(settings.SecretPath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); return; }
 Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(settings.SavePath);
@@ -148,8 +155,8 @@ try { adminToken = AdminToken.EnsureToken(settings.SecretPath); } catch (Excepti
 Console.WriteLine($"Admin token ensured at {Path.Combine(settings.SecretPath, "admin.token")}");
 try { ServerLifecycle.DoStartup(settings); } catch (Exception ex) { Console.Error.WriteLine($"Startup tasks failed: {ex}"); pidFile?.Release(); AdminToken.DeleteToken(settings.SecretPath); Environment.Exit(1); }
 ProtocolBootstrap.RegisterProtocols(app, settings);
-StaticFileConfig.Configure(app, settings);
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
+StaticFileConfig.Configure(app, settings);
 if (settings.WebsocketEnabled) app.Map("/ws", ctx => WebSocketHandler.HandleAsync(ctx, settings));
 app.MapAdminRoutes(settings);
 var displayHost = settings.WebserverInterface;

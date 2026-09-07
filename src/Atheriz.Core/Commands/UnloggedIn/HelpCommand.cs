@@ -7,12 +7,7 @@ public sealed class HelpCommand : Command
     public override string Desc => "Show help for commands.";
     public override string Category => "General";
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("command", nargs: "?", help: "Command to get help on"); }
-    private static string PrintHelpFor(Command cmd)
-    {
-        if (cmd.Parser != null) return cmd.PrintHelp();
-        string aliasStr = cmd.Aliases.Count > 0 ? $"{cmd.Key}, {string.Join(", ", cmd.Aliases)}" : cmd.Key;
-        return $"\n{cmd.Desc}\n\nAliases: {aliasStr}\n" + cmd.ExtraDesc;
-    }
+    private static string PrintHelpFor(Command cmd) => HelpHelper.FormatFor(cmd);
     public override void Run(IMessageTarget caller, object? args)
     {
         var pa = args as GameArgumentParser.ParsedArgs;

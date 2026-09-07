@@ -21,7 +21,7 @@ public sealed class BanCommand : Command
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null || pa.GetString("target") is not string targetName || string.IsNullOrWhiteSpace(targetName))
         { caller.Msg(PrintHelp()); return; }
@@ -107,7 +107,7 @@ public sealed class UnbanCommand : Command
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null || pa.GetString("target") is not string targetName || string.IsNullOrWhiteSpace(targetName))
         { caller.Msg(PrintHelp()); return; }

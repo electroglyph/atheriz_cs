@@ -158,37 +158,8 @@ public sealed class ConnectCommand : Command
             }
             catch { caller.Msg("This character is not available."); continue; }
 
-            bool success = false;
-            lock (caller.Session.Lock)
-            {
-                // Port of connect.py:70-77 with caller.session.lock: with char.lock:
-                // Need to check char.session and is_deleted under char lock
-                chosen.SyncRoot.EnterWriteLock();
-                try
-                {
-                    // Check if already puppeted or deleted
-                    bool hasSession = false;
-                    try { hasSession = chosen.Session != null; } catch { hasSession = false; }
-                    if (hasSession || chosen.IsDeleted)
-                    {
-                        // will msg outside lock
-                    }
-                    else
-                    {
-                        caller.Session.Puppet = chosen;
-                        try { chosen.Session = caller.Session; } catch (Exception) { }
-                        caller.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        try { caller.Session.ConnectedAt = DateTime.UtcNow; } catch (Exception) { }
-                        success = true;
-                    }
-                }
-                finally { chosen.SyncRoot.ExitWriteLock(); }
-            }
-            if (!success)
-            {
-                caller.Msg("This character is not available.");
-                continue;
-            }
+            if (!SessionPuppetHelper.TryAttach(caller, chosen)) continue;
+            try { caller.Session.ConnectedAt = DateTime.UtcNow; } catch (Exception) { }
             try { chosen.AtPostPuppet(); } catch (Exception ex) { Console.Error.WriteLine($"[Connect] AtPostPuppet failed: {ex}"); }
             // In Python, char_selection loop exits after successful puppet (while puppet is None)
             break;

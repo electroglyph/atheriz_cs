@@ -120,8 +120,7 @@ public sealed class NodeGrid
         finally { Lock.ExitWriteLock(); }
         if (old != null && !ReferenceEquals(old, node))
         {
-            try { Console.Error.WriteLine($"Warning: overwriting node at {(node.Coord.X, node.Coord.Y)}"); } catch (Exception) { }
-            try { AtherizLogger.LogWarning($"Overwriting node at {node.Coord}"); } catch (Exception) { }
+            try { AtherizLogger.LogWarning($"Overwriting node at {node.Coord}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeGrid.AddNode: " + logEx.Message, "NodeGrid"); }
             old.IsDeleted = true;
             ObjectRegistry.RemoveObject(old);
         }
@@ -268,7 +267,7 @@ public sealed class NodeGrid
         // rebuild ExitCommands
         foreach (var node in affected.Values)
             foreach (var obj in node.GetContents())
-                try { node.AddExits(obj); } catch (Exception) { }
+                try { node.AddExits(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeGrid.ApplyMoves: " + logEx.Message, "NodeGrid"); }
 
         return failed.ToList();
     }
@@ -277,7 +276,27 @@ public sealed class NodeGrid
     public void Clear()
     {
         Lock.EnterWriteLock();
-        try { Nodes.Clear(); }
+        try { Nodes.Clear(); IsModified = true; }
         finally { Lock.ExitWriteLock(); }
     }
+}
+
+// Port of atheriz/objects/nodes.py:1426 Transition (merged here per file-organization hygiene)
+public sealed class Transition
+{
+    public Coord FromCoord { get; set; }
+    public Coord ToCoord { get; set; }
+    public string Name { get; set; } = ""; // from_link
+    public string FromLink { get => Name; set => Name = value; }
+    public readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.SupportsRecursion);
+
+    public Transition() { }
+    // Port of nodes.py:1428
+    public Transition(Coord from, Coord to, string name)
+    {
+        FromCoord = from;
+        ToCoord = to;
+        Name = name;
+    }
+    public override string ToString() => $"Transition({FromCoord} -> {ToCoord}, '{Name}')";
 }

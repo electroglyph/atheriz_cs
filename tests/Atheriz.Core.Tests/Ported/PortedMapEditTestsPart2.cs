@@ -20,7 +20,7 @@ public class PortedMapEditTestsPart2
         public List<(string Cmd, List<object?> Args, Dictionary<string,object?> Kw)> Sent = new();
     }
     private static BaseConnection MakeConn(string ip="10.0.0.1") { var c=new FakeConn2(ip); return c; }
-    private static void Reset() { MapEdit.ResetForTesting(); InputFuncs.MapHandlerFactory = () => GlobalServices.GetMapHandler(); InputFuncs.NodeHandlerFactory = () => NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler(); }
+    private static void Reset() { MapEdit.Reset(); InputFuncs.MapHandlerFactory = () => GlobalServices.GetMapHandler(); InputFuncs.NodeHandlerFactory = () => NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler(); }
     private static string Handshake(BaseConnection conn)
     {
         var key = MapEdit.Grant("10.0.0.1","TestArea",0);

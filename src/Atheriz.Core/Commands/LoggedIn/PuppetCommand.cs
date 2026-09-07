@@ -13,7 +13,7 @@ public sealed class PuppetCommand : Command
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("target", help: "Object to puppet (name or #id)."); }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         var query = pa?.GetString("target");
         if (string.IsNullOrWhiteSpace(query)) { go.Msg(PrintHelp()); return; }
@@ -48,8 +48,8 @@ public sealed class PuppetCommand : Command
             return (res[0], null);
         }
         var matches = CommandHelpers.SearchWithFallback(caller, query);
-        if (matches.Count == 0) return (null, $"No match found for '{query}'.");
-        if (matches.Count > 1) return (null, $"Multiple matches: {string.Join(", ", matches.Select(m => $"#{m.Id} {m.Name}"))}. Use #id to pick one.");
+        if (matches.Count == 0) return (null, CommandHelpers.FormatNoMatchFound(query));
+        if (matches.Count > 1) return (null, CommandHelpers.FormatMultipleMatchesIdList(matches));
         return (matches[0], null);
     }
 }
@@ -63,7 +63,7 @@ public sealed class UnpuppetCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var sess = go.Session;
         if (sess == null) { go.Msg("You have no active session."); return; }
         bool ok = go.Unpuppet(sess);

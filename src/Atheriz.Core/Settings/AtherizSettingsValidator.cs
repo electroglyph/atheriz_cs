@@ -68,6 +68,46 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
 
         if (options.WebserverPort < 1024 || options.WebserverPort > 65535)
             failures.Add($"WebserverPort must be 1024-65535 (was {options.WebserverPort}).");
+        // Mirror the Kestrel/telnet fail-fast binds: "::" is the IPv6-any
+        // spelling, anything else must parse as an IP literal.
+        if (!string.Equals(options.WebserverInterface, "::", StringComparison.Ordinal)
+            && !System.Net.IPAddress.TryParse(options.WebserverInterface ?? "", out _))
+            failures.Add($"WebserverInterface unparseable: '{options.WebserverInterface}'.");
+        if (!string.Equals(options.TelnetInterface, "::", StringComparison.Ordinal)
+            && !System.Net.IPAddress.TryParse(options.TelnetInterface ?? "", out _))
+            failures.Add($"TelnetInterface unparseable: '{options.TelnetInterface}'.");
+        if (options.WebserverPort == options.TelnetPort)
+            failures.Add($"WebserverPort ({options.WebserverPort}) must differ from TelnetPort ({options.TelnetPort}).");
+        if (string.IsNullOrWhiteSpace(options.ServerName))
+            failures.Add("ServerName must be non-empty.");
+        if (options.MinutesPerHour <= 0)
+            failures.Add($"MinutesPerHour must be >0 (was {options.MinutesPerHour}).");
+        if (options.HoursPerDay <= 0)
+            failures.Add($"HoursPerDay must be >0 (was {options.HoursPerDay}).");
+        if (options.DaysPerMonth <= 0)
+            failures.Add($"DaysPerMonth must be >0 (was {options.DaysPerMonth}).");
+        if (options.MonthsPerYear <= 0)
+            failures.Add($"MonthsPerYear must be >0 (was {options.MonthsPerYear}).");
+        // Fail closed on TLS: a configured cert must exist and load. A missing file
+        // is always a config error; a present-but-unloadable one is tolerated only
+        // under an explicit insecure-fallback opt-in (Kestrel warns at startup).
+        if (!string.IsNullOrEmpty(options.SslCertFile))
+        {
+            if (!File.Exists(options.SslCertFile))
+                failures.Add($"SslCertFile not found: {options.SslCertFile}");
+            else
+            {
+                if (!string.IsNullOrEmpty(options.SslKeyFile) && !File.Exists(options.SslKeyFile))
+                    failures.Add($"SslKeyFile not found: {options.SslKeyFile}");
+                else if (!options.AllowInsecureTlsFallback)
+                {
+                    try { using var cert = Atheriz.Core.Utils.TlsCertLoader.Load(options.SslCertFile, options.SslKeyFile); }
+                    catch (Exception ex) { failures.Add($"SslCertFile unloadable: {options.SslCertFile} ({ex.Message})"); }
+                }
+            }
+        }
+        else if (!string.IsNullOrEmpty(options.SslKeyFile) && !File.Exists(options.SslKeyFile))
+            failures.Add($"SslKeyFile not found: {options.SslKeyFile}");
         if (options.TelnetEnabled)
         {
             if (options.TelnetPort < 1024 || options.TelnetPort > 65535)

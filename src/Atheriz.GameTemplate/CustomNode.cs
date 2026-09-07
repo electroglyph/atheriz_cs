@@ -1,7 +1,7 @@
 // Port of atheriz/new.py:522 ("node","Node","atheriz.objects.nodes")
 // Dynamically generated via get_class_hooks
 #nullable enable
-namespace Atheriz.GameTemplate;
+namespace MyGame;
 using Atheriz.Core;
 using Atheriz.Core.Objects;
 /// <summary>Custom Node — mirrors test/node.py</summary>

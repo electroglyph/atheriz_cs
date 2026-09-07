@@ -119,7 +119,7 @@ public class PortedMapInitRegressionTests
         mi.PreRender();
         mh.SetMapInfo("limbo", 4, mi);
         // Install as global handler for AtPostPuppet to find
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         // Use reflection to inject mh as _mapHandler (since GetMapHandler is lazy)
         var f = typeof(GlobalServices).GetField("_mapHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         f!.SetValue(null, mh);

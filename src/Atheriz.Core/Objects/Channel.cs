@@ -1,3 +1,4 @@
+using Atheriz.Core.Commands;
 using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Objects;
@@ -71,6 +72,14 @@ public class Channel : GameObject
     public IReadOnlySet<int> Listeners
     {
         get { lock (_histLock) return new HashSet<int>(_listeners.Keys); }
+    }
+
+    public override IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
+    {
+        foreach (var m in base.GetExamMembers()) yield return m;
+        object? Safe(Func<object?> f) { try { return f(); } catch { return "<error>"; } }
+        yield return ("created_by", Safe(() => (object?)CreatedBy), true);
+        yield return ("Listeners", Safe(() => (object?)Listeners), true);
     }
     public IReadOnlyCollection<GameObject> ListenerObjects
     {
@@ -147,7 +156,7 @@ public class Channel : GameObject
             toDetach = _listeners.Keys.ToList();
             _listeners.Clear();
         }
-        try { SetIsDeletedRaw(true); } catch (Exception) { }
+        try { SetIsDeletedRaw(true); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Delete: " + logEx.Message, "Channel"); }
         foreach (var lid in toDetach)
         {
             var objs = Globals.ObjectRegistry.Get(lid);
@@ -164,7 +173,7 @@ public class Channel : GameObject
                     try { o.Unsubscribe(this); }
                     finally { o.SyncRoot.ExitWriteLock(); }
                 }
-                catch (Exception ex) { try { AtherizLogger.LogError($"channel delete detach failed for object {lid}: {ex.Message}"); } catch (Exception) { } }
+                catch (Exception ex) { try { AtherizLogger.LogError($"channel delete detach failed for object {lid}: {ex.Message}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Delete: " + logEx.Message, "Channel"); } }
             }
         }
         Globals.ObjectRegistry.RemoveObject(this);
@@ -197,7 +206,7 @@ public class Channel : GameObject
         {
             // FormatMessage is a pure function of (timestamp, sender, text), so
             // format once instead of once per listener.
-            try { listener.Msg(formatted); } catch (Exception) { }
+            try { listener.Msg(formatted); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Msg: " + logEx.Message, "Channel"); }
         }
     }
 
@@ -246,7 +255,6 @@ public class Channel : GameObject
 
     private (string Sql, object[] Params) BuildSaveOps(bool clearing)
     {
-        IncrementTracker();
         List<ChannelHistoryEntry> histSnap;
         lock (_histLock) { histSnap = _history.ToList(); }
         bool had = false;

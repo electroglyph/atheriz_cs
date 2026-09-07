@@ -23,24 +23,31 @@ public static class TlsCertLoader
         // Combined PEM: certificate with embedded private key — split and load both parts.
         if (pemText.Contains("PRIVATE KEY"))
         {
-            var certStart = pemText.IndexOf("-----BEGIN CERTIFICATE-----", StringComparison.Ordinal);
-            var certEndIdx = pemText.IndexOf("-----END CERTIFICATE-----", StringComparison.Ordinal);
-            if (certStart >= 0 && certEndIdx >= 0)
+            var certBlocks = SplitPemBlocks(pemText, "CERTIFICATE");
+            var keyBlocks = SplitPemBlocks(pemText, "PRIVATE KEY");
+            if (certBlocks.Count > 0 && keyBlocks.Count > 0)
             {
-                certEndIdx += "-----END CERTIFICATE-----".Length;
-                var certPemPart = pemText.Substring(certStart, certEndIdx - certStart);
-                var keyStart = pemText.IndexOf("-----BEGIN", certEndIdx, StringComparison.Ordinal);
-                if (keyStart >= 0)
+                var leafPem = certBlocks[0];
+                var keyPem = keyBlocks[0];
+                var leaf = X509Certificate2.CreateFromPem(leafPem, keyPem);
+                // Preserve the chain: bundle leaf + intermediates into an in-memory
+                // PFX so the handshake can present more than the leaf. Falls back
+                // to the leaf alone if any intermediate is unparseable.
+                if (certBlocks.Count > 1)
                 {
-                    var keyPemPart = pemText.Substring(keyStart);
-                    var keyEnd = keyPemPart.IndexOf("-----END", StringComparison.Ordinal);
-                    if (keyEnd >= 0)
+                    try
                     {
-                        var endMarkerEnd = keyPemPart.IndexOf("-----", keyEnd + 5, StringComparison.Ordinal);
-                        if (endMarkerEnd >= 0) keyPemPart = keyPemPart.Substring(0, endMarkerEnd + 5);
+                        var bundle = new X509Certificate2Collection { leaf };
+                        for (int i = 1; i < certBlocks.Count; i++)
+                            bundle.Add(X509Certificate2.CreateFromPem(certBlocks[i]));
+                        var pfx = bundle.Export(X509ContentType.Pfx);
+                        if (pfx == null) return leaf;
+                        return new X509Certificate2(pfx, (string?)null,
+                            X509KeyStorageFlags.EphemeralKeySet);
                     }
-                    return X509Certificate2.CreateFromPem(certPemPart, keyPemPart);
+                    catch { return leaf; }
                 }
+                return leaf;
             }
         }
         try
@@ -52,5 +59,32 @@ public static class TlsCertLoader
             try { return X509Certificate2.CreateFromPemFile(certFile); }
             catch { return new X509Certificate2(certFile); }
         }
+    }
+
+    /// <summary>
+    /// Splits PEM text into blocks whose BEGIN header line contains
+    /// <paramref name="fragment"/> (e.g. "CERTIFICATE", or "PRIVATE KEY" which
+    /// also matches "RSA PRIVATE KEY"). End marker mirrors the BEGIN suffix.
+    /// </summary>
+    private static List<string> SplitPemBlocks(string text, string fragment)
+    {
+        var blocks = new List<string>();
+        int idx = 0;
+        while (true)
+        {
+            int begin = text.IndexOf("-----BEGIN", idx, StringComparison.Ordinal);
+            if (begin < 0) break;
+            int headerEnd = text.IndexOf('\n', begin);
+            if (headerEnd < 0) headerEnd = text.Length;
+            string header = text.Substring(begin, headerEnd - begin);
+            if (!header.Contains(fragment, StringComparison.Ordinal)) { idx = headerEnd; continue; }
+            string endMarker = "-----END" + header.Substring("-----BEGIN".Length);
+            int end = text.IndexOf(endMarker, headerEnd, StringComparison.Ordinal);
+            if (end < 0) break;
+            end += endMarker.Length;
+            blocks.Add(text.Substring(begin, end - begin));
+            idx = end;
+        }
+        return blocks;
     }
 }

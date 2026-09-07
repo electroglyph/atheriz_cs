@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Atheriz.Core\Atheriz.Core.csproj" />
     <ProjectReference Include="..\..\src\Atheriz.Server\Atheriz.Server.csproj" />
+    <ProjectReference Include="..\..\src\Atheriz.GameTemplate\Atheriz.GameTemplate.csproj" />
   </ItemGroup>
 
 </Project>

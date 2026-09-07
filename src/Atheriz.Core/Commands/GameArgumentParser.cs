@@ -36,6 +36,10 @@ public sealed class GameArgumentParser
     public enum ArgAction { Store, StoreTrue, StoreFalse, Append }
     public enum NargsKind { None, Optional, ZeroOrMore, OneOrMore, Remainder }
 
+    private static bool IsOptionLike(string? s) =>
+        !string.IsNullOrEmpty(s) && s.Length > 1 && s[0] == '-' &&
+        (char.IsLetter(s[1]) || (s[1] == '-' && s.Length > 2 && char.IsLetter(s[2])));
+
     public sealed class ArgumentDef
     {
         public List<string> Names = new();
@@ -96,7 +100,9 @@ public sealed class GameArgumentParser
     {
         // Handle case where caller passed two option strings positionally: AddArgument("-f","--flag")
         // In that case 'help' looks like an option (starts with -), treat as second alias rather than help text.
-        if (!string.IsNullOrEmpty(help) && help.StartsWith("-") && string.IsNullOrEmpty(nargs) && string.IsNullOrEmpty(action) && type == null && defaultValue == null && choices == null && !required)
+        // Guard requires BOTH strings to be option-like so genuine help text
+        // starting with '-' on a positional is never misread as an alias.
+        if (name.StartsWith("-") && IsOptionLike(help) && string.IsNullOrEmpty(nargs) && string.IsNullOrEmpty(action) && type == null && defaultValue == null && choices == null && !required)
         {
             // treat as AddArgument(params ["-f","--flag"])
             var names = new List<string> { name, help };
@@ -242,7 +248,7 @@ public sealed class GameArgumentParser
                             if (int.TryParse(val, out var iv)) conv = iv;
                             else throw new CommandError($"argument {tok}: invalid int value: '{val}'");
                         }
-                        else if (opt.Type == typeof(float) && float.TryParse(val, out var fv)) conv = fv;
+                        else if (opt.Type == typeof(float) && float.TryParse(val, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var fv)) conv = fv;
                         // choices
                         if (opt.Choices is not null && !opt.Choices.Contains(val))
                             throw new CommandError($"argument {tok}: invalid choice: '{val}' (choose from {string.Join(", ", opt.Choices)})");

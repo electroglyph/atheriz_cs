@@ -21,7 +21,7 @@ public class PortedMapEditTests
         public override void Close() {}
         public List<(string Cmd, List<object?> Args, Dictionary<string,object?> Kw)> Sent = new();
     }
-    private static void Reset() { MapEdit.ResetForTesting(); InputFuncs.MapHandlerFactory = () => GlobalServices.GetMapHandler(); InputFuncs.NodeHandlerFactory = () => NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler(); }
+    private static void Reset() { MapEdit.Reset(); InputFuncs.MapHandlerFactory = () => GlobalServices.GetMapHandler(); InputFuncs.NodeHandlerFactory = () => NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler(); }
     private static MapInfo MakeMi(Dictionary<(int,int),string>? grid=null)
     {
         var mi = new MapInfo("TestArea");

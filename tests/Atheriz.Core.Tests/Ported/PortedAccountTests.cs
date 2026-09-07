@@ -140,17 +140,32 @@ public class PortedAccountTests
         Assert.Empty(acc.Characters);
         Assert.IsType<List<int>>(new List<int>(acc.Characters));
     }
+    // Recording subclass: proves Account.Create drives the virtual AtCreate.
+    private sealed class RecordingAccount : Account
+    {
+        public int AtCreateCalls;
+        public override void AtCreate() { AtCreateCalls++; base.AtCreate(); }
+    }
+
+    // [Replace]-attributed delete vetoes (replaces the removed AtDeleteHook seam).
+    private sealed class VetoHooks
+    {
+        [Replace]
+        public bool DenyDelete(GameObject? c) => false;
+    }
+
+    private sealed class RecordingDeleteHook
+    {
+        public readonly List<GameObject?> Received = new();
+        [Replace]
+        public bool RecordAllow(GameObject? c) { Received.Add(c); return true; }
+    }
+
     [Fact] public void AtCreateCalled()
     {
         using var env=GlobalTestEnv.Enter();
-        var called=new List<Account>();
-        var orig=Account.AtCreateHook;
-        Account.AtCreateHook = (acc)=> called.Add(acc);
-        try{
-            var acc=MakeAccount("harry","pw");
-            Assert.Single(called);
-            Assert.Same(acc, called[0]);
-        } finally { Account.AtCreateHook=orig; }
+        var acc = Account.Create<RecordingAccount>("harry","pw");
+        Assert.Equal(1, acc.AtCreateCalls);
     }
 
     // Port of test_account.py:160 TestAccountDelete
@@ -182,28 +197,22 @@ public class PortedAccountTests
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("liam","pw");
-        var orig=Account.AtDeleteHook;
-        Account.AtDeleteHook = _=> false;
-        try{
-            var result=acc.Delete();
-            Assert.False(result);
-            Assert.Contains(acc, ObjectRegistry.FilterBy(_=>true));
-            Assert.False(acc.IsDeleted);
-        } finally { Account.AtDeleteHook=orig; }
+        acc.InstallHook("at_delete", (Func<GameObject?, bool>)new VetoHooks().DenyDelete);
+        var result=acc.Delete();
+        Assert.False(result);
+        Assert.Contains(acc, ObjectRegistry.FilterBy(_=>true));
+        Assert.False(acc.IsDeleted);
     }
     [Fact] public void DeleteAtDeleteReceivesCaller()
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("mia","pw");
         var caller=new GameObject(); caller.Name="caller";
-        var received=new List<GameObject?>();
-        var orig=Account.AtDeleteHook;
-        Account.AtDeleteHook = (c)=> { received.Add(c); return true; };
-        try{
-            acc.Delete(caller);
-            Assert.Single(received);
-            Assert.Same(caller, received[0]);
-        } finally { Account.AtDeleteHook=orig; }
+        var hook=new RecordingDeleteHook();
+        acc.InstallHook("at_delete", (Func<GameObject?, bool>)hook.RecordAllow);
+        acc.Delete(caller);
+        Assert.Single(hook.Received);
+        Assert.Same(caller, hook.Received[0]);
     }
     [Fact] public void DeleteUnusedParamDoesNotBreakSignature()
     {
@@ -215,15 +224,10 @@ public class PortedAccountTests
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("olive","pw");
-        var delCalls=new List<object>();
-        var origHook=Account.AtDeleteHook;
-        Account.AtDeleteHook=_=>false;
-        // In C# we can't easily spy delete_objects; we verify veto prevents removal
-        try{
-            acc.Delete();
-            Assert.Empty(delCalls);
-            Assert.Contains(acc, ObjectRegistry.FilterBy(_=>true));
-        } finally { Account.AtDeleteHook=origHook; }
+        acc.InstallHook("at_delete", (Func<GameObject?, bool>)new VetoHooks().DenyDelete);
+        // A vetoed delete performs no removal: the account stays registered.
+        acc.Delete();
+        Assert.Contains(acc, ObjectRegistry.FilterBy(_=>true));
     }
 
     // Port of test_account.py:231 TestAccountCharacterManagement

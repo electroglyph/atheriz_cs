@@ -30,7 +30,7 @@ public class PortedMoveNodesTests
     {
         var nh = new NodeHandler(autoLoad:false);
         NodeHandler.SetCurrent(nh);
-        MapHandlerHolder.Set(new MapHandler(autoLoad:false));
+        GlobalServices.SetMapHandler(new MapHandler(autoLoad:false));
         var grid = new NodeGrid("TestArea",0);
         foreach(var n in nodes) grid.Nodes[(n.Coord.X, n.Coord.Y)]=n;
         // Need to ensure we also have an Area to hold grid? For ApplyMoves doors/transitions, handler not needed for grid nodes but for remap we need handler set.

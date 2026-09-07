@@ -331,12 +331,12 @@ public static class ObjectRegistry
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt object row {row.Id}: {ex.GetType().Name}"); } catch (Exception) { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt object row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
                     continue;
                 }
                 if (dto == null)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping null object row {row.Id}"); } catch (Exception) { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping null object row {row.Id}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
                     continue;
                 }
                 try
@@ -347,7 +347,7 @@ public static class ObjectRegistry
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping unrestorable object row {row.Id}: {ex.GetType().Name}"); } catch (Exception) { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping unrestorable object row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
                 }
             }
         }
@@ -395,7 +395,7 @@ public static class ObjectRegistry
         finally { AllLock.ExitReadLock(); }
         foreach (var o in snap)
         {
-            try { o.ResolveRelations(); } catch (Exception) { }
+            try { o.ResolveRelations(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
         }
     }
 
@@ -495,7 +495,7 @@ public static class ObjectRegistry
                         try { c.IsModified = true; }
                         finally { c.SyncRoot.ExitWriteLock(); }
                     }
-                    catch (Exception) { }
+                    catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.SaveObjects: " + logEx.Message, "BoundedDictionary"); }
                 }
                 try
                 {
@@ -503,7 +503,7 @@ public static class ObjectRegistry
                     try { obj.IsModified = true; }
                     finally { obj.SyncRoot.ExitWriteLock(); }
                 }
-                catch (Exception) { }
+                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.SaveObjects: " + logEx.Message, "BoundedDictionary"); }
                 throw;
             }
         }
@@ -516,7 +516,17 @@ public static class ObjectRegistry
             {
                 foreach (var (obj, json) in pending)
                 {
-                    if (!IsStillSaveable(obj, forSave: false, force: force)) continue;
+                    if (!IsStillSaveable(obj, forSave: false, force: force))
+                    {
+                        // Clear-then-skip: the flag was cleared in the serialize
+                        // phase but this row is not being written — restore dirty
+                        // so the next checkpoint retries (for deleted/evicted
+                        // objects the flag dies with the object; harmless).
+                        obj.SyncRoot.EnterWriteLock();
+                        try { obj.IsModified = true; }
+                        finally { obj.SyncRoot.ExitWriteLock(); }
+                        continue;
+                    }
                     DbTransactionHelper.UpsertJson(ctx.Objects, () => ctx.Objects.Find(obj.Id), () => new ObjectRow { Id = obj.Id, Version = 1 }, json, row =>
                     {
                         row.Type = obj.IsAccount ? "account" : obj.IsChannel ? "channel" : "object";

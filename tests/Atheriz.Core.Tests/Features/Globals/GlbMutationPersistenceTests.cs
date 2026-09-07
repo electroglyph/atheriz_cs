@@ -82,7 +82,7 @@ public class GlbMutationPersistenceTests
         // The exposed chains mapping (MapEdit.cs:98-99) must be a snapshot like
         // ChainsSnapshot (MapEdit.cs:101-109): clearing it must not evict live
         // chains from the store.
-        MapEdit.ResetForTesting();
+        MapEdit.Reset();
         try
         {
             string key = MapEdit.Grant("9.9.9.9", "limbo", 0, session: null);
@@ -90,7 +90,7 @@ public class GlbMutationPersistenceTests
             Assert.NotNull(MapEdit.GetChain(key));
             Assert.Single(MapEdit.ChainsSnapshot);
         }
-        finally { MapEdit.ResetForTesting(); }
+        finally { MapEdit.Reset(); }
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public class GlbMutationPersistenceTests
     {
         // Writing through the exposed chains mapping (MapEdit.cs:98-99) must
         // not plant entries in the store: only Grant/AddChain may do that.
-        MapEdit.ResetForTesting();
+        MapEdit.Reset();
         try
         {
             string key = MapEdit.Grant("9.9.9.9", "limbo", 0, session: null);
@@ -107,7 +107,7 @@ public class GlbMutationPersistenceTests
             Assert.False(MapEdit.ChainsSnapshot.ContainsKey("injected"));
             Assert.Single(MapEdit.ChainsSnapshot);
         }
-        finally { MapEdit.ResetForTesting(); }
+        finally { MapEdit.Reset(); }
     }
 
     // --- Consume must hand out a copy ---
@@ -118,7 +118,7 @@ public class GlbMutationPersistenceTests
         // Consume (MapEdit.cs:257-322) must hand out a copy like GetChain
         // (MapEdit.cs:326-336) does: mutating the returned chain must not
         // rewrite the stored chain behind the lock.
-        MapEdit.ResetForTesting();
+        MapEdit.Reset();
         try
         {
             string key = MapEdit.Grant("1.2.3.4", "limbo", 0, session: null);
@@ -133,7 +133,7 @@ public class GlbMutationPersistenceTests
             Assert.DoesNotContain(new Coord("evil", 1, 2, 3), stored!.Chain);
             Assert.True(stored.Validation == null || !stored.Validation.Contains(999));
         }
-        finally { MapEdit.ResetForTesting(); }
+        finally { MapEdit.Reset(); }
     }
 
     // --- Shutdown must not conjure singletons ---
@@ -152,7 +152,7 @@ public class GlbMutationPersistenceTests
         {
             Assert.Null(GlobalServices.TryGetGameTime());
         }
-        finally { try { StartStop.ResetForTesting(); } catch { } }
+        finally { try { StartStop.Reset(); } catch { } }
     }
 
     // --- Shutdown must release world handlers ---
@@ -161,7 +161,7 @@ public class GlbMutationPersistenceTests
     public void Shutdown_ClearsWorldHandlers_SoNextBootReloads()
     {
         // Shutdown must release the cached node/map handlers
-        // (GlobalServices.cs:183-197 keeps them while ResetForTesting at
+        // (GlobalServices.cs:183-197 keeps them while Reset at
         // :200-219 clears all): a lookup after shutdown must build fresh
         // instances instead of resurrecting pre-shutdown world state.
         using var env = GlobalTestEnv.Enter();
@@ -174,6 +174,6 @@ public class GlbMutationPersistenceTests
             Assert.False(ReferenceEquals(mh1, GlobalServices.GetMapHandler()));
             Assert.False(ReferenceEquals(nh1, GlobalServices.GetNodeHandler()));
         }
-        finally { try { StartStop.ResetForTesting(); } catch { } }
+        finally { try { StartStop.Reset(); } catch { } }
     }
 }

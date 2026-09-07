@@ -14,7 +14,7 @@ public sealed class WanderCommand : Command
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("count", nargs: "?", type: typeof(int), help: "Number of wanderers to spawn"); }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         int count = 10;
         if (pa != null && pa["count"] is int iv) count = iv;

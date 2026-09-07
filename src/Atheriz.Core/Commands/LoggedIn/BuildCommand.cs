@@ -54,12 +54,12 @@ public sealed class BuildCommand : Command
 
     public override void Run(IMessageTarget caller, object? args)
     {
-        // Resolve args to flags
+        if (!CommandHelpers.RequirePuppet(caller, out var goCaller)) return;
+        // Resolve args to flags (typed shapes only: BuildArgs or ParsedArgs)
         bool n=false, e=false, s=false, w=false, u=false, d=false, x=false;
         bool room=false, road=false, path=false;
         string? desc=null;
         bool single=false, dbl=false, round=false, none=false;
-        bool hasArgsObj = false;
         if (args == null)
         {
             caller.Msg(PrintHelp());
@@ -67,57 +67,18 @@ public sealed class BuildCommand : Command
         }
         if (args is BuildArgs ba)
         {
-            hasArgsObj = true;
             n=ba.N; e=ba.E; s=ba.S; w=ba.W; u=ba.U; d=ba.D; x=ba.X;
             room=ba.Room; road=ba.Road; path=ba.Path; desc=ba.Desc;
             single=ba.Single; dbl=ba.Double; round=ba.Round; none=ba.None;
         }
         else if (args is GameArgumentParser.ParsedArgs pa)
         {
-            hasArgsObj = true;
             n=pa.GetBool("n"); e=pa.GetBool("e"); s=pa.GetBool("s"); w=pa.GetBool("w"); u=pa.GetBool("u"); d=pa.GetBool("d"); x=pa.GetBool("x");
             room=pa.GetBool("room"); road=pa.GetBool("road"); path=pa.GetBool("path");
             desc=pa["desc"] as string;
             single=pa.GetBool("single"); dbl=pa.GetBool("double"); round=pa.GetBool("round"); none=pa.GetBool("none");
         }
         else
-        {
-            // Generic reflection: anonymous object, dictionary, or MockCaller mock-like
-            try
-            {
-                var t = args.GetType();
-                bool TryGetBool(string name, out bool val)
-                {
-                    var p = t.GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                    if (p != null && p.PropertyType == typeof(bool)) { val = (bool)(p.GetValue(args) ?? false); return true; }
-                    var f = t.GetField(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                    if (f != null && f.FieldType == typeof(bool)) { val = (bool)(f.GetValue(args) ?? false); return true; }
-                    val=false; return false;
-                }
-                bool TryGetString(string name, out string? val)
-                {
-                    var p = t.GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                    if (p != null) { val = p.GetValue(args) as string; return true; }
-                    var f = t.GetField(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                    if (f != null) { val = f.GetValue(args) as string; return true; }
-                    val=null; return false;
-                }
-                hasArgsObj = true;
-                TryGetBool("n", out n); TryGetBool("e", out e); TryGetBool("s", out s); TryGetBool("w", out w); TryGetBool("u", out u); TryGetBool("d", out d); TryGetBool("x", out x);
-                TryGetBool("room", out room); TryGetBool("road", out road); TryGetBool("path", out path);
-                TryGetString("desc", out desc);
-                TryGetBool("single", out single); TryGetBool("double", out dbl); TryGetBool("round", out round); TryGetBool("none", out none);
-                // Also check dynamic dictionary pattern: IDictionary
-                if (args is System.Collections.IDictionary dict)
-                {
-                    if (dict.Contains("desc")) desc = dict["desc"] as string;
-                    // bool flags may be in dict too but not needed for test helper
-                }
-            }
-            catch { caller.Msg(PrintHelp()); return; }
-        }
-
-        if (!hasArgsObj)
         {
             caller.Msg(PrintHelp());
             return;
@@ -128,47 +89,7 @@ public sealed class BuildCommand : Command
         MapHandler mh;
         try { mh = GlobalServices.GetMapHandler(); } catch { mh = new MapHandler(autoLoad:false); }
 
-        GameObject? goCaller = caller as GameObject;
-        Node? loc = null;
-        if (goCaller != null)
-        {
-            loc = goCaller.ResolveLocationObject() as Node;
-            // Also support direct location via Caller property? If caller is MockCaller style with location property
-            if (loc == null)
-            {
-                try
-                {
-                    var prop = caller.GetType().GetProperty("location", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                    if (prop != null)
-                    {
-                        var val = prop.GetValue(caller);
-                        if (val is Node nnode) loc = nnode;
-                        else if (val == null) loc = null;
-                    }
-                }
-                catch (Exception) { }
-            }
-        }
-        else
-        {
-            // generic IMessageTarget with location property (MockCaller in tests)
-            try
-            {
-                var prop = caller.GetType().GetProperty("location", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                if (prop != null)
-                {
-                    var val = prop.GetValue(caller);
-                    if (val is Node nnode) loc = nnode;
-                }
-                var field = caller.GetType().GetField("location", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
-                if (loc == null && field != null)
-                {
-                    var val = field.GetValue(caller);
-                    if (val is Node nnode) loc = nnode;
-                }
-            }
-            catch (Exception) { }
-        }
+        Node? loc = goCaller.ResolveLocationObject() as Node;
 
         if (loc == null)
         {
@@ -364,25 +285,9 @@ public sealed class BuildCommand : Command
 
         if (targets.Count == 1 && lastNewNode != null)
         {
-            // Move caller to new node (support both GameObject and generic MockCaller)
-            if (goCaller != null)
-            {
-                goCaller.MoveTo(lastNewNode);
-            }
-            else
-            {
-                try
-                {
-                    var m = caller.GetType().GetMethod("move_to") ?? caller.GetType().GetMethod("MoveTo");
-                    if (m != null) m.Invoke(caller, new object[]{lastNewNode});
-                    else
-                    {
-                        var prop = caller.GetType().GetProperty("location");
-                        if (prop != null && prop.CanWrite) prop.SetValue(caller, lastNewNode);
-                    }
-                }
-                catch (Exception) { }
-            }
+            // Move caller to new node
+            if (!goCaller.MoveTo(lastNewNode))
+                caller.Msg($"Could not move to {lastNewNode.Coord}.");
         }
     }
 

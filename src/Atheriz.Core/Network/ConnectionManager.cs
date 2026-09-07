@@ -36,7 +36,10 @@ public class InputFuncs
     // Port of inputfuncs.py:224-238 get_handlers
     public Dictionary<string, Delegate> GetHandlers()
     {
-        var handlers = new Dictionary<string, Delegate>();
+        // Single case-insensitive registry: each handler is stored under its
+        // attribute name plus the method name when they differ (no triplication:
+        // the derived lowercase form is covered by the comparer itself).
+        var handlers = new Dictionary<string, Delegate>(StringComparer.OrdinalIgnoreCase);
         var methods = GetType().GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
         foreach (var m in methods)
         {
@@ -44,25 +47,24 @@ public class InputFuncs
             if (attr != null)
             {
                 var name = attr.Name ?? m.Name;
-                // Key set stays doubled (method-name + attr-name + lower):
-                // PortedInputFuncsTests pins PascalCase key presence. Dispatch
-                // itself is exact (RegisterHandler/lookup), so all-caps input
-                // like TEXT no longer routes; exact PascalCase method names
-                // remain routable as a pinned C# extension.
-                var lower = name.ToLowerInvariant();
                 // Create delegate of signature Action<BaseConnection, List<object?>, Dictionary<string,object?>>
                 try
                 {
                     var del = Delegate.CreateDelegate(typeof(Action<BaseConnection, List<object?>, Dictionary<string, object?>>), this, m, false);
-                    if (del != null) { handlers[m.Name] = del; handlers[name] = del; if (lower != name) handlers[lower] = del; }
+                    if (del != null)
+                    {
+                        handlers[name] = del;
+                        if (!name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) handlers[m.Name] = del;
+                    }
                     else
                     {
                         // fallback generic Delegate
                         var del2 = m.CreateDelegate(typeof(Action<BaseConnection, List<object?>, Dictionary<string, object?>>), this);
-                        handlers[m.Name] = del2; handlers[name] = del2; if (lower != name) handlers[lower] = del2;
+                        handlers[name] = del2;
+                        if (!name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) handlers[m.Name] = del2;
                     }
                 }
-                catch { }
+                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InputFuncs.GetHandlers: " + logEx.Message, "InputFuncs"); }
             }
         }
         return handlers;
@@ -100,10 +102,10 @@ public class InputFuncs
             {
                 if (masked)
                 {
-                    try { connection.SendCommand("echo_on"); } catch { }
+                    try { connection.SendCommand("echo_on"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InputFuncs.Text: " + logEx.Message, "InputFuncs"); }
                 }
                 // port of inputfuncs.py:277 atp.loop.call_soon_threadsafe(future.set_result, text)
-                try { future.TrySetResult(text); } catch { }
+                try { future.TrySetResult(text); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InputFuncs.Text: " + logEx.Message, "InputFuncs"); }
                 return;
             }
             if (string.IsNullOrEmpty(text)) return; // port of inputfuncs.py:280
@@ -268,7 +270,7 @@ public class InputFuncs
             if (v is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Object)
             {
                 dict = new Dictionary<string, object?>();
-                foreach (var p in je.EnumerateObject()) dict[p.Name]= JsonElementToObjectLocal(p.Value);
+                foreach (var p in je.EnumerateObject()) dict[p.Name]= ConnectionManager.JsonElementToObject(p.Value);
             }
             else return false;
         }
@@ -341,23 +343,23 @@ public class InputFuncs
     private static List<object?> ToList(object? o)
     {
         if (o is List<object?> lst) return lst;
-        if (o is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Array) return je.EnumerateArray().Select(JsonElementToObjectLocal).ToList()!;
+        if (o is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Array) return je.EnumerateArray().Select(ConnectionManager.JsonElementToObject).ToList()!;
         return new List<object?>();
     }
 
-    private static object? JsonElementToObjectLocal(System.Text.Json.JsonElement el)
+    // Shared seq/key consume + reject-reply cycle for the map_edit family
+    // (map_edit, map_validate_moves, map_legend). Returns null after sending
+    // map_edit_reject; otherwise the consume result for Retry-ack or processing.
+    private static Globals.MapEditResult? ConsumeOrReply(BaseConnection connection, string? key, int seq)
     {
-        return el.ValueKind switch
+        string ip = connection.ClientHost ?? "?";
+        var result = Globals.MapEdit.Consume(key!, ip, seq);
+        if (result.Status == Globals.MapEditStatus.Reject)
         {
-            System.Text.Json.JsonValueKind.String => el.GetString(),
-            System.Text.Json.JsonValueKind.Number => el.TryGetInt32(out var i) ? i : el.TryGetInt64(out var l) ? l : el.GetDouble(),
-            System.Text.Json.JsonValueKind.True => true,
-            System.Text.Json.JsonValueKind.False => false,
-            System.Text.Json.JsonValueKind.Null => null,
-            System.Text.Json.JsonValueKind.Array => el.EnumerateArray().Select(JsonElementToObjectLocal).ToList(),
-            System.Text.Json.JsonValueKind.Object => el.EnumerateObject().ToDictionary(p=>p.Name, p=> JsonElementToObjectLocal(p.Value)),
-            _ => null
-        };
+            connection.SendCommand("map_edit_reject", new List<object?>{ result.Reason }, new Dictionary<string, object?>());
+            return null;
+        }
+        return result;
     }
 
     // Port of inputfuncs.py:376-489 map_edit
@@ -415,13 +417,8 @@ public class InputFuncs
                 if (!IsColor(cell[3]) || !IsColor(cell[4]) || !IsAttrs(cell[5])) return;
             }
         }
-        string ip = connection.ClientHost ?? "?";
-        var result = Globals.MapEdit.Consume(key, ip, seq);
-        if (result.Status == Globals.MapEditStatus.Reject)
-        {
-            connection.SendCommand("map_edit_reject", new List<object?>{ result.Reason }, new Dictionary<string, object?>());
-            return;
-        }
+        var result = ConsumeOrReply(connection, key, seq);
+        if (result == null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
         {
             connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, new Dictionary<string, object?>());
@@ -496,7 +493,12 @@ public class InputFuncs
             if (grid != null)
             {
                 var failed = grid.ApplyMoves(roomMoves);
-                // log warnings; for test we ignore
+                // Port of mapedit.py apply: surface refused moves (the client
+                // already validated — a refusal here means a cross-message
+                // validate->apply TOCTOU or a stale chain, worth one line).
+                if (failed.Count > 0)
+                    try { Atheriz.Core.AtherizLogger.LogWarning($"[MapEdit] ApplyMoves refused {failed.Count}/{roomMoves.Count} moves on {result.Chain.Area} z={result.Chain.Z}: {string.Join(";", failed.Take(5))}"); }
+                    catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.MapEditHandler: " + logEx.Message, "ConnectionManager"); }
             }
         }
         connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, new Dictionary<string, object?>());
@@ -545,13 +547,8 @@ public class InputFuncs
                 context.Add(((ToInt(ctx[0]), ToInt(ctx[1])), (ToInt(ctx[2]), ToInt(ctx[3]))));
             }
         }
-        string ip = connection.ClientHost ?? "?";
-        var result = Globals.MapEdit.Consume(key, ip, seq);
-        if (result.Status == Globals.MapEditStatus.Reject)
-        {
-            connection.SendCommand("map_edit_reject", new List<object?>{ result.Reason }, new Dictionary<string, object?>());
-            return;
-        }
+        var result = ConsumeOrReply(connection, key, seq);
+        if (result == null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
         {
             SendMoveVerdict(connection, seq, result.NewKey!, result.Chain!.Validation ?? new List<int>());
@@ -612,7 +609,7 @@ public class InputFuncs
             if (entry is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Object)
             {
                 var dict = new Dictionary<string, object?>();
-                foreach(var p in je.EnumerateObject()) dict[p.Name]= JsonElementToObjectLocal(p.Value);
+                foreach(var p in je.EnumerateObject()) dict[p.Name]= ConnectionManager.JsonElementToObject(p.Value);
                 norm = dict;
             }
             if (!IsLegendEntry(norm))
@@ -621,13 +618,8 @@ public class InputFuncs
                 return;
             }
         }
-        string ip = connection.ClientHost ?? "?";
-        var result = Globals.MapEdit.Consume(key, ip, seq);
-        if (result.Status == Globals.MapEditStatus.Reject)
-        {
-            connection.SendCommand("map_edit_reject", new List<object?>{ result.Reason }, new Dictionary<string, object?>());
-            return;
-        }
+        var result = ConsumeOrReply(connection, key, seq);
+        if (result == null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
         {
             connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, new Dictionary<string, object?>());
@@ -649,7 +641,7 @@ public class InputFuncs
             else if (eObj is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Object)
             {
                 dict = new Dictionary<string, object?>();
-                foreach(var p in je.EnumerateObject()) dict[p.Name]= JsonElementToObjectLocal(p.Value);
+                foreach(var p in je.EnumerateObject()) dict[p.Name]= ConnectionManager.JsonElementToObject(p.Value);
             }
             else continue;
             var le = new LegendEntry();
@@ -726,7 +718,8 @@ public class ConnectionManager
     private readonly Dictionary<string, BaseConnection> _connections = new(); // port of manager.py:51
     private readonly Dictionary<BaseConnection, string> _connToId = new(ReferenceEqualityComparer.Instance); // port of manager.py:52
     private readonly Dictionary<string, int> _perIpCounts = new(); // port of manager.py:53
-    private readonly Dictionary<string, Delegate> _messageHandlers = new(); // port of manager.py:55
+    private int _sinceSweep; // amortized orphan-sweep counter (see RegisterConnection tail)
+    private readonly Dictionary<string, Delegate> _messageHandlers = new(StringComparer.OrdinalIgnoreCase); // port of manager.py:55
     private int _connectionCounter; // port of manager.py:56
 
     public AsyncThreadPool Atp { get; } // port of manager.py:57
@@ -771,6 +764,7 @@ public class ConnectionManager
     public virtual bool RegisterConnection(string connId, BaseConnection connection)
     {
         var host = connection.ClientHost ?? "?"; // port of manager.py:76
+        connection.RegisteredHost = host;
         var limit = _settings.MaxConnectionsPerIp; // port of manager.py:77
         _lock.EnterWriteLock();
         try
@@ -778,26 +772,34 @@ public class ConnectionManager
             if (ObjectRegistry.IsIpBanned(host)) // port of manager.py:79-85
             {
                 try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Refusing connection from banned host {host}"); } catch { Console.Error.WriteLine($"[Network] Refusing connection from banned host {host}"); }
-                try { connection.Close(); } catch { }
+                try { connection.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ReferenceEqualityComparer.RegisterConnection: " + logEx.Message, "ReferenceEqualityComparer"); }
                 return false;
             }
             if (limit > 0 && host != "?") // port of manager.py:86-101
             {
                 var sameHost = _perIpCounts.TryGetValue(host, out var cnt) ? cnt : 0;
                 // if overwriting same conn_id, don't count itself twice — manager.py:88-91
-                if (_connections.TryGetValue(connId, out var existing) && (existing.ClientHost ?? "?") == host)
+                if (_connections.TryGetValue(connId, out var existing) && (existing.RegisteredHost ?? existing.ClientHost ?? "?") == host)
                     sameHost--;
                 if (sameHost >= limit)
                 {
                     try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Refusing connection from {host}: per-IP limit ({limit}) reached"); } catch { Console.Error.WriteLine($"[Network] Refusing connection from {host}: per-IP limit ({limit}) reached"); }
-                    try { connection.Close(); } catch { }
+                    try { connection.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ReferenceEqualityComparer.RegisterConnection: " + logEx.Message, "ReferenceEqualityComparer"); }
                     return false;
                 }
+            }
+            // Total-connection admission cap (0 = unlimited). Checked after the
+            // per-IP gate so the refusal reason stays specific.
+            if (_settings.MaxTotalConnections > 0 && _connections.Count >= _settings.MaxTotalConnections)
+            {
+                try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Refusing connection from {host}: total limit ({_settings.MaxTotalConnections}) reached"); } catch { Console.Error.WriteLine($"[Network] Refusing connection from {host}: total limit ({_settings.MaxTotalConnections}) reached"); }
+                try { connection.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.RegisterConnection: " + logEx.Message, "ConnectionManager"); }
+                return false;
             }
             // handle overwrite: adjust old host count — manager.py:102-113
             if (_connections.TryGetValue(connId, out var old))
             {
-                var oldHost = old.ClientHost ?? "?";
+                var oldHost = old.RegisteredHost ?? old.ClientHost ?? "?";
                 if (oldHost != "?" && oldHost != host)
                 {
                     var cnt = _perIpCounts.TryGetValue(oldHost, out var c) ? c - 1 : -1;
@@ -813,14 +815,50 @@ public class ConnectionManager
         }
         finally { _lock.ExitWriteLock(); }
         try { Atheriz.Core.AtherizLogger.LogInformation($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); } catch { Console.Error.WriteLine($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); } // port of manager.py:118
+        // Amortized orphan sweep: every 50th registration, drop sockets that
+        // never logged in and aged out (no login timeout exists upstream).
+        // Runs after the write lock is released; Disconnect is lock-safe.
+        if (System.Threading.Interlocked.Increment(ref _sinceSweep) % 50 == 0)
+        {
+            try { SweepOrphanedConnections(TimeSpan.FromMinutes(5)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.RegisterConnection: " + logEx.Message, "ConnectionManager"); }
+        }
         return true;
+    }
+
+    /// <summary>
+    /// Disconnects sockets that never attached an account/puppet and are older
+    /// than <paramref name="maxPreLoginAge"/>. Returns the number swept.
+    /// Same-account duplicate gating is intentionally absent (the login layer
+    /// owns session replacement); this only reaps abandoned pre-login sockets.
+    /// </summary>
+    public int SweepOrphanedConnections(TimeSpan maxPreLoginAge)
+    {
+        var cutoff = DateTime.UtcNow - maxPreLoginAge;
+        var stale = new List<BaseConnection>();
+        foreach (var c in ConnectionsSnapshot.Values)
+        {
+            try
+            {
+                var s = c.Session;
+                if (s == null || s.Puppet != null || s.Account != null) continue;
+                if (c.ConnectedAtUtc > cutoff) continue;
+                stale.Add(c);
+            }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.SweepOrphanedConnections: " + logEx.Message, "ConnectionManager"); }
+        }
+        int swept = 0;
+        foreach (var c in stale)
+        {
+            try { Disconnect(c); swept++; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.SweepOrphanedConnections: " + logEx.Message, "ConnectionManager"); }
+        }
+        return swept;
     }
 
     // Port of manager.py:121-153 disconnect
     public virtual void Disconnect(BaseConnection connection)
     {
         string? connId = null;
-        var host = connection.ClientHost ?? "?"; // port of manager.py:123
+        var host = connection.RegisteredHost ?? connection.ClientHost ?? "?"; // port of manager.py:123
         _lock.EnterWriteLock();
         try
         {
@@ -853,21 +891,26 @@ public class ConnectionManager
         var session = connection.Session; // port of manager.py:142
         if (session != null)
         {
-            // port of manager.py:144-148 run session teardown on game threadpool
-            if (!Atp.AddTask(() => DoSessionDisconnect(session)))
+            // port of manager.py:144-148 run session teardown on game threadpool.
+            // Fire-and-forget by design: disconnect() executes on the network
+            // event loop and must not block on teardown (pinned by
+            // DisconnectDoesNotBlockOnSlowTeardown: 0.5s teardown, <0.5s return).
+            // Pool full/stopped: never run teardown inline — at_disconnect()
+            // checkpoints the DB. Re-schedule with a short delay (same
+            // pattern as GameTime alarms); the delayed task re-queues
+            // onto the pool once it drains.
+            bool queued = false;
+            try { queued = Atp.AddTask(() => DoSessionDisconnect(session)); }
+            catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Session teardown could not be queued during disconnect: {e}"); } catch { Console.Error.WriteLine($"[Network] Session teardown could not be queued during disconnect: {e}"); } }
+            if (!queued)
             {
-                // Pool full/stopped: never run teardown inline — disconnect()
-                // executes on the network event loop and at_disconnect()
-                // checkpoints the DB. Re-schedule with a short delay (same
-                // pattern as GameTime alarms); the delayed task re-queues
-                // onto the pool once it drains.
                 try { Atp.Delay(0.05, () => DoSessionDisconnect(session)); }
                 catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Session teardown could not be deferred during disconnect: {e}"); } catch { Console.Error.WriteLine($"[Network] Session teardown could not be deferred during disconnect: {e}"); } }
             }
         }
         try { connection.Close(); } // port of manager.py:149-152
         catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Connection cleanup failed: {e}"); } catch { Console.Error.WriteLine($"[Network] Connection cleanup failed: {e}"); } }
-        try { (connection as IDisposable)?.Dispose(); } catch { }
+        try { (connection as IDisposable)?.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ReferenceEqualityComparer.Disconnect: " + logEx.Message, "ReferenceEqualityComparer"); }
         try { Atheriz.Core.AtherizLogger.LogInformation($"[Network] Connection closed: {connId} (total: {ConnectionCount})"); } catch { Console.Error.WriteLine($"[Network] Connection closed: {connId} (total: {ConnectionCount})"); } // port of manager.py:153
     }
 
@@ -960,8 +1003,8 @@ public class ConnectionManager
             var cmd = cmdElement.GetString()!;
             List<object?> args = new(); // port of manager.py:203
             Dictionary<string, object?> kwargs = new(); // port of manager.py:204
-            if (root.GetArrayLength() > 1) args = JsonElementToList(root[1]);
-            if (root.GetArrayLength() > 2) kwargs = JsonElementToDict(root[2]);
+            if (root.GetArrayLength() > 1) args = JsonElementToObject(root[1]) as List<object?> ?? new();
+            if (root.GetArrayLength() > 2) kwargs = JsonElementToObject(root[2]) as Dictionary<string, object?> ?? new();
 
             Dispatch(connection, cmd, args, kwargs); // port of manager.py:206
         }
@@ -1006,28 +1049,13 @@ public class ConnectionManager
         }
         else
         {
-            try { Atheriz.Core.AtherizLogger.LogDebug($"Unknown command: {cmd}"); } catch (Exception) { } // port of manager.py:229 (logger.debug)
+            try { Atheriz.Core.AtherizLogger.LogDebug($"Unknown command: {cmd}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ReferenceEqualityComparer.Dispatch: " + logEx.Message, "ReferenceEqualityComparer"); } // port of manager.py:229 (logger.debug)
         }
     }
 
-    // Helpers to convert JsonElement to List/Dict of objects
-    private static List<object?> JsonElementToList(JsonElement el)
-    {
-        if (el.ValueKind != JsonValueKind.Array) return new List<object?> { JsonElementToObject(el) };
-        var list = new List<object?>();
-        foreach (var item in el.EnumerateArray()) list.Add(JsonElementToObject(item));
-        return list;
-    }
+    // Helpers to convert JsonElement to List/Dict of objects: single family below.
 
-    private static Dictionary<string, object?> JsonElementToDict(JsonElement el)
-    {
-        if (el.ValueKind != JsonValueKind.Object) return new Dictionary<string, object?>();
-        var dict = new Dictionary<string, object?>();
-        foreach (var prop in el.EnumerateObject()) dict[prop.Name] = JsonElementToObject(prop.Value);
-        return dict;
-    }
-
-    private static object? JsonElementToObject(JsonElement el)
+    internal static object? JsonElementToObject(JsonElement el)
     {
         return el.ValueKind switch
         {
@@ -1036,10 +1064,27 @@ public class ConnectionManager
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.Null => null,
-            JsonValueKind.Array => JsonElementToList(el),
-            JsonValueKind.Object => JsonElementToDict(el),
+            JsonValueKind.Array => ConvertArray(el),
+            JsonValueKind.Object => ConvertDict(el),
             _ => null
         };
+
+        // Array/object recursion lives here, inside the single converter family.
+        static List<object?> ConvertArray(JsonElement a)
+        {
+            if (a.ValueKind != JsonValueKind.Array) return new List<object?> { JsonElementToObject(a) };
+            var list = new List<object?>();
+            foreach (var item in a.EnumerateArray()) list.Add(JsonElementToObject(item));
+            return list;
+        }
+
+        static Dictionary<string, object?> ConvertDict(JsonElement o)
+        {
+            if (o.ValueKind != JsonValueKind.Object) return new Dictionary<string, object?>();
+            var dict = new Dictionary<string, object?>();
+            foreach (var prop in o.EnumerateObject()) dict[prop.Name] = JsonElementToObject(prop.Value);
+            return dict;
+        }
     }
 
     // For tests / introspection — expose internal state counts similar to Python's _connections

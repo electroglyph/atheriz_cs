@@ -10,8 +10,6 @@ public static class WebSocketHandler
     private static readonly Dictionary<string, double> _wsOversizeLast = new();
     private static readonly object _wsOversizeLock = new();
 
-    public static async Task MapWebSocketAsync(HttpContext context, AtherizSettings settings) => await HandleAsync(context, settings);
-
     public static async Task HandleAsync(HttpContext context, AtherizSettings settings)
     {
         string clientHost = "?";

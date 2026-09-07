@@ -1,4 +1,5 @@
 // Port of atheriz/initial_setup.py:48 do_setup
+using Microsoft.EntityFrameworkCore;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Commands;
@@ -74,7 +75,7 @@ public static class InitialSetup
         // Ensure Id generator clean
         IdGenerator.SetId(-1);
         // Clear any existing node/map/time singletons that might cache old save path
-        try { Globals.GlobalServices.ResetForTesting(); } catch { }
+        try { Globals.GlobalServices.Reset(); } catch { }
         SaltProvider.Clear();
         // Re-seed salt after clear
         try { SaltProvider.GetSalt(absSecret); } catch {}
@@ -138,15 +139,27 @@ public static class InitialSetup
             mi.PreRender();
             mh.SetMapInfo(LIMBO_AREA, z, mi);
         }
-        // Persist nodes and map
-        using (var db = AtherizDbContextFactory.Create(absSave))
+        // Persist nodes and map.
+        // Single shared context + transaction for the whole seed (atomic checkpoint):
+        // previously five separate contexts committed independently, so a mid-setup
+        // failure left a half-built world. Any early return / throw below disposes the
+        // transaction uncommitted (rollback); only the Commit at the end persists.
+        using var db = AtherizDbContextFactory.Create(absSave);
+        // The seed holds the write gate for its whole span so no concurrent save can
+        // interleave with the single transaction below (same-flow re-entry, bounded).
+        if (!Atheriz.Core.Persistence.DbWriteGate.TryEnter(TimeSpan.FromSeconds(30)))
+            throw new TimeoutException("DbWriteGate held for over 30s; refusing to hang initial setup.");
+        try
         {
-            mh.Save(db);
-        }
-        using (var db = AtherizDbContextFactory.Create(absSave))
-        {
-            nh.Save(db);
-        }
+        db.Database.EnsureCreated();
+        // Scoped durability: global pragmas use synchronous=NORMAL (steady-state perf);
+        // the one-time seed upgrades this connection to FULL so the initial world
+        // state is fsync'd through the OS buffers, not just WAL-buffered.
+        try { db.Database.ExecuteSqlRaw("PRAGMA synchronous=FULL;"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InitialSetup.DoSetup fsync pragma: " + logEx.Message, "InitialSetup"); }
+        using var setupTx = db.Database.BeginTransaction();
+        mh.Save(db);
+        nh.Save(db);
 
         // Resolve username/password — mirrors initial_setup.py:98-123
         string? u = username;
@@ -237,7 +250,7 @@ public static class InitialSetup
         var gtSettings = new AtherizSettings { SavePath = absSave };
         var gt = new Globals.GameTime(gtSettings, autoLoad: false);
         gt.AddAlarm("?", "0", alarmObj, repeat: true);
-        using (var db = AtherizDbContextFactory.Create(absSave)) gt.Save(db);
+        gt.Save(db);
 
         // Account + character
         // Ensure salt with explicit secret path
@@ -282,16 +295,13 @@ public static class InitialSetup
         if (!character.ChannelsSnapshot.Contains(chan.Id))
             character.Subscribe(chan);
 
-        using (var db = AtherizDbContextFactory.Create(absSave))
-        {
-            // Port of initial_setup.py:171 save_objects() — default force=False:
-            // persist only modified objects.
-            ObjectRegistry.SaveObjects(db, force: false);
-        }
-        using (var db = AtherizDbContextFactory.Create(absSave))
-        {
-            nh.Save(db);
-        }
+        // Port of initial_setup.py:171 save_objects() — default force=False:
+        // persist only modified objects.
+        ObjectRegistry.SaveObjects(db, force: false);
+        nh.Save(db);
+        setupTx.Commit();
         Console.Error.WriteLine("Initial world state set up.");
+        }
+        finally { Atheriz.Core.Persistence.DbWriteGate.Exit(); }
     }
 }

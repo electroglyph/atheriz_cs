@@ -103,8 +103,6 @@ public class PortedSessionTests
         using var env = GlobalTestEnv.Enter();
         var acc = Account.Create("alice2", "pw1234567");
         var s = new Session(account: acc);
-        var orig = Account.AtCreateHook;
-        // Use Account's AtDisconnect via tracking: we create a wrapper GameObject account? Simpler: check that session disposes account without error
         s.AtDisconnect(); // should not throw
         Assert.True(true);
     }

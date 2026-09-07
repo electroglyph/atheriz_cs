@@ -33,7 +33,7 @@ public class PortedDuplicateCreateRaceTests
     public void ConcurrentAccountCreateSameName()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         try
         {
             var gate = new Barrier(2);

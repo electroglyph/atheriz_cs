@@ -50,7 +50,7 @@ public class CheckpointJournalTests
             // Crash residue: the checkpoint journal still says dirty.
             CheckpointJournal.MarkDirty(env.TempPath);
             Assert.True(CheckpointJournal.IsDirty(env.TempPath), "journal roundtrip must report dirty");
-            GlobalServices.ResetForTesting();
+            GlobalServices.Reset();
             NodeHandler.SetCurrent(null);
             Exception? ex;
             string log;
@@ -64,9 +64,9 @@ public class CheckpointJournalTests
         }
         finally
         {
-            GlobalServices.ResetForTesting();
+            GlobalServices.Reset();
             NodeHandler.SetCurrent(null);
-            try { StartStop.ResetForTesting(); } catch { }
+            try { StartStop.Reset(); } catch { }
         }
     }
 
@@ -89,7 +89,7 @@ public class CheckpointJournalTests
             nh.AddNode(node);
             var gt = new GameTime(settings, autoLoad: false);
             Autosave.AutosaveTick(settings, mh, nh, gt);
-            GlobalServices.ResetForTesting();
+            GlobalServices.Reset();
             NodeHandler.SetCurrent(null);
             Exception? ex;
             string log;
@@ -103,9 +103,9 @@ public class CheckpointJournalTests
         }
         finally
         {
-            GlobalServices.ResetForTesting();
+            GlobalServices.Reset();
             NodeHandler.SetCurrent(null);
-            try { StartStop.ResetForTesting(); } catch { }
+            try { StartStop.Reset(); } catch { }
         }
     }
 }

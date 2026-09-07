@@ -7,16 +7,6 @@ using Atheriz.Core.Utils;
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Write-lock acquisition observer for the location-lock tests (ports the
-/// Python SpyLock tests): test doubles implement this to count EnterWriteLock
-/// calls routed through IncrementTracker. Production trackers stay null.
-/// </summary>
-internal interface IWriteLockTracker
-{
-    void TrackWriteLock();
-}
-
-/// <summary>
 /// Core entity. Ports <c>atheriz/objects/base_obj.py:Object</c> merged with
 /// <c>base_flags.Flags</c>, <c>base_lock.AccessLock</c>, <c>base_db_ops.DbOps</c>.
 /// Thread-safe via ReaderWriterLockSlim (SupportsRecursion) mirroring Python RLock.
@@ -28,21 +18,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     private ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);
     private readonly List<string> _msgLog = new();
 
-    // --- test overrides for move hooks (faithful to MagicMock patching in tests) ---
-    public Func<GameObject?, string?, bool>? AtPreMoveOverride { get; set; }
-    public Action<GameObject?, string?>? AtPostMoveOverride { get; set; }
-    public Func<GameObject?, string?, bool>? AtPreObjectLeaveOverride { get; set; }
-    public Action<GameObject?, string?>? AtObjectLeaveOverride { get; set; }
-    public Func<GameObject?, string?, bool>? AtPreObjectReceiveOverride { get; set; }
-    public Action<GameObject?, string?>? AtObjectReceiveOverride { get; set; }
-
-    // --- tracking for location lock test (counts EnterWriteLock calls when SetLockForTesting used) ---
-    // Typed via IWriteLockTracker (no reflection): test doubles implement the
-    // interface; production never sets a tracker (stays null).
-    private IWriteLockTracker? _testTracker;
-    protected void IncrementTracker() { try { _testTracker?.TrackWriteLock(); } catch (Exception) { } }
-    private void EnterWriteLockTracked() { IncrementTracker(); _lock.EnterWriteLock(); }
-    private void EnterReadLockTracked() { _lock.EnterReadLock(); }
     // Puppet snapshot — only is_pc/privilege_level per puppet.py:110 wontfix (quelled/can_hear/is_mapable not saved)
     private Dictionary<string, object>? _puppetRestore; // Port of target._puppet_restore (Python) — transient, never persisted
     private double _secondsPlayed; // Port of base_obj.py:103-104 _seconds_played + seconds_played property
@@ -107,13 +82,13 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     private void Write(Action action)
     {
-        IncrementTracker(); _lock.EnterWriteLock();
+        _lock.EnterWriteLock();
         try { action(); }
         finally { _lock.ExitWriteLock(); }
     }
     private T Write<T>(Func<T> fn)
     {
-        IncrementTracker(); _lock.EnterWriteLock();
+        _lock.EnterWriteLock();
         try { return fn(); }
         finally { _lock.ExitWriteLock(); }
     }
@@ -127,7 +102,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     public IDisposable WriteScope()
     {
-        IncrementTracker();
         _lock.EnterWriteLock();
         return new LockScope(_lock, isWrite: true);
     }
@@ -189,7 +163,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                         pos = (n.Coord.X - minX, maxY - n.Coord.Y);
                 }
             }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
             try
             {
                 // Port of base_obj.py:790-801 self.msg(map={map, pos, symbol, legend, min_x, max_y, area, show_legend})
@@ -205,7 +179,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     ["show_legend"] = showLegend,
                 };
                 Session? sess = null;
-                try { sess = Session; } catch (Exception) { }
+                try { sess = Session; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
                 var conn = sess?.Connection;
                 if (conn != null)
                 {
@@ -215,10 +189,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 {
                     // Fallback for test harnesses without connection — store via _msgLog like original Python would via session.msg
                     // Use MsgInternal path via Session if available, otherwise log
-                    try { Msg($"[map:{name}]"); } catch (Exception) { }
+                    try { Msg($"[map:{name}]"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
                 }
             }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
             LastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
             return 0;
         }, mapStr, entries, minX, maxY, showLegend, name);
@@ -236,12 +210,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     ["show_legend"] = show,
                 };
                 Session? sess = null;
-                try { sess = Session; } catch (Exception) { }
+                try { sess = Session; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLegendUpdate: " + logEx.Message, "GameObject"); }
                 var conn = sess?.Connection;
                 if (conn != null)
                     conn.SendCommand("legend", new List<object?> { payload }, null);
             }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLegendUpdate: " + logEx.Message, "GameObject"); }
             return 0;
         }, entries, show, area);
     }
@@ -289,8 +263,15 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public List<int> ChannelsSnapshot => Read(() => new List<int>(_channels));
     public HashSet<int> FollowersSnapshot => Read(() => new HashSet<int>(_followers));
 
+    /// <summary>
+    /// Curated member list for the examine command (typed replacement for the
+    /// reflection field/property walk). Game-code subclasses override to append
+    /// their own members. Bool marks CLR properties ("[property]" in output).
+    /// </summary>
+    public virtual IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
+        => Atheriz.Core.Commands.LoggedIn.ExamFormatter.BaseMembers(this);
+
     public ReaderWriterLockSlim SyncRoot => _lock;
-    internal void SetLockForTesting(ReaderWriterLockSlim newLock) { _lock = newLock; _testTracker = newLock as IWriteLockTracker; }
 
     internal void SetIsDeletedRaw(bool v)
     {
@@ -373,7 +354,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             // deadlock against Msg delivery (channel → peer).
             if (channel.IsDeletedSnapshot())
             {
-                try { channel.RemoveListener(this); } catch (Exception) { }
+                try { channel.RemoveListener(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Subscribe: " + logEx.Message, "GameObject"); }
             }
             else if (!_channels.Contains(channel.Id))
             {
@@ -398,7 +379,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     catch (InvalidOperationException) { /* already installed */ }
                 }
             }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Subscribe: " + logEx.Message, "GameObject"); }
         }
     }
     /// <summary>
@@ -439,7 +420,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             // Port of base_obj.py:775-777: drop the channel command again.
             // Channel locks only (see Subscribe) — never under the peer lock.
             try { var cmd = channel.GetCommand(); if (cmd != null) InternalCmdSet?.Remove(cmd); }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unsubscribe: " + logEx.Message, "GameObject"); }
         }
     }
 
@@ -580,7 +561,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     {
         if (IsTickable)
         {
-            try { Objects.GlobalTickerHolder.Get()?.AddCoro(AtTick, TickSeconds); } catch (Exception) { }
+            try { Objects.GlobalTickerHolder.Get()?.AddCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ResolveRelations: " + logEx.Message, "GameObject"); }
         }
         HashSet<int> scripts;
         _lock.EnterReadLock();
@@ -591,10 +572,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             var lst = Globals.ObjectRegistry.Get(id);
             if (lst.Count > 0 && lst[0] is Script s)
             {
-                try { s.InstallHooks(this); } catch (Exception) { }
+                try { s.InstallHooks(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ResolveRelations: " + logEx.Message, "GameObject"); }
             }
         }
-        try { AtInit(); } catch (Exception) { }
+        try { AtInit(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ResolveRelations: " + logEx.Message, "GameObject"); }
     }
 
     // --- DTO conversion (mirrors __getstate__/__setstate__) --- (persisted via Persistence/Converters/GameObjectDtoConverter.cs)
@@ -745,10 +726,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         // (load path re-registers via ResolveRelations).
         obj._internalCmdSet = new Commands.CmdSet();
         obj._externalCmdSet = new Commands.CmdSet();
-        try { obj.AtCreate(); } catch (Exception) { }
+        try { obj.AtCreate(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Create: " + logEx.Message, "GameObject"); }
         if (isTickable)
         {
-            try { Objects.GlobalTickerHolder.Get()?.AddCoro(obj.AtTick, tickSeconds); } catch (Exception) { }
+            try { Objects.GlobalTickerHolder.Get()?.AddCoro(obj.AtTick, tickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Create: " + logEx.Message, "GameObject"); }
         }
 
         return obj;
@@ -764,9 +745,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     internal Dictionary<string, System.Text.Json.JsonElement> GetExtraSnapshot() => Read(() => new Dictionary<string, System.Text.Json.JsonElement>(_extra));
     internal Dictionary<string, List<Func<GameObject, bool>>> GetLocksSnapshot() => Read(() => new Dictionary<string, List<Func<GameObject, bool>>>(_locks));
     internal Dictionary<string, List<string>> GetLockPoliciesSnapshot() => Read(() => new Dictionary<string, List<string>>(_lockPolicies));
-    internal void IncrementTrackerInternal() => IncrementTracker();
     internal Persistence.Dto.GameObjectDto ToDtoUnsafeInternal() => BuildDto();
-    // Raw IsModified access without re-entering lock (caller must hold write lock) — used by GetSaveOps to ensure exactly one tracker increment
+    // Raw IsModified access without re-entering lock (caller must hold write lock) — used by GetSaveOps.
     internal bool GetIsModifiedRawNoLock() => _flags.IsModified;
     internal void SetIsModifiedRawNoLock(bool v) => _flags.IsModified = v;
 

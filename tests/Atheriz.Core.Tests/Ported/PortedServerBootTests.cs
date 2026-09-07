@@ -11,7 +11,7 @@ public class PortedServerBootTests
         using var env = GlobalTestEnv.Enter();
         var pidFile = Path.Combine(env.TempPath, "server.pid");
         Assert.False(File.Exists(pidFile));
-        StartStop.ResetForTesting();
+        StartStop.Reset();
         Assert.False(StartStop.Started);
     }
     [Fact] public void ServerRefusesSecondInstance_WhenStarted()
@@ -32,9 +32,9 @@ public class PortedServerBootTests
         Assert.NotNull(pool);
         Assert.NotNull(ticker);
         StartStop.DoShutdown();
-        // After shutdown, ResetForTesting clears
-        StartStop.ResetForTesting();
-        GlobalServices.ResetForTesting();
+        // After shutdown, Reset clears
+        StartStop.Reset();
+        GlobalServices.Reset();
         Assert.False(StartStop.Started);
     }
 }

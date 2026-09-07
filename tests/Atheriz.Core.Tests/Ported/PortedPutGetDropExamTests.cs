@@ -71,9 +71,6 @@ public class PortedPutGetDropExamTests
         public override bool AtPreDrop(GameObject dropper){ return AtPreDropResult; }
     }
 
-    private sealed class MockPutArgs { public string Object {get;} public List<string> Destination {get;} public MockPutArgs(string o, List<string> d){ Object=o; Destination=d; } }
-    private sealed class MockGetArgs { public string Object {get;} public List<string> Source {get;} public MockGetArgs(string o, List<string> s){ Object=o; Source=s; } }
-    private sealed class MockDropArgs { public List<string> Object {get;} public MockDropArgs(List<string> o){ Object=o; } }
     // For legacy args shape compatibility, PutCommand also handles "args" list
 
     // -----------------------------------------------------------------------
@@ -100,7 +97,7 @@ public class PortedPutGetDropExamTests
         c.Location = LocationRef.NullLocation.Instance;
         c.SearchMap["bag"] = new List<GameObject>();
         var put = new PutCommand();
-        var args = new MockPutArgs("apple", new List<string>{"bag"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"apple", "in", "bag"} };
         put.Run(c, args);
         Assert.Single(c.Msgs);
         Assert.Equal("'bag' not found.", c.Msgs[0]);
@@ -123,7 +120,7 @@ public class PortedPutGetDropExamTests
         c.SearchMap["rock"] = new List<GameObject>{ rock };
         c.SearchMap["apple"] = new List<GameObject>{ apple };
         var put = new PutCommand();
-        var args = new MockPutArgs("apple", new List<string>{"rock"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"apple", "in", "rock"} };
         put.Run(c, args);
         Assert.Single(c.Msgs);
         Assert.Equal("You can't put anything in Rock!", c.Msgs[0]);
@@ -146,7 +143,7 @@ public class PortedPutGetDropExamTests
         c.SearchMap["bag"] = new List<GameObject>{ bag };
         c.SearchMap["apple"] = new List<GameObject>{ apple };
         var put = new PutCommand();
-        var args = new MockPutArgs("apple", new List<string>{"bag"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"apple", "in", "bag"} };
         put.Run(c, args);
         Assert.Contains(apple.Id, bag.ContentsSnapshot);
         Assert.Contains("You put Apple in Bag.", string.Join(" ", c.Msgs));
@@ -165,7 +162,7 @@ public class PortedPutGetDropExamTests
         c.SearchMap["bag"] = new List<GameObject>{ bag };
         c.SearchMap["apple"] = new List<GameObject>{ apple };
         var put = new PutCommand();
-        var args = new MockPutArgs("apple", new List<string>{"bag"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"apple", "in", "bag"} };
         put.Run(c, args);
         Assert.DoesNotContain(apple.Id, bag.ContentsSnapshot);
         Assert.Equal(1, apple.AtPrePutCalls);
@@ -186,7 +183,7 @@ public class PortedPutGetDropExamTests
         c.SearchMap["bag"] = new List<GameObject>{ bag };
         c.SearchMap["apple"] = new List<GameObject>{ apple };
         var put = new PutCommand();
-        var args = new MockPutArgs("apple", new List<string>{"bag"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"apple", "in", "bag"} };
         put.Run(c, args);
         Assert.Contains(apple.Id, bag.ContentsSnapshot);
         Assert.Equal(1, apple.AtPutCalls);
@@ -208,7 +205,7 @@ public class PortedPutGetDropExamTests
         // For "all" case, PutCommand iterates caller.contents directly, not via search
         c.SearchMap["bag"] = new List<GameObject>{ bag };
         var put = new PutCommand();
-        var args = new MockPutArgs("all", new List<string>{"bag"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"all", "in", "bag"} };
         put.Run(c, args);
         Assert.DoesNotContain(a.Id, bag.ContentsSnapshot);
         Assert.Contains(b.Id, bag.ContentsSnapshot);
@@ -226,7 +223,7 @@ public class PortedPutGetDropExamTests
         var a = new HookObj("A"); ObjectRegistry.AddObject(a); a.MoveTo(c);
         c.SearchMap["bag"] = new List<GameObject>{ bag };
         var put = new PutCommand();
-        var args = new MockPutArgs("all", new List<string>{"bag"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"all", "in", "bag"} };
         put.Run(c, args);
         Assert.Equal(1, a.AtPutCalls);
         Assert.Equal(c, a.AtPutArgs[0].putter);
@@ -350,7 +347,7 @@ public class PortedPutGetDropExamTests
         // We need c.Location to resolve to room2? Instead just set c.Location to room2's coord and add room2 to registry
         // Simplify: just run Get with source "from bag" and ensure no crash
         var cmd = new GetCommand();
-        var args = new MockGetArgs("apple", new List<string>{"from","bag"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["target"] = new List<string>{"apple", "from","bag"} };
         // Need bag object for source search
         var bag = GameObject.Create("bag"); ObjectRegistry.AddObject(bag);
         c.SearchMap["bag"] = new List<GameObject>{ bag };
@@ -378,7 +375,7 @@ public class PortedPutGetDropExamTests
         var c = MakeCaller();
         c.Location = LocationRef.NullLocation.Instance;
         var cmd = new DropCommand();
-        var args = new MockDropArgs(new List<string>{"apple"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["object"] = new List<string>{"apple"} };
         cmd.Run(c, args);
         Assert.Contains("You can't drop something here!", string.Join(" ", c.PeekMessages()));
     }
@@ -391,7 +388,7 @@ public class PortedPutGetDropExamTests
         room.AddLock("put", _=> false);
         c.MoveTo(room);
         var cmd = new DropCommand();
-        var args = new MockDropArgs(new List<string>{"apple"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["object"] = new List<string>{"apple"} };
         cmd.Run(c, args);
         Assert.Contains("You can't drop something here!", string.Join(" ", c.PeekMessages()));
     }
@@ -407,7 +404,7 @@ public class PortedPutGetDropExamTests
         var apple = GameObject.Create("Apple"); ObjectRegistry.AddObject(apple); apple.MoveTo(c);
         c.SearchMap["apple"] = new List<GameObject>{ apple };
         var cmd = new DropCommand();
-        var args = new MockDropArgs(new List<string>{"apple"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["object"] = new List<string>{"apple"} };
         cmd.Run(c, args);
         Assert.Contains(apple.Id, room.ContentsSnapshot);
         Assert.Contains("You dropped: Apple", string.Join(" ", c.Msgs));
@@ -423,7 +420,7 @@ public class PortedPutGetDropExamTests
         c.Location = new LocationRef.CoordLocation(room.Coord); room.AddObject(c);
         c.SearchMap["apple"] = new List<GameObject>();
         var cmd = new DropCommand();
-        var args = new MockDropArgs(new List<string>{"apple"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["object"] = new List<string>{"apple"} };
         cmd.Run(c, args);
         Assert.Contains("Object not found.", string.Join(" ", c.Msgs));
     }
@@ -438,7 +435,7 @@ public class PortedPutGetDropExamTests
         var a = GameObject.Create("A"); ObjectRegistry.AddObject(a); a.MoveTo(c);
         var b = GameObject.Create("B"); ObjectRegistry.AddObject(b); b.MoveTo(c);
         var cmd = new DropCommand();
-        var args = new MockDropArgs(new List<string>{"all"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["object"] = new List<string>{"all"} };
         cmd.Run(c, args);
         Assert.Contains(a.Id, room.ContentsSnapshot);
         Assert.Contains(b.Id, room.ContentsSnapshot);
@@ -655,7 +652,7 @@ public class PortedPutGetDropExamTests
         c.Location = new LocationRef.CoordLocation(room.Coord); room.AddObject(c);
         var rock = GameObject.Create("Rock"); rock.IsContainer=false; rock.AddLock("put", _=> true); ObjectRegistry.AddObject(rock);
         c.SearchMap["rock"] = new List<GameObject>{ rock };
-        var args = new MockPutArgs("apple", new List<string>{"rock"});
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"apple", "in", "rock"} };
         var put = new PutCommand();
         put.Run(c, args);
         Assert.Single(c.Msgs);

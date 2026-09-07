@@ -47,7 +47,9 @@ public static class ServerEvents
     // Port of server_events.py:19 def at_char_create(account_name, char_name, password) CLI helper.
     // The optional output mirrors Python's redirect_stdout capture in the
     // /_internal/create_account endpoint: null keeps Console output (CLI/tests).
-    public static void AtCharCreate(string accountName, string charName, string password, TextWriter? output = null)
+    // settingsOverride lets embedders pass explicit settings instead of the Global
+    // singleton (which carries SavePath/SecretPath); null keeps Global (CLI/tests).
+    public static void AtCharCreate(string accountName, string charName, string password, TextWriter? output = null, AtherizSettings? settingsOverride = null)
     {
         void Out(string s) => (output ?? Console.Out).WriteLine(s);
         // Port of server_events.py:19-96 faithful validation + creation, console output replaces print
@@ -56,6 +58,10 @@ public static class ServerEvents
         err = Commands.UnloggedIn.Validation.ValidateCharacterName(charName);
         if (err != null) { Out(err); return; }
         var existsLc = charName.ToLowerInvariant();
+        // Lock narrowing: the creation lock guards ONLY check-then-insert (registry
+        // mutations + race rollback). MoveTo messaging, SaveObjects persistence, console
+        // output of the success path, and the hook call all run AFTER the lock releases.
+        GameObject? doneChar = null; Account? doneAcc = null; Node? doneHome = null; bool doneNewAccount = false;
         // B-UTL-1: pre-check + insert are one critical section per creator; concurrent
         // AtCharCreate calls serialize so the second sees the first's committed PC.
         lock (_charCreateLock)
@@ -65,7 +71,7 @@ public static class ServerEvents
             Out($"Character name '{charName}' already exists.");
             return;
         }
-        var settings = AtherizSettings.Global;
+        var settings = settingsOverride ?? AtherizSettings.Global;
         var results = ObjectRegistry.FilterBy(o => o.IsAccount && (o.Name ?? "").ToLowerInvariant() == accountName.ToLowerInvariant());
         // Port of server_events.py:47 get_node_handler + DEFAULT_HOME (direct call, errors surface).
         // C# tests use real Nodes without handler indexing (no mocks), so also consult the live registry.
@@ -103,12 +109,8 @@ public static class ServerEvents
                     Out($"Character name '{charName}' already exists.");
                     return;
                 }
-                character.MoveTo(home);
-                ObjectRegistry.SaveObjects();
-                acc.IsModified = true; // Port of server_events.py object.__setattr__(r, "is_modified", True) after save
-                Out("Success! Character created.");
-                // Port of hook invocation for at_char_create
-                AtCharCreate(ObjectRegistry.FilterBy(o => o.Name == charName && o.IsPc).FirstOrDefault()!, results[0] as Account ?? new Account { Name = accountName });
+                // Success-path I/O runs after the lock releases (see doneChar below).
+                doneChar = character; doneAcc = acc; doneHome = home; doneNewAccount = false;
                 return;
             }
         }
@@ -131,11 +133,17 @@ public static class ServerEvents
         }
         ch2.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord);
         account.AddCharacter(ch2);
-        ch2.MoveTo(home);
-        ObjectRegistry.SaveObjects();
-        account.IsModified = true; // Port of server_events.py object.__setattr__(account, "is_modified", True) after save
-        Out("Success! Account and character created.");
-        AtCharCreate(ch2, account);
+        // Success-path I/O runs after the lock releases (see doneChar below).
+        doneChar = ch2; doneAcc = account; doneHome = home; doneNewAccount = true;
+        }
+        if (doneChar != null && doneAcc != null && doneHome != null)
+        {
+            doneChar.MoveTo(doneHome);
+            ObjectRegistry.SaveObjects();
+            doneAcc.IsModified = true; // Port of server_events.py object.__setattr__(account, "is_modified", True) after save
+            Out(doneNewAccount ? "Success! Account and character created." : "Success! Character created.");
+            // Pass the live objects (not a re-query of the registry).
+            AtCharCreate(doneChar, doneAcc);
         }
     }
 
@@ -154,16 +162,6 @@ public static class ServerEvents
     {
         if (character == null || account == null) return;
         AtherizLogger.LogInformation($"Character '{character.Name}' created for account '{account.Name}'.");
-    }
-
-    private static void TryBroadcast(string msg)
-    {
-        try
-        {
-            var ch = GlobalServices.GetServerChannel();
-            if (ch != null) try { ch.Msg(msg); } catch { }
-        }
-        catch { }
     }
 
     private static void InvokeHooks(string hookName, params object?[] args)

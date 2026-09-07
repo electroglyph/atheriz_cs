@@ -86,7 +86,7 @@ public sealed class CommandTests
     [Fact]
     public void Dispatch_InternalCmdSet_PrecedesGlobal()
     {
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
         var puppet = new GameObject { Name = "Hero" };
         var internalCs = new CmdSet();
         var internalCmd = new EchoCommand(); // key echo
@@ -100,13 +100,13 @@ public sealed class CommandTests
         Assert.NotNull(job);
         job!.Func(job.Caller, job.Args);
         Assert.Contains("hello world", puppet.PeekMessages().Last());
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
     }
 
     [Fact]
     public void Dispatch_AutoAlias_FindsPrefix()
     {
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
         var _ = CommandRegistry.LoggedIn; // init with default look etc
         var puppet = new GameObject { Name = "Hero", Desc = "A hero stands here." };
         puppet.ClearMessages();
@@ -118,13 +118,13 @@ public sealed class CommandTests
         job.Func(job.Caller, job.Args);
         // look should msg desc
         Assert.Contains("hero stands", puppet.PeekMessages().Last().ToLower());
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
     }
 
     [Fact]
     public void Dispatch_GluedSingleCharNonAlpha_ConsumesPrefix()
     {
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
         var cs = CommandRegistry.LoggedIn;
         var custom = new TestCommaCommand();
         cs.Add(custom);
@@ -135,7 +135,7 @@ public sealed class CommandTests
         job!.Func(job.Caller, job.Args);
         // glued args should be "hello world" (prefix consumed)
         Assert.Contains("hello world", puppet.PeekMessages().Last());
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
     }
 
     private sealed class TestCommaCommand : Command
@@ -148,7 +148,7 @@ public sealed class CommandTests
     [Fact]
     public void Dispatch_NoneFallback_ForUnknown()
     {
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
         var _ = CommandRegistry.LoggedIn;
         var puppet = new GameObject { Name = "Hero" };
         puppet.ClearMessages();
@@ -157,23 +157,23 @@ public sealed class CommandTests
         job!.Func(job.Caller, job.Args);
         // none command will msg Huh?
         Assert.Contains(puppet.PeekMessages(), m => m.Contains("Huh?"));
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
     }
 
     [Fact]
     public void PyCommand_NotPorted()
     {
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
         var keys = CommandRegistry.LoggedIn.GetKeys();
         Assert.DoesNotContain("py", keys);
         Assert.DoesNotContain("py", CommandRegistry.LoggedIn.GetAll().Select(c => c.Key));
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
     }
 
     [Fact]
     public void Dispatch_NIsBlockedForAutoAlias()
     {
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
         var _ = CommandRegistry.LoggedIn;
         var puppet = new GameObject { Name = "Hero" };
         puppet.ClearMessages();
@@ -182,6 +182,6 @@ public sealed class CommandTests
         // n is in NoAliasCommands -> should msg "You can't do that." and return null
         Assert.Null(job);
         Assert.Contains("You can't do that.", puppet.PeekMessages());
-        CommandRegistry.ResetForTesting();
+        CommandRegistry.Reset();
     }
 }

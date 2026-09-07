@@ -1,0 +1,113 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+
+namespace Atheriz.Server.Cli;
+
+// Outcome of a graceful-shutdown request. Unreachable (no token / server
+// down) lets the caller fall back to signals; AuthRejected (a live server
+// refused us) must abort — never escalate a refused request into SIGKILL.
+internal enum ShutdownRequestResult { Accepted, Unreachable, AuthRejected }
+
+// One HTTP answer from a /_internal/* admin endpoint. Auth failures are
+// HTTP 200 with {status:"error"} (AdminRoutes), so callers must inspect the
+// body, not just reachability.
+internal sealed record AdminResponse(int StatusCode, string Body);
+
+public static class ShutdownClient
+{
+    // The single HTTP admin client for the stop/reload/create paths.
+    // Returns null when there is no token or the server cannot be reached
+    // (caller falls back); a non-null response — even {status:"error"} —
+    // proves a live server answered, and the caller must NOT escalate
+    // (no SIGKILL, no offline DB writes).
+    internal static async Task<AdminResponse?> PostAdminAsync(int port, string secretPath, string path, string? jsonPayload, bool tlsOn)
+    {
+        var tokenFile = FindTokenFile(secretPath, port);
+        if (tokenFile == null || !File.Exists(tokenFile)) return null;
+        string token;
+        try { token = File.ReadAllText(tokenFile, Encoding.UTF8).Trim(); } catch { return null; }
+        var url = $"{(tlsOn ? "https" : "http")}://localhost:{port}{path}";
+        try
+        {
+            // Loopback only: the token is a bearer secret, but the peer is
+            // always localhost here. Self-signed dev certs cannot chain-verify,
+            // so chain validation is skipped ONLY when the request targets a
+            // loopback host — never blind-trust a non-loopback peer.
+            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (req, cert, chain, errors) =>
+                req is System.Net.Http.HttpRequestMessage m && m.RequestUri is Uri u &&
+                (u.Host == "localhost" || u.Host == "127.0.0.1" || u.Host == "::1") };
+            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+            var req = new HttpRequestMessage(HttpMethod.Post, url);
+            req.Headers.Add("X-Admin-Token", token);
+            if (jsonPayload != null) req.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+            var resp = await client.SendAsync(req);
+            var body = await resp.Content.ReadAsStringAsync();
+            return new AdminResponse((int)resp.StatusCode, body);
+        }
+        catch { return null; }
+    }
+
+    internal static async Task<ShutdownRequestResult> TryRequestShutdownAsync(int port, string secretPath, bool tlsOn)
+    {
+        Console.WriteLine("Requesting graceful shutdown via internal API...");
+        var resp = await PostAdminAsync(port, secretPath, "/_internal/shutdown", null, tlsOn);
+        if (resp == null)
+        {
+            Console.WriteLine("Could not contact server for graceful shutdown (server might be hung or stopped).");
+            return ShutdownRequestResult.Unreachable;
+        }
+        if (resp.StatusCode == 401 || resp.StatusCode == 403)
+        {
+            Console.WriteLine("Server refused the shutdown request (not authorized); aborting without touching processes.");
+            return ShutdownRequestResult.AuthRejected;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(resp.Body);
+            var status = doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : "";
+            Console.WriteLine($"Internal shutdown response: {resp.Body}");
+            if (status == "ok") { Console.WriteLine("Server has completed shutdown tasks."); return ShutdownRequestResult.Accepted; }
+            // status == "error": a live server refused (bad token / non-loopback).
+            Console.WriteLine("Server refused the shutdown request; aborting without touching processes.");
+            return ShutdownRequestResult.AuthRejected;
+        }
+        catch { return ShutdownRequestResult.Unreachable; }
+    }
+
+    internal static string? FindTokenFile(string secretPath, int port)
+    {
+        var cand = Path.Combine(secretPath, "admin.token");
+        if (File.Exists(cand)) return cand;
+        try
+        {
+            var cur = new DirectoryInfo(Directory.GetCurrentDirectory());
+            for (int i = 0; i < 6 && cur != null; i++) { var p = Path.Combine(cur.FullName, "secret", "admin.token"); if (File.Exists(p)) return p; var p2 = Path.Combine(cur.FullName, "save", "..", "secret", "admin.token"); if (File.Exists(Path.GetFullPath(p2))) return Path.GetFullPath(p2); cur = cur.Parent; }
+        }
+        catch { }
+        try
+        {
+            if (Infrastructure.PidFile.TryFindPidListeningOnPort(port, out var lpid))
+            {
+                try
+                {
+                    var link = Path.Combine($"/proc/{lpid}/cwd");
+                    if (Directory.Exists(link)) { }
+                    var realCwd = new FileInfo($"/proc/{lpid}/cwd").LinkTarget;
+                    if (!string.IsNullOrEmpty(realCwd)) { var p3 = Path.Combine(realCwd, "secret", "admin.token"); if (File.Exists(p3)) return p3; }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        // CWD-tree scan only. Never scan /tmp: an attacker-planted admin.token there
+        // would hand CLI control to the wrong server.
+        try
+        {
+            foreach (var f in Directory.GetFiles(Directory.GetCurrentDirectory(), "admin.token", SearchOption.AllDirectories))
+                if (f.EndsWith("secret/admin.token", StringComparison.Ordinal)) return f;
+        }
+        catch { }
+        return null;
+    }
+}

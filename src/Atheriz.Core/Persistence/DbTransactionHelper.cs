@@ -29,6 +29,10 @@ public static class CheckpointJournal
 
     public static void MarkDirty(string savePath)
     {
+        // Gated: the mark is part of the checkpoint write it brackets, and an
+        // un-gated EnsureCreated+upsert here used to race concurrent saves
+        // into SQLITE_BUSY. Re-entrant when called under an outer save gate.
+        DbWriteGate.Enter();
         try
         {
             using var db = AtherizDbContextFactory.Create(savePath);
@@ -36,10 +40,12 @@ public static class CheckpointJournal
             Upsert(db, "dirty");
         }
         catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal dirty-mark failed: {ex.Message}"); } catch (Exception) { } }
+        finally { DbWriteGate.Exit(); }
     }
 
     public static void MarkClean(string savePath)
     {
+        DbWriteGate.Enter();
         try
         {
             using var db = AtherizDbContextFactory.Create(savePath);
@@ -47,11 +53,13 @@ public static class CheckpointJournal
             Upsert(db, "clean");
         }
         catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal clean-mark failed: {ex.Message}"); } catch (Exception) { } }
+        finally { DbWriteGate.Exit(); }
     }
 
     /// <summary>True when a previous checkpoint died mid-way. Missing row/table (first boot) counts as clean.</summary>
     public static bool IsDirty(string savePath)
     {
+        DbWriteGate.Enter();
         try
         {
             using var db = AtherizDbContextFactory.Create(savePath);
@@ -60,6 +68,7 @@ public static class CheckpointJournal
             return row != null && row.State == "dirty";
         }
         catch { return false; }
+        finally { DbWriteGate.Exit(); }
     }
 
     private static void Upsert(AtherizDbContext db, string state)
@@ -99,28 +108,65 @@ public static class DbTransactionHelper
     /// </summary>
     public static void WithGateAndTransaction(AtherizDbContext db, Action<AtherizDbContext> work, Action? onRollback = null)
     {
-        DbWriteGate.Enter();
+        // Ambient-transaction re-entrancy: a caller that already opened a transaction
+        // on this context (e.g. InitialSetup's single-transaction seed) runs inline —
+        // a second BeginTransaction on the same connection throws. The outer
+        // transaction owns atomicity; SaveChanges joins it. (Caller must EnsureCreated.)
+        if (db.Database.CurrentTransaction != null)
+        {
+            work(db);
+            db.SaveChanges();
+            return;
+        }
+        // Bounded take: a stuck holder fails loud instead of hanging all saves forever.
+        if (!DbWriteGate.TryEnter(TimeSpan.FromSeconds(30)))
+            throw new TimeoutException("DbWriteGate held for over 30s; refusing to hang the save.");
         try
         {
             db.Database.EnsureCreated();
-            using var tx = db.Database.BeginTransaction();
-            try
+            // Engine-level busy_timeout=5000 is the primary contention mechanism;
+            // this bounded retry covers residual SQLITE_BUSY/LOCKED races with
+            // un-gated readers. Non-busy failures throw immediately.
+            const int maxAttempts = 3;
+            for (int attempt = 1; ; attempt++)
             {
-                work(db);
-                db.SaveChanges();
-                tx.Commit();
-            }
-            catch
-            {
-                try { tx.Rollback(); } catch (Exception) { }
-                try { onRollback?.Invoke(); } catch (Exception) { }
-                throw;
+                using var tx = db.Database.BeginTransaction();
+                try
+                {
+                    work(db);
+                    db.SaveChanges();
+                    tx.Commit();
+                    return;
+                }
+                catch (Exception ex) when (attempt < maxAttempts && IsBusyConflict(ex))
+                {
+                    try { tx.Rollback(); } catch (Exception) { }
+                    AtherizLogger.LogDebug($"Suppressed DbTransactionHelper.WithGateAndTransaction SQLITE_BUSY retry {attempt}: {ex.Message}", "DbTransactionHelper");
+                }
+                catch
+                {
+                    try { tx.Rollback(); } catch (Exception) { }
+                    try { onRollback?.Invoke(); } catch (Exception) { }
+                    throw;
+                }
             }
         }
         finally
         {
             DbWriteGate.Exit();
         }
+    }
+
+    /// <summary>True when <paramref name="ex"/> (or any inner) is SQLITE_BUSY (5) or SQLITE_LOCKED (6).</summary>
+    internal static bool IsBusyConflict(Exception ex)
+    {
+        for (var e = ex; e != null; e = e.InnerException)
+        {
+            if (e is Microsoft.Data.Sqlite.SqliteException se
+                && (se.SqliteErrorCode == 5 || se.SqliteErrorCode == 6))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>Generic upsert for any <see cref="IJsonEntity"/> row: Find → update Data else Add.</summary>

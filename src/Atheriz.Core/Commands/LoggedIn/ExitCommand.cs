@@ -24,8 +24,6 @@ public sealed class LoggedInExitCommand : Command
     // Faithful aliases for Python attributes: self.name / self.key
     public string Name { get => ExitName; set => ExitName = value; }
     public string DoorKey { get => ExitName; set => ExitName = value; }
-    // Compatibility: allow setting Key via property without overriding base Key (used in ported tests that set .Key)
-    public string? KeyOverride { get; set; } = null;
     public override void Run(IMessageTarget caller, object? args)
     {
         if (caller is GameObject go)
@@ -73,7 +71,6 @@ public sealed class LoggedInExitCommand : Command
         if (doors != null)
         {
             string lookup = ExitName;
-            if (string.IsNullOrEmpty(lookup) && !string.IsNullOrEmpty(KeyOverride)) lookup = KeyOverride!;
             if (doors.TryGetValue(lookup, out var door) && door != null)
             {
                 if (door.Closed && door.TryOpen(c))
@@ -116,6 +113,13 @@ public sealed class LoggedInExitCommand : Command
                 }
                 else
                 {
+                    // Door stayed closed and TryOpen already broadcast the
+                    // reason via loc MsgContents — except when the caller has
+                    // no location to broadcast to (loc null), where TryOpen's
+                    // loc?.MsgContents reaches nobody. Message directly so the
+                    // move never fails silently (Python is silent here too).
+                    if (c.ResolveLocationObject() == null)
+                        c.Msg("You can't go that way.");
                     return;
                 }
             }
@@ -124,31 +128,13 @@ public sealed class LoggedInExitCommand : Command
         c.MoveTo(dest, null, false, true, ExitName);
     }
 
-    // Legacy overload used by old ported tests (direct caller)
+    // Legacy overload: delegates to the single DoMove core (no test callers
+    // remain; kept for source compat). CallerId routing makes it identical
+    // for registered callers; unregistered callers hit the invalid-caller log.
     public void DoMove(GameObject go)
     {
-        if (Location == null || Destination == null) return;
-        var nh = NodeHandler.GetCurrent();
-        if (nh == null) return;
-        var dest = nh.GetNode(Destination.Value);
-        if (dest == null) return;
-        var doors = nh.GetDoors(Location.Value);
-        if (doors != null && doors.TryGetValue(ExitName, out var door))
-        {
-            if (door.Closed && door.TryOpen(go))
-            {
-                ClearFollowing(go);
-                bool moved = false;
-                try { moved = go.MoveTo(dest, null, false, true, ExitName); } catch { try { door.TryClose(go); } catch (Exception) { } throw; }
-                if (moved) door.TryClose(go);
-                else { try { if (!door.TryClose(go)) { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } door.MapClose(); } } catch (Exception) { } }
-                return;
-            }
-            else if (!door.Closed) { ClearFollowing(go); go.MoveTo(dest, null, false, true, ExitName); return; }
-            else return;
-        }
-        ClearFollowing(go);
-        go.MoveTo(dest, null, false, true, ExitName);
+        CallerId = go.Id;
+        DoMove();
     }
 
     // Shared with Objects.ExitCommand (exit objects move through the same

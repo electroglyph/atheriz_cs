@@ -13,12 +13,7 @@ public sealed class HelpCommand : Command
     public override bool UseParser => true;
 
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("command", nargs: "?", help: "Command to get help on"); }
-    private static string PrintHelpFor(Command cmd)
-    {
-        if (cmd.Parser != null) return cmd.PrintHelp();
-        string aliasStr = cmd.Aliases.Count > 0 ? $"{cmd.Key}, {string.Join(", ", cmd.Aliases)}" : cmd.Key;
-        return $"\n{cmd.Desc}\n\nAliases: {aliasStr}\n" + cmd.ExtraDesc;
-    }
+    private static string PrintHelpFor(Command cmd) => HelpHelper.FormatFor(cmd);
     public override void Run(IMessageTarget caller, object? args)
     {
         var pa = args as GameArgumentParser.ParsedArgs;
@@ -42,19 +37,9 @@ public sealed class HelpCommand : Command
                 bool sr2 = false; int tw2 = 80;
                 try { sr2 = go.Session?.ScreenReader ?? false; } catch (Exception) { }
                 try { tw2 = (go.Session?.TermWidth ?? 80) - 2; if (tw2 < 20) tw2 = 20; } catch { tw2 = 80; }
-                var loc = go.ResolveLocationObject();
                 var locals = new List<Command>();
-                if (loc != null)
-                    foreach (var id in loc.ContentsSnapshot)
-                    {
-                        var o = Globals.ObjectRegistry.Get(id).FirstOrDefault();
-                        if (o?.ExternalCmdSet != null) locals.AddRange(o.ExternalCmdSet.GetAll().Where(cmd => !cmd.Hide && cmd.Access(go)));
-                    }
-                foreach (var id in go.ContentsSnapshot)
-                {
-                    var o = Globals.ObjectRegistry.Get(id).FirstOrDefault();
-                    if (o?.ExternalCmdSet != null) locals.AddRange(o.ExternalCmdSet.GetAll().Where(cmd => !cmd.Hide && cmd.Access(go)));
-                }
+                foreach (var set in CommandHelpers.LocalVerbSets(go))
+                    locals.AddRange(set.GetAll().Where(cmd => !cmd.Hide && cmd.Access(go)));
                 if (locals.Count > 0)
                 {
                     sb.AppendLine("\nLocal commands:");
@@ -69,27 +54,11 @@ public sealed class HelpCommand : Command
         // search local
         if (caller is Objects.GameObject go2)
         {
-            var loc = go2.ResolveLocationObject();
-            if (loc != null)
-                foreach (var id in loc.ContentsSnapshot)
-                {
-                    var o = Globals.ObjectRegistry.Get(id).FirstOrDefault();
-                    if (o?.ExternalCmdSet != null)
-                    {
-                        var c = o.ExternalCmdSet.Get(query!);
-                        if (c != null && c.Access(go2) && !c.Hide) { caller.Msg(PrintHelpFor(c)); return; }
-                        foreach (var cc in o.ExternalCmdSet.GetAll()) if (cc.Aliases.Any(a => a.Equals(query, StringComparison.OrdinalIgnoreCase)) && cc.Access(go2) && !cc.Hide) { caller.Msg(PrintHelpFor(cc)); return; }
-                    }
-                }
-            foreach (var id in go2.ContentsSnapshot)
+            foreach (var set in CommandHelpers.LocalVerbSets(go2))
             {
-                var o = Globals.ObjectRegistry.Get(id).FirstOrDefault();
-                if (o?.ExternalCmdSet != null)
-                {
-                    var c = o.ExternalCmdSet.Get(query!);
-                    if (c != null && c.Access(go2) && !c.Hide) { caller.Msg(PrintHelpFor(c)); return; }
-                    foreach (var cc in o.ExternalCmdSet.GetAll()) if (cc.Aliases.Any(a => a.Equals(query, StringComparison.OrdinalIgnoreCase)) && cc.Access(go2) && !cc.Hide) { caller.Msg(PrintHelpFor(cc)); return; }
-                }
+                var c = set.Get(query!);
+                if (c != null && c.Access(go2) && !c.Hide) { caller.Msg(PrintHelpFor(c)); return; }
+                foreach (var cc in set.GetAll()) if (cc.Aliases.Any(a => a.Equals(query, StringComparison.OrdinalIgnoreCase)) && cc.Access(go2) && !cc.Hide) { caller.Msg(PrintHelpFor(cc)); return; }
             }
         }
         caller.Msg("Command not found.");

@@ -8,6 +8,12 @@ internal sealed class LockScope : IDisposable
 {
     private readonly ReaderWriterLockSlim _rw;
     private readonly bool _isWrite;
+    private bool _disposed;
     public LockScope(ReaderWriterLockSlim rw, bool isWrite) { _rw = rw; _isWrite = isWrite; }
-    public void Dispose() { if (_isWrite) _rw.ExitWriteLock(); else _rw.ExitReadLock(); }
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (_isWrite) _rw.ExitWriteLock(); else _rw.ExitReadLock();
+    }
 }

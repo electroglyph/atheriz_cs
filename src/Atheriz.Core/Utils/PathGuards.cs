@@ -37,6 +37,7 @@ public static class PathGuards
         GuardSavePath(savePath);
         Directory.CreateDirectory(savePath);
         FsUtil.TryChmod0700(savePath);
+        ProbeWritable(savePath, "save");
     }
 
     public static void EnsureSecretDirectory(string secretPath)
@@ -44,6 +45,27 @@ public static class PathGuards
         GuardSecretPath(secretPath);
         Directory.CreateDirectory(secretPath);
         FsUtil.TryChmod0700(secretPath);
+        ProbeWritable(secretPath, "secret");
+    }
+
+    /// <summary>
+    /// Fail loud here instead of mid-save/mid-token-write: proves the directory
+    /// is actually writable (CreateDirectory succeeds on read-only mounts when
+    /// the dir already exists, deferring the failure to first write).
+    /// </summary>
+    private static void ProbeWritable(string dir, string kind)
+    {
+        var probe = Path.Combine(dir, ".atheriz_write_probe");
+        try
+        {
+            File.WriteAllText(probe, "w");
+            File.Delete(probe);
+        }
+        catch (Exception ex)
+        {
+            throw new UnauthorizedAccessException(
+                $"Game {kind} directory '{dir}' is not writable: {ex.Message}", ex);
+        }
     }
 
     /// <summary>
@@ -58,4 +80,40 @@ public static class PathGuards
     }
 
     public static void EnsureSecretPathValid(string secretPath) => GuardSecretPath(secretPath);
+
+    /// <summary>
+    /// Refuses filesystem roots: wiping <c>/</c>, <c>C:\</c> etc. is never a valid game operation.
+    /// </summary>
+    public static void DenyRoot(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(full) ?? "";
+        var normFull = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.Equals(normFull, normRoot, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Refusing to wipe filesystem root: {path}");
+    }
+
+    /// <summary>
+    /// Containment for destructive wipes (<c>reset</c>, overwrite scaffolding).
+    /// The target must be a <c>save</c> leaf or a previously-initialized world
+    /// (<c>server.pid</c> / <c>database.sqlite3*</c> markers); anything else needs
+    /// an explicit <c>--force</c> inside a game folder.
+    /// </summary>
+    public static void GuardWipePath(string path, bool force)
+    {
+        DenyRoot(path);
+        var full = Path.GetFullPath(path);
+        var leaf = Path.GetFileName(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (leaf.Equals("save", StringComparison.OrdinalIgnoreCase)) return;
+        if (Directory.Exists(full))
+        {
+            if (File.Exists(Path.Combine(full, "server.pid"))) return;
+            foreach (var marker in new[] { "database.sqlite3", "database.sqlite3-wal", "database.sqlite3-shm", "database.sqlite3.journal" })
+                if (File.Exists(Path.Combine(full, marker))) return;
+        }
+        if (force && GameUtils.IsInGameFolder()) return;
+        throw new InvalidOperationException(
+            $"Refusing to wipe '{path}': not a game save directory (expected a 'save' leaf or an initialized world). Pass --force inside a game folder to override.");
+    }
 }

@@ -111,18 +111,17 @@ public class PortedMoveTests
         using var env = GlobalTestEnv.Enter();
         var container = GameObject.Create("MagicBox", isItem: true, isContainer: true); ObjectRegistry.AddObject(container);
         var item = GameObject.Create("Wand", isItem: true); ObjectRegistry.AddObject(item);
-        int preCalls = 0; (GameObject? d, string? e) lastPre = (null, null);
-        item.AtPreMoveOverride = (dest, exit) => { preCalls++; lastPre = (dest, exit); return true; };
-        int postCalls = 0;
-        item.AtPostMoveOverride = (dest, exit) => postCalls++;
+        var moveRec = new MoveRecorder();
+        item.InstallHook("at_pre_move", (Func<GameObject?, string?, bool>)moveRec.RecordPre);
+        item.InstallHook("at_post_move", (Action<GameObject?, string?>)moveRec.RecordPost);
         var ok = item.MoveTo(container);
         Assert.True(ok);
-        Assert.Equal(1, preCalls);
-        Assert.Equal(container, lastPre.d);
-        Assert.Null(lastPre.e);
+        Assert.Equal(1, moveRec.PreCalls);
+        Assert.Equal(container, moveRec.LastPre.d);
+        Assert.Null(moveRec.LastPre.e);
         // Second with blocking pre_move
         var item2 = GameObject.Create("CursedSword", isItem: true); ObjectRegistry.AddObject(item2);
-        item2.AtPreMoveOverride = (d, e) => false;
+        item2.InstallHook("at_pre_move", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
         var ok2 = item2.MoveTo(container);
         Assert.False(ok2);
         Assert.IsType<Persistence.Dto.LocationRef.NullLocation>(item2.Location);
@@ -160,17 +159,17 @@ public class PortedMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var (n1, n2) = MakeTwoSimpleNodes();
-        var calls = new List<string>();
-        n1.AtPreObjectLeaveOverride = (d, e) => { calls.Add("pre_leave"); return true; };
-        n1.AtObjectLeaveOverride = (d, e) => calls.Add("leave");
-        n2.AtPreObjectReceiveOverride = (s, e) => { calls.Add("pre_receive"); return false; };
-        n2.AtObjectReceiveOverride = (s, e) => calls.Add("receive");
+        var rec = new OrderRecorder();
+        n1.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)rec.PreLeave);
+        n1.InstallHook("at_object_leave", (Action<GameObject?, string?>)rec.Leave);
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)rec.VetoReceive);
+        n2.InstallHook("at_object_receive", (Action<GameObject?, string?>)rec.Receive);
         var mover = GameObject.Create("Mover", isPc: true); ObjectRegistry.AddObject(mover);
         mover.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord);
         n1.AddObject(mover);
         var ok = mover.MoveTo(n2, toExit: "north", announce: false);
         Assert.False(ok);
-        Assert.Equal(new[] {"pre_leave","pre_receive"}, calls);
+        Assert.Equal(new[] {"pre_leave","pre_receive"}, rec.Calls);
         Assert.Equal(n1.Coord, ((Persistence.Dto.LocationRef.CoordLocation)mover.Location).Coord);
         Assert.Contains(mover.Id, n1.ContentsSnapshot);
         Assert.DoesNotContain(mover.Id, n2.ContentsSnapshot);
@@ -181,16 +180,16 @@ public class PortedMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var (n1, n2) = MakeTwoSimpleNodes();
-        var calls = new List<string>();
-        n1.AtPreObjectLeaveOverride = (d,e)=>{calls.Add("pre_leave"); return true;};
-        n1.AtObjectLeaveOverride = (d,e)=>calls.Add("leave");
-        n2.AtPreObjectReceiveOverride = (s,e)=>{calls.Add("pre_receive"); return true;};
-        n2.AtObjectReceiveOverride = (s,e)=>calls.Add("receive");
+        var rec = new OrderRecorder();
+        n1.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)rec.PreLeave);
+        n1.InstallHook("at_object_leave", (Action<GameObject?, string?>)rec.Leave);
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)rec.PreReceive);
+        n2.InstallHook("at_object_receive", (Action<GameObject?, string?>)rec.Receive);
         var mover = GameObject.Create("Mover2", isPc: true); ObjectRegistry.AddObject(mover);
         mover.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord); n1.AddObject(mover);
         var ok = mover.MoveTo(n2, toExit: "north", announce: false);
         Assert.True(ok);
-        Assert.Equal(new[] {"pre_leave","pre_receive","leave","receive"}, calls);
+        Assert.Equal(new[] {"pre_leave","pre_receive","leave","receive"}, rec.Calls);
         Assert.Equal(n2.Coord, ((Persistence.Dto.LocationRef.CoordLocation)mover.Location).Coord);
         Assert.DoesNotContain(mover.Id, n1.ContentsSnapshot);
         Assert.Contains(mover.Id, n2.ContentsSnapshot);
@@ -201,16 +200,16 @@ public class PortedMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var (n1, n2) = MakeTwoSimpleNodes();
-        var calls = new List<string>();
-        n1.AtPreObjectLeaveOverride = (d,e)=>{calls.Add("pre_leave"); return false;};
-        n1.AtObjectLeaveOverride = (d,e)=>calls.Add("leave");
-        n2.AtPreObjectReceiveOverride = (s,e)=>{calls.Add("pre_receive"); return true;};
-        n2.AtObjectReceiveOverride = (s,e)=>calls.Add("receive");
+        var rec = new OrderRecorder();
+        n1.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)rec.VetoLeave);
+        n1.InstallHook("at_object_leave", (Action<GameObject?, string?>)rec.Leave);
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)rec.PreReceive);
+        n2.InstallHook("at_object_receive", (Action<GameObject?, string?>)rec.Receive);
         var mover = GameObject.Create("Mover3", isPc: true); ObjectRegistry.AddObject(mover);
         mover.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord); n1.AddObject(mover);
         var ok = mover.MoveTo(n2, toExit: "north", announce: false);
         Assert.False(ok);
-        Assert.Equal(new[] {"pre_leave"}, calls);
+        Assert.Equal(new[] {"pre_leave"}, rec.Calls);
         Assert.Equal(n1.Coord, ((Persistence.Dto.LocationRef.CoordLocation)mover.Location).Coord);
         Assert.Contains(mover.Id, n1.ContentsSnapshot);
     }
@@ -235,16 +234,16 @@ public class PortedMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var (n1, n2) = MakeTwoSimpleNodes();
-        var calls = new List<string>();
-        n1.AtPreObjectLeaveOverride = (d,e)=>{calls.Add("pre_leave"); return true;};
-        n1.AtObjectLeaveOverride = (d,e)=>calls.Add("leave");
-        n2.AtPreObjectReceiveOverride = (s,e)=>{calls.Add("pre_receive"); return false;};
-        n2.AtObjectReceiveOverride = (s,e)=>calls.Add("receive");
+        var rec = new OrderRecorder();
+        n1.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)rec.PreLeave);
+        n1.InstallHook("at_object_leave", (Action<GameObject?, string?>)rec.Leave);
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)rec.VetoReceive);
+        n2.InstallHook("at_object_receive", (Action<GameObject?, string?>)rec.Receive);
         var item = GameObject.Create("Apple", isItem: true); ObjectRegistry.AddObject(item);
         item.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord); n1.AddObject(item);
         var ok = item.MoveTo(n2, announce: false);
         Assert.False(ok);
-        Assert.Equal(new[] {"pre_leave","pre_receive"}, calls);
+        Assert.Equal(new[] {"pre_leave","pre_receive"}, rec.Calls);
         Assert.Equal(n1.Coord, ((Persistence.Dto.LocationRef.CoordLocation)item.Location).Coord);
         Assert.Contains(item.Id, n1.ContentsSnapshot);
         Assert.DoesNotContain(item.Id, n2.ContentsSnapshot);
@@ -255,16 +254,16 @@ public class PortedMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var (n1, n2) = MakeTwoSimpleNodes();
-        var calls = new List<string>();
-        n1.AtPreObjectLeaveOverride = (d,e)=>{calls.Add("pre_leave"); return true;};
-        n1.AtObjectLeaveOverride = (d,e)=>calls.Add("leave");
-        n2.AtPreObjectReceiveOverride = (s,e)=>{calls.Add("pre_receive"); return true;};
-        n2.AtObjectReceiveOverride = (s,e)=>calls.Add("receive");
+        var rec = new OrderRecorder();
+        n1.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)rec.PreLeave);
+        n1.InstallHook("at_object_leave", (Action<GameObject?, string?>)rec.Leave);
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)rec.PreReceive);
+        n2.InstallHook("at_object_receive", (Action<GameObject?, string?>)rec.Receive);
         var item = GameObject.Create("Gem", isItem: true); ObjectRegistry.AddObject(item);
         item.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord); n1.AddObject(item);
         var ok = item.MoveTo(n2, announce: false);
         Assert.True(ok);
-        Assert.Equal(new[] {"pre_leave","pre_receive","leave","receive"}, calls);
+        Assert.Equal(new[] {"pre_leave","pre_receive","leave","receive"}, rec.Calls);
         Assert.Equal(n2.Coord, ((Persistence.Dto.LocationRef.CoordLocation)item.Location).Coord);
         Assert.DoesNotContain(item.Id, n1.ContentsSnapshot);
         Assert.Contains(item.Id, n2.ContentsSnapshot);
@@ -276,21 +275,21 @@ public class PortedMoveTests
         using var env = GlobalTestEnv.Enter();
         var (n1, n2) = MakeTwoSimpleNodes();
         var container = GameObject.Create("Chest", isItem: true, isContainer: true); ObjectRegistry.AddObject(container);
-        var containerCalls = new List<string>();
-        container.AtPreObjectLeaveOverride = (d,e)=>{containerCalls.Add("pre_leave"); return true;};
-        container.AtObjectLeaveOverride = (d,e)=>containerCalls.Add("leave");
+        var rec = new OrderRecorder();
+        container.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)rec.PreLeave);
+        container.InstallHook("at_object_leave", (Action<GameObject?, string?>)rec.Leave);
         var item2 = GameObject.Create("Coin", isItem: true); ObjectRegistry.AddObject(item2);
         item2.Location = new Persistence.Dto.LocationRef.ObjectLocation(container.Id);
         container.AddObject(item2);
         // n2 pre_receive fails
-        n2.AtPreObjectReceiveOverride = (s,e)=>{containerCalls.Add("pre_receive"); return false;};
-        n2.AtObjectReceiveOverride = (s,e)=>containerCalls.Add("receive");
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)rec.VetoReceive);
+        n2.InstallHook("at_object_receive", (Action<GameObject?, string?>)rec.Receive);
         var ok = item2.MoveTo(n2, announce: false);
         Assert.False(ok);
         Assert.Equal(container.Id, ((Persistence.Dto.LocationRef.ObjectLocation)item2.Location).ObjectId);
         Assert.Contains(item2.Id, container.ContentsSnapshot);
         Assert.DoesNotContain(item2.Id, n2.ContentsSnapshot);
-        Assert.DoesNotContain("receive", containerCalls);
+        Assert.DoesNotContain("receive", rec.Calls);
     }
 
     [Fact]
@@ -298,16 +297,16 @@ public class PortedMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var (n1, n2) = MakeTwoSimpleNodes();
-        var calls = new List<string>();
-        n1.AtPreObjectLeaveOverride = (d,e)=>{calls.Add("pre_leave"); return true;};
-        n1.AtObjectLeaveOverride = (d,e)=>calls.Add("leave");
-        n2.AtPreObjectReceiveOverride = (s,e)=>{calls.Add("pre_receive"); return true;};
-        n2.AtObjectReceiveOverride = (s,e)=>calls.Add("receive");
+        var rec = new OrderRecorder();
+        n1.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)rec.PreLeave);
+        n1.InstallHook("at_object_leave", (Action<GameObject?, string?>)rec.Leave);
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)rec.PreReceive);
+        n2.InstallHook("at_object_receive", (Action<GameObject?, string?>)rec.Receive);
         var item = GameObject.Create("Potion", isItem: true, isContainer: true); ObjectRegistry.AddObject(item);
         item.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord); n1.AddObject(item);
         var ok = item.MoveTo(n2, announce: false);
         Assert.True(ok);
-        Assert.Equal(new[] {"pre_leave","pre_receive","leave","receive"}, calls);
+        Assert.Equal(new[] {"pre_leave","pre_receive","leave","receive"}, rec.Calls);
         Assert.Equal(n2.Coord, ((Persistence.Dto.LocationRef.CoordLocation)item.Location).Coord);
     }
 
@@ -318,16 +317,47 @@ public class PortedMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var (n1, n2) = MakeTwoSimpleNodes();
-        var calls = new List<string>();
-        n1.AtPreObjectLeaveOverride = (d,e)=>{calls.Add("pre_leave"); return true;};
-        n1.AtObjectLeaveOverride = (d,e)=>calls.Add("leave");
-        n2.AtPreObjectReceiveOverride = (s,e)=>{calls.Add("pre_receive"); return true;};
-        n2.AtObjectReceiveOverride = (s,e)=>calls.Add("receive");
+        var rec = new OrderRecorder();
+        n1.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)rec.PreLeave);
+        n1.InstallHook("at_object_leave", (Action<GameObject?, string?>)rec.Leave);
+        n2.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)rec.PreReceive);
+        n2.InstallHook("at_object_receive", (Action<GameObject?, string?>)rec.Receive);
         var obj = GameObject.Create("wanderer", isPc: true); ObjectRegistry.AddObject(obj);
         obj.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord); n1.AddObject(obj);
         var ok = obj.MoveTo(n2, announce: false);
         Assert.True(ok);
-        Assert.Equal(new[] {"pre_leave","pre_receive","leave","receive"}, calls);
+        Assert.Equal(new[] {"pre_leave","pre_receive","leave","receive"}, rec.Calls);
+    }
+
+    // Recording hook host (replaces the removed At*Override seam): [Before]
+    // hooks record advisory pres, [After] hooks record posts, [Replace] hooks
+    // record + veto. Lambdas cannot carry attributes, hence real methods.
+    private sealed class OrderRecorder
+    {
+        public readonly List<string> Calls = new();
+        [Before] public bool PreLeave(GameObject? d, string? e) { Calls.Add("pre_leave"); return true; }
+        [After] public void Leave(GameObject? d, string? e) => Calls.Add("leave");
+        [Before] public bool PreReceive(GameObject? s, string? e) { Calls.Add("pre_receive"); return true; }
+        [After] public void Receive(GameObject? s, string? e) => Calls.Add("receive");
+        [Replace] public bool VetoLeave(GameObject? d, string? e) { Calls.Add("pre_leave"); return false; }
+        [Replace] public bool VetoReceive(GameObject? s, string? e) { Calls.Add("pre_receive"); return false; }
+    }
+
+    private sealed class MoveRecorder
+    {
+        public int PreCalls;
+        public (GameObject? d, string? e) LastPre = (null, null);
+        public int PostCalls;
+        [Before] public bool RecordPre(GameObject? d, string? e) { PreCalls++; LastPre = (d, e); return true; }
+        [After] public void RecordPost(GameObject? d, string? e) => PostCalls++;
+    }
+
+    // [Replace]-attributed veto hooks (replaces the removed At*Override seam;
+    // lambdas cannot carry attributes, so real methods provide the marker).
+    private sealed class VetoHooks
+    {
+        [Replace]
+        public bool DenyAll(GameObject? a, string? b) => false;
     }
 
     [Fact]
@@ -335,7 +365,7 @@ public class PortedMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var (n1, n2) = MakeTwoSimpleNodes();
-        n1.AtPreObjectLeaveOverride = (d,e)=>false;
+        n1.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
         var obj = GameObject.Create("stuck", isPc: true); ObjectRegistry.AddObject(obj);
         obj.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord); n1.AddObject(obj);
         var ok = obj.MoveTo(n2, announce: false);
@@ -352,20 +382,14 @@ public class PortedMoveTests
         pack.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord); n1.AddObject(pack);
         var item = GameObject.Create("ball", isItem: true); ObjectRegistry.AddObject(item);
         item.Location = new Persistence.Dto.LocationRef.CoordLocation(n1.Coord); n1.AddObject(item);
-        n1.AtPreObjectLeaveOverride = (d,e)=>false;
+        n1.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
         var ok = item.MoveTo(pack);
         Assert.False(ok);
         Assert.Equal(n1.Coord, ((Persistence.Dto.LocationRef.CoordLocation)item.Location).Coord);
     }
 
-    // ----- Location lock test -----
-    private sealed class TrackingLock : ReaderWriterLockSlim, IWriteLockTracker
-    {
-        public int Entries = 0;
-        public void TrackWriteLock() => Entries++;
-        public TrackingLock() : base(LockRecursionPolicy.SupportsRecursion) {}
-    }
-
+    // ----- Location lock test (real path: a worker MoveTo blocks while this
+    // thread holds the mover's write lock, proving MoveTo acquires it) -----
     [Fact]
     public void RoomMoveLocksLocationWhenTracking()
     {
@@ -382,13 +406,14 @@ public class PortedMoveTests
         // Reset to source
         obj.Location = new Persistence.Dto.LocationRef.CoordLocation(source.Coord);
         source.AddObject(obj);
-        // Now set tracking lock on object itself
-        var tracker = new TrackingLock();
-        obj.SetLockForTesting(tracker);
-        // Ensure at_pre checks pass
-        obj.AtPreMoveOverride = (d,e)=>true;
-        var ok = obj.MoveTo(dest, announce: false);
-        Assert.True(ok);
-        Assert.True(tracker.Entries >= 1, $"entries was {tracker.Entries}");
+        obj.SyncRoot.EnterWriteLock();
+        var task = Task.Run(() => obj.MoveTo(dest, announce: false));
+        try
+        {
+            Assert.False(task.Wait(TimeSpan.FromMilliseconds(300)), "MoveTo completed without acquiring the mover's lock");
+        }
+        finally { obj.SyncRoot.ExitWriteLock(); }
+        Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "MoveTo did not finish after the lock was released");
+        Assert.True(task.Result);
     }
 }

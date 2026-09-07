@@ -72,11 +72,19 @@ public class ObjectDeletionTests
             var stuck = GameObject.Create("stuck");
             RegisterAll(parent, stuck);
             Assert.True(stuck.MoveTo(parent));
-            stuck.AtPreMoveOverride = (d, e) => false;
+            stuck.InstallHook("at_pre_move", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
             var res = parent.Delete(null, recursive: false);
             Assert.NotNull(res);
             Assert.Equal(2, res!.Value.count);
         }
         finally { ObjectRegistry.ClearAll(); }
+    }
+
+    // [Replace]-attributed veto hook (replaces the removed At*Override seam;
+    // lambdas cannot carry attributes, so a real method provides the marker).
+    private sealed class VetoHooks
+    {
+        [Replace]
+        public bool DenyAll(GameObject? a, string? b) => false;
     }
 }

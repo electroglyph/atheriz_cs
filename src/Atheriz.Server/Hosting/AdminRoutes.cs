@@ -29,23 +29,38 @@ public static class AdminRoutes
                 // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
                 // {status: error} so the CLI reads data.status (IsSuccess path).
                 return Results.Json(new { status = "error", message = err });
+            if (ctx.Request.ContentLength > 4096)
+                return Results.Json(new { status = "error", message = "Request body too large." });
             try
             {
-                string msg;
-                try
+                // Watchdog: a hung reload must not pin the worker forever.
+                // On timeout the background reload keeps running; the caller
+                // retries or inspects the log (same 200+{status:error} contract).
+                var work = Task.Run(async () =>
                 {
-                    var ticker = GlobalServices.GetAsyncTicker();
-                    var pool = GlobalServices.GetAsyncThreadPool();
-                    msg = await PluginReloader.ReloadGameLogicAsync(ticker, pool, settings);
-                    try { ServerLifecycle.DoReload(settings); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] DoReload failed: {ex.Message}"); }
-                }
-                catch (Exception ex)
+                    string msg;
+                    try
+                    {
+                        var ticker = GlobalServices.GetAsyncTicker();
+                        var pool = GlobalServices.GetAsyncThreadPool();
+                        msg = await PluginReloader.ReloadGameLogicAsync(ticker, pool, settings);
+                        try { ServerLifecycle.DoReload(settings); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] DoReload failed: {ex.Message}"); }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[HotReload] PluginReloader failed: {ex.Message}, falling back to DoReload");
+                        ServerLifecycle.DoReload(settings);
+                        msg = "Reload completed (fallback).";
+                    }
+                    return msg;
+                });
+                var done = await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(60)));
+                if (done != work)
                 {
-                    Console.Error.WriteLine($"[HotReload] PluginReloader failed: {ex.Message}, falling back to DoReload");
-                    ServerLifecycle.DoReload(settings);
-                    msg = "Reload completed (fallback).";
+                    Console.Error.WriteLine("[HotReload] Reload exceeded 60s watchdog; continuing in background.");
+                    return Results.Json(new { status = "error", message = "Reload timed out after 60s; still running in background." });
                 }
-                return Results.Json(new { status = "ok", message = msg });
+                return Results.Json(new { status = "ok", message = await work });
             }
             catch (Exception ex)
             {
@@ -59,6 +74,8 @@ public static class AdminRoutes
                 // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
                 // {status: error} so the CLI reads data.status (IsSuccess path).
                 return Results.Json(new { status = "error", message = err });
+            if (ctx.Request.ContentLength > 4096)
+                return Results.Json(new { status = "error", message = "Request body too large." });
 
             Console.Error.WriteLine("Internal shutdown request received. Running shutdown tasks...");
 

@@ -38,7 +38,7 @@ public class PortedMazeBackgroundDoubleMapTests
         fm!.SetValue(null, mh);
         var fn = typeof(GlobalServices).GetField("_nodeHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         fn!.SetValue(null, nh);
-        try { MapHandlerHolder.Set(mh); } catch { }
+        try { GlobalServices.SetMapHandler(mh); } catch { }
         try
         {
             var t = typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton");

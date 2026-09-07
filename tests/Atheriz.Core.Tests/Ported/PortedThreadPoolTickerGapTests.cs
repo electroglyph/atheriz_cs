@@ -96,7 +96,7 @@ public class PortedThreadPoolTickerGapTests
         }finally{
             fresh.Stop(wait:true, timeout: TimeSpan.FromSeconds(2));
             // Restore global for other tests
-            StartStop.ResetForTesting();
+            StartStop.Reset();
         }
     }
 
@@ -125,7 +125,7 @@ public class PortedThreadPoolTickerGapTests
         var fld = typeof(AsyncThreadPool).GetField("_lastReliefSpawnTicks", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         fld!.SetValue(pool, DateTime.UtcNow.Ticks);
         int before2 = pool.ReliefCount;
-        pool.MaybeSpawnReliefWorkerForTesting();
+        pool.MaybeSpawnReliefWorker();
         Assert.Equal(before2, pool.ReliefCount);
         // After cooldown (1.1s), spawn should be allowed if still saturated
         fld.SetValue(pool, DateTime.UtcNow.Ticks - TimeSpan.FromSeconds(1.1).Ticks);
@@ -157,7 +157,7 @@ public class PortedThreadPoolTickerGapTests
         Assert.DoesNotContain(oldPool.FixedThreads.Skip(1), t=>t.IsAlive);
         newPool.Stop();
         newTicker.Clear();
-        StartStop.ResetForTesting();
+        StartStop.Reset();
     }
 
     // ---- ticker_restart: ticking_resumes_after_in_process_reboot ----
@@ -187,7 +187,7 @@ public class PortedThreadPoolTickerGapTests
         Assert.True(after >= 2, $"ticking dead after in-process reboot ({after} ticks in 0.25s)");
         newTicker.Clear();
         GlobalServices.GetAsyncThreadPool().Stop();
-        StartStop.ResetForTesting();
+        StartStop.Reset();
     }
 
     // ---- ticker_restart: hook_failure_does_not_skip_remaining_steps ----
@@ -384,20 +384,16 @@ public class PortedThreadPoolTickerGapTests
         var ran = new List<int>();
         Assert.True(pool.AddTask(()=> ran.Add(1)));
         Assert.True(pool.AddTask(()=> ran.Add(2)));
-        // Replace queue with exactly 2 capacity already done via constructor
-        var before = new List<WorkItemCapture>(pool.RawQueueCount);
-        // Snapshot before
-        int beforeCount = pool.RawQueueCount;
+        // Snapshot queue depth before stop
+        int beforeCount = pool.QueueCount;
         Assert.Equal(2, beforeCount);
         pool.Stop(wait:false, timeout: TimeSpan.FromSeconds(2));
         // Remaining should still contain both tasks (plus sentinels), not discarded
-        int remaining = pool.RawQueueCount;
-        // At least before count preserved (plus sentinels may increase count but capped view may hide)
-        Assert.True(remaining >= beforeCount || remaining >=1);
+        int remaining = pool.QueueCount;
+        Assert.True(remaining >= beforeCount || remaining >= 1);
         block.Set();
         pool.Stop(wait:true, timeout: TimeSpan.FromSeconds(3));
     }
-    private struct WorkItemCapture{}
 
     [Fact]
     public void StopHoldsBusyLockWhileInjectingSentinelsFaithful()

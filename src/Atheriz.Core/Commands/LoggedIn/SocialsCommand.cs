@@ -73,7 +73,7 @@ public sealed class SocialsCommand : Command
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("target", nargs: "*", help: "Who or what to do this to."); }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         string verb = pa?.CmdString ?? Key;
         if (!SocialsDict.TryGetValue(verb, out var templates))

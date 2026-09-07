@@ -22,6 +22,10 @@ public static class Autosave
     private static NodeHandler? _cachedNodes;
     private static GameTime? _cachedTime;
     private static AsyncTicker? _globalTicker;
+    // Ticker an explicit-ticker StartAutosave ran on (Python always uses the
+    // global ticker, so stop needs no handle; here the parameterless Stop must
+    // still reach a coro registered on a caller-supplied ticker).
+    private static AsyncTicker? _startedTicker;
 
     public static bool AutosaveStarted
     {
@@ -133,11 +137,15 @@ public static class Autosave
         lock (_lock)
         {
             settings ??= AtherizSettings.Global;
-            if (settings.AutosaveMinutes == 0 || _autosaveStarted) return;
+            // Port of autosave.py `if not settings.AUTOSAVE_MINUTES`: falsy
+            // covers 0 AND negatives — a negative interval must not register
+            // a coro with a negative slot key.
+            if (settings.AutosaveMinutes <= 0 || _autosaveStarted) return;
             double interval = IntervalSeconds(settings);
             ticker.AddCoro(AutosaveTick, interval);
             _registeredInterval = interval;
             _autosaveStarted = true;
+            _startedTicker = ticker;
             _cachedSettings = settings;
             _cachedMap = mapHandler;
             _cachedNodes = nodeHandler;
@@ -168,7 +176,7 @@ public static class Autosave
     public static void StopAutosave()
     {
         AsyncTicker? ticker;
-        lock (_lock) { ticker = _globalTicker; }
+        lock (_lock) { ticker = _globalTicker ?? _startedTicker; }
         if (ticker != null)
         {
             try { StopAutosave(ticker); } catch (Exception) { }
@@ -209,12 +217,13 @@ public static class Autosave
                 _registeredInterval = null;
             }
             _autosaveStarted = false;
+            _startedTicker = null;
             // keep cached handlers until next start
         }
     }
 
     /// <summary>For tests: reset static state.</summary>
-    public static void ResetForTesting()
+    public static void Reset()
     {
         AsyncTicker? gt = null;
         lock (_lock)
@@ -225,6 +234,7 @@ public static class Autosave
             _cachedMap = null;
             _cachedNodes = null;
             _cachedTime = null;
+            _startedTicker = null;
             gt = _globalTicker;
             _globalTicker = null;
         }

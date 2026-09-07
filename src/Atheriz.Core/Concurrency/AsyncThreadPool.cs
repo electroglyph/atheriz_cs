@@ -18,8 +18,6 @@ public class AsyncThreadPool : IDisposable
     private readonly Queue<WorkItem?> _queue = new();
     private readonly object _queueLock = new();
     private int _queueLimit;
-    private int _origLimitForCap = 0;
-    private bool _capped = false;
 
     private readonly List<Thread> _fixedThreads = new();
     private readonly List<Thread> _reliefThreads = new();
@@ -80,17 +78,15 @@ public class AsyncThreadPool : IDisposable
     {
         get
         {
-            lock (_queueLock)
-            {
-                int actual = _queue.Count;
-                if (_capped) return Math.Min(actual, _origLimitForCap);
-                return actual;
-            }
+            // Only real queued work is reported: the null control sentinels
+            // Stop enqueues for worker shutdown are not user tasks.
+            lock (_queueLock) return _queue.Count(i => i != null);
         }
     }
     public int QueueLimit
     {
         get { lock (_queueLock) return _queueLimit; }
+        set { lock (_queueLock) { _queueLimit = value; } }
     }
     public int ReliefCount { get { lock (_lock) return _reliefCount; } }
     public IReadOnlyList<Thread> FixedThreads { get { lock (_lock) return _fixedThreads.ToList(); } }
@@ -113,16 +109,6 @@ public class AsyncThreadPool : IDisposable
         }
     }
     public bool IsStopped { get { lock (_lock) return _stopped; } }
-    public object BusyLock => _lock;
-
-    // For tests: allow replacing queue limit (simulates atp.task_queue = Queue(maxsize=2))
-    public void SetQueueLimitForTesting(int newLimit)
-    {
-        lock (_queueLock) { _queueLimit = newLimit; _capped = false; }
-    }
-
-    // Expose internal queue for inspection (count, etc.) — not for direct mutation
-    public int RawQueueCount { get { lock (_queueLock) return _queue.Count; } }
 
     private void WorkLoop(object? arg)
     {
@@ -204,17 +190,13 @@ public class AsyncThreadPool : IDisposable
                             }
                             else
                             {
-                                // Queue full: discard one item then enqueue sentinel (Python fallback)
-                                if (_queue.Count > 0)
-                                {
-                                    try { _ = _queue.Dequeue(); } catch { }
-                                    _queue.Enqueue(null);
-                                    Monitor.Pulse(_queueLock);
-                                }
-                                else
-                                {
-                                    try { _queue.Enqueue(null); Monitor.Pulse(_queueLock); } catch { }
-                                }
+                                // Queue full: expand the limit — exit sentinels are
+                                // control messages, not user tasks — so a queued
+                                // user task is never silently discarded to make
+                                // room for a sentinel.
+                                _queueLimit++;
+                                _queue.Enqueue(null);
+                                Monitor.Pulse(_queueLock);
                             }
                             if (_stopped)
                             {
@@ -282,7 +264,8 @@ public class AsyncThreadPool : IDisposable
         catch (Exception ex) { try { AtherizLogger.LogError(ex.ToString()); } catch { Console.Error.WriteLine(ex.ToString()); } }
     }
 
-    private void MaybeSpawnReliefWorker()
+    /// <summary>Spawns a relief worker if the pool is saturated and cooldown elapsed. Public so hosts can prod relief.</summary>
+    public void MaybeSpawnReliefWorker()
     {
         bool spawn = false;
         int seq = 0;
@@ -520,9 +503,6 @@ public class AsyncThreadPool : IDisposable
     public void Delay(double seconds, Action action) => Delay(TimeSpan.FromSeconds(seconds), action);
     public void Delay(double seconds, Func<Task> asyncFunc) => Delay(TimeSpan.FromSeconds(seconds), asyncFunc);
 
-    // For testing relief directly
-    public void MaybeSpawnReliefWorkerForTesting() => MaybeSpawnReliefWorker();
-
     public void Stop(bool wait = true, TimeSpan? timeout = null)
     {
         var to = timeout ?? TimeSpan.FromSeconds(10);
@@ -536,12 +516,10 @@ public class AsyncThreadPool : IDisposable
 
         // Drain preserving non-null tasks, similar to Python logic, while holding both locks
         List<WorkItem?> preserved = new();
-        int origLimit = 0;
         lock (_lock)
         {
             lock (_queueLock)
             {
-                origLimit = _queueLimit;
                 while (_queue.Count > 0)
                 {
                     var it = _queue.Dequeue();
@@ -560,21 +538,20 @@ public class AsyncThreadPool : IDisposable
                 {
                     _queue.Enqueue(null);
                 }
-                // Cap handling: if needed > orig and orig>10, queue count view should be capped
-                if (origLimit != 0 && needed > origLimit && origLimit > 10)
-                {
-                    _origLimitForCap = origLimit;
-                    _capped = true;
-                }
                 Monitor.PulseAll(_queueLock);
             }
         }
 
         if (wait)
         {
+            // One deadline shared by all fixed workers: sequential Join(to)
+            // calls would stall shutdown N×to in the worst case.
+            var deadline = DateTime.UtcNow + to;
             foreach (var t in _fixedThreads)
             {
-                if (!t.Join(to))
+                var remaining = deadline - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero) remaining = TimeSpan.FromMilliseconds(50);
+                if (!t.Join(remaining))
                     Console.Error.WriteLine($"Thread {t.Name} did not stop within {to.TotalSeconds}s");
             }
             List<Thread> reliefSnap;

@@ -10,11 +10,11 @@ public sealed class EmoteCommand : Command
     public override string Desc => "Emote something.";
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("text").Nargs("*").Help("Text to emote.");
+        p.AddArgument("text").Nargs("REMAINDER").Help("Text to emote.");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject p) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var p)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { p.Msg(PrintHelp()); return; }
         var lst = pa.GetList("text");

@@ -32,8 +32,8 @@ public class PortedMapTests
     }
     private sealed class FakeListener : GameObject
     {
-        public new bool MapEnabled = true;
-        public new double? LastMapTime;
+        // Note: no field shadows for MapEnabled/LastMapTime — assignments flow to
+        // the base virtuals, which is what the typed map dispatch reads.
         public Func<Dictionary<(int,int),string>, Dictionary<(int,int),string>> AtPreMapRenderImpl = g => g;
         public List<(string mapStr, List<(string sym,string desc,(int x,int y) coord)> entries, int minX, int maxY, bool showLegend, string name)> AtMapUpdateCalls = new();
         public List<(List<(string sym,string desc,(int,int))> entries, bool show, string area)> AtLegendUpdateCalls = new();

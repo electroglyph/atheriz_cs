@@ -17,7 +17,6 @@ public sealed class ChannelCommand : Command
     public static void ClearCache() { lock (CacheLock) ChannelCache.Clear(); }
     public static IReadOnlyDictionary<string, Channel> GetCacheSnapshot() { lock (CacheLock) return new Dictionary<string, Channel>(ChannelCache, StringComparer.OrdinalIgnoreCase); }
     public static bool TryGetCached(string name, out Channel? ch) { lock (CacheLock) return ChannelCache.TryGetValue(name, out ch); }
-    public static void SetCacheForTesting(string name, Channel ch) { lock (CacheLock) ChannelCache[name.ToLowerInvariant()] = ch; }
     protected override void SetupParser(GameArgumentParser p)
     {
         p.AddArgument("message").Help("Message to send").Nargs("*");
@@ -29,7 +28,7 @@ public sealed class ChannelCommand : Command
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { caller.Msg(PrintHelp()); return; }
         if (pa.GetBool("list"))

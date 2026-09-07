@@ -19,7 +19,7 @@ public class PortedMapEditTestsPart3
         public override void Close(){}
         public List<(string Cmd, List<object?> Args, Dictionary<string,object?> Kw)> Sent=new();
     }
-    private static void Reset(){ MapEdit.ResetForTesting(); InputFuncs.MapHandlerFactory = () => GlobalServices.GetMapHandler(); InputFuncs.NodeHandlerFactory = () => NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler(); }
+    private static void Reset(){ MapEdit.Reset(); InputFuncs.MapHandlerFactory = () => GlobalServices.GetMapHandler(); InputFuncs.NodeHandlerFactory = () => NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler(); }
     private static BaseConnection MakeConn(string ip="10.0.0.1") { var c=new FakeC(ip); return c; }
     private static MapInfo MakeMi(){ var mi=new MapInfo("TestArea"); return mi; }
 
@@ -27,7 +27,7 @@ public class PortedMapEditTestsPart3
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
-        MapEdit.ResetForTesting();
+        MapEdit.Reset();
         // No TTL: chains are valid while the owning session is open; only the cap evicts.
         var origMax = Atheriz.Core.Settings.AtherizSettings.Global.MapeditMaxChains;
         try{
@@ -48,7 +48,7 @@ public class PortedMapEditTestsPart3
             var k3 = MapEdit.Grant("1.1.1.1","A",0);
             Assert.True(MapEdit.chains.Count<=2);
             // Session-bound chains die with the session, others survive.
-            MapEdit.ResetForTesting();
+            MapEdit.Reset();
             var session = new Session(null);
             var ks = MapEdit.Grant("1.1.1.1","A",0, session);
             var ko = MapEdit.Grant("1.1.1.1","A",0);
@@ -63,7 +63,7 @@ public class PortedMapEditTestsPart3
             Assert.DoesNotContain(ks2, MapEdit.chains.Keys);
         } finally{
             Atheriz.Core.Settings.AtherizSettings.Global.MapeditMaxChains = origMax;
-            MapEdit.ResetForTesting();
+            MapEdit.Reset();
         }
     }
 

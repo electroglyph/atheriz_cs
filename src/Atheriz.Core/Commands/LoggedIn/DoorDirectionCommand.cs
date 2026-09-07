@@ -8,6 +8,7 @@ public abstract class DoorDirectionCommand : Command
 {
     protected abstract string VerbNoun { get; }
     protected abstract void Act(Door door, GameObject go);
+    public override string ExtraDesc => "Also accepts n,s,e,w,u,d as arguments.";
 
     protected sealed override void SetupParser(GameArgumentParser p)
     {
@@ -22,13 +23,13 @@ public abstract class DoorDirectionCommand : Command
 
     public sealed override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var loc = go.ResolveLocationObject() as Node;
         if (loc == null)
         {
             // preserve original OpenCommand double check for invalid location
-            if (go.ResolveLocationObject() == null) { go.Msg("You have an invalid location."); return; }
-            go.Msg("You have an invalid location.");
+            if (go.ResolveLocationObject() == null) { CommandHelpers.MsgInvalidLocation(go); return; }
+            CommandHelpers.MsgInvalidLocation(go);
             return;
         }
         var pa = args as GameArgumentParser.ParsedArgs;

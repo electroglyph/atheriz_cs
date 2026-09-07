@@ -116,7 +116,7 @@ public class AccountTests
     public void SaltProvider_FixedInjection()
     {
         ObjectRegistry.ClearAll();
-        SaltProvider.SetSaltForTesting(FixedSalt);
+        SaltProvider.SetSalt(FixedSalt);
         try
         {
             Assert.Equal(FixedSalt, SaltProvider.GetSalt());

@@ -56,7 +56,7 @@ public class PortedMapEditBuildingMoveTests
         NodeHandler.SetCurrent(nh);
         var mh = new MapHandler(autoLoad:false);
         mh.SetMapInfo(AREA, Z, mi);
-        MapHandlerHolder.Set(mh);
+        GlobalServices.SetMapHandler(mh);
         // Door
         var door = new Door(new Coord(AREA,5,2,Z), new Coord(AREA,5,4,Z), "north","south", (5,3), GameUtils.WrapTruecolor("━",35,fgBright:65), GameUtils.WrapTruecolor("┚",35,fgBright:65), true,false);
         nh.AddDoor(door);
@@ -108,9 +108,9 @@ public class PortedMapEditBuildingMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var (mi, nh, gridObj, door) = MakeFixture();
-        var mh = MapHandlerHolder.Get()!;
+        var mh = GlobalServices.GetMapHandler()!;
         // Ensure MapEdit clean
-        MapEdit.ResetForTesting();
+        MapEdit.Reset();
         var conn = new FakeConn();
         conn.ClientHost = "10.0.0.1";
         // Re-set factories after reset
@@ -190,11 +190,11 @@ public class PortedMapEditBuildingMoveTests
         gridObj.Nodes[(5,2)]=upper; gridObj.Nodes[(5,4)]=lower;
         var area = new NodeArea(AREA); area.AddGrid(gridObj);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
-        var mh = new MapHandler(autoLoad:false); mh.SetMapInfo(AREA,Z,mi); MapHandlerHolder.Set(mh);
+        var mh = new MapHandler(autoLoad:false); mh.SetMapInfo(AREA,Z,mi); GlobalServices.SetMapHandler(mh);
         var door = new Door(new Coord(AREA,5,2,Z), new Coord(AREA,5,4,Z), "north","south",(5,3), GameUtils.WrapTruecolor("━",35,fgBright:65), GameUtils.WrapTruecolor("┚",35,fgBright:65));
         nh.AddDoor(door);
         InputFuncs.MapHandlerFactory=()=>mh; InputFuncs.NodeHandlerFactory=()=>nh;
-        MapEdit.ResetForTesting();
+        MapEdit.Reset();
         var conn = new FakeConn();
         var key = MapEdit.Grant("10.0.0.1", AREA, Z);
         new InputFuncs().MapEditHandler(conn, new List<object?>{key,0,new List<object?>()}, new Dictionary<string,object?>());

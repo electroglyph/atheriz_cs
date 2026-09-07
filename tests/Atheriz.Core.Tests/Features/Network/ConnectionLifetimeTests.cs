@@ -37,13 +37,13 @@ public class ConnectionLifetimeTests
         ConnectionManager.GlobalInstance = mgr;
         try
         {
-            mgr.Atp.SetQueueLimitForTesting(0);
+            mgr.Atp.QueueLimit = 0;
             var conn = new TestConnection();
             var tcs = new TaskCompletionSource<bool>();
             conn.EnqueueInput(
                 new Action<BaseConnection, List<object?>, Dictionary<string, object?>>((c, a, k) => tcs.TrySetResult(true)),
                 new List<object?>(), new Dictionary<string, object?>());
-            mgr.Atp.SetQueueLimitForTesting(10000);
+            mgr.Atp.QueueLimit = 10000;
             Assert.True(tcs.Task.Wait(TimeSpan.FromSeconds(2)), "dropped input was never retried");
         }
         finally

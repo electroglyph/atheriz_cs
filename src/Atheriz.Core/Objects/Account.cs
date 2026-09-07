@@ -14,9 +14,6 @@ public class Account : GameObject
 {
     public new static bool _is_thread_safe = true;
     public static bool GroupSave => false; // Fix for test_account.py:39
-    // Hooks for testing — mirrors Python monkeypatch of at_create/at_delete
-    public static Action<Account>? AtCreateHook { get; set; }
-    public static Func<GameObject?, bool>? AtDeleteHook { get; set; }
 
     private string _passwordHash = "";
     private List<int> _characters = [];
@@ -27,15 +24,11 @@ public class Account : GameObject
     {
         IsAccount = true;
     }
-    public override void AtCreate()
-    {
-        base.AtCreate();
-        AtCreateHook?.Invoke(this);
-    }
     public override bool AtDelete(GameObject caller)
     {
-        if (AtDeleteHook != null) return AtDeleteHook(caller);
-        return true; // Fix for test_account.py:88 Account.at_delete is unconditional true, not access-gated
+        // Unconditional true (test_account.py:88 — not access-gated like the base),
+        // routed through the hook pipeline so game code can veto via at_delete hooks.
+        return Hookable("at_delete", () => true, caller);
     }
     public virtual bool AtPrePuppet(GameObject character) => Hookable("at_pre_puppet", () => true, character); // Fix for test_account.py:408 port of base_account.py:76 at_pre_puppet
     // Account-specific Delete returns bool (Python) — hides GameObject tuple version.
@@ -92,6 +85,15 @@ public class Account : GameObject
     public IReadOnlyList<int> Characters => ReadChars();
     public override string BanReason { get => ReadBan(); set => WriteBan(value); }
     public bool LoggedIn { get => ReadLogged(); private set => WriteLogged(value); }
+
+    public override IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
+    {
+        foreach (var m in base.GetExamMembers()) yield return m;
+        object? Safe(Func<object?> f) { try { return f(); } catch { return "<error>"; } }
+        yield return ("Characters", Safe(() => (object?)Characters), true);
+        yield return ("BanReason", Safe(() => (object?)BanReason), true);
+        yield return ("LoggedIn", Safe(() => (object?)LoggedIn), true);
+    }
 
     private string ReadHash() { SyncRoot.EnterReadLock(); try { return _passwordHash; } finally { SyncRoot.ExitReadLock(); } }
     private void WriteHash(string v) { SyncRoot.EnterWriteLock(); try { _passwordHash = v; IsModified = true; } finally { SyncRoot.ExitWriteLock(); } }
@@ -165,12 +167,19 @@ public class Account : GameObject
 
 
     public static Account Create(string name, string password, string? saltOverride = null, Func<string,bool>? existsCheck = null)
+        => Create<Account>(name, password, saltOverride, existsCheck);
+
+    /// <summary>
+    /// Typed factory: runs the full create pipeline (hash, AtCreate, atomic register)
+    /// for game-code <see cref="Account"/> subclasses (e.g. CustomAccount).
+    /// </summary>
+    public static T Create<T>(string name, string password, string? saltOverride = null, Func<string,bool>? existsCheck = null) where T : Account, new()
     {
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(password))
             throw new ArgumentException("Name and password must not be empty.");
         if (existsCheck is not null && existsCheck(name))
             throw new InvalidOperationException($"Account with this name ({name}) already exists.");
-        var acc = new Account();
+        var acc = new T();
         acc.Id = GameObject.GetNextId();
         acc.Name = name;
         acc.SyncRoot.EnterWriteLock();
@@ -209,6 +218,7 @@ public class Account : GameObject
     {
         string json;
         SyncRoot.EnterWriteLock();
+        bool had = IsModified;
         try
         {
             var dto = ToDto();
@@ -218,6 +228,9 @@ public class Account : GameObject
         }
         catch
         {
+            // Failed serialization must not leave the object clean
+            // (Channel.BuildSaveOps parity) — the next checkpoint retries.
+            IsModified = had;
             throw;
         }
         finally { SyncRoot.ExitWriteLock(); }

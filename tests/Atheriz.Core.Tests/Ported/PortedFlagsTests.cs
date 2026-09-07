@@ -122,21 +122,20 @@ public class PortedFlagsTests
         Assert.True(c.IsModified);
     }
     // Port of test_flags.py:107 add_uses_lock — original spies SpyLock.__enter__ called
-    // Translated: verify that GameObject lock was acquired during AddTag via instrumented counting LockWrapper
-    // In C# Write() calls _lock.EnterWriteLock via IncrementTracker if _testTracker set; we instrument via reflection
+    // Translated: AddTag must acquire the object's write lock — proven behaviorally by
+    // holding SyncRoot for write on this thread and showing a worker AddTag blocks
+    // until release (real engine path, no instrumentation seam).
     [Fact] public void AddUsesLock()
     {
-        var o=NewFlags();
-        // Instrument: inject a counting tracker via the typed test seam
-        // (IWriteLockTracker); Write() counts EnterWriteLock acquisitions.
-        var tracker = new LockCountTracker();
-        var trackerField = typeof(GameObject).GetField("_testTracker", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        trackerField!.SetValue(o, tracker);
-        // Now AddTag should increment tracker.Entries via IncrementTracker()
-        o.AddTag("x");
+        var o = NewFlags();
+        o.SyncRoot.EnterWriteLock();
+        var task = Task.Run(() => o.AddTag("x"));
+        try
+        {
+            Assert.False(task.Wait(TimeSpan.FromMilliseconds(300)), "AddTag completed without acquiring the write lock");
+        }
+        finally { o.SyncRoot.ExitWriteLock(); }
+        Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "AddTag did not finish after the lock was released");
         Assert.Contains("x", o.TagsSnapshot);
-        // Verify lock was used (EnterWriteLock tracked) — faithful to SpyLock.__enter__ called
-        Assert.True(tracker.Entries > 0);
     }
-    private sealed class LockCountTracker : IWriteLockTracker { public int Entries = 0; public void TrackWriteLock() => Entries++; }
 }

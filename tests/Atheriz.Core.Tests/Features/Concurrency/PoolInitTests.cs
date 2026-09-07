@@ -120,7 +120,7 @@ public class PoolInitTests
             catch
             {
             }
-            Autosave.ResetForTesting();
+            Autosave.Reset();
             try
             {
                 ticker.Stop();

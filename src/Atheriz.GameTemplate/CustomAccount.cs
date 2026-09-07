@@ -1,6 +1,6 @@
 // Port of atheriz/new.py:522 ("account","Account","atheriz.objects.base_account")
 #nullable enable
-namespace Atheriz.GameTemplate;
+namespace MyGame;
 using Atheriz.Core.Objects;
 /// <summary>Custom Account — mirrors test/account.py</summary>
 public class CustomAccount : Account

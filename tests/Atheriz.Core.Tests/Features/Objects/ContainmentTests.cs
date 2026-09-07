@@ -125,7 +125,7 @@ public class ContainmentTests
             var item = GameObject.Create("item");
             RegisterAll(room, item);
             Assert.True(item.MoveTo(room));
-            room.AtPreObjectLeaveOverride = (dest, exit) => false;
+            room.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
             Assert.True(item.MoveTo(null));
             Assert.DoesNotContain(item.Id, room.ContentsSnapshot);
             Assert.IsType<LocationRef.NullLocation>(item.Location);
@@ -147,7 +147,7 @@ public class ContainmentTests
             var item = GameObject.Create("item");
             RegisterAll(src, dst, item);
             Assert.True(item.MoveTo(src));
-            dst.AtPreObjectReceiveOverride = (s, e) => false;
+            dst.InstallHook("at_pre_object_receive", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
             Assert.True(item.MoveTo(dst));
             Assert.DoesNotContain(item.Id, src.ContentsSnapshot);
             Assert.Contains(item.Id, dst.ContentsSnapshot);
@@ -167,7 +167,7 @@ public class ContainmentTests
             var item = GameObject.Create("item");
             RegisterAll(src, dst, item);
             Assert.True(item.MoveTo(src));
-            src.AtPreObjectLeaveOverride = (d, e) => false;
+            src.InstallHook("at_pre_object_leave", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
             Assert.True(item.MoveTo(dst));
             Assert.DoesNotContain(item.Id, src.ContentsSnapshot);
             Assert.Contains(item.Id, dst.ContentsSnapshot);
@@ -192,5 +192,13 @@ public class ContainmentTests
             Assert.Contains(item.Id, dst.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
+    }
+
+    // [Replace]-attributed veto hook (replaces the removed At*Override seam;
+    // lambdas cannot carry attributes, so a real method provides the marker).
+    private sealed class VetoHooks
+    {
+        [Replace]
+        public bool DenyAll(GameObject? a, string? b) => false;
     }
 }

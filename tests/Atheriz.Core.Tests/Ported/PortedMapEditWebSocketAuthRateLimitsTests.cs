@@ -123,7 +123,7 @@ public class PortedMapEditWebSocketAuthRateLimitsTests
     public void ConnectLookupIsCaseInsensitive()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         try
         {
             var acc = Account.Create("FooBar", "password123");
@@ -138,7 +138,7 @@ public class PortedMapEditWebSocketAuthRateLimitsTests
     public void BannedAccountDoesNotTriggerPasswordCheck()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         try
         {
             var acc = Account.Create("BannedUser2", "password123");

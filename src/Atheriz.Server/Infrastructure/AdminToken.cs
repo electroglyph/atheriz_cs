@@ -24,9 +24,9 @@ public static class AdminToken
     /// </summary>
     public static string EnsureToken(string secretPath)
     {
-        // Guard — atheriz.py:559-563
-        PathGuards.GuardSecretPath(secretPath);
-        PathGuards.EnsureSecretDirectory(secretPath);
+        // Guard — atheriz.py:559-563 (Core; Server wrapper deleted P1-16)
+        Atheriz.Core.Utils.PathGuards.GuardSecretPath(secretPath);
+        Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(secretPath);
 
         var tokenFile = Path.Combine(secretPath, TokenFileName);
 
@@ -129,7 +129,15 @@ public static class AdminToken
     /// Returns null if allowed, error string otherwise.
     /// Caller should check RemoteIp loopback + FixedTimeEquals.
     /// This helper works with HttpContext.
+    /// The token file is re-read only when its size/mtime changes (rotation
+    /// stays exact: a rewrite bumps mtime, a delete misses File.Exists below).
     /// </summary>
+    private static readonly object _tokenCacheLock = new();
+    private static string? _cachedTokenPath;
+    private static string? _cachedToken;
+    private static DateTime _cachedTokenMtimeUtc;
+    private static long _cachedTokenLength = -1;
+
     public static string? CheckAdmin(string secretPath, string? remoteIp, string? providedToken, string action)
     {
         if (!IsLoopbackIp(remoteIp))
@@ -139,7 +147,27 @@ public static class AdminToken
         if (!File.Exists(tokenFile))
             return "Token file not found.";
         string expected;
-        try { expected = File.ReadAllText(tokenFile, Encoding.UTF8).Trim(); }
+        try
+        {
+            var mtime = File.GetLastWriteTimeUtc(tokenFile);
+            var length = new FileInfo(tokenFile).Length;
+            lock (_tokenCacheLock)
+            {
+                if (_cachedTokenPath == tokenFile && _cachedToken != null
+                    && _cachedTokenMtimeUtc == mtime && _cachedTokenLength == length)
+                {
+                    expected = _cachedToken;
+                }
+                else
+                {
+                    expected = File.ReadAllText(tokenFile, Encoding.UTF8).Trim();
+                    _cachedTokenPath = tokenFile;
+                    _cachedToken = expected;
+                    _cachedTokenMtimeUtc = mtime;
+                    _cachedTokenLength = length;
+                }
+            }
+        }
         catch { return "Token file not found."; }
 
         if (!ValidateToken(providedToken, expected))
@@ -157,6 +185,9 @@ public static class AdminToken
         if (!System.Net.IPAddress.TryParse(remoteIp, out var ip)) return false;
         if (System.Net.IPAddress.IsLoopback(ip)) return true;
         if (ip.IsIPv4MappedToIPv6 && System.Net.IPAddress.IsLoopback(ip.MapToIPv4())) return true;
+        // Whole 127/8 (IsLoopback is exact-match only: 127.0.0.1 / ::1).
+        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && ip.GetAddressBytes()[0] == 127) return true;
+        if (ip.IsIPv4MappedToIPv6 && ip.MapToIPv4().GetAddressBytes()[0] == 127) return true;
         return false;
     }
 }

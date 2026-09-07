@@ -17,7 +17,7 @@ public sealed class ShutdownCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         go.Msg("Initiating server shutdown...");
         var settings = AtherizSettings.Global;
         int port = settings.WebserverPort;
@@ -54,13 +54,14 @@ public sealed class ShutdownCommand : Command
                         try
                         {
                             using var doc = System.Text.Json.JsonDocument.Parse(body);
-                            var status = doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : null;
-                            if (status == "ok") capturedGo.Msg("Server shutdown initiated successfully.");
-                            else
+                            string? status = null, msg = null;
+                            foreach (var prop in doc.RootElement.EnumerateObject())
                             {
-                                var msg = doc.RootElement.TryGetProperty("message", out var m) ? m.GetString() : null;
-                                capturedGo.Msg($"Shutdown failed: {msg}");
+                                if (prop.NameEquals("status")) status = prop.Value.GetString();
+                                else if (prop.NameEquals("message")) msg = prop.Value.GetString();
                             }
+                            if (status == "ok") capturedGo.Msg("Server shutdown initiated successfully.");
+                            else capturedGo.Msg($"Shutdown failed: {msg}");
                         }
                         catch { capturedGo.Msg("Server shutdown initiated successfully."); }
                     }

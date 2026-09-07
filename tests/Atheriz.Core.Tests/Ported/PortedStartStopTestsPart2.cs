@@ -9,17 +9,17 @@ public class PortedStartStopTestsPart2
     [Fact] public void DoShutdown_SkipsWhenNoChannel()
     {
         using var env = GlobalTestEnv.Enter();
-        StartStop.ResetForTesting();
+        StartStop.Reset();
         var ex = Record.Exception(() => StartStop.DoShutdown());
         Assert.Null(ex);
-        StartStop.ResetForTesting();
+        StartStop.Reset();
     }
     [Fact] public void DoReload_RunsAtServerReloadHook()
     {
         using var env = GlobalTestEnv.Enter();
-        StartStop.ResetForTesting();
+        StartStop.Reset();
         var ex = Record.Exception(() => StartStop.DoReload());
         Assert.Null(ex);
-        StartStop.ResetForTesting();
+        StartStop.Reset();
     }
 }

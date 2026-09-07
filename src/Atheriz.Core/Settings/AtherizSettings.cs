@@ -29,6 +29,7 @@ public sealed class AtherizSettings
     public int WebsocketMaxPendingSends { get; set; } = 256;
     public int WebsocketMaxPendingBytes { get; set; } = 4 * 1024 * 1024;
     public int TelnetMaxPendingBytes { get; set; } = 1 * 1024 * 1024;
+    public int TelnetMaxPendingSends { get; set; } = 256;
     public bool TelnetEnabled { get; set; } = true;
     public int TelnetPort { get; set; } = 4444;
     public string TelnetInterface { get; set; } = "0.0.0.0";
@@ -59,11 +60,12 @@ public sealed class AtherizSettings
     public string? SslCertFile { get; set; } = Environment.GetEnvironmentVariable("ATHERIZ_SSL_CERTFILE");
     public string? SslKeyFile { get; set; } = Environment.GetEnvironmentVariable("ATHERIZ_SSL_KEYFILE");
     /// <summary>
-    /// When true (default, faithful to the Python server which always starts), a configured
-    /// but unloadable TLS certificate logs a warning and serves plaintext. Set false to
-    /// fail fast instead of serving the admin token over plaintext unnoticed.
+    /// When true, a configured but unloadable TLS certificate logs a warning and serves
+    /// plaintext. Default false (fail closed): a missing cert file is always a startup
+    /// error, and an unloadable one is too unless the operator explicitly opts into
+    /// serving the admin token over plaintext.
     /// </summary>
-    public bool AllowInsecureTlsFallback { get; set; } = true;
+    public bool AllowInsecureTlsFallback { get; set; } = false;
     public bool WebclientSyncCheck { get; set; } = true;
 
     public int? ThreadpoolLimit { get; set; } = Environment.ProcessorCount;
@@ -95,6 +97,8 @@ public sealed class AtherizSettings
     public int MaxLoginAttempts { get; set; } = 3;
     public int LoginAttemptCooldown { get; set; } = 100;
     public int MaxConnectionsPerIp { get; set; } = 2;
+    /// <summary>Total-connection admission cap (0 = unlimited).</summary>
+    public int MaxTotalConnections { get; set; } = 500;
     public int MenuPromptTimeout { get; set; } = 60;
     public int CreationCooldown { get; set; } = 60;
     public int MapeditMaxChains { get; set; } = 256;
@@ -178,14 +182,4 @@ public sealed class AtherizSettings
         (40, 20.0),
         (50, 10.0),
     ];
-
-    // py sandbox
-    public int PyMaxOutputLines { get; set; } = 200;
-    public int PyMaxOutputBytes { get; set; } = 50_000;
-    public int PyOutputFg { get; set; } = 15;
-    public int KillPyCommandAfter { get; set; } = 5;
-    public int PyMaxCodeBytes { get; set; } = 65_536;
-    public int PyMaxAstNodes { get; set; } = 20_000;
-    public int PyMaxLineEvents { get; set; } = 5_000_000;
-    public bool PyRequireSuperuser { get; set; } = false;
 }

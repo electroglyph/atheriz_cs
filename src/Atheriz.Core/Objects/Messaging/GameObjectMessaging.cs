@@ -37,10 +37,10 @@ public partial class GameObject
             // Hookable wrapper would be used in real port; we call directly and honour false
             if (!AtMsgReceive(parsed, fromObj, msgType)) return;
         }
-        catch (Exception) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
         if (fromObj != null)
         {
-            try { fromObj.AtMsgSend(parsed, this, msgType); } catch (Exception) { }
+            try { fromObj.AtMsgSend(parsed, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
         }
         _lock.EnterWriteLock();
         // Bounded like Channel history (limit 50) — see AppendMessage below.
@@ -53,7 +53,7 @@ public partial class GameObject
         finally { _lock.ExitReadLock(); }
         if (sess != null && sess.Connection != null)
         {
-            try { sess.Msg(parsed); } catch (Exception) { }
+            try { sess.Msg(parsed); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
         }
     }
 
@@ -202,7 +202,7 @@ public partial class GameObject
         foreach (var obj in contents)
         {
             if (excl != null && excl.Contains(obj)) continue;
-            try { func(obj); } catch (Exception) { }
+            try { func(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ForContents: " + logEx.Message, "GameObject"); }
         }
     }
     public void ForContents(Action<GameObject, IDictionary<string, object?>> func, IDictionary<string, object?>? kwargs = null, IEnumerable<GameObject>? exclude = null, Func<int, GameObject?>? resolver = null)
@@ -214,7 +214,7 @@ public partial class GameObject
         foreach (var obj in contents)
         {
             if (excl != null && excl.Contains(obj)) continue;
-            try { func(obj, kwargs ?? new Dictionary<string, object?>()); } catch (Exception) { }
+            try { func(obj, kwargs ?? new Dictionary<string, object?>()); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ForContents: " + logEx.Message, "GameObject"); }
         }
     }
 
@@ -266,8 +266,8 @@ public partial class GameObject
 
     private void AppendMessage(string text, GameObject? fromObj, string? msgType)
     {
-        try { if (!AtMsgReceive(text, fromObj, msgType)) return; } catch (Exception) { }
-        if (fromObj != null) try { fromObj.AtMsgSend(text, this, msgType); } catch (Exception) { }
+        try { if (!AtMsgReceive(text, fromObj, msgType)) return; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AppendMessage: " + logEx.Message, "GameObject"); }
+        if (fromObj != null) try { fromObj.AtMsgSend(text, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AppendMessage: " + logEx.Message, "GameObject"); }
         _lock.EnterWriteLock();
         // Bounded like Channel history (limit 50): long-lived NPCs must not
         // accumulate unbounded message logs. Oldest entries drop first.

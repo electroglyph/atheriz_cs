@@ -297,7 +297,7 @@ public static class FuncParserHelpers
                     if(arr[1] is IDictionary<string, object> d2) kwConvs=d2;
                 }
             }
-        }catch (Exception) { }
+        }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser.SafeConvertToTypes: " + logEx.Message, "SafeArithParser"); }
         if(argConvs==null && kwConvs==null){
             // converters is single arg converters?
             if(converters is IEnumerable<object> e3) argConvs=e3;
@@ -319,7 +319,7 @@ public static class FuncParserHelpers
                         else if(tp==typeof(string)) argsCopy[i]=argsCopy[i]?.ToString();
                         else argsCopy[i]= Convert.ChangeType(argsCopy[i], tp);
                     }else if(conv is Delegate del){
-                        try{ argsCopy[i]= del.DynamicInvoke(argsCopy[i]); } catch(System.Reflection.TargetInvocationException tie){ throw tie.InnerException ?? tie; }
+                        argsCopy[i]= DelegateInvoker.Invoke(del, new object?[]{ argsCopy[i] });
                     }else if(conv is Func<object?,object?> fn){
                         argsCopy[i]= fn(argsCopy[i]);
                     }
@@ -340,7 +340,7 @@ public static class FuncParserHelpers
                         if(kwargs[kv.Key] is string s && tp==typeof(int) && int.TryParse(s, out var iv2)) kwargs[kv.Key]=iv2;
                         else if(tp==typeof(string)) kwargs[kv.Key]=kwargs[kv.Key]?.ToString();
                     }else if(conv is Delegate del){
-                        try{ kwargs[kv.Key]= del.DynamicInvoke(kwargs[kv.Key]); } catch(System.Reflection.TargetInvocationException tie){ throw tie.InnerException ?? tie; }
+                        kwargs[kv.Key]= DelegateInvoker.Invoke(del, new object?[]{ kwargs[kv.Key] });
                     }else if(conv is Func<object?,object?> fn2){
                         kwargs[kv.Key]= fn2(kwargs[kv.Key]);
                     }
@@ -365,11 +365,11 @@ public static class FuncParserHelpers
         try{
             var lit = _TryLiteralEval(s);
             if(lit != null || s.Trim()=="[]" || s.Trim()=="()") return lit;
-        }catch (Exception) { }
+        }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser._SafeEval: " + logEx.Message, "SafeArithParser"); }
         // try arith
         try{
             return _safe_arith_eval(s);
-        }catch (Exception) { }
+        }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser._SafeEval: " + logEx.Message, "SafeArithParser"); }
         // manual containers
         var parts = _ManualParseContainers(s);
         if(parts != null) return parts;

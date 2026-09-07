@@ -53,6 +53,20 @@ public partial class Node : GameObject
     // Kept for save/load compat (NodeHandler.Save reads ScriptsSet).
     public HashSet<int> ScriptsSet => ScriptsSnapshot;
 
+    public override IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
+    {
+        foreach (var m in base.GetExamMembers()) yield return m;
+        object? Safe(Func<object?> f) { try { return f(); } catch { return "<error>"; } }
+        yield return ("Coord", Safe(() => (object?)Coord), true);
+        yield return ("Theme", Safe(() => (object?)Theme), true);
+        yield return ("LegendDesc", Safe(() => (object?)LegendDesc), true);
+        yield return ("Links", Safe(() => (object?)Links), true);
+        yield return ("Nouns", Safe(() => (object?)Nouns), true);
+        yield return ("OpenAttenuation", Safe(() => (object?)OpenAttenuation), true);
+        yield return ("EnclosedAttenuation", Safe(() => (object?)EnclosedAttenuation), true);
+        yield return ("AmbientSoundLevel", Safe(() => (object?)AmbientSoundLevel), true);
+    }
+
     public Node() : this(new Coord("limbo", 0, 0, 0)) { }
     // Load path: initializes defaults WITHOUT consuming an id (leave -1) and
     // WITHOUT publishing to the registry (no phantom). Caller must SetIdRaw +
@@ -112,7 +126,7 @@ public partial class Node : GameObject
                 return true;
             }
         }
-        catch (Exception) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.TryCreatePersistedSubtype: " + logEx.Message, "Node"); }
         node = null;
         return false;
     }
@@ -181,7 +195,7 @@ public partial class Node : GameObject
         foreach (var obj in contents)
         {
             if (excl != null && excl.Contains(obj)) continue;
-            try { func(obj); } catch (Exception) { }
+            try { func(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.ForContents: " + logEx.Message, "NoIdMarker"); }
         }
     }
 
@@ -252,7 +266,7 @@ public partial class Node : GameObject
         bool open = false;
         var nh = NodeHandler.GetCurrent();
         Dictionary<string, Door>? doors = null;
-        try { doors = nh?.GetDoors(Coord); } catch (Exception) { }
+        try { doors = nh?.GetDoors(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.AtHear: " + logEx.Message, "NoIdMarker"); }
         if (doors != null && doors.Count > 0)
         {
             foreach (var d in doors.Values) { if (!d.Closed) { open = true; break; } }
@@ -270,7 +284,7 @@ public partial class Node : GameObject
                 if (!pre.ok) continue;
                 o.AtHear(pre.emitter, pre.desc, pre.msg, pre.loudness, pre.isSay);
             }
-            catch (Exception) { }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.AtHear: " + logEx.Message, "NoIdMarker"); }
         }
             return loud2 - attenuation;
         }, emitter, soundDesc, soundMsg, loudness, isSay);
@@ -279,25 +293,21 @@ public partial class Node : GameObject
     // Port of nodes.py:332
     public override bool AtPreObjectLeave(GameObject? destination, string? toExit = null)
     {
-        if (AtPreObjectLeaveOverride != null) return AtPreObjectLeaveOverride(destination, toExit);
         return Hookable("at_pre_object_leave", () => true, destination, toExit);
     }
     // Port of nodes.py:348
     public override void AtObjectLeave(GameObject? destination, string? toExit = null)
     {
-        if (AtObjectLeaveOverride != null) { AtObjectLeaveOverride(destination, toExit); return; }
         Hookable("at_object_leave", () => 0, destination, toExit);
     }
     // Port of nodes.py:359
     public override bool AtPreObjectReceive(GameObject? source, string? fromExit = null)
     {
-        if (AtPreObjectReceiveOverride != null) return AtPreObjectReceiveOverride(source, fromExit);
         return Hookable("at_pre_object_receive", () => true, source, fromExit);
     }
     // Port of nodes.py:374
     public override void AtObjectReceive(GameObject? source, string? fromExit = null)
     {
-        if (AtObjectReceiveOverride != null) { AtObjectReceiveOverride(source, fromExit); return; }
         Hookable("at_object_receive", () => 0, source, fromExit);
     }
     // Port of nodes.py:386
@@ -363,8 +373,8 @@ public partial class Node : GameObject
                 {
                     if (ReferenceEquals(content.ResolveLocationObject(), obj))
                     {
-                        try { obj.RemoveObject(content); } catch (Exception) { }
-                        try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception) { }
+                        try { obj.RemoveObject(content); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
+                        try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
                     }
                     var res = content.Delete(caller, true);
                     if (res != null) { allOps.AddRange(res.Value.ops); count += res.Value.count; }
@@ -376,9 +386,9 @@ public partial class Node : GameObject
         {
             if (IsTickable)
             {
-                try { GlobalTickerHolder.Get()?.RemoveCoro(AtTick, TickSeconds); } catch (Exception) { }
+                try { GlobalTickerHolder.Get()?.RemoveCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
             }
-            try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch (Exception) { }
+            try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
         }
         if (caller != null && !AtDelete(caller)) return null;
         SyncRoot.EnterWriteLock();
@@ -400,7 +410,7 @@ public partial class Node : GameObject
         {
             if (!Access(caller, "delete"))
             {
-                try { caller.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch (Exception) { }
+                try { caller.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.AtDelete: " + logEx.Message, "NoIdMarker"); }
                 return false;
             }
             return true;
@@ -441,7 +451,7 @@ public sealed class ExitCommand : Command
             {
                 // Port of exit.py:95-103 via the shared helper: moving
                 // through an exit breaks following like any other move.
-                try { Commands.LoggedIn.LoggedInExitCommand.ClearFollowing(go); } catch (Exception) { }
+                try { Commands.LoggedIn.LoggedInExitCommand.ClearFollowing(go); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ExitCommand.Run: " + logEx.Message, "ExitCommand"); }
                 go.MoveTo(dest);
             }
             else go.Msg("You can't go that way.");

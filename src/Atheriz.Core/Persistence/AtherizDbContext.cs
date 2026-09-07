@@ -23,11 +23,8 @@ public sealed class AtherizDbContext : DbContext
     public DbSet<GameTimeRow> GameTime => Set<GameTimeRow>();
     public DbSet<CheckpointRow> Checkpoints => Set<CheckpointRow>();
 
-    // Shared write gate (mirrors Database.lock). Static to serialize across contexts in same process.
-    // NOTE: new code should use DbWriteGate.Enter/Exit (re-entrant RLock semantics). Gate kept for tests.
-    private static readonly SemaphoreSlim WriteGate = new(1, 1);
-    [Obsolete("Use DbWriteGate.Enter/Exit; Gate is alias to DbWriteGate.SemaphoreForTesting for backwards compat")]
-    public static SemaphoreSlim Gate => DbWriteGate.SemaphoreForTesting;
+    // Shared write gate lives in DbWriteGate (re-entrant RLock semantics).
+    // (An earlier per-class SemaphoreSlim was removed: zero uses, DbWriteGate only.)
 
     // Port of database_setup.py:14-15 _CLOSED and _DATABASE global
     private static bool _closed = false;
@@ -107,18 +104,20 @@ public sealed class AtherizDbContext : DbContext
     private void ApplyWalPragmas()
     {
         try { Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;"); }
-        catch
+        catch (Exception ex)
         {
+            // Loud: falling back to DELETE journaling on a multi-context workload
+            // risks SQLITE_BUSY surfacing to saves; the fallback stays (port) but must be visible.
+            AtherizLogger.LogError($"WAL pragmas failed ({ex.Message}); falling back to DELETE journal.", ex);
             try { Database.ExecuteSqlRaw("PRAGMA journal_mode=DELETE;"); Database.ExecuteSqlRaw("PRAGMA synchronous=NORMAL;"); Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;"); }
-            catch (Exception) { }
+            catch (Exception ex2) { AtherizLogger.LogError($"WAL fallback pragmas failed: {ex2.Message}", ex2); }
         }
-        try { Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;"); } catch (Exception) { }
+        try { Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;"); } catch (Exception ex3) { AtherizLogger.LogDebug($"Suppressed AtherizDbContext.ApplyWalPragmas busy_timeout: {ex3.Message}", "AtherizDbContext"); }
     }
 
     public async Task EnsureCreatedAsync(CancellationToken ct = default)
     {
         await DbWriteGate.EnterAsync(ct);
-        int ownerThread = Environment.CurrentManagedThreadId;
         try
         {
             await Database.EnsureCreatedAsync(ct);
@@ -126,11 +125,11 @@ public sealed class AtherizDbContext : DbContext
         }
         finally
         {
-            // The awaits above may resume on another pool thread; Exit only
-            // releases on the taker thread (a stray cross-thread exit must not
-            // free another flow's slot), so take the hop-aware path when we hopped.
-            if (Environment.CurrentManagedThreadId == ownerThread) DbWriteGate.Exit();
-            else DbWriteGate.ExitAfterThreadHop();
+            // The awaits above may resume on another pool thread, but the hold
+            // belongs to this async flow (AsyncLocal continuity), not to the
+            // taker thread — so the hop-aware exit is the correct pairing
+            // whether a hop happened or not (no thread-id compare to mis-pair).
+            DbWriteGate.ExitAfterThreadHop();
         }
     }
 

@@ -184,7 +184,7 @@ public class PortedThreadPoolTests
         pool.Stop(wait: false, timeout: TimeSpan.FromSeconds(2));
         // preserved tasks should still be in queue (plus sentinels), not discarded
         // we check that QueueCount >= before (capped view may hide)
-        Assert.True(pool.RawQueueCount >= before || pool.QueueCount >= 1);
+        Assert.True(pool.QueueCount >= before || pool.QueueCount >= 1);
         block.Set();
         pool.Stop(wait: true);
     }
@@ -354,7 +354,7 @@ public class PortedThreadPoolTests
         while (sw.ElapsedMilliseconds < 3000 && got.Count==0) Thread.Sleep(10);
         Assert.Equal(new[]{"ok"}, got.ToArray());
         newPool.Stop();
-        StartStop.ResetForTesting();
+        StartStop.Reset();
     }
 
     [Fact]
@@ -395,7 +395,7 @@ public class PortedThreadPoolTests
         int before = pool.QueueCount;
         pool.Stop(wait: false, timeout: TimeSpan.FromSeconds(2));
         // preserved tasks should still be in queue (plus sentinels), not discarded – check before vs remaining
-        int remaining = pool.RawQueueCount;
+        int remaining = pool.QueueCount;
         Assert.True(remaining >= before || remaining >= 1);
         block.Set();
         pool.Stop(wait: true);

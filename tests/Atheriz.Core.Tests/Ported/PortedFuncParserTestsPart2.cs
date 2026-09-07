@@ -71,19 +71,16 @@ public class PortedFuncParserTestsPart2
         var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
         obj.Gender="male";
         Assert.Equal("he", p.Parse("$pron(I)", obj, GameObject.Create("Other"), null)?.ToString());
-        // Callable gender: gender can be a callable that returns string – test via mock with delegate property
+        // Callable gender: objects with computed gender implement IGenderProvider.
         var mock = new MockGenderCallable("male");
-        // Set base _gender to empty so reflection branch is taken
-        var f = typeof(GameObject).GetField("_gender", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        f?.SetValue(mock, "");
         var (first, third) =pronounTestHelper(mock, "I", "bob");
         Assert.Equal("he", third);
     }
-    private sealed class MockGenderCallable : GameObject
+    private sealed class MockGenderCallable : GameObject, IGenderProvider
     {
         private readonly Func<string> _fn;
         public MockGenderCallable(string ret){ _fn=()=>ret; }
-        public new Func<string> Gender => _fn;
+        public string? GetGender() => _fn();
     }
     private (string,string) pronounTestHelper(GameObject obj, string pron, string receiverName)
     {

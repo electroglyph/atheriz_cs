@@ -87,7 +87,7 @@ public sealed class SetCommand : Command
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { go.Msg(PrintHelp()); return; }
         var targetStr = pa.GetString("target") ?? "";
@@ -121,7 +121,7 @@ public sealed class SetCommand : Command
             {
                 string candidate = raw;
                 string candTrim = candidate.TrimStart();
-                if (candTrim.StartsWith("+")) candidate = candidate.Replace("+", "", StringComparison.Ordinal);
+                if (candTrim.StartsWith("+")) candidate = candTrim.Substring(1);
                 else if (candTrim.StartsWith(".")) candidate = "0" + candidate.TrimStart();
                 try { value = JsonSerializer.Deserialize<JsonElement>(candidate); }
                 catch { value = null; }
@@ -195,7 +195,7 @@ public sealed class UnsetCommand : Command
     }
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
+        if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { go.Msg(PrintHelp()); return; }
         var targetStr = pa.GetString("target") ?? "";
@@ -211,8 +211,7 @@ public sealed class UnsetCommand : Command
         if (new[] { "location","home","_contents","group_channel","contents" }.Contains(attr)) { go.Msg($"'{attr}' cannot be removed directly."); return; }
         try
         {
-            var prop = SetHelper.FindPropUnset(target, attr);
-            if (prop != null) throw new InvalidOperationException();
+            if (SetHelper.HasKnownProp(target, attr)) throw new InvalidOperationException();
             bool had = SetHelper.HasAttr(target, attr);
             // also check _extra directly via SetHelper
             if (!had)

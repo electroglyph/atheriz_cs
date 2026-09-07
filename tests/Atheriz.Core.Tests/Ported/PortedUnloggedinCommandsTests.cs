@@ -45,7 +45,7 @@ public class PortedUnloggedinCommandsTests
     [Fact] public void Connect_WrongPassword_IncrementsAttempts()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice","correct");
         Assert.False(acc.CheckPassword("wrong"));
         Assert.True(acc.CheckPassword("correct"));
@@ -54,7 +54,7 @@ public class PortedUnloggedinCommandsTests
     [Fact] public void Connect_TimingOracle_Mitigated()
     {
         using var env = GlobalTestEnv.Enter();
-        SaltProvider.SetSaltForTesting("testsalt");
+        SaltProvider.SetSalt("testsalt");
         // Invalid account path still does hash (600k iterations via PBKDF2)
         var hash = Account.HashPassword("anything", "testsalt");
         Assert.NotEmpty(hash);

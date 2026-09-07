@@ -3,6 +3,10 @@ using System.Text.RegularExpressions;
 using Atheriz.Core.Utils;
 namespace Atheriz.Server.Infrastructure;
 /// <summary>Generates game folder — C# analogue of <c>atheriz new my_game</c>. Mirrors <c>new.py:create_game_folder</c>.</summary>
+// Reflection note (P0-1 EXEMPT per owner ruling): GetHookMethods/BuildParamList/
+// GenerateHooksFor use System.Reflection to EMIT game source text (compile-time-
+// style codegen, like a source generator) — never to invoke or inspect live
+// objects. This is legitimate codegen, not runtime reflection.
 public static class GameTemplateGenerator
 {
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
@@ -16,7 +20,7 @@ public static class GameTemplateGenerator
         var trimmed = targetPath.Trim();
         var raw = Path.GetFileName(trimmed.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (string.IsNullOrEmpty(raw)) raw = trimmed;
-        if (string.IsNullOrEmpty(raw) || raw == "." || !Regex.IsMatch(raw, @"^[A-Za-z_][A-Za-z0-9_]*$") || Keywords.Contains(raw) || char.IsDigit(raw[0]))
+        if (!IsValidId(raw))
         {
             Console.WriteLine($"Error: '{raw}' is not a valid C# identifier (hyphens/digits/spaces not allowed).");
             return false;
@@ -25,6 +29,7 @@ public static class GameTemplateGenerator
         if (!IsValidId(gName)) { Console.WriteLine($"Error: '{gName}' is not a valid C# identifier (hyphens/digits/spaces not allowed)."); return false; }
         if (GameUtils.IsInGameFolder()) Console.WriteLine("Warning: already inside a game folder; creating nested game folder is not recommended.");
         var folderPath = Path.GetFullPath(targetPath);
+        try { Atheriz.Core.Utils.PathGuards.DenyRoot(folderPath); } catch (Exception ex) { Console.WriteLine(ex.Message); return false; }
         bool folderExistsInitially = Directory.Exists(folderPath);
         if (folderExistsInitially && !overwrite)
         {
@@ -38,7 +43,14 @@ public static class GameTemplateGenerator
         }
         // Decide if we need to (re)create world — fresh folder OR overwrite forces fresh DB
         bool shouldSetup = !folderExistsInitially || overwrite;
-        // When overwriting an existing folder, wipe stale DB so DoSetup starts fresh (handles `new test --overwrite` bare-name case)
+        // When overwriting an existing folder, wipe the save leaf so DoSetup
+        // starts fresh (handles `new test --overwrite` bare-name case).
+        // Containment: the wipe is confined to <folder>/save/** (a save leaf
+        // is always guardable per GuardWipePath) plus exact database file
+        // names below — folder top-level files are never deleted. A stale
+        // save dir with no DB markers (aborted setup) still wipes: `new
+        // --overwrite` means fresh world, and the pre-existing integration
+        // test pins stale.txt removal for exactly that shape.
         if (overwrite && folderExistsInitially)
         {
             try
@@ -46,6 +58,7 @@ public static class GameTemplateGenerator
                 var saveDirForWipe = Path.Combine(folderPath, "save");
                 if (Directory.Exists(saveDirForWipe))
                 {
+                    Atheriz.Core.Utils.PathGuards.GuardWipePath(saveDirForWipe, overwrite);
                     foreach (var f in Directory.GetFiles(saveDirForWipe, "*", SearchOption.AllDirectories))
                         try { File.Delete(f); } catch { }
                 }
@@ -83,7 +96,14 @@ public static class GameTemplateGenerator
                     return false;
                 }
                 Console.Write("Enter superuser password: ");
-                try
+                if (Console.IsInputRedirected)
+                {
+                    // No ReadKey without a console: input would throw, so read
+                    // the line with an echo warning instead of failing.
+                    Console.Error.WriteLine("Warning: input is redirected; password will be echoed.");
+                    password = Console.ReadLine()?.Trim();
+                }
+                else try
                 {
                     var sb = new System.Text.StringBuilder();
                     ConsoleKeyInfo k;
@@ -130,7 +150,7 @@ public static class GameTemplateGenerator
         }
         Console.WriteLine($"\nSuccess! Game folder '{targetPath}' created/updated with:");
         Console.WriteLine("  Template files:");
-        Console.WriteLine("    - GameSettings.cs, CustomObject.cs, CustomNode.cs, CustomAccount.cs, CustomChannel.cs, CustomScript.cs");
+        Console.WriteLine("    - GameSettings.cs, CustomObject.cs, CustomNode.cs, CustomAccount.cs, CustomChannel.cs, CustomScript.cs, AssemblyInfo.cs");
         Console.WriteLine($"    - {gName}.csproj (refs Atheriz.Core)");
         Console.WriteLine("    - README.md, save/, secret/");
         Console.WriteLine("    - web/ (templates and static files)");
@@ -160,7 +180,7 @@ public static class GameTemplateGenerator
         var csproj = $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>\n  <ItemGroup><ProjectReference Include=\"{coreRef}\" /></ItemGroup>\n</Project>\n";
         Console.WriteLine($"  Creating {csprojName}...");
         File.WriteAllText(csprojPath, csproj);
-        var files = new Dictionary<string,string>{["GameSettings.cs"]=GS(gameName),["CustomObject.cs"]=CO(gameName),["CustomNode.cs"]=CN(gameName),["CustomAccount.cs"]=CA(gameName),["CustomChannel.cs"]=CC(gameName),["CustomScript.cs"]=CS(gameName),["README.md"]=RM(gameName)};
+        var files = new Dictionary<string,string>{["GameSettings.cs"]=GS(gameName),["CustomObject.cs"]=CO(gameName),["CustomNode.cs"]=CN(gameName),["CustomAccount.cs"]=CA(gameName),["CustomChannel.cs"]=CC(gameName),["CustomScript.cs"]=CS(gameName),["AssemblyInfo.cs"]=AI(gameName),["README.md"]=RM(gameName)};
         foreach (var kv in files)
         {
             Console.WriteLine($"  Creating {kv.Key}...");
@@ -343,7 +363,9 @@ public static class GameTemplateGenerator
         var hooks = GenerateHooksFor(typeof(Atheriz.Core.Objects.Script));
         return header + ctor + hooks + "}\n";
     }
-    private static string RM(string ns) => $"# {ns} — Atheriz Game Folder\nGenerated via `atheriz-cs new {ns}` (ports `atheriz/new.py:784`).\n## Run\n```\ndotnet run --project {ns}.csproj -- --foreground\n# or dotnet run --project ../src/Atheriz.Server -- --foreground\n```\n";
+    private static string RM(string ns) => $"# {ns} — Atheriz Game Folder\nGenerated via `atheriz-cs new {ns}` (ports `atheriz/new.py:784`).\n## Run\n```\n# Game code is a class library loaded by the server (no Program.cs needed).\n# From this folder:\ndotnet run --project ../src/Atheriz.Server -- start\n```\n";
+    // Assembly attributes for scaffolded games (checked-in template carries AssemblyInfo.cs with the same shape).
+    private static string AI(string ns) => $"using System.Reflection;\n[assembly: AssemblyDescription(\"{ns} — Atheriz game plugin, loaded by Atheriz.Server via PluginLoader.\")]\n";
     // Port of atheriz/new.py:530 copy_web_folder
     public static void CopyWebFolder(string destination, string? webSrc = null)
     {

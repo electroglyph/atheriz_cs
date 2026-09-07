@@ -14,12 +14,21 @@ PUBLISH_DIR="$PROJECT_ROOT/publish"
 PUBLISH_DLL="$PUBLISH_DIR/Atheriz.Server.dll"
 
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "error: dotnet 8.0.130+ required (see global.json, dotnet --version)" >&2
+  echo "error: dotnet SDK 8.0.100+ required (see global.json, dotnet --version)" >&2
   exit 1
 fi
 
 # Prefer built DLL to preserve CWD (game folder) — dotnet run --project changes CWD to project dir
 # See README.md Game-folder commands note
+have_dll() {
+  for dll in "$SERVER_DLL_RELEASE" "$SERVER_DLL_DEBUG" "$PUBLISH_DLL"; do
+    if [ -f "$dll" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 run_via_dll() {
   for dll in "$SERVER_DLL_RELEASE" "$SERVER_DLL_DEBUG" "$PUBLISH_DLL"; do
     if [ -f "$dll" ]; then
@@ -35,18 +44,21 @@ run_via_project() {
 
 if [ $# -eq 0 ]; then
   # No args → help (mirrors atheriz --help)
-  if ! run_via_dll --help 2>/dev/null; then
-    run_via_project --help
+  if have_dll; then
+    # DLL exists: run it directly so its stderr surfaces (no silent fallback)
+    run_via_dll --help
+    exit $?
   fi
+  run_via_project --help
   exit $?
 fi
 
-# Try DLL first (keeps caller's CWD for save/secret guards), fallback to project
-if ! run_via_dll "$@" 2>/dev/null; then
-  # If DLL not found, build hint
-  if [ ! -f "$SERVER_DLL_DEBUG" ] && [ ! -f "$SERVER_DLL_RELEASE" ]; then
-    echo "note: no built Atheriz.Server.dll found — building via dotnet run --project (will be slower)" >&2
-    echo "hint: run ./build.sh to pre-build webclient + engine" >&2
-  fi
-  run_via_project "$@"
+# A built DLL exists → run it directly so server stderr surfaces.
+# Fall back to dotnet-run only when nothing is built yet.
+if have_dll; then
+  run_via_dll "$@"
+  exit $?
 fi
+echo "note: no built Atheriz.Server.dll found — building via dotnet run --project (will be slower)" >&2
+echo "hint: run ./build.sh to pre-build webclient + engine" >&2
+run_via_project "$@"

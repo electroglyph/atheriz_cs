@@ -83,7 +83,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetGameTimeReturnsSingleton()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var t1 = GlobalServices.GetGameTime();
         var t2 = GlobalServices.GetGameTime();
         Assert.Same(t1, t2);
@@ -92,7 +92,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetConnectionManagerReturnsSingleton()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var m1 = GlobalServices.GetConnectionManager();
         var m2 = GlobalServices.GetConnectionManager();
         Assert.Same(m1, m2);
@@ -100,12 +100,12 @@ public class PortedGlobalsGetTests
     [Fact] public void GetConnectionManagerReturnsManagerInstance()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var m1 = GlobalServices.GetConnectionManager();
         var m2 = GlobalServices.GetConnectionManager();
         Assert.Same(m1, m2);
         // After reset, should still be ConnectionManager
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var baseMgr = GlobalServices.GetConnectionManager();
         Assert.IsType<ConnectionManager>(baseMgr);
     }
@@ -113,7 +113,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetAsyncTickerReturnsSingleton()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var t1 = GlobalServices.GetAsyncTicker();
         var t2 = GlobalServices.GetAsyncTicker();
         Assert.Same(t1, t2);
@@ -121,7 +121,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetAsyncTickerConstructedOnce()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var t1 = GlobalServices.GetAsyncTicker();
         var t2 = GlobalServices.GetAsyncTicker();
         Assert.Same(t1, t2);
@@ -130,7 +130,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetServerChannelReturnsNoneWhenNoChannel()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         ObjectRegistry.ClearAll();
         // ensure no channel named server
         var result = GlobalServices.GetServerChannel();
@@ -139,7 +139,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetServerChannelReturnsFirstMatchingChannel()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         ObjectRegistry.ClearAll();
         var chan = new Channel();
         chan.Name = "server";
@@ -151,7 +151,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetServerChannelCachesAfterFirstLookup()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         ObjectRegistry.ClearAll();
         var chan = new Channel();
         chan.Name = "server";
@@ -172,7 +172,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetServerChannelReturnsCachedOnSubsequentCalls()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         ObjectRegistry.ClearAll();
         var chan = new Channel();
         chan.Name = "server";
@@ -186,7 +186,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetMapHandlerReturnsSingleton()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var m1 = GlobalServices.GetMapHandler();
         var m2 = GlobalServices.GetMapHandler();
         Assert.Same(m1, m2);
@@ -195,7 +195,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetLoggedInCmdSetReturnsSingleton()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var c1 = GlobalServices.GetLoggedInCmdSet();
         var c2 = GlobalServices.GetLoggedInCmdSet();
         Assert.Same(c1, c2);
@@ -204,7 +204,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetUnloggedInCmdSetReturnsSingleton()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var c1 = GlobalServices.GetUnloggedInCmdSet();
         var c2 = GlobalServices.GetUnloggedInCmdSet();
         Assert.Same(c1, c2);
@@ -213,7 +213,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetAsyncThreadPoolReturnsSingleton()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var t1 = GlobalServices.GetAsyncThreadPool();
         var t2 = GlobalServices.GetAsyncThreadPool();
         Assert.Same(t1, t2);
@@ -221,7 +221,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetAsyncThreadPoolConstructedWithThreadpoolLimit()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var pool = GlobalServices.GetAsyncThreadPool();
         Assert.NotNull(pool);
         // Threadpool limit is at least 1
@@ -231,7 +231,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GetNodeHandlerReturnsSingleton()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var n1 = GlobalServices.GetNodeHandler();
         var n2 = GlobalServices.GetNodeHandler();
         Assert.Same(n1, n2);
@@ -240,7 +240,7 @@ public class PortedGlobalsGetTests
     [Fact] public void GettersAreIndependent()
     {
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.ResetForTesting();
+        GlobalServices.Reset();
         var gt = GlobalServices.GetGameTime();
         var mh = GlobalServices.GetMapHandler();
         var nh = GlobalServices.GetNodeHandler();

@@ -11,10 +11,19 @@ public static class StringDistance
     /// Levenshtein distance DP O(n*m) with <c>int[,] d</c> as in NoneCommand.
     /// Uses <c>StringComparer.Ordinal</c> semantics (char equality <c>a[i-1]==b[j-1]</c>).
     /// </summary>
+    /// <summary>
+    /// Inputs longer than this are not worth a full O(n*m) table (10k x 10k
+    /// would allocate ~400MB); the capped upper bound below still orders sane.
+    /// </summary>
+    public const int MaxInputLength = 1024;
+
     public static int Levenshtein(string a, string b)
     {
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
+        // Capped upper bound (true distance is always <= max length), no table.
+        if (a.Length > MaxInputLength || b.Length > MaxInputLength)
+            return Math.Max(a.Length, b.Length);
         var d = new int[a.Length + 1, b.Length + 1];
         for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
         for (int j = 0; j <= b.Length; j++) d[0, j] = j;

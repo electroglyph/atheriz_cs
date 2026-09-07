@@ -27,6 +27,10 @@ public static class StaticFileConfig
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
                     else if (path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase))
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=86400";
+                    else if (System.Text.RegularExpressions.Regex.IsMatch(path, @"\.[0-9a-fA-F]{8,}\.[a-z0-9]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                        // Content-hashed bundle filename (e.g. app.ab12cd34.js):
+                        // immutable regardless of directory prefix.
+                        ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
                 }
             });
             var drawEntrypoint = Path.Combine(staticCandidate, "atheriz_draw", "index.html");
@@ -49,8 +53,10 @@ public static class StaticFileConfig
             Console.WriteLine($"Warning: Static directory not found: {Path.Combine(app.Environment.ContentRootPath, "wwwroot")}");
         }
 
-        app.MapGet("/", () =>
+        app.MapGet("/", (HttpContext ctx) =>
         {
+            ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Response.Headers.Pragma = "no-cache";
             if (templatesCandidate != null)
             {
                 var tpl = Path.Combine(templatesCandidate, "index.html");
@@ -63,8 +69,10 @@ public static class StaticFileConfig
             }
             return Results.Content($"<h1>{settings.ServerName}</h1><p><a href=\"/webclient/index.html\">Play</a></p>", "text/html");
         });
-        app.MapGet("/webclient/index.html", () =>
+        app.MapGet("/webclient/index.html", (HttpContext ctx) =>
         {
+            ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Response.Headers.Pragma = "no-cache";
             if (staticCandidate != null)
             {
                 var compiled = Path.Combine(staticCandidate, "webclient", "index.html");
@@ -79,8 +87,11 @@ public static class StaticFileConfig
         });
         app.MapGet("/webclient", () => Results.Redirect("/webclient/index.html"));
         app.MapGet("/webclient/", () => Results.Redirect("/webclient/index.html"));
-        IResult ServeDraw()
+        IResult ServeDraw(HttpContext ctx)
         {
+            // Entry HTML is never cached (hashed bundles underneath are immutable).
+            ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Response.Headers.Pragma = "no-cache";
             if (staticCandidate != null)
             {
                 var compiledDraw = Path.Combine(staticCandidate, "atheriz_draw", "index.html");

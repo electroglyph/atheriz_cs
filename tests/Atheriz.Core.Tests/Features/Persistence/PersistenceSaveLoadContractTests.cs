@@ -134,6 +134,6 @@ public class PersistenceSaveLoadContractTests
             using var db = new AtherizDbContext(env.TempPath);
             Assert.NotEmpty(db.MapData.Where(r => r.Area == "zona").ToList());
         }
-        finally { try { StartStop.ResetForTesting(); } catch { } }
+        finally { try { StartStop.Reset(); } catch { } }
     }
 }
