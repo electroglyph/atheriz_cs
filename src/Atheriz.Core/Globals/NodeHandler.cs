@@ -567,6 +567,7 @@ public partial class NodeHandler
                                 inst.Links = nd.Links ?? new List<NodeLink>();
                                 inst.Nouns = nd.Nouns ?? new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
                                 inst.SetIdRaw(nd.Id);
+                                IdGenerator.EnsureAtLeast(nd.Id);
                                 // Restore scripts into the shared base scripts set (typed; was _nodeScripts/_scripts reflection)
                                 if (nd.Scripts != null && nd.Scripts.Count > 0)
                                     inst.RestoreScriptIds(nd.Scripts);
@@ -586,6 +587,7 @@ public partial class NodeHandler
                     node.Links = nd.Links ?? new List<NodeLink>();
                     node.Nouns = nd.Nouns ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     node.SetIdRaw(nd.Id);
+                    IdGenerator.EnsureAtLeast(nd.Id);
                     if (nd.Scripts != null && nd.Scripts.Count > 0)
                         node.RestoreScriptIds(nd.Scripts);
                     node.IsModified = false;

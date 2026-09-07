@@ -462,12 +462,22 @@ public static class ObjectRegistry
                 pending.Add((obj, json));
                 cleared.Add(obj);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // Skip-and-report: one poison row must not abort siblings.
-                // The poison object stays dirty (BuildSaveJson restores on
-                // failure); ensure it explicitly, then continue with the rest.
-                try { AtherizLogger.LogWarning($"[Save] skipping poison object row {obj.Id}: {ex.GetType().Name}"); } catch { }
+                // Port of objects.py:save_objects serialization phase: a poison
+                // row aborts the whole checkpoint — nothing has been written yet,
+                // so restore every cleared flag and rethrow (the transaction
+                // below never runs).
+                foreach (var c in cleared)
+                {
+                    try
+                    {
+                        c.SyncRoot.EnterWriteLock();
+                        try { c.IsModified = true; }
+                        finally { c.SyncRoot.ExitWriteLock(); }
+                    }
+                    catch { }
+                }
                 try
                 {
                     obj.SyncRoot.EnterWriteLock();
@@ -475,7 +485,7 @@ public static class ObjectRegistry
                     finally { obj.SyncRoot.ExitWriteLock(); }
                 }
                 catch { }
-                continue;
+                throw;
             }
         }
 

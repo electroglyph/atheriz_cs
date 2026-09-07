@@ -225,6 +225,24 @@ public static class MapEdit
         CreatedMonotonic = c.CreatedMonotonic,
     };
 
+    // Port of inputfuncs.py:547 `result.chain.validation = denied` — Python
+    // consume returns the live stored chain, so the assignment persists for
+    // RETRY resends. Our Consume hands out copies, so the verdict must be
+    // written back explicitly (stored as a fresh copy to keep readers'
+    // snapshots untorn; no-op when the key rotated away or evicted meanwhile).
+    public static void SetValidation(string key, List<int> denied)
+    {
+        Lock.EnterWriteLock();
+        try
+        {
+            if (!_chains.TryGetValue(key, out var c)) return;
+            var updated = CopyOf(c);
+            updated.Validation = new List<int>(denied);
+            _chains[key] = updated;
+        }
+        finally { Lock.ExitWriteLock(); }
+    }
+
     // Spec wrapper: AddChain(ip,area,z) => Grant
     public static string AddChain(string ip, string area, int z, Session? session = null) => Grant(ip, area, z, session);
 

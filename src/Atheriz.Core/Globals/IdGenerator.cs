@@ -22,6 +22,16 @@ public static class IdGenerator
 
     public static void Reset() => SetId(-1);
 
+    /// <summary>
+    /// Port of <c>node.py:load</c> tail (<c>_ID = max(_ID, max_node_id)</c> under
+    /// <c>_ID_LOCK</c>): loading persisted rows must advance the counter past
+    /// every restored id, or fresh objects reuse live ids after a load.
+    /// </summary>
+    public static void EnsureAtLeast(int id)
+    {
+        lock (Lock) if (id > _id) _id = id;
+    }
+
     public static int GetUniqueId()
     {
         // Checked: wrap-around would silently reuse live ids (Python is unbounded).

@@ -16,7 +16,7 @@ public sealed class CreateAccountCommand : Command
         if (!Settings.AtherizSettings.Global.AccountCreationEnabled) { caller.Msg("Account creation is not enabled."); return; }
         {
             string host = (caller as BaseConnection)?.ClientHost ?? "?";
-            string rateKey = caller is BaseConnection bc ? (host != "?" ? host : bc.SessionId ?? bc.GetHashCode().ToString()) : "?";
+            string rateKey = caller is BaseConnection bc ? (host != "?" ? host : bc.GetHashCode().ToString()) : "?";
             double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
             if (!ObjectRegistry.TryReserveCreationCooldown("account", rateKey, now, Settings.AtherizSettings.Global.CreationCooldown))
             { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return; }
@@ -58,7 +58,7 @@ public sealed class CreateAccountCommand : Command
         var settings = Settings.AtherizSettings.Global;
         if (!settings.AccountCreationEnabled) { caller.Msg("Account creation is not enabled."); return; }
         string host = caller.ClientHost ?? "?";
-        string rateKey = host != "?" ? host : caller.SessionId ?? caller.GetHashCode().ToString();
+        string rateKey = host != "?" ? host : caller.GetHashCode().ToString();
         double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
         if (!ObjectRegistry.TryReserveCreationCooldown("account", rateKey, now, settings.CreationCooldown))
         { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return; }

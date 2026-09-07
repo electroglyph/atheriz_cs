@@ -567,7 +567,7 @@ public class InputFuncs
             var failed = grid2.CheckMoves(moves, context);
             denied = failed.OrderBy(x=>x).ToList();
         }
-        result.Chain.Validation = denied;
+        Globals.MapEdit.SetValidation(result.NewKey!, denied);
         SendMoveVerdict(connection, seq, result.NewKey!, denied);
     }
 
