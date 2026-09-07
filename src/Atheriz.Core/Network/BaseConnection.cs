@@ -184,18 +184,19 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             }
             try
             {
-                // Typed fast path (F001): registered handlers are
+                // Typed dispatch (F001): registered handlers are
                 // Action<BaseConnection, List<object?>, Dictionary<string, object?>>.
-                // DynamicInvoke stays as fallback for exotic test doubles.
+                // Anything else is a shape error: log and continue draining
+                // (same outcome as the old DynamicInvoke arity failure).
                 if (handler is Action<BaseConnection, List<object?>, Dictionary<string, object?>> typed)
                     typed(this, args, kwargs);
                 else
-                    handler.DynamicInvoke(this, args, kwargs); // port of connection.py:150
+                    throw new InvalidOperationException($"Unsupported input handler shape {handler.Method.Name}; register Action<BaseConnection, List<object?>, Dictionary<string, object?>>.");
             }
             catch (Exception ex)
             {
                 var name = handler.Method.Name ?? handler.ToString();
-                try { Atheriz.Core.AtherizLogger.LogError($"[Network] Input handler '{name}' failed: {ex}"); } catch { Console.Error.WriteLine($"[Network] Input handler '{name}' failed: {ex}"); } // port of connection.py:152-153
+                Atheriz.Core.AtherizLogger.LogError($"[Network] Input handler '{name}' failed: {ex}"); // port of connection.py:152-153
             }
         }
     }

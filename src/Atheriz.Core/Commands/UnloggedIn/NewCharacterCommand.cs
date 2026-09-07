@@ -43,7 +43,7 @@ public sealed class NewCharacterCommand : Command
             catch (InvalidOperationException ex)
             {
                 caller.Msg(ex.Message);
-                try { character.IsDeleted = true; } catch { }
+                try { character.IsDeleted = true; } catch (Exception) { }
                 return;
             }
             acc.AddCharacter(character);
@@ -73,7 +73,7 @@ public sealed class NewCharacterCommand : Command
             var nh = NodeHandler.GetCurrent();
             var home = nh?.GetNode(settings.DefaultHome);
             if (home != null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
-            try { character.AtPostPuppet(); } catch { }
+            try { character.AtPostPuppet(); } catch (Exception) { }
             caller.Msg($"Character {name} created.");
         }
         else
@@ -116,7 +116,7 @@ public sealed class NewCharacterCommand : Command
         {
             ObjectRegistry.ClearCreationCooldown(rateKey);
             caller.Msg(ex.Message);
-            try { character.IsDeleted = true; } catch { }
+            try { character.IsDeleted = true; } catch (Exception) { }
             return;
         }
         double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
@@ -147,7 +147,7 @@ public sealed class NewCharacterCommand : Command
         var nh = NodeHandler.GetCurrent();
         var home = nh?.GetNode(settings.DefaultHome);
         if (home != null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
-        try { character.AtPostPuppet(); } catch { }
+        try { character.AtPostPuppet(); } catch (Exception) { }
         caller.Msg($"Character {name} created and puppeted.");
     }
 }

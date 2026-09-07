@@ -81,7 +81,7 @@ public partial class GameObject
                         if (!string.IsNullOrEmpty(direction)) dirStr = $" to the {direction}";
                     }
             }
-            catch { }
+            catch (Exception) { }
             Msg($"You hear something{adj}{zStr}{dirStr}: {soundDesc}{soundMsg}");
         }
             return 0.0;
@@ -188,7 +188,7 @@ public partial class GameObject
                 return;
             }
         }
-        catch { }
+        catch (Exception) { }
         AtEmitSound(soundDesc, soundMsg, loudness, isSay);
     }
 

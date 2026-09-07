@@ -224,12 +224,10 @@ public class Script : GameObject
             bool isReplace = m.GetCustomAttribute<ReplaceAttribute>() != null;
             if (isBefore || isAfter || isReplace) atFuncs.Add((m.Name, m));
         }
-        // Port of base_script.py:233-240 with child.lock: for name, func in at_funcs: s = child.hooks.get(name,set()); s.discard(func); s.difference_update([... if __self__ is self]); child.hooks[name]=s
-        var hooksField = typeof(GameObject).GetField("_hooks", BindingFlags.NonPublic | BindingFlags.Instance);
-        if (hooksField != null)
+        // Port of base_script.py:233-240 with child.lock: mutate the hook sets
+        // under the child's write lock via the typed accessor (no reflection).
         {
-            var hooksDict = hooksField.GetValue(child) as Dictionary<string, HashSet<Delegate>>;
-            if (hooksDict != null)
+            var hooksDict = child.HooksRawNoLock;
             {
                 child.SyncRoot.EnterWriteLock();
                 try

@@ -31,17 +31,11 @@ public sealed class FollowScript : Script
         if (child == null) { Delete(); return; }
         if (child.FollowersSnapshot.Count == 0) { Delete(); return; }
         var oldLoc = _oldLoc;
-        try { _oldLoc = null; } catch {}
+        try { _oldLoc = null; } catch (Exception) { }
         if (oldLoc == null) return;
         List<int> followers;
-        // snapshot followers under lock
-        var f = typeof(GameObject).GetField("_followers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        if (f != null)
-        {
-            var set = f.GetValue(child) as HashSet<int>;
-            followers = set != null ? new List<int>(set) : child.FollowersSnapshot.ToList();
-        }
-        else followers = child.FollowersSnapshot.ToList();
+        // Snapshot followers under lock via the typed snapshot (no reflection).
+        followers = child.FollowersSnapshot.ToList();
         foreach (var id in followers)
         {
             var followerList = ObjectRegistry.Get(id);
@@ -64,11 +58,6 @@ public sealed class FollowScript : Script
         if (child != null)
         {
             RemoveHooks(child);
-            try
-            {
-                var f = typeof(GameObject).GetField("_followers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                // do not clear followers here, just remove script
-            } catch {}
         }
         return true;
     }

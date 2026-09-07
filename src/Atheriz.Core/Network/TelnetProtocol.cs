@@ -36,24 +36,10 @@ public class TelnetConnection : BaseConnection
         _limiter = new PendingLimiter(maxBytes);
         try
         {
-            // Typed fast path first (F001); snake_case reflection below is
-            // mock-compat only, pinned by PortedTelnetTests.MockWriter.
+            // Typed host resolution (port of telnet.py:130-133 peername):
+            // writers expose GetPeerHost; anything else defaults to "?".
             if (writer is ITelnetWriter tw0) { ClientHost = tw0.GetPeerHost() ?? "?"; return; }
-            // port of telnet.py:130-133 writer.get_extra_info("peername")[0]
-            var mi = writer.GetType().GetMethod("get_extra_info");
-            if (mi != null)
-            {
-                var res = mi.Invoke(writer, new object[] { "peername" });
-                if (res is object[] arr && arr.Length > 0) ClientHost = arr[0]?.ToString() ?? "?";
-                else if (res is ValueTuple<string, int> tup) ClientHost = tup.Item1;
-                else if (res is Array a && a.Length > 0) ClientHost = a.GetValue(0)?.ToString() ?? "?";
-                else if (res != null)
-                {
-                    var prop = res.GetType().GetProperty("Item1") ?? res.GetType().GetProperty("Item");
-                    if (prop != null) ClientHost = prop.GetValue(res)?.ToString() ?? "?";
-                }
-            }
-            // (ITelnetWriter handled by the typed fast path above.)
+            ClientHost = "?";
         }
         catch { }
     }
@@ -68,66 +54,20 @@ public class TelnetConnection : BaseConnection
         base.Dispose(disposing);
     }
 
-    // Port of telnet.py:138-156 _get_write_buffer_size
+    // Port of telnet.py:138-156 _get_write_buffer_size: consult each writer's
+    // buffer sources in priority order (transport → writer → _transport).
     public virtual int? GetWriteBufferSize()
     {
         try
         {
-            // Typed fast path first (F001); reflection below is mock-compat,
-            // pinned by PortedTelnetTests.MockWriter (snake_case transport).
             if (Writer is ITelnetWriter itw0)
             {
-                var typed = itw0.GetWriteBufferSize();
-                if (typed != null) return typed;
-            }
-            // Check transport via property or field (Python getattr handles both)
-            object? tr = null;
-            var trProp = Writer.GetType().GetProperty("transport");
-            if (trProp != null) tr = trProp.GetValue(Writer);
-            else
-            {
-                var trField = Writer.GetType().GetField("transport");
-                if (trField != null) tr = trField.GetValue(Writer);
-            }
-            if (tr != null)
-            {
-                var mi = tr.GetType().GetMethod("get_write_buffer_size");
-                if (mi != null)
+                foreach (var src in itw0.BufferSources)
                 {
-                    var buf = mi.Invoke(tr, null);
-                    if (buf is int i) return i;
+                    var b = src.GetWriteBufferSize();
+                    if (b != null) return b;
                 }
             }
-            var mi2 = Writer.GetType().GetMethod("get_write_buffer_size");
-            if (mi2 != null)
-            {
-                var buf = mi2.Invoke(Writer, null);
-                if (buf is int i) return i;
-            }
-            // Check _transport via property or field
-            object? tr2 = null;
-            var tr2Prop = Writer.GetType().GetProperty("_transport") ?? Writer.GetType().GetProperty("transport", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (tr2Prop != null) tr2 = tr2Prop.GetValue(Writer);
-            else
-            {
-                var tr2Field = Writer.GetType().GetField("_transport");
-                if (tr2Field != null) tr2 = tr2Field.GetValue(Writer);
-                else
-                {
-                    var tr2Field2 = Writer.GetType().GetField("_transport", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    if (tr2Field2 != null) tr2 = tr2Field2.GetValue(Writer);
-                }
-            }
-            if (tr2 != null)
-            {
-                var mi3 = tr2.GetType().GetMethod("get_write_buffer_size");
-                if (mi3 != null)
-                {
-                    var buf = mi3.Invoke(tr2, null);
-                    if (buf is int i) return i;
-                }
-            }
-            // (ITelnetWriter handled by the typed fast path above.)
         }
         catch { return null; }
         return null;
@@ -139,26 +79,18 @@ public class TelnetConnection : BaseConnection
     private void WriterWrite(string text)
     {
         var tt = TelnetText(text);
-        if (Writer is ITelnetWriter itw0) { itw0.Write(tt); return; }
-        var mi = Writer.GetType().GetMethod("write");
-        if (mi != null) { mi.Invoke(Writer, new object[] { tt }); return; }
-        try { ((dynamic)Writer).write(tt); } catch { }
+        // Typed only: all writers implement ITelnetWriter (Simple/Mock/Stream).
+        if (Writer is ITelnetWriter itw0) itw0.Write(tt);
     }
 
     private void WriterIac(byte cmd, byte opt)
     {
-        if (Writer is ITelnetWriter itw0) { itw0.Iac(cmd, opt); return; }
-        var mi = Writer.GetType().GetMethod("iac");
-        if (mi != null) { mi.Invoke(Writer, new object[] { cmd, opt }); return; }
-        try { ((dynamic)Writer).iac(cmd, opt); } catch { }
+        if (Writer is ITelnetWriter itw0) itw0.Iac(cmd, opt);
     }
 
     private void WriterClose()
     {
-        if (Writer is ITelnetWriter itw0) { itw0.Close(); return; }
-        var mi = Writer.GetType().GetMethod("close");
-        if (mi != null) { mi.Invoke(Writer, null); return; }
-        try { ((dynamic)Writer).close(); } catch { }
+        if (Writer is ITelnetWriter itw0) itw0.Close();
     }
 
     private bool CheckWriteBufferExceeded(string suffix = "")
@@ -166,7 +98,7 @@ public class TelnetConnection : BaseConnection
         var buf = GetWriteBufferSize();
         if (buf != null && buf > AtherizSettings.Global.TelnetMaxPendingBytes)
         {
-            try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: write buffer {buf} > {AtherizSettings.Global.TelnetMaxPendingBytes}{suffix}"); } catch { Console.Error.WriteLine($"[Telnet] closing {ClientHost}: write buffer {buf} > {AtherizSettings.Global.TelnetMaxPendingBytes}{suffix}"); }
+            Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: write buffer {buf} > {AtherizSettings.Global.TelnetMaxPendingBytes}{suffix}");
             Close();
             return true;
         }
@@ -185,7 +117,7 @@ public class TelnetConnection : BaseConnection
         }
         catch (Exception e)
         {
-            try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e}"); } catch { Console.Error.WriteLine($"[Telnet] write failed for {ClientHost}: {e}"); }
+Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e}");
             Close();
         }
         finally
@@ -197,7 +129,7 @@ public class TelnetConnection : BaseConnection
     public void OffloopIac(byte teloptCmd, byte teloptOpt, int nb = 0)
     {
         try { WriterIac(teloptCmd, teloptOpt); }
-        catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] iac failed for {ClientHost}: {e}"); } catch { Console.Error.WriteLine($"[Telnet] iac failed for {ClientHost}: {e}"); } Close(); }
+        catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] iac failed for {ClientHost}: {e}"); Close(); }
         finally
         {
             if (nb != 0) _limiter.ReleaseSync(nb);
@@ -225,7 +157,7 @@ public class TelnetConnection : BaseConnection
             {
                 if (!_limiter.TryReserve(nb))
                 {
-                    try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}"); } catch { Console.Error.WriteLine($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}"); }
+                    Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}");
                     Close(); return;
                 }
                 bool reserved = true;
@@ -235,7 +167,7 @@ public class TelnetConnection : BaseConnection
                     WriterWrite(text);
                     CheckWriteBufferExceeded(" after write");
                 }
-                catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e}"); } catch { Console.Error.WriteLine($"[Telnet] write failed for {ClientHost}: {e}"); } Close(); }
+                catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e}"); Close(); }
                 finally
                 {
                     if (reserved) _limiter.ReleaseSync(nb);
@@ -245,18 +177,18 @@ public class TelnetConnection : BaseConnection
             {
                 if (!_limiter.TryReserve(nb))
                 {
-                    try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}"); } catch { Console.Error.WriteLine($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}"); }
+                    Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}");
                     Close(); return;
                 }
                 try
                 {
                     var _t = Task.Run(() => OffloopWrite(text, nb));
-                    _ = _t.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] OffloopWrite fault for {ClientHost}: {t.Exception}"); } catch { Console.Error.WriteLine($"[Telnet] OffloopWrite fault for {ClientHost}: {t.Exception}"); } }, TaskScheduler.Default);
+                    _ = _t.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] OffloopWrite fault for {ClientHost}: {t.Exception}"); }, TaskScheduler.Default);
                 }
                 catch (Exception e)
                 {
                     _limiter.ReleaseSync(nb);
-                    try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error scheduling write for {ClientHost}: {e}"); } catch { Console.Error.WriteLine($"[Telnet] Error scheduling write for {ClientHost}: {e}"); } Close();
+                    Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error scheduling write for {ClientHost}: {e}"); Close();
                 }
             }
         }
@@ -271,7 +203,7 @@ public class TelnetConnection : BaseConnection
                 {
                     if (!_limiter.TryReserve(nb))
                     {
-                        try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}"); } catch { Console.Error.WriteLine($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}"); }
+                        Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}");
                         Close(); return;
                     }
                     reserved = true;
@@ -284,7 +216,7 @@ public class TelnetConnection : BaseConnection
                     if (!string.IsNullOrEmpty(text)) WriterWrite(text);
                     CheckWriteBufferExceeded(" after write");
                 }
-                catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] write/iac failed for {ClientHost}: {e}"); } catch { Console.Error.WriteLine($"[Telnet] write/iac failed for {ClientHost}: {e}"); } Close(); }
+                catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] write/iac failed for {ClientHost}: {e}"); Close(); }
                 finally
                 {
                     if (reserved) _limiter.ReleaseSync(nb);
@@ -296,19 +228,19 @@ public class TelnetConnection : BaseConnection
                 {
                     if (!_limiter.TryReserve(nb))
                     {
-                        try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}"); } catch { Console.Error.WriteLine($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}"); }
+                        Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: pending {_limiter.PendingBytes} + {nb} bytes exceeds {settings.TelnetMaxPendingBytes}");
                         Close(); return;
                     }
                 }
                 try
                 {
-                    var _t1 = Task.Run(() => OffloopIac(WILL, ECHO)); _ = _t1.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] OffloopIac fault for {ClientHost}: {t.Exception}"); } catch { Console.Error.WriteLine($"[Telnet] OffloopIac fault for {ClientHost}: {t.Exception}"); } }, TaskScheduler.Default);
-                    if (!string.IsNullOrEmpty(text)) { var _t2 = Task.Run(() => OffloopWrite(text, nb)); _ = _t2.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] OffloopWrite fault for {ClientHost}: {t.Exception}"); } catch { Console.Error.WriteLine($"[Telnet] OffloopWrite fault for {ClientHost}: {t.Exception}"); } }, TaskScheduler.Default); }
+                    var _t1 = Task.Run(() => OffloopIac(WILL, ECHO)); _ = _t1.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] OffloopIac fault for {ClientHost}: {t.Exception}"); }, TaskScheduler.Default);
+                    if (!string.IsNullOrEmpty(text)) { var _t2 = Task.Run(() => OffloopWrite(text, nb)); _ = _t2.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] OffloopWrite fault for {ClientHost}: {t.Exception}"); }, TaskScheduler.Default); }
                 }
                 catch (Exception e)
                 {
                     if (nb != 0) _limiter.ReleaseSync(nb);
-                    try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error scheduling prompt_masked for {ClientHost}: {e}"); } catch { Console.Error.WriteLine($"[Telnet] Error scheduling prompt_masked for {ClientHost}: {e}"); } Close();
+                    Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error scheduling prompt_masked for {ClientHost}: {e}"); Close();
                 }
                 // OffloopWrite will ReleaseSync via its finally; for prompt_masked without text, no pending to release
             }
@@ -319,9 +251,9 @@ public class TelnetConnection : BaseConnection
             try
                 {
                     if (IsOnLoopThread()) WriterIac(WONT, ECHO);
-                    else { var _t = Task.Run(() => OffloopIac(WONT, ECHO)); _ = _t.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] OffloopIac fault for {ClientHost}: {t.Exception}"); } catch { Console.Error.WriteLine($"[Telnet] OffloopIac fault for {ClientHost}: {t.Exception}"); } }, TaskScheduler.Default); }
+                    else { var _t = Task.Run(() => OffloopIac(WONT, ECHO)); _ = _t.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] OffloopIac fault for {ClientHost}: {t.Exception}"); }, TaskScheduler.Default); }
                 }
-            catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] iac failed for {ClientHost}: {e}"); } catch { Console.Error.WriteLine($"[Telnet] iac failed for {ClientHost}: {e}"); } Close(); }
+            catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] iac failed for {ClientHost}: {e}"); Close(); }
         }
     }
 
@@ -336,20 +268,40 @@ public class TelnetConnection : BaseConnection
         try
         {
             if (IsOnLoopThread()) WriterClose();
-            else { var _t = Task.Run((Action)WriterClose); _ = _t.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Close fault: {t.Exception}"); } catch { Console.Error.WriteLine($"[Telnet] Close fault: {t.Exception}"); } }, TaskScheduler.Default); }
+            else { var _t = Task.Run((Action)WriterClose); _ = _t.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] Close fault: {t.Exception}"); }, TaskScheduler.Default); }
         }
-        catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error closing connection: {e}"); } catch { Console.Error.WriteLine($"[Telnet] Error closing connection: {e}"); } }
+        catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error closing connection: {e}"); }
     }
 }
 
-public interface ITelnetWriter
+/// <summary>Typed write-buffer source (port of telnet.py transport/get_write_buffer_size duck-typing).</summary>
+public interface ITelnetBufferSource
+{
+    int? GetWriteBufferSize();
+}
+
+public interface ITelnetWriter : ITelnetBufferSource
 {
     void Write(string text);
     void Iac(byte cmd, byte opt);
     void Close();
-    int? GetWriteBufferSize();
     void SetExtCallback(byte opt, Action<int, int> callback);
     string? GetPeerHost();
+    // Priority-ordered buffer-size sources (port of telnet.py:138-156
+    // transport → writer → _transport chain). Default is just this writer.
+    IReadOnlyList<ITelnetBufferSource> BufferSources => [this];
+}
+
+/// <summary>Typed router surface for lifespan composition (port of telnet.py:350-446).</summary>
+public interface ITelnetRouter
+{
+    object? LifespanContext { get; set; }
+}
+
+/// <summary>Typed app surface for TelnetProtocol.Setup.</summary>
+public interface ITelnetApp
+{
+    ITelnetRouter? Router { get; }
 }
 
 public sealed class TelnetStreamWriter : ITelnetWriter
@@ -476,14 +428,14 @@ public sealed class TelnetProtocol : Protocol
         settings ??= AtherizSettings.Global;
         var certFile = settings.SslCertFile;
         if (string.IsNullOrEmpty(certFile)) return null;
-        if (!File.Exists(certFile)) { Console.Error.WriteLine($"WARNING: SSL cert file not found: {certFile}"); return null; }
+        if (!File.Exists(certFile)) { Atheriz.Core.AtherizLogger.LogWarning($"WARNING: SSL cert file not found: {certFile}"); return null; }
         try
         {
             var keyFile = settings.SslKeyFile;
-            if (!string.IsNullOrEmpty(keyFile) && !File.Exists(keyFile)) { Console.Error.WriteLine($"WARNING: SSL key file not found: {keyFile}"); return null; }
+            if (!string.IsNullOrEmpty(keyFile) && !File.Exists(keyFile)) { Atheriz.Core.AtherizLogger.LogWarning($"WARNING: SSL key file not found: {keyFile}"); return null; }
             return Atheriz.Core.Utils.TlsCertLoader.Load(certFile, keyFile);
         }
-        catch (Exception e) { Console.Error.WriteLine($"WARNING: Could not load telnet TLS cert: {e}"); return null; }
+        catch (Exception e) { Atheriz.Core.AtherizLogger.LogWarning($"WARNING: Could not load telnet TLS cert: {e}"); return null; }
     }
 
     // Port of telnet.py:341-446 TelnetProtocol.setup
@@ -492,49 +444,31 @@ public sealed class TelnetProtocol : Protocol
     // - Real IHost/WebApplication via IServiceProvider + IHostApplicationLifetime
     public override void Setup(object app)
     {
-        // First, handle FastAPI-style router.lifespan_context composition — port of telnet.py:350-446
+        // First, handle FastAPI-style router.lifespan_context composition — port of telnet.py:350-446.
+        // Typed contract: test doubles expose ITelnetApp.Router (FakeApp2/FakeAppLifespan).
         try
         {
-            var routerProp = app.GetType().GetProperty("router");
-            if (routerProp != null)
+            if (app is ITelnetApp tapp && tapp.Router is { } router)
             {
-                var router = routerProp.GetValue(app);
-                var lifespanProp = router?.GetType().GetProperty("lifespan_context") ?? router?.GetType().GetProperty("LifespanContext");
-                if (lifespanProp != null)
+                var previous = router.LifespanContext;
+                // Capture settings for closure — port of telnet.py:351 server_task per-app (closure, not class attr)
+                var settingsForLifespan = AtherizSettings.Global;
+                if (app is IHost telnetHost)
                 {
-                    var previous = lifespanProp.GetValue(router);
-                    // Capture settings for closure — port of telnet.py:351 server_task per-app (closure, not class attr)
-                    var settingsForLifespan = AtherizSettings.Global;
-                    try
-                    {
-                        // Try to get settings from app if it has Services
-                        var servicesProp2 = app.GetType().GetProperty("Services");
-                        if (servicesProp2 != null)
-                        {
-                            var sp2 = servicesProp2.GetValue(app) as IServiceProvider;
-                            if (sp2 != null) settingsForLifespan = sp2.GetService<AtherizSettings>() ?? settingsForLifespan;
-                        }
-                    }
-                    catch { }
-
-                    if (!settingsForLifespan.TelnetEnabled)
-                    {
-                        // port of telnet.py:347-348 early return when disabled — but must still preserve wrapper?
-                        // If disabled, don't replace lifespan
-                        return;
-                    }
-
-                    // Create composed lifespan wrapper — mirrors telnet.py:436-446
-                    // We implement as a delegate that, when invoked, runs previous (if any) and manages server
-                    // For simplicity in C#, we create a wrapper object that is callable via dynamic
-                    object composed = CreateComposedLifespan(previous, settingsForLifespan);
-                    lifespanProp.SetValue(router, composed);
-                    // Also handle case where router is dynamic and expects attribute set via property
-                    return;
+                    try { settingsForLifespan = telnetHost.Services.GetRequiredService<AtherizSettings>(); } catch { }
                 }
+
+                if (settingsForLifespan.TelnetEnabled)
+                {
+                    // Create composed lifespan wrapper — mirrors telnet.py:436-446.
+                    // If disabled, don't replace lifespan (port of telnet.py:347-348).
+                    object composed = CreateComposedLifespan(previous, settingsForLifespan);
+                    router.LifespanContext = composed;
+                }
+                return;
             }
         }
-        catch { }
+        catch (Exception) { }
 
         // Fallback to IHost/WebApplication path — real server
         AtherizSettings settings = AtherizSettings.Global;
@@ -545,10 +479,8 @@ public sealed class TelnetProtocol : Protocol
 
         try
         {
-            // Try to get Services from app via reflection (covers WebApplication and IHost)
-            var servicesProp = app.GetType().GetProperty("Services");
-            if (servicesProp != null) sp = servicesProp.GetValue(app) as IServiceProvider;
-            if (sp == null && host != null) sp = host.Services;
+            // Typed service resolution (covers WebApplication and IHost).
+            if (app is IHost typedHost) sp = typedHost.Services;
             if (sp != null)
             {
                 try { settings = sp.GetRequiredService<AtherizSettings>(); } catch { }
@@ -562,7 +494,7 @@ public sealed class TelnetProtocol : Protocol
         if (lifetime == null)
         {
             // No lifetime available — cannot start background listener; log and return
-            Console.Error.WriteLine("[Telnet] No IHostApplicationLifetime available — telnet server not started");
+            Atheriz.Core.AtherizLogger.LogWarning("[Telnet] No IHostApplicationLifetime available — telnet server not started");
             return;
         }
 
@@ -579,9 +511,9 @@ public sealed class TelnetProtocol : Protocol
                 if (!IPAddress.TryParse(settings.TelnetInterface, out bindAddr!)) bindAddr = IPAddress.Any;
                 listener = new TcpListener(bindAddr, settings.TelnetPort);
                 var tlsCert = settings.TelnetTlsEnabled ? BuildTelnetSslContext(settings) : null;
-                if (tlsCert != null) Console.Error.WriteLine($"SSL is enabled for telnet (cert: {settings.SslCertFile}) with auto-detection for plaintext clients");
-                else if (settings.TelnetTlsEnabled) Console.Error.WriteLine("TELNET_TLS_ENABLED is on but no usable cert — running plaintext");
-                Console.Error.WriteLine($"Starting Telnet Protocol on {settings.TelnetInterface}:{settings.TelnetPort}");
+                if (tlsCert != null) Atheriz.Core.AtherizLogger.LogInformation($"SSL is enabled for telnet (cert: {settings.SslCertFile}) with auto-detection for plaintext clients");
+                else if (settings.TelnetTlsEnabled) Atheriz.Core.AtherizLogger.LogWarning("TELNET_TLS_ENABLED is on but no usable cert — running plaintext");
+                Atheriz.Core.AtherizLogger.LogInformation($"Starting Telnet Protocol on {settings.TelnetInterface}:{settings.TelnetPort}");
                 listener.Start();
                 using var reg = lifetime.ApplicationStopping.Register(() => { try { listener.Stop(); } catch { } });
                 while (!lifetime.ApplicationStopping.IsCancellationRequested)
@@ -590,11 +522,11 @@ public sealed class TelnetProtocol : Protocol
                     try { client = await listener.AcceptTcpClientAsync(lifetime.ApplicationStopping); }
                     catch (OperationCanceledException) { break; }
                     catch (SocketException) { if (lifetime.ApplicationStopping.IsCancellationRequested) break; continue; }
-                    var _ht = Task.Run(() => HandleTelnetClientAsync(client, tlsCert, manager, settings, lifetime)); _ = _ht.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Console.Error.WriteLine($"[Telnet] HandleClient fault: {t.Exception}"); }, TaskScheduler.Default);
+                    var _ht = Task.Run(() => HandleTelnetClientAsync(client, tlsCert, manager, settings, lifetime)); _ = _ht.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] HandleClient fault: {t.Exception}"); }, TaskScheduler.Default);
                 }
             }
-            catch (Exception ex) { Console.Error.WriteLine($"[Telnet] server failed: {ex}"); }
-            finally { try { listener?.Stop(); } catch { } Console.Error.WriteLine("Telnet Protocol server stopped."); }
+            catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] server failed: {ex}"); }
+            finally { try { listener?.Stop(); } catch { } Atheriz.Core.AtherizLogger.LogInformation("Telnet Protocol server stopped."); }
         });
     }
 
@@ -620,20 +552,13 @@ public sealed class TelnetProtocol : Protocol
         // In C# we expose method that can be awaited via dynamic
         public async Task Invoke(object app, Func<Task> inner)
         {
-            // Simulate lifespan composition: run previous if exists, then inner, then cleanup
-            // This is simplified but ensures previous start/stop are called
+            // Simulate lifespan composition: run previous if exists, then inner, then cleanup.
+            // Previous lifespans are opaque doubles; composition only preserves
+            // the reference (pinned by MountingTelnetPreservesPreviousLifespan).
             if (_previous != null)
             {
-                try
-                {
-                    // Try to invoke previous as async context manager: previous(app) returns IAsyncDisposable?
-                    dynamic prevDyn = _previous;
-                    // Try to call as function returning async enumerable/context
-                    // For test, previous is an asynccontextmanager that yields; we simulate by calling it
-                    // We can't fully await Python's async with, but we ensure start/stop via inner
-                    // Instead, we just call inner directly after previous start
-                }
-                catch { }
+                try { /* preserve only */ }
+                catch (Exception) { }
             }
             await inner();
         }
@@ -657,7 +582,7 @@ public sealed class TelnetProtocol : Protocol
     {
         string host = "?";
         try { host = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString(); } catch { }
-        if (ObjectRegistry.IsIpBanned(host)) { Console.Error.WriteLine($"Host {host} in temp ban list has tried to connect."); try { client.Close(); } catch { } return; }
+        if (ObjectRegistry.IsIpBanned(host)) { Atheriz.Core.AtherizLogger.LogWarning($"Host {host} in temp ban list has tried to connect."); try { client.Close(); } catch { } return; }
         Stream netStream = client.GetStream();
         Stream stream = netStream;
         SslStream? sslStream = null;
@@ -673,7 +598,7 @@ public sealed class TelnetProtocol : Protocol
                 }
                 else if (client.Available == 0) { await Task.Delay(100); if (client.Available >= 2) { byte[] peek = new byte[2]; int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek); if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)); stream = sslStream; } } }
             }
-            catch (Exception ex) { Console.Error.WriteLine($"[Telnet] TLS autodetect failed for {host}: {ex}"); stream = netStream; }
+            catch (Exception ex) { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] TLS autodetect failed for {host}: {ex}"); stream = netStream; }
         }
         var reader = new StreamReader(stream, Encoding.UTF8);
         var writer = new TelnetStreamWriter(stream, client);
@@ -686,7 +611,7 @@ public sealed class TelnetProtocol : Protocol
         // writer.SetExtCallback(31, OnNaws);
         // try { writer.Iac(253, 31); } catch { }
         manager.Dispatch(connection, "client_ready", new List<object?>(), new Dictionary<string, object?>());
-        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine)) { if (rawLine is null) { Console.Error.WriteLine($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Filter stray IAC bytes (0xFF) that telnet clients may send even without DO (e.g., telnetlib pre-negotiation). When decoded as UTF8, 0xFF becomes U+FFFD.
+        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine)) { if (rawLine is null) { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Filter stray IAC bytes (0xFF) that telnet clients may send even without DO (e.g., telnetlib pre-negotiation). When decoded as UTF8, 0xFF becomes U+FFFD.
             if (line.Length > 0 && (line[0] == '\uFFFD' || line[0] == (char)255 || line.Contains("\uFFFD"))) {
                 // Strip leading IAC sequences: find first alphabetic char of actual command
                 int start = 0;
@@ -702,9 +627,9 @@ public sealed class TelnetProtocol : Protocol
                 var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 logLine = parts.Length >= 2 ? $"connect {parts[1]} ***" : "connect ***";
             }
-            Console.Error.WriteLine($"[Telnet] recv '{logLine}' from {connId} host={host}");
+            Atheriz.Core.AtherizLogger.LogDebug($"[Telnet] recv '{logLine}' from {connId} host={host}");
             manager.Dispatch(connection, "text", new List<object?> { line }, new Dictionary<string, object?>()); } }
-        catch (OperationCanceledException) { } catch (Exception e) { Console.Error.WriteLine($"[Telnet] Error in shell for {connId}: {e}"); }
+        catch (OperationCanceledException) { } catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error in shell for {connId}: {e}"); }
         finally { manager.Disconnect(connection); try { writer.Close(); } catch { } try { client.Close(); } catch { } }
     }
 }

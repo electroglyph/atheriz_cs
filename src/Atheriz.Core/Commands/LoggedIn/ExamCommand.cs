@@ -114,7 +114,7 @@ public sealed class ExamCommand : Command
         {
             var res = ObjectRegistry.Get(id);
             if (res.Count > 0) return $"#{id} ({res[0].Name})";
-        } catch {}
+        } catch (Exception) { }
         return $"#{id}";
     }
 
@@ -151,7 +151,7 @@ public sealed class ExamCommand : Command
                         return keys.Count > 0 ? "[" + string.Join(", ", keys) + "]" : "[]";
                     }
                 }
-            } catch {}
+            } catch (Exception) { }
             return "<hidden>";
         }
         if (hint == "followers")
@@ -167,7 +167,7 @@ public sealed class ExamCommand : Command
                     if (ids.Count == 0) return "set()";
                     return "{" + string.Join(", ", ids.Select(ExpandId)) + "}";
                 }
-            } catch {}
+            } catch (Exception) { }
             return "set()";
         }
         if (hint == "created_by" || hint == "last_touched_by")
@@ -186,7 +186,7 @@ public sealed class ExamCommand : Command
                 if (id == -1) return "-1";
                 var name = ObjectRegistry.Get(id).FirstOrDefault()?.Name;
                 return name != null ? $"{id} ({name})" : id.ToString();
-            } catch {}
+            } catch (Exception) { }
             return val?.ToString() ?? "None";
         }
         if (hint == "scripts")
@@ -203,7 +203,7 @@ public sealed class ExamCommand : Command
                     if (count == 0) return "set()";
                     if (allInts) return "{" + string.Join(", ", ids.Select(ExpandId)) + "}";
                 }
-            } catch {}
+            } catch (Exception) { }
             // fallback
         }
         if (hint == "_contents")
@@ -220,7 +220,7 @@ public sealed class ExamCommand : Command
                     if (count == 0) return "set()";
                     if (allInts) return "{" + string.Join(", ", ids.Select(ExpandId)) + "}";
                 }
-            } catch {}
+            } catch (Exception) { }
         }
         if (hint == "locks")
         {
@@ -273,7 +273,7 @@ public sealed class ExamCommand : Command
                             }
                         }
                     }
-                } catch {}
+                } catch (Exception) { }
             }
             return lines;
         }
@@ -292,7 +292,7 @@ public sealed class ExamCommand : Command
                     var id = acc.GetType().GetProperty("Id")?.GetValue(acc) ?? acc.GetType().GetField("Id")?.GetValue(acc);
                     if (name != null) parts.Add($"account={name} (#{id})");
                 }
-            } catch {}
+            } catch (Exception) { }
             try
             {
                 var connField = val.GetType().GetField("Connection") ?? val.GetType().GetField("connection");
@@ -308,7 +308,7 @@ public sealed class ExamCommand : Command
                         ?? "?";
                     parts.Add($"conn={host}");
                 }
-            } catch {}
+            } catch (Exception) { }
             try
             {
                 var puppetField = val.GetType().GetField("Puppet") ?? val.GetType().GetField("puppet");
@@ -321,7 +321,7 @@ public sealed class ExamCommand : Command
                     var id = puppet.GetType().GetProperty("Id")?.GetValue(puppet) ?? puppet.GetType().GetField("_id")?.GetValue(puppet);
                     if (name != null) parts.Add($"puppet={name} (#{id})");
                 }
-            } catch {}
+            } catch (Exception) { }
             try
             {
                 var wField = val.GetType().GetField("TermWidth") ?? val.GetType().GetField("term_width");
@@ -331,14 +331,14 @@ public sealed class ExamCommand : Command
                 var w = wField?.GetValue(val) ?? wProp?.GetValue(val);
                 var h = hField?.GetValue(val) ?? hProp?.GetValue(val);
                 if (w is int wi && h is int hi && wi != 0 && hi != 0) parts.Add($"w={wi}, h={hi}");
-            } catch {}
+            } catch (Exception) { }
             try
             {
                 var srField = val.GetType().GetField("ScreenReader") ?? val.GetType().GetField("screenreader");
                 var srProp = val.GetType().GetProperty("ScreenReader") ?? val.GetType().GetProperty("screenreader");
                 var sr = srField?.GetValue(val) ?? srProp?.GetValue(val);
                 if (sr is bool b && b) parts.Add("sr=True");
-            } catch {}
+            } catch (Exception) { }
             return parts.Count > 0 ? "Session(" + string.Join(", ", parts) + ")" : "Session()";
         }
         if (val == null) return "None";

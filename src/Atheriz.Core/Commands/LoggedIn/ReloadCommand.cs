@@ -18,10 +18,10 @@ public sealed class ReloadCommand : Command
         var channel = GlobalServices.GetServerChannel();
         if (channel != null)
         {
-            try { channel.Msg("Server is reloading..."); } catch { }
+            try { channel.Msg("Server is reloading..."); } catch (Exception) { }
         }
-        try { Atheriz.Core.ServerEvents.AtServerReload(); } catch { }
-        try { AtherizLogger.LogInformation($"Reload triggered by {go.Name} ({go.Id})"); } catch { }
+        try { Atheriz.Core.ServerEvents.AtServerReload(); } catch (Exception) { }
+        try { AtherizLogger.LogInformation($"Reload triggered by {go.Name} ({go.Id})"); } catch (Exception) { }
         string result;
         try
         {
@@ -41,8 +41,8 @@ public sealed class ReloadCommand : Command
         catch (Exception ex) { result = $"Reload failed: {ex.Message}"; }
         if (channel != null)
         {
-            try { channel.Msg(result); } catch {}
-            try { go.Msg(result); } catch {}
+            try { channel.Msg(result); } catch (Exception) { }
+            try { go.Msg(result); } catch (Exception) { }
         }
         else
         {

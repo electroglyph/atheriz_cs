@@ -12,41 +12,23 @@ namespace Atheriz.Core.Tests.Ported;
 public class PortedWebSocketTests
 {
     // Helpers for endpoint capture
-    private sealed class FakeApp
+    private sealed class FakeApp : IWebSocketApp
     {
         public Dictionary<string, Delegate> Captured = new();
-        public Func<string, Func<Delegate, Delegate>> websocket => path => handler => { Captured[path] = handler; return handler; };
+        public void WebSocket(string path, Func<IWebSocketPeer, Task> endpoint) => Captured[path] = endpoint;
     }
-    private static Func<dynamic, Task> CaptureEndpoint()
+    private static Func<IWebSocketPeer, Task> CaptureEndpoint()
     {
         var app = new FakeApp();
         var prev = AtherizSettings.Global.WebsocketEnabled;
         AtherizSettings.Global.WebsocketEnabled = true;
         try { new WebSocketProtocol().Setup(app); }
         finally { AtherizSettings.Global.WebsocketEnabled = prev; }
-        if (app.Captured.TryGetValue("/ws", out var del) && del is Func<dynamic, Task> fn) return fn;
-        if (app.Captured.TryGetValue("/ws", out var del2) && del2 is Delegate d)
-        {
-            // Try to convert Delegate to Func<dynamic,Task>
-            if (d is Func<dynamic, Task> ff) return ff;
-            // If it's Func<Delegate,Delegate> wrapped, unwrap via DynamicInvoke
-            try { var res = d.DynamicInvoke(new Func<dynamic, Task>(_=> Task.CompletedTask)); } catch {}
-        }
-        // Fallback: try to get as Delegate and cast
-        foreach (var kv in app.Captured)
-        {
-            if (kv.Value is Func<dynamic, Task> f) return f;
-            if (kv.Value is Delegate dd && dd.Method.ReturnType == typeof(Task))
-            {
-                // Attempt to create wrapper
-                return async (dynamic ws) => { await (Task)dd.DynamicInvoke(ws)!; };
-            }
-        }
-        throw new InvalidOperationException("endpoint not captured");
+        return (Func<IWebSocketPeer, Task>)app.Captured["/ws"];
     }
 
-    private sealed class MockClient { public string host = "127.0.0.1"; }
-    private sealed class MockWsEndpoint
+    private sealed class MockClient : IWebSocketClientInfo { public string host = "127.0.0.1"; string? IWebSocketClientInfo.Host => host; }
+    private sealed class MockWsEndpoint : IWebSocketPeer
     {
         public object? client;
         public Func<Task> acceptImpl = () => Task.CompletedTask;
@@ -63,6 +45,10 @@ public class PortedWebSocketTests
             else CloseCodes.Add(0);
             return Task.CompletedTask;
         }
+        object? IWebSocketPeer.Client => client;
+        Task IWebSocketPeer.AcceptAsync() => accept();
+        Task<string> IWebSocketPeer.ReceiveTextAsync() => receive_text();
+        Task IWebSocketPeer.CloseAsync(int code, string? reason) => close(code, reason);
     }
 
     private sealed class FakeWs : WebSocket
@@ -116,7 +102,7 @@ public class PortedWebSocketTests
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint((dynamic)ws); }
+        try { await endpoint(ws); }
         finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
         Assert.Equal(1, mockMgr.DisconnectCalls);
     }
@@ -132,7 +118,7 @@ public class PortedWebSocketTests
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint((dynamic)ws); }
+        try { await endpoint(ws); }
         finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
         Assert.Equal(1, mockMgr.DisconnectCalls);
     }
@@ -149,7 +135,7 @@ public class PortedWebSocketTests
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint((dynamic)ws); }
+        try { await endpoint(ws); }
         finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
         Assert.Equal(1, mockMgr.DisconnectCalls);
     }
@@ -256,7 +242,7 @@ public class PortedWebSocketTests
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint((dynamic)ws); }
+        try { await endpoint(ws); }
         finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
         Assert.Contains(1009, ws.CloseCodes);
     }
@@ -277,7 +263,7 @@ public class PortedWebSocketTests
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint((dynamic)ws); }
+        try { await endpoint(ws); }
         finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
         Assert.Equal(1, mockMgr.HandleCalls);
         Assert.Empty(ws.CloseCodes);

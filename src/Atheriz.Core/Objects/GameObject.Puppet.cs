@@ -82,7 +82,7 @@ public partial class GameObject
             finally { npc.SyncRoot.ExitReadLock(); }
         }
         // Port of puppet.py:112 caller.at_disconnect()
-        try { this.AtDisconnect(); } catch { }
+        try { this.AtDisconnect(); } catch (Exception) { }
         lock (session.Lock)
         {
             npc.SyncRoot.EnterWriteLock();
@@ -99,8 +99,8 @@ public partial class GameObject
             }
             finally { npc.SyncRoot.ExitWriteLock(); }
         }
-        try { npc.AtPuppet(this); } catch { }
-        try { npc.AtPostPuppet(); } catch { }
+        try { npc.AtPuppet(this); } catch (Exception) { }
+        try { npc.AtPostPuppet(); } catch (Exception) { }
         return true;
     }
 
@@ -121,13 +121,13 @@ public partial class GameObject
             session.PuppetStack.RemoveAt(session.PuppetStack.Count - 1);
         }
         var restore = target.GetPuppetRestore();
-        try { target.AtUnpuppet(prev); } catch { }
+        try { target.AtUnpuppet(prev); } catch (Exception) { }
         if (restore != null)
         {
             target.RestorePuppetSnapshot(restore);
             target.ClearPuppetRestore();
         }
-        try { target.AtDisconnect(); } catch { }
+        try { target.AtDisconnect(); } catch (Exception) { }
         lock (session.Lock)
         {
             prev.SyncRoot.EnterWriteLock();
@@ -138,7 +138,7 @@ public partial class GameObject
             }
             finally { prev.SyncRoot.ExitWriteLock(); }
         }
-        try { prev.AtPostPuppet(); } catch { }
+        try { prev.AtPostPuppet(); } catch (Exception) { }
         return true;
     }
 
@@ -158,7 +158,7 @@ public partial class GameObject
             if (conn != null)
                 conn.SendCommand("logged_in");
         }
-        catch { }
+        catch (Exception) { }
         // Port of base_obj.py:1457-1460 with self.lock: for c in self.channels: if channel := get(c): channel[0].add_listener(self)
         try
         {
@@ -180,10 +180,10 @@ public partial class GameObject
                         // (no dynamic dispatch, no throw).
                     }
                 }
-                catch { }
+                catch (Exception) { }
             }
         }
-        catch { }
+        catch (Exception) { }
         // Port of base_obj.py:1461-1462 if channel := get_server_channel(): channel.msg(f"{wrap_xterm256(self.name, fg=15, bold=True)} (#{self.id}) has logged in.")
         try
         {
@@ -194,7 +194,7 @@ public partial class GameObject
                 serverChannel.Msg($"{wrapped} (#{Id}) has logged in.");
             }
         }
-        catch { }
+        catch (Exception) { }
         // Port of base_obj.py:1463-1470 cs = get_loggedin_cmdset(); commands = [cmd.key for cmd in cs.get_all() if cmd.access(self) and not cmd.hide]; try: SOCIALS_DICT
         List<string> commands = new();
         try
@@ -207,16 +207,16 @@ public partial class GameObject
                     if (!cmd.Hide && cmd.Access(this))
                         commands.Add(cmd.Key);
                 }
-                catch { }
+                catch (Exception) { }
             }
         }
-        catch { }
+        catch (Exception) { }
         try
         {
             foreach (var key in SocialsCommand.SocialsDict.Keys)
                 commands.Add(key);
         }
-        catch { }
+        catch (Exception) { }
         // Port of base_obj.py:1471 self.msg(player_commands=commands)
         try
         {
@@ -228,14 +228,14 @@ public partial class GameObject
                 conn.SendCommand("player_commands", new List<object?> { commands }, null);
             }
         }
-        catch { }
+        catch (Exception) { }
         // Port of base_obj.py:1472 self.msg(f"You become {wrap_xterm256(self.name, fg=15, bold=True)}.")
         try
         {
             var wrapped = GameUtils.WrapXterm256(Name ?? "", fg: 15, bold: true);
             Msg($"You become {wrapped}.");
         }
-        catch { }
+        catch (Exception) { }
         // Port of base_obj.py:1473-1485 if self.location: map handling + move_to + map_enable + render
         try
         {
@@ -248,21 +248,21 @@ public partial class GameObject
             {
                 // Port of base_obj.py:1474-1478 if settings.MAP_ENABLED: mh.add_listener(self); if self.is_mapable: mh.add_mapable(self)
                 bool mapEnabledSettings = false;
-                try { mapEnabledSettings = AtherizSettings.Global.MapEnabled; } catch { }
+                try { mapEnabledSettings = AtherizSettings.Global.MapEnabled; } catch (Exception) { }
                 if (mapEnabledSettings)
                 {
                     try
                     {
                         var mh = GlobalServices.GetMapHandler();
-                        try { mh.AddListener(this); } catch { }
+                        try { mh.AddListener(this); } catch (Exception) { }
                         bool isMapable = false;
-                        try { isMapable = IsMapable; } catch { }
+                        try { isMapable = IsMapable; } catch (Exception) { }
                         if (isMapable)
                         {
-                            try { mh.AddMapable(this); } catch { }
+                            try { mh.AddMapable(this); } catch (Exception) { }
                         }
                     }
-                    catch { }
+                    catch (Exception) { }
                 }
                 // Port of base_obj.py:1479 self.move_to(self.location, announce=False)
                 try
@@ -283,12 +283,12 @@ public partial class GameObject
                         MoveTo(destArg, announce: false);
                     }
                 }
-                catch { }
+                catch (Exception) { }
                 // Port of base_obj.py:1480-1485 if settings.MAP_ENABLED and self.map_enabled: self.msg(map_enable=""); mh = get_map_handler(); mi = mh.get_mapinfo(...); if mi: mi.render(True)
                 bool mapEnabled2 = false;
                 bool selfMapEnabled = false;
-                try { mapEnabled2 = AtherizSettings.Global.MapEnabled; } catch { }
-                try { selfMapEnabled = MapEnabled; } catch { try { selfMapEnabled = IsMapable; } catch { } }
+                try { mapEnabled2 = AtherizSettings.Global.MapEnabled; } catch (Exception) { }
+                try { selfMapEnabled = MapEnabled; } catch { try { selfMapEnabled = IsMapable; } catch (Exception) { } }
                 if (mapEnabled2 && selfMapEnabled)
                 {
                     try
@@ -301,7 +301,7 @@ public partial class GameObject
                             conn.SendCommand("map_enable", new List<object?> { "" }, null);
                         }
                     }
-                    catch { }
+                    catch (Exception) { }
                     try
                     {
                         Coord? coord = null;
@@ -331,11 +331,11 @@ public partial class GameObject
                                 mi.Render(true);
                         }
                     }
-                    catch { }
+                    catch (Exception) { }
                 }
             }
         }
-        catch { }
+        catch (Exception) { }
     }
 
     public virtual void AtPuppet(GameObject caller) // Port of base_obj.py:1488 at_puppet
@@ -370,13 +370,21 @@ public partial class GameObject
         Hookable("at_tick", () => 0);
     }
 
+    // Server-event virtuals (replaces TryInvokeVirtual reflection): game-defined
+    // subclasses override these with the exact (object? sender) signature to
+    // receive at_server_start/stop/reload. Base no-ops equal the old
+    // skip-when-declared-on-GameObject rule.
+    public virtual void AtServerStart(object? sender) { }
+    public virtual void AtServerStop(object? sender) { }
+    public virtual void AtServerReload(object? sender) { }
+
     public virtual void AtSolarEvent(string message) // Port of time.py solar
     {
-        Hookable("at_solar_event", () => { try { Msg(message); } catch { } return 0; }, message);
+        Hookable("at_solar_event", () => { try { Msg(message); } catch (Exception) { } return 0; }, message);
     }
     public virtual void AtLunarEvent(string message) // Port of time.py lunar
     {
-        Hookable("at_lunar_event", () => { try { Msg(message); } catch { } return 0; }, message);
+        Hookable("at_lunar_event", () => { try { Msg(message); } catch (Exception) { } return 0; }, message);
     }
     public virtual void AtAlarm(Globals.GameTime.GameTimeInfo time, Dictionary<string, System.Text.Json.JsonElement>? data) // Port of time.py alarm
     {
@@ -478,14 +486,14 @@ public partial class GameObject
                 else { continue; }
                 if (locId.HasValue && seen.Contains(locId.Value))
                 {
-                    try { locObj?.RemoveContent(survivor.Id); } catch {}
+                    try { locObj?.RemoveContent(survivor.Id); } catch (Exception) { }
                     try
                     {
                         survivor._lock.EnterWriteLock();
                         try { survivor._location = LocationRef.NullLocation.Instance; survivor._flags.IsModified = true; }
                         finally { survivor._lock.ExitWriteLock(); }
                     }
-                    catch { try { survivor.Location = LocationRef.NullLocation.Instance; } catch {} }
+                    catch { try { survivor.Location = LocationRef.NullLocation.Instance; } catch (Exception) { } }
                 }
             }
             // actually need to ensure toDelete contains order reversed already; truncated survivors stay alive
@@ -499,9 +507,9 @@ public partial class GameObject
                     var loc = obj.ResolveLocationObject();
                     if (loc != null)
                     {
-                        try { loc.RemoveContent(obj.Id); } catch {}
+                        try { loc.RemoveContent(obj.Id); } catch (Exception) { }
                     }
-                } catch {}
+                } catch (Exception) { }
                 try
                 {
                     obj._lock.EnterWriteLock();
@@ -517,7 +525,7 @@ public partial class GameObject
                         // Don't override truncated handling for toDelete objects
                     }
                     finally { obj._lock.ExitWriteLock(); }
-                } catch {}
+                } catch (Exception) { }
                 ObjectRegistry.RemoveObject(obj);
                 TeardownDeleted(obj);
             }
@@ -528,7 +536,7 @@ public partial class GameObject
         {
             // non-recursive: move contents to self's location (Python _move_contents)
             GameObject? loc = null;
-            try { loc = this.ResolveLocationObject(); } catch {}
+            try { loc = this.ResolveLocationObject(); } catch (Exception) { }
             List<int> contentIds;
             _lock.EnterReadLock();
             try { contentIds = new List<int>(_contents); }
@@ -551,13 +559,13 @@ public partial class GameObject
                     finally { content._lock.ExitReadLock(); }
                     if (stillAtThis)
                     {
-                        try { this.RemoveContent(content.Id); } catch {}
+                        try { this.RemoveContent(content.Id); } catch (Exception) { }
                         try
                         {
                             content._lock.EnterWriteLock();
                             try { content._location = LocationRef.NullLocation.Instance; content._flags.IsModified = true; }
                             finally { content._lock.ExitWriteLock(); }
-                        } catch {}
+                        } catch (Exception) { }
                     }
                     // then collect recursively (delete content and its children)
                     var r = content.Delete(caller, true);
@@ -583,7 +591,7 @@ public partial class GameObject
             {
                 var loc2 = this.ResolveLocationObject();
                 if (loc2 != null) loc2.RemoveContent(this.Id);
-            } catch {}
+            } catch (Exception) { }
             if (!this.IsTemporary)
                 ops.Add(this.GetDelOps());
             // include self in count
@@ -606,16 +614,16 @@ public partial class GameObject
             var leaderId = obj.Following;
             if (leaderId.HasValue)
             {
-                try { obj.Following = null; } catch { }
+                try { obj.Following = null; } catch (Exception) { }
                 try
                 {
                     var leader = ObjectRegistry.Get(leaderId.Value).FirstOrDefault();
-                    try { leader?.RemoveFollower(obj.Id); } catch { }
+                    try { leader?.RemoveFollower(obj.Id); } catch (Exception) { }
                 }
-                catch { }
+                catch (Exception) { }
             }
         }
-        catch { }
+        catch (Exception) { }
         try
         {
             foreach (var fid in obj.FollowersSnapshot.ToList())
@@ -624,12 +632,12 @@ public partial class GameObject
                 {
                     var follower = ObjectRegistry.Get(fid).FirstOrDefault();
                     if (follower != null && follower.Following == obj.Id)
-                        try { follower.Following = null; } catch { }
+                        try { follower.Following = null; } catch (Exception) { }
                 }
-                catch { }
+                catch (Exception) { }
             }
         }
-        catch { }
+        catch (Exception) { }
         try
         {
             foreach (var chId in obj.ChannelsSnapshot.ToList())
@@ -637,23 +645,23 @@ public partial class GameObject
                 try
                 {
                     var ch = ObjectRegistry.Get(chId).FirstOrDefault() as Channel;
-                    if (ch != null) try { ch.RemoveListener(obj); } catch { }
+                    if (ch != null) try { ch.RemoveListener(obj); } catch (Exception) { }
                 }
-                catch { }
-                try { obj.UnsubscribeById(chId); } catch { }
+                catch (Exception) { }
+                try { obj.UnsubscribeById(chId); } catch (Exception) { }
             }
         }
-        catch { }
+        catch (Exception) { }
         try
         {
             var sess = obj.Session;
             if (sess != null)
             {
-                try { obj.AtDisconnect(); } catch { }
-                try { sess.Connection?.Close(); } catch { }
+                try { obj.AtDisconnect(); } catch (Exception) { }
+                try { sess.Connection?.Close(); } catch (Exception) { }
             }
         }
-        catch { }
-        try { Objects.GlobalTickerHolder.Get()?.RemoveCoro(obj.AtTick, obj.TickSeconds); } catch { }
+        catch (Exception) { }
+        try { Objects.GlobalTickerHolder.Get()?.RemoveCoro(obj.AtTick, obj.TickSeconds); } catch (Exception) { }
     }
 }

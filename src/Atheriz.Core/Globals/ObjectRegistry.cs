@@ -331,12 +331,12 @@ public static class ObjectRegistry
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt object row {row.Id}: {ex.GetType().Name}"); } catch { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt object row {row.Id}: {ex.GetType().Name}"); } catch (Exception) { }
                     continue;
                 }
                 if (dto == null)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping null object row {row.Id}"); } catch { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping null object row {row.Id}"); } catch (Exception) { }
                     continue;
                 }
                 try
@@ -347,19 +347,23 @@ public static class ObjectRegistry
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping unrestorable object row {row.Id}: {ex.GetType().Name}"); } catch { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping unrestorable object row {row.Id}: {ex.GetType().Name}"); } catch (Exception) { }
                 }
             }
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex)
         {
-            Console.Error.WriteLine($"database closed; skipping load: {ex.Message}");
-            Console.Error.WriteLine("database closed");
+            // Closed-DB guard is the IsClosed flag (no message sniffing).
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+            AtherizLogger.LogWarning("database closed");
             return;
         }
-        catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex)
         {
-            Console.Error.WriteLine($"database closed; skipping load: {ex.Message}");
+            // Closed-DB races only (no message sniffing): anything else propagates.
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
             return;
         }
         if (objects.Count == 0 && maxId == -1)
@@ -391,7 +395,7 @@ public static class ObjectRegistry
         finally { AllLock.ExitReadLock(); }
         foreach (var o in snap)
         {
-            try { o.ResolveRelations(); } catch { }
+            try { o.ResolveRelations(); } catch (Exception) { }
         }
     }
 
@@ -399,40 +403,52 @@ public static class ObjectRegistry
     {
         AtherizDbContext db;
         try { db = new AtherizDbContext(savePath); }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex)
         {
-            Console.Error.WriteLine($"database closed; skipping load: {ex.Message}");
-            Console.Error.WriteLine("database closed");
+            // Closed-DB guard is the IsClosed flag (no message sniffing).
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+            AtherizLogger.LogWarning("database closed");
             return;
         }
-        catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex)
         {
-            Console.Error.WriteLine($"database closed; skipping load: {ex.Message}");
+            // Closed-DB races only (no message sniffing): anything else propagates.
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
             return;
         }
         using (db)
         {
             try { db.Database.EnsureCreated(); }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+            catch (InvalidOperationException ex)
             {
-                Console.Error.WriteLine($"database closed; skipping load: {ex.Message}");
+                // Closed-DB guard is the IsClosed flag (no message sniffing).
+                if (!AtherizDbContext.IsClosed) throw;
+                AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
                 return;
             }
-            catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+            catch (Exception ex)
             {
-                Console.Error.WriteLine($"database closed; skipping load: {ex.Message}");
+                // Closed-DB races only (no message sniffing): anything else propagates.
+                if (!AtherizDbContext.IsClosed) throw;
+                AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
                 return;
             }
             try { LoadObjects(db); }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+            catch (InvalidOperationException ex)
             {
-                Console.Error.WriteLine($"database closed; skipping load: {ex.Message}");
-                Console.Error.WriteLine("database closed");
+                // Closed-DB guard is the IsClosed flag (no message sniffing).
+                if (!AtherizDbContext.IsClosed) throw;
+                AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+                AtherizLogger.LogWarning("database closed");
                 return;
             }
-            catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+            catch (Exception ex)
             {
-                Console.Error.WriteLine($"database closed; skipping load: {ex.Message}");
+                // Closed-DB races only (no message sniffing): anything else propagates.
+                if (!AtherizDbContext.IsClosed) throw;
+                AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
                 return;
             }
         }
@@ -479,7 +495,7 @@ public static class ObjectRegistry
                         try { c.IsModified = true; }
                         finally { c.SyncRoot.ExitWriteLock(); }
                     }
-                    catch { }
+                    catch (Exception) { }
                 }
                 try
                 {
@@ -487,7 +503,7 @@ public static class ObjectRegistry
                     try { obj.IsModified = true; }
                     finally { obj.SyncRoot.ExitWriteLock(); }
                 }
-                catch { }
+                catch (Exception) { }
                 throw;
             }
         }
@@ -516,10 +532,12 @@ public static class ObjectRegistry
                 }
             });
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex)
         {
-            Console.Error.WriteLine($"database closed; skipping save: {ex.Message}");
-            Console.Error.WriteLine("database closed");
+            // Closed-DB guard is the IsClosed flag (no message sniffing).
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
+            AtherizLogger.LogWarning("database closed");
             foreach (var (obj, _) in pending)
             {
                 obj.SyncRoot.EnterWriteLock();
@@ -528,10 +546,12 @@ public static class ObjectRegistry
             }
             return;
         }
-        catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex)
         {
-            Console.Error.WriteLine($"database closed; skipping save: {ex.Message}");
-            Console.Error.WriteLine("database closed");
+            // Closed-DB races only (no message sniffing): anything else propagates.
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
+            AtherizLogger.LogWarning("database closed");
             foreach (var (obj, _) in pending)
             {
                 obj.SyncRoot.EnterWriteLock();
@@ -553,43 +573,55 @@ public static class ObjectRegistry
     public static void SaveObjects(string savePath, bool force = false)
     {        AtherizDbContext db;
         try { db = new AtherizDbContext(savePath); }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex)
         {
-            Console.Error.WriteLine($"database closed; skipping save: {ex.Message}");
-            Console.Error.WriteLine("database closed");
+            // Closed-DB guard is the IsClosed flag (no message sniffing).
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
+            AtherizLogger.LogWarning("database closed");
             // restore cleared flags? none yet, but ensure pending objects stay dirty
             // We haven't built pending yet, so nothing to restore; just log warning not exception
             return;
         }
-        catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex)
         {
-            Console.Error.WriteLine($"database closed; skipping save: {ex.Message}");
+            // Closed-DB races only (no message sniffing): anything else propagates.
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
             return;
         }
         using (db)
         {
             try { db.Database.EnsureCreated(); }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+            catch (InvalidOperationException ex)
             {
-                Console.Error.WriteLine($"database closed; skipping save: {ex.Message}");
-                Console.Error.WriteLine("database closed");
+                // Closed-DB guard is the IsClosed flag (no message sniffing).
+                if (!AtherizDbContext.IsClosed) throw;
+                AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
+                AtherizLogger.LogWarning("database closed");
                 return;
             }
-            catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+            catch (Exception ex)
             {
-                Console.Error.WriteLine($"database closed; skipping save: {ex.Message}");
+                // Closed-DB races only (no message sniffing): anything else propagates.
+                if (!AtherizDbContext.IsClosed) throw;
+                AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
                 return;
             }
             try { SaveObjects(db, force); }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+            catch (InvalidOperationException ex)
             {
-                Console.Error.WriteLine($"database closed; skipping save: {ex.Message}");
-                Console.Error.WriteLine("database closed");
+                // Closed-DB guard is the IsClosed flag (no message sniffing).
+                if (!AtherizDbContext.IsClosed) throw;
+                AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
+                AtherizLogger.LogWarning("database closed");
                 return;
             }
-            catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+            catch (Exception ex)
             {
-                Console.Error.WriteLine($"database closed; skipping save: {ex.Message}");
+                // Closed-DB races only (no message sniffing): anything else propagates.
+                if (!AtherizDbContext.IsClosed) throw;
+                AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
                 return;
             }
         }

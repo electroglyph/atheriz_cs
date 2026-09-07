@@ -98,7 +98,7 @@ public sealed class NofollowCommand : Command
             {
                 foreach (var script in go.GetScriptsByType("FollowScript").ToList())
                 {
-                    try { script.IsDeleted = true; ObjectRegistry.RemoveObject(script); go.RemoveScript(script); } catch {}
+                    try { script.IsDeleted = true; ObjectRegistry.RemoveObject(script); go.RemoveScript(script); } catch (Exception) { }
                 }
             }
         }

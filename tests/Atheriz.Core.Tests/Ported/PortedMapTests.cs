@@ -128,7 +128,10 @@ public class PortedMapTests
         // DTO has no Lock property – verify via reflection that DTO type doesn't have Lock
         Assert.Null(typeof(MapInfo.MapInfoPersistDto).GetProperty("Lock"));
         // Also check MapInfo's own GetState-like via reflection: fields that would be pickled exclude lock
-        var members = typeof(MapInfo).GetMembers().Select(m=>m.Name).ToList();
+        var members = typeof(MapInfo).GetMembers(
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.Public |
+            System.Reflection.BindingFlags.NonPublic).Select(m=>m.Name).ToList();
         // Simulate __getstate__ exclusion: ensure that DTO conversion excludes lock/objects/listeners
         // For build, just assert Lock exists on MapInfo but not in DTO
         Assert.Contains("Lock", members);

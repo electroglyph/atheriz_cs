@@ -24,13 +24,6 @@ public class GameTime
     public ReaderWriterLockSlim Lock => _lock;
     public IDisposable ReadScope() { _lock.EnterReadLock(); return new LockScope(_lock, false); }
     public IDisposable WriteScope() { _lock.EnterWriteLock(); return new LockScope(_lock, true); }
-    private sealed class LockScope : IDisposable
-    {
-        private readonly ReaderWriterLockSlim _rw;
-        private readonly bool _isWrite;
-        public LockScope(ReaderWriterLockSlim rw, bool isWrite) { _rw = rw; _isWrite = isWrite; }
-        public void Dispose() { if (_isWrite) _rw.ExitWriteLock(); else _rw.ExitReadLock(); }
-    }
     private long _ticks;
     private readonly Dictionary<(string Hour, string Minute), List<AlarmEntry>> _alarms = new();
     public bool Started { get; private set; }
@@ -108,7 +101,7 @@ public class GameTime
             catch (Exception ex)
             {
                 // Per-row report: corrupt ticks zero out loudly, not silently.
-                try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch { }
+                try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch (Exception) { }
                 _lock.EnterWriteLock();
                 try { _ticks = 0; _alarms.Clear(); }
                 finally { _lock.ExitWriteLock(); }
@@ -214,7 +207,7 @@ public class GameTime
                 Save(db);
             }
             catch { return false; }
-            try { File.Delete(path); } catch { }
+            try { File.Delete(path); } catch (Exception) { }
             return true;
         }
         catch { return false; }
@@ -405,7 +398,7 @@ public class GameTime
         }
         ticker?.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
         StopOwnedFallbacks();
-        try { Save(); } catch { }
+        try { Save(); } catch (Exception) { }
     }
     public void Stop(AsyncTicker ticker)
     {
@@ -420,15 +413,15 @@ public class GameTime
         }
         if (ours) ticker.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
         StopOwnedFallbacks();
-        try { Save(); } catch { }
+        try { Save(); } catch (Exception) { }
     }
 
     private void StopOwnedFallbacks()
     {
         var t = Interlocked.Exchange(ref _ownedTicker, null);
-        if (t != null) try { t.Stop(); } catch { }
+        if (t != null) try { t.Stop(); } catch (Exception) { }
         var p = Interlocked.Exchange(ref _ownedPool, null);
-        if (p != null) try { p.Stop(wait: false); } catch { }
+        if (p != null) try { p.Stop(wait: false); } catch (Exception) { }
     }
 
     public bool SunUp()
@@ -481,7 +474,7 @@ public class GameTime
                     var capturedAfter = after;
                     // Direct virtual dispatch (port of getattr(objs[0], "at_alarm")):
                     // every GameObject exposes AtAlarm, so no reflection is needed.
-                    Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch { } };
+                    Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch (Exception) { } };
                     if (!pool.AddTask(act, $"alarm:{entry.CallerId}"))
                     {
                         AtherizLogger.LogWarning($"Task queue full; alarm for {target} retrying.");
@@ -499,7 +492,7 @@ public class GameTime
             var recv = _settings.LunarReceiverLambda ?? (o => o.IsPc && o.IsConnected);
             foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
             {
-                try { obj.AtLunarEvent($"A {afterPhase.ToLower()} moon rises."); } catch { }
+                try { obj.AtLunarEvent($"A {afterPhase.ToLower()} moon rises."); } catch (Exception) { }
             }
         }
         if (beforeSun != afterSun)
@@ -508,7 +501,7 @@ public class GameTime
             var recv = _settings.SolarReceiverLambda ?? (o => o.IsPc && o.IsConnected);
             foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
             {
-                try { obj.AtSolarEvent(msg); } catch { }
+                try { obj.AtSolarEvent(msg); } catch (Exception) { }
             }
         }
     }

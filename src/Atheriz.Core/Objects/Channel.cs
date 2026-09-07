@@ -147,7 +147,7 @@ public class Channel : GameObject
             toDetach = _listeners.Keys.ToList();
             _listeners.Clear();
         }
-        try { SetIsDeletedRaw(true); } catch {}
+        try { SetIsDeletedRaw(true); } catch (Exception) { }
         foreach (var lid in toDetach)
         {
             var objs = Globals.ObjectRegistry.Get(lid);
@@ -164,7 +164,7 @@ public class Channel : GameObject
                     try { o.Unsubscribe(this); }
                     finally { o.SyncRoot.ExitWriteLock(); }
                 }
-                catch (Exception ex) { try { AtherizLogger.LogError($"channel delete detach failed for object {lid}: {ex.Message}"); } catch { } }
+                catch (Exception ex) { try { AtherizLogger.LogError($"channel delete detach failed for object {lid}: {ex.Message}"); } catch (Exception) { } }
             }
         }
         Globals.ObjectRegistry.RemoveObject(this);
@@ -197,7 +197,7 @@ public class Channel : GameObject
         {
             // FormatMessage is a pure function of (timestamp, sender, text), so
             // format once instead of once per listener.
-            try { listener.Msg(formatted); } catch {}
+            try { listener.Msg(formatted); } catch (Exception) { }
         }
     }
 

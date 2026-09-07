@@ -29,13 +29,6 @@ public partial class NodeHandler
     public IDisposable WriteScope2() { _lock2.EnterWriteLock(); return new LockScope(_lock2, true); }
     public IDisposable ReadScope3() { _lock3.EnterReadLock(); return new LockScope(_lock3, false); }
     public IDisposable WriteScope3() { _lock3.EnterWriteLock(); return new LockScope(_lock3, true); }
-    private sealed class LockScope : IDisposable
-    {
-        private readonly ReaderWriterLockSlim _rw;
-        private readonly bool _isWrite;
-        public LockScope(ReaderWriterLockSlim rw, bool isWrite) { _rw = rw; _isWrite = isWrite; }
-        public void Dispose() { if (_isWrite) _rw.ExitWriteLock(); else _rw.ExitReadLock(); }
-    }
     // Test hook for serialization lock verification (port of dill.dumps monkeypatch)
     public static Func<object, string>? TestSerializeHook;
     private readonly Dictionary<string, NodeArea> _areas = new();
@@ -96,14 +89,14 @@ public partial class NodeHandler
                                 }
                                 catch { grafted = false; }
                                 if (!grafted)
-                                    try { ObjectRegistry.RemoveObject(n); } catch { }
+                                    try { ObjectRegistry.RemoveObject(n); } catch (Exception) { }
                             }
                     }
                     _areas[na.Name] = na;
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt area row {row.Name}: {ex.GetType().Name}"); } catch { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt area row {row.Name}: {ex.GetType().Name}"); } catch (Exception) { }
                     throw;
                 }
             });
@@ -133,8 +126,8 @@ public partial class NodeHandler
                         {
                             foreach (var g in removed.Grids.Values)
                                 foreach (var n in g.Nodes.Values.ToList())
-                                    try { ObjectRegistry.RemoveObject(n); } catch { }
-                            try { AtherizLogger.LogWarning($"[Load] evicting deleted area {name}"); } catch { }
+                                    try { ObjectRegistry.RemoveObject(n); } catch (Exception) { }
+                            try { AtherizLogger.LogWarning($"[Load] evicting deleted area {name}"); } catch (Exception) { }
                         }
                     }
                 }
@@ -163,7 +156,7 @@ public partial class NodeHandler
                     finally { Lock3.ExitWriteLock(); }
                 }
             }
-            catch { }
+            catch (Exception) { }
         }
         catch { return; }
 
@@ -191,16 +184,16 @@ public partial class NodeHandler
                     if (existing.Count > 0 && !ReferenceEquals(existing[0], node))
                     {
                         bool liveModified = false;
-                        try { liveModified = existing[0].IsModified; } catch { }
+                        try { liveModified = existing[0].IsModified; } catch (Exception) { }
                         if (liveModified)
                         {
-                            try { AtherizLogger.LogWarning($"[Load] skipping stale node row {node.Id} (live modified)"); } catch { }
+                            try { AtherizLogger.LogWarning($"[Load] skipping stale node row {node.Id} (live modified)"); } catch (Exception) { }
                             continue;
                         }
                     }
                     ObjectRegistry.AddObject(node);
                     // Port of node.py:84-86 node.resolve_relations() — reinstall script hooks, ticker, at_init
-                    try { node.ResolveRelations(); } catch {}
+                    try { node.ResolveRelations(); } catch (Exception) { }
                 }
             }
         }
@@ -258,14 +251,18 @@ public partial class NodeHandler
     {
         if (!force && !ObjectRegistry.AlwaysSaveAll && !IsDirty()) return;
         try { Save(global::Atheriz.Core.Persistence.AtherizDbContextFactory.Create(), force); }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex)
         {
-            Console.Error.WriteLine($"database closed; skipping node save: {ex.Message}");
+            // Closed-DB guard is the IsClosed flag (no message sniffing).
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
             return;
         }
-        catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex)
         {
-            Console.Error.WriteLine($"database closed; skipping node save: {ex.Message}");
+            // Closed-DB races only (no message sniffing): anything else propagates.
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
             return;
         }
     }
@@ -365,7 +362,7 @@ public partial class NodeHandler
                                 scriptsSnap = n.ScriptsSet;
                                 var t = n.GetType();
                                 if (t != typeof(Node))
-                                    objType = t.AssemblyQualifiedName ?? t.FullName;
+                                    objType = Node.RegisteredNameFor(t) ?? t.AssemblyQualifiedName ?? t.FullName;
                             }
                             catch { scriptsSnap = new HashSet<int>(); }
                             dto = new NodeDto
@@ -474,9 +471,11 @@ public partial class NodeHandler
                 foreach (var n in clearedNodes) n.IsModified = true;
             });
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex)
         {
-            Console.Error.WriteLine($"database closed; skipping node save: {ex.Message}");
+            // Closed-DB guard is the IsClosed flag (no message sniffing).
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
             // restore already handled via onRollback for transaction failure, but for gate failure before transaction we restored via catch above
             // Ensure flags restored
             if (handlerWas) { Lock.EnterWriteLock(); try { _modified = true; } finally { Lock.ExitWriteLock(); } }
@@ -487,9 +486,11 @@ public partial class NodeHandler
             foreach (var n in clearedNodes) n.IsModified = true;
             return;
         }
-        catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex)
         {
-            Console.Error.WriteLine($"database closed; skipping node save: {ex.Message}");
+            // Closed-DB races only (no message sniffing): anything else propagates.
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
             if (handlerWas) { Lock.EnterWriteLock(); try { _modified = true; } finally { Lock.ExitWriteLock(); } }
             if (transWas) { Lock2.EnterWriteLock(); try { _modified2 = true; } finally { Lock2.ExitWriteLock(); } }
             if (doorsWas) { Lock3.EnterWriteLock(); try { _modified3 = true; } finally { Lock3.ExitWriteLock(); } }
@@ -543,21 +544,15 @@ public partial class NodeHandler
                     // Preserve concrete Node subclass via ObjectType (dill-like fidelity) — mirrors GameObject.FromDto __object_type handling
                     if (!string.IsNullOrEmpty(nd.ObjectType))
                     {
-                        Type? t = null;
-                        try { t = Type.GetType(nd.ObjectType!); } catch {}
-                        if (t == null)
+                        // Explicit subtype registry (replaces Type.GetType +
+                        // assembly scan + Activator): only registered names
+                        // reconstruct; anything else falls through to plain Node.
+                        Node? inst = null;
+                        try { Node.TryCreatePersistedSubtype(nd.ObjectType!, nd.Coord, out inst); } catch { inst = null; }
+                        if (inst != null)
                         {
-                            try { t = AppDomain.CurrentDomain.GetAssemblies().SelectMany(a=> { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } }).FirstOrDefault(x=> x.FullName==nd.ObjectType || x.Name==nd.ObjectType || x.AssemblyQualifiedName==nd.ObjectType); } catch {}
-                        }
-                        if (t != null && typeof(Node).IsAssignableFrom(t))
-                        {
-                            Node? inst = null;
-                            try { inst = (Node?)Activator.CreateInstance(t, new object[]{ nd.Coord }); } catch {}
-                            if (inst == null) try { inst = (Node?)Activator.CreateInstance(t, nonPublic:true); } catch {}
-                            if (inst != null)
-                            {
                                 // Remove from ObjectRegistry the auto-registered instance's temporary id collision
-                                try { ObjectRegistry.RemoveObject(inst); } catch {}
+                                try { ObjectRegistry.RemoveObject(inst); } catch (Exception) { }
                                 inst.Coord = nd.Coord;
                                 inst.Desc = nd.Desc;
                                 // base Name is coord string for Node, but preserve if needed
@@ -576,7 +571,6 @@ public partial class NodeHandler
                                 grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
                                 continue;
                             }
-                        }
                     }
                     node = Node.CreateForLoad(nd.Coord);
                     node.Name = nd.Name;

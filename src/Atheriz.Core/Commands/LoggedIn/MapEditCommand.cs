@@ -73,7 +73,7 @@ public sealed class DrawCommand : Command
         try { gridSnap = mi.PostGrid.ToList(); }
         finally { mi.Lock.ExitReadLock(); }
         NodeHandler? nh = null;
-        try { nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler(); } catch { }
+        try { nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler(); } catch (Exception) { }
         NodeArea? areaObj = nh?.GetArea(area);
         NodeGrid? nodeGrid = areaObj?.GetGrid(z);
 
@@ -141,7 +141,7 @@ public sealed class DrawCommand : Command
             var kw = new Dictionary<string, object?>();
             conn.SendCommand("launch_draw", argsList, kw);
         }
-        catch { }
+        catch (Exception) { }
         caller.Msg("Opening AtheriZ Draw in a new tab.");
     }
 }

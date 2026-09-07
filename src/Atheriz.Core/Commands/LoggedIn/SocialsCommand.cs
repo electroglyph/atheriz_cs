@@ -94,7 +94,7 @@ public sealed class SocialsCommand : Command
         {
             List<GameObject> targets;
             try { targets = go.Search(targetName, true, go); } catch { targets = []; }
-            if (targets.Count == 0 && loc != null) try { targets = loc.Search(targetName, true, go); } catch { }
+            if (targets.Count == 0 && loc != null) try { targets = loc.Search(targetName, true, go); } catch (Exception) { }
             if (targets.Count == 0) { go.Msg($"Could not find '{targetName}'."); return; }
             if (targets.Count > 1) { go.Msg($"Multiple matches for '{targetName}'. Be more specific."); return; }
             var target = targets[0];

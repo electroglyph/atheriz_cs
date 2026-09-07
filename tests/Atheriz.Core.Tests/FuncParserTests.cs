@@ -3,6 +3,7 @@ using Atheriz.Core.Objects.VerbConjugation;
 
 namespace Atheriz.Core.Tests;
 
+[Collection("Ported")]
 public class FuncParserTests
 {
     [Fact]

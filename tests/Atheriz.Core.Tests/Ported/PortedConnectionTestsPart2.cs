@@ -507,7 +507,7 @@ public class PortedConnectionTestsPart2
         var prev = AtherizSettings.Global.WebsocketEnabled;
         AtherizSettings.Global.WebsocketEnabled = true;
         try { new WebSocketProtocol().Setup(app); } finally { AtherizSettings.Global.WebsocketEnabled = prev; }
-        var endpoint = app.Captured["/ws"] as Func<dynamic, Task>;
+        var endpoint = app.Captured["/ws"] as Func<IWebSocketPeer, Task>;
         Assert.NotNull(endpoint);
         var ws = new WebSocketEndpointMockWs();
         ws.client = new MockClient2 { host = "1.2.3.4" };
@@ -516,7 +516,7 @@ public class PortedConnectionTestsPart2
         var mockMgr = new MockMgrForEndpoint { RegisterReturn = false };
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint!((dynamic)ws); } finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
+        try { await endpoint!(ws); } finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
         Assert.Equal(0, mockMgr.HandleCalls);
         Assert.Equal(0, mockMgr.DisconnectCalls);
     }
@@ -555,13 +555,13 @@ public class PortedConnectionTestsPart2
         public override void SendCommand(string cmd, List<object?>? args = null, Dictionary<string, object?>? kwargs = null) => throw new InvalidOperationException("boom");
         public override void Close(){}
     }
-    private sealed class WebSocketTestsFakeApp
+    private sealed class WebSocketTestsFakeApp : IWebSocketApp
     {
         public Dictionary<string, Delegate> Captured = new();
-        public Func<string, Func<Delegate, Delegate>> websocket => path => handler => { Captured[path]=handler; return handler; };
+        public void WebSocket(string path, Func<IWebSocketPeer, Task> endpoint) => Captured[path] = endpoint;
     }
-    private sealed class MockClient2 { public string host="1.2.3.4"; }
-    private sealed class WebSocketEndpointMockWs
+    private sealed class MockClient2 : IWebSocketClientInfo { public string host="1.2.3.4"; string? IWebSocketClientInfo.Host => host; }
+    private sealed class WebSocketEndpointMockWs : IWebSocketPeer
     {
         public object client = new MockClient2();
         public Func<Task<string>> receive_text = () => Task.FromResult("");
@@ -569,6 +569,10 @@ public class PortedConnectionTestsPart2
         public Task acceptMethod() => accept();
         public Task<string> receive_textMethod() => receive_text();
         public Task close(object? code=null, object? reason=null) => Task.CompletedTask;
+        object? IWebSocketPeer.Client => client;
+        Task IWebSocketPeer.AcceptAsync() => accept();
+        Task<string> IWebSocketPeer.ReceiveTextAsync() => receive_text();
+        Task IWebSocketPeer.CloseAsync(int code, string? reason) => close(code, reason);
     }
     private sealed class MockMgrForEndpoint : ConnectionManager
     {

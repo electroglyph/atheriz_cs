@@ -62,6 +62,60 @@ public partial class Node : GameObject
         var n = new Node(NoIdMarker.Instance, coord);
         return n;
     }
+
+    // Persisted-subtype registry (mirrors GameObject.RegisterPersistedSubtype):
+    // explicit factories replace the Type.GetType + assembly scan + Activator
+    // path. Base Node is pre-registered; games register Custom* node types at
+    // startup. Unregistered names load as plain nodes via CreateForLoad.
+    private static readonly Dictionary<string, Func<Coord, Node>> _persistedSubtypeFactories = new(StringComparer.Ordinal);
+    private static readonly Dictionary<Type, string> _persistedSubtypeNames = new();
+    private static readonly object _persistedSubtypeLock = new();
+    static Node() { _persistedSubtypeFactories[typeof(Node).FullName!] = c => CreateForLoad(c); _persistedSubtypeNames[typeof(Node)] = typeof(Node).FullName!; }
+    public static void RegisterPersistedSubtype(string fullName, Type type, Func<Coord, Node> factory)
+    {
+        if (string.IsNullOrEmpty(fullName)) throw new ArgumentException("Subtype full name required.", nameof(fullName));
+        if (type == null) throw new ArgumentNullException(nameof(type));
+        if (factory == null) throw new ArgumentNullException(nameof(factory));
+        lock (_persistedSubtypeLock) { _persistedSubtypeFactories[fullName] = factory; _persistedSubtypeNames[type] = fullName; }
+    }
+    internal static string? RegisteredNameFor(Type t)
+    {
+        lock (_persistedSubtypeLock) { return _persistedSubtypeNames.TryGetValue(t, out var n) ? n : null; }
+    }
+    internal static bool TryCreatePersistedSubtype(string objectType, Coord coord, out Node? node)
+    {
+        // Legacy saves store AssemblyQualifiedName; registrations use FullName:
+        // strip the ", Assembly..." suffix to normalize (type names never
+        // contain a bare comma).
+        string key = objectType;
+        int comma = key.IndexOf(',');
+        if (comma > 0) key = key.Substring(0, comma).Trim();
+        lock (_persistedSubtypeLock)
+        {
+            if (_persistedSubtypeFactories.TryGetValue(key, out var f)) { node = f(coord); return true; }
+            // Short-name fallback (mirrors the old scan matching x.Name).
+            foreach (var kv in _persistedSubtypeFactories)
+            {
+                var rkey = kv.Key;
+                var shortName = rkey.Substring(rkey.LastIndexOfAny(['.', '+']) + 1);
+                if (shortName == key) { node = kv.Value(coord); return true; }
+            }
+        }
+        // Shared GameObject subtype registry (tests and games register node
+        // doubles there, e.g. DummyNode): adopt Node instances from it.
+        // Hydration below overwrites the placeholder coord.
+        try
+        {
+            if (Persistence.Converters.GameObjectDtoConverter.TryCreateSubtype(key, out var shared) && shared is Node sharedNode)
+            {
+                node = sharedNode;
+                return true;
+            }
+        }
+        catch (Exception) { }
+        node = null;
+        return false;
+    }
     private sealed class NoIdMarker
     {
         public static readonly NoIdMarker Instance = new();
@@ -127,7 +181,7 @@ public partial class Node : GameObject
         foreach (var obj in contents)
         {
             if (excl != null && excl.Contains(obj)) continue;
-            try { func(obj); } catch { }
+            try { func(obj); } catch (Exception) { }
         }
     }
 
@@ -198,7 +252,7 @@ public partial class Node : GameObject
         bool open = false;
         var nh = NodeHandler.GetCurrent();
         Dictionary<string, Door>? doors = null;
-        try { doors = nh?.GetDoors(Coord); } catch { }
+        try { doors = nh?.GetDoors(Coord); } catch (Exception) { }
         if (doors != null && doors.Count > 0)
         {
             foreach (var d in doors.Values) { if (!d.Closed) { open = true; break; } }
@@ -216,7 +270,7 @@ public partial class Node : GameObject
                 if (!pre.ok) continue;
                 o.AtHear(pre.emitter, pre.desc, pre.msg, pre.loudness, pre.isSay);
             }
-            catch { }
+            catch (Exception) { }
         }
             return loud2 - attenuation;
         }, emitter, soundDesc, soundMsg, loudness, isSay);
@@ -309,8 +363,8 @@ public partial class Node : GameObject
                 {
                     if (ReferenceEquals(content.ResolveLocationObject(), obj))
                     {
-                        try { obj.RemoveObject(content); } catch { }
-                        try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch { }
+                        try { obj.RemoveObject(content); } catch (Exception) { }
+                        try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception) { }
                     }
                     var res = content.Delete(caller, true);
                     if (res != null) { allOps.AddRange(res.Value.ops); count += res.Value.count; }
@@ -322,9 +376,9 @@ public partial class Node : GameObject
         {
             if (IsTickable)
             {
-                try { GlobalTickerHolder.Get()?.RemoveCoro(AtTick, TickSeconds); } catch { }
+                try { GlobalTickerHolder.Get()?.RemoveCoro(AtTick, TickSeconds); } catch (Exception) { }
             }
-            try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch { }
+            try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch (Exception) { }
         }
         if (caller != null && !AtDelete(caller)) return null;
         SyncRoot.EnterWriteLock();
@@ -346,7 +400,7 @@ public partial class Node : GameObject
         {
             if (!Access(caller, "delete"))
             {
-                try { caller.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch { }
+                try { caller.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch (Exception) { }
                 return false;
             }
             return true;
@@ -387,7 +441,7 @@ public sealed class ExitCommand : Command
             {
                 // Port of exit.py:95-103 via the shared helper: moving
                 // through an exit breaks following like any other move.
-                try { Commands.LoggedIn.LoggedInExitCommand.ClearFollowing(go); } catch { }
+                try { Commands.LoggedIn.LoggedInExitCommand.ClearFollowing(go); } catch (Exception) { }
                 go.MoveTo(dest);
             }
             else go.Msg("You can't go that way.");

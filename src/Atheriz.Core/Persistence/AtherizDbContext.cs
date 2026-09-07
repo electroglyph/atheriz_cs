@@ -32,7 +32,6 @@ public sealed class AtherizDbContext : DbContext
     // Port of database_setup.py:14-15 _CLOSED and _DATABASE global
     private static bool _closed = false;
     private static readonly object _initLock = new();
-
     public static bool IsClosed { get { lock (_initLock) return _closed; } }
 
     // Port of database_setup.py:45 reopen_database() — clears _CLOSED flag for reset command (atheriz.py:1472)
@@ -51,7 +50,7 @@ public sealed class AtherizDbContext : DbContext
     public void Close()
     {
         lock (_initLock) _closed = true;
-        try { Database.CloseConnection(); } catch { }
+        try { Database.CloseConnection(); } catch (Exception) { }
     }
 
     public AtherizDbContext(string savePath)
@@ -111,9 +110,9 @@ public sealed class AtherizDbContext : DbContext
         catch
         {
             try { Database.ExecuteSqlRaw("PRAGMA journal_mode=DELETE;"); Database.ExecuteSqlRaw("PRAGMA synchronous=NORMAL;"); Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;"); }
-            catch { }
+            catch (Exception) { }
         }
-        try { Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;"); } catch { }
+        try { Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;"); } catch (Exception) { }
     }
 
     public async Task EnsureCreatedAsync(CancellationToken ct = default)

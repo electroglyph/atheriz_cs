@@ -8,6 +8,7 @@ using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Tests;
 
+[Collection("Ported")]
 public class WontfixRegressionTests
 {
     // Port of AGENTS.md put covers all placement wontfix: put.py:34-36 + drop.py:26

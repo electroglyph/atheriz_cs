@@ -38,7 +38,7 @@ public sealed class MazeCommand : Command
         {
             var globalNh = GlobalServices.GetNodeHandler();
             NodeHandler? factoryNh = null;
-            try { factoryNh = NodeHandlerFactory(); } catch { }
+            try { factoryNh = NodeHandlerFactory(); } catch (Exception) { }
             if (factoryNh != null && !ReferenceEquals(factoryNh, globalNh))
             {
                 // Test injected custom handler via factory – honour it (keeps MazeMapsStoredInPreGrid passing)
@@ -65,7 +65,7 @@ public sealed class MazeCommand : Command
         {
             var globalMh = GlobalServices.GetMapHandler();
             MapHandler? factoryMh = null;
-            try { factoryMh = MapHandlerFactory(); } catch { }
+            try { factoryMh = MapHandlerFactory(); } catch (Exception) { }
             if (factoryMh != null && !ReferenceEquals(factoryMh, globalMh))
             {
                 // Test injected custom MapHandler – honour it to keep PortedMaze tests passing,
@@ -76,8 +76,8 @@ public sealed class MazeCommand : Command
             else mh = globalMh;
         }
         catch { mh = MapHandlerFactory(); }
-        try { MapHandlerHolder.Set(mh); } catch { }
-        try { Atheriz.Core.Objects.MapHandlerSingleton.Set(mh); } catch { }
+        try { MapHandlerHolder.Set(mh); } catch (Exception) { }
+        try { Atheriz.Core.Objects.MapHandlerSingleton.Set(mh); } catch (Exception) { }
         GlobalServices.SetMapHandler(mh);
         var maze1Exit = tuple1.grid.GetRandomNode();
         var maze2Exit = tuple2.grid.GetRandomNode();
@@ -115,16 +115,16 @@ public sealed class MazeCommand : Command
                             var (found, path, dead) = Pathfind.AStar(start, end, go, nh);
                             sw2.Stop();
                             // Verbatim maze.py do_pathfind: unbackground first, then background.
-                            try { capturedConn?.SendCommand("unbackground", new List<object?> { "" }, null); } catch { }
+                            try { capturedConn?.SendCommand("unbackground", new List<object?> { "" }, null); } catch (Exception) { }
                             if (found)
                             {
                                 go.Msg($"path found in: {sw2.Elapsed.TotalMilliseconds:F2} milliseconds");
                                 try
                                 {
                                     var bgPayload = new Dictionary<string, object?> { ["color"] = new List<int> { 83, 128, 56 }, ["coords"] = path.Select(n => (object)new List<int> { n.Coord.X, n.Coord.Y }).ToList() };
-                                    try { capturedConn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch { }
-                                    if (capturedConn == null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch { }
-                                } catch { }
+                                    try { capturedConn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
+                                    if (capturedConn == null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
+                                } catch (Exception) { }
                             }
                             else
                             {
@@ -132,19 +132,19 @@ public sealed class MazeCommand : Command
                                 try
                                 {
                                     var bgPayload = new Dictionary<string, object?> { ["color"] = new List<int> { 90, 0, 0 }, ["coords"] = dead.Select(c => (object)new List<int> { c.X, c.Y }).ToList() };
-                                    try { capturedConn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch { }
-                                    if (capturedConn == null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch { }
-                                } catch { }
+                                    try { capturedConn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
+                                    if (capturedConn == null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
+                                } catch (Exception) { }
                             }
                         }
-                        catch (Exception ex) { try { go.Msg($"pathfind error: {ex.Message}"); } catch { } }
+                        catch (Exception ex) { try { go.Msg($"pathfind error: {ex.Message}"); } catch (Exception) { } }
                     });
                 }
             }
-            catch { }
+            catch (Exception) { }
             if (!queued) go.Msg("Pathfinding queue full; try again in a moment.");
             else go.Msg($"moving to: {start} ...");
-            try { go.IsMapable = true; } catch { }
+            try { go.IsMapable = true; } catch (Exception) { }
             go.MapEnabled = true;
             go.MoveTo(start);
         }

@@ -29,6 +29,8 @@ public class AsyncThreadPool : IDisposable
     private long _lastReliefSpawnTicks;
     private long _lastFullLogTicks;
     private bool _stopped;
+    // Signalled by Stop so sleep loops exit promptly without Thread.Sleep polling.
+    private readonly ManualResetEventSlim _stopEvent = new(false);
     private readonly Dictionary<long, (string Name, double StartedSeconds)> _currentTasks = new();
     private double? _saturatedSince;
     private double _lastStarvationLog;
@@ -223,7 +225,7 @@ public class AsyncThreadPool : IDisposable
                         }
                     }
                     // Brief yield for fixed workers to pick sentinel (relief thread, not pool worker)
-                    for (int _s = 0; _s < 50; _s += 10) { Thread.Sleep(10); lock (_lock) if (_stopped) return; }
+                    _stopEvent.Wait(TimeSpan.FromMilliseconds(50)); lock (_lock) if (_stopped) return;
                     continue;
                 }
                 break;
@@ -319,7 +321,8 @@ public class AsyncThreadPool : IDisposable
             var total = TimeSpan.Zero;
             while (total < _watchdogInterval)
             {
-                Thread.Sleep(slice);
+                // Event wait instead of Thread.Sleep so Stop wakes the watchdog immediately.
+                _stopEvent.Wait(slice);
                 total += slice;
                 lock (_lock) { if (_stopped) return; }
             }
@@ -366,9 +369,9 @@ public class AsyncThreadPool : IDisposable
         var now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
         var detail = string.Join(", ", tasks.OrderBy(kv => kv.Key).Select(kv => $"{kv.Value.Name} running {now - kv.Value.Started:F1}s"));
         var msg = $"[AsyncThreadPool] starvation suspected: {qsize} task(s) queued, {busy}/{_maxThreads - 1} workers busy for {duration:F1}s; running: [{detail}]";
-        // Log via AtherizLogger which also echoes to Console.Error for CaptureAtherizLog (see Logger.Write)
-        // Duplicate Console.Error is handled inside Logger; avoid double-write that would double-count in tests
-        try { AtherizLogger.LogError(msg); } catch { Console.Error.WriteLine(msg); }
+        // Log via AtherizLogger which also echoes to Console.Error for CaptureAtherizLog (see Logger.Write).
+        // Logger is the last resort here: if it throws there is nowhere left to report.
+        try { AtherizLogger.LogError(msg); } catch (Exception) { }
     }
 
     public virtual bool AddTask(Action action)
@@ -387,13 +390,46 @@ public class AsyncThreadPool : IDisposable
     public virtual bool AddTask(Func<Task> asyncFunc, string name) => AddInternal(asyncFunc, name);
 
     // For python test compat: bool AddTask(Delegate) etc.
+    // Typed delegate binding (replaces DynamicInvoke): closed Action/Func shapes
+    // only. Callers with other shapes must bind arguments into a closure and use
+    // the Action/Func<Task> overloads (narrowing of Python's arbitrary callables).
+    private static Func<object?> BindDelegate(Delegate del, object?[] args)
+    {
+        args ??= [];
+        if (args.Length == 0)
+        {
+            if (del is Action a) return () => { a(); return null; };
+            if (del is Func<Task> ft) return () => ft();
+            throw new ArgumentException($"Unsupported 0-arg delegate shape {del.Method.Name}; use an Action/Func<Task> overload.", nameof(del));
+        }
+        if (args.Length == 1)
+        {
+            var a0 = args[0];
+            // Reference-type parameters via contravariance (covers Action<string> etc.).
+            // Null arg passes through as null, matching the old DynamicInvoke behavior.
+            if (del is Action<object> ao) return () => { ao(a0!); return null; };
+            if (del is Func<object, Task> fo) return () => fo(a0!);
+            if (a0 is int i)
+            {
+                if (del is Action<int> ai) return () => { ai(i); return null; };
+                if (del is Func<int, Task> fi) return () => fi(i);
+            }
+            if (a0 is bool b)
+            {
+                if (del is Action<bool> ab) return () => { ab(b); return null; };
+                if (del is Func<bool, Task> fb) return () => fb(b);
+            }
+            throw new ArgumentException($"Unsupported 1-arg delegate shape {del.Method.Name}; bind arguments into an Action/Func<Task> closure.", nameof(del));
+        }
+        throw new ArgumentException($"AddTask/Run accept at most 1 delegate argument; bind arguments into an Action/Func<Task> closure.", nameof(args));
+    }
     public virtual bool AddTask(Delegate del, params object?[] args)
     {
-        if (del is Action a) return AddTask(a);
-        if (del is Func<Task> f) return AddTask(f);
-        // Fallback: wrap delegate invoke
+        var bound = BindDelegate(del, args);
+        // Fallback: wrap delegate invoke (returned Task intentionally unobserved,
+        // matching the historical DynamicInvoke fallback).
         string name = del.Method.Name ?? "delegate";
-        return AddInternal(() => { del.DynamicInvoke(args); return Task.CompletedTask; }, name);
+        return AddInternal(() => { bound(); return Task.CompletedTask; }, name);
     }
 
     // Port of asyncthreadpool.py: run() executes sync inline and logs exceptions without raising
@@ -401,12 +437,12 @@ public class AsyncThreadPool : IDisposable
     {
         try
         {
-            var r = del.DynamicInvoke(args);
+            var r = BindDelegate(del, args)();
             // A returned Task is not a loop coroutine (no loop exists here),
             // but it must not go unobserved: log faults like _do_async does.
-            if (r is Task t) _ = t.ContinueWith(ct => { if (ct.IsFaulted && ct.Exception != null) try { Console.Error.WriteLine(ct.Exception.ToString()); } catch { } }, TaskScheduler.Default);
+            if (r is Task t) _ = t.ContinueWith(ct => { if (ct.IsFaulted && ct.Exception != null) try { AtherizLogger.LogError(ct.Exception.ToString()); } catch (Exception) { } }, TaskScheduler.Default);
         }
-        catch (Exception ex) { Console.Error.WriteLine(ex.ToString()); }
+        catch (Exception ex) { try { AtherizLogger.LogError(ex.ToString()); } catch (Exception) { } }
     }
     public virtual void Run(Action action)
     {
@@ -494,8 +530,9 @@ public class AsyncThreadPool : IDisposable
         {
             if (_stopped) return;
             _stopped = true;
+            _stopEvent.Set();
         }
-        Console.Error.WriteLine("at AsyncThreadPool.stop() ...");
+        AtherizLogger.LogError("at AsyncThreadPool.stop() ...");
 
         // Drain preserving non-null tasks, similar to Python logic, while holding both locks
         List<WorkItem?> preserved = new();
@@ -556,6 +593,7 @@ public class AsyncThreadPool : IDisposable
     {
         if (_disposed) return;
         Stop(wait: true);
+        _stopEvent.Dispose();
         _disposed = true;
     }
 }

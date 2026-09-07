@@ -84,12 +84,12 @@ public class PortedTelnetTestsPart2
     }
 
     // ----- TelnetLifespan -----
-    private sealed class FakeAppLifespan
+    private sealed class FakeAppLifespan : ITelnetApp
     {
         public FakeRouterLifespan Router { get; } = new();
-        public FakeRouterLifespan router => Router;
+        ITelnetRouter? ITelnetApp.Router => Router;
     }
-    private sealed class FakeRouterLifespan
+    private sealed class FakeRouterLifespan : ITelnetRouter
     {
         public object? lifespan_context;
         public object? LifespanContext { get=> lifespan_context; set=> lifespan_context=value; }

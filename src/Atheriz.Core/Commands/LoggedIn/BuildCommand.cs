@@ -146,7 +146,7 @@ public sealed class BuildCommand : Command
                         else if (val == null) loc = null;
                     }
                 }
-                catch { }
+                catch (Exception) { }
             }
         }
         else
@@ -167,7 +167,7 @@ public sealed class BuildCommand : Command
                     if (val is Node nnode) loc = nnode;
                 }
             }
-            catch { }
+            catch (Exception) { }
         }
 
         if (loc == null)
@@ -381,7 +381,7 @@ public sealed class BuildCommand : Command
                         if (prop != null && prop.CanWrite) prop.SetValue(caller, lastNewNode);
                     }
                 }
-                catch { }
+                catch (Exception) { }
             }
         }
     }

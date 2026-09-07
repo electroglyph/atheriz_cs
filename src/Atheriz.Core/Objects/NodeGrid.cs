@@ -120,8 +120,8 @@ public sealed class NodeGrid
         finally { Lock.ExitWriteLock(); }
         if (old != null && !ReferenceEquals(old, node))
         {
-            try { Console.Error.WriteLine($"Warning: overwriting node at {(node.Coord.X, node.Coord.Y)}"); } catch { }
-            try { AtherizLogger.LogWarning($"Overwriting node at {node.Coord}"); } catch { }
+            try { Console.Error.WriteLine($"Warning: overwriting node at {(node.Coord.X, node.Coord.Y)}"); } catch (Exception) { }
+            try { AtherizLogger.LogWarning($"Overwriting node at {node.Coord}"); } catch (Exception) { }
             old.IsDeleted = true;
             ObjectRegistry.RemoveObject(old);
         }
@@ -268,7 +268,7 @@ public sealed class NodeGrid
         // rebuild ExitCommands
         foreach (var node in affected.Values)
             foreach (var obj in node.GetContents())
-                try { node.AddExits(obj); } catch { }
+                try { node.AddExits(obj); } catch (Exception) { }
 
         return failed.ToList();
     }

@@ -27,7 +27,7 @@ public partial class NodeHandler
         // nesting). MapClose/MapOpen already implement the post_grid (+pre_grid
         // if non-empty) stamp + render; the MapEnabled gate only skips render
         // work when maps are disabled.
-        try { if (door.Closed) door.MapClose(); else door.MapOpen(); } catch { }
+        try { if (door.Closed) door.MapClose(); else door.MapOpen(); } catch (Exception) { }
     }
     // Port of node.py remove_door: entries are removed by VALUE (v == door),
     // not by exit-name key.
@@ -68,7 +68,7 @@ public partial class NodeHandler
                 }
             }
         }
-        catch { }
+        catch (Exception) { }
     }
     public void AddNode(Node node)
     {

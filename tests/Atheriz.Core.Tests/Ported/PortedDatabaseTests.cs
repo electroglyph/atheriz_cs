@@ -224,15 +224,13 @@ public class PortedDatabaseTests
         obj.GetSaveOps();
         Assert.True(obj.IsModified);
     }
-    private sealed class LockCountTracker { public int Entries = 0; }
+    private sealed class LockCountTracker : IWriteLockTracker { public int Entries = 0; public void TrackWriteLock() => Entries++; }
     [Fact] public void SaveUsesLock()
     {
         var obj=new DbHolder(); obj.Id=1;
         var tracker = new LockCountTracker();
         var trackerField = typeof(GameObject).GetField("_testTracker", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var entriesField = typeof(LockCountTracker).GetField(nameof(LockCountTracker.Entries));
         trackerField!.SetValue(obj, tracker);
-        typeof(GameObject).GetField("_trackerEntriesField", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(obj, entriesField);
         obj.GetSaveOps();
         Assert.True(tracker.Entries > 0);
         // Also ensure exactly one acquisition for faithful to Python's acquired == [True]

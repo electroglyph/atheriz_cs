@@ -25,7 +25,7 @@ public sealed class ConnectCommand : Command
         var accounts = ObjectRegistry.FilterBy(x => x.IsAccount && x.Name.Equals(accountName, StringComparison.OrdinalIgnoreCase));
         if (accounts.Count == 0)
         {
-            try { Account.HashPassword(password); } catch { }
+            try { Account.HashPassword(password); } catch (Exception) { }
             caller.Msg("Invalid password.");
             return;
         }
@@ -46,7 +46,7 @@ public sealed class ConnectCommand : Command
                 // Atomic increment under the dict lock (F005) — no snapshot alloc, no lost updates.
                 attempts = ObjectRegistry.FailedLogins.AddOrUpdate(host, (exists, cur) => cur + 1);
             }
-            try { if (caller is BaseConnection bc) bc.FailedLoginAttempts++; } catch { }
+            try { if (caller is BaseConnection bc) bc.FailedLoginAttempts++; } catch (Exception) { }
             caller.Msg("Invalid password.");
             int fail2 = (caller as BaseConnection)?.FailedLoginAttempts ?? 0;
             var settings = AtherizSettings.Global;
@@ -60,11 +60,11 @@ public sealed class ConnectCommand : Command
         }
         string host2 = (caller as BaseConnection)?.ClientHost ?? "?";
         if (host2 != "?") ObjectRegistry.FailedLogins.Remove(host2);
-        try { if (caller is BaseConnection bc) bc.FailedLoginAttempts = 0; } catch { }
+        try { if (caller is BaseConnection bc) bc.FailedLoginAttempts = 0; } catch (Exception) { }
         if (caller is BaseConnection conn2 && conn2.Session != null)
         {
             conn2.Session.Account = account;
-            try { conn2.Session.AccountId = account.Id; } catch { }
+            try { conn2.Session.AccountId = account.Id; } catch (Exception) { }
             conn2.SendCommand("logged_in");
             // Port of connect.py:154 await char_selection(caller, account) — fire-and-forget async
             _ = Task.Run(async () =>
@@ -176,9 +176,9 @@ public sealed class ConnectCommand : Command
                     else
                     {
                         caller.Session.Puppet = chosen;
-                        try { chosen.Session = caller.Session; } catch { }
+                        try { chosen.Session = caller.Session; } catch (Exception) { }
                         caller.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        try { caller.Session.ConnectedAt = DateTime.UtcNow; } catch { }
+                        try { caller.Session.ConnectedAt = DateTime.UtcNow; } catch (Exception) { }
                         success = true;
                     }
                 }

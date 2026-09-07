@@ -165,13 +165,6 @@ public class MapInfo
     public ReaderWriterLockSlim Lock => _lock;
     public IDisposable ReadScope() { _lock.EnterReadLock(); return new LockScope(_lock, false); }
     public IDisposable WriteScope() { _lock.EnterWriteLock(); return new LockScope(_lock, true); }
-    private sealed class LockScope : IDisposable
-    {
-        private readonly ReaderWriterLockSlim _rw;
-        private readonly bool _isWrite;
-        public LockScope(ReaderWriterLockSlim rw, bool isWrite) { _rw = rw; _isWrite = isWrite; }
-        public void Dispose() { if (_isWrite) _rw.ExitWriteLock(); else _rw.ExitReadLock(); }
-    }
     private int _batchUpdate = 0;
     private bool _legendSuppressed = false;
 
@@ -424,7 +417,7 @@ public class MapInfo
                 return false;
             }
         }
-        catch { }
+        catch (Exception) { }
         return false;
     }
 
@@ -451,7 +444,7 @@ public class MapInfo
             }
             if (listener is GameObject go) return go.MapEnabled;
         }
-        catch { }
+        catch (Exception) { }
         return true;
     }
 
@@ -471,7 +464,7 @@ public class MapInfo
                     if (v is int ii) return (double)ii;
                     if (v is long ll) return (double)ll;
                     if (v is decimal dc) return (double)dc;
-                    try { return Convert.ToDouble(v); } catch { }
+                    try { return Convert.ToDouble(v); } catch (Exception) { }
                 }
             }
             foreach (var p in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic))
@@ -485,12 +478,12 @@ public class MapInfo
                     if (v is int ii) return (double)ii;
                     if (v is long ll) return (double)ll;
                     if (v is decimal dc) return (double)dc;
-                    try { return Convert.ToDouble(v); } catch { }
+                    try { return Convert.ToDouble(v); } catch (Exception) { }
                 }
             }
             if (listener is GameObject go) return go.LastMapTime;
         }
-        catch { }
+        catch (Exception) { }
         return null;
     }
 
@@ -511,7 +504,7 @@ public class MapInfo
                         if (res is Dictionary<(int X, int Y), string> d) return d;
                         if (res != null)
                         {
-                            try { return (Dictionary<(int X, int Y), string>)res; } catch { }
+                            try { return (Dictionary<(int X, int Y), string>)res; } catch (Exception) { }
                         }
                         return grid;
                     }
@@ -519,7 +512,7 @@ public class MapInfo
             }
             if (listener is GameObject go) return go.AtPreMapRender(grid);
         }
-        catch { }
+        catch (Exception) { }
         return grid;
     }
 
@@ -536,15 +529,15 @@ public class MapInfo
                     var pars = m.GetParameters();
                     if (pars.Length == 6)
                     {
-                        try { m.Invoke(listener, new object[] { mapStr, entries, minX, maxY, showLegend, name }); return; } catch { }
+                        try { m.Invoke(listener, new object[] { mapStr, entries, minX, maxY, showLegend, name }); return; } catch (Exception) { }
                     }
                 }
             }
             if (listener is GameObject go) { go.AtMapUpdate(mapStr, entries, minX, maxY, showLegend, name); return; }
-            try { ((dynamic)listener).AtMapUpdate(mapStr, entries, minX, maxY, showLegend, name); return; } catch { }
-            try { ((dynamic)listener).at_map_update(mapStr, entries, minX, maxY, showLegend, name); return; } catch { }
+            try { ((dynamic)listener).AtMapUpdate(mapStr, entries, minX, maxY, showLegend, name); return; } catch (Exception) { }
+            try { ((dynamic)listener).at_map_update(mapStr, entries, minX, maxY, showLegend, name); return; } catch (Exception) { }
         }
-        catch { }
+        catch (Exception) { }
     }
 
     private static void CallAtLegendUpdate(object listener, List<(string sym, string desc, (int x, int y) coord)> entries, bool show, string area)
@@ -560,15 +553,15 @@ public class MapInfo
                     var pars = m.GetParameters();
                     if (pars.Length == 3)
                     {
-                        try { m.Invoke(listener, new object[] { entries, show, area }); return; } catch { }
+                        try { m.Invoke(listener, new object[] { entries, show, area }); return; } catch (Exception) { }
                     }
                 }
             }
             if (listener is GameObject go) { go.AtLegendUpdate(entries, show, area); return; }
-            try { ((dynamic)listener).AtLegendUpdate(entries, show, area); return; } catch { }
-            try { ((dynamic)listener).at_legend_update(entries, show, area); return; } catch { }
+            try { ((dynamic)listener).AtLegendUpdate(entries, show, area); return; } catch (Exception) { }
+            try { ((dynamic)listener).at_legend_update(entries, show, area); return; } catch (Exception) { }
         }
-        catch { }
+        catch (Exception) { }
     }
 
     public virtual void RenderLegend()
@@ -615,8 +608,8 @@ public class MapInfo
                 {
                     string sym = "";
                     string desc = "";
-                    try { sym = o.Symbol ?? ""; } catch { }
-                    try { desc = o.Name ?? ""; } catch { }
+                    try { sym = o.Symbol ?? ""; } catch (Exception) { }
+                    try { desc = o.Name ?? ""; } catch (Exception) { }
                     objEntries.Add((o.Id, (sym, desc, c)));
                 }
             }
@@ -665,8 +658,8 @@ public class MapInfo
             {
                 string sym = "";
                 string desc = "";
-                try { sym = o.Symbol ?? ""; } catch { }
-                try { desc = o.Name ?? ""; } catch { }
+                try { sym = o.Symbol ?? ""; } catch (Exception) { }
+                try { desc = o.Name ?? ""; } catch (Exception) { }
                 objEntries.Add((o.Id, (sym, desc, c)));
             }
         }
@@ -847,13 +840,6 @@ public class MapHandler
     public ReaderWriterLockSlim Lock => _lock;
     public IDisposable ReadScope() { _lock.EnterReadLock(); return new LockScope(_lock, false); }
     public IDisposable WriteScope() { _lock.EnterWriteLock(); return new LockScope(_lock, true); }
-    private sealed class LockScope : IDisposable
-    {
-        private readonly ReaderWriterLockSlim _rw;
-        private readonly bool _isWrite;
-        public LockScope(ReaderWriterLockSlim rw, bool isWrite) { _rw = rw; _isWrite = isWrite; }
-        public void Dispose() { if (_isWrite) _rw.ExitWriteLock(); else _rw.ExitReadLock(); }
-    }
     // Test hook for serialization lock verification
     public static Func<object, string>? TestSerializeHook;
     private readonly Dictionary<(string Area, int Z), MapInfo> _data = new();
@@ -886,7 +872,7 @@ public class MapHandler
 
     public void Load()
     {
-        try { Load(AtherizDbContextFactory.Create()); } catch { }
+        try { Load(AtherizDbContextFactory.Create()); } catch (Exception) { }
     }
     public void Load(AtherizDbContext db)
     {
@@ -904,7 +890,7 @@ public class MapHandler
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt map chunk {row.Area}:{row.Z}: {ex.GetType().Name}"); } catch { }
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt map chunk {row.Area}:{row.Z}: {ex.GetType().Name}"); } catch (Exception) { }
                 }
             });
             // Clear-then-swap (mirrors ObjectRegistry.LoadObjects): rows deleted
@@ -922,7 +908,7 @@ public class MapHandler
                     catch { dbCheckFailed = true; }
                     if (dbCheckFailed || dbHasRows)
                     {
-                        try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch { }
+                        try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch (Exception) { }
                     }
                     else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; }
                 }
@@ -930,7 +916,7 @@ public class MapHandler
             }
             finally { Lock.ExitWriteLock(); }
         }
-        catch { }
+        catch (Exception) { }
     }
 
     public virtual void Save(bool force = false)
@@ -1018,9 +1004,11 @@ public class MapHandler
                 }
             });
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex)
         {
-            Console.Error.WriteLine($"database closed; skipping map save: {ex.Message}");
+            // Closed-DB guard is the IsClosed flag (no message sniffing).
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping map save: {ex.Message}");
             foreach (var mi in cleared)
             {
                 mi.Lock.EnterWriteLock();
@@ -1029,9 +1017,11 @@ public class MapHandler
             }
             return;
         }
-        catch (Exception ex) when (ex.Message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex)
         {
-            Console.Error.WriteLine($"database closed; skipping map save: {ex.Message}");
+            // Closed-DB races only (no message sniffing): anything else propagates.
+            if (!AtherizDbContext.IsClosed) throw;
+            AtherizLogger.LogWarning($"database closed; skipping map save: {ex.Message}");
             foreach (var mi in cleared)
             {
                 mi.Lock.EnterWriteLock();
@@ -1158,7 +1148,7 @@ public class MapHandler
             var conn = listener.Session?.Connection;
             conn?.SendCommand("unbackground", new List<object?> { "" }, null);
         }
-        catch { }
+        catch (Exception) { }
     }
 
     public void MoveMapable(GameObject mapable, Coord toCoord, Coord? fromCoord = null)

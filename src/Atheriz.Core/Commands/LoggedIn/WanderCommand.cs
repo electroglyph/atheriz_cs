@@ -66,8 +66,8 @@ public sealed class WanderCommand : Command
             var newArea = node.Coord.Area;
             if (oldArea != newArea)
             {
-                try { AtherizLogger.LogWarning($"NPC {Name} (#{Id}) crossing areas: {loc.Coord} -> {node.Coord} via link '{link.Name}' (link.coord={link.Coord})"); } catch { }
-                try { AtherizLogger.LogWarning($"Wanderer crossed area {oldArea} -> {newArea}"); } catch { }
+                try { AtherizLogger.LogWarning($"NPC {Name} (#{Id}) crossing areas: {loc.Coord} -> {node.Coord} via link '{link.Name}' (link.coord={link.Coord})"); } catch (Exception) { }
+                try { AtherizLogger.LogWarning($"Wanderer crossed area {oldArea} -> {newArea}"); } catch (Exception) { }
             }
             MoveTo(node, toExit: link.Name);
         }

@@ -17,7 +17,7 @@ public sealed class MapCommand : Command
         if (go.MapEnabled)
         {
             go.Msg("Map enabled.");
-            try { go.Session?.Connection?.SendCommand("map_enable", new List<object?> { "" }, null); } catch { }
+            try { go.Session?.Connection?.SendCommand("map_enable", new List<object?> { "" }, null); } catch (Exception) { }
             if (AtherizSettings.Global.MapEnabled)
             {
                 var loc = go.ResolveLocationObject() as Node;
@@ -29,14 +29,14 @@ public sealed class MapCommand : Command
                         var mi = mh.GetMapInfo(loc.Coord.Area, loc.Coord.Z);
                         mi?.Render(true);
                     }
-                    catch { }
+                    catch (Exception) { }
                 }
             }
         }
         else
         {
             go.Msg("Map disabled.");
-            try { go.Session?.Connection?.SendCommand("map_disable", new List<object?> { "" }, null); } catch { }
+            try { go.Session?.Connection?.SendCommand("map_disable", new List<object?> { "" }, null); } catch (Exception) { }
         }
     }
 }

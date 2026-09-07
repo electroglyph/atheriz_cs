@@ -4,6 +4,7 @@ using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Tests;
 
+[Collection("Ported")]
 public sealed class NetworkTests
 {
     [Fact]

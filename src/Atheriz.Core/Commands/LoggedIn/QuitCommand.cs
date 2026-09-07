@@ -18,11 +18,11 @@ public sealed class QuitCommand : Command
         caller.Msg("Goodbye!");
         if (caller is GameObject go)
         {
-            try { go.Session?.Connection?.Close(); } catch { }
+            try { go.Session?.Connection?.Close(); } catch (Exception) { }
         }
         else if (caller is Session sess)
         {
-            try { sess.Connection?.Close(); } catch { }
+            try { sess.Connection?.Close(); } catch (Exception) { }
         }
     }
 }

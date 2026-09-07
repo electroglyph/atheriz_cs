@@ -158,7 +158,9 @@ public static class InitialSetup
             {
                 if (!Console.IsInputRedirected)
                 {
-                    Console.Write("Enter superuser username: ");
+                    // Explicit Console.Out (not Logger): interactive prompts must stay
+                    // on stdout interleaved with stdin reads, mirroring print()/input().
+                    Console.Out.Write("Enter superuser username: ");
                     u = Console.ReadLine()?.Trim();
                 }
             }
@@ -168,7 +170,7 @@ public static class InitialSetup
                 Console.Error.WriteLine("Error: Username cannot be empty.");
                 // still save world without account? Python would return early after error during creation — we mimic that
                 // but limbo already saved, so return
-                Console.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
+                Console.Out.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
                 return;
             }
         }
@@ -181,7 +183,7 @@ public static class InitialSetup
             {
                 if (!Console.IsInputRedirected)
                 {
-                    Console.Write("Enter superuser password: ");
+                    Console.Out.Write("Enter superuser password: ");
                     // simple no-echo fallback
                     try
                     {
@@ -192,7 +194,7 @@ public static class InitialSetup
                             if (k.Key == ConsoleKey.Backspace && sb.Length > 0) sb.Length--;
                             else if (!char.IsControl(k.KeyChar)) sb.Append(k.KeyChar);
                         }
-                        Console.WriteLine();
+                        Console.Out.WriteLine();
                         p = sb.ToString().Trim();
                     }
                     catch { p = Console.ReadLine()?.Trim(); }
@@ -202,7 +204,7 @@ public static class InitialSetup
             if (string.IsNullOrWhiteSpace(p))
             {
                 Console.Error.WriteLine("Error: Password cannot be empty.");
-                Console.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
+                Console.Out.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
                 return;
             }
         }
@@ -242,7 +244,7 @@ public static class InitialSetup
         string saltVal;
         try { saltVal = SaltProvider.GetSalt(absSecret); } catch { saltVal = SaltProvider.GetSalt(absSecret); }
         var account = Account.Create(u!, p!, saltOverride: saltVal);
-        Console.WriteLine($"Creating character '{u!}'...");
+        Console.Out.WriteLine($"Creating character '{u!}'...");
         var character = GameObject.Create(u!, isPc: true);
         character.Desc = "";
         // Port of Object.create add_object — faithful registry add before save

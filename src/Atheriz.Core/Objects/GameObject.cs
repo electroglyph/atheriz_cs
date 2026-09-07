@@ -7,6 +7,16 @@ using Atheriz.Core.Utils;
 namespace Atheriz.Core.Objects;
 
 /// <summary>
+/// Write-lock acquisition observer for the location-lock tests (ports the
+/// Python SpyLock tests): test doubles implement this to count EnterWriteLock
+/// calls routed through IncrementTracker. Production trackers stay null.
+/// </summary>
+internal interface IWriteLockTracker
+{
+    void TrackWriteLock();
+}
+
+/// <summary>
 /// Core entity. Ports <c>atheriz/objects/base_obj.py:Object</c> merged with
 /// <c>base_flags.Flags</c>, <c>base_lock.AccessLock</c>, <c>base_db_ops.DbOps</c>.
 /// Thread-safe via ReaderWriterLockSlim (SupportsRecursion) mirroring Python RLock.
@@ -27,9 +37,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public Action<GameObject?, string?>? AtObjectReceiveOverride { get; set; }
 
     // --- tracking for location lock test (counts EnterWriteLock calls when SetLockForTesting used) ---
-    private object? _testTracker;
-    private System.Reflection.FieldInfo? _trackerEntriesField;
-    protected void IncrementTracker() { if (_testTracker != null && _trackerEntriesField != null) { try { var cur = (int)(_trackerEntriesField.GetValue(_testTracker) ?? 0); _trackerEntriesField.SetValue(_testTracker, cur+1); } catch {} } }
+    // Typed via IWriteLockTracker (no reflection): test doubles implement the
+    // interface; production never sets a tracker (stays null).
+    private IWriteLockTracker? _testTracker;
+    protected void IncrementTracker() { try { _testTracker?.TrackWriteLock(); } catch (Exception) { } }
     private void EnterWriteLockTracked() { IncrementTracker(); _lock.EnterWriteLock(); }
     private void EnterReadLockTracked() { _lock.EnterReadLock(); }
     // Puppet snapshot — only is_pc/privilege_level per puppet.py:110 wontfix (quelled/can_hear/is_mapable not saved)
@@ -73,6 +84,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
 
     // hooks: funcName -> set of delegates tagged via attributes
     private Dictionary<string, HashSet<Delegate>> _hooks = [];
+    // Typed hooks access for Script.RemoveHooks (replaces _hooks reflection).
+    // Caller must hold the write lock; name mirrors the RawNoLock convention.
+    internal Dictionary<string, HashSet<Delegate>> HooksRawNoLock => _hooks;
 
     private Dictionary<string, JsonElement> _extra = [];
     private CmdSet? _internalCmdSet;
@@ -116,17 +130,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         IncrementTracker();
         _lock.EnterWriteLock();
         return new LockScope(_lock, isWrite: true);
-    }
-    private sealed class LockScope : IDisposable
-    {
-        private readonly ReaderWriterLockSlim _rw;
-        private readonly bool _isWrite;
-        public LockScope(ReaderWriterLockSlim rw, bool isWrite) { _rw = rw; _isWrite = isWrite; }
-        public void Dispose()
-        {
-            if (_isWrite) _rw.ExitWriteLock();
-            else _rw.ExitReadLock();
-        }
     }
 
     // --- properties (setters mark isModified) ---
@@ -186,7 +189,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                         pos = (n.Coord.X - minX, maxY - n.Coord.Y);
                 }
             }
-            catch { }
+            catch (Exception) { }
             try
             {
                 // Port of base_obj.py:790-801 self.msg(map={map, pos, symbol, legend, min_x, max_y, area, show_legend})
@@ -202,7 +205,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     ["show_legend"] = showLegend,
                 };
                 Session? sess = null;
-                try { sess = Session; } catch { }
+                try { sess = Session; } catch (Exception) { }
                 var conn = sess?.Connection;
                 if (conn != null)
                 {
@@ -212,10 +215,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 {
                     // Fallback for test harnesses without connection — store via _msgLog like original Python would via session.msg
                     // Use MsgInternal path via Session if available, otherwise log
-                    try { Msg($"[map:{name}]"); } catch { }
+                    try { Msg($"[map:{name}]"); } catch (Exception) { }
                 }
             }
-            catch { }
+            catch (Exception) { }
             LastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
             return 0;
         }, mapStr, entries, minX, maxY, showLegend, name);
@@ -233,12 +236,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     ["show_legend"] = show,
                 };
                 Session? sess = null;
-                try { sess = Session; } catch { }
+                try { sess = Session; } catch (Exception) { }
                 var conn = sess?.Connection;
                 if (conn != null)
                     conn.SendCommand("legend", new List<object?> { payload }, null);
             }
-            catch { }
+            catch (Exception) { }
             return 0;
         }, entries, show, area);
     }
@@ -287,7 +290,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public HashSet<int> FollowersSnapshot => Read(() => new HashSet<int>(_followers));
 
     public ReaderWriterLockSlim SyncRoot => _lock;
-    public void SetLockForTesting(ReaderWriterLockSlim newLock) { _lock = newLock; _testTracker = newLock; try { _trackerEntriesField = newLock.GetType().GetField("Entries", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance); } catch { _trackerEntriesField = null; } }
+    internal void SetLockForTesting(ReaderWriterLockSlim newLock) { _lock = newLock; _testTracker = newLock as IWriteLockTracker; }
 
     internal void SetIsDeletedRaw(bool v)
     {
@@ -370,7 +373,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             // deadlock against Msg delivery (channel → peer).
             if (channel.IsDeletedSnapshot())
             {
-                try { channel.RemoveListener(this); } catch { }
+                try { channel.RemoveListener(this); } catch (Exception) { }
             }
             else if (!_channels.Contains(channel.Id))
             {
@@ -395,7 +398,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     catch (InvalidOperationException) { /* already installed */ }
                 }
             }
-            catch { }
+            catch (Exception) { }
         }
     }
     /// <summary>
@@ -436,7 +439,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             // Port of base_obj.py:775-777: drop the channel command again.
             // Channel locks only (see Subscribe) — never under the peer lock.
             try { var cmd = channel.GetCommand(); if (cmd != null) InternalCmdSet?.Remove(cmd); }
-            catch { }
+            catch (Exception) { }
         }
     }
 
@@ -577,7 +580,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     {
         if (IsTickable)
         {
-            try { Objects.GlobalTickerHolder.Get()?.AddCoro(AtTick, TickSeconds); } catch { }
+            try { Objects.GlobalTickerHolder.Get()?.AddCoro(AtTick, TickSeconds); } catch (Exception) { }
         }
         HashSet<int> scripts;
         _lock.EnterReadLock();
@@ -588,10 +591,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             var lst = Globals.ObjectRegistry.Get(id);
             if (lst.Count > 0 && lst[0] is Script s)
             {
-                try { s.InstallHooks(this); } catch { }
+                try { s.InstallHooks(this); } catch (Exception) { }
             }
         }
-        try { AtInit(); } catch { }
+        try { AtInit(); } catch (Exception) { }
     }
 
     // --- DTO conversion (mirrors __getstate__/__setstate__) --- (persisted via Persistence/Converters/GameObjectDtoConverter.cs)
@@ -742,10 +745,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         // (load path re-registers via ResolveRelations).
         obj._internalCmdSet = new Commands.CmdSet();
         obj._externalCmdSet = new Commands.CmdSet();
-        try { obj.AtCreate(); } catch { }
+        try { obj.AtCreate(); } catch (Exception) { }
         if (isTickable)
         {
-            try { Objects.GlobalTickerHolder.Get()?.AddCoro(obj.AtTick, tickSeconds); } catch { }
+            try { Objects.GlobalTickerHolder.Get()?.AddCoro(obj.AtTick, tickSeconds); } catch (Exception) { }
         }
 
         return obj;

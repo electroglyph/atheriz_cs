@@ -165,10 +165,10 @@ public static class StartStop
                 var channel = GlobalServices.GetServerChannel();
                 if (channel != null)
                 {
-                    try { channel.Msg("Server is shutting down!"); } catch { }
+                    try { channel.Msg("Server is shutting down!"); } catch (Exception) { }
                 }
             }
-            catch { }
+            catch (Exception) { }
 
             Console.Error.WriteLine("Starting shutdown sequence..."); // Port of logger.info
 
@@ -184,7 +184,7 @@ public static class StartStop
                     if (t != null) Autosave.StopAutosave(t);
                     else Autosave.ResetForTesting(); // fallback placeholder
                 }
-                catch { }
+                catch (Exception) { }
             });
 
             // Port of startstop.py:67-68 if TIME_SYSTEM_ENABLED: get_game_time().stop
@@ -199,7 +199,7 @@ public static class StartStop
                         if (gt != null && t != null) gt.Stop(t);
                         else if (gt != null) gt.Stop();
                     }
-                    catch { }
+                    catch (Exception) { }
                 });
             }
 
@@ -233,17 +233,17 @@ public static class StartStop
                         var cm = TryGetConnectionManager();
                         cm?.Broadcast(msg);
                     }
-                    catch { }
+                    catch (Exception) { }
                     // Also try ObjectRegistry filter as utils.msg_all does
                     try
                     {
                         foreach (var obj in ObjectRegistry.FilterBy(o => o.IsPc && o.IsConnected))
-                            try { obj.Msg(msg); } catch { }
+                            try { obj.Msg(msg); } catch (Exception) { }
                     }
-                    catch { }
+                    catch (Exception) { }
                     Console.Error.WriteLine(msg);
                 }
-                catch { }
+                catch (Exception) { }
             });
 
             Console.Error.WriteLine("Shutdown sequence completed."); // Port of logger.info
@@ -256,7 +256,7 @@ public static class StartStop
                     // Faithful: clear only those three per Python, via GlobalServices helper
                     GlobalServices.ClearForShutdown();
                 }
-                catch { }
+                catch (Exception) { }
             });
 
             // Port of startstop.py:82 db_close get_database().close
@@ -267,9 +267,9 @@ public static class StartStop
                     // In C# AtherizDbContext is per-call, not singleton; ensure gate released
                     // Simulate get_database().close by disposing a factory context
                     using var db = new AtherizDbContext(settings.SavePath);
-                    try { db.Database.CloseConnection(); } catch { }
+                    try { db.Database.CloseConnection(); } catch (Exception) { }
                 }
-                catch { }
+                catch (Exception) { }
             });
 
             _started = false;
@@ -290,10 +290,10 @@ public static class StartStop
                 try { seconds = obj.TickSeconds; } catch { seconds = 1.0; }
                 if (seconds <= 0) seconds = 1.0;
                 try { ticker.AddCoro(atTick, seconds); }
-                catch (Exception ex) { Console.Error.WriteLine($"Failed to re-register tick for object {obj.Id}:\n{ex}"); }
+                catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Failed to re-register tick for object {obj.Id}:\n{ex}"); }
             }
         }
-        catch (Exception ex) { Console.Error.WriteLine($"Tick re-registration failed (objects):\n{ex}"); }
+        catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Tick re-registration failed (objects):\n{ex}"); }
 
         // Port of startstop.py:103-122 node handler grids
         try
@@ -324,24 +324,22 @@ public static class StartStop
                         try { seconds = node.TickSeconds; } catch { seconds = 1.0; }
                         if (seconds <= 0) seconds = 1.0;
                         try { ticker.AddCoro(atTick, seconds); }
-                        catch (Exception ex) { Console.Error.WriteLine($"Failed to re-register tick for node {node.Id}:\n{ex}"); }
+                        catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Failed to re-register tick for node {node.Id}:\n{ex}"); }
                     }
                 }
             }
         }
-        catch (Exception ex) { Console.Error.WriteLine($"Node tick re-registration failed:\n{ex}"); }
+        catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Node tick re-registration failed:\n{ex}"); }
     }
 
     private static Action? TryGetAtTick(object obj)
     {
-        try
-        {
-            var mi = obj.GetType().GetMethod("AtTick");
-            if (mi == null) return null;
-            // Need instance method; create Action that invokes via reflection
-            return () => { try { mi.Invoke(obj, null); } catch { } };
-        }
-        catch { return null; }
+        // Typed dispatch (replaces GetMethod("AtTick") reflection): every
+        // tickable is a GameObject (Node overrides AtTick). Tick faults stay
+        // silent per-tick, matching the old Invoke catch-swallow.
+        if (obj is Atheriz.Core.Objects.GameObject go)
+            return () => { try { go.AtTick(); } catch (Exception) { } };
+        return null;
     }
 
     // Port of startstop.py:125-153 do_reload
@@ -354,9 +352,9 @@ public static class StartStop
             try
             {
                 var ch = GlobalServices.GetServerChannel();
-                if (ch != null) try { ch.Msg("Server is reloading..."); } catch { }
+                if (ch != null) try { ch.Msg("Server is reloading..."); } catch (Exception) { }
             }
-            catch { }
+            catch (Exception) { }
 
             Console.Error.WriteLine("Starting reload sequence..."); // Port of logger.info
 
@@ -375,7 +373,7 @@ public static class StartStop
                         if (gt != null && t != null) gt.Stop(t);
                         else if (gt != null) gt.Stop();
                     }
-                    catch { }
+                    catch (Exception) { }
                 });
             }
 
@@ -387,7 +385,7 @@ public static class StartStop
                     var t = ticker ?? TryGetTicker();
                     if (t != null) Autosave.StopAutosave(t);
                 }
-                catch { }
+                catch (Exception) { }
             });
 
             // Port of startstop.py:141 get_async_ticker().clear()
@@ -436,16 +434,16 @@ public static class StartStop
                         Autosave.StartAutosave(t, settings, mh, nh, gt);
                     }
                 }
-                catch { }
+                catch (Exception) { }
             });
 
             // Port of startstop.py:150-152 channel msg reloaded
             try
             {
                 var ch = GlobalServices.GetServerChannel();
-                if (ch != null) try { ch.Msg("Server reloaded"); } catch { }
+                if (ch != null) try { ch.Msg("Server reloaded"); } catch (Exception) { }
             }
-            catch { }
+            catch (Exception) { }
 
             Console.Error.WriteLine("Reload sequence completed."); // Port of logger.info
         }
@@ -528,63 +526,46 @@ public static class StartStop
         try { return GlobalServices.TryGetConnectionManager(); } catch { return null; }
     }
 
+    // Game-side server-event handlers registered explicitly by game/plugin
+    // assemblies (replaces the assembly scan for server_events/ServerEvents types).
+    private static readonly Dictionary<string, List<Action>> _gameServerEventHandlers = new(StringComparer.Ordinal);
+    private static readonly object _gameServerEventLock = new();
+    /// <summary>Registers a game-side handler invoked after the core server event.</summary>
+    public static void RegisterGameServerEvent(string methodName, Action handler)
+    {
+        if (string.IsNullOrEmpty(methodName)) throw new ArgumentException("Server event name required.", nameof(methodName));
+        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        lock (_gameServerEventLock)
+        {
+            if (!_gameServerEventHandlers.TryGetValue(methodName, out var list))
+                _gameServerEventHandlers[methodName] = list = new List<Action>();
+            list.Add(handler);
+        }
+    }
     private static void TryInvokeServerEvent(string methodName)
     {
-        // Concrete type first — Port of atheriz/server_events.py:8 replaces reflection string lookup
+        // Concrete core dispatch — Port of atheriz/server_events.py:8 (no string lookup).
         try
         {
-            var coreType = typeof(Atheriz.Core.ServerEvents);
-            var miCore = coreType.GetMethod(methodName, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-            if (miCore != null)
+            switch (methodName)
             {
-                try { miCore.Invoke(null, null); return; } catch { }
+                case "AtServerStart": Atheriz.Core.ServerEvents.AtServerStart(); break;
+                case "AtServerStop": Atheriz.Core.ServerEvents.AtServerStop(); break;
+                case "AtServerReload": Atheriz.Core.ServerEvents.AtServerReload(); break;
+                default: break;
             }
         }
-        catch { }
-        // Try game-folder server_events via reflection if loaded, else Atheriz.Core stub
-        // Search loaded assemblies for type named server_events or ServerEvents
-        try
+        catch (Exception) { }
+        // Game-side handlers registered via RegisterGameServerEvent.
+        List<Action>? handlers = null;
+        lock (_gameServerEventLock) { if (_gameServerEventHandlers.TryGetValue(methodName, out var list)) handlers = new List<Action>(list); }
+        if (handlers != null)
         {
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (var h in handlers)
             {
-                Type? t = null;
-                try { t = asm.GetType("server_events"); } catch { }
-                if (t == null) try { t = asm.GetType("ServerEvents"); } catch { }
-                if (t == null)
-                {
-                    foreach (var type in asm.GetTypes())
-                    {
-                        if (string.Equals(type.Name, "server_events", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(type.Name, "ServerEvents", StringComparison.OrdinalIgnoreCase))
-                        { t = type; break; }
-                    }
-                }
-                if (t != null)
-                {
-                    // Skip core type already tried
-                    if (t == typeof(Atheriz.Core.ServerEvents)) continue;
-                    var mi = t.GetMethod(methodName, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Instance);
-                    if (mi != null)
-                    {
-                        try
-                        {
-                            if (mi.IsStatic) mi.Invoke(null, null);
-                            else
-                            {
-                                var inst = Activator.CreateInstance(t);
-                                mi.Invoke(inst, null);
-                            }
-                            return;
-                        }
-                        catch { }
-                    }
-                }
+                try { h(); } catch (Exception) { }
             }
         }
-        catch { }
-        // No server_events found — placeholder (mirrors ImportError fallback to atheriz.server_events)
-        // Do nothing; real engine would call atheriz.server_events.at_server_start/stop/reload
-        Debug.WriteLine($"[StartStop] {methodName} no-op (server_events not found)");
     }
 
     // For tests — mirrors ServerLifecycle.ResetForTesting and Python _shutdown_completed reset
@@ -596,8 +577,8 @@ public static class StartStop
             _shuttingDown = false;
             _started = false;
         }
-        try { Autosave.ResetForTesting(); } catch { }
-        try { GlobalServices.ResetForTesting(); } catch { }
-        try { MapEdit.ResetForTesting(); } catch { }
+        try { Autosave.ResetForTesting(); } catch (Exception) { }
+        try { GlobalServices.ResetForTesting(); } catch (Exception) { }
+        try { MapEdit.ResetForTesting(); } catch (Exception) { }
     }
 }

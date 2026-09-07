@@ -22,13 +22,6 @@ public class Door
     public ReaderWriterLockSlim Lock => _lock;
     public IDisposable ReadScope() { _lock.EnterReadLock(); return new LockScope(_lock, false); }
     public IDisposable WriteScope() { _lock.EnterWriteLock(); return new LockScope(_lock, true); }
-    private sealed class LockScope : IDisposable
-    {
-        private readonly ReaderWriterLockSlim _rw;
-        private readonly bool _isWrite;
-        public LockScope(ReaderWriterLockSlim rw, bool isWrite) { _rw = rw; _isWrite = isWrite; }
-        public void Dispose() { if (_isWrite) _rw.ExitWriteLock(); else _rw.ExitReadLock(); }
-    }
     // Door state lives outside ObjectRegistry, so direct assignment used to be lost
     // on save (only Try* paths marked doors modified). Every mutating setter below
     // takes the lock, and any change marks the NodeHandler doors section modified
@@ -89,7 +82,7 @@ public class Door
             nh.Lock3.EnterWriteLock();
             try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); }
         }
-        catch { }
+        catch (Exception) { }
     }
 
     private readonly Dictionary<string, List<Func<GameObject, bool>>> _locks = new();

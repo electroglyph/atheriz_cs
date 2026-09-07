@@ -35,7 +35,7 @@ public static class CheckpointJournal
             db.Database.EnsureCreated();
             Upsert(db, "dirty");
         }
-        catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal dirty-mark failed: {ex.Message}"); } catch { } }
+        catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal dirty-mark failed: {ex.Message}"); } catch (Exception) { } }
     }
 
     public static void MarkClean(string savePath)
@@ -46,7 +46,7 @@ public static class CheckpointJournal
             db.Database.EnsureCreated();
             Upsert(db, "clean");
         }
-        catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal clean-mark failed: {ex.Message}"); } catch { } }
+        catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal clean-mark failed: {ex.Message}"); } catch (Exception) { } }
     }
 
     /// <summary>True when a previous checkpoint died mid-way. Missing row/table (first boot) counts as clean.</summary>
@@ -112,8 +112,8 @@ public static class DbTransactionHelper
             }
             catch
             {
-                try { tx.Rollback(); } catch { }
-                try { onRollback?.Invoke(); } catch { }
+                try { tx.Rollback(); } catch (Exception) { }
+                try { onRollback?.Invoke(); } catch (Exception) { }
                 throw;
             }
         }

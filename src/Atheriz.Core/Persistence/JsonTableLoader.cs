@@ -32,7 +32,7 @@ public static class JsonTableLoader
                 var dto = deserialize(row.Data);
                 if (dto != null) add(dto, row);
             }
-            catch { }
+            catch (Exception) { }
         }
     }
 
@@ -51,12 +51,12 @@ public static class JsonTableLoader
                 var dto = deserialize(row.Data);
                 if (dto != null) buffer.Add((dto, row));
             }
-            catch { }
+            catch (Exception) { }
         }
         lockObj.EnterWriteLock();
         try
         {
-            foreach (var (dto, row) in buffer) { try { add(dto, row); } catch { } }
+            foreach (var (dto, row) in buffer) { try { add(dto, row); } catch (Exception) { } }
         }
         finally { lockObj.ExitWriteLock(); }
     }
@@ -76,7 +76,7 @@ public static class JsonTableLoader
                 var dto = deserialize(row.Data);
                 if (dto != null) outList.Add(dto);
             }
-            catch { }
+            catch (Exception) { }
         }
         return outList;
     }

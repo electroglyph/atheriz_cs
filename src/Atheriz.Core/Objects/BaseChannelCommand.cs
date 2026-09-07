@@ -24,7 +24,7 @@ public class BaseChannelCommand : Command
                     return typeof(BaseChannelCommand).Assembly;
                 return null;
             };
-        } catch {}
+        } catch (Exception) { }
         // Also ensure AssemblyResolve for completeness
         try
         {
@@ -33,7 +33,7 @@ public class BaseChannelCommand : Command
                 if (args.Name != null && args.Name.Contains("BaseChannelCommand")) return typeof(BaseChannelCommand).Assembly;
                 return null;
             };
-        } catch {}
+        } catch (Exception) { }
     }
 
     private string _key = "__base_channel";
@@ -45,13 +45,13 @@ public class BaseChannelCommand : Command
     public void SetKey(string k)
     {
         _key = k;
-        // force parser rebuild so FormatHelp shows new prog
-        try { typeof(Command).GetField("_parser", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.SetValue(this, null); } catch {}
+        // force parser rebuild so FormatHelp shows new prog (Parser lazily rebuilds when null)
+        try { Parser = null; } catch (Exception) { }
     }
     public void SetDesc(string d)
     {
         _desc = d;
-        try { typeof(Command).GetField("_parser", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.SetValue(this, null); } catch {}
+        try { Parser = null; } catch (Exception) { }
     }
 
     // Use fields to match Python's __dict__ keys for test reflection (id, _channel)
@@ -134,8 +134,8 @@ public class BaseChannelCommand : Command
         if (pa.GetBool("unsubscribe"))
         {
             // mirror caller.unsubscribe(ch)
-            try { ch.RemoveListener(go); } catch {}
-            try { go.Unsubscribe(ch); } catch {}
+            try { ch.RemoveListener(go); } catch (Exception) { }
+            try { go.Unsubscribe(ch); } catch (Exception) { }
             // also remove command from internal cmdset? Handled via Unsubscribe
         }
         else if (pa.GetBool("replay"))

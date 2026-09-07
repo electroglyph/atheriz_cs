@@ -5,6 +5,7 @@ using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Tests;
 
+[Collection("Ported")]
 public class AccountTests
 {
     private const string FixedSalt = "testsalt";
@@ -126,6 +127,7 @@ public class AccountTests
     }
 }
 
+[Collection("Ported")]
 public class ChannelTests
 {
     [Fact]
@@ -164,6 +166,7 @@ public class ChannelTests
     }
 }
 
+[Collection("Ported")]
 public class NodeTests
 {
     [Fact]

@@ -31,7 +31,7 @@ internal static class GameObjectDtoConverter
         }
     }
 
-    private static bool TryCreateSubtype(string fullName, out GameObject? instance)
+    internal static bool TryCreateSubtype(string fullName, out GameObject? instance)
     {
         lock (_subtypeLock) { if (_subtypeFactories.TryGetValue(fullName, out var f)) { instance = f(); return true; } }
         instance = null;

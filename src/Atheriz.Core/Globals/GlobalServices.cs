@@ -125,7 +125,7 @@ public static class GlobalServices
                     try { isDel = _serverChannel.IsDeleted; } catch { isDel = true; }
                     try { name = _serverChannel.Name ?? ""; } catch { name = ""; }
                     bool nameOk = false;
-                    try { nameOk = name.ToLowerInvariant() == "server"; } catch { }
+                    try { nameOk = name.ToLowerInvariant() == "server"; } catch (Exception) { }
                     if (!isDel && nameOk) return _serverChannel;
                     _serverChannel = null;
                 }
@@ -219,8 +219,8 @@ public static class GlobalServices
         }
         finally { _singletonLock.ExitWriteLock(); }
         // Also reset underlying registries that are not singletons but global
-        try { CommandRegistry.ResetForTesting(); } catch { }
-        try { ConnectionManager.GlobalInstance = null; } catch { }
+        try { CommandRegistry.ResetForTesting(); } catch (Exception) { }
+        try { ConnectionManager.GlobalInstance = null; } catch (Exception) { }
     }
 
     public static AsyncTicker? TryGetTicker()

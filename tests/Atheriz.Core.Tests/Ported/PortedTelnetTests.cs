@@ -19,15 +19,27 @@ public class PortedTelnetTests
         public void SetExtCallback(byte opt, Action<int, int> cb){}
         public string? GetPeerHost()=> Host;
     }
-    private sealed class MockWriter
+    private sealed class MockWriter : ITelnetWriter
     {
         public object? transport; public object? _transport; public Func<int?>? BufferSizeFunc;
-        public string GetExtraInfo(string key){ throw new Exception("no info"); }
-        public object get_extra_info(string key){ throw new Exception("no info"); }
-        public void write(string s){}
-        public void iac(byte a, byte b){}
-        public void close(){}
-        public int get_write_buffer_size()=> BufferSizeFunc?.Invoke() ?? 0;
+        public void Write(string s){}
+        public void Iac(byte a, byte b){}
+        public void Close(){}
+        public int? GetWriteBufferSize()=> BufferSizeFunc?.Invoke() ?? 0;
+        public void SetExtCallback(byte opt, Action<int,int> cb){}
+        public string? GetPeerHost()=> null;
+        // Priority chain port of telnet.py:138-156 (transport → writer → _transport).
+        public IReadOnlyList<ITelnetBufferSource> BufferSources
+        {
+            get
+            {
+                var list = new List<ITelnetBufferSource>();
+                if (transport is ITelnetBufferSource t) list.Add(t);
+                list.Add(this);
+                if (_transport is ITelnetBufferSource t2 && !ReferenceEquals(t2, this)) list.Add(t2);
+                return list;
+            }
+        }
     }
     private sealed class TestableConn : TelnetConnection
     {
@@ -552,13 +564,13 @@ public class PortedTelnetTests
         try{ new TelnetProtocol().Setup(app); } finally{ AtherizSettings.Global.TelnetEnabled = prev; }
         Assert.NotNull(app.Router.LifespanContext);
     }
-    private sealed class FakeApp2
+    private sealed class FakeApp2 : ITelnetApp
     {
         public object? Captured = null!;
         public FakeRouter2 Router { get; } = new();
-        public FakeRouter2 router => Router;
+        ITelnetRouter? ITelnetApp.Router => Router;
     }
-    private sealed class FakeRouter2
+    private sealed class FakeRouter2 : ITelnetRouter
     {
         public object? lifespan_context;
         public object? LifespanContext { get=> lifespan_context; set=> lifespan_context=value; }

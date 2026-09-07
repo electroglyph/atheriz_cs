@@ -39,7 +39,7 @@ public sealed class GuestCommand : Command
         catch (InvalidOperationException ex)
         {
             caller.Msg(ex.Message);
-            try { character.IsDeleted = true; } catch { }
+            try { character.IsDeleted = true; } catch (Exception) { }
             return;
         }
         if (caller is BaseConnection conn && conn.Session != null)
@@ -69,7 +69,7 @@ public sealed class GuestCommand : Command
             var nh = NodeHandler.GetCurrent();
             var home = nh?.GetNode(AtherizSettings.Global.DefaultHome);
             if (home != null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
-            try { character.AtPostPuppet(); } catch { }
+            try { character.AtPostPuppet(); } catch (Exception) { }
             caller.Msg($"Guest {name} created.");
         }
         else caller.Msg($"Guest {name} created (no session).");
@@ -105,7 +105,7 @@ public sealed class GuestCommand : Command
         {
             ObjectRegistry.ClearCreationCooldown(rateKey);
             caller.Msg(ex.Message);
-            try { character.IsDeleted = true; } catch { }
+            try { character.IsDeleted = true; } catch (Exception) { }
             return;
         }
         double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
@@ -135,7 +135,7 @@ public sealed class GuestCommand : Command
         var nh = NodeHandler.GetCurrent();
         var home = nh?.GetNode(settings.DefaultHome);
         if (home != null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
-        try { character.AtPostPuppet(); } catch { }
+        try { character.AtPostPuppet(); } catch (Exception) { }
         caller.Msg($"Guest {name} created.");
     }
 }

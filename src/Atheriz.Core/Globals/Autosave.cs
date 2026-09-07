@@ -114,13 +114,13 @@ public static class Autosave
         if (failures.Count > 0)
         {
             try { AtherizLogger.LogError($"Autosave failed for: {string.Join(", ", failures)}"); } catch { Console.Error.WriteLine($"Autosave failed for: {string.Join(", ", failures)}"); }
-            try { var ch = GlobalServices.GetServerChannel(); if (ch != null) ch.Msg($"Autosave failed for: {string.Join(", ", failures)}"); } catch { }
+            try { var ch = GlobalServices.GetServerChannel(); if (ch != null) ch.Msg($"Autosave failed for: {string.Join(", ", failures)}"); } catch (Exception) { }
         }
         else
         {
             CheckpointJournal.MarkClean();
             try { AtherizLogger.LogInformation("Autosave completed."); } catch { Console.Error.WriteLine("Autosave completed."); }
-            try { var ch = GlobalServices.GetServerChannel(); if (ch != null) ch.Msg("Autosave completed."); } catch { }
+            try { var ch = GlobalServices.GetServerChannel(); if (ch != null) ch.Msg("Autosave completed."); } catch (Exception) { }
         }
     }
 
@@ -171,7 +171,7 @@ public static class Autosave
         lock (_lock) { ticker = _globalTicker; }
         if (ticker != null)
         {
-            try { StopAutosave(ticker); } catch { }
+            try { StopAutosave(ticker); } catch (Exception) { }
         }
     }
 
@@ -189,7 +189,7 @@ public static class Autosave
                     var fallback = _cachedSettings != null ? IntervalSeconds(_cachedSettings) : 0;
                     if (fallback != 0) ticker.RemoveCoro(AutosaveTick, fallback);
                 }
-                catch { }
+                catch (Exception) { }
                 try
                 {
                     // scan ticker slots for orphaned coro
@@ -197,10 +197,10 @@ public static class Autosave
                     {
                         var slot = kv.Value;
                         // TimeSlot.RemoveCoro requires interval key; we try both fallback and slot interval
-                        try { slot.RemoveCoro((Action)AutosaveTick); } catch { }
+                        try { slot.RemoveCoro((Action)AutosaveTick); } catch (Exception) { }
                     }
                 }
-                catch { }
+                catch (Exception) { }
                 _registeredInterval = null;
             }
             else
@@ -230,8 +230,8 @@ public static class Autosave
         }
         if (gt != null)
         {
-            try { gt.Clear(); } catch { }
-            try { gt.Stop(); } catch { }
+            try { gt.Clear(); } catch (Exception) { }
+            try { gt.Stop(); } catch (Exception) { }
         }
     }
 }

@@ -3,6 +3,7 @@ using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests;
 
+[Collection("Ported")]
 public class MovePuppetTests
 {
     [Fact]

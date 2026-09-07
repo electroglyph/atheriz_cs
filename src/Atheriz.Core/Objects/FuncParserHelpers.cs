@@ -282,9 +282,9 @@ public static class FuncParserHelpers
         IDictionary<string, object>? kwConvs = null;
         // Try to extract ValueTuple Item1/Item2 via ITuple
         try{
-            if(converters is System.Runtime.CompilerServices.ITuple tup && tup.Length==2){
+            if(converters is System.Runtime.CompilerServices.ITuple tup && tup.Length>=1){
                 var p1 = tup[0];
-                var p2 = tup[1];
+                var p2 = tup.Length>=2 ? tup[1] : null;
                 if(p1 is IEnumerable<object> e) argConvs = e;
                 else if(p1 is System.Collections.IEnumerable en) argConvs = en.Cast<object>();
                 else if(p1 != null) argConvs = new[]{p1};
@@ -292,21 +292,12 @@ public static class FuncParserHelpers
                 else if(p2 is System.Collections.IDictionary id) { var nd=new Dictionary<string,object>(); foreach(System.Collections.DictionaryEntry kv in id) nd[kv.Key.ToString()!] = kv.Value!; kwConvs=nd; }
                 else if(p2 is IDictionary<string, object?> d2b) kwConvs = d2b.ToDictionary(kv=>kv.Key, kv=>(object)kv.Value!);
             }else{
-                var t = converters.GetType();
-                if(t.IsGenericType && t.Name.StartsWith("ValueTuple")){
-                    var p1 = t.GetProperty("Item1")?.GetValue(converters);
-                    var p2 = t.GetProperty("Item2")?.GetValue(converters);
-                    if(p1 is IEnumerable<object> e) argConvs = e;
-                    else if(p1 is System.Collections.IEnumerable en) argConvs = en.Cast<object>();
-                    else if(p1 != null) argConvs = new[]{p1};
-                    if(p2 is IDictionary<string, object> d) kwConvs = d;
-                    else if(p2 is System.Collections.IDictionary id) { var nd=new Dictionary<string,object>(); foreach(System.Collections.DictionaryEntry kv in id) nd[kv.Key.ToString()!] = kv.Value!; kwConvs=nd; }
-                }else if(converters is object[] arr && arr.Length==2){
+                if(converters is object[] arr && arr.Length==2){
                     if(arr[0] is IEnumerable<object> e2) argConvs=e2; else if(arr[0] is System.Collections.IEnumerable en2) argConvs=en2.Cast<object>(); else if(arr[0]!=null) argConvs=new[]{arr[0]};
                     if(arr[1] is IDictionary<string, object> d2) kwConvs=d2;
                 }
             }
-        }catch{}
+        }catch (Exception) { }
         if(argConvs==null && kwConvs==null){
             // converters is single arg converters?
             if(converters is IEnumerable<object> e3) argConvs=e3;
@@ -374,11 +365,11 @@ public static class FuncParserHelpers
         try{
             var lit = _TryLiteralEval(s);
             if(lit != null || s.Trim()=="[]" || s.Trim()=="()") return lit;
-        }catch{}
+        }catch (Exception) { }
         // try arith
         try{
             return _safe_arith_eval(s);
-        }catch{}
+        }catch (Exception) { }
         // manual containers
         var parts = _ManualParseContainers(s);
         if(parts != null) return parts;

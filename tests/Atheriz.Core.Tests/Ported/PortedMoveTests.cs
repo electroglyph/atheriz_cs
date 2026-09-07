@@ -359,9 +359,10 @@ public class PortedMoveTests
     }
 
     // ----- Location lock test -----
-    private sealed class TrackingLock : ReaderWriterLockSlim
+    private sealed class TrackingLock : ReaderWriterLockSlim, IWriteLockTracker
     {
         public int Entries = 0;
+        public void TrackWriteLock() => Entries++;
         public TrackingLock() : base(LockRecursionPolicy.SupportsRecursion) {}
     }
 

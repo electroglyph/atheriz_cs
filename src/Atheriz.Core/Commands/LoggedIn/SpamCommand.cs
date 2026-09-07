@@ -63,7 +63,7 @@ public sealed class SpamCommand : Command
             foreach (var (a, p, c) in created)
                 f.Write($"{a}|{p}|{c}\n");
         }
-        catch { }
+        catch (Exception) { }
         sw.Stop();
         go.Msg($"Created {created.Count} accounts/chars in {sw.Elapsed.TotalMilliseconds} milliseconds. Credentials saved to {credsFile}");
     }

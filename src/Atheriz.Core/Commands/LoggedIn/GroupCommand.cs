@@ -57,7 +57,7 @@ public sealed class GroupCommand : Command
                         var locAllK = locForKick is Node nAllK ? nAllK.Search("all " + targetName, true, go) : ContentUtils.Search(locForKick, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
                         if (locAllK.Count > 1) matches = locAllK;
                     }
-                } catch {}
+                } catch (Exception) { }
             }
             if (matches.Count == 0) { go.Msg($"Could not find '{targetName}'."); return; }
             if (matches.Count > 1) { go.Msg($"Multiple matches found for '{targetName}'."); return; }
@@ -86,7 +86,7 @@ public sealed class GroupCommand : Command
             }
             if (channel.Listeners.Count == 0)
             {
-                try { channel.Delete(); } catch { try { channel.IsDeleted = true; ObjectRegistry.RemoveObject(channel); } catch { } }
+                try { channel.Delete(); } catch { try { channel.IsDeleted = true; ObjectRegistry.RemoveObject(channel); } catch (Exception) { } }
             }
             return;
         }
@@ -113,7 +113,7 @@ public sealed class GroupCommand : Command
                         var locAll = locForAdd is Node nAll ? nAll.Search("all " + targetName, true, go) : ContentUtils.Search(locForAdd, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
                         if (locAll.Count > 1) all = locAll;
                     }
-                } catch {}
+                } catch (Exception) { }
                 if (all.Count > 1) matches = all;
             }
             if (matches.Count == 0) { go.Msg($"Could not find '{targetName}'."); return; }
@@ -176,7 +176,7 @@ public sealed class GroupCommand : Command
                     if (existing.Count > 0)
                     {
                         channel = existing[0] as Channel ?? leaked;
-                        try { leaked.Delete(); } catch { }
+                        try { leaked.Delete(); } catch (Exception) { }
                     }
                     else
                     {

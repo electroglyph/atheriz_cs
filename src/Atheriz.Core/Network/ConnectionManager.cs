@@ -1006,7 +1006,7 @@ public class ConnectionManager
         }
         else
         {
-            try { Atheriz.Core.AtherizLogger.LogDebug($"Unknown command: {cmd}"); } catch { Console.Error.WriteLine($"Unknown command: {cmd}"); } // port of manager.py:229 (logger.debug)
+            try { Atheriz.Core.AtherizLogger.LogDebug($"Unknown command: {cmd}"); } catch (Exception) { } // port of manager.py:229 (logger.debug)
         }
     }
 

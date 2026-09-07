@@ -89,7 +89,7 @@ public partial class GameObject
                 if (obj.Location is LocationRef.ObjectLocation ol && ol.ObjectId == this.Id)
                     obj.Location = LocationRef.NullLocation.Instance;
             }
-            catch { }
+            catch (Exception) { }
         }
     }
 
@@ -348,7 +348,7 @@ public partial class GameObject
             {
                 if (destObj is Node dn)
                 {
-                    try { dn.AddExitsForObject(this); } catch { }
+                    try { dn.AddExitsForObject(this); } catch (Exception) { }
                 }
             }
 
@@ -378,7 +378,7 @@ public partial class GameObject
             // Release in reverse order
             for (int i = toLock.Count - 1; i >= 0; i--)
             {
-                try { toLock[i].SyncRoot.ExitWriteLock(); } catch { }
+                try { toLock[i].SyncRoot.ExitWriteLock(); } catch (Exception) { }
             }
         }
 
@@ -453,7 +453,7 @@ public partial class GameObject
                     }
                 }
             }
-            catch { }
+            catch (Exception) { }
         }
 
         // Follow/wander invalidation — Port spec: clear followers if needed
@@ -470,7 +470,7 @@ public partial class GameObject
                 var appearance = AtLook(destObj);
                 if (!string.IsNullOrEmpty(appearance)) Msg(appearance);
             }
-            catch { }
+            catch (Exception) { }
         }
 
         return true;
@@ -488,7 +488,7 @@ public partial class GameObject
                 if (l.Coord.Equals(from.Coord)) return l.Name;
             }
         }
-        catch { }
+        catch (Exception) { }
         return null;
     }
 
@@ -549,7 +549,7 @@ public partial class GameObject
         // Port of base_obj.py:876-878 from atheriz.inputfuncs import dispatch_loggedin; dispatch_loggedin(self, raw_string)
         // In C# we use Commands.CommandDispatcher
         // session param ignored for compatibility; this object's own session is used for message routing (but we just dispatch)
-        try { Commands.CommandDispatcher.DispatchLoggedIn(this, raw); } catch { }
+        try { Commands.CommandDispatcher.DispatchLoggedIn(this, raw); } catch (Exception) { }
     }
 
     // Port of base_obj.py:2073 at_look
@@ -562,7 +562,7 @@ public partial class GameObject
             string desc;
             if (target is Node node) desc = node.ReturnAppearance(this);
             else desc = target.ReturnAppearance(this);
-            try { target.AtDesc(this); } catch { } // Port of base_obj.py:2090 target.at_desc
+            try { target.AtDesc(this); } catch (Exception) { } // Port of base_obj.py:2090 target.at_desc
             return desc;
         }, target);
     }

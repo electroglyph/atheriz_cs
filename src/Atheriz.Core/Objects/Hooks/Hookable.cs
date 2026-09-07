@@ -71,7 +71,7 @@ public partial class GameObject
             catch { invoked = true; }
             if (!invoked)
             {
-                try { newResult = h.DynamicInvoke(args); invoked = true; } catch { }
+                try { newResult = h.DynamicInvoke(args); invoked = true; } catch (Exception) { }
             }
             // Port of base_obj.py:64-66 — an after-hook replaces the result
             // unconditionally, including with null (reference types).

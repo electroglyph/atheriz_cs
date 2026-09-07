@@ -99,7 +99,7 @@ public class FuncParser
             ["random"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ if(a[0].Contains('.')){ double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); return rnd.NextDouble()*mx; } int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } { double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn); double.TryParse(a[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); bool isFloat=a[0].Contains('.')||a[1].Contains('.'); if(isFloat) return mn + (mx-mn)*rnd.NextDouble(); return rnd.Next((int)mn,(int)mx+1); } },
             ["randint"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } int.TryParse(a[0], out var mn2); int.TryParse(a[1], out var mx3); return rnd.Next(mn2,mx3+1); },
             ["choice"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; var rnd=Random.Shared;
-                if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[")&&single.EndsWith("]")){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch{} } try{
+                if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[")&&single.EndsWith("]")){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch (Exception) { } } try{
                         var conv = FuncParserHelpers.SafeConvertToTypes( (new object[]{"py"}, new Dictionary<string,object>()), new object?[]{single}, new Dictionary<string,object?>(), ctx.RaiseErrors); if(conv.args.Length>0 && conv.args[0] is System.Collections.IEnumerable en && !(conv.args[0] is string)){ var list=en.Cast<object?>().ToArray(); if(list.Length>0) return list[rnd.Next(list.Length)]?.ToString()??""; } }catch{ if(ctx.RaiseErrors) throw; } if(ctx.RaiseErrors){
                         // For single non-list like "a", py conversion will have thrown if raiseErrors, so propagate
                         // Check if single was not list and not int, try py conversion for validation
@@ -188,7 +188,7 @@ public class FuncParser
             if(v is string str) return str;
             if(v is System.Collections.IList list) return "["+string.Join(",", list.Cast<object?>())+"]";
             return v?.ToString()??"";
-        }catch{ }
+        }catch (Exception) { }
         if(int.TryParse(s, out var i2)) return i2.ToString();
         if(double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d2)) return d2.ToString(System.Globalization.CultureInfo.InvariantCulture);
         if(s.StartsWith("[")&&s.EndsWith("]")) return s;
@@ -265,7 +265,7 @@ public class FuncParser
         {
             var g = obj.Gender;
             if(!string.IsNullOrEmpty(g)) plural = g.Equals("plural", StringComparison.OrdinalIgnoreCase);
-            else { try{ foreach(var prop in obj.GetType().GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)){ if(prop.Name!="Gender") continue; try{ var gv=prop.GetValue(obj); if(gv is Delegate dg){ var r=dg.DynamicInvoke(); if(r is string rs) { plural=rs=="plural"; if(plural) break; } } else if(gv is string gs) { plural=gs=="plural"; if(plural) break; } }catch{} } }catch{} }
+            else { try{ foreach(var prop in obj.GetType().GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)){ if(prop.Name!="Gender") continue; try{ var gv=prop.GetValue(obj); if(gv is Delegate dg){ var r=dg.DynamicInvoke(); if(r is string rs) { plural=rs=="plural"; if(plural) break; } } else if(gv is string gs) { plural=gs=="plural"; if(plural) break; } }catch (Exception) { } } }catch (Exception) { } }
         }
         var (second, third) = Conjugate.VerbActorStanceComponents(verb, plural:plural);
         return obj == ctx.Receiver ? second : third;
@@ -299,10 +299,10 @@ public class FuncParser
                             var gv = pi.GetValue(obj);
                             if(gv is Delegate d){ var r=d.DynamicInvoke(); if(r is string rs && !string.IsNullOrEmpty(rs)){ defaultGender=rs; break; } }
                             else if(gv is string s && !string.IsNullOrEmpty(s)){ defaultGender=s; break; }
-                        }catch{}
+                        }catch (Exception) { }
                     }
                 }
-            }catch{}
+            }catch (Exception) { }
         }
         string defaultViewpoint = "2nd person";
         if(kwargs.TryGetValue("viewpoint", out var vp)) defaultViewpoint = vp;

@@ -127,17 +127,16 @@ public class PortedFlagsTests
     [Fact] public void AddUsesLock()
     {
         var o=NewFlags();
-        // Instrument: create tracker object with public int Entries field and inject via reflection so Write() increments it
+        // Instrument: inject a counting tracker via the typed test seam
+        // (IWriteLockTracker); Write() counts EnterWriteLock acquisitions.
         var tracker = new LockCountTracker();
         var trackerField = typeof(GameObject).GetField("_testTracker", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var entriesField = typeof(LockCountTracker).GetField(nameof(LockCountTracker.Entries));
         trackerField!.SetValue(o, tracker);
-        typeof(GameObject).GetField("_trackerEntriesField", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(o, entriesField);
         // Now AddTag should increment tracker.Entries via IncrementTracker()
         o.AddTag("x");
         Assert.Contains("x", o.TagsSnapshot);
         // Verify lock was used (EnterWriteLock tracked) — faithful to SpyLock.__enter__ called
         Assert.True(tracker.Entries > 0);
     }
-    private sealed class LockCountTracker { public int Entries = 0; }
+    private sealed class LockCountTracker : IWriteLockTracker { public int Entries = 0; public void TrackWriteLock() => Entries++; }
 }

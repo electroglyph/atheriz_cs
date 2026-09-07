@@ -31,7 +31,7 @@ public sealed class HelpCommand : Command
             int tw = 80;
             if (caller is Objects.GameObject goc)
             {
-                try { sr = goc.Session?.ScreenReader ?? false; } catch { }
+                try { sr = goc.Session?.ScreenReader ?? false; } catch (Exception) { }
                 try { tw = (goc.Session?.TermWidth ?? 80) - 2; if (tw < 20) tw = 20; } catch { tw = 80; }
             }
             var all = CommandRegistry.LoggedIn.GetAll().Distinct().Where(c => !c.Hide && c.Access(caller)).ToList();
@@ -40,7 +40,7 @@ public sealed class HelpCommand : Command
             if (caller is Objects.GameObject go)
             {
                 bool sr2 = false; int tw2 = 80;
-                try { sr2 = go.Session?.ScreenReader ?? false; } catch { }
+                try { sr2 = go.Session?.ScreenReader ?? false; } catch (Exception) { }
                 try { tw2 = (go.Session?.TermWidth ?? 80) - 2; if (tw2 < 20) tw2 = 20; } catch { tw2 = 80; }
                 var loc = go.ResolveLocationObject();
                 var locals = new List<Command>();

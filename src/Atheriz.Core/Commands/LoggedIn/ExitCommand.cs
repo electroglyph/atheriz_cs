@@ -55,18 +55,18 @@ public sealed class LoggedInExitCommand : Command
         if (lst.Count > 0) c = lst[0];
         if (c == null)
         {
-            try { Console.Error.WriteLine($"Exit command with invalid caller. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}"); } catch {}
+            try { Console.Error.WriteLine($"Exit command with invalid caller. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}"); } catch (Exception) { }
             return;
         }
         if (Location == null || Destination == null)
         {
-            try { Console.Error.WriteLine($"invalid Exit command. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}"); } catch {}
+            try { Console.Error.WriteLine($"invalid Exit command. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}"); } catch (Exception) { }
             return;
         }
         var dest = nh.GetNode(Destination.Value);
         if (dest == null)
         {
-            try { Console.Error.WriteLine($"Error getting destination node for: {Destination}"); } catch {}
+            try { Console.Error.WriteLine($"Error getting destination node for: {Destination}"); } catch (Exception) { }
             return;
         }
         var doors = nh.GetDoors(Location.Value);
@@ -87,8 +87,8 @@ public sealed class LoggedInExitCommand : Command
                         try { closedOk = door.TryClose(c); } catch { closedOk = false; }
                         if (!closedOk)
                         {
-                            try { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } } catch {}
-                            try { door.MapClose(); } catch {}
+                            try { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } } catch (Exception) { }
+                            try { door.MapClose(); } catch (Exception) { }
                         }
                         throw;
                     }
@@ -102,8 +102,8 @@ public sealed class LoggedInExitCommand : Command
                         try { closedOk = door.TryClose(c); } catch { closedOk = false; }
                         if (!closedOk)
                         {
-                            try { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } } catch {}
-                            try { door.MapClose(); } catch {}
+                            try { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } } catch (Exception) { }
+                            try { door.MapClose(); } catch (Exception) { }
                         }
                     }
                     return;
@@ -139,9 +139,9 @@ public sealed class LoggedInExitCommand : Command
             {
                 ClearFollowing(go);
                 bool moved = false;
-                try { moved = go.MoveTo(dest, null, false, true, ExitName); } catch { try { door.TryClose(go); } catch { } throw; }
+                try { moved = go.MoveTo(dest, null, false, true, ExitName); } catch { try { door.TryClose(go); } catch (Exception) { } throw; }
                 if (moved) door.TryClose(go);
-                else { try { if (!door.TryClose(go)) { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } door.MapClose(); } } catch { } }
+                else { try { if (!door.TryClose(go)) { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } door.MapClose(); } } catch (Exception) { } }
                 return;
             }
             else if (!door.Closed) { ClearFollowing(go); go.MoveTo(dest, null, false, true, ExitName); return; }
@@ -172,11 +172,11 @@ public sealed class LoggedInExitCommand : Command
                 }
                 finally { leader.SyncRoot.ExitWriteLock(); }
             }
-            catch { }
+            catch (Exception) { }
             // Port of exit.py:100-103 — the leader's notice is gated on the
             // follower's view of the leader, and vice versa.
-            try { if (c.Access(leader, "view")) leader.Msg($"{c.GetDisplayName(leader)} is no longer following you."); } catch {}
-            try { if (leader.Access(c, "view")) c.Msg($"You are no longer following {leader.GetDisplayName(c)}."); } catch {}
+            try { if (c.Access(leader, "view")) leader.Msg($"{c.GetDisplayName(leader)} is no longer following you."); } catch (Exception) { }
+            try { if (leader.Access(c, "view")) c.Msg($"You are no longer following {leader.GetDisplayName(c)}."); } catch (Exception) { }
         }
         c.Following = null;
     }

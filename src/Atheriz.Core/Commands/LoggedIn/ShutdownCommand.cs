@@ -28,7 +28,7 @@ public sealed class ShutdownCommand : Command
             go.Msg("Error: admin.token not found.");
             return;
         }
-        try { Atheriz.Core.ServerEvents.AtServerStop(); } catch { }
+        try { Atheriz.Core.ServerEvents.AtServerStop(); } catch (Exception) { }
         string token;
         try { token = File.ReadAllText(tokenFile).Trim(); }
         catch (Exception ex) { go.Msg($"Error reading token: {ex.Message}"); return; }

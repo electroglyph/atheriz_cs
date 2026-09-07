@@ -17,11 +17,9 @@ public static class ServerEvents
     // Port of server_events.py:8 def at_server_start()
     public static void AtServerStart() => AtServerStart(null);
     // Port of server_events.py:8 preserve hook signature at_server_start(sender).
-    // Python is pass; C# logs for operator visibility but sends no channel
-    // broadcast. The hook walk stays as the game-code extension point.
+    // Python is pass (silent); the hook walk stays as the game-code extension point.
     public static void AtServerStart(object? sender)
     {
-        AtherizLogger.LogInformation("Server starting..."); // Port of server_events.py:8 minimal log
         if (sender != null) InvokeHooks("at_server_start", sender); // Port of base_obj hookable iteration
         else InvokeHooks("at_server_start");
     }
@@ -29,9 +27,9 @@ public static class ServerEvents
     // Port of server_events.py:12 def at_server_stop()
     public static void AtServerStop() => AtServerStop(null);
     // Port of server_events.py:12 preserve hook signature at_server_stop(sender)
+    // Python is pass (silent); the hook walk stays as the game-code extension point.
     public static void AtServerStop(object? sender)
     {
-        AtherizLogger.LogInformation("Server stopping..."); // Port of server_events.py:12
         if (sender != null) InvokeHooks("at_server_stop", sender);
         else InvokeHooks("at_server_stop");
     }
@@ -39,9 +37,9 @@ public static class ServerEvents
     // Port of server_events.py:16 def at_server_reload()
     public static void AtServerReload() => AtServerReload(null);
     // Port of server_events.py:16 preserve hook signature at_server_reload(sender)
+    // Python is pass (silent); the hook walk stays as the game-code extension point.
     public static void AtServerReload(object? sender)
     {
-        AtherizLogger.LogInformation("Server reloading..."); // Port of server_events.py:16
         if (sender != null) InvokeHooks("at_server_reload", sender);
         else InvokeHooks("at_server_reload");
     }
@@ -187,18 +185,28 @@ public static class ServerEvents
 
     private static void TryInvokeVirtual(string methodName, params object?[] args)
     {
+        // Typed virtual dispatch (replaces GetMethod(methodName) reflection):
+        // game subclasses override the AtServer* virtuals on GameObject.
         args ??= Array.Empty<object?>();
+        object? sender = args.Length > 0 ? args[0] : null;
         try
         {
             foreach (var o in ObjectRegistry.FilterBy(_ => true))
             {
-                var mi = o.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (mi == null) continue;
-                if (mi.DeclaringType == typeof(GameObject) || mi.DeclaringType == typeof(object)) continue;
-                try { mi.Invoke(o, args.Length == 0 ? null : args); } catch { }
+                try
+                {
+                    switch (methodName)
+                    {
+                        case "AtServerStart": o.AtServerStart(sender); break;
+                        case "AtServerStop": o.AtServerStop(sender); break;
+                        case "AtServerReload": o.AtServerReload(sender); break;
+                        default: break;
+                    }
+                }
+                catch (Exception) { }
             }
         }
-        catch { }
+        catch (Exception) { }
     }
 
     private static string ToPascal(string snake)

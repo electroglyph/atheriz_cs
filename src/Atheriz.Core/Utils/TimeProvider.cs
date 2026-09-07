@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("Atheriz.Core.Tests")]
 
 namespace Atheriz.Core.Utils;
 
@@ -19,7 +22,9 @@ public static class TimeProvider
 
     // F015: injectable seam for tests/game code that needs a fake clock.
     // The static methods above stay as the default fast path (port of time.monotonic()).
-    public static ITimeProvider Default { get; set; } = new SystemTimeProvider();
+    // Setter is internal (visible to tests via InternalsVisibleTo) so production
+    // code cannot swap the global clock.
+    public static ITimeProvider Default { get; internal set; } = new SystemTimeProvider();
 }
 
 /// <summary>

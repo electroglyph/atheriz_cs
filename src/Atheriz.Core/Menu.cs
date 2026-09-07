@@ -75,7 +75,7 @@ public sealed class Menu{
  public static Task RunMenu(Session s,string p,Dictionary<string,Func<Session,string,Task<bool>>> opts,TimeSpan? to=null){var m=new Menu(p,opts,to); return m.Run(s,p);}
 }
 public static class MenuRunner{ // Port of menu.py:135 top-level run_menu future-based
- static Session? GetSess(object? caller){ if(caller is Session s)return s; if(caller is Atheriz.Core.Commands.ISessionProvider p){ try{ var v=p.Session; if(v!=null)return v; }catch{} } try{var pr=caller?.GetType().GetProperty("Session"); var v=pr?.GetValue(caller) as Session; if(v!=null)return v;}catch{} try{var f=caller?.GetType().GetField("Session"); var v=f?.GetValue(caller) as Session; if(v!=null)return v;}catch{} if(caller is GameObject go)return go.Session; return null;}
+ static Session? GetSess(object? caller){ if(caller is Session s)return s; if(caller is Atheriz.Core.Commands.ISessionProvider p){ try{ var v=p.Session; if(v!=null)return v; }catch{} } if(caller is GameObject go)return go.Session; return null;}
  public static Task RunMenuAsync(object? caller,Func<MenuContext,(string,List<Choice>)> start){ // Port of menu.py:140-166
   return Task.Run(async()=>{var e=new MenuEngine(caller,start); try{while(e.HasNode){var d=e.GetDisplay(); var sess=GetSess(caller); if(sess==null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to); if(inp==null)break; try{var k=e.HandleInput(inp); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}});}
  public static Task RunMenuAsync(object? caller,Func<MenuContext,Task<(string,List<Choice>)>> startA){

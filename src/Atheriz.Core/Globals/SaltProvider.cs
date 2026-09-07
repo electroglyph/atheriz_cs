@@ -58,7 +58,7 @@ public static class SaltProvider
                 // Port of salt.py:65-66 except OSError fallback: a non-race OS
                 // error (permissions/FS) falls back to a plain write rather
                 // than propagating.
-                try { File.WriteAllText(saltFile, val); } catch { }
+                try { File.WriteAllText(saltFile, val); } catch (Exception) { }
                 _salt = val;
                 return _salt;
             }

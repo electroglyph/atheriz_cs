@@ -52,7 +52,7 @@ public sealed class GetCommand : Command
                 }
                 if (objName==null && tokens.Count>0) { /* fall through to token parse below */ }
                 else if (objName!=null) { /* already have names, skip token parse */ goto haveNames; }
-            } catch {}
+            } catch (Exception) { }
         }
         if (objName == null)
         {
@@ -196,12 +196,12 @@ public sealed class PutCommand : Command
         }
         if (string.IsNullOrWhiteSpace(objName) || string.IsNullOrWhiteSpace(destName)) { caller.Msg(PrintHelp()); return; }
         GameObject? loc = null;
-        try { loc = goCaller.ResolveLocationObject(); } catch { }
+        try { loc = goCaller.ResolveLocationObject(); } catch (Exception) { }
         List<GameObject> destList = new();
-        try { destList = goCaller.Search(destName!, true, goCaller); } catch { }
+        try { destList = goCaller.Search(destName!, true, goCaller); } catch (Exception) { }
         if (destList.Count==0 && loc != null)
         {
-            try { if (loc.Access(goCaller, "put")) destList = loc.Search(destName!, true, goCaller); } catch { }
+            try { if (loc.Access(goCaller, "put")) destList = loc.Search(destName!, true, goCaller); } catch (Exception) { }
         }
         if (destList.Count==0) { caller.Msg($"'{destName}' not found."); return; }
         var destObj = destList[0];
@@ -231,7 +231,7 @@ public sealed class PutCommand : Command
                 if (!obj.MoveTo(destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name}."); continue; }
                 if (loc != null)
                 {
-                    try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, mapping: null, exclude: new List<GameObject>{goCaller}); } catch { }
+                    try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, mapping: null, exclude: new List<GameObject>{goCaller}); } catch (Exception) { }
                 }
                 caller.Msg($"You put {obj.Name} in {destObj.Name}.");
                 obj.AtPut(goCaller, destObj);
@@ -239,7 +239,7 @@ public sealed class PutCommand : Command
             return;
         }
         List<GameObject> foundObjs = new();
-        try { foundObjs = goCaller.Search(objName, true, goCaller); } catch { }
+        try { foundObjs = goCaller.Search(objName, true, goCaller); } catch (Exception) { }
         if (foundObjs.Count==0) { caller.Msg("Object not found."); return; }
         foreach (var obj in foundObjs)
         {
@@ -249,7 +249,7 @@ public sealed class PutCommand : Command
             if (!obj.MoveTo(destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name}."); continue; }
             if (loc != null)
             {
-                try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, exclude: new List<GameObject>{goCaller}); } catch { }
+                try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, exclude: new List<GameObject>{goCaller}); } catch (Exception) { }
             }
             caller.Msg($"You put {obj.Name} in {destObj.Name}.");
             obj.AtPut(goCaller, destObj);
@@ -298,7 +298,7 @@ public sealed class DropCommand : Command
                     }
                 }
                 if (string.IsNullOrWhiteSpace(dropName) && args is IEnumerable<string> sseq) dropName = string.Join(" ", sseq);
-            } catch {}
+            } catch (Exception) { }
         }
         if (string.IsNullOrWhiteSpace(dropName)) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject();

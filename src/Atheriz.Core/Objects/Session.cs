@@ -124,7 +124,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         // Port of session.py:52-56 if masked and self.connection is not None: send echo_on
         if (masked && Connection != null)
         {
-            try { Connection.SendCommand("echo_on"); } catch { }
+            try { Connection.SendCommand("echo_on"); } catch (Exception) { }
         }
         // Port of session.py:57-79 if future is not None: try loop.call_soon_threadsafe(cancel)
         if (future != null)
@@ -137,7 +137,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                 // We attempt TrySetCanceled directly; if it fails because already completed, ignore.
                 future.TrySetCanceled();
             }
-            catch { }
+            catch (Exception) { }
             // If we had a captured SynchronizationContext/TaskScheduler, we could post, but TrySetCanceled is safe.
         }
         // Port of session.py:81-86 unwind any in-progress puppet chain before autosave
@@ -199,25 +199,25 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                             var nodeObjs = Globals.ObjectRegistry.FilterBy(o => o.IsNode);
                             foreach (var n in nodeObjs)
                             {
-                                try { n.RemoveContent(puppet.Id); } catch { }
+                                try { n.RemoveContent(puppet.Id); } catch (Exception) { }
                             }
                         }
-                        catch { }
+                        catch (Exception) { }
                     }
-                    try { puppet.Location = Atheriz.Core.Persistence.Dto.LocationRef.NullLocation.Instance; } catch { }
+                    try { puppet.Location = Atheriz.Core.Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception) { }
                 }
-                catch { }
-                try { Globals.ObjectRegistry.RemoveObject(puppet); } catch { }
-                try { puppet.IsDeleted = true; } catch { }
+                catch (Exception) { }
+                try { Globals.ObjectRegistry.RemoveObject(puppet); } catch (Exception) { }
+                try { puppet.IsDeleted = true; } catch (Exception) { }
             }
         }
         if (Account != null) // Port of session.py:115-116 if self.account: self.account.at_disconnect()
         {
-            try { Account.AtDisconnect(); } catch { }
+            try { Account.AtDisconnect(); } catch (Exception) { }
         }
         // Port of session.py at_disconnect mapedit discard: chains are valid
         // only while this session is open.
-        try { Globals.MapEdit.DiscardSession(this); } catch { }
+        try { Globals.MapEdit.DiscardSession(this); } catch (Exception) { }
     }
 
     // Port of session.py:118-119 msg
@@ -275,21 +275,21 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                 // Thread-safe completion with empty string (mirrors prev.set_result(""))
                 prev.TrySetResult("");
             }
-            catch { }
+            catch (Exception) { }
         }
         // Port of session.py:190-194 if need_restore: connection.send_command("echo_on")
         if (needRestore)
         {
-            try { Connection?.SendCommand("echo_on"); } catch { }
+            try { Connection?.SendCommand("echo_on"); } catch (Exception) { }
         }
         // Port of session.py:195-202 if mask: connection.send_command("prompt_masked", text) else msg(text)
         if (mask)
         {
-            try { Connection?.SendCommand("prompt_masked", text); } catch { }
+            try { Connection?.SendCommand("prompt_masked", text); } catch (Exception) { }
         }
         else
         {
-            try { Msg(text); } catch { }
+            try { Msg(text); } catch (Exception) { }
         }
         return await future.Task.ConfigureAwait(false); // Port of session.py:202 return await future
     }

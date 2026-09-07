@@ -20,21 +20,20 @@ public class WebSocketConnectionTests
 {
     // --- WebSocket pump via mock app (decorator pattern, no server) ---
 
-    private sealed class FakeWsApp
+    private sealed class FakeWsApp : IWebSocketApp
     {
-        // Public dynamic surface: the pump binds via DLR + reflection
-        // fallbacks, which need an accessible peer type (as with real peers).
-        public Func<dynamic, Task>? CapturedEndpoint;
-        public readonly Func<string, Action<Func<dynamic, Task>>> websocket;
-        public FakeWsApp() { websocket = _ => ep => { CapturedEndpoint += ep; }; }
+        // Typed app surface: Setup registers the endpoint directly.
+        public Func<IWebSocketPeer, Task>? CapturedEndpoint;
+        public void WebSocket(string path, Func<IWebSocketPeer, Task> endpoint) => CapturedEndpoint += endpoint;
     }
 
-    public sealed class FakeWsClient
+    public sealed class FakeWsClient : IWebSocketClientInfo
     {
         public string host = "9.9.9.9";
+        string? IWebSocketClientInfo.Host => host;
     }
 
-    public sealed class FakeWebsocket
+    public sealed class FakeWebsocket : IWebSocketPeer
     {
         public readonly FakeWsClient client = new();
         public readonly Queue<Func<Task<string>>> Script = new();
@@ -44,6 +43,10 @@ public class WebSocketConnectionTests
         public Task close() { Closes.Add("close()"); return Task.CompletedTask; }
         public Task close(int code) { Closes.Add(code); return Task.CompletedTask; }
         public Task close(int code, string? reason) { Closes.Add((code, reason)); return Task.CompletedTask; }
+        object? IWebSocketPeer.Client => client;
+        Task IWebSocketPeer.AcceptAsync() => accept();
+        Task<string> IWebSocketPeer.ReceiveTextAsync() => receive_text();
+        Task IWebSocketPeer.CloseAsync(int code, string? reason) => close(code);
     }
 
     private sealed class WsScope : IDisposable

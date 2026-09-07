@@ -36,12 +36,10 @@ public sealed class HelpCommand : Command
                     tw = bc.Session.TermWidth - 2; if (tw < 20) tw = 20;
                 }
                 else if (caller is ISessionProvider sp && sp.Session is Objects.Session s2) { sr = s2.ScreenReader; tw = s2.TermWidth - 2; if (tw < 20) tw = 20; }
-                else
-                {
-                    try { var sess = ((dynamic)caller).Session as Objects.Session; if (sess != null) { sr = sess.ScreenReader; tw = sess.TermWidth - 2; if (tw < 20) tw = 20; } } catch { }
-                }
+                // No dynamic fallback: GameObject/BaseConnection/ISessionProvider cover
+                // all production callers and test doubles (MockCaller has no Session).
             }
-            catch { }
+            catch (Exception) { }
             var cmds = cs.GetAll().Distinct().Where(c => !c.Hide && c.Access(caller)).OrderBy(c => c.Category).ThenBy(c => c.Key).ToList();
             caller.Msg("\n" + HelpFormatter.Format(cmds, sr, tw + 2));
             return;

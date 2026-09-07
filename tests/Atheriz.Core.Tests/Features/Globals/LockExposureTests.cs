@@ -14,22 +14,27 @@ using Atheriz.Server.Infrastructure;
 
 namespace Atheriz.Core.Tests.Features.Globals;
 
-// Lock-exposure direction: raw sync primitives must not stay public.
-// Hiding them (to prevent external lock-order inversion, e.g. Channel.Msg
-// vs delete-detach) is deferred work; this test stays red until it lands.
+// Lock-exposure contract (wontfix, see AGENTS.md hard rules): the raw sync
+// primitives stay public. External game code depends on them for atomic
+// check-and-set across Session.Lock + character SyncRoot (puppet selection;
+// a public-API rewrite would be check-then-set and race double-puppeting)
+// and area-wide enumeration (area.Grids, grid.Nodes have no snapshot API).
+// A previous internal-visibility attempt was reverted for this reason.
+// This test pins the public surface: if SyncRoot ever stops being public,
+// external game code breaks.
 [Collection("Ported")]
 public class LockExposureTests
 {
     // --- Raw lock exposure ---
 
     [Fact]
-    public void GameObject_SyncRoot_IsNotPublic()
+    public void GameObject_SyncRoot_IsPublic()
     {
-        // Raw ReaderWriterLockSlim exposure (SyncRoot / NodeLock / Lock plus
-        // ReadScope/WriteScope and raw Enter*) lets external code invert the
-        // lock order (Channel.Msg vs Delete-detach today), so SyncRoot must become non-public.
-        var prop = typeof(GameObject).GetProperty("SyncRoot");
+        var prop = typeof(GameObject).GetProperty("SyncRoot",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic |
+            System.Reflection.BindingFlags.Public);
         Assert.NotNull(prop);
-        Assert.False(prop!.GetMethod!.IsPublic);
+        Assert.True(prop!.GetMethod!.IsPublic);
     }
 }
