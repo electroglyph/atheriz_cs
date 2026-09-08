@@ -62,11 +62,15 @@ public partial class GameObject
         if (npc.Id != -1 && npc.Id == this.Id) return false;
         if (npc.IsAccount || npc.IsChannel || npc.IsNode) return false; // Port of _puppetable
         if (!npc.Access(this, "puppet")) return false; // Port of puppet.py:94
-        Dictionary<string, object> snapshot;
-        Privilege callerPriv;
+        // Fast-path peek (unlocked, advisory only): skip work when the target
+        // is obviously unavailable. Authoritative checks run inside the
+        // single critical section below, with the caller's session intact.
+        if ((npc.Session != null && npc.Session != session) || npc.IsDeleted) return false;
         lock (session.Lock)
         {
             npc.SyncRoot.EnterReadLock();
+            Dictionary<string, object> snapshot;
+            Privilege callerPriv;
             try
             {
                 if (npc.Session != null && npc.Session != session) return false; // already puppeted
@@ -80,17 +84,17 @@ public partial class GameObject
                 callerPriv = this.PrivilegeLevel;
             }
             finally { npc.SyncRoot.ExitReadLock(); }
-        }
-        // Port of puppet.py:112 caller.at_disconnect()
-        try { this.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Puppet: " + logEx.Message, "GameObject"); }
-        lock (session.Lock)
-        {
+            // Port of puppet.py:112 caller.at_disconnect() — state part runs
+            // here (session intact for the checks above); the game hook fires
+            // after release below. Hooks must never run under session.Lock.
+            IsConnected = false;
+            Session = null;
             npc.SyncRoot.EnterWriteLock();
             try
             {
-                if (npc.Session != null && npc.Session != session) return false;
-                if (npc.IsDeleted) return false;
-                session.PuppetStack.Add((this, npc));
+                if (npc.Session != null && npc.Session != session) { ReattachCaller(session); return false; }
+                if (npc.IsDeleted) { ReattachCaller(session); return false; }
+                session.PushPuppetEntry(this, npc);
                 npc.SetPuppetRestore(snapshot); // Port of puppet.py:138 target._puppet_restore = restore_snapshot
                 npc.IsPc = true; // Port of puppet.py:139
                 npc.PrivilegeLevel = callerPriv; // Port of puppet.py:140
@@ -99,9 +103,26 @@ public partial class GameObject
             }
             finally { npc.SyncRoot.ExitWriteLock(); }
         }
+        // Port of puppet.py:112 hook half (state already settled above).
+        try { this.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Puppet: " + logEx.Message, "GameObject"); }
         try { npc.AtPuppet(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Puppet: " + logEx.Message, "GameObject"); }
-        try { npc.AtPostPuppet(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Puppet: " + logEx.Message, "GameObject"); }
+        try { npc.AtPostPuppet(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtPostPuppet: " + logEx.Message, "GameObject"); }
         return true;
+    }
+
+    // Port of puppet.py failure path: a failed puppet leaves the caller
+    // attached (caller.session = session, is_connected True). Runs inside
+    // the single session.Lock hold; property setters take the object lock
+    // internally (session -> object order).
+    private void ReattachCaller(Session session)
+    {
+        try
+        {
+            Session = session;
+            IsConnected = true;
+            session.Puppet = this;
+        }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ReattachCaller: " + logEx.Message, "GameObject"); }
     }
 
     /// <summary>
@@ -112,15 +133,22 @@ public partial class GameObject
         if (session == null) return false;
         GameObject prev;
         GameObject target;
+        Dictionary<string, object>? restore;
+        // Single critical section : pop + restore-apply + rewire are
+        // atomic — a concurrent Puppet/Unpuppet/AtDisconnect in the old gap
+        // can no longer clobber the puppet pointer with a stale write. Only
+        // state runs under the lock; game hooks fire after release.
         lock (session.Lock)
         {
-            if (session.PuppetStack.Count == 0) return false;
-            var last = session.PuppetStack[session.PuppetStack.Count - 1];
-            prev = last.Prev!;
-            target = last.Target;
-            session.PuppetStack.RemoveAt(session.PuppetStack.Count - 1);
+            if (!session.TryPopPuppetEntry(out var prevEntry, out target)) return false;
+            prev = prevEntry!;
+            // Read the restore here; applied after AtUnpuppet below so game
+            // hooks observe the pre-restore target like puppet.py:164-192.
+            restore = target.GetPuppetRestore();
+            target.Session = null;
+            session.Puppet = prev;
+            prev.Session = session;
         }
-        var restore = target.GetPuppetRestore();
         try { target.AtUnpuppet(prev); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unpuppet: " + logEx.Message, "GameObject"); }
         if (restore != null)
         {
@@ -128,16 +156,6 @@ public partial class GameObject
             target.ClearPuppetRestore();
         }
         try { target.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unpuppet: " + logEx.Message, "GameObject"); }
-        lock (session.Lock)
-        {
-            prev.SyncRoot.EnterWriteLock();
-            try
-            {
-                session.Puppet = prev;
-                prev.Session = session;
-            }
-            finally { prev.SyncRoot.ExitWriteLock(); }
-        }
         try { prev.AtPostPuppet(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unpuppet: " + logEx.Message, "GameObject"); }
         return true;
     }
@@ -176,7 +194,7 @@ public partial class GameObject
                         var ch = chObjs[0];
                         if (ch is Channel channelObj)
                             channelObj.AddListener(this);
-                        // B-OBJ-15: non-Channel IsChannel objects are ignored
+                        // non-Channel IsChannel objects are ignored
                         // (no dynamic dispatch, no throw).
                     }
                 }
@@ -265,6 +283,9 @@ public partial class GameObject
                     catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtPostPuppet: " + logEx.Message, "GameObject"); }
                 }
                 // Port of base_obj.py:1479 self.move_to(self.location, announce=False)
+                // (return value ignored upstream too; map_enable below is
+                // unconditional). MoveTo runs force:true so hooks fire
+                // exactly once (cf. FollowScript stack).
                 try
                 {
                     var destObj = ResolveLocationObject();
@@ -280,7 +301,7 @@ public partial class GameObject
                     if (destArg != null && !(destArg is LocationRef.NullLocation))
                     {
                         // announce=False to avoid "walks in" spam — test_puppet_announce expects no walk broadcast
-                        MoveTo(destArg, announce: false);
+                        MoveTo(destArg, force: true, announce: false);
                     }
                 }
                 catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtPostPuppet: " + logEx.Message, "GameObject"); }
@@ -289,6 +310,7 @@ public partial class GameObject
                 bool selfMapEnabled = false;
                 try { mapEnabled2 = AtherizSettings.Global.MapEnabled; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtPostPuppet: " + logEx.Message, "GameObject"); }
                 try { selfMapEnabled = MapEnabled; } catch { try { selfMapEnabled = IsMapable; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtPostPuppet: " + logEx.Message, "GameObject"); } }
+                // Port of base_obj.py:1480-1485 (unconditional once flags hold).
                 if (mapEnabled2 && selfMapEnabled)
                 {
                     try

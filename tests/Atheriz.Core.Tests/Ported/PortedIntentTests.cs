@@ -28,7 +28,8 @@ public class PortedIntentTests
     {
         var coord=new Coord(area,x,y,z);
         var r=new Node(coord, desc:desc);
-        // Node ctor already adds to registry; ensure added
+        // Explicit registration: the constructor does not publish.
+        ObjectRegistry.AddObject(r);
         return r;
     }
 
@@ -213,7 +214,7 @@ public class PortedIntentTests
     {
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c);
-        var coord=new Coord("test_self",0,0,0); var room=new Node(coord); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
+        var coord=new Coord("test_self",0,0,0); var room=new Node(coord); ObjectRegistry.AddObject(room); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var chan=new Channel(); chan.Name="Alice's group"; chan.Id=99; chan.CreatedBy=c.Id;
         ObjectRegistry.AddObject(chan);
         c.GroupChannel=99;
@@ -226,7 +227,7 @@ public class PortedIntentTests
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c);
         var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target); target.IsConnected=true;
-        var coord=new Coord("test",0,0,0); var room=new Node(coord); room.AddObject(target); // put target in room for search fallback
+        var coord=new Coord("test",0,0,0); var room=new Node(coord); ObjectRegistry.AddObject(room); room.AddObject(target); // put target in room for search fallback
         c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         // also ensure caller search finds target
         c.SearchOverride = q => { if(q.ToLowerInvariant()=="bob") return new List<GameObject>{target}; return new List<GameObject>(); };
@@ -259,7 +260,7 @@ public class PortedIntentTests
     {
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c); c.GroupChannel=null;
-        var coord=new Coord("test",0,0,0); var room=new Node(coord); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
+        var coord=new Coord("test",0,0,0); var room=new Node(coord); ObjectRegistry.AddObject(room); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var t1=GameObject.Create("x", isPc:true); var t2=GameObject.Create("x", isPc:true); t1.IsConnected=true; t2.IsConnected=true; ObjectRegistry.AddObject(t1); ObjectRegistry.AddObject(t2); room.AddObject(t1); room.AddObject(t2);
         var cmd=new GroupCommand(); var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"add","x"};
         cmd.Run(c, pa);
@@ -269,7 +270,7 @@ public class PortedIntentTests
     {
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c); c.GroupChannel=null;
-        var coord=new Coord("test",0,0,0); var room=new Node(coord); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
+        var coord=new Coord("test",0,0,0); var room=new Node(coord); ObjectRegistry.AddObject(room); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target); target.IsConnected=true; room.AddObject(target);
         var fField=typeof(GameObject).GetField("_followers", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
         var set=(HashSet<int>)fField!.GetValue(c)!; set.Add(target.Id);
@@ -286,7 +287,7 @@ public class PortedIntentTests
     {
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c);
-        var coord=new Coord("test",0,0,0); var room=new Node(coord); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
+        var coord=new Coord("test",0,0,0); var room=new Node(coord); ObjectRegistry.AddObject(room); room.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target); target.IsConnected=true; room.AddObject(target);
         var chan=new Channel(); chan.Name="Group"; chan.Id=99; chan.CreatedBy=50;
         chan.AddListener(c); ObjectRegistry.AddObject(chan);
@@ -343,7 +344,7 @@ public class PortedIntentTests
     {
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c);
-        var coord=new Coord("test",0,0,0); var room=new Node(coord);
+        var coord=new Coord("test",0,0,0); var room=new Node(coord); ObjectRegistry.AddObject(room);
         var receiver=GameObject.Create("Bob"); receiver.IsContainer=true; ObjectRegistry.AddObject(receiver); room.AddObject(receiver);
         c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         c.SearchOverride = q => new List<GameObject>(); // inventory empty
@@ -357,7 +358,7 @@ public class PortedIntentTests
     {
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c);
-        var coord=new Coord("test",0,0,0); var room=new Node(coord);
+        var coord=new Coord("test",0,0,0); var room=new Node(coord); ObjectRegistry.AddObject(room);
         c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var cmd=new GiveCommand();
         var pa=new GameArgumentParser.ParsedArgs();
@@ -369,7 +370,7 @@ public class PortedIntentTests
     {
         using var env=GlobalTestEnv.Enter();
         var c=new TestCaller("Alice"); ObjectRegistry.AddObject(c);
-        var coord=new Coord("test",0,0,0); var room=new Node(coord);
+        var coord=new Coord("test",0,0,0); var room=new Node(coord); ObjectRegistry.AddObject(room);
         var receiver=GameObject.Create("Bob"); receiver.IsContainer=true; ObjectRegistry.AddObject(receiver); room.AddObject(receiver);
         c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         c.SearchOverride = q => new List<GameObject>();

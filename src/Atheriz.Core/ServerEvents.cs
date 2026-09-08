@@ -2,6 +2,7 @@
 using System.Reflection;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Persistence;
 using Atheriz.Core.Settings;
 
 namespace Atheriz.Core;
@@ -9,7 +10,7 @@ namespace Atheriz.Core;
 // Port of atheriz/server_events.py:8 static hook points
 public static class ServerEvents
 {
-    // B-UTL-1: serializes concurrent AtCharCreate check-then-insert sequences so two
+    // serializes concurrent AtCharCreate check-then-insert sequences so two
     // creators cannot both pass the pre-check and insert duplicate PC names. Dedicated
     // root lock (never taken elsewhere, always outermost); LostPcNameRace stays as the
     // deterministic tiebreak for non-AtCharCreate writers.
@@ -62,17 +63,12 @@ public static class ServerEvents
         // mutations + race rollback). MoveTo messaging, SaveObjects persistence, console
         // output of the success path, and the hook call all run AFTER the lock releases.
         GameObject? doneChar = null; Account? doneAcc = null; Node? doneHome = null; bool doneNewAccount = false;
-        // B-UTL-1: pre-check + insert are one critical section per creator; concurrent
+        // pre-check + insert are one critical section per creator; concurrent
         // AtCharCreate calls serialize so the second sees the first's committed PC.
-        lock (_charCreateLock)
-        {
-        if (ObjectRegistry.FilterBy(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == existsLc).Count > 0)
-        {
-            Out($"Character name '{charName}' already exists.");
-            return;
-        }
+        // home resolution runs BEFORE the lock. GetNodeHandler() can
+        // do cold-start Load() disk I/O (server_events.py:47 has no creation
+        // lock at all); serializing creators on I/O stalls every signup.
         var settings = settingsOverride ?? AtherizSettings.Global;
-        var results = ObjectRegistry.FilterBy(o => o.IsAccount && (o.Name ?? "").ToLowerInvariant() == accountName.ToLowerInvariant());
         // Port of server_events.py:47 get_node_handler + DEFAULT_HOME (direct call, errors surface).
         // C# tests use real Nodes without handler indexing (no mocks), so also consult the live registry.
         Node? home = GlobalServices.GetNodeHandler().GetNode(settings.DefaultHome);
@@ -82,6 +78,23 @@ public static class ServerEvents
             Out($"Default home {settings.DefaultHome} not found; aborting char create");
             return;
         }
+        // no console I/O under the creation lock — error paths capture
+        // their message and print after the lock releases (CheckPassword I/O
+        // stays: it is part of the check-then-insert critical section).
+        string? failMsg = null;
+        var progressMsgs = new List<string>();
+        // Local section: `return` below exits the lock, not the method —
+        // captured messages print after the lock releases.
+        void CreateUnderLock()
+        {
+        lock (_charCreateLock)
+        {
+        if (ObjectRegistry.FilterBy(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == existsLc).Count > 0)
+        {
+            failMsg = $"Character name '{charName}' already exists.";
+            return;
+        }
+        var results = ObjectRegistry.FilterBy(o => o.IsAccount && (o.Name ?? "").ToLowerInvariant() == accountName.ToLowerInvariant());
         if (results.Count > 0)
         {
             foreach (var r in results)
@@ -89,12 +102,12 @@ public static class ServerEvents
                 if (r is not Account acc) continue;
                 if (!acc.CheckPassword(password))
                 {
-                    Out($"Account '{accountName}' already exists with a different password...");
+                    failMsg = $"Account '{accountName}' already exists with a different password...";
                     return;
                 }
                 if (acc.Characters.Count >= settings.MaxCharacters)
                 {
-                    Out($"Account '{accountName}' already has {settings.MaxCharacters} characters...");
+                    failMsg = $"Account '{accountName}' already has {settings.MaxCharacters} characters...";
                     return;
                 }
                 var character = GameObject.Create(charName, isPc: true);
@@ -106,7 +119,7 @@ public static class ServerEvents
                 {
                     acc.RemoveCharacter(character);
                     ObjectRegistry.RemoveObject(character);
-                    Out($"Character name '{charName}' already exists.");
+                    failMsg = $"Character name '{charName}' already exists.";
                     return;
                 }
                 // Success-path I/O runs after the lock releases (see doneChar below).
@@ -115,20 +128,20 @@ public static class ServerEvents
             }
         }
         err = Commands.UnloggedIn.Validation.ValidateAccountName(accountName);
-        if (err != null) { Out(err); return; }
-        Out($"Creating account '{accountName}'...");
+        if (err != null) { failMsg = err; return; }
+        progressMsgs.Add($"Creating account '{accountName}'...");
         Account account;
         try { account = Account.Create(accountName, password); }
-        catch (InvalidOperationException) { Out($"Account '{accountName}' already exists."); return; }
-        if (account == null) { Out($"Account '{accountName}' already exists."); return; }
+        catch (InvalidOperationException) { failMsg = $"Account '{accountName}' already exists."; return; }
+        if (account == null) { failMsg = $"Account '{accountName}' already exists."; return; }
         ObjectRegistry.AddObject(account);
-        Out($"Creating character '{charName}'...");
+        progressMsgs.Add($"Creating character '{charName}'...");
         var ch2 = GameObject.Create(charName, isPc: true);
         ObjectRegistry.AddObject(ch2);
         if (LostPcNameRace(existsLc, ch2.Id))
         {
             ObjectRegistry.RemoveObject(ch2);
-            Out($"Character name '{charName}' already exists.");
+            failMsg = $"Character name '{charName}' already exists.";
             return;
         }
         ch2.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord);
@@ -136,10 +149,19 @@ public static class ServerEvents
         // Success-path I/O runs after the lock releases (see doneChar below).
         doneChar = ch2; doneAcc = account; doneHome = home; doneNewAccount = true;
         }
+        }
+        CreateUnderLock();
+        foreach (var m in progressMsgs) Out(m);
+        if (failMsg != null) { Out(failMsg); return; }
         if (doneChar != null && doneAcc != null && doneHome != null)
         {
             doneChar.MoveTo(doneHome);
-            ObjectRegistry.SaveObjects();
+            // honor settingsOverride — the parameterless save lands
+            // in the ambient Global DB when explicit settings were passed.
+            // the success-path save is failure-captured — a dead disk
+            // must not take down the signup flow with an unhandled throw.
+            try { ObjectRegistry.SaveObjects(AtherizDbContextFactory.ResolveSavePath(settings)); }
+            catch (Exception saveEx) { string saveErr = "Save failed: " + saveEx.Message; Out(saveErr); return; }
             doneAcc.IsModified = true; // Port of server_events.py object.__setattr__(account, "is_modified", True) after save
             Out(doneNewAccount ? "Success! Account and character created." : "Success! Character created.");
             // Pass the live objects (not a re-query of the registry).
@@ -167,49 +189,37 @@ public static class ServerEvents
     private static void InvokeHooks(string hookName, params object?[] args)
     {
         args ??= Array.Empty<object?>();
-        try
-        {
-            var targets = ObjectRegistry.FilterBy(o => o.HasHook(hookName));
-            foreach (var o in targets)
-            {
-                try { o.Hookable(hookName, () => 0, args); } catch { }
-            }
-        }
-        catch { }
         // Also try virtual overrides named AtServerStart etc (PascalCase)
         var pascal = ToPascal(hookName);
-        TryInvokeVirtual(pascal, args);
-    }
-
-    private static void TryInvokeVirtual(string methodName, params object?[] args)
-    {
-        // Typed virtual dispatch (replaces GetMethod(methodName) reflection):
-        // game subclasses override the AtServer* virtuals on GameObject.
-        args ??= Array.Empty<object?>();
-        object? sender = args.Length > 0 ? args[0] : null;
         try
         {
+            // Single registry walk: hook fan-out + virtual dispatch per object.
             foreach (var o in ObjectRegistry.FilterBy(_ => true))
             {
+                if (o.HasHook(hookName))
+                {
+                    try { o.Hookable(hookName, () => 0, args); } catch (Exception ex) { AtherizLogger.LogWarning($"Hook '{hookName}' failed on '{o.Name}': {ex.Message}"); }
+                }
                 try
                 {
-                    switch (methodName)
+                    switch (pascal)
                     {
-                        case "AtServerStart": o.AtServerStart(sender); break;
-                        case "AtServerStop": o.AtServerStop(sender); break;
-                        case "AtServerReload": o.AtServerReload(sender); break;
+                        case "AtServerStart": o.AtServerStart(args.Length > 0 ? args[0] : null); break;
+                        case "AtServerStop": o.AtServerStop(args.Length > 0 ? args[0] : null); break;
+                        case "AtServerReload": o.AtServerReload(args.Length > 0 ? args[0] : null); break;
                         default: break;
                     }
                 }
-                catch (Exception) { }
+                catch (Exception ex) { AtherizLogger.LogWarning($"Hook '{hookName}' failed on '{o.Name}': {ex.Message}"); }
             }
         }
-        catch (Exception) { }
+        catch (Exception ex) { AtherizLogger.LogWarning($"Hook dispatch '{hookName}' failed: {ex.Message}"); }
+
+        static string ToPascal(string snake)
+        {
+            var parts = snake.Split('_', StringSplitOptions.RemoveEmptyEntries);
+            return string.Concat(parts.Select(p => char.ToUpperInvariant(p[0]) + p.Substring(1)));
+        }
     }
 
-    private static string ToPascal(string snake)
-    {
-        var parts = snake.Split('_', StringSplitOptions.RemoveEmptyEntries);
-        return string.Concat(parts.Select(p => char.ToUpperInvariant(p[0]) + p.Substring(1)));
-    }
 }

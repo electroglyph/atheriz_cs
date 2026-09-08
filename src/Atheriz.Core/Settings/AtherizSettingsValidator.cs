@@ -8,7 +8,7 @@ namespace Atheriz.Core.Settings;
 /// </summary>
 public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
 {
-    // B-UTL-5: valid vocabulary per Logger.cs:47-50 (unknown levels silently fall back
+    // valid vocabulary per Logger.cs:47-50 (unknown levels silently fall back
     // to Information there, so reject them here).
     private static readonly HashSet<string> ValidLogLevels = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -24,16 +24,32 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
         // Python settings.py:83 MAX_CHARACTERS=5; the <=100 upper bound stays permissive by design.
         if (options.MaxConnectionsPerIp < 0)
             failures.Add($"MaxConnectionsPerIp must be >=0 (0 = unlimited, was {options.MaxConnectionsPerIp}).");
-        if (options.WebsocketMaxMessageSize <= 0)
-            failures.Add($"WebsocketMaxMessageSize must be >0 (was {options.WebsocketMaxMessageSize}).");
-        if (options.WebsocketMaxPendingSends <= 0)
-            failures.Add($"WebsocketMaxPendingSends must be >0 (was {options.WebsocketMaxPendingSends}).");
-        if (options.WebsocketMaxPendingBytes <= 0)
-            failures.Add($"WebsocketMaxPendingBytes must be >0 (was {options.WebsocketMaxPendingBytes}).");
-        if (options.TelnetMaxPendingBytes <= 0)
-            failures.Add($"TelnetMaxPendingBytes must be >0 (was {options.TelnetMaxPendingBytes}).");
-        if (options.ConnectionInputQueueLimit <= 0)
-            failures.Add($"ConnectionInputQueueLimit must be >0 (was {options.ConnectionInputQueueLimit}).");
+        if (options.WebsocketMaxMessageSize <= 0 || options.WebsocketMaxMessageSize > 64 * 1024 * 1024)
+            failures.Add($"WebsocketMaxMessageSize must be >0 and <=64MB (was {options.WebsocketMaxMessageSize}).");
+        if (options.WebsocketMaxPendingSends <= 0 || options.WebsocketMaxPendingSends > 100000)
+            failures.Add($"WebsocketMaxPendingSends must be >0 and <=100000 (was {options.WebsocketMaxPendingSends}).");
+        if (options.WebsocketMaxPendingBytes <= 0 || options.WebsocketMaxPendingBytes > 1024 * 1024 * 1024)
+            failures.Add($"WebsocketMaxPendingBytes must be >0 and <=1GB (was {options.WebsocketMaxPendingBytes}).");
+        if (options.TelnetMaxPendingSends <= 0 || options.TelnetMaxPendingSends > 100000)
+            failures.Add($"TelnetMaxPendingSends must be >0 and <=100000 (was {options.TelnetMaxPendingSends}).");
+        if (options.TelnetMaxPendingBytes <= 0 || options.TelnetMaxPendingBytes > 1024 * 1024 * 1024)
+            failures.Add($"TelnetMaxPendingBytes must be >0 and <=1GB (was {options.TelnetMaxPendingBytes}).");
+        if (options.ConnectionInputQueueLimit <= 0 || options.ConnectionInputQueueLimit > 1000000)
+            failures.Add($"ConnectionInputQueueLimit must be >0 and <=1000000 (was {options.ConnectionInputQueueLimit}).");
+        // connection/attempt/cooldown budgets must be non-negative
+        // (0 = unlimited where the consumer documents it).
+        if (options.MaxTotalConnections < 0)
+            failures.Add($"MaxTotalConnections must be >=0 (was {options.MaxTotalConnections}).");
+        if (options.MaxLoginAttempts < 0)
+            failures.Add($"MaxLoginAttempts must be >=0 (was {options.MaxLoginAttempts}).");
+        if (options.LoginAttemptCooldown < 0)
+            failures.Add($"LoginAttemptCooldown must be >=0 (was {options.LoginAttemptCooldown}).");
+        if (options.CreationCooldown < 0)
+            failures.Add($"CreationCooldown must be >=0 (was {options.CreationCooldown}).");
+        if (string.IsNullOrEmpty(options.FuncparserStartChar))
+            failures.Add("FuncparserStartChar must be non-empty.");
+        if (string.IsNullOrEmpty(options.FuncparserEscapeChar))
+            failures.Add("FuncparserEscapeChar must be non-empty.");
         if (options.ThreadpoolQueueLimit <= 0)
             failures.Add($"ThreadpoolQueueLimit must be >0 (was {options.ThreadpoolQueueLimit}).");
         if (options.ThreadpoolLimit is < 1)
@@ -66,8 +82,10 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
         if (options.MaxPasswordLength < options.MinPasswordLength)
             failures.Add($"MaxPasswordLength ({options.MaxPasswordLength}) must be >= MinPasswordLength ({options.MinPasswordLength}).");
 
-        if (options.WebserverPort < 1024 || options.WebserverPort > 65535)
-            failures.Add($"WebserverPort must be 1024-65535 (was {options.WebserverPort}).");
+        // No privileged-port floor: Python accepts 80/443 (bind may need
+        // elevation, but that is the operator's call, not a config error).
+        if (options.WebserverPort < 1 || options.WebserverPort > 65535)
+            failures.Add($"WebserverPort must be 1-65535 (was {options.WebserverPort}).");
         // Mirror the Kestrel/telnet fail-fast binds: "::" is the IPv6-any
         // spelling, anything else must parse as an IP literal.
         if (!string.Equals(options.WebserverInterface, "::", StringComparison.Ordinal)
@@ -76,7 +94,7 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
         if (!string.Equals(options.TelnetInterface, "::", StringComparison.Ordinal)
             && !System.Net.IPAddress.TryParse(options.TelnetInterface ?? "", out _))
             failures.Add($"TelnetInterface unparseable: '{options.TelnetInterface}'.");
-        if (options.WebserverPort == options.TelnetPort)
+        if (options.TelnetEnabled && options.WebserverPort == options.TelnetPort)
             failures.Add($"WebserverPort ({options.WebserverPort}) must differ from TelnetPort ({options.TelnetPort}).");
         if (string.IsNullOrWhiteSpace(options.ServerName))
             failures.Add("ServerName must be non-empty.");
@@ -110,9 +128,11 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
             failures.Add($"SslKeyFile not found: {options.SslKeyFile}");
         if (options.TelnetEnabled)
         {
-            if (options.TelnetPort < 1024 || options.TelnetPort > 65535)
-                failures.Add($"TelnetPort must be 1024-65535 when TelnetEnabled (was {options.TelnetPort}).");
+            if (options.TelnetPort < 1 || options.TelnetPort > 65535)
+                failures.Add($"TelnetPort must be 1-65535 when TelnetEnabled (was {options.TelnetPort}).");
         }
+        else if (options.TelnetPort < 1 || options.TelnetPort > 65535)
+            failures.Add($"TelnetPort must be 1-65535 for later re-enable (was {options.TelnetPort}).");
 
         if (options.TelnetNawsMaxCols <= 0)
             failures.Add($"TelnetNawsMaxCols must be >0 (was {options.TelnetNawsMaxCols}).");

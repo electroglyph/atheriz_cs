@@ -20,14 +20,10 @@ public static class AtherizLogger
     private static LogLevel _level = LogLevel.Information; // Port of logger.py:28 default info
     private static LogLevel _appliedLevel = LogLevel.Information; // minimum level the live factory was built with
     private static string _savePath = "save";
-#pragma warning disable CS0414 // Last-outcome hint, maintained for diagnostics/tests; writes always retry.
-    private static bool _fileEnabled = true;
-#pragma warning restore CS0414
-    // B-THR-5: _fileEnabled is a diagnostic hint only (kept for compat), never a
-    // permanent latch — every write attempts the append. Last failure ticks are
-    // recorded lock-free for backoff/diagnostics; a healed directory writes on
-    // the very next call (no cooldown skip — the pin test requires immediate
-    // post-heal retry).
+    // the write-only latch is gone — every write attempts
+    // the append (a transient failure never mutes later writes). Last failure
+    // ticks are recorded lock-free for backoff/diagnostics; a healed directory
+    // writes on the very next call (no cooldown skip).
     private static long _lastFileFailureTicks;
     public const long MaxFileBytes = 5 * 1024 * 1024; // Port of RotatingFileHandler 5M
     public const int MaxFiles = 5;
@@ -179,13 +175,13 @@ public static class AtherizLogger
                 if (File.Exists(file))
                 {
                     var info = new FileInfo(file);
-                    if (info.Length + line.Length > MaxFileBytes)
+                    if (info.Length + System.Text.Encoding.UTF8.GetByteCount(line) > MaxFileBytes)
                         Rotate(file);
                 }
             }
             catch { }
-            try { File.AppendAllText(file, line); _fileEnabled = true; Volatile.Write(ref _lastFileFailureTicks, 0); }
-            catch { _fileEnabled = false; Volatile.Write(ref _lastFileFailureTicks, DateTime.UtcNow.Ticks); }
+            try { File.AppendAllText(file, line); Volatile.Write(ref _lastFileFailureTicks, 0); }
+            catch { Volatile.Write(ref _lastFileFailureTicks, DateTime.UtcNow.Ticks); }
         }
         catch { }
         }
@@ -220,17 +216,10 @@ public static class AtherizLogger
 
     private static void Write(LogLevel level, string category, string message, Exception? ex = null)
     {
-        if (level < _level)
-        {
-            // F009 deviation: filtered levels still echo to Console.Error. Strict level-honoring
-            // would drop them, but PortedConnectionTestsPart2.DispatchUnknownCmdLogged pins that a
-            // Debug "Unknown command" line is capturable at default info level (mirrors the old
-            // direct-Console.Error behavior), so the echo stays. File output is still skipped.
-            var filteredLine = $"{level.ToString().ToUpperInvariant()}: {category}: {message}";
-            if (ex != null) filteredLine += $"\n{ex}";
-            try { Console.Error.WriteLine(filteredLine); } catch { }
-            return;
-        }
+        // filtered levels are dropped — operators silencing via
+        // LogLevel must not pay debug IO on every call. (Port of
+        // logger.py, where a below-level debug never reaches any handler.)
+        if (level < _level) return;
         ILogger? logger = null;
         lock (_lock) logger = _cachedDefault;
         if (logger != null)

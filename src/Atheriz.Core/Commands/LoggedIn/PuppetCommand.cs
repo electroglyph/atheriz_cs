@@ -23,9 +23,12 @@ public sealed class PuppetCommand : Command
         if (err != null) { go.Msg(err); return; }
         if (target == go) { go.Msg("You are already puppeting yourself."); return; }
         if (target!.IsAccount || target.IsChannel || target.IsNode) { go.Msg($"You cannot puppet {target.Name}."); return; }
+        // Port of puppet.py:94 before :101 — permission precedes occupancy
+        // disclosure : unpermitted callers must not learn whether
+        // the target is puppeted.
+        if (!target.Access(go, "puppet")) { go.Msg($"You cannot puppet {target.Name}."); return; }
         if (target.IsDeleted) { go.Msg($"{target.Name} is not available."); return; }
         if (target.Session != null && target.Session != sess) { go.Msg($"{target.Name} is already being puppeted."); return; }
-        if (!target.Access(go, "puppet")) { go.Msg($"You cannot puppet {target.Name}."); return; }
         bool ok = go.Puppet(sess, target);
         if (!ok)
         {

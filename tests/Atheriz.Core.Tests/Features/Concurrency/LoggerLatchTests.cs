@@ -8,18 +8,13 @@ namespace Atheriz.Core.Tests.Features.Concurrency;
 [Collection("Ported")]
 public class LoggerLatchTests
 {
-    private static bool ReadFileEnabled()
+    // the write-only _fileEnabled latch was deleted;
+    // the failure witness is now the lock-free last-failure tick stamp.
+    private static bool ReadFileFailureRecorded()
     {
-        var field = typeof(AtherizLogger).GetField("_fileEnabled", BindingFlags.NonPublic | BindingFlags.Static);
+        var field = typeof(AtherizLogger).GetField("_lastFileFailureTicks", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(field);
-        return (bool)field!.GetValue(null)!;
-    }
-
-    private static void WriteFileEnabled(bool value)
-    {
-        var field = typeof(AtherizLogger).GetField("_fileEnabled", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(field);
-        field!.SetValue(null, value);
+        return (long)field!.GetValue(null)! != 0;
     }
 
     [Fact]
@@ -52,8 +47,8 @@ public class LoggerLatchTests
                 File.Delete(dir);
                 Directory.CreateDirectory(dir);
             }
-            // Guard against a vacuous pass: the failure must have tripped the latch.
-            Assert.False(ReadFileEnabled(), "precondition: the failed write did not trip the file latch");
+            // Guard against a vacuous pass: the failure must have been recorded.
+            Assert.True(ReadFileFailureRecorded(), "precondition: the failed write was not recorded");
             string after = $"latch-after-{tag}";
             AtherizLogger.LogInformation(after);
             string healed = Path.Combine(dir, "server.log");
@@ -62,7 +57,7 @@ public class LoggerLatchTests
         }
         finally
         {
-            WriteFileEnabled(true);
+            // No latch reset needed: a successful write clears the stamp itself.
             AtherizLogger.ApplySettings();
             try { if (File.Exists(dir)) File.Delete(dir); } catch { }
             try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); } catch { }

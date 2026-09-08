@@ -1,4 +1,11 @@
 // Port of atheriz/reloader.py:536 — faithful ALC single-load + _apply_patch + _reload_game_logic
+//
+// Reflection is confined to the live-patch field copy here (see
+// SourceHygieneTests exclusions): ctor-bypass is intrinsic to _apply_patch
+// fidelity (Python skips __init__; covered by PortedReloaderTests with a
+// throwing ctor), and no non-reflection mechanism instantiates without
+// running a ctor. Member-method lookups use direct virtual dispatch
+// (ResolveRelations/AtTick).
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
@@ -95,7 +102,7 @@ public static class PluginReloader
         foreach(var obj in live.ToList()){ try{if(PatchSingleObject(obj,newType))patched++;}catch(Exception ex){Console.Error.WriteLine($"[HotReload] patch {obj.Id}: {ex.Message}");} }
         // Only the live replacements need ResolveRelations (old instances are detached after AddObject rewire).
         var newLive=ObjectRegistry.FilterBy(o=>o.GetType()==newType);
-        foreach(var obj in newLive){ try{ var mi=obj.GetType().GetMethod("ResolveRelations",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic); mi?.Invoke(obj,null);}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchLiveObjects: " + logEx.Message, "PluginReloader"); }}
+        foreach(var obj in newLive){ try{ obj.ResolveRelations(); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchLiveObjects: " + logEx.Message, "PluginReloader"); }}
         return patched;
     }
     /// <summary>
@@ -180,6 +187,11 @@ public static class PluginReloader
             var lf=FindField(newType,"_lock");
             if(lf!=null) try{ var cur=lf.GetValue(newObj); if(cur==null) lf.SetValue(newObj,saved.TryGetValue("_lock",out var v)?v:new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion)); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
             try{newObj.Id=oldObj.Id;}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
+            // release the old-object write lock BEFORE AddObject +
+            // RewireReferences (which take channel/map/area/grid/session
+            // locks). Holding it across inverted the registry→object order
+            // of FilterBy while ReloadAsync holds WorldLock.
+            if(taken) try{lk.ExitWriteLock(); taken=false;}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
             ObjectRegistry.AddObject(newObj);
             // C# cannot swap __class__ in place like Python: AddObject replaced the id,
             // so rewire direct refs (channels/map/nodes/sessions hold instances, not ids).
@@ -216,9 +228,11 @@ public static class PluginReloader
         RemoveTickDelegatesFor(ticker,tickables);
         foreach(var obj in tickables){
             double secs=1; try{secs=obj.TickSeconds;}catch{secs=1;} if(secs<=0) secs=1;
-            var mi=obj.GetType().GetMethod("AtTick",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);
-            if(mi==null) continue;
-            try{ Action act=()=>{try{mi.Invoke(obj,null);}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ReregisterTicks: " + logEx.Message, "PluginReloader"); }}; ticker.AddCoro(act,secs);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] rereg {obj.Id}: {ex.Message}");}
+            // direct virtual dispatch — every GameObject
+            // carries AtTick, so the old reflective tick-method lookup plus
+            // Invoke was pure overhead with identical dispatch (all overrides,
+            // no `new` shadows). No behavior change.
+            try{ Action act=()=>{try{obj.AtTick();}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ReregisterTicks: " + logEx.Message, "PluginReloader"); }}; ticker.AddCoro(act,secs);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] rereg {obj.Id}: {ex.Message}");}
         }
     }
     private static void RemoveTickDelegatesFor(AsyncTicker ticker, List<GameObject> tickables)
@@ -244,22 +258,67 @@ public static class PluginReloader
             }
         }
     }
+    private sealed class IdentityComparer : IEqualityComparer<object>
+    {
+        public static readonly IdentityComparer Instance = new();
+        public new bool Equals(object? x, object? y) => ReferenceEquals(x, y);
+        public int GetHashCode(object obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+    }
+
     private static bool TargetsTickable(object? target, List<GameObject> tickables)
     {
         if (target == null) return false;
         foreach (var obj in tickables)
-        {
             if (ReferenceEquals(target, obj)) return true;
-            // Compiler-generated closure capturing the tickable (e.g. () => obj.AtTick()).
-            try
+        // Id match : a pre-patch delegate targets the OLD instance,
+        // which shares the replacement's registry id but never the reference.
+        // Closure walk: Release builds one display class holding the tickable
+        // directly; Debug splits captures across linked display classes
+        // (CS$<>8__locals) — recurse through compiler-generated frames.
+        var ids = new HashSet<int>();
+        foreach (var obj in tickables) ids.Add(obj.Id);
+        var seen = new HashSet<object>(IdentityComparer.Instance);
+        var queue = new Queue<object>();
+        queue.Enqueue(target);
+        seen.Add(target);
+        for (int depth = 0; depth < 4 && queue.Count > 0; depth++)
+        {
+            int n = queue.Count;
+            for (int i = 0; i < n; i++)
             {
-                foreach (var f in target.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                    if (typeof(GameObject).IsAssignableFrom(f.FieldType) && ReferenceEquals(f.GetValue(target), obj))
-                        return true;
+                var cur = queue.Dequeue();
+                if (cur is GameObject go)
+                {
+                    if (ids.Contains(go.Id)) return true;
+                    continue; // never walk live game objects' fields
+                }
+                if (!IsCompilerGenerated(cur.GetType())) continue;
+                FieldInfo[] fields;
+                try { fields = cur.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); }
+                catch { continue; }
+                foreach (var f in fields)
+                {
+                    if (f.FieldType.IsValueType) continue;
+                    object? v;
+                    try { v = f.GetValue(cur); } catch { continue; }
+                    if (v == null || !seen.Add(v)) continue;
+                    queue.Enqueue(v);
+                }
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.TargetsTickable: " + logEx.Message, "PluginReloader"); }
         }
         return false;
+    }
+
+    private static bool IsCompilerGenerated(Type t)
+    {
+        try
+        {
+            if (t.GetCustomAttributes(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), false).Length > 0)
+                return true;
+        }
+        catch { }
+        try { return (t.FullName ?? "").Contains("DisplayClass", StringComparison.Ordinal); }
+        catch { return false; }
     }
     // Port of atheriz/reloader.py:58 _discover_new_atheriz_modules + 93 _discover_new_game_modules — scan plugins + game project
     // Game project discovery: look for already-built dlls near CWD / SavePath parent (mirrors Python game folder import).
@@ -308,8 +367,9 @@ public static class PluginReloader
                         var csprojTime = File.GetLastWriteTimeUtc(csproj);
                         var dllTime = File.GetLastWriteTimeUtc(dll!);
                         if (csprojTime > dllTime) needBuild = true;
-                        // also if any *.cs newer
-                        foreach (var cs in Directory.GetFiles(dir, "*.cs", SearchOption.TopDirectoryOnly))
+                        // also if any *.cs newer (recursive: subdirectory
+                        // edits must not look "up to date")
+                        foreach (var cs in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
                             if (File.GetLastWriteTimeUtc(cs) > dllTime) { needBuild = true; break; }
                     }
                     catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.DiscoverGameAssembly: " + logEx.Message, "PluginReloader"); }

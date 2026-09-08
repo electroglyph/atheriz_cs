@@ -50,7 +50,7 @@ public sealed class TupleCoordConverter : JsonConverter<(int X, int Y)?>
             if (x.HasValue && y.HasValue) return (x.Value, y.Value);
             return null;
         }
-        return null;
+        throw new JsonException($"Unexpected token {reader.TokenType} for nullable coord; expected null, array, or object.");
     }
     public override void Write(Utf8JsonWriter writer, (int X, int Y)? value, JsonSerializerOptions options)
     {
@@ -150,7 +150,16 @@ public sealed class LegendEntry : IEquatable<LegendEntry>
 public class MapInfo
 {
     public string Name { get; set; } = "unknown";
-    public bool MapChanged { get; set; } = true;
+    // every MapChanged=true bumps the dirty generation, so Render
+    // can clear only dirtiness it already rendered (an UpdateGrid landing
+    // between PreRender and the clear must survive for the next render).
+    private bool _mapChanged = true;
+    private long _mapGen;
+    public bool MapChanged
+    {
+        get => _mapChanged;
+        set { if (value) System.Threading.Interlocked.Increment(ref _mapGen); _mapChanged = value; }
+    }
     public bool IsModified { get; set; } = false; // for parity with Python getattr is_modified
     public Dictionary<(int X, int Y), string> PreGrid { get; } = new();
     public Dictionary<(int X, int Y), string> PostGrid { get; } = new();
@@ -223,10 +232,14 @@ public class MapInfo
     public static (string Rendered, int MinX, int MaxY) RenderGrid(Dictionary<(int X, int Y), string> grid)
     {
         if (grid.Count == 0) return ("", 0, 0);
-        int minX = grid.Keys.Min(k => k.X);
-        int maxX = grid.Keys.Max(k => k.X);
-        int minY = grid.Keys.Min(k => k.Y);
-        int maxY = grid.Keys.Max(k => k.Y);
+        int minX = int.MaxValue, maxX = int.MinValue, minY = int.MaxValue, maxY = int.MinValue;
+        foreach (var k in grid.Keys)
+        {
+            if (k.X < minX) minX = k.X;
+            if (k.X > maxX) maxX = k.X;
+            if (k.Y < minY) minY = k.Y;
+            if (k.Y > maxY) maxY = k.Y;
+        }
         var lines = new List<string>();
         for (int y = maxY; y >= minY; y--)
         {
@@ -239,6 +252,9 @@ public class MapInfo
     }
 
     public static (bool N, bool S, bool E, bool W) GetDirs(Dictionary<(int X, int Y), string> grid, (int X, int Y) coord, List<string> chars)
+        => GetDirs(grid, coord, new HashSet<string>(chars));
+
+    public static (bool N, bool S, bool E, bool W) GetDirs(Dictionary<(int X, int Y), string> grid, (int X, int Y) coord, HashSet<string> chars)
     {
         bool n = false, s = false, e = false, w = false;
         int cx = coord.X, cy = coord.Y;
@@ -251,9 +267,9 @@ public class MapInfo
 
     public static string ResolveChar(bool n, bool s, bool e, bool w, string style)
     {
+        if (n && s && e && w) return style == "double" ? "╬" : "┼";
         if (style == "single")
         {
-            if (n && s && e && w) return "┼";
             if (n && s && e) return "├";
             if (n && s && w) return "┤";
             if (n && e && w) return "┴";
@@ -269,7 +285,6 @@ public class MapInfo
         }
         if (style == "double")
         {
-            if (n && s && e && w) return "╬";
             if (n && s && e) return "╠";
             if (n && s && w) return "╣";
             if (n && e && w) return "╩";
@@ -285,7 +300,6 @@ public class MapInfo
         }
         if (style == "rounded")
         {
-            if (n && s && e && w) return "┼";
             if (n && s && e) return "├";
             if (n && s && w) return "┤";
             if (n && e && w) return "┴";
@@ -315,15 +329,14 @@ public class MapInfo
                 [Settings.PathPlaceholder] = "rounded",
                 [Settings.RoadPlaceholder] = "double",
             };
-            var allSymbols = new List<string>(Settings.AllSymbols);
+            var allSymbols = new HashSet<string>(Settings.AllSymbols);
             var rendered = new Dictionary<(int, int), string>(PreGrid);
-            var original = new Dictionary<(int, int), string>(PreGrid);
             var toPlace = new Dictionary<(int, int), string>();
             foreach (var kv in rendered)
             {
                 if (placeholderStyles.TryGetValue(kv.Value, out var style))
                 {
-                    var (n, s, e, w) = GetDirs(original, kv.Key, allSymbols);
+                    var (n, s, e, w) = GetDirs(rendered, kv.Key, allSymbols);
                     toPlace[kv.Key] = ResolveChar(n, s, e, w, style);
                 }
                 else if (kv.Value == Settings.RoomPlaceholder)
@@ -502,7 +515,7 @@ public class MapInfo
                     objEntries.Add((o.Id, (sym, desc, c)));
                 }
             }
-            var staticEntries = staticSnapshot.Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord ?? (0, 0))).ToList();
+            var staticEntries = staticSnapshot.Where(e => e.Coord != null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
             foreach (var l in listenersSnapshot)
             {
                 var entries = new List<(string, string, (int, int))>();
@@ -516,12 +529,13 @@ public class MapInfo
     public virtual void Render(bool force = false)
     {
         bool needsPre;
+        long gen;
         Lock.EnterReadLock();
-        try { needsPre = (force || MapChanged) && PreGrid.Count > 0; }
+        try { needsPre = (force || MapChanged) && PreGrid.Count > 0; gen = _mapGen; }
         finally { Lock.ExitReadLock(); }
         if (needsPre) PreRender();
         Lock.EnterWriteLock();
-        try { MapChanged = false; }
+        try { if (_mapGen == gen) MapChanged = false; }
         finally { Lock.ExitWriteLock(); }
 
         List<GameObject> listeners;
@@ -552,7 +566,7 @@ public class MapInfo
                 objEntries.Add((o.Id, (sym, desc, c)));
             }
         }
-        var staticEntries = staticSnapshot.Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord ?? (0, 0))).ToList();
+        var staticEntries = staticSnapshot.Where(e => e.Coord != null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
 
         double fpsLimit = 0;
         try
@@ -663,12 +677,15 @@ public class MapInfo
                 var parts = kv.Key.Split(',');
                 if (parts.Length == 2 && int.TryParse(parts[0], out var x) && int.TryParse(parts[1], out var y))
                     mi.PreGrid[(x, y)] = kv.Value;
+                // malformed persisted grid keys warn, not vanish silently.
+                else AtherizLogger.LogWarning($"[Load] skipping malformed pre-grid key '{kv.Key}' in area '{Name}'.");
             }
             foreach (var kv in PostGrid)
             {
                 var parts = kv.Key.Split(',');
                 if (parts.Length == 2 && int.TryParse(parts[0], out var x) && int.TryParse(parts[1], out var y))
                     mi.PostGrid[(x, y)] = kv.Value;
+                else AtherizLogger.LogWarning($"[Load] skipping malformed post-grid key '{kv.Key}' in area '{Name}'.");
             }
             foreach (var le in LegendEntries) mi.LegendEntries.Add(le.ToDomain());
             mi.MapChanged = false;
@@ -784,6 +801,16 @@ public class MapHandler
                     try { AtherizLogger.LogWarning($"[Load] skipping corrupt map chunk {row.Area}:{row.Z}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
                 }
             });
+            // the existence query runs BEFORE the write lock (all
+            // readers blocked for the query duration otherwise). Only needed
+            // when nothing usable loaded.
+            bool dbHasRows = false;
+            bool dbCheckFailed = false;
+            if (buffer.Count == 0)
+            {
+                try { dbHasRows = db.MapData.AsNoTracking().Any(); }
+                catch { dbCheckFailed = true; }
+            }
             // Clear-then-swap (mirrors ObjectRegistry.LoadObjects): rows deleted
             // from the DB must not resurrect from memory on the next save.
             // But a failed load (all rows corrupt / I/O error) must preserve
@@ -793,10 +820,6 @@ public class MapHandler
             {
                 if (buffer.Count == 0)
                 {
-                    bool dbHasRows = false;
-                    bool dbCheckFailed = false;
-                    try { dbHasRows = db.MapData.AsNoTracking().Any(); }
-                    catch { dbCheckFailed = true; }
                     if (dbCheckFailed || dbHasRows)
                     {
                         try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
@@ -820,12 +843,14 @@ public class MapHandler
     public virtual void Save(bool force = false)
     {
         try { Save(AtherizDbContextFactory.Create(), force); }
-        catch
+        catch (Exception ex)
         {
             // Python: catches Exception around get_database and around save, restores flags
             // If Create throws (DB closed), ensure flags remain dirty (not cleared) – since we cleared optimistically inside Save(db), we need to restore
             // But if Create throws before Save(db) is entered, flags were not yet cleared, so nothing to restore
-            // Just swallow to mimic Python's logger.error and not raise
+            // log instead of swallowing (map.py logs save errors),
+            // so "skipped, still dirty" is distinguishable from "failed".
+            try { AtherizLogger.LogWarning($"MapHandler.Save failed, flags left dirty: {ex.GetType().Name}: {ex.Message}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Save: " + logEx.Message, "MapHandler"); }
         }
     }
     public virtual void Save(AtherizDbContext db, bool force = false)
@@ -866,9 +891,10 @@ public class MapHandler
                 }
                 finally { mi.Lock.ExitWriteLock(); }
 
+                // Skip unchanged maps before paying for the DTO snapshot.
+                if (!force && !wasChanged && !_settings.AlwaysSaveAll && !ObjectRegistry.AlwaysSaveAll) continue;
                 var dto = MapInfo.MapInfoPersistDto.FromDomain(mi);
                 // if not changed we still snapshot for write if force? For non-force we only write changed.
-                if (!force && !wasChanged && !_settings.AlwaysSaveAll && !ObjectRegistry.AlwaysSaveAll) continue;
                 snapshot.Add((k, dto, mi));
             }
 
@@ -900,6 +926,11 @@ public class MapHandler
                 {
                     DbTransactionHelper.UpsertJson(ctx.MapData, () => ctx.MapData.Find(key.Area, key.Z), () => new MapDataRow { Area = key.Area, Z = key.Z }, json);
                 }
+                // Re-validate in-txn : a key removed then re-added
+                // after the snapshot must not be deleted at commit.
+                Lock.EnterReadLock();
+                try { deletes.ExceptWith(_data.Keys); }
+                finally { Lock.ExitReadLock(); }
                 foreach (var key in deletes)
                 {
                     var row = ctx.MapData.Find(key.Area, key.Z);
@@ -959,6 +990,20 @@ public class MapHandler
     public MapInfo? GetMapInfo(string area, int z)
     {
         using (ReadScope()) return _data.TryGetValue((area, z), out var mi) ? mi : null;
+    }
+
+    // atomic get-or-create. The old GetMapInfo→new→SetMapInfo sequence
+    // let two concurrent creators for the same new area/Z both build and store,
+    // last-wins, losing one's entries. Under one write hold the first stored
+    // instance wins and every caller converges on it.
+    public MapInfo GetOrAddMapInfo(string area, int z, MapInfo candidate)
+    {
+        using (WriteScope())
+        {
+            if (_data.TryGetValue((area, z), out var mi)) return mi;
+            _data[(area, z)] = candidate;
+            return candidate;
+        }
     }
 
     /// <summary>

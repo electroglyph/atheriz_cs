@@ -183,7 +183,8 @@ public partial class GameObject
             {
                 if (!pool.AddTask(() => AtEmitSound(soundDesc, soundMsg, loudness, isSay)))
                 {
-                    // log warning
+                    // Port of base_obj.py emit_sound reject path.
+                    AtherizLogger.LogWarning($"[Sound] Task queue full; sound from {this} dropped.");
                 }
                 return;
             }

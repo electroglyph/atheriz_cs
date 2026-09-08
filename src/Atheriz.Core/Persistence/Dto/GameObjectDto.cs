@@ -30,7 +30,7 @@ public sealed class GameObjectDto
     public bool IsDeleted { get; set; }
     public bool IsModified { get; set; } = true;
 
-    // B-OBJ-6: roundtripped fields (additive, default-tolerant for old saves).
+    // roundtripped fields (additive, default-tolerant for old saves).
     public bool CanHear { get; set; }
     public bool IsTickable { get; set; }
     public double TickSeconds { get; set; } = 1.0;

@@ -9,13 +9,16 @@ public static class ReloadHandler
     {
         var settings = StopHandler.EffectiveSettingsValue;
         var port = ArgumentParser.ParsePort(a) ?? settings.WebserverPort;
-        var tokenFile = ShutdownClient.FindTokenFile(settings.SecretPath, port);
-        if (tokenFile == null) { Console.WriteLine("Error: admin.token not found. Is the server running?"); return; }
         var tlsOn = !string.IsNullOrEmpty(settings.SslCertFile);
         var url = $"{(tlsOn ? "https" : "http")}://localhost:{port}/_internal/hot_reload";
         Console.WriteLine($"Triggering hot reload at {url}...");
         var sw = Stopwatch.StartNew();
+        // single end-to-end token resolution — the helper below
+        // locates admin.token itself, so no separate pre-lookup exists to go
+        // stale. On a scheme mismatch (settings say https, server speaks
+        // plaintext or vice versa) retry once with the flipped scheme.
         var resp = await ShutdownClient.PostAdminAsync(port, settings.SecretPath, "/_internal/hot_reload", null, tlsOn);
+        resp ??= await ShutdownClient.PostAdminAsync(port, settings.SecretPath, "/_internal/hot_reload", null, !tlsOn);
         sw.Stop();
         if (resp == null) { Console.WriteLine($"Error connecting to server at {url}"); return; }
         var body = resp.Body;

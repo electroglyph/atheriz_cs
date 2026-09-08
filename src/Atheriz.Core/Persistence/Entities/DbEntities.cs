@@ -35,6 +35,12 @@ public sealed class AreaRow : IJsonEntity
 
 public sealed class TransitionRow : IJsonEntity
 {
+    // Composite PK is (From*, To*): fan-in edges to one destination are
+    // distinct rows . Data carries the full Transition JSON.
+    public string FromArea { get; set; } = "";
+    public int FromX { get; set; }
+    public int FromY { get; set; }
+    public int FromZ { get; set; }
     public string ToArea { get; set; } = "";
     public int ToX { get; set; }
     public int ToY { get; set; }

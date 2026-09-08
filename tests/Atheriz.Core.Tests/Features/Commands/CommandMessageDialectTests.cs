@@ -4,7 +4,7 @@ using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
-// P1-12: message-dialect centralization — CommandHelpers message homes emit
+// message-dialect centralization — CommandHelpers message homes emit
 // the exact verbatim strings the commands previously inlined.
 public sealed class CommandMessageDialectTests
 {

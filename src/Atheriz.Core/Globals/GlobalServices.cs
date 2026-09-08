@@ -69,7 +69,12 @@ public static class GlobalServices
     });
 
     // Port of get.py:169-176 get_node_handler
-    public static NodeHandler GetNodeHandler() => GetOrCreateSingleton(ref _nodeHandler, () => new NodeHandler(autoLoad: true));
+    // the singleton owner publishes itself as current explicitly
+    // (the ctor no longer hijacks it).
+    public static NodeHandler GetNodeHandler() => GetOrCreateSingleton(ref _nodeHandler, () => { var h = new NodeHandler(autoLoad: true); NodeHandler.SetCurrent(h); return h; });
+    // Settings-pinned boot: first creation loads from settings.SavePath instead
+    // of the ambient path, so DoStartup(settings) uses one database .
+    public static NodeHandler GetNodeHandler(AtherizSettings settings) => GetOrCreateSingleton(ref _nodeHandler, () => { var h = new NodeHandler(settings, autoLoad: true); NodeHandler.SetCurrent(h); return h; });
 
     // Port of get.py:129-136 get_map_handler
     public static MapHandler GetMapHandler() => GetOrCreateSingleton(ref _mapHandler, () =>
@@ -77,13 +82,24 @@ public static class GlobalServices
         var settings = AtherizSettings.Global;
         return new MapHandler(settings, autoLoad: true);
     });
+    public static MapHandler GetMapHandler(AtherizSettings settings) => GetOrCreateSingleton(ref _mapHandler, () => new MapHandler(settings, autoLoad: true));
 
     // Port of get.py:69-76 get_game_time
     public static GameTime GetGameTime() => GetOrCreateSingleton(ref _gameTime, () =>
     {
         var settings = AtherizSettings.Global;
-        var ticker = _asyncTicker;
-        var pool = _asyncThreadPool;
+        // volatile reads — these fields are written under the
+        // singleton lock by Reset/ClearForShutdown on other threads.
+        var ticker = Volatile.Read(ref _asyncTicker);
+        var pool = Volatile.Read(ref _asyncThreadPool);
+        if (ticker != null || pool != null)
+            return new GameTime(settings, ticker, pool, autoLoad: true);
+        return new GameTime(settings, autoLoad: true);
+    });
+    public static GameTime GetGameTime(AtherizSettings settings) => GetOrCreateSingleton(ref _gameTime, () =>
+    {
+        var ticker = Volatile.Read(ref _asyncTicker);
+        var pool = Volatile.Read(ref _asyncThreadPool);
         if (ticker != null || pool != null)
             return new GameTime(settings, ticker, pool, autoLoad: true);
         return new GameTime(settings, autoLoad: true);
@@ -197,6 +213,11 @@ public static class GlobalServices
             _nodeHandler = null;
             _mapHandler = null;
             _gameTime = null;
+            // command sets too — they are rebuilt lazily on next
+            // boot, and reusing instances across a world reload keeps
+            // references to the discarded world (Reset() already clears them).
+            _loggedInCmdSet = null;
+            _unloggedInCmdSet = null;
         }
         finally { _singletonLock.ExitWriteLock(); }
     }

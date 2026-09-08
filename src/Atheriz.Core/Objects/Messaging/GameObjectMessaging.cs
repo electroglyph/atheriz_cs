@@ -42,15 +42,20 @@ public partial class GameObject
         {
             try { fromObj.AtMsgSend(parsed, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
         }
+        // single critical section — the log append and the session read
+        // happen under one write hold, so a session swap between them can no
+        // longer log under one session and forward under another. The actual
+        // socket send stays outside the lock (never do I/O under SyncRoot).
+        Session? sess;
         _lock.EnterWriteLock();
-        // Bounded like Channel history (limit 50) — see AppendMessage below.
-        try { _msgLog.Add(parsed); while (_msgLog.Count > MsgLogLimit) _msgLog.RemoveAt(0); }
+        // Bounded like Channel history (see MsgLogLimit = 200) — see AppendMessage below.
+        try
+        {
+            _msgLog.Add(parsed); while (_msgLog.Count > MsgLogLimit) _msgLog.RemoveAt(0);
+            sess = _session;
+        }
         finally { _lock.ExitWriteLock(); }
         // Forward to session if puppeted — mirrors base_obj.py:904 if self.session is not None: self.session.msg(*args, **kwargs)
-        Session? sess = null;
-        _lock.EnterReadLock();
-        try { sess = _session; }
-        finally { _lock.ExitReadLock(); }
         if (sess != null && sess.Connection != null)
         {
             try { sess.Msg(parsed); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
@@ -259,8 +264,11 @@ public partial class GameObject
                 if (raiseErrors) throw;
                 outMessage = text;
             }
-            // Directly append to receiver without re-parsing (avoid double)
-            receiver.AppendMessage(outMessage, fromObj, msgType);
+            // Port of base_obj.py msg_contents tail: receiver.msg(...) — a full
+            // send (session delivery), not a log-only append . Null
+            // mapping avoids double-parsing the already-parsed message.
+            try { receiver.Msg(outMessage, fromObj, null, false, msgType); }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MsgContents: " + logEx.Message, "GameObject"); }
         }
     }
 
@@ -269,7 +277,7 @@ public partial class GameObject
         try { if (!AtMsgReceive(text, fromObj, msgType)) return; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AppendMessage: " + logEx.Message, "GameObject"); }
         if (fromObj != null) try { fromObj.AtMsgSend(text, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AppendMessage: " + logEx.Message, "GameObject"); }
         _lock.EnterWriteLock();
-        // Bounded like Channel history (limit 50): long-lived NPCs must not
+        // Bounded like Channel history (see MsgLogLimit = 200): long-lived NPCs must not
         // accumulate unbounded message logs. Oldest entries drop first.
         try { _msgLog.Add(text); while (_msgLog.Count > MsgLogLimit) _msgLog.RemoveAt(0); }
         finally { _lock.ExitWriteLock(); }

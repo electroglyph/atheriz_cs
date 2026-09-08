@@ -60,7 +60,9 @@ public class PortedBaseCmdTestsPart2
         var (runFn, _, parsed) = c.Execute(caller, "alice \"the builder\"", cmdstring: "test");
         Assert.Null(runFn);
         Assert.Null(parsed);
-        Assert.Single(caller.Msgs);
+        // Diagnosis first, then help.
+        Assert.Equal(2, caller.Msgs.Count);
+        Assert.Contains("unrecognized arguments", caller.Msgs[0]);
         // Verify shlex behavior directly via our SplitArgs reflection
         var method = typeof(Command).GetMethod("SplitArgs", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         var tokens = method!.Invoke(null, new object[]{"alice \"the builder\""}) as List<string>;
@@ -107,7 +109,8 @@ public class PortedBaseCmdTestsPart2
         var (runFn, _, parsed) = c.Execute(caller, "--name hello world", cmdstring: "x");
         Assert.Null(runFn);
         Assert.Null(parsed);
-        Assert.Single(caller.Msgs);
+        // Diagnosis first, then help.
+        Assert.Equal(2, caller.Msgs.Count);
     }
 
     [Fact]
@@ -217,10 +220,11 @@ public class PortedBaseCmdTestsPart2
         var c = new ConcreteCommand();
         var caller = new MockCaller();
         c.Execute(caller, "", cmdstring: "test");
-        var msg = caller.Msgs[0];
+        // Diagnosis first, then help.
+        var msg = caller.Msgs[1];
         Assert.Contains("test", msg);
         Assert.Contains("A test command", msg);
-        Assert.Contains("aliases:", msg);
+        Assert.Contains("Aliases:", msg);
         Assert.Contains("extra info", msg);
     }
 
@@ -314,6 +318,7 @@ public class PortedBaseCmdTestsPart2
         using var env = GlobalTestEnv.Enter();
         var coord = new Coord("test", 0,0,0);
         var node = new Node(coord, desc: "A room.", symbol:"#");
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var prop = GameObject.Create("mystery-box");
         ObjectRegistry.AddObject(prop);
         prop.ExternalCmdSet = new CmdSet();
@@ -341,6 +346,7 @@ public class PortedBaseCmdTestsPart2
         using var env = GlobalTestEnv.Enter();
         var coord = new Coord("test", 0,0,0);
         var node = new Node(coord, desc:"A room.", symbol:"#");
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var prop = GameObject.Create("async-box");
         ObjectRegistry.AddObject(prop);
         prop.ExternalCmdSet = new CmdSet();

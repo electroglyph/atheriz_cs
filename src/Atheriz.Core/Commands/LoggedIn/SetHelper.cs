@@ -30,7 +30,7 @@ public static class SetHelper
     // NOTE vs the old code: exact-case flag spellings ("IsPc") used to slip past
     // IsProtected (which compares snake forms) and toggle flags. Flags are now
     // uniformly read-only through `set` (use the quell/build commands instead);
-    // superuser-only narrowing for is_* is intentional hardening, see audit.
+    // superuser-only narrowing for is_* is intentional hardening.
     private sealed record SetterEntry(Type ValueType, Action<GameObject, object?>? Set);
 
     private static void Put(Dictionary<string, SetterEntry> m, Type t, Action<GameObject, object?>? set, params string[] names)

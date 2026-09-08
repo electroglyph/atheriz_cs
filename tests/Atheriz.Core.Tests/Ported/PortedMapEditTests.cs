@@ -142,6 +142,7 @@ public class PortedMapEditTests
         var mi = MakeMi(new Dictionary<(int,int),string>{[(0,0)]="X",[(5,-2)]="Y"});
         mh.SetMapInfo("TestArea",0,mi);
         var node = new Node(new Coord("TestArea",3,7,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         // No NodeArea needed for this test - rooms should be empty
         var nh = new NodeHandler(autoLoad:false); NodeHandler.SetCurrent(nh);
         var conn = new FakeConn();
@@ -177,7 +178,7 @@ public class PortedMapEditTests
         Reset();
         var mi = MakeMi(new Dictionary<(int,int),string>{[(0,0)]=new AtherizSettings().RoomPlaceholder,[(5,-2)]="Y"});
         var mh = GlobalServices.GetMapHandler(); mh.SetMapInfo("TestArea",0,mi);
-        var room = new Node(new Coord("TestArea",0,0,0)); room.Desc="A dusty hall.";
+        var room = new Node(new Coord("TestArea",0,0,0)); ObjectRegistry.AddObject(room); room.Desc="A dusty hall."; // Explicit registration: the constructor does not publish.
         room.AddLink(new NodeLink("North", new Coord("TestArea",0,1,0), new List<string>{"n"}));
         room.AddLink(new NodeLink("East", new Coord("TestArea",1,0,0)));
         room.AddLink(new NodeLink("Broken", default)); // coord None -> default Coord (empty area)
@@ -190,6 +191,7 @@ public class PortedMapEditTests
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         var callerNode = new Node(new Coord("TestArea",3,7,0));
+        ObjectRegistry.AddObject(callerNode); // Explicit registration: the constructor does not publish.
         var conn = new FakeConn();
         var caller = GameObject.Create("Caller", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
         caller.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(callerNode.Coord);
@@ -218,12 +220,12 @@ public class PortedMapEditTests
         Reset();
         var mi = MakeMi(new Dictionary<(int,int),string>{[(0,0)]="│",[(2,0)]="│"});
         var mh = GlobalServices.GetMapHandler(); mh.SetMapInfo("TestArea",0,mi);
-        var wallNode = new Node(new Coord("TestArea",0,0,0));
-        var interior = new Node(new Coord("TestArea",1,0,0)); interior.Desc="A cozy room.";
+        var wallNode = new Node(new Coord("TestArea",0,0,0)); ObjectRegistry.AddObject(wallNode); // Explicit registration: the constructor does not publish.
+        var interior = new Node(new Coord("TestArea",1,0,0)); ObjectRegistry.AddObject(interior); interior.Desc="A cozy room."; // Explicit registration: the constructor does not publish.
         var grid = new NodeGrid("TestArea",0); grid.Nodes[(0,0)]=wallNode; grid.Nodes[(1,0)]=interior;
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = GlobalServices.GetNodeHandler(); nh.AddArea(area); NodeHandler.SetCurrent(nh);
-        var callerNode = new Node(new Coord("TestArea",1,0,0)); // caller at interior
+        var callerNode = new Node(new Coord("TestArea",1,0,0)); ObjectRegistry.AddObject(callerNode); // caller at interior (explicit registration: the constructor does not publish).
         // Ensure caller node is not same as interior? Use separate
         var conn = new FakeConn();
         var caller = GameObject.Create("Caller", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
@@ -254,6 +256,7 @@ public class PortedMapEditTests
         var mi = MakeMi(new Dictionary<(int,int),string>{[(0,0)]=s.SingleWallPlaceholder});
         var mh = GlobalServices.GetMapHandler(); mh.SetMapInfo("TestArea",0,mi);
         var node = new Node(new Coord("TestArea",3,7,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var nh = GlobalServices.GetNodeHandler(); var area = new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         grid.Nodes[(3,7)]=node;
         var conn = new FakeConn();
@@ -277,6 +280,7 @@ public class PortedMapEditTests
         var mi = new MapInfo("TestArea"); mi.PostGrid[(0,0)]="╬"; mi.PostGrid[(1,0)]="═";
         var mh = GlobalServices.GetMapHandler(); mh.SetMapInfo("TestArea",0,mi);
         var node = new Node(new Coord("TestArea",3,7,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         grid.Nodes[(3,7)]=node;
         var conn = new FakeConn();
@@ -302,6 +306,7 @@ public class PortedMapEditTests
         // Ensure no mapinfo
         Assert.Null(mh.GetMapInfo("TestArea",0));
         var node = new Node(new Coord("TestArea",0,0,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         grid.Nodes[(0,0)]=node;
         var conn = new FakeConn();
@@ -338,6 +343,7 @@ public class PortedMapEditTests
         var caller = GameObject.Create("Builder", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
         caller.Session = null!;
         var node = new Node(new Coord("TestArea",0,0,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         grid.Nodes[(0,0)]=node; node.AddObject(caller);
         caller.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(node.Coord);
@@ -356,6 +362,7 @@ public class PortedMapEditTests
         var sess = new Session(connection:null);
         caller.Session = sess;
         var node = new Node(new Coord("TestArea",1,0,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         grid.Nodes[(1,0)]=node; node.AddObject(caller);
         caller.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(node.Coord);

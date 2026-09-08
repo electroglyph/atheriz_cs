@@ -5,7 +5,7 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Globals;
 
-// P1-11 lifecycle regression pins.
+// Lifecycle regression pins.
 [Collection("Ported")]
 public class LifecycleRegressionTests
 {

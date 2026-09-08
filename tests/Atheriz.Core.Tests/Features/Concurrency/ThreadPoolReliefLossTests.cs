@@ -5,7 +5,7 @@ using Atheriz.Core.Concurrency;
 
 namespace Atheriz.Core.Tests.Features.Concurrency;
 
-// P0-7: relief-path task loss, QueueCount truthfulness, shutdown join bound.
+// relief-path task loss, QueueCount truthfulness, shutdown join bound.
 // Reflection is test-only white-box access (production never reflects).
 [Collection("Ported")]
 public class ThreadPoolReliefLossTests

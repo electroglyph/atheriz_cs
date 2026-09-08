@@ -7,7 +7,7 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Globals;
 
-// P1-11 NodeHandler regression pins: tombstone deletes, gen bumps,
+// NodeHandler regression pins: tombstone deletes, gen bumps,
 // atomic delete-eviction, loud load failure.
 [Collection("Ported")]
 public class NodeHandlerRegressionTests

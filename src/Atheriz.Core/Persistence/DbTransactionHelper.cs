@@ -56,7 +56,9 @@ public static class CheckpointJournal
         finally { DbWriteGate.Exit(); }
     }
 
-    /// <summary>True when a previous checkpoint died mid-way. Missing row/table (first boot) counts as clean.</summary>
+    /// <summary>True when a previous checkpoint died mid-way. Missing row (first boot) counts as clean.
+    /// errors fail loud (the StartStop caller logs them); a full disk,
+    /// read-only file, or torn table must never read back as "clean".</summary>
     public static bool IsDirty(string savePath)
     {
         DbWriteGate.Enter();
@@ -67,7 +69,6 @@ public static class CheckpointJournal
             var row = db.Checkpoints.Find(RowId);
             return row != null && row.State == "dirty";
         }
-        catch { return false; }
         finally { DbWriteGate.Exit(); }
     }
 
@@ -141,6 +142,11 @@ public static class DbTransactionHelper
                 catch (Exception ex) when (attempt < maxAttempts && IsBusyConflict(ex))
                 {
                     try { tx.Rollback(); } catch (Exception) { }
+                    // Clean tracker per attempt : retrying work() +
+                    // SaveChanges() on the same context with a dirty tracker
+                    // throws already-tracked / re-inserts the same key instead
+                    // of a clean retry. work() re-fetches everything via Find.
+                    db.ChangeTracker.Clear();
                     AtherizLogger.LogDebug($"Suppressed DbTransactionHelper.WithGateAndTransaction SQLITE_BUSY retry {attempt}: {ex.Message}", "DbTransactionHelper");
                 }
                 catch

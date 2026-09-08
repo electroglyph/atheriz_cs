@@ -7,7 +7,7 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Persistence;
 
-// P1-10 data-loss regression pins.
+// Data-loss regression pins.
 [Collection("Ported")]
 public class DataLossRegressionTests
 {

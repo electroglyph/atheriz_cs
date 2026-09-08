@@ -11,9 +11,21 @@ namespace Atheriz.Core;
 public static class ConnectionScreen
 {
     // Port of connection_screen.py:11 _guest_text
-    private static string GuestText(AtherizSettings? s = null) => (s ?? AtherizSettings.Global).GuestEnabled ? "enter 'guest' to create a temporary character" : "";
+    // hints must agree with the dispatch gate, not just the display
+    // settings — the gate also requires the dispatcher snapshot.
+    private static string GuestText(AtherizSettings? s = null)
+    {
+        if (!(s ?? AtherizSettings.Global).GuestEnabled) return "";
+        try { if (!Commands.CommandDispatcher.IsUnloggedInEnabled(new Commands.UnloggedIn.GuestCommand())) return ""; } catch { }
+        return "enter 'guest' to create a temporary character";
+    }
     // Port of connection_screen.py:15 _create_text
-    private static string CreateText(AtherizSettings? s = null) => (s ?? AtherizSettings.Global).AccountCreationEnabled ? "enter 'create' to make a new account" : "";
+    private static string CreateText(AtherizSettings? s = null)
+    {
+        if (!(s ?? AtherizSettings.Global).AccountCreationEnabled) return "";
+        try { if (!Commands.CommandDispatcher.IsUnloggedInEnabled(new Commands.UnloggedIn.CreateAccountCommand())) return ""; } catch { }
+        return "enter 'create' to make a new account";
+    }
 
     // Port of connection_screen.py:22 SCREEN
     private const string Screen = """
@@ -86,7 +98,7 @@ public static class ConnectionScreen
 
     // Port of connection_screen.py:79 render
     public static string Render(Session? session = null) => Render(AtherizSettings.Global, session);
-    public static string Render(AtherizSettings settings, Session? session = null)
+    public static string Render(AtherizSettings? settings, Session? session = null)
     {
         settings ??= AtherizSettings.Global;
         var (online, known) = GetOnline(); // Port of connection_screen.py:80

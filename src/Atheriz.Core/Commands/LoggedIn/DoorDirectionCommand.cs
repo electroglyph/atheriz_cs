@@ -24,11 +24,10 @@ public abstract class DoorDirectionCommand : Command
     public sealed override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
+        // single location resolve (open.py reads caller.location once).
         var loc = go.ResolveLocationObject() as Node;
         if (loc == null)
         {
-            // preserve original OpenCommand double check for invalid location
-            if (go.ResolveLocationObject() == null) { CommandHelpers.MsgInvalidLocation(go); return; }
             CommandHelpers.MsgInvalidLocation(go);
             return;
         }

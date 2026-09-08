@@ -2,10 +2,9 @@ using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Tests.Features.Utils;
 
-// A failed deep-copy must never hand back the live original: callers mutate
-// the "detached" copy, so aliasing corrupts source state (GameUtils.cs:441-454).
-// Pure-function checks over a holder whose Func member cannot survive a JSON
-// round-trip, so Detach deterministically falls into its failure path.
+// A failed detach raises (utils.py:538-550), like Python — never the live
+// original, never a silent blank. Holder whose Func member cannot survive
+// a JSON round-trip, so Detach deterministically hits the failure path.
 public sealed class DetachTests
 {
     // Holder with a member JSON cannot represent; serialization throws every run.
@@ -16,20 +15,19 @@ public sealed class DetachTests
     }
 
     [Fact]
-    public void Detach_FailedRoundTrip_ReturnsIndependentCopy()
+    public void Detach_FailedRoundTrip_Throws()
     {
         var original = new HoldsCallback();
-        var copy = GameUtils.Detach(original);
-        Assert.NotNull(copy);
-        Assert.NotSame(original, copy);
+        Assert.ThrowsAny<Exception>(() => GameUtils.Detach(original));
     }
 
     [Fact]
-    public void Detach_FailedRoundTrip_MutatingCopyLeavesOriginalUnchanged()
+    public void Detach_RoundTrip_CopiesIndependently()
     {
-        var original = new HoldsCallback { Value = 1 };
+        var original = new HoldsCallback { Value = 1, Callback = null };
         var copy = GameUtils.Detach(original);
         Assert.NotNull(copy);
+        Assert.NotSame(original, copy);
         copy!.Value = 999;
         Assert.Equal(1, original.Value);
     }

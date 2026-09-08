@@ -7,7 +7,7 @@ namespace Atheriz.Core.Tests.Features.Objects;
 // Method carries the [Before]/[After]/[Replace] marker for Hookable.
 // Signatures beyond Action/Func range cannot be honored: InstallHooks logs
 // loudly and skips them instead of installing a marker-less wrapper that
-// Hookable would silently ignore (P0-1).
+// Hookable would silently ignore .
 [Collection("Ported")]
 public class ScriptHookTests
 {

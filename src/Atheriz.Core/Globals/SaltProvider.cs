@@ -19,12 +19,16 @@ public static class SaltProvider
     private static readonly Dictionary<string, string> _salts = new(StringComparer.Ordinal);
     private static readonly object _lock = new();
 
-    public static string GetSalt(string secretPath = "secret")
+    // Full-path keying for explicit arguments; the default invocation uses a
+    // fixed key (single static salt is an intentional wontfix).
+    private const string DefaultSaltKey = "secret";
+
+    public static string GetSalt(string secretPath = DefaultSaltKey)
     {
-        // `secretPath == "secret"` identifies the default invocation (the
+        // Equality with the default identifies the default invocation (the
         // production Account path); any explicit argument is path-keyed.
-        bool isDefault = secretPath == "secret";
-        string key = isDefault ? "secret" : Path.GetFullPath(secretPath);
+        bool isDefault = secretPath == DefaultSaltKey;
+        string key = isDefault ? DefaultSaltKey : Path.GetFullPath(secretPath);
         lock (_lock)
         {
             if (isDefault)
@@ -33,6 +37,9 @@ public static class SaltProvider
             }
             else if (_salts.TryGetValue(key, out var cached)) return cached;
         }
+        // RNG runs outside the global lock (RNG is thread-safe;
+        // holding _lock over it serializes all salt callers for no reason).
+        var preVal = CryptoRandom.UInt64String();
         lock (_lock)
         {
             if (isDefault)
@@ -56,7 +63,7 @@ public static class SaltProvider
                 return raw;
             }
 
-            var val = CryptoRandom.UInt64String();
+            var val = preVal;
             // Ensure parent exists
             Directory.CreateDirectory(secretPath);
             FsUtil.TryChmod0700(secretPath);
@@ -83,10 +90,15 @@ public static class SaltProvider
             {
                 // Port of salt.py:65-66 except OSError fallback: a non-race OS
                 // error (permissions/FS) falls back to a plain write rather
-                // than propagating — but the fallback MUST be verified: a
+                // than propagating. Read any peer-persisted salt
+                // BEFORE overwriting — a concurrent process may have created
+                // the file between our failed O_EXCL create and now, and
+                // overwriting it would fork the salt. Then verify: a
                 // swallowed failed write would cache a salt that is not on
                 // disk, silently invalidating every password hash on restart.
                 // Re-read (or throw) instead of trusting the write.
+                var peer = TryReadSalt(saltFile);
+                if (peer != null) { Store(key, isDefault, peer); return peer; }
                 try { File.WriteAllText(saltFile, val); } catch (Exception) { }
                 var back = TryReadSalt(saltFile);
                 if (back == null || !CryptographicEquals(back, val))

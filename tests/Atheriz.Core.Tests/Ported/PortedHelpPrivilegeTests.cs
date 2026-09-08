@@ -136,6 +136,7 @@ public class PortedHelpPrivilegeTests
         using var env = GlobalTestEnv.Enter();
         var coord = new Coord("test_follow", 0,0,0);
         var room = new Node(coord, desc: "Room");
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c = MakeCaller();
         c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
         room.AddObject(c);
@@ -339,6 +340,7 @@ public class PortedHelpPrivilegeTests
         using var env = GlobalTestEnv.Enter();
         var coord = new Coord("t",0,0,0);
         var node = new Node(coord);
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var c = MakeCaller();
         c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
         var pa = new GameArgumentParser.ParsedArgs();
@@ -365,6 +367,7 @@ public class PortedHelpPrivilegeTests
         using var env = GlobalTestEnv.Enter();
         var coord = new Coord("tn",0,0,0);
         var loc = new Node(coord);
+        ObjectRegistry.AddObject(loc); // Explicit registration: the constructor does not publish.
         var c = MakeCaller(builder: true);
         c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
         var pa = new GameArgumentParser.ParsedArgs();
@@ -625,7 +628,7 @@ public class PortedHelpPrivilegeTests
         using var env=GlobalTestEnv.Enter();
         var c=MakeCaller();
         var target=GameObject.Create("Bob", isPc:true); ObjectRegistry.AddObject(target);
-        var coord=new Coord("test_group_add",0,0,0); var node=new Node(coord); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord); node.AddObject(c); node.AddObject(target);
+        var coord=new Coord("test_group_add",0,0,0); var node=new Node(coord); ObjectRegistry.AddObject(node); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord); node.AddObject(c); node.AddObject(target);
         c.IsConnected=true; target.IsConnected=true;
         var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"add","bob"};
         new GroupCommand().Run(c, pa);

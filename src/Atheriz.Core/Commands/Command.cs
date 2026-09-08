@@ -63,7 +63,7 @@ public abstract class Command
         var a = new List<string> { Key };
         a.AddRange(Aliases);
         if (Parser is null) return HelpHelper.FormatNoParser(this);
-        return Parser.FormatHelp() + $"\naliases: {string.Join(", ", a)}\n" + ExtraDesc;
+        return Parser.FormatHelp() + $"\nAliases: {string.Join(", ", a)}\n" + ExtraDesc;
     }
 
     /// <summary>
@@ -72,7 +72,7 @@ public abstract class Command
     public abstract void Run(IMessageTarget caller, object? args);
 
     // Shlex helper — mirrors Python's shlex.split( posix=True ) with escaping for Windows backslashes
-    private static List<string> SplitArgs(string argsString)
+    internal static List<string> SplitArgs(string argsString)
     {
         // replicate Python: re.sub(r'\\(?![\"\'\\])', r'\\\\', args_string)
         var escaped = Regex.Replace(argsString, @"\\(?![\""\'\\])", @"\\");
@@ -103,6 +103,15 @@ public abstract class Command
         if (inSingle || inDouble) throw new ArgumentException("Unbalanced quote");
         if (cur.Length > 0) tokens.Add(cur.ToString());
         return tokens;
+    }
+
+    // Sync-stub splitter for the creation stubs (create/guest/new-character):
+    // honors quotes/tabs like the parser path; on unbalanced quotes falls
+    // back to a plain whitespace split so weird input still reaches validation.
+    internal static List<string> SplitStubArgs(string text)
+    {
+        try { return SplitArgs(text); }
+        catch (ArgumentException) { return text.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries).ToList(); }
     }
 
     // Lag gate global hook — mirrors grotto/lag_gate.py monkey-patch of BaseCommand.execute
@@ -149,12 +158,12 @@ public abstract class Command
                 parsed.CmdString = cmdstring;
             }
         }
-        catch (CommandError)
+        catch (CommandError ce)
         {
-            // Python base_cmd.py:189 shows help only on parser errors; the
-            // diagnosis in ce.Message is intentionally not surfaced: three
-            // pins (Execute_WithRequiredArgOmitted, Execute_ShlexStripsQuotes,
-            // Execute_ArgsWithSpacesSplit) assert exactly one message here.
+            // surface the diagnosis WITH the help. (Python
+            // base_cmd.py:189 shows help only — this deliberately diverges so
+            // callers learn what failed instead of guessing.)
+            if (!string.IsNullOrEmpty(ce.Message)) caller.Msg(ce.Message);
             caller.Msg(PrintHelp());
             return (null, null, null);
         }

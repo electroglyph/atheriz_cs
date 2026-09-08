@@ -41,7 +41,7 @@ public class PortedOpenExitMapNounSpamWanderTests
     [Fact] public void Open_NoDirection()
     {
         using var env=GlobalTestEnv.Enter();
-        var coord=MakeCoord(); var node=new Node(coord); NodeHandler.GetCurrent()?.AddNode(node);
+        var coord=MakeCoord(); var node=new Node(coord); NodeHandler.GetCurrent()?.AddNode(node); ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish (AddNode is a null-op when no handler).
         var c=MakeCaller(); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var pa=new GameArgumentParser.ParsedArgs();
         pa["north"]=false; pa["south"]=false; pa["east"]=false; pa["west"]=false; pa["up"]=false; pa["down"]=false; pa["args"]=new List<string>();
@@ -96,6 +96,7 @@ public class PortedOpenExitMapNounSpamWanderTests
     {
         using var env=GlobalTestEnv.Enter();
         var coord=MakeCoord(); var node=new Node(coord);
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var c=MakeCaller(); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var pa=new GameArgumentParser.ParsedArgs();
         pa["north"]=false; pa["south"]=false; pa["east"]=false; pa["west"]=false; pa["up"]=false; pa["down"]=false; pa["args"]=new List<string>();
@@ -439,7 +440,9 @@ public class PortedOpenExitMapNounSpamWanderTests
         {
             var content=System.IO.File.ReadAllText(file);
             Assert.StartsWith("# Account Name", content);
-            Assert.Contains("account1|password1|char1", content);
+            // Passwords are never persisted to the credentials file.
+            Assert.Contains("account1|char1", content);
+            Assert.DoesNotContain("password1", content);
         }
         else
         {

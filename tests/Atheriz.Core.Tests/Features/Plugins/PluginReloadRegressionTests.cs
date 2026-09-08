@@ -8,7 +8,7 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Plugins;
 
-// P1-15 plugin loader/reloader regression pins.
+// Plugin loader/reloader regression pins.
 
 // Unassignable replacement on a DISTINCT base (Channel) so a missing skip can't
 // hide behind dictionary key collision: string is not a Channel — Load must skip.

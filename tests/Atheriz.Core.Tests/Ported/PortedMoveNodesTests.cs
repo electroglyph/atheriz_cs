@@ -150,12 +150,12 @@ public class PortedMoveNodesTests
         Assert.Single(found);
         var t = found[0];
         Assert.Equal(new Coord("TestArea",3,0,0), t.FromCoord);
-        // Also verify via dictionary reflection
+        // Also verify via dictionary reflection (keyed by (from,to)).
         var field = typeof(NodeHandler).GetField("_transitions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var dict = field!.GetValue(nh) as Dictionary<Coord, Transition>;
+        var dict = field!.GetValue(nh) as Dictionary<(Coord From, Coord To), Transition>;
         Assert.NotNull(dict);
-        Assert.True(dict!.ContainsKey(new Coord("OtherArea",0,0,0)));
-        Assert.Equal(new Coord("TestArea",3,0,0), dict[new Coord("OtherArea",0,0,0)].FromCoord);
+        Assert.True(dict!.ContainsKey((new Coord("TestArea", 3, 0, 0), new Coord("OtherArea", 0, 0, 0))));
+        Assert.Equal(new Coord("TestArea", 3, 0, 0), dict[(new Coord("TestArea", 3, 0, 0), new Coord("OtherArea", 0, 0, 0))].FromCoord);
     }
 
     [Fact]

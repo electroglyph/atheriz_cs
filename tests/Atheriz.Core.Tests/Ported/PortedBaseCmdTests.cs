@@ -280,7 +280,7 @@ public class PortedBaseCmdTests
     {
         var c = new ConcreteCommand();
         var h = c.PrintHelp();
-        Assert.Contains("aliases:", h);
+        Assert.Contains("Aliases:", h);
         Assert.Contains("test", h);
         Assert.Contains("t", h);
         Assert.Contains("tst", h);
@@ -299,7 +299,7 @@ public class PortedBaseCmdTests
     {
         var c = new MinimalBaseNoAlias();
         var h = c.PrintHelp();
-        Assert.Contains("aliases: x", h);
+        Assert.Contains("Aliases: x", h);
     }
     private sealed class MinimalBaseNoAlias : Command
     {
@@ -350,8 +350,10 @@ public class PortedBaseCmdTests
         Assert.Null(runFn);
         Assert.Null(cArg);
         Assert.Null(parsed);
-        Assert.Single(caller.Msgs);
-        Assert.Contains("aliases:", caller.Msgs[0]);
+        // Diagnosis first, then help.
+        Assert.Equal(2, caller.Msgs.Count);
+        Assert.Contains("required", caller.Msgs[0]);
+        Assert.Contains("Aliases:", caller.Msgs[1]);
     }
 
     [Fact]
@@ -396,7 +398,9 @@ public class PortedBaseCmdTests
         var caller = new MockCaller();
         var (runFn, cArg, parsed) = c.Execute(caller, "", cmdstring: "test");
         Assert.Null(runFn);
-        Assert.Contains("aliases:", caller.Msgs[0]);
+        // Diagnosis first, then help.
+        Assert.Contains("required", caller.Msgs[0]);
+        Assert.Contains("Aliases:", caller.Msgs[1]);
     }
 
     [Fact]

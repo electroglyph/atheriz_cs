@@ -42,7 +42,8 @@ public sealed class GiveCommand : Command
                     if (locMatches.Count > 0) { foundObj = candObj; foundTgt = candTgt; break; }
                     continue;
                 }
-                if (CommandHelpers.SearchWithFallback(go, candObj).Count > 0)
+                // Port of give.py:63 — caller.search is inventory-only.
+                if (go.Search(candObj, true, go).Count > 0)
                 {
                     var locMatches = CommandHelpers.SearchIn(loc, candTgt, go);
                     if (locMatches.Count > 0) { foundObj = candObj; foundTgt = candTgt; break; }
@@ -82,13 +83,10 @@ public sealed class GiveCommand : Command
         if (objName == "all") objsToGive = ObjectRegistry.Get(go.ContentsSnapshot.ToList());
         else
         {
-            // Resolution is caller+room(+global #id) via SearchWithFallback:
-            // Python's caller.search() is inventory-only and would refuse
-            // room-ground gives with "You don't have that.", but pre-existing
-            // Give_RoomObject_MovesToTarget pins giving a room object, so the
-            // test wins (same precedent as BareNameNewOverwrite) and the
-            // possession restriction stays reverted.
-            objsToGive = CommandHelpers.SearchWithFallback(go, objName);
+            // Port of give.py:162 — caller.search is inventory-only: room
+            // ground (or global #id) matches are NOT givable .
+            // "You don't have that." is the verbatim refusal.
+            objsToGive = go.Search(objName, true, go);
             if (objsToGive.Count == 0) { go.Msg("You don't have that."); return; }
         }
         if (objsToGive.Count == 0) { go.Msg("You don't have that."); return; }

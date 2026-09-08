@@ -158,7 +158,7 @@ public static class MapEdit
         var stale = new List<string>();
         foreach (var kv in _previous)
             if (!_chains.ContainsKey(kv.Value)) stale.Add(kv.Key);
-        foreach (var k in stale) _previous.Remove(k);
+        foreach (var k in stale) { _previous.Remove(k); }
 
         // Port of mapedit.py:53-60 while len(_chains) > cap: oldest = min by created
         while (_chains.Count > cap)
@@ -179,26 +179,28 @@ public static class MapEdit
             // Port of mapedit.py:58-60 stale after eviction
             var stale2 = new List<string>();
             foreach (var kv in _previous) if (!_chains.ContainsKey(kv.Value)) stale2.Add(kv.Key);
-            foreach (var k in stale2) _previous.Remove(k);
+            foreach (var k in stale2) { _previous.Remove(k); }
         }
     }
 
     // Port of mapedit.py:63-70 grant(ip,area,z) -> key
     public static string Grant(string ip, string area, int z, Session? session = null)
     {
+        // first token candidate is generated OUTSIDE the write lock
+        // (RNG is the slow part); only a collision (rare) regenerates inside.
+        string key = GenerateToken();
         Lock.EnterWriteLock();
         try
         {
             double now = GetMonotonic();
             EvictLocked(now);
-            string key;
-            int attempts = 0;
-            do
+            int attempts = 1;
+            while (_chains.ContainsKey(key) || _previous.ContainsKey(key))
             {
+                if (attempts > 100) throw new InvalidOperationException("Failed to generate unique mapedit key");
                 key = GenerateToken();
                 attempts++;
-                if (attempts > 100) throw new InvalidOperationException("Failed to generate unique mapedit key");
-            } while (_chains.ContainsKey(key) || _previous.ContainsKey(key));
+            }
             var chain = new MapEditChain(key, ip, area, z, session);
             _chains[key] = chain;
             if (_chains.Count > EffectiveCap())
@@ -337,6 +339,10 @@ public static class MapEdit
                 rotated.CreatedMonotonic = GetMonotonic();
                 _chains[newKey] = rotated;
                 _previous[oldKey] = newKey;
+                // Port of mapedit.py:96-105 — no grandparent repoint:
+                // entries still aimed at the retired key go stale and are
+                // dropped by EvictLocked, so a twice-rotated key resolves
+                // to nothing (fail-closed, as upstream).
                 return new MapEditResult(MapEditStatus.Processed, newKey: newKey, chain: CopyOf(rotated));
             }
             if (seq <= chain.Seq)
@@ -379,7 +385,7 @@ public static class MapEdit
             }
             var stale = new List<string>();
             foreach (var kv in _previous) if (!_chains.ContainsKey(kv.Value)) stale.Add(kv.Key);
-            foreach (var k in stale) _previous.Remove(k);
+            foreach (var k in stale) { _previous.Remove(k); }
         }
         finally { Lock.ExitWriteLock(); }
     }
@@ -444,7 +450,7 @@ public static class MapEdit
             // Clean stale
             var stale = new List<string>();
             foreach (var kv in _previous) if (!_chains.ContainsKey(kv.Value)) stale.Add(kv.Key);
-            foreach (var k in stale) _previous.Remove(k);
+            foreach (var k in stale) { _previous.Remove(k); }
             return removed;
         }
         finally { Lock.ExitWriteLock(); }

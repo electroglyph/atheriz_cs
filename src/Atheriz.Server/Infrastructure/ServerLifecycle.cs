@@ -13,12 +13,12 @@ namespace Atheriz.Server.Infrastructure;
 /// </summary>
 public static class ServerLifecycle
 {
-    // Single _WORLD_LOCK with _shutdown_lock alias (startstop.py:17-18):
-    // both names refer to StartStop.WorldLock, so admin shutdown/reload and
-    // in-game reload mutually exclude (Monitor is re-entrant; nesting is safe).
+    // Single _WORLD_LOCK (startstop.py:17-18): admin shutdown/reload and
+    // in-game reload mutually exclude on StartStop.WorldLock directly
+    // (Monitor is re-entrant; nesting is safe). the alias is gone —
+    // one name, one lock.
     // Port of startstop.py:19 _shutdown_completed
     private static readonly object WorldLock = StartStop.WorldLock;
-    private static readonly object ShutdownLock = WorldLock;
     // Port of startstop.py:19 _shutdown_completed
     private static bool _shutdownCompleted = false;
     // Readiness flag for /ready (liveness stays /health per AGENTS webclient constraint).
@@ -38,15 +38,14 @@ public static class ServerLifecycle
         _startupSucceeded = false;
 
         // Guard paths — atheriz/atheriz.py:508 etc already done in Program, but repeat for direct calls
-        // Port of database_setup.py:66 SAVE_PATH guard
-        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(settings.SavePath); } catch { throw; }
+        // Port of database_setup.py:66 SAVE_PATH guard (no-op rethrows removed)
+        Atheriz.Core.Utils.PathGuards.GuardSavePath(settings.SavePath);
         // Ensure DB created — mirrors get_database() at database_setup.py:66-88
         try
         {
             using var db = new AtherizDbContext(settings.SavePath);
             db.Database.EnsureCreated();
         }
-        catch (InvalidOperationException) { throw; }
         catch (Exception ex) { Console.Error.WriteLine($"DoStartup EnsureCreated failed: {ex}"); _startupSucceeded = false; throw; }
 
         // Port of startstop.py:30-46 delegate faithful — loads objects, handlers, server_events, gametime, autosave

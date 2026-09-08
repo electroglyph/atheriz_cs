@@ -80,7 +80,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     private static readonly Lazy<AsyncThreadPool> _fallbackPool = new(() => new AsyncThreadPool());
     private static AsyncThreadPool FallbackPool => _fallbackPool.Value;
 
-    // P1-13 R2: the fallback pool is process-lifetime; shut it down (non-blocking)
+    // The fallback pool is process-lifetime; shut it down (non-blocking)
     // on exit so a leftover full queue cannot pin the process... (threads are
     // background anyway; this is belt-and-braces for hosted test runners).
     static BaseConnection()
@@ -95,7 +95,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] fallback pool shutdown failed: {e}"); } catch { } }
     }
 
-    // P1-13 R1: aggregate cap on RetryDrain chains. One chain per connection is
+    // Aggregate cap on RetryDrain chains. One chain per connection is
     // bounded (50ms cadence), but chains are unbounded ACROSS connections — a
     // stuck pool + connection churn would pile Task.Delay continuations forever.
     private static int _outstandingRetryDrains;
@@ -147,6 +147,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         if (_disposed) return;
         bool notifyBusy = false;
         bool needsDrain = false;
+        int pendingCount = 0;
         lock (Lock)
         {
             if (_disconnected || _disposed) return; // port of connection.py:84-85
@@ -170,6 +171,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             lock (Lock) // port of connection.py:101-106
             {
                 _inputRunning = false;
+                pendingCount = _inputQueue.Count;
                 var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
                 if (ThrottleWindow.ShouldLog(ref _lastInputBusy, 1.0, now))
                 {
@@ -185,7 +187,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         }
         if (notifyBusy) // port of connection.py:111-116
         {
-            try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Input queue submission rejected (pool full); {_inputQueue.Count} message(s) pending retry"); } catch { Console.Error.WriteLine($"[Network] Input queue submission rejected (pool full); {_inputQueue.Count} message(s) pending retry"); }
+            try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Input queue submission rejected (pool full); {pendingCount} message(s) pending retry"); } catch { Console.Error.WriteLine($"[Network] Input queue submission rejected (pool full); {pendingCount} message(s) pending retry"); }
             Msg("Server busy; input dropped.");
         }
     }
@@ -266,7 +268,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         get { lock (Lock) return _disconnected; }
     }
 
-    // Snapshot of the host at RegisterConnection time (P1-13 C2): ClientHost is
+    // Snapshot of the host at RegisterConnection time: ClientHost is
     // mutable per message (tests/host changes), so counts/disconnect/overwrite
     // use the registration-time value.
     internal string? RegisteredHost { get; set; }
@@ -313,7 +315,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             return; // port of connection.py:179-180
 
         // Copy the caller's list: the text path mutates args[0] below and the
-        // kwargs path re-roots args — neither may alias caller state (P1-13 R3).
+        // kwargs path re-roots args — neither may alias caller state.
         args = args != null ? new List<object?>(args) : new List<object?>();
         // outgoing_kwargs = dict(kwargs) at connection.py:182
         var outgoingKwargs = kwargs != null ? new Dictionary<string, object?>(kwargs) : new Dictionary<string, object?>();
@@ -327,10 +329,15 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             }
             else if (outgoingKwargs.Count > 0) // port of connection.py:187-190
             {
-                var kv = outgoingKwargs.First();
-                outgoingKwargs.Remove(kv.Key);
-                cmd = kv.Key;
-                args = new List<object?> { kv.Value }.Concat(args).ToList();
+                // Python popitem() takes the LAST-inserted kwarg
+                // (dict LIFO); First() took the first — same arbitrariness,
+                // opposite end. Take the last key explicitly so the mapping
+                // is specified and matches Python.
+                var lastKey = outgoingKwargs.Keys.Last();
+                var lastVal = outgoingKwargs[lastKey];
+                outgoingKwargs.Remove(lastKey);
+                cmd = lastKey;
+                args = new List<object?> { lastVal }.Concat(args).ToList();
             }
         }
 

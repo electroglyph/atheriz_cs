@@ -49,20 +49,11 @@ public class Script : GameObject
         }
         finally { SyncRoot.ExitWriteLock(); }
         // Port of base_script.py:194-203 at_funcs = [(d, getattr(self,d)) for d in dir(self) if d.startswith("at_") and (is_before or is_after or is_replace)]
-        var methods = GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        var atFuncs = new List<(string Name, MethodInfo Method)>();
-        foreach (var m in methods)
-        {
-            if (!m.Name.StartsWith("at_", StringComparison.Ordinal)) continue; // Port of base_script.py:197 d.startswith("at_")
-            bool isBefore = m.GetCustomAttribute<BeforeAttribute>() != null; // Port of base_script.py:199 is_before
-            bool isAfter = m.GetCustomAttribute<AfterAttribute>() != null;   // Port of base_script.py:200 is_after
-            bool isReplace = m.GetCustomAttribute<ReplaceAttribute>() != null; // Port of base_script.py:201 is_replace
-            if (isBefore || isAfter || isReplace)
-                atFuncs.Add((m.Name, m));
-        }
+        // marker classification cached per type (HookMarkerCache).
+        var atFuncs = HookMarkerCache.ForType(GetType());
 
         // Port of base_script.py:204-208 with child.lock: for name, func in at_funcs: s = child.hooks.get(name,set()); s.add(func); child.hooks[name]=s
-        foreach (var (name, method) in atFuncs)
+                    foreach (var (name, method, _) in atFuncs)
         {
             // Bind a closed delegate to this script instance. The delegate's
             // Method is the original method, so Hookable sees the
@@ -192,25 +183,18 @@ public class Script : GameObject
         // Port of base_script.py:219 child = self.child if child is None else child
         child ??= _child;
         if (child == null) return; // Port of base_script.py:220-222 if child is None: logger.error...
-        var methods = GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        var atFuncs = new List<(string Name, MethodInfo Method)>();
-        foreach (var m in methods)
-        {
-            if (!m.Name.StartsWith("at_", StringComparison.Ordinal)) continue;
-            bool isBefore = m.GetCustomAttribute<BeforeAttribute>() != null;
-            bool isAfter = m.GetCustomAttribute<AfterAttribute>() != null;
-            bool isReplace = m.GetCustomAttribute<ReplaceAttribute>() != null;
-            if (isBefore || isAfter || isReplace) atFuncs.Add((m.Name, m));
-        }
+        // marker classification cached per type (HookMarkerCache).
+        var atFuncs = HookMarkerCache.ForType(GetType());
         // Port of base_script.py:233-240 with child.lock: mutate the hook sets
         // under the child's write lock via the typed accessor (no reflection).
         {
-            var hooksDict = child.HooksRawNoLock;
+            child.SyncRoot.EnterWriteLock();
+            try
             {
-                child.SyncRoot.EnterWriteLock();
-                try
-                {
-                    foreach (var (name, method) in atFuncs)
+                // Fetch inside the lock: the live dict must not be grabbed
+                // beforehand (a concurrent InstallHook could replace it).
+                var hooksDict = child.HooksRawNoLock;
+        foreach (var (name, method, _) in atFuncs)
                     {
                         if (hooksDict.TryGetValue(name, out var set))
                         {
@@ -225,7 +209,6 @@ public class Script : GameObject
                     }
                 }
                 finally { child.SyncRoot.ExitWriteLock(); }
-            }
         }
 
         // Also remove from child's scripts set

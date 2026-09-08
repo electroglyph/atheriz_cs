@@ -23,8 +23,15 @@ public sealed class NodeLink
         Coord = coord;
         Aliases = aliases ?? [];
     }
+    // Port of nodes.py:63-66 __eq__: name+coord only (aliases excluded).
     public override bool Equals(object? obj) => obj is NodeLink o && Name == o.Name && Coord.Equals(o.Coord);
-    public override int GetHashCode() => HashCode.Combine(Name, Coord);
+    public override int GetHashCode()
+    {
+        var h = new HashCode();
+        h.Add(Name);
+        h.Add(Coord);
+        return h.ToHashCode();
+    }
     public override string ToString() => $"NodeLink: {Name}, [{string.Join(",", Aliases)}], {Coord}";
 }
 
@@ -38,8 +45,16 @@ public partial class Node : GameObject
     public ReaderWriterLockSlim NodeLock => SyncRoot;
     public ReaderWriterLockSlim Lock => SyncRoot;
 
-    // Port of atheriz/objects/nodes.py:122
-    public Coord Coord { get; set; }
+    // Port of atheriz/objects/nodes.py:122. Lock-guarded : ApplyMoves
+    // rewrites Coord under the grid lock while AtHear/GetDisplayName readers
+    // run concurrently. Coord is an immutable struct so a locked reference
+    // swap is sufficient — no torn coordinates.
+    private Coord _coord;
+    public Coord Coord
+    {
+        get { SyncRoot.EnterReadLock(); try { return _coord; } finally { SyncRoot.ExitReadLock(); } }
+        set { SyncRoot.EnterWriteLock(); try { _coord = value; } finally { SyncRoot.ExitWriteLock(); } }
+    }
     public string Theme { get; set; } = "";
     public string? LegendDesc { get; set; }
     public List<NodeLink> Links { get; set; } = [];
@@ -169,7 +184,10 @@ public partial class Node : GameObject
         IsNode = true;
         IsModified = true;
         if (Id == -1) Id = IdGenerator.GetUniqueId();
-        ObjectRegistry.AddObject(this);
+        // no publication from the constructor. Python registers in
+        // create(), not __init__ (base_obj.py:121+); publishing `this` here
+        // leaks half-built subclass instances when a derived ctor throws.
+        // Callers register explicitly via ObjectRegistry.AddObject(node).
     }
 
     // Identity (id equality) lives on GameObject once; see base Equals/GetHashCode.
@@ -355,10 +373,10 @@ public partial class Node : GameObject
                 GameObject? fallback = null;
                 if (caller != null)
                 {
+                    // collapsed single expression (the three-way
+                    // if/else assigned loc in exactly one case).
                     var loc = caller.ResolveLocationObject();
-                    if (loc != null && !ReferenceEquals(loc, obj)) fallback = loc;
-                    else if (loc == obj) fallback = null;
-                    else fallback = loc;
+                    fallback = (loc != null && !ReferenceEquals(loc, obj)) ? loc : null;
                 }
                 if (homeObj != null)
                 {
@@ -400,6 +418,15 @@ public partial class Node : GameObject
         finally { SyncRoot.ExitWriteLock(); }
         var (ops, kids) = recursive ? execDeleteRecursive(this) : execMoveContents(this);
         execSelfDelete();
+        // Self teardown: the kids-only collection above never
+        // emits the node's own delete op, detaches its followers/channel
+        // subscriptions/session, or unregisters a handler-less node (which
+        // RemoveNode never sees). RemoveObject is a same-thread idempotent
+        // remove when the handler already unregistered it.
+        if (!IsTemporary)
+            ops.Add(GetDelOps());
+        ObjectRegistry.RemoveObject(this);
+        TeardownDeleted(this);
         return (1 + kids, ops);
     }
 

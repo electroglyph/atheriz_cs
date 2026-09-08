@@ -165,13 +165,20 @@ public partial class NodeHandler
     }
     public void RemoveNode(Coord coord)
     {
-        var node=GetNode(coord);
-        var area=GetArea(coord.Area);
-        var grid=area?.GetGrid(coord.Z);
-        grid?.RemoveNode((coord.X,coord.Y));
-        if(node!=null) ObjectRegistry.RemoveObject(node);
+        // resolve + remove + evict under one write hold. The old
+        // GetNode/GetArea/RemoveNode ran in 3 separate acquisitions, so a
+        // coord replaced mid-sequence leaked one instance / dropped the other.
+        // (SupportsRecursion: the nested read locks below are re-entrant.)
         Lock.EnterWriteLock();
-        try { _modified=true; _areaGen++; }
+        try
+        {
+            var node = GetNode(coord);
+            var area = GetArea(coord.Area);
+            var grid = area?.GetGrid(coord.Z);
+            grid?.RemoveNode((coord.X, coord.Y));
+            if (node != null) ObjectRegistry.RemoveObject(node);
+            _modified = true; _areaGen++;
+        }
         finally { Lock.ExitWriteLock(); }
     }
     public List<Node> GetNodes(List<Coord> coords)
@@ -183,15 +190,26 @@ public partial class NodeHandler
     public void AddTransition(Transition t)
     {
         Lock2.EnterWriteLock();
-        try { _transitions[t.ToCoord]=t; _modified2=true; _transGen++; }
+        try { _transitions[(t.FromCoord, t.ToCoord)] = t; _modified2 = true; _transGen++; }
         finally { Lock2.ExitWriteLock(); }
     }
+    // Destination-only removal drops every fan-in edge to dest (previously at
+    // most one could exist); tombstones record the exact (from,to) keys.
     public void RemoveTransition(Coord dest)
     {
         Lock2.EnterWriteLock();
         // Gen bump (AddTransition parity): without it a concurrent save can
         // snapshot, then clear _modified2 post-commit and lose this removal.
-        try { _transitions.Remove(dest); _modified2=true; _transGen++; _removedTrans.Add(dest); }
+        try
+        {
+            foreach (var k in _transitions.Keys.Where(k => k.To.Equals(dest)).ToList())
+            {
+                _transitions.Remove(k);
+                _removedTrans.Add(k);
+            }
+            _modified2 = true;
+            _transGen++;
+        }
         finally { Lock2.ExitWriteLock(); }
     }
     public List<Transition> FindTransitions(int? fromZ=null,int? toZ=null,string? fromArea=null,string? toArea=null)
@@ -290,18 +308,38 @@ public partial class NodeHandler
         Lock2.EnterWriteLock();
         try
         {
-            foreach (var (oldFull, newFull) in oldToNewFull)
+            // Snapshot the caller dict: it may be mutated concurrently, and
+            // half a remap must never persist .
+            var moves = oldToNewFull.ToList();
+            // Stale-from drop: ApplyMoves re-adds cross-area edges with fresh
+            // From coords right after this call; without dest-keyed overwrite
+            // the old (from,to) generation would survive alongside .
+            foreach (var (oldFrom, _) in moves)
             {
-                if (_transitions.TryGetValue(oldFull, out var trans))
+                foreach (var key in _transitions.Keys.Where(k => k.From.Equals(oldFrom)).ToList())
                 {
-                    _transitions.Remove(oldFull);
+                    _transitions.Remove(key);
+                    _removedTrans.Add(key);
+                    _modified2 = true;
+                    _transGen++;
+                }
+            }
+            foreach (var (oldFull, newFull) in moves)
+            {
+                foreach (var key in _transitions.Keys.Where(k => k.To.Equals(oldFull)).ToList())
+                {
+                    var trans = _transitions[key];
+                    _transitions.Remove(key);
                     trans.Lock.EnterWriteLock();
                     try { trans.ToCoord = newFull; } finally { trans.Lock.ExitWriteLock(); }
-                    _transitions[newFull] = trans;
+                    var newKey = (trans.FromCoord, newFull);
+                    // Never silently clobber a pre-existing destination edge.
+                    if (!_transitions.ContainsKey(newKey))
+                        _transitions[newKey] = trans;
                     _modified2 = true;
                     _transGen++;
                     // Old-coord row must die in the DB (see RemapDoors).
-                    _removedTrans.Add(oldFull);
+                    _removedTrans.Add(key);
                 }
             }
         }

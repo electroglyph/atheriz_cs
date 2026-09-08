@@ -37,10 +37,19 @@ public static class WebSocketHandler
         try
         {
             var buffer = new byte[8192];
+            // socket ops observe host shutdown — graceful stop
+            // cancels open sockets (whose OperationCanceledException flows
+            // to finally/Disconnect below) instead of dangling until the
+            // client closes. RequestAborted is deliberately NOT used: it
+            // fires during normal WS lifetime behind some proxies.
+            var lifetime = context.RequestServices?.GetService(typeof(Microsoft.Extensions.Hosting.IHostApplicationLifetime)) as Microsoft.Extensions.Hosting.IHostApplicationLifetime;
+            var shutdownToken = lifetime?.ApplicationStopping ?? default(System.Threading.CancellationToken);
             // Streaming size gate: fragments are measured as they
             // arrive and the message is abandoned as soon as it exceeds the
-            // limit — never accumulate an unbounded MemoryStream before the
-            // post-hoc check below (which stays as a backstop).
+            // limit — never accumulate an unbounded MemoryStream.
+            // this gate is the single enforcement point (the old
+            // post-hoc byte-count re-check was dead: assembled bytes can
+            // never exceed what the streaming gate already measured).
             var maxMessageSize = settings.WebsocketMaxMessageSize;
             while (true)
             {
@@ -52,9 +61,8 @@ public static class WebSocketHandler
                     System.Net.WebSockets.WebSocketReceiveResult result;
                     do
                     {
-                        // Use CancellationToken.None to avoid breaking on RequestAborted during normal WS lifetime;
-                        // host shutdown is handled via finally/Disconnect. Old Program.cs:463 lambda used None.
-                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                        // observe host shutdown (see above).
+                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), shutdownToken);
                         if (result.MessageType == System.Net.WebSockets.WebSocketMessageType.Close)
                         {
                             isClose = true;
@@ -77,23 +85,10 @@ public static class WebSocketHandler
                         try { Atheriz.Core.AtherizLogger.LogWarning(msg); } catch { }
                         Console.Error.WriteLine(msg);
                     }
-                    try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.MessageTooBig, "Message too large", CancellationToken.None); } catch { }
+                    try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.MessageTooBig, "Message too large", shutdownToken); } catch { }
                     break;
                 }
 
-                var byteCount = Encoding.UTF8.GetByteCount(rawMessage);
-                if (byteCount > settings.WebsocketMaxMessageSize)
-                {
-                    bool shouldLog = ThrottleWindow.ShouldLog(_wsOversizeLast, _wsOversizeLock, clientHost, 5.0);
-                    if (shouldLog)
-                    {
-                        var msg = $"[WebSocket] Message too large from {clientHost} ({byteCount} bytes > {settings.WebsocketMaxMessageSize} bytes)";
-                        try { Atheriz.Core.AtherizLogger.LogWarning(msg); } catch { }
-                        Console.Error.WriteLine(msg);
-                    }
-                    try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.MessageTooBig, "Message too large", CancellationToken.None); } catch { }
-                    break;
-                }
                 manager.HandleCommand(connection, rawMessage);
             }
         }
@@ -107,8 +102,9 @@ public static class WebSocketHandler
         }
         finally
         {
-            var mgr = ConnectionManager.GlobalInstance;
-            mgr?.Disconnect(connection);
+            // disconnect on the REGISTERING manager instance, not a
+            // fresh GlobalInstance read (which may have been swapped since).
+            manager.Disconnect(connection);
         }
     }
 }

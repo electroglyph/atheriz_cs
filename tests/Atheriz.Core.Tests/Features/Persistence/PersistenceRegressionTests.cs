@@ -9,7 +9,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Atheriz.Core.Tests.Features.Persistence;
 
-// P1-14 persistence regression pins: gate pairing/timeout, transaction
+// Persistence regression pins: gate pairing/timeout, transaction
 // commit/rollback/retry, journal roundtrip, setup parity, DTO hardening,
 // loader loud-skips.
 [Collection("Ported")]

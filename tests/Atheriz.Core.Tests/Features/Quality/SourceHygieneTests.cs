@@ -114,8 +114,8 @@ public class SourceHygieneTests
     [Fact] public void NoReflection_NetworkConcurrency() =>
         AssertNoHits(Scan(NetConcurrency, ReflectionPat), "reflection in Network/Concurrency");
 
-    // Owner ruling 2026-09-07: plugin discovery (PluginLoader.GetTypes scan) and
-    // live-patch (PluginReloader field copy) have no non-reflection mechanism and
+    // Plugin discovery (PluginLoader.GetTypes scan) and live-patch
+    // (PluginReloader field copy) have no non-reflection mechanism and
     // are narrowly exempt. Everything else under Server/Utils stays banned.
     [Fact] public void NoReflection_ServerUtils() =>
         AssertNoHits(Scan(ServerUtils, ReflectionPat,

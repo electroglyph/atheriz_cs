@@ -1,4 +1,5 @@
 // Port of atheriz/commands/loggedin/quit.py:20
+using Atheriz.Core.Network;
 using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
@@ -23,6 +24,11 @@ public sealed class QuitCommand : Command
         else if (caller is Session sess)
         {
             try { sess.Connection?.Close(); } catch (Exception) { }
+        }
+        // close raw connections like the unlogged-in twin does.
+        else if (caller is BaseConnection bc)
+        {
+            try { bc.Close(); } catch (Exception) { }
         }
     }
 }

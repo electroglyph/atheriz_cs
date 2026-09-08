@@ -75,7 +75,12 @@ public sealed class SocialsCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        string verb = pa?.CmdString ?? Key;
+        // Port of socials.py:91-93 — getattr(args,'cmdstring',None); no verb
+        // means silent return . No Key fallback: Key is "socials",
+        // which never hits SocialsDict, so the fallback only masked empty
+        // CmdString on directly-constructed ParsedArgs.
+        string verb = pa?.CmdString ?? "";
+        if (string.IsNullOrEmpty(verb)) return;
         if (!SocialsDict.TryGetValue(verb, out var templates))
         {
             go.Msg("This command is meant to be invoked via one of its aliases: " + string.Join(", ", Aliases));
@@ -92,9 +97,10 @@ public sealed class SocialsCommand : Command
         }
         else
         {
-            List<GameObject> targets;
-            try { targets = go.Search(targetName, true, go); } catch { targets = []; }
-            if (targets.Count == 0 && loc != null) try { targets = loc.Search(targetName, true, go); } catch (Exception) { }
+            // shared fallback — caller + loc (view-gated) + #id,
+            // "me"/"here"/coords — like Look/Follow/Give. Raw go.Search +
+            // loc.Search missed all of those and skipped the view gate.
+            var targets = CommandHelpers.SearchWithFallback(go, targetName);
             if (targets.Count == 0) { go.Msg($"Could not find '{targetName}'."); return; }
             if (targets.Count > 1) { go.Msg($"Multiple matches for '{targetName}'. Be more specific."); return; }
             var target = targets[0];

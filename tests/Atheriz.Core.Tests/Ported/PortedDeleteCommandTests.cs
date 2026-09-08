@@ -15,6 +15,7 @@ public class PortedDeleteCommandTests
         var coord = new Coord(area, x, y, z);
         var n = new Node(coord);
         NodeHandler.GetCurrent()?.AddNode(n);
+        ObjectRegistry.AddObject(n); // Explicit registration: the constructor does not publish (AddNode is a no-op when no handler is current).
         return n;
     }
 

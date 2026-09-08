@@ -135,18 +135,22 @@ public sealed class GroupCommand : Command
         else loc = go.ResolveLocationObject() as GameObject;
         if (matches.Count == 0 && loc != null)
             matches = loc is Node n ? n.Search(targetName, true, go) : ContentUtils.Search(loc, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-        // Detect hidden multiples when Search returns first match only (port of Python mocked multiple handling) — check exhaustive "all" query
+        // Plain search returns the first match only, so a second object sharing
+        // the resolved member's name would stay hidden. Probe both pools for a
+        // same-named sibling and report multiples instead of guessing wrong.
         if (matches.Count == 1)
         {
-            try {
-                var goAll = ContentUtils.Search(go, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-                if (goAll.Count > 1) matches = goAll;
-                else if (loc != null)
+            var seen = matches[0];
+            bool multiple = false;
+            foreach (var pool in new GameObject?[] { go, loc })
+            {
+                if (pool == null || multiple) break;
+                foreach (var o in ContentUtils.GatherContents(pool, id => ObjectRegistry.Get(id).FirstOrDefault(), looker: go))
                 {
-                    var locAll = loc is Node nAll ? nAll.Search("all " + targetName, true, go) : ContentUtils.Search(loc, "all " + targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
-                    if (locAll.Count > 1) matches = locAll;
+                    if (o != seen && string.Equals(o.Name, seen.Name, StringComparison.OrdinalIgnoreCase)) { multiple = true; break; }
                 }
-            } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GroupCommand.ResolveMember: " + logEx.Message, "GroupCommand"); }
+            }
+            if (multiple) { CommandHelpers.MsgMultipleMatchesFound(go, targetName); return null; }
         }
         if (matches.Count == 0) { go.Msg($"Could not find '{targetName}'."); return null; }
         if (matches.Count > 1) { CommandHelpers.MsgMultipleMatchesFound(go, targetName); return null; }
@@ -155,20 +159,17 @@ public sealed class GroupCommand : Command
         return tgt;
     }
 
-    // Channel.Create throws on name collision (ValueError in Python: retry 5
-    // times with random suffix). The two original catch sites (duplicate-name
-    // vs invalid-name) ran near-identical retry loops; unified here — the retry
-    // logs-and-continues on any failure and the caller gets the same message.
+    // Channel.Create throws on name collision (Python group.py:163 retries with
+    // randint(0, 99)). Leader names are unique so the base name effectively
+    // never collides; the fallback uses a deterministic leader-Id suffix
+    // instead of randomness — distinct leaders can never collide with it.
     private static Channel? CreateGroupChannel(GameObject go)
     {
         try { return Channel.Create($"{go.Name}'s group", go); }
         catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException)
         {
-            for (int r = 0; r < 5; r++)
-            {
-                try { return Channel.Create($"{go.Name}'s group {Random.Shared.Next(0, 100)}", go); }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GroupCommand.CreateGroupChannel: " + logEx.Message, "GroupCommand"); }
-            }
+            try { return Channel.Create($"{go.Name}'s group {go.Id}", go); }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GroupCommand.CreateGroupChannel: " + logEx.Message, "GroupCommand"); }
             go.Msg("Could not create a group channel; try again.");
             return null;
         }

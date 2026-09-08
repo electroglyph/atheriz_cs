@@ -37,7 +37,9 @@ public partial class GameObject
         finally { _lock.ExitReadLock(); }
         if (!hasHooks) return original();
 
-        var replaceHooks = hooksSnapshot!.Where(d => d.Method.GetCustomAttributes(typeof(ReplaceAttribute), false).Length > 0).ToList();
+        // marker classification cached per delegate (HookMarkerCache),
+        // not reflected per dispatch.
+        var replaceHooks = hooksSnapshot!.Where(d => (HookMarkerCache.KindOf(d) & HookKind.Replace) != 0).ToList();
         if (replaceHooks.Count > 0)
         {
             try
@@ -50,7 +52,7 @@ public partial class GameObject
             }
         }
 
-        var beforeHooks = hooksSnapshot!.Where(d => d.Method.GetCustomAttributes(typeof(BeforeAttribute), false).Length > 0).ToList();
+        var beforeHooks = hooksSnapshot!.Where(d => (HookMarkerCache.KindOf(d) & HookKind.Before) != 0).ToList();
         foreach (var h in beforeHooks)
         {
             // Advisory: return ignored. Hook errors propagate raw (previously
@@ -60,7 +62,7 @@ public partial class GameObject
 
         var result = original();
 
-        var afterHooks = hooksSnapshot!.Where(d => d.Method.GetCustomAttributes(typeof(AfterAttribute), false).Length > 0).ToList();
+        var afterHooks = hooksSnapshot!.Where(d => (HookMarkerCache.KindOf(d) & HookKind.After) != 0).ToList();
         foreach (var h in afterHooks)
         {
             // after hooks: try args+result then args only (faithful to Python where after hook receives same args, not extra result)
@@ -72,7 +74,8 @@ public partial class GameObject
                 invoked = true;
             }
             catch (TargetParameterCountException) { }
-            catch { invoked = true; }
+            // No catch-all: a throwing after-hook propagates (base_obj.py:66
+            // `result = h(*args)` raises raw) instead of nulling the result.
             if (!invoked)
             {
                 try { newResult = DelegateInvoker.Invoke(h, args); invoked = true; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Hookable: " + logEx.Message, "GameObject"); }

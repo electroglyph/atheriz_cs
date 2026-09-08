@@ -77,8 +77,14 @@ public static class ExamFormatter
             .ToList();
     }
 
-    private static string ExpandId(int id)
+    // getattr(val, name, None) equivalent — a throwing accessor
+    // yields default instead of aborting the render.
+    private static T? SafeGet<T>(Func<T> f)
     {
+        try { return f(); }
+        catch (Exception) { return default; }
+    }
+    private static string ExpandId(int id)    {
         try
         {
             var res = ObjectRegistry.Get(id);
@@ -222,14 +228,17 @@ public static class ExamFormatter
             if (val == null) return "None";
             if (val is not Session sess) return val.ToString() ?? "Session()";
             var parts = new List<string>();
-            var acc = sess.Account;
-            if (acc != null) parts.Add($"account={acc.Name} (#{acc.Id})");
-            var conn = sess.Connection;
-            if (conn != null) parts.Add($"conn={conn.ClientHost ?? conn.SessionId ?? "?"}");
-            var puppet = sess.Puppet;
-            if (puppet != null) parts.Add($"puppet={puppet.Name} (#{puppet.Id})");
-            if (sess.TermWidth != 0 && sess.TermHeight != 0) parts.Add($"w={sess.TermWidth}, h={sess.TermHeight}");
-            if (sess.ScreenReader) parts.Add("sr=True");
+            // getattr-style guards — one throwing accessor (e.g. a
+            // puppet whose Name raises) must not abort the whole exam list.
+            var acc = SafeGet(() => sess.Account);
+            if (acc != null) parts.Add($"account={SafeGet(() => acc.Name) ?? "?"} (#{SafeGet(() => acc.Id)})");
+            var conn = SafeGet(() => sess.Connection);
+            if (conn != null) parts.Add($"conn={SafeGet(() => conn.ClientHost) ?? SafeGet(() => conn.SessionId) ?? "?"}");
+            var puppet = SafeGet(() => sess.Puppet);
+            if (puppet != null) parts.Add($"puppet={SafeGet(() => puppet.Name) ?? "?"} (#{SafeGet(() => puppet.Id)})");
+            var tw = SafeGet(() => sess.TermWidth); var th = SafeGet(() => sess.TermHeight);
+            if (tw != 0 && th != 0) parts.Add($"w={tw}, h={th}");
+            if (SafeGet(() => sess.ScreenReader)) parts.Add("sr=True");
             return parts.Count > 0 ? "Session(" + string.Join(", ", parts) + ")" : "Session()";
         }
         if (val == null) return "None";
@@ -242,7 +251,9 @@ public static class ExamFormatter
             foreach (System.Collections.DictionaryEntry kv in genDict)
             {
                 var kf = FormatValue(kv.Key, null) as string ?? kv.Key?.ToString() ?? "";
-                var vf = FormatValue(kv.Value, null) as string ?? kv.Value?.ToString() ?? "";
+                // Key-aware recursion: a nested "password"/"secret" key redacts
+                // its value exactly like a top-level hint does.
+                var vf = FormatValue(kv.Value, kv.Key?.ToString()) as string ?? kv.Value?.ToString() ?? "";
                 items.Add($"{kf}: {vf}");
             }
             return "{" + string.Join(", ", items) + "}";

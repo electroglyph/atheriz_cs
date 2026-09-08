@@ -9,7 +9,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// P1-16 Batch B: Kestrel fail-fast/dual-stack/limits, admin-token cache,
+// Kestrel fail-fast/dual-stack/limits, admin-token cache,
 // orphan sweep + total-cap admission gate.
 [Collection("Ported")]
 public class HostingRegressionTests
@@ -20,7 +20,7 @@ public class HostingRegressionTests
     [Fact]
     public void Kestrel_UnparseableInterface_Throws()
     {
-        // P1-16: a bad interface must never silently serve on loopback/Any.
+        // a bad interface must never silently serve on loopback/Any.
         var config = KestrelConfigFor(new() { ["Atheriz:WebserverInterface"] = "not an ip" });
         Assert.Throws<InvalidOperationException>(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), config));
     }
@@ -28,7 +28,7 @@ public class HostingRegressionTests
     [Fact]
     public void Kestrel_Limits_Configured()
     {
-        // P1-16: global guardrails behind the per-route caps.
+        // global guardrails behind the per-route caps.
         var config = KestrelConfigFor(new());
         var opts = new KestrelServerOptions();
         KestrelConfig.ConfigureKestrel(opts, config);
@@ -40,7 +40,7 @@ public class HostingRegressionTests
     [Fact]
     public void AdminToken_Cache_RotationExact()
     {
-        // P1-16: mtime-gated cache must track rotation and deletion exactly.
+        // mtime-gated cache must track rotation and deletion exactly.
         using var env = GlobalTestEnv.Enter();
         var dir = Path.Combine(Path.GetTempPath(), "atheriz_tokcache_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -62,7 +62,7 @@ public class HostingRegressionTests
     [Fact]
     public void SweepOrphanedConnections_DropsStalePreLogin()
     {
-        // P1-16: sockets that never attached account/puppet age out.
+        // sockets that never attached account/puppet age out.
         using var env = GlobalTestEnv.Enter();
         var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 100);
         var mgr = new ConnectionManager(pool: pool, settings: new AtherizSettings());
@@ -79,7 +79,7 @@ public class HostingRegressionTests
     [Fact]
     public void TotalCap_RefusesOverLimit()
     {
-        // P1-16: admission gate above the per-IP limit.
+        // admission gate above the per-IP limit.
         using var env = GlobalTestEnv.Enter();
         var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 100);
         var settings = new AtherizSettings { MaxTotalConnections = 1 };

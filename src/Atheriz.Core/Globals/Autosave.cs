@@ -61,12 +61,14 @@ public static class Autosave
 
         // Crash-consistency journal: dirty before tables, clean
         // after all commit. A crash between tables leaves dirty behind.
-        CheckpointJournal.MarkDirty();
+        // journal + objects save honor explicit settings (the
+        // handlers below save their own singleton state via their own paths).
+        CheckpointJournal.MarkDirty(AtherizDbContextFactory.ResolveSavePath(settings));
 
         // objects
         try
         {
-            using var db = AtherizDbContextFactory.Create();
+            using var db = AtherizDbContextFactory.CreateForSettings(settings);
             db.Database.EnsureCreated();
             ObjectRegistry.SaveObjects(db);
         }
@@ -79,7 +81,9 @@ public static class Autosave
         // map — Port of autosave.py:26 get_map_handler().save() singleton reuse
         try
         {
-            var mh = mapHandler ?? _cachedMap ?? GlobalServices.GetMapHandler();
+            // volatile read — written under _lock by Start/Stop on
+            // other threads; a torn read would save via a stale handler.
+            var mh = mapHandler ?? Volatile.Read(ref _cachedMap) ?? GlobalServices.GetMapHandler();
             mh.Save();
         }
         catch (Exception ex)
@@ -91,7 +95,7 @@ public static class Autosave
         // node — Port of autosave.py:27 get_node_handler().save() singleton reuse
         try
         {
-            var nh = nodeHandler ?? _cachedNodes ?? GlobalServices.GetNodeHandler();
+            var nh = nodeHandler ?? Volatile.Read(ref _cachedNodes) ?? GlobalServices.GetNodeHandler();
             nh.Save();
         }
         catch (Exception ex)

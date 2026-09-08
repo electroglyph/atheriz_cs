@@ -1,6 +1,7 @@
 // Port of atheriz/objects/verb_conjugation/pronouns.py:1
 using System.Collections.Generic;
 using System.Linq;
+using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Objects.VerbConjugation;
 
@@ -112,18 +113,6 @@ public static class Pronouns
 
     private static bool IsIter(object o) => o is System.Collections.IEnumerable && o is not string;
 
-    private static string CopyWordCase(string src, string dst)
-    {
-        if (string.IsNullOrEmpty(src) || string.IsNullOrEmpty(dst)) return dst;
-        // If src is all caps, return dst upper
-        if (src.All(char.IsUpper)) return dst.ToUpperInvariant();
-        // If src capitalized (first upper rest lower)
-        if (char.IsUpper(src[0]) && src.Skip(1).All(c => !char.IsLetter(c) || char.IsLower(c)))
-            return char.ToUpperInvariant(dst[0]) + (dst.Length > 1 ? dst[1..].ToLowerInvariant() : "");
-        // If src lower, return lower
-        return dst.ToLowerInvariant();
-    }
-
     /// <summary>
     /// Port of <c>pronoun_to_viewpoints</c>. Returns (1st/2nd, 3rd) tuple.
     /// </summary>
@@ -216,7 +205,7 @@ public static class Pronouns
 
         var mappedPronoun = mapped;
         if (pronoun != "I")
-            mappedPronoun = CopyWordCase(pronoun, mappedPronoun);
+            mappedPronoun = GameUtils.CopyWordCase(pronoun, mappedPronoun);
         if (mappedPronoun == "i") mappedPronoun = mappedPronoun.ToUpperInvariant();
 
         if (viewpoint == "3rd person")

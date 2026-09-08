@@ -363,7 +363,7 @@ public class PortedUnloggedinCommandsTestsPart3
         var host = "198.51.100.99";
         ObjectRegistry.ClearCreationCooldown(host);
         Assert.True(ObjectRegistry.TryReserveCreationCooldown("account", host, 1000, 60));
-        Assert.True(ObjectRegistry.CreationCooldownActive("guest", host, 1001));
+        Assert.True(ObjectRegistry.CreationCooldownActive(host, 1001));
         ObjectRegistry.ClearCreationCooldown(host);
     }
 }

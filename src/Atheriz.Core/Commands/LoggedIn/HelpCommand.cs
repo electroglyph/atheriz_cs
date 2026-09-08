@@ -31,19 +31,18 @@ public sealed class HelpCommand : Command
             }
             var all = CommandRegistry.LoggedIn.GetAll().Distinct().Where(c => !c.Hide && c.Access(caller)).ToList();
             var sb = new StringBuilder(HelpFormatter.Format(all, sr, tw + 2));
-            // local commands from location/inventory
+            // local commands from location/inventory (single session lookup above)
             if (caller is Objects.GameObject go)
             {
-                bool sr2 = false; int tw2 = 80;
-                try { sr2 = go.Session?.ScreenReader ?? false; } catch (Exception) { }
-                try { tw2 = (go.Session?.TermWidth ?? 80) - 2; if (tw2 < 20) tw2 = 20; } catch { tw2 = 80; }
                 var locals = new List<Command>();
                 foreach (var set in CommandHelpers.LocalVerbSets(go))
-                    locals.AddRange(set.GetAll().Where(cmd => !cmd.Hide && cmd.Access(go)));
+                    foreach (var lc in set.GetAll())
+                        if (!lc.Hide && lc.Access(go) && locals.All(l => !ReferenceEquals(l, lc)))
+                            locals.Add(lc);
                 if (locals.Count > 0)
                 {
                     sb.AppendLine("\nLocal commands:");
-                    sb.Append(HelpFormatter.Format(locals, sr2, tw2 + 2));
+                    sb.Append(HelpFormatter.Format(locals, sr, tw + 2));
                 }
             }
             caller.Msg(sb.ToString());

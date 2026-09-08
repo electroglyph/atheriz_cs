@@ -2,6 +2,7 @@ using System.Text.Json;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Dto;
+using Atheriz.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Globals;
@@ -31,7 +32,7 @@ public partial class NodeHandler
     public IDisposable ReadScope3() { _lock3.EnterReadLock(); return new LockScope(_lock3, false); }
     public IDisposable WriteScope3() { _lock3.EnterWriteLock(); return new LockScope(_lock3, true); }
     private readonly Dictionary<string, NodeArea> _areas = new();
-    private readonly Dictionary<Coord, Transition> _transitions = new();
+    private readonly Dictionary<(Coord From, Coord To), Transition> _transitions = new();
     private readonly Dictionary<Coord, Dictionary<string, Door>> _doors = new();
     private bool _modified, _modified2, _modified3;
     // Port of node.py:42-43 _trans_gen/_door_gen: mutation counters so Save
@@ -45,7 +46,7 @@ public partial class NodeHandler
     // relocated-from keys instead. Guarded by the domain lock each set lives
     // under (Lock / Lock2 / Lock3).
     private readonly HashSet<string> _removedAreas = new();
-    private readonly HashSet<Coord> _removedTrans = new();
+    private readonly HashSet<(Coord From, Coord To)> _removedTrans = new();
     private readonly HashSet<Coord> _removedDoors = new();
 
     private static NodeHandler? _current;
@@ -55,8 +56,37 @@ public partial class NodeHandler
     internal void MarkDoorsModified() { Lock3.EnterWriteLock(); try { _modified3 = true; _doorGen++; } finally { Lock3.ExitWriteLock(); } }
     internal void MarkTransitionsModified() { Lock2.EnterWriteLock(); try { _modified2 = true; _transGen++; } finally { Lock2.ExitWriteLock(); } }
 
-    public NodeHandler() { lock (_currentLock) _current = this; Load(); }
-    public NodeHandler(bool autoLoad) { lock (_currentLock) _current = this; if (autoLoad) Load(); }
+    // O(1) coord→node index lookup through the area/grid/(x,y) dicts.
+    // Snapshot-at-each-level (same pattern as Load): handler lock released
+    // before the area/grid locks are taken, so no lock nesting.
+    public Node? TryGetNodeAt(Coord coord)
+    {
+        NodeArea? area;
+        Lock.EnterReadLock();
+        try { _areas.TryGetValue(coord.Area, out area); }
+        finally { Lock.ExitReadLock(); }
+        if (area is null) return null;
+        var grid = area.GetGrid(coord.Z);
+        if (grid is null) return null;
+        grid.Lock.EnterReadLock();
+        try { return grid.Nodes.TryGetValue((coord.X, coord.Y), out var n) ? n : null; }
+        finally { grid.Lock.ExitReadLock(); }
+    }
+
+    // ctors never touch the process-global current — constructing a
+    // helper handler must not hijack it. Owners publish via SetCurrent.
+    public NodeHandler() { Load(); }
+    public NodeHandler(bool autoLoad) { if (autoLoad) Load(); }
+    // Settings-pinned load: boots from settings.SavePath instead of the ambient
+    // factory path, so DoStartup(settings) uses one database everywhere .
+    public NodeHandler(AtherizSettings? settings, bool autoLoad = true)
+    {
+        if (autoLoad)
+        {
+            if (settings == null) Load();
+            else { using var db = new AtherizDbContext(settings); Load(db); }
+        }
+    }
 
     // --- load ---
     public void Load() => Load(global::Atheriz.Core.Persistence.AtherizDbContextFactory.Create());
@@ -93,10 +123,18 @@ public partial class NodeHandler
                                     if (n.IsModified)
                                     {
                                         var ng = na.GetGrid(n.Coord.Z);
-                                        if (ng != null && ng.Nodes.ContainsKey((n.Coord.X, n.Coord.Y)))
+                                        // graft under the target
+                                        // grid's write scope (leaf lock;
+                                        // handler Lock is already held).
+                                        if (ng != null)
                                         {
-                                            ng.Nodes[(n.Coord.X, n.Coord.Y)] = n;
-                                            grafted = true;
+                                            ng.Lock.EnterWriteLock();
+                                            try
+                                            {
+                                                if (ng.Nodes.ContainsKey((n.Coord.X, n.Coord.Y)))
+                                                { ng.Nodes[(n.Coord.X, n.Coord.Y)] = n; grafted = true; }
+                                            }
+                                            finally { ng.Lock.ExitWriteLock(); }
                                         }
                                     }
                                 }
@@ -120,8 +158,8 @@ public partial class NodeHandler
                 try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
             JsonTableLoader.LoadInto(db.Transitions, Lock2, json => JsonSerializer.Deserialize<Transition>(json, JsonOptions.Default), (dto, row) =>
             {
-                _transitions[dto.ToCoord] = dto;
-                _removedTrans.Remove(dto.ToCoord);
+                _transitions[(dto.FromCoord, dto.ToCoord)] = dto;
+                _removedTrans.Remove((dto.FromCoord, dto.ToCoord));
             });
             JsonTableLoader.LoadInto(db.Doors, Lock3, json => JsonSerializer.Deserialize<Dictionary<string, Door>>(json, JsonOptions.Default), (dto, row) =>
             {
@@ -161,14 +199,14 @@ public partial class NodeHandler
                         try { AtherizLogger.LogWarning($"[Load] evicting deleted area {name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
                     }
                 }
-                HashSet<(string, int, int, int)>? dbTransKeys = null;
-                try { dbTransKeys = new HashSet<(string, int, int, int)>(db.Transitions.AsNoTracking().Select(r => new ValueTuple<string, int, int, int>(r.ToArea, r.ToX, r.ToY, r.ToZ)).ToList()); } catch { dbTransKeys = null; }
+                HashSet<(string FA, int FX, int FY, int FZ, string TA, int TX, int TY, int TZ)>? dbTransKeys = null;
+                try { dbTransKeys = new HashSet<(string FA, int FX, int FY, int FZ, string TA, int TX, int TY, int TZ)>(db.Transitions.AsNoTracking().Select(r => new { r.FromArea, r.FromX, r.FromY, r.FromZ, r.ToArea, r.ToX, r.ToY, r.ToZ }).ToList().Select(a => (FA: a.FromArea, FX: a.FromX, FY: a.FromY, FZ: a.FromZ, TA: a.ToArea, TX: a.ToX, TY: a.ToY, TZ: a.ToZ)).ToList()); } catch { dbTransKeys = null; }
                 if (dbTransKeys != null)
                 {
                     Lock2.EnterWriteLock();
                     try
                     {
-                        var tRem = _transitions.Keys.Where(k => !dbTransKeys.Contains((k.Area, k.X, k.Y, k.Z))).ToList();
+                        var tRem = _transitions.Keys.Where(k => !dbTransKeys.Contains((k.From.Area, k.From.X, k.From.Y, k.From.Z, k.To.Area, k.To.X, k.To.Y, k.To.Z))).ToList();
                         foreach (var k in tRem) _transitions.Remove(k);
                     }
                     finally { Lock2.ExitWriteLock(); }
@@ -232,13 +270,13 @@ public partial class NodeHandler
                 }
             }
         }
-        if (maxNodeId != 0)
+        // unconditional max-merge. The old nonzero-only guard
+        // skipped the watermark when the DB held exactly node Id==0, so the
+        // next alloc reused 0 and overwrote the loaded node.
+        lock (IdGenerator.LockObj)
         {
-            lock (IdGenerator.LockObj)
-            {
-                if (maxNodeId > IdGenerator.GetId())
-                    IdGenerator.SetId(maxNodeId);
-            }
+            if (maxNodeId > IdGenerator.GetId())
+                IdGenerator.SetId(maxNodeId);
         }
     }
 
@@ -309,6 +347,17 @@ public partial class NodeHandler
         }
     }
 
+    // Restores the transient save flags cleared for persistence.
+    private void RestoreSaveFlags(bool handlerWas, bool transWas, bool doorsWas, List<NodeArea> clearedAreas, List<NodeGrid> clearedGrids, List<Node> clearedNodes)
+    {
+        if (handlerWas) { Lock.EnterWriteLock(); try { _modified = true; } finally { Lock.ExitWriteLock(); } }
+        if (transWas) { Lock2.EnterWriteLock(); try { _modified2 = true; } finally { Lock2.ExitWriteLock(); } }
+        if (doorsWas) { Lock3.EnterWriteLock(); try { _modified3 = true; } finally { Lock3.ExitWriteLock(); } }
+        foreach (var a in clearedAreas) { a.Lock.EnterWriteLock(); try { a.IsModified = true; } finally { a.Lock.ExitWriteLock(); } }
+        foreach (var g in clearedGrids) { g.Lock.EnterWriteLock(); try { g.IsModified = true; } finally { g.Lock.ExitWriteLock(); } }
+        foreach (var n in clearedNodes) n.IsModified = true;
+    }
+
     public virtual void Save(AtherizDbContext db, bool force = false)
     {
         // Snapshot refs (using scoped helpers)
@@ -320,8 +369,8 @@ public partial class NodeHandler
         var transRefs = new List<Transition>();
         bool transWas;
         long transGen0;
-        HashSet<Coord> transDeletes;
-        using (ReadScope2()) { transRefs = _transitions.Values.ToList(); transWas = _modified2; transGen0 = _transGen; transDeletes = new HashSet<Coord>(_removedTrans); transDeletes.ExceptWith(_transitions.Keys); }
+        HashSet<(Coord From, Coord To)> transDeletes;
+        using (ReadScope2()) { transRefs = _transitions.Values.ToList(); transWas = _modified2; transGen0 = _transGen; transDeletes = new HashSet<(Coord From, Coord To)>(_removedTrans); transDeletes.ExceptWith(_transitions.Keys); }
         List<(Coord, Dictionary<string, Door>)> doorsRefs;
         bool doorsWas;
         long doorGen0;
@@ -439,12 +488,7 @@ public partial class NodeHandler
                 && areaDeletes.Count==0 && transDeletes.Count==0 && doorDeletes.Count==0)
             {
                 // restore if nothing to write
-                if (handlerWas) { Lock.EnterWriteLock(); try{ _modified=true;} finally{Lock.ExitWriteLock();} }
-                if (transWas) { Lock2.EnterWriteLock(); try{ _modified2=true;} finally{Lock2.ExitWriteLock();} }
-                if (doorsWas) { Lock3.EnterWriteLock(); try{ _modified3=true;} finally{Lock3.ExitWriteLock();} }
-                foreach(var a in clearedAreas){ a.Lock.EnterWriteLock(); try{ a.IsModified=true;} finally{ a.Lock.ExitWriteLock();} }
-                foreach(var g in clearedGrids){ g.Lock.EnterWriteLock(); try{ g.IsModified=true;} finally{ g.Lock.ExitWriteLock();} }
-                foreach(var n in clearedNodes) n.IsModified=true;
+                RestoreSaveFlags(handlerWas, transWas, doorsWas, clearedAreas, clearedGrids, clearedNodes);
                 return;
             }
 
@@ -468,12 +512,7 @@ public partial class NodeHandler
         catch
         {
             // Restore flags on serialization/build failure (mirrors Python detach failure restore)
-            if (handlerWas) { Lock.EnterWriteLock(); try { _modified = true; } finally { Lock.ExitWriteLock(); } }
-            if (transWas) { Lock2.EnterWriteLock(); try { _modified2 = true; } finally { Lock2.ExitWriteLock(); } }
-            if (doorsWas) { Lock3.EnterWriteLock(); try { _modified3 = true; } finally { Lock3.ExitWriteLock(); } }
-            foreach (var a in clearedAreas) { a.Lock.EnterWriteLock(); try { a.IsModified = true; } finally { a.Lock.ExitWriteLock(); } }
-            foreach (var g in clearedGrids) { g.Lock.EnterWriteLock(); try { g.IsModified = true; } finally { g.Lock.ExitWriteLock(); } }
-            foreach (var n in clearedNodes) n.IsModified = true;
+            RestoreSaveFlags(handlerWas, transWas, doorsWas, clearedAreas, clearedGrids, clearedNodes);
             throw;
         }
 
@@ -500,7 +539,7 @@ public partial class NodeHandler
                 }
                 foreach (var (t, json) in transJsons)
                 {
-                    DbTransactionHelper.UpsertJson(ctx.Transitions, () => ctx.Transitions.Find(t.ToCoord.Area, t.ToCoord.X, t.ToCoord.Y, t.ToCoord.Z), () => new Persistence.Entities.TransitionRow { ToArea = t.ToCoord.Area, ToX = t.ToCoord.X, ToY = t.ToCoord.Y, ToZ = t.ToCoord.Z }, json);
+                    DbTransactionHelper.UpsertJson(ctx.Transitions, () => ctx.Transitions.Find(t.FromCoord.Area, t.FromCoord.X, t.FromCoord.Y, t.FromCoord.Z, t.ToCoord.Area, t.ToCoord.X, t.ToCoord.Y, t.ToCoord.Z), () => new Persistence.Entities.TransitionRow { FromArea = t.FromCoord.Area, FromX = t.FromCoord.X, FromY = t.FromCoord.Y, FromZ = t.FromCoord.Z, ToArea = t.ToCoord.Area, ToX = t.ToCoord.X, ToY = t.ToCoord.Y, ToZ = t.ToCoord.Z }, json);
                 }
                 foreach (var (item, json) in doorsJsons)
                 {
@@ -508,6 +547,19 @@ public partial class NodeHandler
                     DbTransactionHelper.UpsertJson(ctx.Doors, () => ctx.Doors.Find(coord.Area, coord.X, coord.Y, coord.Z), () => new Persistence.Entities.DoorRow { Area = coord.Area, X = coord.X, Y = coord.Y, Z = coord.Z }, json);
                 }
                 // Tombstone deletes ride the SAME transaction as the upserts.
+                // Re-validate against live keys in-txn : a key
+                // removed then re-added after the snapshot must not be
+                // deleted at commit. Read locks inside the gate follow the
+                // IsStillSaveable precedent in ObjectRegistry.SaveObjects.
+                Lock.EnterReadLock();
+                try { areaDeletes.ExceptWith(_areas.Keys); }
+                finally { Lock.ExitReadLock(); }
+                Lock2.EnterReadLock();
+                try { transDeletes.ExceptWith(_transitions.Keys); }
+                finally { Lock2.ExitReadLock(); }
+                Lock3.EnterReadLock();
+                try { doorDeletes.ExceptWith(_doors.Keys); }
+                finally { Lock3.ExitReadLock(); }
                 foreach (var name in areaDeletes)
                 {
                     var row = ctx.Areas.Find(name);
@@ -515,7 +567,7 @@ public partial class NodeHandler
                 }
                 foreach (var key in transDeletes)
                 {
-                    var row = ctx.Transitions.Find(key.Area, key.X, key.Y, key.Z);
+                    var row = ctx.Transitions.Find(key.From.Area, key.From.X, key.From.Y, key.From.Z, key.To.Area, key.To.X, key.To.Y, key.To.Z);
                     if (row != null) ctx.Transitions.Remove(row);
                 }
                 foreach (var key in doorDeletes)
@@ -525,12 +577,7 @@ public partial class NodeHandler
                 }
             }, onRollback: () =>
             {
-                if (handlerWas) { Lock.EnterWriteLock(); try { _modified = true; } finally { Lock.ExitWriteLock(); } }
-                if (transWas) { Lock2.EnterWriteLock(); try { _modified2 = true; } finally { Lock2.ExitWriteLock(); } }
-                if (doorsWas) { Lock3.EnterWriteLock(); try { _modified3 = true; } finally { Lock3.ExitWriteLock(); } }
-                foreach (var a in clearedAreas) { a.Lock.EnterWriteLock(); try { a.IsModified = true; } finally { a.Lock.ExitWriteLock(); } }
-                foreach (var g in clearedGrids) { g.Lock.EnterWriteLock(); try { g.IsModified = true; } finally { g.Lock.ExitWriteLock(); } }
-                foreach (var n in clearedNodes) n.IsModified = true;
+                RestoreSaveFlags(handlerWas, transWas, doorsWas, clearedAreas, clearedGrids, clearedNodes);
             });
         }
         catch (InvalidOperationException ex)
@@ -540,12 +587,7 @@ public partial class NodeHandler
             AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
             // restore already handled via onRollback for transaction failure, but for gate failure before transaction we restored via catch above
             // Ensure flags restored
-            if (handlerWas) { Lock.EnterWriteLock(); try { _modified = true; } finally { Lock.ExitWriteLock(); } }
-            if (transWas) { Lock2.EnterWriteLock(); try { _modified2 = true; } finally { Lock2.ExitWriteLock(); } }
-            if (doorsWas) { Lock3.EnterWriteLock(); try { _modified3 = true; } finally { Lock3.ExitWriteLock(); } }
-            foreach (var a in clearedAreas) { a.Lock.EnterWriteLock(); try { a.IsModified = true; } finally { a.Lock.ExitWriteLock(); } }
-            foreach (var g in clearedGrids) { g.Lock.EnterWriteLock(); try { g.IsModified = true; } finally { g.Lock.ExitWriteLock(); } }
-            foreach (var n in clearedNodes) n.IsModified = true;
+            RestoreSaveFlags(handlerWas, transWas, doorsWas, clearedAreas, clearedGrids, clearedNodes);
             return;
         }
         catch (Exception ex)
@@ -553,12 +595,7 @@ public partial class NodeHandler
             // Closed-DB races only (no message sniffing): anything else propagates.
             if (!AtherizDbContext.IsClosed) throw;
             AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
-            if (handlerWas) { Lock.EnterWriteLock(); try { _modified = true; } finally { Lock.ExitWriteLock(); } }
-            if (transWas) { Lock2.EnterWriteLock(); try { _modified2 = true; } finally { Lock2.ExitWriteLock(); } }
-            if (doorsWas) { Lock3.EnterWriteLock(); try { _modified3 = true; } finally { Lock3.ExitWriteLock(); } }
-            foreach (var a in clearedAreas) { a.Lock.EnterWriteLock(); try { a.IsModified = true; } finally { a.Lock.ExitWriteLock(); } }
-            foreach (var g in clearedGrids) { g.Lock.EnterWriteLock(); try { g.IsModified = true; } finally { g.Lock.ExitWriteLock(); } }
-            foreach (var n in clearedNodes) n.IsModified = true;
+            RestoreSaveFlags(handlerWas, transWas, doorsWas, clearedAreas, clearedGrids, clearedNodes);
             return;
         }
         MarkHandlerClean();

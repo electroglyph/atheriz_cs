@@ -19,15 +19,17 @@ public class TelnetConnection : BaseConnection
     // telnet.py:121-137 TelnetConnection.__init__
     public object Reader { get; }
     public object Writer { get; }
-    private readonly PendingLimiter _limiter; // sole accounting (P1.6 single source of truth)
+    private readonly PendingLimiter _limiter; // sole accounting (single source of truth)
     private readonly AtherizSettings _settings;
     private int _inflight; // offloaded writes not yet finished (Dispose waits, bounded)
-    // Legacy reflection fields retained as obsolete shims for test compat (not authoritative, no drift)
-#pragma warning disable CS0169 // unused field kept for reflection compat
-    private int _pendingBytes; // legacy mirror, not used for logic
-    private readonly object _pendingLock = new object(); // legacy, unused
-    private bool _closing; // legacy mirror, kept for reflection GetField("_closing")
-#pragma warning restore CS0169
+    // Dispose joins in-flight writes via this event instead of a
+    // 250ms spin that loses to 2-5s write/TLS timeouts and aborts mid-write.
+    private readonly ManualResetEventSlim _drained = new(true);
+    // Bound covers the longest write/TLS timeouts above (2-5s) with headroom.
+    private static readonly TimeSpan DisposeJoinTimeout = TimeSpan.FromSeconds(10);
+    // Close flag (with _limiter.IsClosing forms IsClosing). Pending-byte
+    // accounting lives solely in PendingLimiter — no mirrors.
+    private bool _closing;
 
     public TelnetConnection(object reader, object writer, string? sessionId = null, AtherizSettings? settings = null) : base(sessionId)
     {
@@ -50,10 +52,11 @@ public class TelnetConnection : BaseConnection
     {
         if (disposing)
         {
-            // Let in-flight offloaded writes finish (bounded) before disposing the writer.
-            SpinWait.SpinUntil(() => Volatile.Read(ref _inflight) == 0, 250);
+            // Join in-flight offloaded writes (bounded) before disposing the writer.
+            try { _drained.Wait(DisposeJoinTimeout); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
             try { if (Writer is IDisposable wd) wd.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
             try { if (Reader is System.IO.TextReader tr) tr.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
+            try { _drained.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
         }
         base.Dispose(disposing);
     }
@@ -109,22 +112,23 @@ public class TelnetConnection : BaseConnection
         return false;
     }
 
-    // Offload a worker-thread write to the pool (P1-13: Stream.Write blocks up to
+    // Offload a worker-thread write to the pool (Stream.Write blocks up to
     // seconds; loop-thread sends stay inline for Python parity — see SendCommand).
     // _inflight lets Dispose wait for pending writes (bounded) before disposing.
     private void ScheduleWrite(Action write, int nb)
     {
         if (IsClosing) { if (nb != 0) _limiter.ReleaseSync(nb); return; }
         Interlocked.Increment(ref _inflight);
+        try { _drained.Reset(); } catch (ObjectDisposedException) { /* Dispose already joined; write still runs below. */ }
         try
         {
-            Task.Run(() => { try { write(); } finally { Interlocked.Decrement(ref _inflight); } })
+            Task.Run(() => { try { write(); } finally { if (Interlocked.Decrement(ref _inflight) == 0) { try { _drained.Set(); } catch (ObjectDisposedException) { } } } })
                 .ContinueWith(t => { AtherizLogger.LogError($"[Telnet] offloaded write task faulted for {ClientHost}", t.Exception!); },
                     TaskContinuationOptions.OnlyOnFaulted);
         }
         catch (Exception e)
         {
-            Interlocked.Decrement(ref _inflight);
+            if (Interlocked.Decrement(ref _inflight) == 0) { try { _drained.Set(); } catch (ObjectDisposedException) { } }
             if (nb != 0) _limiter.ReleaseSync(nb);
             AtherizLogger.LogError($"[Telnet] failed to schedule write for {ClientHost}: {e}");
             Close();
@@ -283,6 +287,7 @@ public sealed class TelnetStreamWriter : ITelnetWriter
     private readonly Stream _stream;
     private readonly TcpClient _client;
     private readonly object _writeLock = new object();
+    private int _pendingWriteBytes; // buffered-not-flushed bytes (see Write)
     private Action<int,int>? _nawsCallback;
     public TelnetStreamWriter(Stream stream, TcpClient client) { _stream = stream; _client = client; }
     public void Write(string text)
@@ -295,18 +300,28 @@ public sealed class TelnetStreamWriter : ITelnetWriter
         var bytes = Encoding.UTF8.GetBytes(text);
         lock (_writeLock)
         {
-            if (_stream is SslStream)
+            // track buffered-not-yet-flushed bytes (the asyncio
+            // get_write_buffer_size() semantic from telnet.py:138-156) so the
+            // write-buffer check is live. Never report SO_SNDBUF capacity here:
+            // SendBufferSize (~2.6MB) dwarfs TelnetMaxPendingBytes and caused
+            // false closes when it was returned by mistake.
+            _pendingWriteBytes += bytes.Length;
+            try
             {
-                var wt = _stream.WriteAsync(bytes, 0, bytes.Length);
-                if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out");
+                if (_stream is SslStream)
+                {
+                    var wt = _stream.WriteAsync(bytes, 0, bytes.Length);
+                    if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out");
+                }
+                else _stream.Write(bytes, 0, bytes.Length);
             }
-            else _stream.Write(bytes, 0, bytes.Length);
+            finally { _pendingWriteBytes -= bytes.Length; }
         }
     }
-    public void Iac(byte cmd, byte opt) { var bytes = new byte[] { 255, cmd, opt }; lock (_writeLock) { if (_stream is SslStream) { var wt = _stream.WriteAsync(bytes, 0, bytes.Length); if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out"); } else _stream.Write(bytes, 0, bytes.Length); } }
+    public void Iac(byte cmd, byte opt) { var bytes = new byte[] { 255, cmd, opt }; lock (_writeLock) { _pendingWriteBytes += bytes.Length; try { if (_stream is SslStream) { var wt = _stream.WriteAsync(bytes, 0, bytes.Length); if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out"); } else _stream.Write(bytes, 0, bytes.Length); } finally { _pendingWriteBytes -= bytes.Length; } } }
     public void Close() { try { _stream.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Close: " + logEx.Message, "TelnetStreamWriter"); } try { _client.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Close: " + logEx.Message, "TelnetStreamWriter"); } }
-    // Port of telnet.py: get_write_buffer_size returns pending bytes, not SO_SNDBUF. Returning null skips the OS buffer check which was misusing SendBufferSize (2626560) vs TelnetMaxPendingBytes (1M) and causing false closes.
-    public int? GetWriteBufferSize() => null;
+    // Port of telnet.py:138-156 — pending (buffered, unflushed) bytes, not capacity.
+    public int? GetWriteBufferSize() => Volatile.Read(ref _pendingWriteBytes);
     public void SetExtCallback(byte opt, Action<int, int> callback) { if (opt == 31) _nawsCallback = callback; }
     public void TriggerNaws(int rows, int cols) => _nawsCallback?.Invoke(rows, cols);
     public string? GetPeerHost() { try { return ((IPEndPoint)_client.Client.RemoteEndPoint!).Address.ToString(); } catch { return null; } }
@@ -503,6 +518,17 @@ public sealed class TelnetProtocol : BaseProtocol
                     try { client = await listener.AcceptTcpClientAsync(lifetime.ApplicationStopping); }
                     catch (OperationCanceledException) { break; }
                     catch (SocketException) { if (lifetime.ApplicationStopping.IsCancellationRequested) break; continue; }
+                    // admission checks precede the handler spawn — a
+                    // banned/over-limit peer is refused here instead of
+                    // queueing a task that RegisterConnection would reject.
+                    string preHost = "?";
+                    try { preHost = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString(); } catch { }
+                    if (ObjectRegistry.IsIpBanned(preHost) || manager.ShouldRefusePreSpawn(preHost))
+                    {
+                        try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] Refusing pre-spawn connection from {preHost} (banned or over connection cap)."); } catch { }
+                        try { client.Close(); } catch { }
+                        continue;
+                    }
                     var _ht = Task.Run(() => HandleTelnetClientAsync(client, tlsCert, manager, settings, lifetime)); _ = _ht.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] HandleClient fault: {t.Exception}"); }, TaskScheduler.Default);
                 }
             }
@@ -577,7 +603,19 @@ public sealed class TelnetProtocol : BaseProtocol
                     int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek);
                     if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)); stream = sslStream; }
                 }
-                else if (client.Available == 0) { await Task.Delay(100); if (client.Available >= 2) { byte[] peek = new byte[2]; int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek); if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)); stream = sslStream; } } }
+                else if (client.Available == 0)
+                {
+                    // no fixed 100ms tax on every plaintext login — wait
+                    // only until the client's first bytes actually arrive (or a
+                    // short budget expires), then peek once. Data already in
+                    // flight wakes the loop in ~10ms; a slow TLS hello inside
+                    // the budget is still detected instead of being parsed as
+                    // plaintext. Past the budget the bytes are treated as
+                    // plaintext, exactly as before.
+                    var autodetectDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(250);
+                    while (client.Available < 2 && DateTime.UtcNow < autodetectDeadline)
+                        await Task.Delay(10);
+                    if (client.Available >= 2) { byte[] peek = new byte[2]; int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek); if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)); stream = sslStream; } } }
             }
             catch (Exception ex) { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] TLS autodetect failed for {host}: {ex}"); stream = netStream; }
         }

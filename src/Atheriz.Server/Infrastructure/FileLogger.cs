@@ -47,7 +47,8 @@ public sealed class FileLoggerProvider : ILoggerProvider
                     if (File.Exists(file))
                     {
                         var len = new FileInfo(file).Length;
-                        if (len + line.Length > AtherizLogger.MaxFileBytes) Rotate(file);
+                        // bytes to bytes — line.Length is chars.
+                        if (len + System.Text.Encoding.UTF8.GetByteCount(line) > AtherizLogger.MaxFileBytes) Rotate(file);
                     }
                 }
                 catch { }

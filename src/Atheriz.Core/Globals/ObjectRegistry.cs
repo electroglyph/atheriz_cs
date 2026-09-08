@@ -22,14 +22,12 @@ public static class ObjectRegistry
         private readonly Dictionary<TKey, TValue> _dict = new();
         private readonly Queue<TKey> _order = new();
         private readonly object _lock = new();
-        private void EvictIfNeeded(TKey justSet)
+        private void EvictIfNeeded()
         {
             if (_dict.Count <= Limit) return;
-            var oldest = _order.Dequeue();
-            // if oldest == key (re-enqueued same key that was oldest) need next
-            if (EqualityComparer<TKey>.Default.Equals(oldest, justSet) && _order.Count > 0)
-                oldest = _order.Dequeue();
-            _dict.Remove(oldest);
+            // Only newly-enqueued keys call this, and they land at the tail,
+            // so the head can never be the just-set key — plain dequeue.
+            _dict.Remove(_order.Dequeue());
         }
         public void Set(TKey key, TValue value)
         {
@@ -39,7 +37,7 @@ public static class ObjectRegistry
                 _dict[key] = value;
                 if (!isNew) return;
                 _order.Enqueue(key);
-                EvictIfNeeded(key);
+                EvictIfNeeded();
             }
         }
         /// <summary>Atomic read-modify-write under the dict lock (F005 login hot path).</summary>
@@ -53,7 +51,7 @@ public static class ObjectRegistry
                 if (isNew)
                 {
                     _order.Enqueue(key);
-                    EvictIfNeeded(key);
+                    EvictIfNeeded();
                 }
                 return nv;
             }
@@ -72,7 +70,7 @@ public static class ObjectRegistry
                 if (!exists)
                 {
                     _order.Enqueue(key);
-                    EvictIfNeeded(key);
+                    EvictIfNeeded();
                 }
                 return true;
             }
@@ -126,6 +124,27 @@ public static class ObjectRegistry
     internal static readonly ReaderWriterLockSlim AllLock = new(LockRecursionPolicy.SupportsRecursion);
     private static readonly Dictionary<int, GameObject> AllObjects = new();
 
+    // reverse index (reference -> key) so re-keying an already
+    // registered reference is O(1). Replaces the old per-insert O(n) scan
+    // for stale keys. Reference identity (never Id equality) — the same
+    // reference may be re-registered under a new Id after reload/rollback.
+    private sealed class ReferenceComparer : IEqualityComparer<GameObject>
+    {
+        public static readonly ReferenceComparer Instance = new();
+        public bool Equals(GameObject? a, GameObject? b) => ReferenceEquals(a, b);
+        public int GetHashCode(GameObject o) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o);
+    }
+    private static readonly Dictionary<GameObject, int> _keysByRef = new(ReferenceComparer.Instance);
+
+    // All callers hold AllLock write.
+    private static void IndexInsert(GameObject obj)
+    {
+        if (_keysByRef.TryGetValue(obj, out var oldKey) && oldKey != obj.Id)
+            AllObjects.Remove(oldKey);
+        AllObjects[obj.Id] = obj;
+        _keysByRef[obj] = obj.Id;
+    }
+
     private static readonly BoundedDictionary<string, double> TempBannedIps = new();
     private static readonly BoundedDictionary<string, double> CreationCooldowns = new();
     private static readonly BoundedDictionary<string, int> FailedLoginAttempts = new();
@@ -152,7 +171,7 @@ public static class ObjectRegistry
 
     // --- creation cooldowns (unified per host, ? bypass) ---
     private static string CooldownKey(string host) => host;
-    public static bool CreationCooldownActive(string op, string host, double now)
+    public static bool CreationCooldownActive(string host, double now)
     {
         if (host == "?") return false;
         var key = CooldownKey(host);
@@ -170,7 +189,7 @@ public static class ObjectRegistry
     {
         if (host == "?") return true;
         var key = CooldownKey(host);
-        if (cooldown <= 0) return !CreationCooldownActive(op, host, now);
+        if (cooldown <= 0) return !CreationCooldownActive(host, now);
         // Atomic check+reserve on the dict's own lock (F005) — no snapshot, no outer lock.
         return CreationCooldowns.CheckAndSet(key, now + cooldown, (exists, exp) => !exists || exp <= now);
     }
@@ -191,6 +210,27 @@ public static class ObjectRegistry
         try { snap = AllObjects.Values.ToList(); }
         finally { AllLock.ExitReadLock(); }
         return snap.Where(predicate).ToList();
+    }
+
+    // coord→node resolution. Prefers the O(1) NodeHandler area/grid/(x,y)
+    // index; falls back to a registry scan for nodes not grafted into any grid
+    // (fresh `new Node` + AddObject with no handler/grid, as in tests). Single
+    // choke point so callers never hand-roll full-registry node scans.
+    public static Node? FindNodeByCoord(Coord coord)
+    {
+        try
+        {
+            var indexed = NodeHandler.GetCurrent()?.TryGetNodeAt(coord);
+            if (indexed is not null) return indexed;
+        }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ObjectRegistry.FindNodeByCoord index lookup: " + logEx.Message, "ObjectRegistry"); }
+        AllLock.EnterReadLock();
+        List<GameObject> snap;
+        try { snap = AllObjects.Values.ToList(); }
+        finally { AllLock.ExitReadLock(); }
+        foreach (var o in snap)
+            if (o is Node n && n.Coord.Equals(coord)) return n;
+        return null;
     }
 
     public static List<GameObject> GetByTag(object tag, bool all = false)
@@ -217,8 +257,11 @@ public static class ObjectRegistry
     }
     public static List<GameObject> Get(IEnumerable<int> ids)
     {
+        // materialize the caller enumerable BEFORE the read lock —
+        // a lazy enumerable would execute arbitrary caller code under AllLock.
+        var list = ids.ToList();
         AllLock.EnterReadLock();
-        try { return ids.Select(id => AllObjects.TryGetValue(id, out var o) ? o : null).Where(o => o != null).Cast<GameObject>().ToList(); }
+        try { return list.Select(id => AllObjects.TryGetValue(id, out var o) ? o : null).Where(o => o != null).Cast<GameObject>().ToList(); }
         finally { AllLock.ExitReadLock(); }
     }
 
@@ -227,9 +270,7 @@ public static class ObjectRegistry
         AllLock.EnterWriteLock();
         try
         {
-            var stale = AllObjects.Where(kv => ReferenceEquals(kv.Value, obj) && kv.Key != obj.Id).Select(kv => kv.Key).ToList();
-            foreach (var k in stale) AllObjects.Remove(k);
-            AllObjects[obj.Id] = obj;
+            IndexInsert(obj);
         }
         finally { AllLock.ExitWriteLock(); }
     }
@@ -251,9 +292,7 @@ public static class ObjectRegistry
         try
         {
             if (AllObjects.Values.Any(predicate)) throw new InvalidOperationException(error);
-            var stale = AllObjects.Where(kv => ReferenceEquals(kv.Value, obj) && kv.Key != obj.Id).Select(kv => kv.Key).ToList();
-            foreach (var k in stale) AllObjects.Remove(k);
-            AllObjects[obj.Id] = obj;
+            IndexInsert(obj);
         }
         finally { AllLock.ExitWriteLock(); }
     }
@@ -261,7 +300,13 @@ public static class ObjectRegistry
     public static void RemoveObject(GameObject obj)
     {
         AllLock.EnterWriteLock();
-        try { AllObjects.Remove(obj.Id); }
+        try
+        {
+            AllObjects.Remove(obj.Id);
+            // Drop the reverse entry only if it points at the removed key —
+            // AllObjects[obj.Id] may have been a different occupant.
+            if (_keysByRef.TryGetValue(obj, out var k) && k == obj.Id) _keysByRef.Remove(obj);
+        }
         finally { AllLock.ExitWriteLock(); }
     }
 
@@ -274,6 +319,7 @@ public static class ObjectRegistry
             try
             {
                 AllObjects.Clear();
+                _keysByRef.Clear();
                 // directly set without extra lock (already holding IdGenerator lock via LockObj)
                 // Use SetId which will re-lock but recursion on same lock object is not allowed for Monitor; use field directly
                 // So we set via reflection-safe direct field access under lock
@@ -295,11 +341,19 @@ public static class ObjectRegistry
     private static bool IsStillSaveable(GameObject obj, bool forSave = false, bool force = false)
     {
         var id = obj.Id;
+        // lock coupling — the obj read lock is taken BEFORE AllLock
+        // is released, so the registry-membership check and the flag reads
+        // are atomic (no evict/delete/re-key can interleave). Read->read
+        // nesting is safe: no path holds AllLock.Write while taking obj
+        // locks, and callers never hold obj locks into this method.
         AllLock.EnterReadLock();
-        try { if (!AllObjects.TryGetValue(id, out var cur) || !ReferenceEquals(cur, obj)) return false; }
+        try
+        {
+            if (!AllObjects.TryGetValue(id, out var cur) || !ReferenceEquals(cur, obj)) return false;
+            obj.SyncRoot.EnterReadLock();
+        }
         finally { AllLock.ExitReadLock(); }
         // need obj lock
-        obj.SyncRoot.EnterReadLock();
         try
         {
             if (obj.IsDeleted) return false;
@@ -366,10 +420,14 @@ public static class ObjectRegistry
             AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
             return;
         }
-        if (objects.Count == 0 && maxId == -1)
+        if (objects.Count == 0)
         {
-            // empty table: still clear? mimic original early return but ensure cleared
-            // If no rows, keep existing clear behaviour
+            // Zero usable rows must never wipe the live world (corrupt or
+            // unreadable rows all skipped above; empty table on a running
+            // server likewise keeps live state). Mirrors MapHandler.Load /
+            // NodeHandler.Load preserving live on zero usable rows.
+            try { AtherizLogger.LogWarning("[Load] object load yielded no usable rows; preserving live registry"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
+            return;
         }
         // Swap + id watermark atomically under both locks: a concurrent
         // GetUniqueId between the swap and SetId could otherwise hand out an
@@ -380,7 +438,8 @@ public static class ObjectRegistry
             try
             {
                 AllObjects.Clear();
-                foreach (var kv in objects) AllObjects[kv.Key] = kv.Value;
+                _keysByRef.Clear();
+                foreach (var kv in objects) { AllObjects[kv.Key] = kv.Value; _keysByRef[kv.Value] = kv.Key; }
             }
             finally { AllLock.ExitWriteLock(); }
 
@@ -399,23 +458,29 @@ public static class ObjectRegistry
         }
     }
 
+    // Closed-DB guard: the IsClosed flag decides (no message sniffing).
+    // Rethrows anything raised while the DB is open; logs and swallows
+    // only the closed-DB race.
+    private static void RunClosedDbGuard(Exception ex)
+    {
+        if (!AtherizDbContext.IsClosed)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw();
+        AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+    }
+
     public static void LoadObjects(string savePath)
     {
         AtherizDbContext db;
         try { db = new AtherizDbContext(savePath); }
         catch (InvalidOperationException ex)
         {
-            // Closed-DB guard is the IsClosed flag (no message sniffing).
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
-            AtherizLogger.LogWarning("database closed");
+            RunClosedDbGuard(ex);
             return;
         }
         catch (Exception ex)
         {
             // Closed-DB races only (no message sniffing): anything else propagates.
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+            RunClosedDbGuard(ex);
             return;
         }
         using (db)
@@ -423,32 +488,25 @@ public static class ObjectRegistry
             try { db.Database.EnsureCreated(); }
             catch (InvalidOperationException ex)
             {
-                // Closed-DB guard is the IsClosed flag (no message sniffing).
-                if (!AtherizDbContext.IsClosed) throw;
-                AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+                RunClosedDbGuard(ex);
                 return;
             }
             catch (Exception ex)
             {
                 // Closed-DB races only (no message sniffing): anything else propagates.
-                if (!AtherizDbContext.IsClosed) throw;
-                AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+                RunClosedDbGuard(ex);
                 return;
             }
             try { LoadObjects(db); }
             catch (InvalidOperationException ex)
             {
-                // Closed-DB guard is the IsClosed flag (no message sniffing).
-                if (!AtherizDbContext.IsClosed) throw;
-                AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
-                AtherizLogger.LogWarning("database closed");
+                RunClosedDbGuard(ex);
                 return;
             }
             catch (Exception ex)
             {
                 // Closed-DB races only (no message sniffing): anything else propagates.
-                if (!AtherizDbContext.IsClosed) throw;
-                AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+                RunClosedDbGuard(ex);
                 return;
             }
         }
@@ -637,14 +695,13 @@ public static class ObjectRegistry
         }
     }
 
-    public static void DeleteObjects(AtherizDbContext db, List<(string Sql, object[] Params)> ops)
+    public static void DeleteObjects(AtherizDbContext db, List<int> ids)
     {
-        if (ops.Count == 0) return;
+        if (ids.Count == 0) return;
         DbTransactionHelper.WithGateAndTransaction(db, ctx =>
         {
-            foreach (var op in ops)
+            foreach (var id in ids)
             {
-                var id = Convert.ToInt32(op.Params[0]);
                 var row = ctx.Objects.Find(id);
                 if (row != null) ctx.Objects.Remove(row);
             }

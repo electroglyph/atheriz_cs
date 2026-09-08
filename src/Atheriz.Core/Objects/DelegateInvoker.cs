@@ -26,6 +26,21 @@ public static class DelegateInvoker
             required++;
         }
         if (args.Length < required || args.Length > ps.Length) throw new TargetParameterCountException();
+        // surface type failures as arity failures. Without this the
+        // compiled Convert throws NullReference/InvalidCast at invoke time.
+        // Only caller-supplied args are checked; filled defaults are trusted.
+        for (int i = 0; i < args.Length; i++)
+        {
+            var t = ps[i].ParameterType;
+            var a = args[i];
+            if (a is null)
+            {
+                if (t.IsValueType && Nullable.GetUnderlyingType(t) is null)
+                    throw new TargetParameterCountException();
+            }
+            else if (!t.IsInstanceOfType(a))
+                throw new TargetParameterCountException();
+        }
         var inv = _cache.GetValue(d, static del => Compile(del));
         if (args.Length < ps.Length)
         {

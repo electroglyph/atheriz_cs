@@ -14,10 +14,9 @@ namespace Atheriz.Core.Globals;
 // Port of atheriz/globals/startstop.py:17 _WORLD_LOCK
 public static class StartStop
 {
-    // Port of startstop.py:17 _WORLD_LOCK = RLock()
+    // Port of startstop.py:17 _WORLD_LOCK = RLock(); startstop.py:18 aliases
+    // _shutdown_lock to the same lock — C# keeps the single name .
     private static readonly object _worldLock = new();
-    // Port of startstop.py:18 _shutdown_lock = _WORLD_LOCK
-    private static readonly object _shutdownLock = _worldLock;
     // Port of startstop.py:19 _shutdown_completed = False
     private static bool _shutdownCompleted = false;
     // Spec extra: bool _started,_shuttingDown (aliases to _shutdownCompleted)
@@ -26,8 +25,8 @@ public static class StartStop
 
     // Expose locks for parity with spec
     public static object WorldLock => _worldLock;
-    public static bool Started { get { lock (_shutdownLock) return _started; } }
-    public static bool ShuttingDown { get { lock (_shutdownLock) return _shuttingDown; } }
+    public static bool Started { get { lock (_worldLock) return _started; } }
+    public static bool ShuttingDown { get { lock (_worldLock) return _shuttingDown; } }
 
     // Port of startstop.py:22 _shutdown_step(name,fn)
     private static void ShutdownStep(string name, Action fn)
@@ -43,103 +42,106 @@ public static class StartStop
     public static void DoStartup(AsyncThreadPool? pool = null, AsyncTicker? ticker = null, AtherizSettings? settings = null)
     {
         settings ??= AtherizSettings.Global;
-        // Port of startstop.py:32 with _shutdown_lock: _shutdown_completed=False
-        lock (_shutdownLock)
+        // Port of startstop.py:32 with _shutdown_lock: _shutdown_completed=False.
+        // Unlike Python (flag-only hold), the whole load phase holds _worldLock
+        // — outermost in the global order, same as DoShutdown/DoReload — so a
+        // concurrent shutdown/reload cannot clear singletons mid-boot .
+        lock (_worldLock)
         {
             _shutdownCompleted = false;
             _shuttingDown = false;
             _started = true;
-        }
-        // Port of startstop.py:34 load_objects()
-        try
-        {
-            // Port of objects.load_objects via ObjectRegistry.LoadObjects
-            // Use savePath overload which handles DB EnsureCreated
-            ObjectRegistry.LoadObjects(settings.SavePath);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"DoStartup LoadObjects failed:\n{ex}");
-        }
-
-        // Crash-consistency check: a dirty journal means the
-        // previous checkpoint died between tables — the world may be torn.
-        // Boot continues (availability), but the torn state is surfaced loudly.
-        try
-        {
-            if (Persistence.CheckpointJournal.IsDirty(settings.SavePath))
-            {
-                var msg = "Torn checkpoint detected: previous save did not complete; world tables may be inconsistent.";
-                try { AtherizLogger.LogError(msg); } catch { Console.Error.WriteLine(msg); }
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"DoStartup checkpoint check failed:\n{ex}");
-        }
-
-        // Port of startstop.py:35-38 get_async_threadpool/get_map_handler/get_node_handler/get_async_ticker
-        try
-        {
-            pool ??= GlobalServices.GetAsyncThreadPool();
-        }
-        catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetAsyncThreadPool failed:\n{ex}"); }
-
-        MapHandler? mapHandler = null;
-        try
-        {
-            mapHandler = GlobalServices.GetMapHandler();
-        }
-        catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetMapHandler failed:\n{ex}"); }
-
-        NodeHandler? nodeHandler = null;
-        try
-        {
-            nodeHandler = GlobalServices.GetNodeHandler();
-        }
-        catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetNodeHandler failed:\n{ex}"); }
-
-        try
-        {
-            ticker ??= GlobalServices.GetAsyncTicker();
-        }
-        catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetAsyncTicker failed:\n{ex}"); }
-
-        // Port of startstop.py:39-42 server_events.at_server_start()
-        try
-        {
-            // Try game-folder server_events first, fallback to Core stub
-            TryInvokeServerEvent("AtServerStart");
-        }
-        catch (Exception ex) { Console.Error.WriteLine($"at_server_start failed:\n{ex}"); }
-
-        // Port of startstop.py:44-45 if TIME_SYSTEM_ENABLED: get_game_time().start()
-        if (settings.TimeSystemEnabled)
-        {
+            // Port of startstop.py:34 load_objects()
             try
             {
-                var gt = GlobalServices.GetGameTime();
-                // Port of get_game_time().start() — ticker is singleton; GameTime.Start expects ticker
-                if (ticker != null)
-                    gt.Start(ticker);
-                else
-                    gt.Start();
+                // Port of objects.load_objects via ObjectRegistry.LoadObjects
+                // Use savePath overload which handles DB EnsureCreated
+                ObjectRegistry.LoadObjects(settings.SavePath);
             }
-            catch (Exception ex) { Console.Error.WriteLine($"GameTime start failed:\n{ex}"); }
-        }
-
-        // Port of startstop.py:46 start_autosave()
-        try
-        {
-            if (settings.AutosaveMinutes != 0)
+            catch (Exception ex)
             {
-                var t = ticker ?? GlobalServices.GetAsyncTicker();
-                var gt = settings.TimeSystemEnabled ? GlobalServices.GetGameTime() : null;
-                // Port of autosave.start_autosave — use ticker overload with handlers
-                Autosave.StartAutosave(t, settings, mapHandler, nodeHandler, gt);
+                Console.Error.WriteLine($"DoStartup LoadObjects failed:\n{ex}");
             }
+
+            // Crash-consistency check: a dirty journal means the
+            // previous checkpoint died between tables — the world may be torn.
+            // Boot continues (availability), but the torn state is surfaced loudly.
+            try
+            {
+                if (Persistence.CheckpointJournal.IsDirty(settings.SavePath))
+                {
+                    var msg = "Torn checkpoint detected: previous save did not complete; world tables may be inconsistent.";
+                    try { AtherizLogger.LogError(msg); } catch { Console.Error.WriteLine(msg); }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"DoStartup checkpoint check failed:\n{ex}");
+            }
+
+            // Port of startstop.py:35-38 get_async_threadpool/get_map_handler/get_node_handler/get_async_ticker
+            try
+            {
+                pool ??= GlobalServices.GetAsyncThreadPool();
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetAsyncThreadPool failed:\n{ex}"); }
+
+            MapHandler? mapHandler = null;
+            try
+            {
+                mapHandler = GlobalServices.GetMapHandler(settings);
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetMapHandler failed:\n{ex}"); }
+
+            NodeHandler? nodeHandler = null;
+            try
+            {
+                nodeHandler = GlobalServices.GetNodeHandler(settings);
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetNodeHandler failed:\n{ex}"); }
+
+            try
+            {
+                ticker ??= GlobalServices.GetAsyncTicker();
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetAsyncTicker failed:\n{ex}"); }
+
+            // Port of startstop.py:39-42 server_events.at_server_start()
+            try
+            {
+                // Try game-folder server_events first, fallback to Core stub
+                TryInvokeServerEvent("AtServerStart");
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"at_server_start failed:\n{ex}"); }
+
+            // Port of startstop.py:44-45 if TIME_SYSTEM_ENABLED: get_game_time().start()
+            if (settings.TimeSystemEnabled)
+            {
+                try
+                {
+                    var gt = GlobalServices.GetGameTime(settings);
+                    // Port of get_game_time().start() — ticker is singleton; GameTime.Start expects ticker
+                    if (ticker != null)
+                        gt.Start(ticker);
+                    else
+                        gt.Start();
+                }
+                catch (Exception ex) { Console.Error.WriteLine($"GameTime start failed:\n{ex}"); }
+            }
+
+            // Port of startstop.py:46 start_autosave()
+            try
+            {
+                if (settings.AutosaveMinutes != 0)
+                {
+                    var t = ticker ?? GlobalServices.GetAsyncTicker();
+                    var gt = settings.TimeSystemEnabled ? GlobalServices.GetGameTime(settings) : null;
+                    // Port of autosave.start_autosave — use ticker overload with handlers
+                    Autosave.StartAutosave(t, settings, mapHandler, nodeHandler, gt);
+                }
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"start_autosave failed:\n{ex}"); }
         }
-        catch (Exception ex) { Console.Error.WriteLine($"start_autosave failed:\n{ex}"); }
     }
 
     // Port of startstop.py:49-82 do_shutdown
@@ -148,16 +150,13 @@ public static class StartStop
         settings ??= AtherizSettings.Global;
         lock (_worldLock)
         {
-            lock (_shutdownLock)
+            if (_shutdownCompleted)
             {
-                if (_shutdownCompleted)
-                {
-                    Console.Error.WriteLine("Shutdown already completed; skipping."); // Port of logger.info
-                    return;
-                }
-                _shutdownCompleted = true;
-                _shuttingDown = true;
+                Console.Error.WriteLine("Shutdown already completed; skipping."); // Port of logger.info
+                return;
             }
+            _shutdownCompleted = true;
+            _shuttingDown = true;
 
             // Port of startstop.py:57 channel = get_server_channel(); if channel: channel.msg("Server is shutting down!")
             try
@@ -220,7 +219,20 @@ public static class StartStop
             if (settings.AutosaveOnShutdown)
                 SaveWorld(settings);
 
+            // truncate the WAL after the final save so -wal/-shm
+            // files cannot grow unbounded across restarts. Best-effort and
+            // post-save by design (a checkpoint before the save would be
+            // immediately re-dirtied).
+            ShutdownStep("wal_checkpoint", () =>
+            {
+                try { using var ctx = AtherizDbContextFactory.CreateForSettings(settings); ctx.CheckpointWal(); }
+                catch (Exception) { }
+            });
+
             // Port of startstop.py:75 msg_all("Server is shutting down NOW!")
+            // — last, after ticker/pool stops and saves, exactly as upstream.
+            // Delivery is synchronous socket writes (no pool/ticker needed),
+            // so the warning still reaches clients in this position.
             ShutdownStep("msg_all", () =>
             {
                 try
@@ -338,7 +350,7 @@ public static class StartStop
         // tickable is a GameObject (Node overrides AtTick). Tick faults stay
         // silent per-tick, matching the old Invoke catch-swallow.
         if (obj is Atheriz.Core.Objects.GameObject go)
-            return () => { try { go.AtTick(); } catch (Exception) { } };
+            return () => { try { go.AtTick(); } catch (Exception ex) { AtherizLogger.LogWarning($"AtTick failed on '{go.Name}': {ex.Message}"); } };
         return null;
     }
 
@@ -577,7 +589,7 @@ public static class StartStop
         {
             foreach (var h in handlers)
             {
-                try { h(); } catch (Exception) { }
+                try { h(); } catch (Exception ex) { AtherizLogger.LogWarning($"Reload handler failed: {ex.Message}"); }
             }
         }
     }
@@ -585,7 +597,7 @@ public static class StartStop
     // For tests — mirrors ServerLifecycle.Reset and Python _shutdown_completed reset
     public static void Reset()
     {
-        lock (_shutdownLock)
+        lock (_worldLock)
         {
             _shutdownCompleted = false;
             _shuttingDown = false;

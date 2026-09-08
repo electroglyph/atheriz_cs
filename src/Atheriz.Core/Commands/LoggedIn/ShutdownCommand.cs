@@ -28,7 +28,6 @@ public sealed class ShutdownCommand : Command
             go.Msg("Error: admin.token not found.");
             return;
         }
-        try { Atheriz.Core.ServerEvents.AtServerStop(); } catch (Exception) { }
         string token;
         try { token = File.ReadAllText(tokenFile).Trim(); }
         catch (Exception ex) { go.Msg($"Error reading token: {ex.Message}"); return; }
@@ -50,6 +49,11 @@ public sealed class ShutdownCommand : Command
                     var resp = client.SendAsync(req).GetAwaiter().GetResult();
                     if (resp.IsSuccessStatusCode)
                     {
+                        // fire the stop hooks only once the shutdown
+                        // is confirmed. Python runs at_server_stop() eagerly
+                        // (shutdown.py:53, before the request); if the request
+                        // then fails, hooks already ran for a live server.
+                        try { Atheriz.Core.ServerEvents.AtServerStop(); } catch (Exception) { }
                         var body = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                         try
                         {

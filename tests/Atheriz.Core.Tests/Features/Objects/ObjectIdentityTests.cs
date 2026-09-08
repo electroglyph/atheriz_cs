@@ -10,25 +10,27 @@ namespace Atheriz.Core.Tests.Features.Objects;
 public class ObjectIdentityTests
 {
     [Fact]
-    public void HashCode_StableAcrossIdAssignment()
+    public void HashCode_FollowsRegistryId()
     {
-        // Correct: assigning the registry id never changes the hash.
+        // Port of nodes.py:92 — hash(id), matching Equals-by-Id .
+        // Same-Id instances (e.g. reload duplicates) hash equal.
         var o = new GameObject(); // transient Id == -1
-        int before = o.GetHashCode();
         o.Id = 4242;
-        Assert.Equal(before, o.GetHashCode());
+        Assert.Equal(4242.GetHashCode(), o.GetHashCode());
     }
 
     [Fact]
-    public void HashSet_FindsObjectAfterIdAssignment()
+    public void HashSet_FindsSameIdInstance()
     {
-        // Correct: an object stays findable in a hash set across id assignment.
+        // Equal (same-Id) instances share a hash bucket: reload duplicates
+        // are findable via the hash lookup, not just linear scan.
         // NOTE: must use the hash-bucket lookup (TryGetValue), not
         // Assert.Contains (linear scan that never consults the hash).
-        var o = new GameObject();
-        var set = new HashSet<GameObject> { o };
-        o.Id = 4243;
-        Assert.True(set.TryGetValue(o, out var found));
-        Assert.Same(o, found);
+        var a = GameObject.Create("hash-a");
+        var b = GameObject.Create("hash-b");
+        b.Id = a.Id;
+        var set = new HashSet<GameObject> { a };
+        Assert.True(set.TryGetValue(b, out var found));
+        Assert.Same(a, found);
     }
 }

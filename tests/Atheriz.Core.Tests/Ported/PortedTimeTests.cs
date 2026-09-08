@@ -332,8 +332,8 @@ public class PortedTimeTests
         Assert.False(MakeGt(0, s).SunUp());
         Assert.True(MakeGt(12*60, s).SunUp());
         Assert.False(MakeGt(s.SunsetHour*60, s).SunUp());
-        Assert.True(MakeGt(0, s).SunUpAlt(s.SunriseHour));
-        Assert.False(MakeGt(0, s).SunUpAlt(s.SunriseHour-1));
+        Assert.True(MakeGt(0, s).SunUp(s.SunriseHour));
+        Assert.False(MakeGt(0, s).SunUp(s.SunriseHour-1));
     }
 
     [Fact]
@@ -486,16 +486,16 @@ public class PortedTimeTests
     }
 
     [Fact]
-    public void SunUpAltDirectly()
+    public void SunUpHourDirectly()
     {
         var gt = MakeGt(0, new AtherizSettings { TickMinutes = 1.0 });
         var s = new AtherizSettings();
-        Assert.True(gt.SunUpAlt(s.SunriseHour));
-        Assert.False(gt.SunUpAlt(s.SunriseHour - 1));
-        Assert.True(gt.SunUpAlt(s.SunsetHour - 1));
-        Assert.False(gt.SunUpAlt(s.SunsetHour));
-        Assert.False(gt.SunUpAlt(0));
-        Assert.True(gt.SunUpAlt(12));
+        Assert.True(gt.SunUp(s.SunriseHour));
+        Assert.False(gt.SunUp(s.SunriseHour - 1));
+        Assert.True(gt.SunUp(s.SunsetHour - 1));
+        Assert.False(gt.SunUp(s.SunsetHour));
+        Assert.False(gt.SunUp(0));
+        Assert.True(gt.SunUp(12));
     }
 
     [Fact]

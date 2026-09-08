@@ -54,7 +54,11 @@ public static class CommandDispatcher
         foreach (var key in cmdset.GetKeys().OrderBy(k => k, StringComparer.Ordinal))
         {
             if (_settings.AutoAliasIgnoredKeys.Contains(key)) continue;
-            if (key.StartsWith(rawCmdKey, StringComparison.Ordinal))
+            // case-insensitive prefix. Input is lowercased but
+            // registered keys may be mixed-case (channel/exit SetKey);
+            // Ordinal never matched those. Dict lookups are already
+            // OrdinalIgnoreCase, so this aligns the scan with Get.
+            if (key.StartsWith(rawCmdKey, StringComparison.OrdinalIgnoreCase))
             {
                 var candidate = cmdset.Get(key);
                 if (socialsFallback && candidate is LoggedIn.SocialsCommand)
@@ -93,6 +97,22 @@ public static class CommandDispatcher
             if (!string.IsNullOrEmpty(first) && !char.IsLetter(first[0]))
             {
                 cmd = CommandRegistry.LoggedIn.Get(first);
+                // deliberate extension beyond inputfuncs.py (global
+                // only): a glued single-char verb may also live on the
+                // internal cmdset or a nearby object's verb set.
+                cmd ??= puppet.InternalCmdSet?.Get(first);
+                if (cmd is null)
+                {
+                    foreach (var set in CommandHelpers.LocalVerbSets(puppet))
+                    {
+                        if ((cmd = set.Get(first)) is not null) break;
+                    }
+                }
+                if (cmd is null)
+                {
+                    GameObject? locG = puppet.ResolveLocationObject();
+                    if (locG?.ExternalCmdSet is not null) cmd = locG.ExternalCmdSet.Get(first);
+                }
                 if (cmd is not null)
                 {
                     matchedAlias = first;
@@ -124,7 +144,7 @@ public static class CommandDispatcher
                     return null;
                 }
                 // Deliberate divergence from Python: non-social commands take priority over socials
-                // (Else "sa"→salute would shadow "say", etc. Owner decision 2026-09-04.)
+                // (else "sa"→salute would shadow "say", etc.).
                 (cmd, matchedAlias) = AutoAlias(CommandRegistry.LoggedIn, rawCmdKey, socialsFallback: true);
             }
             if (cmd is null)
@@ -164,7 +184,9 @@ public static class CommandDispatcher
     // (_settings, honored by the aliasing paths above) or the live Global
     // settings disables it (both default enabled; Global flips and
     // SetSettings flips both take effect).
-    private static bool IsUnloggedInEnabled(Command cmd)
+    // shared with the creation commands' Run methods so a direct
+    // Run honors the same gate as dispatch (SetSettings snapshot && Global).
+    internal static bool IsUnloggedInEnabled(Command cmd)
     {
         var g = AtherizSettings.Global;
         if (cmd is UnloggedIn.CreateAccountCommand) return _settings.AccountCreationEnabled && g.AccountCreationEnabled;
@@ -197,8 +219,20 @@ public static class CommandDispatcher
             }
         }
         // cmdset.py:14-26 conditionals are evaluated at registration; settings
-        // flips afterwards must take effect without a reset.
-        if (cmd is not null && !IsUnloggedInEnabled(cmd)) cmd = cmdset.Get("none") ?? cmd;
+        // flips afterwards must take effect without a reset. A disabled verb
+        // demotes to `none` exactly like an unknown verb above :
+        // full stripped input, so the suggestion is based on "create foo",
+        // not the already-split args "foo".
+        if (cmd is not null && !IsUnloggedInEnabled(cmd))
+        {
+            var none = cmdset.Get("none");
+            if (none is not null)
+            {
+                cmd = none;
+                matchedAlias = "none";
+                cmdArgs = stripped;
+            }
+        }
         if (cmd is null) return null;
         if (!cmd.Access(connection))
         {

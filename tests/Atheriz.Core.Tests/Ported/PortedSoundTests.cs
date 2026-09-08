@@ -45,7 +45,8 @@ public class PortedSoundTests
         for(int z=0; z<grid; z++)
         {
             var g = new NodeGrid(name,z);
-            for(int x=0;x<grid;x++) for(int y=0;y<grid;y++) g.Nodes[(x,y)] = new TrackingNode(new Coord(name,x,y,z));
+            // Explicit registration: the constructor does not publish.
+            for(int x=0;x<grid;x++) for(int y=0;y<grid;y++) { var tn = new TrackingNode(new Coord(name,x,y,z)); g.Nodes[(x,y)] = tn; ObjectRegistry.AddObject(tn); }
             area.AddGrid(g);
         }
         nh.AddArea(area);
@@ -149,6 +150,7 @@ public class PortedSoundTests
         var blocker=new BlockingNode(new Coord("bfs_block_test",1,0,0));
         var beyond=new TrackingNode(new Coord("bfs_block_test",2,0,0));
         grid.Nodes[(0,0)]=src; grid.Nodes[(1,0)]=blocker; grid.Nodes[(2,0)]=beyond;
+        ObjectRegistry.AddObject(src); ObjectRegistry.AddObject(blocker); ObjectRegistry.AddObject(beyond); // Explicit registration: the constructor does not publish.
         area.AddGrid(grid); nh.AddArea(area);
         var emitter=new TrackingObject(); emitter.Name="Emitter"; emitter.IsNpc=true; emitter.CanHear=true; emitter.Id=IdGenerator.GetUniqueId(); ObjectRegistry.AddObject(emitter);
         emitter.Location=new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(src.Coord); src.AddObject(emitter);

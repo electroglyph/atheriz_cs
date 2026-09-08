@@ -36,7 +36,9 @@ public static class AdminRoutes
                 // Watchdog: a hung reload must not pin the worker forever.
                 // On timeout the background reload keeps running; the caller
                 // retries or inspects the log (same 200+{status:error} contract).
-                var work = Task.Run(async () =>
+                // single thread-pool hop — the work runs as a named
+                // local function, not an async lambda (same one hop).
+                async Task<string> DoReloadWork()
                 {
                     string msg;
                     try
@@ -53,7 +55,8 @@ public static class AdminRoutes
                         msg = "Reload completed (fallback).";
                     }
                     return msg;
-                });
+                }
+                var work = Task.Run(DoReloadWork);
                 var done = await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(60)));
                 if (done != work)
                 {
@@ -79,21 +82,22 @@ public static class AdminRoutes
 
             Console.Error.WriteLine("Internal shutdown request received. Running shutdown tasks...");
 
-            var watchdogCts = new CancellationTokenSource();
-            _ = Task.Run(async () =>
+            // single thread-pool hop for shutdown. The watchdog is a
+            // pure delay — a Timer, not a pooled thread. The shutdown work
+            // runs on one pooled thread (DoShutdown is synchronous; the old
+            // shape nested a second hop inside an async lambda).
+            var watchdog = new System.Threading.Timer(_ =>
             {
-                try { await Task.Delay(TimeSpan.FromSeconds(60), watchdogCts.Token); }
-                catch (OperationCanceledException) { return; }
                 Console.Error.WriteLine("Shutdown watchdog: forcing exit.");
                 lifetime.StopApplication();
-            });
+            }, null, TimeSpan.FromSeconds(60), System.Threading.Timeout.InfiniteTimeSpan);
 
-            _ = Task.Run(async () =>
+            _ = Task.Run(() =>
             {
-                try { await Task.Run(() => ServerLifecycle.DoShutdown(settings)); }
+                try { ServerLifecycle.DoShutdown(settings); }
                 finally
                 {
-                    try { watchdogCts.Cancel(); } catch { }
+                    try { watchdog.Dispose(); } catch { }
                     lifetime.StopApplication();
                 }
             });
@@ -152,22 +156,21 @@ public static class AdminRoutes
         try
         {
             if (ctx.Request.ContentLength > maxBytes) return null;
-            if (ctx.Request.ContentLength is null)
+            // Content-Length is client-declared — never hand the raw
+            // stream to the parser (a lying length over-allocates inside
+            // JsonDocument). Copy through a bounded buffer in all cases.
+            using var ms = new MemoryStream();
+            var buf = new byte[8192];
+            int n;
+            long total = 0;
+            while ((n = await ctx.Request.Body.ReadAsync(buf)) > 0)
             {
-                using var ms = new MemoryStream();
-                var buf = new byte[8192];
-                int n;
-                long total = 0;
-                while ((n = await ctx.Request.Body.ReadAsync(buf)) > 0)
-                {
-                    total += n;
-                    if (total > maxBytes) return null;
-                    ms.Write(buf, 0, n);
-                }
-                ms.Position = 0;
-                return await JsonDocument.ParseAsync(ms);
+                total += n;
+                if (total > maxBytes) return null;
+                ms.Write(buf, 0, n);
             }
-            return await JsonDocument.ParseAsync(ctx.Request.Body);
+            ms.Position = 0;
+            return await JsonDocument.ParseAsync(ms);
         }
         catch { return null; }
     }

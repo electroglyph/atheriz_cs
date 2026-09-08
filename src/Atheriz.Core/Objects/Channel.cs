@@ -188,7 +188,7 @@ public class Channel : GameObject
     public void Msg(string text, GameObject? from = null)
     {
         string senderName = from?.Name ?? "";
-        int timestamp = (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         // Port of base_channel.py:262-264 — history keeps the
         // (timestamp, sender, message) entry; listeners receive the formatted
         // form, and GetHistory re-formats on replay so both match.
@@ -210,7 +210,7 @@ public class Channel : GameObject
         }
     }
 
-    public virtual string FormatMessage(int timestamp, string sender, string message)
+    public virtual string FormatMessage(long timestamp, string sender, string message)
     {
         if (!string.IsNullOrEmpty(sender)) return $"({Name}) [{DateTimeOffset.FromUnixTimeSeconds(timestamp):dd MMMM, yyyy HH:mm:ss}] {sender}: {message}";
         return $"({Name}) [{DateTimeOffset.FromUnixTimeSeconds(timestamp):dd MMMM, yyyy HH:mm:ss}] {message}";
@@ -239,11 +239,13 @@ public class Channel : GameObject
 
     public void ClearHistory()
     {
+        // Fixed order is object -> channel: snapshot/clear under _histLock,
+        // set the flag after release .
         lock (_histLock)
         {
             _history.Clear();
-            IsModified = true;
         }
+        IsModified = true;
     }
 
     // Save ops never nest _histLock inside SyncRoot (or vice versa): history is
@@ -258,28 +260,32 @@ public class Channel : GameObject
         List<ChannelHistoryEntry> histSnap;
         lock (_histLock) { histSnap = _history.ToList(); }
         bool had = false;
-        string json;
+        GameObjectDto dto;
         SyncRoot.EnterWriteLock();
         try
         {
             had = GetIsModifiedRawNoLock();
             SetIsModifiedRawNoLock(false);
-            try
-            {
-                var dto = BuildDto(histSnap);
-                if (clearing) dto.IsModified = false;
-                json = Persistence.Dto.GameObjectDtoSerializer.ToJson(dto);
-                // Non-clearing restores the flag (GetSaveOps is a peek); clearing
-                // leaves it cleared. Either way a throw restores the old flag.
-                SetIsModifiedRawNoLock(clearing ? false : had);
-            }
-            catch
-            {
-                SetIsModifiedRawNoLock(had);
-                throw;
-            }
+            // snapshot the DTO under the lock; JSON serialization
+            // runs after release so checkpoints don't stall readers.
+            dto = BuildDto(histSnap);
+            if (clearing) dto.IsModified = false;
+            // Non-clearing restores the flag (GetSaveOps is a peek); clearing
+            // leaves it cleared.
+            SetIsModifiedRawNoLock(clearing ? false : had);
         }
         finally { SyncRoot.ExitWriteLock(); }
+        string json;
+        try { json = Persistence.Dto.GameObjectDtoSerializer.ToJson(dto); }
+        catch
+        {
+            // Failed serialization must not leave the object clean — the
+            // next checkpoint retries.
+            SyncRoot.EnterWriteLock();
+            try { SetIsModifiedRawNoLock(had); }
+            finally { SyncRoot.ExitWriteLock(); }
+            throw;
+        }
         return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", new object[] { Id, json });
     }
 
@@ -324,4 +330,4 @@ public class Channel : GameObject
 /// <c>(timestamp, sender, message)</c> tuples in
 /// <c>atheriz/objects/base_channel.py</c>.
 /// </summary>
-internal sealed record ChannelHistoryEntry(int Timestamp, string Sender, string Message);
+internal sealed record ChannelHistoryEntry(long Timestamp, string Sender, string Message);

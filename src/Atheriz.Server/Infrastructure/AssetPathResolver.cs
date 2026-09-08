@@ -1,6 +1,6 @@
 namespace Atheriz.Server.Infrastructure;
 
-/// <summary>Resolves wwwroot / templates paths, deduplicating candidate arrays. Port of P1.8.</summary>
+/// <summary>Resolves wwwroot / templates paths, deduplicating candidate arrays.</summary>
 public static class AssetPathResolver
 {
     public static string? ResolveCandidates(IEnumerable<string?> candidates)
@@ -49,16 +49,18 @@ public static class AssetPathResolver
         return null;
     }
 
-    // Single ordered resolution table (P1-16): each row is (base selector, sub-path).
-    // Bases resolve lazily per call (CWD can move); rows keep the historical
-    // priority order contentRoot > CWD > engine > appBaseDir; dups collapse in
-    // ResolveCandidates via Distinct. Sub-path "" means the base itself.
+    // Single ordered resolution table: each row is (base selector, sub-path).
+    // Bases resolve lazily per call (CWD can move); rows keep game-before-install order
+    // CWD (game) > contentRoot (install) > engine > appBaseDir: the server
+    // runs with CWD set to the game folder, so per-game web customizations
+    // win over shipped install assets. Dups collapse in ResolveCandidates
+    // via Distinct. Sub-path "" means the base itself.
     private static IEnumerable<string?> ResolveTable(string contentRoot, string appBaseDir, string? engineDir, string? engineFallback, string subA, string subB)
     {
-        yield return Path.Combine(contentRoot, subA);
-        yield return Path.Combine(contentRoot, subB);
         yield return Path.Combine(Directory.GetCurrentDirectory(), subA);
         yield return Path.Combine(Directory.GetCurrentDirectory(), subB);
+        yield return Path.Combine(contentRoot, subA);
+        yield return Path.Combine(contentRoot, subB);
         if (engineDir != null) yield return engineDir;
         else if (engineFallback != null) yield return engineFallback;
         yield return Path.Combine(appBaseDir, subA);

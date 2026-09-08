@@ -120,8 +120,8 @@ public sealed class ValidationTests
     [Fact]
     public void Coord_TryParse_BareArea_IsOrigin()
     {
-        Assert.True(Coord.TryParse("limbo", out var c));
-        Assert.Equal(new Coord("limbo", 0, 0, 0), c);
+        // Audit-over-ported: bare area names no longer parse as origin.
+        Assert.False(Coord.TryParse("limbo", out _));
     }
 
     [Fact]
@@ -314,13 +314,13 @@ public sealed class ValidationTests
     }
 
     [Fact]
-    public void SettingsValidator_PrivilegedWebserverPort_Fails()
+    public void SettingsValidator_PrivilegedWebserverPort_Passes()
     {
+        // No privileged-port floor upstream: 80/443 are the operator's call.
         var v = new AtherizSettingsValidator();
         var s = AbsolutePaths(new AtherizSettings { WebserverPort = 80 });
         var result = v.Validate(null, s);
-        Assert.True(result.Failed);
-        Assert.Contains("WebserverPort", result.FailureMessage);
+        Assert.False(result.Failed);
     }
 
     [Fact]

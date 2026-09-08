@@ -41,6 +41,10 @@ public static class RestartHandler
         var spawnArgs = new List<string>();
         if (port != null) { spawnArgs.Add("--port"); spawnArgs.Add(port.ToString()!); }
         if (host != null) { spawnArgs.Add("--host"); spawnArgs.Add(host); }
+        // respawn preserves the CLI telnet-port override, else the
+        // replacement silently binds the configured default instead.
+        var telnetPort = ArgumentParser.ParseTelnetPort(a);
+        if (telnetPort != null) { spawnArgs.Add("--telnet-port"); spawnArgs.Add(telnetPort.ToString()!); }
         await DaemonSpawner.SpawnDaemonAsync(spawnArgs.ToArray(), Directory.GetCurrentDirectory());
         // Wait for the new server to come up on the port (bounded).
         if (!await WaitForPortUpAsync(portVal, 150)) Console.WriteLine($"Warning: port {portVal} not listening yet; check save/server.log.");

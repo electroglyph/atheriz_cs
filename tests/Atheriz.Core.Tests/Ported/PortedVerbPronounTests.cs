@@ -96,7 +96,9 @@ public class PortedVerbPronounTests
         Assert.Equal("past participle", Conjugate.VerbTense("been"));
         Assert.Equal("3rd singular present", Conjugate.VerbTense("is"));
     }
-    [Fact] public void VerbTenseUnknownReturnsOriginal(){ Assert.Equal("xyzzy", Conjugate.VerbTense("xyzzy")); }
+    // MISPORT CORRECTED: test_verb_conjugate.py:203-206 asserts
+    // verb_tense("xyzzy") is None ("An unknown verb has no tense").
+    [Fact] public void VerbTenseUnknownReturnsNull(){ Assert.Null(Conjugate.VerbTense("xyzzy")); }
     [Fact] public void VerbTenseInfinitive(){ Assert.Equal("infinitive", Conjugate.VerbTense("be")); Assert.Equal("infinitive", Conjugate.VerbTense("walk")); }
     [Fact] public void VerbIsTenseTrue(){ Assert.True(Conjugate.VerbIsTense("been","ppart")); Assert.True(Conjugate.VerbIsTense("been","past participle")); Assert.True(Conjugate.VerbIsTense("running","present participle")); Assert.True(Conjugate.VerbIsTense("am","1st singular present")); Assert.True(Conjugate.VerbIsTense("is","3rd singular present")); }
     [Fact] public void VerbIsTenseFalse(){ Assert.False(Conjugate.VerbIsTense("been","infinitive")); Assert.False(Conjugate.VerbIsTense("ran","past participle")); Assert.False(Conjugate.VerbIsTense("running","infinitive")); }

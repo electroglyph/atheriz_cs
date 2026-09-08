@@ -157,27 +157,42 @@ public sealed class NodeGrid
     }
     public Node? GetNode(int x, int y) => GetNode((x, y));
 
+    // Shared batch validator for CheckMoves/ApplyMoves (ports nodes.py
+    // check_moves/apply_moves validation loops verbatim: same three
+    // predicates in the same order). Source multiplicities are precomputed
+    // once instead of rescanned per index — identical results, linear time.
+    private static HashSet<int> ValidateMoves(
+        List<((int X, int Y) src, (int X, int Y) dst)> moves,
+        HashSet<(int, int)> occupied)
+    {
+        var failed = new HashSet<int>();
+        var sources = moves.Select(m => m.src).ToList();
+        var sourceCounts = new Dictionary<(int, int), int>();
+        foreach (var s in sources)
+            sourceCounts[s] = sourceCounts.TryGetValue(s, out var n) ? n + 1 : 1;
+        var sourceSet = new HashSet<(int, int)>(sources);
+        for (int i = 0; i < moves.Count; i++)
+        {
+            var (src, dst) = moves[i];
+            if (sources.Take(i).Contains(src) || sourceCounts[src] > 1) { failed.Add(i); continue; }
+            if (!occupied.Contains(src)) { failed.Add(i); continue; }
+            if (occupied.Contains(dst) && !sourceSet.Contains(dst)) failed.Add(i);
+        }
+        return failed;
+    }
+
     // Port of nodes.py:1059 check_moves
     public HashSet<int> CheckMoves(List<((int X, int Y) src, (int X, int Y) dst)> moves, List<((int X, int Y) src, (int X, int Y) dst)>? context = null)
     {
-        var failed = new HashSet<int>();
         Lock.EnterReadLock();
         try
         {
             var occupied = new HashSet<(int, int)>(Nodes.Keys);
             if (context != null)
                 foreach (var (cs, cd) in context) { occupied.Remove(cs); occupied.Add(cd); }
-            var sources = moves.Select(m => m.src).ToList();
-            for (int i = 0; i < moves.Count; i++)
-            {
-                var (src, dst) = moves[i];
-                if (sources.Take(i).Contains(src) || sources.Count(s => s.Equals(src)) > 1) { failed.Add(i); continue; }
-                if (!occupied.Contains(src)) { failed.Add(i); continue; }
-                if (occupied.Contains(dst) && !sources.Contains(dst)) failed.Add(i);
-            }
+            return ValidateMoves(moves, occupied);
         }
         finally { Lock.ExitReadLock(); }
-        return failed;
     }
 
     // Port of nodes.py:1095 apply_moves
@@ -192,14 +207,7 @@ public sealed class NodeGrid
         try
         {
             var occupied = new HashSet<(int, int)>(Nodes.Keys);
-            var sources = moves.Select(m => m.src).ToList();
-            for (int i = 0; i < moves.Count; i++)
-            {
-                var (src, dst) = moves[i];
-                if (sources.Take(i).Contains(src) || sources.Count(s => s.Equals(src)) > 1) { failed.Add(i); continue; }
-                if (!occupied.Contains(src)) { failed.Add(i); continue; }
-                if (occupied.Contains(dst) && !sources.Contains(dst)) { failed.Add(i); continue; }
-            }
+            foreach (var i in ValidateMoves(moves, occupied)) failed.Add(i);
             var applied = moves.Where((_, i) => !failed.Contains(i)).ToList();
             if (applied.Count == 0) return failed.ToList();
             foreach (var (src, dst) in applied)

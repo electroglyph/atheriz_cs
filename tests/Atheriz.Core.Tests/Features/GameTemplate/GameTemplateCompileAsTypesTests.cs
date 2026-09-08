@@ -3,7 +3,7 @@ using MyGame;
 
 namespace Atheriz.Core.Tests.Features.GameTemplate;
 
-// P3: the checked-in template stubs compile as real types against the current
+// the checked-in template stubs compile as real types against the current
 // engine (namespace MyGame) and subclass the engine bases they mirror.
 [Collection("Ported")]
 public class GameTemplateCompileAsTypesTests

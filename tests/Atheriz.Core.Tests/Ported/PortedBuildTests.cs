@@ -1,6 +1,7 @@
 // Port of atheriz/tests/test_build.py:1
 // Port of atheriz/tests/test_build_command.py:1
 using Atheriz.Core;
+using Atheriz.Core.Commands;
 using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
@@ -21,6 +22,7 @@ public class PortedBuildTests
         var grid = new NodeGrid("TestArea", 0);
         var start = new Node(new Coord("TestArea", 0, 0, 0), desc: "Start");
         grid.Nodes[(0,0)] = start;
+        ObjectRegistry.AddObject(start); // Explicit registration: the constructor does not publish.
         area.AddGrid(grid);
         nh.AddArea(area);
         NodeHandler.SetCurrent(nh);
@@ -31,8 +33,8 @@ public class PortedBuildTests
         ObjectRegistry.AddObject(caller);
         return (nh, mh, area, grid, start, caller);
     }
-    private static BuildArgs MakeArgs(bool n=false,bool e=false,bool s=false,bool w=false,bool u=false,bool d=false,bool x=false,bool room=false,bool road=false,bool path=false,string? desc=null,bool single=false,bool dbl=false,bool round=false,bool none=false)
-        => new BuildArgs{N=n,E=e,S=s,W=w,U=u,D=d,X=x,Room=room,Road=road,Path=path,Desc=desc,Single=single,Double=dbl,Round=round,None=none};
+    private static GameArgumentParser.ParsedArgs MakeArgs(bool n=false,bool e=false,bool s=false,bool w=false,bool u=false,bool d=false,bool x=false,bool room=false,bool road=false,bool path=false,string? desc=null,bool single=false,bool dbl=false,bool round=false,bool none=false)
+        => new GameArgumentParser.ParsedArgs { ["n"]=n,["e"]=e,["s"]=s,["w"]=w,["u"]=u,["d"]=d,["x"]=x,["room"]=room,["road"]=road,["path"]=path,["desc"]=desc,["single"]=single,["double"]=dbl,["round"]=round,["none"]=none };
 
     [Fact] public void BuildCommandAttributes()
     {

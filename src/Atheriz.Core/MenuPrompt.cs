@@ -39,12 +39,3 @@ public static class MenuPrompt
     public static Task<string?> PromptWithTimeout(Session session, string display, TimeSpan timeout)
         => PromptWithTimeoutAsync(session, display, timeout);
 }
-
-/// <summary>Alias per spec: <c>MenuHelper.PromptWithTimeout</c> delegates to <see cref="MenuPrompt"/>.</summary>
-public static class MenuHelper
-{
-    public static Task<string?> PromptWithTimeout(Session session, string display, TimeSpan timeout)
-        => MenuPrompt.PromptWithTimeoutAsync(session, display, timeout);
-    public static Task<string?> PromptWithTimeoutAsync(Session session, string display, TimeSpan timeout)
-        => MenuPrompt.PromptWithTimeoutAsync(session, display, timeout);
-}

@@ -223,6 +223,9 @@ public sealed class MazeCommand : Command
             if (e) node.AddLink(new NodeLink("east", new Coord(area, k.Item1+1, k.Item2, 0), new List<string>{"e"}));
             if (w) node.AddLink(new NodeLink("west", new Coord(area, k.Item1-1, k.Item2, 0), new List<string>{"w"}));
             grid.AddNode(node);
+            // the Node ctor no longer publishes to the registry —
+            // register explicitly (mirrors NodeHandler.AddNode's order).
+            Atheriz.Core.Globals.ObjectRegistry.AddObject(node);
             string ch;
             if (n&&s&&e&&w) ch="╬"; else if (n&&s&&e) ch="╠"; else if (n&&s&&w) ch="╣"; else if (s&&e&&w) ch="╦"; else if (n&&e&&w) ch="╩"; else if (s&&e) ch="╔"; else if (s&&w) ch="╗"; else if (n&&e) ch="╚"; else if (n&&w) ch="╝"; else if (n||s) ch="║"; else if (e||w) ch="═"; else ch=" ";
             map[(k.Item1,k.Item2)] = ch;

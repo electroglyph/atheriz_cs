@@ -46,7 +46,6 @@ public class PortedTelnetTests
         public Func<int?>? BufFunc;
         public TestableConn(object r, object w, string? sid=null):base(r,w,sid){}
         public override int? GetWriteBufferSize(){ try { return BufFunc?.Invoke() ?? base.GetWriteBufferSize(); } catch { return null; } }
-        public void SetPending(int v){ var f=typeof(TelnetConnection).GetField("_pendingBytes", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance); f!.SetValue(this, v); try{ var lim = (PendingLimiter)typeof(TelnetConnection).GetField("_limiter", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(this)!; }catch{} }
         public void SetClosing(bool v){ var f=typeof(TelnetConnection).GetField("_closing", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance); f!.SetValue(this, v); }
     }
 
@@ -313,9 +312,6 @@ public class PortedTelnetTests
         var w = new SimpleWriter();
         var conn = new TestableConn(new object(), w);
         conn.BufFunc = ()=> null;
-        // Set pending high
-        var f = typeof(TelnetConnection).GetField("_pendingBytes", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-        f!.SetValue(conn, 999999);
         conn.SendCommand("text", new List<object?>{"hi"});
         Thread.Sleep(50);
         Assert.Single(w.Writes);
@@ -338,8 +334,7 @@ public class PortedTelnetTests
             AtherizSettings.Global.TelnetMaxPendingBytes = 10;
             var w = new SimpleWriter();
             var conn = new TelnetConnection(new object(), w);
-            var f = typeof(TelnetConnection).GetField("_pendingBytes", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-            // Need to set via limiter
+            // Drive real backpressure via the limiter (sole accounting).
             var limiter = (PendingLimiter)typeof(TelnetConnection).GetField("_limiter", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(conn)!;
             limiter.TryReserve(8);
             var t = new Thread(()=> conn.SendCommand("text", new List<object?>{"hello"}));
@@ -358,7 +353,6 @@ public class PortedTelnetTests
         var orig = AtherizSettings.Global.TelnetMaxPendingBytes;
         try{
             AtherizSettings.Global.TelnetMaxPendingBytes = 5;
-            var f = typeof(TelnetConnection).GetField("_pendingBytes", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
             conn.SendCommand("text", new List<object?>{"hello"});
             Thread.Sleep(100);
             Assert.True(conn.PendingBytes >=0);

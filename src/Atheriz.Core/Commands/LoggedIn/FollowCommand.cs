@@ -71,6 +71,17 @@ public sealed class UnfollowCommand : Command
         {
             leader.RemoveFollower(go.Id);
             if (go.Access(leader, "view")) leader.Msg($"{go.GetDisplayName(leader)} is no longer following you.");
+            // clean up the drained FollowScript like nofollow does.
+            // Python leaves this to the leader's next move (follow.py:170-192
+            // has no script cleanup); without a move the script lingers, so
+            // remove it eagerly once the follower set drains.
+            if (leader.FollowersSnapshot.Count == 0)
+            {
+                foreach (var script in leader.GetScriptsByType("FollowScript").ToList())
+                {
+                    try { script.IsDeleted = true; ObjectRegistry.RemoveObject(script); leader.RemoveScript(script); } catch (Exception) { }
+                }
+            }
         }
         go.Following = null;
         go.Msg("You stop following.");

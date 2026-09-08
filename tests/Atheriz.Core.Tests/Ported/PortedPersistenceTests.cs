@@ -653,8 +653,10 @@ public class PortedPersistenceTests
         var grid=new NodeGrid("test",0);
         var coord=new Coord("test",5,5,0);
         var n1=new Node(coord, desc:"first"); grid.AddNode(n1);
+        ObjectRegistry.AddObject(n1);
         Assert.NotEmpty(ObjectRegistry.Get(n1.Id));
         var n2=new Node(coord, desc:"second"); grid.AddNode(n2);
+        ObjectRegistry.AddObject(n2);
         Assert.NotEmpty(ObjectRegistry.Get(n2.Id));
         Assert.Empty(ObjectRegistry.Get(n1.Id));
     }

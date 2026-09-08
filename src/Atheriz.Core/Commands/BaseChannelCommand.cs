@@ -105,9 +105,10 @@ public class BaseChannelCommand : Command
         }
         if (pa.GetBool("unsubscribe"))
         {
-            // mirror caller.unsubscribe(ch)
-            try { ch.RemoveListener(go); } catch (Exception) { }
-            try { go.Unsubscribe(ch); } catch (Exception) { }
+            // Port of channel.py:110-111 caller.unsubscribe(channel):
+            // failures propagate, never swallowed.
+            ch.RemoveListener(go);
+            go.Unsubscribe(ch);
             // also remove command from internal cmdset? Handled via Unsubscribe
         }
         else if (pa.GetBool("replay"))

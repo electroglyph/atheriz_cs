@@ -18,6 +18,7 @@ public class PortedFollowTests
         var n2 = new Node(new Coord(area, 0, 1, 0));
         n2.AddLink(new NodeLink("south", new Coord(area, 0, 0, 0)));
         grid.AddNode(n1); grid.AddNode(n2); areaObj.AddGrid(grid); nh.AddArea(areaObj);
+        ObjectRegistry.AddObject(n1); ObjectRegistry.AddObject(n2); // Explicit registration: the constructor does not publish.
         return (n1,n2,nh);
     }
 

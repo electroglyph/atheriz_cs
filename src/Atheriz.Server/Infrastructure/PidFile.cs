@@ -46,22 +46,23 @@ public sealed class PidFile : IDisposable
             try { name = proc.ProcessName ?? ""; }
             catch { return false; }
             var lower = name.ToLowerInvariant();
-            // atheriz.py:470 — startswith python/atheriz
-            if (lower.StartsWith("python") || lower.StartsWith("atheriz") || lower.Contains("atheriz"))
+            // atheriz.py:470 — startswith python/atheriz. A bare substring is
+            // NOT enough (would match my-atheriz-malware, editor buffers).
+            if (lower.StartsWith("python") || lower.StartsWith("atheriz"))
                 return true;
             // Fallback: check main module filename if available (helps when process name truncated)
             try
             {
                 var mod = proc.MainModule?.FileName ?? "";
-                var ml = mod.ToLowerInvariant();
-                if (ml.Contains("atheriz"))
+                var fileName = Path.GetFileName(mod).ToLowerInvariant();
+                if (fileName.StartsWith("atheriz"))
                     return true;
                 // dotnet host: only trust when the command line names the server
                 // assembly itself. A bare "Atheriz" substring is NOT enough: the
                 // test host loads Atheriz.Server.dll but its command line names
                 // the test assembly, so `stop` can never terminate a test run
                 // on pid reuse.
-                if (ml.Contains("dotnet") || lower.Contains("dotnet"))
+                if (fileName.Contains("dotnet") || lower.Contains("dotnet"))
                     return HasServerCmdline(pid);
             }
             catch { }
@@ -114,6 +115,8 @@ public sealed class PidFile : IDisposable
 
     /// <summary>
     /// Best-effort: find PID holding LISTEN on port via /proc (Linux) or lsof/ss fallback. Mirrors psutil.net_connections.
+    /// Helper output is read asynchronously with a hard timeout : a
+    /// stalled lsof/ss must never hang `stop`.
     /// </summary>
     public static bool TryFindPidListeningOnPort(int port, out int pid)
     {
@@ -129,8 +132,7 @@ public sealed class PidFile : IDisposable
             using var p = Process.Start(psi);
             if (p != null)
             {
-                string outp = p.StandardOutput.ReadToEnd();
-                p.WaitForExit(2000);
+                string outp = ReadHelperOutput(p, TimeSpan.FromSeconds(5));
                 foreach (var line in outp.Split('\n', StringSplitOptions.RemoveEmptyEntries))
                     if (int.TryParse(line.Trim(), out var cand) && IsServerProcess(cand) && IsProcessListeningOnPort(cand, port)) { pid = cand; return true; }
                 foreach (var line in outp.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -147,8 +149,7 @@ public sealed class PidFile : IDisposable
             using var p2 = Process.Start(psi2);
             if (p2 != null)
             {
-                string outp = p2.StandardOutput.ReadToEnd();
-                p2.WaitForExit(2000);
+                string outp = ReadHelperOutput(p2, TimeSpan.FromSeconds(5));
                 // parse pid=1234,
                 foreach (var token in outp.Split(new[] { "pid=", "," }, StringSplitOptions.RemoveEmptyEntries))
                 {
@@ -164,27 +165,7 @@ public sealed class PidFile : IDisposable
             if (Directory.Exists("/proc"))
             {
                 // collect inodes for listening sockets on port via /proc/net/tcp*
-                var targetInodes = new HashSet<string>();
-                foreach (var netFile in new[] { "/proc/net/tcp", "/proc/net/tcp6" })
-                {
-                    if (!File.Exists(netFile)) continue;
-                    var lines = File.ReadAllLines(netFile);
-                    foreach (var line in lines.Skip(1))
-                    {
-                        var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length < 10) continue;
-                        var local = parts[1]; // 0100007F:0035
-                        var st = parts[3];
-                        if (st != "0A") continue; // LISTEN
-                        var portHex = local.Split(':').LastOrDefault();
-                        if (portHex == null) continue;
-                        if (int.TryParse(portHex, System.Globalization.NumberStyles.HexNumber, null, out var pnum) && pnum == port)
-                        {
-                            var inode = parts[9];
-                            targetInodes.Add(inode);
-                        }
-                    }
-                }
+                var targetInodes = GetListeningInodes(port);
                 if (targetInodes.Count > 0)
                 {
                     foreach (var dir in Directory.GetDirectories("/proc"))
@@ -244,6 +225,54 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
+    /// shared /proc/net/tcp* LISTEN-inode parser (was duplicated in
+    /// the port locator and the single-pid verifier). Returns the inodes of
+    /// sockets in LISTEN state on <paramref name="port"/>.
+    /// </summary>
+    private static HashSet<string> GetListeningInodes(int port)
+    {
+        var targetInodes = new HashSet<string>();
+        foreach (var netFile in new[] { "/proc/net/tcp", "/proc/net/tcp6" })
+        {
+            if (!File.Exists(netFile)) continue;
+            var lines = File.ReadAllLines(netFile);
+            foreach (var line in lines.Skip(1))
+            {
+                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 10) continue;
+                var local = parts[1]; // 0100007F:0035
+                var st = parts[3];
+                if (st != "0A") continue; // LISTEN
+                var portHex = local.Split(':').LastOrDefault();
+                if (portHex == null) continue;
+                if (int.TryParse(portHex, System.Globalization.NumberStyles.HexNumber, null, out var pnum) && pnum == port)
+                {
+                    var inode = parts[9];
+                    targetInodes.Add(inode);
+                }
+            }
+        }
+        return targetInodes;
+    }
+
+    /// <summary>
+    /// Reads a helper's stdout to end without ever blocking the caller past
+    /// <paramref name="timeout"/>: async read + bounded wait, kill on expiry.
+    /// Returns whatever was captured (possibly empty).
+    /// </summary>
+    private static string ReadHelperOutput(Process p, TimeSpan timeout)
+    {
+        try
+        {
+            var read = p.StandardOutput.ReadToEndAsync();
+            if (!read.Wait(timeout)) { try { p.Kill(entireProcessTree: false); } catch { } }
+            try { p.WaitForExit(1000); } catch { }
+            return read.IsCompletedSuccessfully ? read.Result : "";
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>
     /// Verify pid actually holds LISTEN on port (mirrors _process_listening_by_port).
     /// </summary>
     public static bool IsProcessListeningOnPort(int pid, int port)
@@ -251,24 +280,7 @@ public sealed class PidFile : IDisposable
         // Quick check via /proc/net/tcp + fd as above for single pid
         try
         {
-            var targetInodes = new HashSet<string>();
-            foreach (var netFile in new[] { "/proc/net/tcp", "/proc/net/tcp6" })
-            {
-                if (!File.Exists(netFile)) continue;
-                var lines = File.ReadAllLines(netFile);
-                foreach (var line in lines.Skip(1))
-                {
-                    var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length < 10) continue;
-                    var local = parts[1];
-                    var st = parts[3];
-                    if (st != "0A") continue;
-                    var portHex = local.Split(':').LastOrDefault();
-                    if (portHex == null) continue;
-                    if (int.TryParse(portHex, System.Globalization.NumberStyles.HexNumber, null, out var pnum) && pnum == port)
-                        targetInodes.Add(parts[9]);
-                }
-            }
+            var targetInodes = GetListeningInodes(port);
             if (targetInodes.Count == 0) return IsPortListening(port);
             var fdDir = $"/proc/{pid}/fd";
             if (!Directory.Exists(fdDir)) return false;
@@ -288,43 +300,15 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
-    /// Locate the server.pid governing <paramref name="port"/>: the save-dir
-    /// file first, then the cwd of the listener process, then a walk up the
-    /// current directory tree. Returns a path that may not exist (caller decides).
+    /// The server.pid governing this game: always <c>{savePath}/server.pid</c>.
+    /// Pinned to the target game : no listener-/proc/cwd probing and
+    /// no directory-tree walk — those could return a FOREIGN game's pid file
+    /// (nested checkouts, attacker-planted files) and signal the wrong world.
+    /// Callers wanting discovery must do it explicitly, never implicitly here.
     /// </summary>
     public static string LocateServerPidFile(int port, string savePath)
     {
-        var pidFilePath = Path.Combine(savePath, "server.pid");
-        if (!File.Exists(pidFilePath))
-        {
-            try
-            {
-                if (TryFindPidListeningOnPort(port, out var lpid2))
-                {
-                    try
-                    {
-                        var cwdLink = new FileInfo($"/proc/{lpid2}/cwd").LinkTarget;
-                        if (!string.IsNullOrEmpty(cwdLink))
-                        {
-                            var alt = Path.Combine(cwdLink, "save", "server.pid");
-                            if (File.Exists(alt)) pidFilePath = alt;
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-            if (!File.Exists(pidFilePath))
-            {
-                try
-                {
-                    var cur = new DirectoryInfo(Directory.GetCurrentDirectory());
-                    for (int i = 0; i < 6 && cur != null; i++) { var p = Path.Combine(cur.FullName, "save", "server.pid"); if (File.Exists(p)) { pidFilePath = p; break; } cur = cur.Parent; }
-                }
-                catch { }
-            }
-        }
-        return pidFilePath;
+        return Path.Combine(savePath, "server.pid");
     }
 
     /// <summary>
@@ -341,7 +325,7 @@ public sealed class PidFile : IDisposable
         pidFile = null;
         reason = null;
 
-        // Guard — atheriz/atheriz.py:508-512 + PathGuards (Core; Server wrapper deleted P1-16)
+        // Guard — atheriz/atheriz.py:508-512 + PathGuards (Core; Server wrapper deleted as redundant)
         Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath);
         Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(savePath);
 
@@ -359,31 +343,17 @@ public sealed class PidFile : IDisposable
 
             // Stale: verify the port is actually free before deleting — deleting a stale
             // file while something still LISTENs risks a split-brain second server.
-            if (oldPid.HasValue)
+            // Unconditional : a corrupt/unparseable pid file must not
+            // bypass this guard merely because TryReadPid returned null.
+            if (IsPortListening(webserverPort))
             {
-                if (IsPortListening(webserverPort))
-                {
-                    reason = $"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.";
-                    return false;
-                }
+                reason = $"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.";
+                return false;
             }
 
-            // Also handle age check for concurrent spawn — atheriz.py:1188-1194 if age < 1.0 → already starting
-            try
-            {
-                var age = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - new DateTimeOffset(File.GetLastWriteTimeUtc(pidPath)).ToUnixTimeSeconds();
-                // Use File.GetLastWriteTimeUtc for cross-platform
-                var mtime = File.GetLastWriteTimeUtc(pidPath);
-                var ageSec = (DateTime.UtcNow - mtime).TotalSeconds;
-                if (ageSec < 1.0 && oldPid.HasValue && IsServerProcess(oldPid.Value))
-                {
-                    reason = "Server is already starting (PID file just created)";
-                    return false;
-                }
-            }
-            catch { }
-
-            // Remove stale — atheriz.py:495
+            // Remove stale — atheriz.py:495. (No age/starting branch: the
+            // live-PID check above already returned for a server process, so
+            // any "just created" file reaching here is stale by definition.)
             try { File.Delete(pidPath); Console.WriteLine("Removing stale PID file."); }
             catch (Exception ex) { reason = $"Failed to remove stale PID file: {ex.Message}"; return false; }
         }
@@ -418,6 +388,15 @@ public sealed class PidFile : IDisposable
                 if (oldPid.HasValue && IsServerProcess(oldPid.Value))
                 {
                     reason = $"Server is already running with PID: {oldPid.Value}";
+                    return false;
+                }
+
+                // Same split-brain guard as the first stale check :
+                // never delete-and-retry into a bound port, whatever the
+                // rival file parses as.
+                if (IsPortListening(webserverPort))
+                {
+                    reason = $"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.";
                     return false;
                 }
 

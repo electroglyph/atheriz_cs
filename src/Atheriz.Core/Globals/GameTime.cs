@@ -250,6 +250,13 @@ public class GameTime
             throw new ArgumentException($"alarm data must be a dict or None, got {data.GetType().Name}");
         Dictionary<string, JsonElement>? dict = null;
         if (data is Dictionary<string, JsonElement> d) dict = d;
+        // a populated object dict must persist, not be silently
+        // dropped (time.py stores the dict as-is; JSON replaces dill here).
+        else if (data is Dictionary<string, object> o)
+        {
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(o));
+            dict = doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+        }
         AddAlarm(hour, minute, caller.Id, repeat, dict);
     }
 
@@ -344,7 +351,16 @@ public class GameTime
 
     public IReadOnlyDictionary<(string Hour, string Minute), List<AlarmEntry>> SnapshotAlarms()
     {
-        using (ReadScope()) return _alarms.ToDictionary(kv => kv.Key, kv => kv.Value.ToList());
+        // clone each entry (and its payload) per snapshot — callers
+        // mutating a snapshot must not corrupt live alarm state.
+        using (ReadScope()) return _alarms.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Value.Select(e => new AlarmEntry
+            {
+                CallerId = e.CallerId,
+                Repeat = e.Repeat,
+                Data = e.Data?.ToDictionary(p => p.Key, p => p.Value.Clone()),
+            }).ToList());
     }
 
     // ----- ticker -----
@@ -399,7 +415,8 @@ public class GameTime
         }
         ticker?.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
         StopOwnedFallbacks();
-        try { Save(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, "GameTimePersistDto"); }
+        // see Stop(ticker) above — settings path, not ambient.
+        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, "GameTimePersistDto"); }
     }
     public void Stop(AsyncTicker ticker)
     {
@@ -413,8 +430,13 @@ public class GameTime
             if (ours) { _runningTicker = null; Started = false; }
         }
         if (ours) ticker.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
-        StopOwnedFallbacks();
-        try { Save(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, "GameTimePersistDto"); }
+        // owned fallbacks die only with our own run. A foreign
+        // Stop (or a concurrent Start/OnTick) must not destroy the live pool
+        // out from under this instance.
+        if (ours) StopOwnedFallbacks();
+        // persist to this instance's settings path, not the ambient
+        // Global (DoShutdown may run under explicit settings).
+        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, "GameTimePersistDto"); }
     }
 
     private void StopOwnedFallbacks()
@@ -427,16 +449,15 @@ public class GameTime
 
     public bool SunUp()
     {
-        var t = GetTime();
-        return t.Hour >= _settings.SunriseHour && t.Hour < _settings.SunsetHour;
+        return SunUp(GetTime().Hour);
     }
 
-    public bool SunUpAlt(int hour) => hour >= _settings.SunriseHour && hour < _settings.SunsetHour;
+    public bool SunUp(int hour) => hour >= _settings.SunriseHour && hour < _settings.SunsetHour;
 
     public void OnTick()
     {
         var before = GetTime();
-        bool beforeSun = SunUpAlt(before.Hour);
+        bool beforeSun = SunUp(before.Hour);
         string beforePhase = before.MoonPhase;
 
         _lock.EnterWriteLock();
@@ -496,7 +517,7 @@ public class GameTime
         }
 
         string afterPhase = after.MoonPhase;
-        bool afterSun = SunUpAlt(after.Hour);
+        bool afterSun = SunUp(after.Hour);
         if (beforePhase != afterPhase)
         {
             var recv = _settings.LunarReceiverLambda ?? (o => o.IsPc && o.IsConnected);
@@ -619,7 +640,7 @@ public class GameTime
 
         int weekOfSeason = (int)(dayInSeason / _settings.DaysPerWeek) + 1;
 
-        string ordinal(string dayStr, int d)
+        string OrdinalDay(int d)
         {
             string suffix = "th";
             if (d < 11 || d > 13)
@@ -635,8 +656,8 @@ public class GameTime
         string formattedTime = $"{calcHour:00}:{calcMinute:00}:{calcSecond:00}";
         string monthName = Enum.IsDefined(typeof(Month), finalMonth) ? ((Month)finalMonth).ToString() : finalMonth.ToString();
         // Month enum mirrors settings.Month — use ToString for name
-        string formattedDateTime = $"{formattedTime}, {ordinal("", finalDay)} of {monthName}, year {finalYear}\nWeek {weekOfSeason} of {season}\nMoon phase: {moonPhase}";
-        string formattedShort = $"{formattedTime}, {ordinal("", finalDay)} of {monthName}, year {finalYear}";
+        string formattedDateTime = $"{formattedTime}, {OrdinalDay(finalDay)} of {monthName}, year {finalYear}\nWeek {weekOfSeason} of {season}\nMoon phase: {moonPhase}";
+        string formattedShort = $"{formattedTime}, {OrdinalDay(finalDay)} of {monthName}, year {finalYear}";
 
         return new GameTimeInfo
         {

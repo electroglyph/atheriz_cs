@@ -5,7 +5,7 @@ using UnloggedInCmds = Atheriz.Core.Commands.UnloggedIn;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
-// P1-12: HelpHelper.FormatFor centralizes the three identical help-text copies
+// HelpHelper.FormatFor centralizes the three identical help-text copies
 // (logged-in HelpCommand.PrintHelpFor, unlogged-in HelpCommand.PrintHelpFor,
 // Command.PrintHelp no-parser branch). Exact-equality pins, written first.
 public sealed class HelpHelperRegressionTests

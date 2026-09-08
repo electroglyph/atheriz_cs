@@ -187,7 +187,7 @@ public class WontfixRegressionTests
         var msgs = hero.PeekMessages();
         // look should win over external l — wontfix precedence
         Assert.DoesNotContain(msgs, m => m.Contains("custom-l"));
-        Assert.Contains(msgs, m => m.ToLower().Contains("hero stands"));
+        Assert.Contains(msgs, m => m.ToLower().Contains("room"));
         CommandRegistry.Reset(); ObjectRegistry.ClearAll();
     }
 

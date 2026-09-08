@@ -14,12 +14,12 @@ public sealed class NewCharacterCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         var settings = Settings.AtherizSettings.Global;
-        if (!settings.CharCreationEnabled) { caller.Msg("Character creation is not enabled."); return; }
+        if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Character creation is not enabled."); return; }
         if (!CreationCooldownHelper.TryReserve(caller, "character")) return;
         // sync stub for tests: expects "name gender desc"
         var text = args as string ?? "";
-        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0) { CreationCooldownHelper.Clear(caller); caller.Msg("Usage: new <name> (interactive in real server)."); return; }
+        var parts = Command.SplitStubArgs(text);
+        if (parts.Count == 0) { CreationCooldownHelper.Clear(caller); caller.Msg("Usage: new <name> (interactive in real server)."); return; }
         string name = parts[0];
         var err = Validation.ValidateCharacterName(name);
         if (err != null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
@@ -29,9 +29,9 @@ public sealed class NewCharacterCommand : Command
             var exists = ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0;
             if (exists) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
             // Desc is the remainder after name+gender (was dropped as "" before).
-            string desc = parts.Length > 2 ? string.Join(" ", parts.Skip(2)) : "";
+            string desc = parts.Count > 2 ? string.Join(" ", parts.Skip(2)) : "";
             var character = GameObject.Create(name, desc, isPc: true);
-            character.Gender = parts.Length > 1 ? parts[1] : "neutral";
+            character.Gender = parts.Count > 1 ? parts[1] : "neutral";
             try
             {
                 ObjectRegistry.AddObjectUnique(character, o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase), $"Character with this name ({name}) already exists.");
@@ -63,7 +63,7 @@ public sealed class NewCharacterCommand : Command
     public async Task RunAsync(BaseConnection caller)
     {
         var settings = Settings.AtherizSettings.Global;
-        if (!settings.CharCreationEnabled) { caller.Msg("Character creation is not enabled."); return; }
+        if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Character creation is not enabled."); return; }
         var account = caller.Session.Account as Account;
         if (account == null) { caller.Msg("You must be logged in first."); return; }
         if (account.Characters.Count >= settings.MaxCharacters) { caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }

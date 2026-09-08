@@ -92,21 +92,23 @@ public sealed class AsyncTicker
 
     public void Clear()
     {
+        // Stop() takes the slot locks itself; holding _lock across it is
+        // needless nesting (C# lock re-entrancy only).
+        Stop();
         lock (_lock)
         {
-            Stop();
             _slots.Clear();
         }
     }
 
     public void Stop()
     {
-        Console.Error.WriteLine("at AsyncTicker.stop() ...");
+        AtherizLogger.LogInformation("at AsyncTicker.stop() ..."); // info upstream (asyncthreadpool.py:599)
         List<TimeSlot> copy;
         lock (_lock) copy = _slots.Values.ToList();
         foreach (var s in copy)
         {
-            try { s.Stop(); } catch (Exception ex) { Console.Error.WriteLine($"Error stopping ticker slot {s.Interval}:\n{ex}"); }
+            try { s.Stop(); } catch (Exception ex) { AtherizLogger.LogError($"Error stopping ticker slot {s.Interval}:\n{ex}"); }
         }
     }
 
@@ -179,7 +181,10 @@ public sealed class AsyncTicker
             var cts = _cts;
             _cts = null;
             _future = null;
-            cts?.Cancel();
+            // Cancel-then-dispose: the timer loop treats a disposed source
+            // like cancellation (ObjectDisposedException breaks the loop).
+            try { cts?.Cancel(); } catch (ObjectDisposedException) { }
+            try { cts?.Dispose(); } catch (ObjectDisposedException) { }
         }
 
         private void Release(Delegate coro) { lock (_lock) _pending.Remove(coro); }
@@ -232,7 +237,7 @@ public sealed class AsyncTicker
                     var delay = nextTick - DateTime.UtcNow;
                     if (delay > TimeSpan.Zero)
                     {
-                        try { await Task.Delay(delay, ct); } catch (OperationCanceledException) { break; }
+                        try { await Task.Delay(delay, ct); } catch (OperationCanceledException) { break; } catch (ObjectDisposedException) { break; }
                     }
                     else if (delay < -_interval)
                     {
@@ -273,7 +278,7 @@ public sealed class AsyncTicker
                 _running = true;
                 _cts = new CancellationTokenSource();
                 try { _future = Task.Run(() => TimerAsync(_cts.Token), _cts.Token); }
-                catch { _running = false; _cts = null; throw; }
+                catch { _running = false; try { _cts.Dispose(); } catch (ObjectDisposedException) { } _cts = null; throw; }
             }
         }
 

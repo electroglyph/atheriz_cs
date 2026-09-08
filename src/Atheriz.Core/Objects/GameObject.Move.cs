@@ -101,14 +101,8 @@ public partial class GameObject
         }
         if (loc is LocationRef.CoordLocation cl)
         {
-            // For Node locations, search registry for Node with matching Coord
-            var candidates = ObjectRegistry.FilterBy(o => o.IsNode);
-            foreach (var c in candidates)
-            {
-                if (c is Node n && n.Coord.Equals(cl.Coord)) return n;
-            }
-            // Fallback: try NodeHandler singleton if available via static access (best effort)
-            // (No global singleton in C# port yet — skip)
+            // O(1) handler index first, registry scan only for ungridded nodes.
+            return ObjectRegistry.FindNodeByCoord(cl.Coord);
         }
         return null;
     }
@@ -130,12 +124,8 @@ public partial class GameObject
         // Handle LocationRef or Coord destination for Node moves (allow Coord)
         if (destination is Coord coord)
         {
-            // Find Node at coord
-            var nodeCandidates = ObjectRegistry.FilterBy(o => o.IsNode);
-            foreach (var c in nodeCandidates)
-            {
-                if (c is Node n && n.Coord.Equals(coord)) { destObj = n; break; }
-            }
+            // O(1) handler index first, registry scan only for ungridded nodes.
+            destObj = ObjectRegistry.FindNodeByCoord(coord);
             if (destObj == null) return false; // destination Node not found
         }
         else if (destination is LocationRef locRef)
@@ -147,8 +137,8 @@ public partial class GameObject
             }
             else if (locRef is LocationRef.CoordLocation cl2)
             {
-                var nodes = ObjectRegistry.FilterBy(o => o.IsNode);
-                foreach (var c in nodes) if (c is Node n && n.Coord.Equals(cl2.Coord)) { destObj = n; break; }
+                // O(1) handler index first, registry scan only for ungridded nodes.
+                destObj = ObjectRegistry.FindNodeByCoord(cl2.Coord);
             }
             else if (locRef is LocationRef.NullLocation) destObj = null;
         }
@@ -183,7 +173,7 @@ public partial class GameObject
         // Port of base_obj.py:1118-1130 if destination is not Node: cycle guard
         // Python: if dest is not Node: walk chain via location until Node or None checking self
         // Note: no depth limit — seen set prevents infinite, and deep chains beyond 100 must still be detected (test_containment:105)
-        // Self/cycle guard also applies to Node destinations (B-OBJ-2).
+        // Self/cycle guard also applies to Node destinations .
         if (ReferenceEquals(destObj, this) || destObj.Id == this.Id) return false;
         if (!destObj.IsNode)
         {
@@ -263,7 +253,7 @@ public partial class GameObject
             return a.Id.CompareTo(b.Id);
         });
 
-        // B-OBJ-3: pre-gates run with NO location locks held (user hooks can
+        // pre-gates run with NO location locks held (user hooks can
         // move things and take other locks, so they must not run under the
         // sort_locks order established below).
         if (oldLoc != null)
@@ -303,6 +293,8 @@ public partial class GameObject
             o.SyncRoot.EnterWriteLock();
         }
         bool success = false;
+        // Deferred past the lock release below .
+        bool installExits = false;
         try
         {
             // Port of base_obj.py:1187-1206 checks inside _do_with_nodes
@@ -337,14 +329,12 @@ public partial class GameObject
                 destObj.IsModified = true;
             }
 
-            // For Node-to-Node moves, Python calls destination.add_exits(self, internal=True) — Port of base_obj.py:1312
+            // For Node-to-Node moves, Python calls destination.add_exits(self, internal=True) — Port of base_obj.py:1312.
+            // Deferred until after both location locks release (see below):
+            // AddExitsForObject nests node->object and must not extend the
+            // two-lock hold .
             if (destObj.IsNode && oldLoc != null)
-            {
-                if (destObj is Node dn)
-                {
-                    try { dn.AddExitsForObject(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
-                }
-            }
+                installExits = true;
 
             // Update our location and last_touched_by — Port of base_obj.py:1249-1252 / 1313-1315
             LocationRef newLocRef;
@@ -378,7 +368,14 @@ public partial class GameObject
 
         if (!success) return false;
 
-        // B-OBJ-3: advisory leave/receive hooks run AFTER location locks are
+        // Deferred exit installation : runs after both location
+        // locks released, alongside the leave/receive hooks below.
+        if (installExits && destObj is Node exitNode)
+        {
+            try { exitNode.AddExitsForObject(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
+        }
+
+        // advisory leave/receive hooks run AFTER location locks are
         // released (oldLoc/destObj locals stay valid). No locks held here.
         if (oldLoc != null)
         {

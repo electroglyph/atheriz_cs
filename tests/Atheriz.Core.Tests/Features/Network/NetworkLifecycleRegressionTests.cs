@@ -8,7 +8,7 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Network;
 
-// P1-13 lifecycle regression pins: on-loop inline delivery, dispose drain,
+// Lifecycle regression pins: on-loop inline delivery, dispose drain,
 // failed-send limiter release, disconnect teardown wait, ReadCappedLines parity.
 [Collection("Ported")]
 public class NetworkLifecycleRegressionTests
@@ -71,7 +71,7 @@ public class NetworkLifecycleRegressionTests
     [Fact]
     public void TelnetSend_OnLoopThread_DeliversInline()
     {
-        // P1-13 T2 (reverted, tests-win): on the loop thread, sends commit inline
+        // On the loop thread, sends commit inline
         // like asyncio transport.write — offload happens only on worker threads.
         using var env = GlobalTestEnv.Enter();
         var writer = new GateWriter();
@@ -89,7 +89,7 @@ public class NetworkLifecycleRegressionTests
     [Fact]
     public void TelnetDispose_DrainsInflightWrites()
     {
-        // P1-13 T3: Dispose waits (bounded) for scheduled off-loop writes.
+        // Dispose waits (bounded) for scheduled off-loop writes.
         using var env = GlobalTestEnv.Enter();
         var writer = new GateWriter();
         writer.Gate.Reset();
@@ -118,7 +118,7 @@ public class NetworkLifecycleRegressionTests
     [Fact]
     public void WsFailedSend_ReleasesReservationAndStaysUsable()
     {
-        // P1-13 W1: a failed send must not leak the limiter slot or break later sends.
+        // a failed send must not leak the limiter slot or break later sends.
         using var env = GlobalTestEnv.Enter();
         var ws = new ScriptedWs { ShouldThrow = true };
         var conn = new WebSocketConnection(ws, clientHost: "10.10.10.10");
@@ -138,7 +138,7 @@ public class NetworkLifecycleRegressionTests
     [Fact]
     public void Disconnect_DoesNotBlockOnSessionTeardown()
     {
-        // P1-13 C1 (reverted): Disconnect is fire-and-forget — it returns promptly
+        // Disconnect is fire-and-forget — it returns promptly
         // even with a slow teardown, and the scheduled teardown still runs async.
         // Pins the same contract as DisconnectDoesNotBlockOnSlowTeardown.
         using var env = GlobalTestEnv.Enter();
@@ -164,7 +164,7 @@ public class NetworkLifecycleRegressionTests
     [Fact]
     public async Task ReadCappedLines_ChunkedReads_MatchBulkReads()
     {
-        // P1-13 T5: the head-offset rewrite must be byte-identical for any chunking.
+        // the head-offset rewrite must be byte-identical for any chunking.
         var sb = new StringBuilder();
         for (int i = 0; i < 200; i++) sb.Append("line-").Append(i.ToString("D3")).Append(i % 7 == 6 ? "\r\n" : "\n");
         string text = sb.ToString();

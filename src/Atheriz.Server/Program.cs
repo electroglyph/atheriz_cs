@@ -111,8 +111,15 @@ if (!foreground && command == "start")
     Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(effSpawn.SavePath);
     Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(effSpawn.SecretPath);
     int spawnPort = portOverride ?? effSpawn.WebserverPort;
-    if (!PidFile.TryAcquire(effSpawn.SavePath, out var spawnPid, out var spawnReason, spawnPort)) { Console.WriteLine(spawnReason ?? "Failed to acquire PID file."); return; }
-    spawnPid?.Release();
+    // atomic handoff — port of spawn_daemon's O_CREAT|O_EXCL claim
+    // (atheriz.py:1330). The parent CLAIMS the pid file (naming this
+    // short-lived process, like spawn_daemon writing os.getpid()) and exits
+    // WITH IT HELD: the claim serializes concurrent starters (the loser's
+    // TryAcquire sees the fresh file → "already starting"), and the daemon
+    // child re-claims it with its own pid at foreground startup once this
+    // parent has exited. Never acquire-release-respawn: the release window
+    // lets two starters both succeed and lets stop see no pid.
+    if (!PidFile.TryAcquire(effSpawn.SavePath, out _, out var spawnReason, spawnPort)) { Console.WriteLine(spawnReason ?? "Failed to acquire PID file."); return; }
     await DaemonSpawner.SpawnDaemonAsync(rest, Directory.GetCurrentDirectory());
     return;
 }
@@ -161,7 +168,18 @@ if (settings.WebsocketEnabled) app.Map("/ws", ctx => WebSocketHandler.HandleAsyn
 app.MapAdminRoutes(settings);
 var displayHost = settings.WebserverInterface;
 if (displayHost.Contains(':')) displayHost = $"[{displayHost}]";
-var scheme = !string.IsNullOrEmpty(settings.SslCertFile) && File.Exists(settings.SslCertFile ?? string.Empty) ? "https" : "http";
+var scheme = "http";
+if (!string.IsNullOrEmpty(settings.SslCertFile) && File.Exists(settings.SslCertFile ?? string.Empty))
+{
+    // agree with KestrelConfig — claim https only when the cert
+    // actually loads. An unloadable cert with AllowInsecureTlsFallback opts
+    // into Kestrel's plaintext fallback, so the banner must say http (a
+    // File.Exists check alone would print https while serving plaintext
+    // holding the admin token). Without the fallback KestrelConfig already
+    // threw during Build above, so this probe cannot fail open here.
+    try { Atheriz.Core.Utils.TlsCertLoader.Load(settings.SslCertFile!, settings.SslKeyFile)?.Dispose(); scheme = "https"; }
+    catch when (settings.AllowInsecureTlsFallback) { scheme = "http"; }
+}
 Console.WriteLine($"Web server listening on {scheme}://{displayHost}:{settings.WebserverPort}");
 if (settings.WebsocketEnabled) { var wssScheme = scheme == "https" ? "wss" : "ws"; Console.WriteLine($"WebSocket server available at {wssScheme}://{displayHost}:{settings.WebserverPort}/ws"); }
 if (!string.IsNullOrEmpty(settings.SslCertFile))

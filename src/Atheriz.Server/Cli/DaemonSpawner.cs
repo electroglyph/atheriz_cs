@@ -4,6 +4,16 @@ namespace Atheriz.Server.Cli;
 
 public static class DaemonSpawner
 {
+    // Bash single-quote armor: inside '...' nothing expands ($, `, \, !
+    // are all literal), so --host/--port values cannot inject commands.
+    // An embedded ' ends the quote, inserts an escaped quote, and reopens.
+    internal static string BashQuote(string s) => "'" + s.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+
+    // Host charset allowlist (names, IPv4/IPv6 incl. brackets + zone id).
+    // Defense in depth behind BashQuote: fail closed before spawning.
+    internal static bool IsSafeHost(string h) =>
+        h.Length > 0 && h.Length <= 255 && h.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_' or ':' or '[' or ']' or '%');
+
     // Port of atheriz.py:1285 spawn_daemon: Popen start --foreground with stdout/stderr to save/server.log.
     public static async Task SpawnDaemonAsync(string[] origArgs, string folder)
     {
@@ -16,7 +26,11 @@ public static class DaemonSpawner
             var argList = new List<string> { "start", "--foreground" };
             if (port.HasValue) { argList.Add("--port"); argList.Add(port.Value.ToString()); }
             if (telnetPort.HasValue) { argList.Add("--telnet-port"); argList.Add(telnetPort.Value.ToString()); }
-            if (!string.IsNullOrEmpty(host)) { argList.Add("--host"); argList.Add(host!); }
+            if (!string.IsNullOrEmpty(host))
+            {
+                if (!IsSafeHost(host!)) { Console.Error.WriteLine($"Invalid --host value: {host}"); return; }
+                argList.Add("--host"); argList.Add(host!);
+            }
             var saveLog = Path.Combine(Path.GetFullPath(folder), "save", "server.log");
             Directory.CreateDirectory(Path.GetDirectoryName(saveLog)!);
             try
@@ -33,12 +47,15 @@ public static class DaemonSpawner
                 }
             }
             catch { }
-            var escapedDll = dll.Replace("\"", "\\\"", StringComparison.Ordinal);
-            var escapedArgs = string.Join(" ", argList.Select(a => $"\"{a.Replace("\"", "\\\"", StringComparison.Ordinal)}\""));
-            var escapedLog = saveLog.Replace("\"", "\\\"", StringComparison.Ordinal).Replace("$", "\\$", StringComparison.Ordinal).Replace("`", "\\`", StringComparison.Ordinal);
+            var escapedDll = BashQuote(dll);
+            var escapedArgs = string.Join(" ", argList.Select(BashQuote));
+            var escapedLog = BashQuote(saveLog);
             Console.WriteLine($"Spawning server in background. Logging to: {saveLog}");
-            var innerCmd = $"dotnet \"{escapedDll}\" {escapedArgs}";
-            var shellCmd = $"nohup {innerCmd} >> \"{escapedLog}\" 2>&1 & echo $!";
+            // BashQuote already returns a fully single-quoted word — do NOT wrap
+            // it in extra double quotes (that would pass literal quote chars
+            // to dotnet and to the log redirect, breaking the spawn).
+            var innerCmd = $"dotnet {escapedDll} {escapedArgs}";
+            var shellCmd = $"nohup {innerCmd} >> {escapedLog} 2>&1 & echo $!";
             var psi = new ProcessStartInfo
             {
                 FileName = "bash",
@@ -74,16 +91,33 @@ public static class DaemonSpawner
                     CreateNoWindow = true,
                     WorkingDirectory = Path.GetFullPath(folder),
                 };
-                psi2.ArgumentList.Add(escapedDll);
+                psi2.ArgumentList.Add(dll);
                 foreach (var a in argList) psi2.ArgumentList.Add(a);
                 try
                 {
-                    var logFs = new FileStream(saveLog, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-                    psi2.RedirectStandardOutput = false;
-                    psi2.RedirectStandardError = false;
+                    // attach the log stream to the fallback child.
+                    // Python passes the log fd as the daemon's stdout/stderr
+                    // (atheriz.py:1403-1405); the .NET equivalent is piped
+                    // redirect with a pump appending to the log. (The bash
+                    // primary path above stays the durable route: its >>
+                    // redirect survives spawner exit, this pump does not.)
+                    psi2.RedirectStandardOutput = true;
+                    psi2.RedirectStandardError = true;
                     var p2 = Process.Start(psi2);
-                    if (p2 != null) daemonPid = p2.Id;
-                    logFs.Dispose();
+                    if (p2 != null)
+                    {
+                        daemonPid = p2.Id;
+                        object logGate = new();
+                        void Pump(object? _, DataReceivedEventArgs e)
+                        {
+                            if (e.Data is null) return;
+                            lock (logGate) File.AppendAllText(saveLog, e.Data + "\n");
+                        }
+                        p2.OutputDataReceived += Pump;
+                        p2.ErrorDataReceived += Pump;
+                        p2.BeginOutputReadLine();
+                        p2.BeginErrorReadLine();
+                    }
                 }
                 catch { }
             }

@@ -88,7 +88,9 @@ public sealed class ChannelCommand : Command
         else if (pa.GetBool("replay"))
         {
             if (!channel.Access(go, "view")) { go.Msg("You do not have permission to view this channel."); return; }
-            go.Msg(channel.GetHistory());
+            var h = channel.GetHistory();
+            if (!string.IsNullOrEmpty(h)) go.Msg(h);
+            else go.Msg("No history available.");
         }
         else
         {

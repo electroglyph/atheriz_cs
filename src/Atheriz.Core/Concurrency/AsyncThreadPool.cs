@@ -236,11 +236,17 @@ public class AsyncThreadPool : IDisposable
         }
     }
 
+    // Bound on the inline wait for an incomplete async operation .
+    // A hung task must not pin a fixed worker forever; on timeout the slot
+    // is released and the operation continues detached on the CLR pool with
+    // a fault-logging continuation attached.
+    private const int WorkItemInlineWaitSeconds = 30;
+
     private static void RunInternal(WorkItem item)
     {
         // F009: faults go through AtherizLogger (server.log) instead of bare Console.Error.
         // AtherizLogger still echoes to Console.Error, so test log-capture keeps working.
-        // B-THR-2: the worker slot (Busy count + watchdog entry) is held for the
+        // the worker slot (Busy count + watchdog entry) is held for the
         // whole async operation, not just the sync prefix: an incomplete task is
         // waited on inline (matching Python holding the worker for the coro
         // lifetime), so maxThreads/queue-limit/relief/watchdog observe real async
@@ -250,11 +256,26 @@ public class AsyncThreadPool : IDisposable
             var task = item.Runner();
             if (!task.IsCompleted)
             {
-                try { task.Wait(); }
-                catch
+                bool done;
+                try { done = task.Wait(TimeSpan.FromSeconds(WorkItemInlineWaitSeconds)); }
+                catch { done = true; }
+                if (!done)
                 {
-                    if (task.IsFaulted && task.Exception != null) try { AtherizLogger.LogError(task.Exception.ToString()); } catch { Console.Error.WriteLine(task.Exception.ToString()); }
+                    // hung async op — release the worker slot instead
+                    // of pinning it unboundedly; keep fault visibility via a
+                    // detached continuation.
+                    try
+                    {
+                        task.ContinueWith(t =>
+                        {
+                            if (t.IsFaulted && t.Exception != null) try { AtherizLogger.LogError(t.Exception.ToString()); } catch { Console.Error.WriteLine(t.Exception.ToString()); }
+                        }, TaskScheduler.Default);
+                    }
+                    catch { }
+                    try { AtherizLogger.LogError($"Work item exceeded {WorkItemInlineWaitSeconds}s without completing; worker slot released."); } catch { }
+                    return;
                 }
+                if (task.IsFaulted && task.Exception != null) try { AtherizLogger.LogError(task.Exception.ToString()); } catch { Console.Error.WriteLine(task.Exception.ToString()); }
             }
             else if (task.IsFaulted && task.Exception != null)
             {
@@ -322,7 +343,7 @@ public class AsyncThreadPool : IDisposable
             double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
             if (saturated)
             {
-                // B-THR-3: snapshot under the lock, log after releasing it —
+                // snapshot under the lock, log after releasing it —
                 // LogStarvation does file I/O and must not stall AddInternal/Stop.
                 Dictionary<long, (string, double)>? snapshot = null;
                 double saturatedFor = 0;
@@ -512,7 +533,7 @@ public class AsyncThreadPool : IDisposable
             _stopped = true;
             _stopEvent.Set();
         }
-        AtherizLogger.LogError("at AsyncThreadPool.stop() ...");
+        AtherizLogger.LogInformation("at AsyncThreadPool.stop() ..."); // info upstream (asyncthreadpool.py:307), not an error
 
         // Drain preserving non-null tasks, similar to Python logic, while holding both locks
         List<WorkItem?> preserved = new();

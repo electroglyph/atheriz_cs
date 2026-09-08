@@ -64,6 +64,7 @@ public sealed class LoggedInExitCommand : Command
         var dest = nh.GetNode(Destination.Value);
         if (dest == null)
         {
+            // Port of exit.py:43-45: log-only, no mover message.
             try { Console.Error.WriteLine($"Error getting destination node for: {Destination}"); } catch (Exception) { }
             return;
         }
@@ -113,13 +114,8 @@ public sealed class LoggedInExitCommand : Command
                 }
                 else
                 {
-                    // Door stayed closed and TryOpen already broadcast the
-                    // reason via loc MsgContents — except when the caller has
-                    // no location to broadcast to (loc null), where TryOpen's
-                    // loc?.MsgContents reaches nobody. Message directly so the
-                    // move never fails silently (Python is silent here too).
-                    if (c.ResolveLocationObject() == null)
-                        c.Msg("You can't go that way.");
+                    // Port of exit.py:92-93: silent return (TryOpen already
+                    // broadcast the reason to the room when there is one).
                     return;
                 }
             }

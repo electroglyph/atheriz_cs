@@ -6,14 +6,22 @@ public static class NewHandler
     {
         bool overwrite = ArgumentParser.HasFlag(a, "--overwrite", null) || ArgumentParser.HasFlag(a, "--force", null);
         var filtered = a.Where((v, i) =>
-            !(v == "--port" && i + 1 < a.Length) && !(i > 0 && a[i - 1] == "--port") && !v.StartsWith("--port=", StringComparison.Ordinal) &&
+        {
+            // A trailing bare flag carries no value — keep it (minus
+            // consumed-value/prefix/glued shapes, which cannot dangle) so the
+            // folder check below rejects it instead of it becoming the folder.
+            if (i + 1 >= a.Length)
+                return !(i > 0 && (a[i - 1] == "--port" || a[i - 1] == "--telnet-port" || a[i - 1] == "-p" || a[i - 1] == "--host"))
+                    && !v.StartsWith("--port=", StringComparison.Ordinal) && !v.StartsWith("--telnet-port=", StringComparison.Ordinal) && !ArgumentParser.IsGluedShortPort(v)
+                    && v != "--overwrite" && v != "--force" && v != "--foreground" && v != "-f";
+            return !(v == "--port" && i + 1 < a.Length) && !(i > 0 && a[i - 1] == "--port") && !v.StartsWith("--port=", StringComparison.Ordinal) &&
             !(v == "--telnet-port" && i + 1 < a.Length) && !(i > 0 && a[i - 1] == "--telnet-port") && !v.StartsWith("--telnet-port=", StringComparison.Ordinal) &&
             !(v == "-p" && i + 1 < a.Length) && !(i > 0 && a[i - 1] == "-p") && !ArgumentParser.IsGluedShortPort(v) &&
             v != "--host" && !(i > 0 && a[i - 1] == "--host") && !v.StartsWith("--host=", StringComparison.Ordinal) &&
             v != "--foreground" && v != "-f" &&
-            v != "--overwrite" && v != "--force"
-        ).ToArray();
-        if (filtered.Length < 1)
+            v != "--overwrite" && v != "--force";
+        }).ToArray();
+        if (filtered.Length < 1 || filtered[0].StartsWith("-", StringComparison.Ordinal))
         {
             Console.Error.WriteLine("Usage: atheriz new <foldername> [--port N] [--host HOST] [--foreground|-f]");
             Console.Error.WriteLine("atheriz: error: the following arguments are required: foldername");

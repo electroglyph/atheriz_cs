@@ -14,18 +14,18 @@ public sealed class GuestCommand : Command
     public override bool UseParser => false;
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (!Settings.AtherizSettings.Global.GuestEnabled) { caller.Msg("Guest accounts are not enabled."); return; }
+        if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Guest accounts are not enabled."); return; }
         if (!CreationCooldownHelper.TryReserve(caller, "guest")) return;
         var text = args as string ?? "";
-        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        string name = parts.Length > 0 ? parts[0] : "";
+        var parts = Command.SplitStubArgs(text);
+        string name = parts.Count > 0 ? parts[0] : "";
         if (string.IsNullOrWhiteSpace(name)) { CreationCooldownHelper.Clear(caller); caller.Msg("Usage: guest <name> (interactive in real server)."); return; }
         var err = Validation.ValidateCharacterName(name);
         if (err != null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         if (ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
         var character = GameObject.Create(name, "", isPc: true);
         character.IsTemporary = true;
-        character.Gender = parts.Length > 1 ? parts[1] : "neutral";
+        character.Gender = parts.Count > 1 ? parts[1] : "neutral";
         try
         {
             ObjectRegistry.AddObjectUnique(character, o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase), $"Character with this name ({name}) already exists.");
@@ -52,7 +52,7 @@ public sealed class GuestCommand : Command
     public async Task RunAsync(BaseConnection caller)
     {
         var settings = Settings.AtherizSettings.Global;
-        if (!settings.GuestEnabled) { caller.Msg("Guest accounts are not enabled."); return; }
+        if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Guest accounts are not enabled."); return; }
         string rateKey = CreationCooldownHelper.RateKey(caller);
         if (!CreationCooldownHelper.TryReserve(caller, "guest")) return;
         string name = await caller.Session.Prompt("Enter a name for your guest character:");

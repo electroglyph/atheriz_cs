@@ -7,20 +7,26 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public sealed class FollowScript : Script
 {
-    private GameObject? _oldLoc;
+    // per-move pairing, not a single shared slot. Concurrent moves of
+    // the same leader each push their pre-move location; each post-move pops
+    // its own partner. Python keeps a single _old_loc (follow.py) — the
+    // stack is a deliberate hardening; no Python test pins the slot.
+    private readonly System.Collections.Concurrent.ConcurrentStack<GameObject?> _oldLocStack = new();
 
     public FollowScript()
     {
         IsTemporary = true;
     }
 
-    public GameObject? OldLoc => _oldLoc;
+    public GameObject? OldLoc => _oldLocStack.TryPeek(out var v) ? v : null;
 
     [Before]
     public void at_pre_move(GameObject? destination, string? toExit = null)
     {
-        try { _oldLoc = Child?.ResolveLocationObject(); }
-        catch { _oldLoc = null; }
+        GameObject? loc;
+        try { loc = Child?.ResolveLocationObject(); }
+        catch { loc = null; }
+        _oldLocStack.Push(loc);
     }
 
     [After]
@@ -30,8 +36,7 @@ public sealed class FollowScript : Script
         var child = Child;
         if (child == null) { Delete(); return; }
         if (child.FollowersSnapshot.Count == 0) { Delete(); return; }
-        var oldLoc = _oldLoc;
-        try { _oldLoc = null; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed FollowScript.at_post_move: " + logEx.Message, "FollowScript"); }
+        if (!_oldLocStack.TryPop(out var oldLoc)) oldLoc = null;
         if (oldLoc == null) return;
         List<int> followers;
         // Snapshot followers under lock via the typed snapshot (no reflection).
@@ -50,6 +55,9 @@ public sealed class FollowScript : Script
         }
     }
 
+    // Convenience overload (not an override — the base Delete takes
+    // (caller, recursive) and returns ops). Direct teardown for a drained
+    // script: unregisters and unwires hooks without the veto round-trip.
     public bool Delete()
     {
         IsDeleted = true;

@@ -6,7 +6,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Atheriz.Core.Tests.Features.Utils;
 
-// P1-17 Batch M (Menu/Logger/ServerEvents/InitialSetup) regression pins.
+// Batch M (Menu/Logger/ServerEvents/InitialSetup) regression pins.
 [Collection("Ported")]
 public class BatchMRegressionTests
 {
@@ -65,7 +65,8 @@ public class BatchMRegressionTests
         sess.InputFuture!.TrySetResult("a");
         var done = await Task.WhenAny(run, Task.Delay(5000));
         Assert.Same(run, done);
-        Assert.False(await run);
+        // handler-directed exit reports true (false = timeout/exhaustion).
+        Assert.True(await run);
     }
 
     // Single-echo: a kept message hits Console.Error exactly once (no AddConsole echo).
@@ -104,7 +105,7 @@ public class BatchMRegressionTests
                 AtherizLogger.LogWarning(w);
                 gated = cap.Read();
             }
-            Assert.Contains(w, gated); // pinned deviation: filtered echo stays
+            Assert.DoesNotContain(w, gated); // filtered levels are dropped entirely (logger.py)
             Assert.False(File.Exists(serverLog) && File.ReadAllText(serverLog).Contains(w));
             AtherizLogger.ApplySettings(new AtherizSettings { LogLevel = "debug", SavePath = logDir });
             string shown;

@@ -10,16 +10,21 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
 
     public static bool TryParse(string? s, out Coord coord)
     {
-        coord = default;
+        // Failures leave a usable (empty-area) coord, never a null-Area default.
+        coord = new Coord(string.Empty, 0, 0, 0);
         if (string.IsNullOrWhiteSpace(s)) return false;
         s = s.Trim();
-        // Form "Area(X,Y,Z)" (mirrors ToString()) or "(Area,X,Y,Z)" (search form)
+        // Form "Area(X,Y,Z)" (mirrors ToString()) or "(Area,X,Y,Z)" (search form).
+        // The LAST open paren starts the numeric group so area names may
+        // themselves contain parens ("My (old) Area(1,2,3)").
         if (s.EndsWith(")"))
         {
-            int open = s.IndexOf('(');
+            int open = s.LastIndexOf('(');
             if (open < 0) return false;
+            string tail = s[(open + 1)..^1];
+            if (tail.Contains('(') || tail.Contains(')')) return false;
             string head = s[..open].Trim();
-            string[] inside = s[(open + 1)..^1].Split(',');
+            string[] inside = tail.Split(',');
             string area;
             string[] nums;
             if (head.Length == 0)
@@ -43,9 +48,8 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
             coord = new Coord(area, x, y, z);
             return true;
         }
-        // Form "Area X Y Z" or bare "Area" (origin)
+        // Form "Area X Y Z". A bare area name is NOT a coord (no origin guess).
         string[] parts = s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 1) { coord = new Coord(parts[0], 0, 0, 0); return true; }
         if (parts.Length != 4) return false;
         if (!int.TryParse(parts[1], out var x2)) return false;
         if (!int.TryParse(parts[2], out var y2)) return false;

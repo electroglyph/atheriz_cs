@@ -37,6 +37,14 @@ public static class AtherizDbContextFactory
         return Create(savePath);
     }
 
+    // Settings-aware creation : explicit settings win over
+    // the ambient Global, but the test-device env override still comes first
+    // (same precedence as ObjectRegistry.SaveObjects).
+    public static string ResolveSavePath(AtherizSettings settings) =>
+        Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? settings.SavePath;
+    public static AtherizDbContext CreateForSettings(AtherizSettings settings) =>
+        Create(ResolveSavePath(settings));
+
     // Port of test helper: in-memory or temp file context
     public static AtherizDbContext CreateForTests(string? savePath = null)
     {
@@ -61,19 +69,138 @@ public static class AtherizDbContextFactory
     public static void DoSetup(AtherizDbContext ctx)
     {
         ctx.EnsureCreated();
-        // WAL pragma already applied in EnsureCreated with fallback log; extra attempt for safety
-        try { ctx.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;"); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback in DoSetup: {ex.Message}"); try { ctx.Database.ExecuteSqlRaw("PRAGMA journal_mode=DELETE;"); } catch (Exception) { } }
+        // no unguarded WAL re-send here. EnsureCreated applies the
+        // pragmas under the write gate; re-sending journal_mode outside the
+        // gate raced concurrent saves.
         // No gametime row seed (database_setup.py:92-111 do_setup creates
         // tables only): GameTime.Save upserts, and a seeded "{}" row would
         // shadow legacy save/time migration (time.py:72-74 migrates only
         // when the row is missing).
+        MigrateTransitionsTable(ctx);
+    }
+
+    // Destination-only transitions tables (Python database_setup.py:105 PK,
+    // mirrored by older C# builds) lack the source columns the fan-in PK
+    // needs: EF queries referencing them fail. Rebuild the table, decoding
+    // each row's source from its Data JSON (which carries the full
+    // Transition incl. FromCoord). Undecodable rows (e.g. Python dill
+    // blobs — a separate format boundary, JSON vs dill) are dropped with a
+    // loud warning; the row loader skips them anyway.
+    public static void MigrateTransitionsTable(AtherizDbContext ctx)
+    {
+        DbWriteGate.Enter();
+        try
+        {
+            var conn = ctx.Database.GetDbConnection();
+            bool wasClosed = conn.State == System.Data.ConnectionState.Closed;
+            if (wasClosed) conn.Open();
+            try
+            {
+                bool hasTable = false, hasSource = false;
+                using (var pragma = conn.CreateCommand())
+                {
+                    pragma.CommandText = "PRAGMA table_info(\"transitions\")";
+                    using var r = pragma.ExecuteReader();
+                    while (r.Read())
+                    {
+                        hasTable = true;
+                        if (NormCol(r.GetString(1)) == "fromarea")
+                            hasSource = true;
+                    }
+                }
+                if (!hasTable || hasSource) return;
+                var rows = new List<(string ToArea, int ToX, int ToY, int ToZ, string? Data)>();
+                using (var sel = conn.CreateCommand())
+                {
+                    // SELECT * with normalized ordinals: old tables come in
+                    // Python snake_case (to_area) or C# PascalCase (ToArea).
+                    sel.CommandText = "SELECT * FROM \"transitions\"";
+                    using var r = sel.ExecuteReader();
+                    var ord = new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal);
+                    while (r.Read())
+                    {
+                        if (ord.Count == 0)
+                            for (int i = 0; i < r.FieldCount; i++) ord[NormCol(r.GetName(i))] = i;
+                        rows.Add((GetStr(r, ord, "toarea"), GetInt(r, ord, "tox"), GetInt(r, ord, "toy"), GetInt(r, ord, "toz"), GetMaybeStr(r, ord, "data")));
+                    }
+                }
+                int dropped = 0;
+                using var txn = conn.BeginTransaction();
+                using (var mk = conn.CreateCommand())
+                {
+                    mk.Transaction = txn;
+                    mk.CommandText = "CREATE TABLE \"transitions_new\" (\"FromArea\" TEXT NOT NULL, \"FromX\" INTEGER NOT NULL, \"FromY\" INTEGER NOT NULL, \"FromZ\" INTEGER NOT NULL, \"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"FromArea\",\"FromX\",\"FromY\",\"FromZ\",\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))";
+                    mk.ExecuteNonQuery();
+                }
+                foreach (var row in rows)
+                {
+                    Objects.Transition? t = null;
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(row.Data))
+                            t = System.Text.Json.JsonSerializer.Deserialize<Objects.Transition>(row.Data, JsonOptions.Default);
+                    }
+                    catch { t = null; }
+                    if (t == null) { dropped++; continue; }
+                    using var ins = conn.CreateCommand();
+                    ins.Transaction = txn;
+                    ins.CommandText = "INSERT OR IGNORE INTO \"transitions_new\" VALUES (@fa,@fx,@fy,@fz,@ta,@tx,@ty,@tz,@d)";
+                    AddParam(ins, "@fa", t.FromCoord.Area);
+                    AddParam(ins, "@fx", t.FromCoord.X);
+                    AddParam(ins, "@fy", t.FromCoord.Y);
+                    AddParam(ins, "@fz", t.FromCoord.Z);
+                    AddParam(ins, "@ta", row.ToArea);
+                    AddParam(ins, "@tx", row.ToX);
+                    AddParam(ins, "@ty", row.ToY);
+                    AddParam(ins, "@tz", row.ToZ);
+                    AddParam(ins, "@d", (object?)row.Data ?? DBNull.Value);
+                    ins.ExecuteNonQuery();
+                }
+                using (var drop = conn.CreateCommand())
+                {
+                    drop.Transaction = txn;
+                    drop.CommandText = "DROP TABLE \"transitions\"";
+                    drop.ExecuteNonQuery();
+                }
+                using (var ren = conn.CreateCommand())
+                {
+                    ren.Transaction = txn;
+                    ren.CommandText = "ALTER TABLE \"transitions_new\" RENAME TO \"transitions\"";
+                    ren.ExecuteNonQuery();
+                }
+                txn.Commit();
+                AtherizLogger.LogWarning($"MigrateTransitionsTable: rebuilt destination-only table, migrated {rows.Count - dropped}/{rows.Count} rows, dropped {dropped} undecodable.");
+            }
+            finally { if (wasClosed) conn.Close(); }
+        }
+        finally { DbWriteGate.Exit(); }
+    }
+
+    // Column-name normalization for migrations: Python snake_case
+    // (to_area) and C# PascalCase (ToArea) spell the same column.
+    private static string NormCol(string name) =>
+        name.Replace("_", "", StringComparison.Ordinal).ToLowerInvariant();
+
+    private static string GetStr(System.Data.Common.DbDataReader r, System.Collections.Generic.Dictionary<string, int> ord, string col)
+        => r.IsDBNull(ord[col]) ? "" : r.GetString(ord[col]);
+    private static string? GetMaybeStr(System.Data.Common.DbDataReader r, System.Collections.Generic.Dictionary<string, int> ord, string col)
+        => r.IsDBNull(ord[col]) ? null : r.GetString(ord[col]);
+    private static int GetInt(System.Data.Common.DbDataReader r, System.Collections.Generic.Dictionary<string, int> ord, string col)
+        => r.IsDBNull(ord[col]) ? 0 : Convert.ToInt32(r.GetValue(ord[col]));
+
+    private static void AddParam(System.Data.Common.DbCommand cmd, string name, object? value)
+    {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value ?? DBNull.Value;
+        cmd.Parameters.Add(p);
     }
 
     public static async Task DoSetupAsync(string savePath, CancellationToken ct = default)
     {
         await using var ctx = Create(savePath);
         await ctx.EnsureCreatedAsync(ct);
-        try { await ctx.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", ct); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback in DoSetupAsync: {ex.Message}"); }
+        // no unguarded WAL re-send (see sync DoSetup above).
         // No gametime row seed — parity with sync DoSetup above (and Python
         // do_setup, tables-only): GameTime.Save upserts, and a seeded "{}" row
         // would shadow legacy save/time migration (time.py:72-74 migrates only

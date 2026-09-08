@@ -1,15 +1,13 @@
 using System.Text.RegularExpressions;
 
-namespace Atheriz.Core.Tests.Features.Audit;
+namespace Atheriz.Core.Tests.Features.Regression;
 
-// Shared source-scan helpers for audit regression tests.
+// Shared source-scan helpers for regression tests.
 //
-// Every finding gets a test that FAILS while the defect is present and PASSES
-// once fixed (mirrors the Features/Quality/SourceHygieneTests precedent).
 // Behavioral tests are preferred where deterministic; source scans pin
 // races, lock-order, perf and style findings that cannot fail deterministically
 // at runtime. Reflection is explicitly permitted in tests/.
-internal static class AuditScan
+internal static class SourceScan
 {
     public static string RepoRoot()
     {

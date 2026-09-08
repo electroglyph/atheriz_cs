@@ -6,7 +6,7 @@ using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Tests.Features.Utils;
 
-// Regression pins for the P1-17 utils batch: sphere pagination, game-folder
+// Regression pins for the utils batch: sphere pagination, game-folder
 // cache, save-dir writability probe, Levenshtein cap, TLS chain bundle,
 // LockScope dispose guard, and the new validator checks.
 public sealed class UtilsBatchRegressionTests

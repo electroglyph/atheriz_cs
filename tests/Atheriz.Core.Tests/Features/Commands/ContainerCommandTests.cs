@@ -49,14 +49,15 @@ public class ContainerCommandTests
         finally { ObjectRegistry.ClearAll(); }
     }
 
-    // --- GiveCommand inventory bypass ---
-
+    // --- GiveCommand requires possession ---
+    // Python parity (give.py:162 objs_to_give = caller.search(obj_name)):
+    // caller.search covers the caller's INVENTORY only (contents.py search
+    // gathers obj.contents), never the room. Room-ground items are refused
+    // with "You don't have that." — giving them without pickup would skip
+    // AtPreGet and the get lock.
     [Fact]
-    public void Give_RoomObject_MovesToTarget()
+    public void Give_RoomObject_IsRefused()
     {
-        // Python parity (give.py:162 objs_to_give = caller.search(obj_name),
-        // and search covers the room the caller stands in): giving a room
-        // object works, like Python.
         ObjectRegistry.ClearAll();
         try
         {
@@ -73,9 +74,9 @@ public class ContainerCommandTests
             var (func, caller, args) = cmd.Execute(giver, "coin to box");
             Assert.NotNull(func);
             func!(caller!, args);
-            Assert.Contains("You give coin to box.", giver.PeekMessages());
-            Assert.Contains(coin.Id, box.ContentsSnapshot);
-            Assert.DoesNotContain(coin.Id, room.ContentsSnapshot);
+            Assert.Contains("You don't have that.", giver.PeekMessages());
+            Assert.Contains(coin.Id, room.ContentsSnapshot);
+            Assert.DoesNotContain(coin.Id, box.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

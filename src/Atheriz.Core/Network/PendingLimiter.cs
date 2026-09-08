@@ -104,27 +104,39 @@ public sealed class PendingLimiter
     /// <summary>
     /// Sync release for telnet success path — mirrors Python <c>with pending_lock: pending-=nb</c> in finally.
     /// Fixes telnet leak where success never decremented.
+    /// Over-release clamps to zero instead of throwing: duplicate completions
+    /// must neither corrupt debt nor crash send paths — but the imbalance is
+    /// still surfaced via a warning.
     /// </summary>
     public void ReleaseSync(int nb)
     {
         lock (_lock)
         {
-            _pendingBytes = Math.Max(0, _pendingBytes - nb);
-            _pendingCount = Math.Max(0, _pendingCount - 1);
-            // if this was tracked via Task, also remove mapping if any task holds same nb? not needed for sync.
-            // For safety, remove any task with matching nb when sync path used (should not be tracked).
+            if (nb == 0) return;
+            if (_pendingCount <= 0 || _pendingBytes < nb)
+            {
+                AtherizLogger.LogWarning($"PendingLimiter.ReleaseSync({nb}) over-release (bytes={_pendingBytes}, count={_pendingCount}); clamping to zero.", "PendingLimiter");
+                _pendingBytes = 0;
+                _pendingCount = 0;
+                return;
+            }
+            _pendingBytes -= nb;
+            _pendingCount--;
         }
     }
 
     /// <summary>
     /// Associate already-reserved bytes with task (when reserve happened before task creation).
-    /// No extra increment; just store mapping for later Release(task).
+    /// exact accounting — when the task already carries a reservation
+    /// (TryReserve(task, old)), only the delta is applied, so re-associating
+    /// with a corrected byte count neither double-counts nor loses bytes.
     /// </summary>
     public void Track(Task task, int nb)
     {
         lock (_lock)
         {
-            // pending already incremented via TryReserve(nb); just record.
+            if (_byTask.TryGetValue(task, out var old))
+                _pendingBytes += nb - old;
             _byTask[task] = nb;
         }
     }

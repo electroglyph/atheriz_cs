@@ -13,12 +13,12 @@ public sealed class CreateAccountCommand : Command
     public override bool UseParser => false;
     public override void Run(IMessageTarget caller, object? args)
     {
-        if (!Settings.AtherizSettings.Global.AccountCreationEnabled) { caller.Msg("Account creation is not enabled."); return; }
+        if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Account creation is not enabled."); return; }
         if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
         // Sync stub: expects args as string "name password" for test convenience; real flow is async prompts via Session.Prompt
         var text = args as string ?? "";
-        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2)
+        var parts = Command.SplitStubArgs(text);
+        if (parts.Count < 2)
         {
             CreationCooldownHelper.Clear(caller);
             caller.Msg("Usage: create <account_name> <password> (interactive prompts in real server).");
@@ -53,7 +53,7 @@ public sealed class CreateAccountCommand : Command
     public async Task RunAsync(BaseConnection caller)
     {
         var settings = Settings.AtherizSettings.Global;
-        if (!settings.AccountCreationEnabled) { caller.Msg("Account creation is not enabled."); return; }
+        if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Account creation is not enabled."); return; }
         string rateKey = CreationCooldownHelper.RateKey(caller);
         if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
         string name = await caller.Session.Prompt("Enter an account name:");

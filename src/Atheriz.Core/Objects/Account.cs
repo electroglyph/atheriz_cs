@@ -40,7 +40,7 @@ public class Account : GameObject
         return DeleteImmediate(caller) != null;
     }
 
-    // Shared immediate-delete core for both static types (B-OBJ-13).
+    // Shared immediate-delete core for both static types .
     internal (int count, List<object> ops)? DeleteImmediate(GameObject? caller)
     {
         // Port of base_account.py:53 delete.
@@ -61,7 +61,7 @@ public class Account : GameObject
                 var savePath = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? Settings.AtherizSettings.Global.SavePath;
                 using var db = new Persistence.AtherizDbContext(savePath);
                 db.Database.EnsureCreated();
-                ObjectRegistry.DeleteObjects(db, ops);
+                ObjectRegistry.DeleteObjects(db, ops.Select(o => Convert.ToInt32(o.Params[0])).ToList());
             }
             catch
             {
@@ -193,7 +193,11 @@ public class Account : GameObject
             acc.IsAccount = true;
         }
         finally { acc.SyncRoot.ExitWriteLock(); }
-        acc.AtCreate();
+        // contain a throwing AtCreate like GameObject.Create
+        // (swallow+log), so the account still registers below. (Python
+        // base_account.py:45 is unguarded, but this matches
+        // the C# GameObject.Create containment.)
+        try { acc.AtCreate(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Account.Create: " + logEx.Message, "Account"); }
         // Atomic register — mirrors add_object_unique for race safety (port of test_duplicate_create_race.py)
         ObjectRegistry.AddObjectUnique(acc, o => o is Account a && string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase), $"Account with this name ({name}) already exists.");
         return acc;
@@ -202,38 +206,59 @@ public class Account : GameObject
     public override (string Sql, object[] Params) GetSaveOps()
     {
         bool had;
-        string json;
+        GameObjectDto dto;
         SyncRoot.EnterWriteLock();
         try
         {
             had = IsModified;
             IsModified = false;
-            try { json = GameObjectDtoSerializer.ToJson(ToDto()); }
-            finally { IsModified = had; }
+            // snapshot the DTO under the lock; JSON serialization
+            // runs after release so checkpoints don't stall readers.
+            // (GetSaveOps is a peek — the flag is restored.)
+            dto = ToDto();
+            IsModified = had;
         }
         finally { SyncRoot.ExitWriteLock(); }
+        string json;
+        try { json = GameObjectDtoSerializer.ToJson(dto); }
+        catch
+        {
+            SyncRoot.EnterWriteLock();
+            try { IsModified = had; }
+            finally { SyncRoot.ExitWriteLock(); }
+            throw;
+        }
         return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [Id, json]);
     }
     public override (string Sql, object[] Params) GetSaveOpsClearing()
     {
-        string json;
+        GameObjectDto dto;
         SyncRoot.EnterWriteLock();
         bool had = IsModified;
         try
         {
-            var dto = ToDto();
+            dto = ToDto();
             dto.IsModified = false;
-            json = GameObjectDtoSerializer.ToJson(dto);
             IsModified = false;
         }
         catch
         {
-            // Failed serialization must not leave the object clean
+            // Failed snapshot must not leave the object clean
             // (Channel.BuildSaveOps parity) — the next checkpoint retries.
             IsModified = had;
             throw;
         }
         finally { SyncRoot.ExitWriteLock(); }
+        // serialize after the lock releases.
+        string json;
+        try { json = GameObjectDtoSerializer.ToJson(dto); }
+        catch
+        {
+            SyncRoot.EnterWriteLock();
+            try { IsModified = had; }
+            finally { SyncRoot.ExitWriteLock(); }
+            throw;
+        }
         return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [Id, json]);
     }
 
@@ -243,10 +268,18 @@ public class Account : GameObject
     {
         var dto = base.ToDto();
         dto.Type = "account";
+        // Snapshot fields under SyncRoot : concurrent SetPassword /
+        // AddCharacter must not tear the checkpoint. Recursion-safe: the
+        // checkpoint path holds the write lock and the lock supports it.
         // Stash account extras via Extra dictionary (JSON) — never persist logged_in true
-        dto.Extra["password"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_passwordHash)).RootElement.Clone();
-        dto.Extra["characters"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_characters)).RootElement.Clone();
-        dto.Extra["banReason"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_banReason)).RootElement.Clone();
+        SyncRoot.EnterReadLock();
+        try
+        {
+            dto.Extra["password"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_passwordHash)).RootElement.Clone();
+            dto.Extra["characters"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_characters)).RootElement.Clone();
+            dto.Extra["banReason"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_banReason)).RootElement.Clone();
+        }
+        finally { SyncRoot.ExitReadLock(); }
         dto.Extra["loggedIn"] = System.Text.Json.JsonDocument.Parse("false").RootElement.Clone();
         return dto;
     }

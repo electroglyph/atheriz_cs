@@ -6,7 +6,7 @@ using Atheriz.Core.Persistence.Dto;
 namespace Atheriz.Core.Persistence.Converters;
 
 /// <summary>
-/// Persistence converter extracted from <c>GameObject.cs</c> god file (P1.5).
+/// Persistence converter extracted from the <c>GameObject.cs</c> god file.
 /// Moves <c>BuildDto</c>, <c>FromDto</c>, <c>GetSaveOps</c>/<c>GetSaveOpsClearing</c>
 /// out of domain object. <c>GameObject</c> keeps thin wrappers for API compat.
 /// </summary>
@@ -312,16 +312,20 @@ internal static class GameObjectDtoConverter
     private static string BuildSaveJson(GameObject obj, bool clearing)
     {
         // Single save-serialization core (mirrors Python get_save_ops).
-        // Use raw IsModified access without re-entering Write lock.
-        // Non-clearing restores the flag afterwards; clearing leaves it false (only restored on error).
+        // Snapshot the DTO under the write lock, then encode AFTER release:
+        // serializing large Extra/history held all readers for the whole
+        // encode . Flag handling unchanged (non-clearing restores
+        // afterwards; clearing leaves false, restored only on error).
         obj.SyncRoot.EnterWriteLock();
         bool had = obj.GetIsModifiedRawNoLock();
         obj.SetIsModifiedRawNoLock(false);
+        GameObjectDto dto;
+        bool snapshotOk = false;
         try
         {
-            var dto = obj.ToDtoUnsafeInternal();
+            dto = obj.ToDtoUnsafeInternal();
             if (clearing) dto.IsModified = false;
-            return GameObjectDtoSerializer.ToJson(dto);
+            snapshotOk = true;
         }
         catch
         {
@@ -330,8 +334,23 @@ internal static class GameObjectDtoConverter
         }
         finally
         {
-            if (!clearing) obj.SetIsModifiedRawNoLock(had);
+            if (!clearing || !snapshotOk) obj.SetIsModifiedRawNoLock(had);
             obj.SyncRoot.ExitWriteLock();
+        }
+        return EncodeSaveJson(obj, dto, had);
+    }
+
+    // Encode runs after lock release; a serialization failure must restore
+    // the flag the snapshot cleared (both clearing and non-clearing paths).
+    private static string EncodeSaveJson(GameObject obj, GameObjectDto dto, bool had)
+    {
+        try { return GameObjectDtoSerializer.ToJson(dto); }
+        catch
+        {
+            obj.SyncRoot.EnterWriteLock();
+            try { obj.SetIsModifiedRawNoLock(had); }
+            finally { obj.SyncRoot.ExitWriteLock(); }
+            throw;
         }
     }
 
@@ -351,7 +370,7 @@ internal static class GameObjectDtoConverter
             else if (el.ValueKind == JsonValueKind.Array)
             {
                 var parts = el.EnumerateArray().ToList();
-                int ts = parts.Count > 0 && parts[0].ValueKind == JsonValueKind.Number && parts[0].TryGetInt32(out var t) ? t : 0;
+                long ts = parts.Count > 0 && parts[0].ValueKind == JsonValueKind.Number && parts[0].TryGetInt64(out var t) ? t : 0;
                 string sender = parts.Count > 1 && parts[1].ValueKind == JsonValueKind.String ? parts[1].GetString() ?? "" : "";
                 string msg = parts.Count > 2 && parts[2].ValueKind == JsonValueKind.String ? parts[2].GetString() ?? "" : "";
                 entries.Add(new ChannelHistoryEntry(ts, sender, msg));

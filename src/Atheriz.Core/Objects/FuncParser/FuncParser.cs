@@ -338,6 +338,10 @@ public class FuncParser
             var del = kv.Value;
             // wrap to ParserCallable that forwards via DynamicInvoke
             ParserCallable wrapper = (a,k,ctx,raw) => {
+                // shape mismatches fail as ParsingError, not
+                // InvalidCast/TargetParameterCountException (line-162 precedent).
+                try
+                {
                 // Build merged kwargs for forwarding: need to include caller/receiver/mapping etc.
                 // For generic callables tests, they expect to receive *args as string[] and **kwargs merged
                 // The delegate is invoked through the compiled typed invoker (no DynamicInvoke);
@@ -367,6 +371,12 @@ public class FuncParser
                     // generic *args, **kwargs as params object[] ?
                     return DelegateInvoker.Invoke(del, a.Cast<object?>().ToArray());
                 }
+                }
+                catch (System.Reflection.TargetParameterCountException tpe)
+                {
+                    if (ctx.RaiseErrors) throw new ParsingError($"Parse-func callable '{kv.Key}' argument mismatch: {tpe.Message}");
+                    return "";
+                }
             };
             _callables[kv.Key]=wrapper;
         }
@@ -387,6 +397,9 @@ public class FuncParser
             if(kv.Value is ParserCallable pc) _callables[kv.Key]=pc;
             else if(kv.Value is Delegate d){ genDict[kv.Key]=d; _hasGeneric=true; _genericCallables[kv.Key]=d;
                 ParserCallable wrapper = (a,k,ctx,raw) => {
+                    // shape mismatches fail as ParsingError (see above).
+                    try
+                    {
                     {
                         var method=d.Method;
                         var pars=method.GetParameters();
@@ -402,6 +415,12 @@ public class FuncParser
                             return DelegateInvoker.Invoke(d, new object?[]{ a, kwargsObj });
                         }
                         return DelegateInvoker.Invoke(d, new object?[]{ a });
+                    }
+                    }
+                    catch (System.Reflection.TargetParameterCountException tpe)
+                    {
+                        if (ctx.RaiseErrors) throw new ParsingError($"Parse-func callable '{kv.Key}' argument mismatch: {tpe.Message}");
+                        return "";
                     }
                 };
                 _callables[kv.Key]=wrapper;

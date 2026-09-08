@@ -58,10 +58,10 @@ public class BanAndThrottleTests
             for (int i = 0; i < 800; i++)
             {
                 ObjectRegistry.ApplyCreationCooldown("create", host, 900.0, 50.0); // exp 950 < 1000
-                var check = Task.Run(() => ObjectRegistry.CreationCooldownActive("create", host, 1000.0));
+                var check = Task.Run(() => ObjectRegistry.CreationCooldownActive(host, 1000.0));
                 var refresh = Task.Run(() => ObjectRegistry.ApplyCreationCooldown("create", host, 1000.0, 100.0));
                 Task.WaitAll(check, refresh);
-                if (!ObjectRegistry.CreationCooldownActive("create", host, 1000.0)) lost++;
+                if (!ObjectRegistry.CreationCooldownActive(host, 1000.0)) lost++;
                 ObjectRegistry.ClearCreationCooldown(host);
             }
             Assert.Equal(0, lost);

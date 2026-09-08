@@ -11,7 +11,10 @@ public class CmdSet
     public IReadOnlyList<Command> GetAll()
     {
         _lock.EnterReadLock();
-        try { return _commands.Values.ToList(); }
+        // one entry per command instance. The dict holds Key +
+        // every alias; without Distinct every caller must remember to
+        // dedupe (two HelpCommands do; the locals.AddRange path didn't).
+        try { return _commands.Values.Distinct().ToList(); }
         finally { _lock.ExitReadLock(); }
     }
 
@@ -48,9 +51,12 @@ public class CmdSet
         _lock.EnterWriteLock();
         try
         {
-            _commands.Remove(command.Key);
-            if (command.Aliases is not null)
-                foreach (var a in command.Aliases) _commands.Remove(a);
+            // remove by instance identity, not by current Key/Aliases.
+            // Channel/exit commands are SetKey()-rekeyed after registration
+            // (no Python set_key exists); key-based removal leaked the
+            // originally-registered entries.
+            foreach (var k in _commands.Where(kv => ReferenceEquals(kv.Value, command)).Select(kv => kv.Key).ToList())
+                _commands.Remove(k);
         }
         finally { _lock.ExitWriteLock(); }
     }
@@ -66,7 +72,14 @@ public class CmdSet
         finally { _lock.ExitReadLock(); }
         if (toDel.Count == 0) return;
         _lock.EnterWriteLock();
-        try { foreach (var k in toDel) _commands.Remove(k); }
+        // re-validate each tag under the write lock — a key collected
+        // above may have been re-added with a different tag in between.
+        try
+        {
+            foreach (var kv in _commands.ToList())
+                if (toDel.Contains(kv.Key) && kv.Value.Tag == tag)
+                    _commands.Remove(kv.Key);
+        }
         finally { _lock.ExitWriteLock(); }
     }
 

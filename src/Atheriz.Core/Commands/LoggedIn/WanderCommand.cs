@@ -69,7 +69,13 @@ public sealed class WanderCommand : Command
                 try { AtherizLogger.LogWarning($"NPC {Name} (#{Id}) crossing areas: {loc.Coord} -> {node.Coord} via link '{link.Name}' (link.coord={link.Coord})"); } catch (Exception) { }
                 try { AtherizLogger.LogWarning($"Wanderer crossed area {oldArea} -> {newArea}"); } catch (Exception) { }
             }
-            MoveTo(node, toExit: link.Name);
+            if (!MoveTo(node, toExit: link.Name))
+            {
+                // a stuck wanderer must not fail silently every tick.
+                // Python ignores move_to's result (wander.py:30); the NPC has
+                // no session to message, so the failure goes to the log.
+                try { AtherizLogger.LogWarning($"NPC {Name} (#{Id}) failed to move {loc.Coord} -> {node.Coord} via link '{link.Name}'"); } catch (Exception) { }
+            }
         }
     }
 }

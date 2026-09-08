@@ -29,11 +29,18 @@ public static class CommandHelpers
     {
         var loc = go.ResolveLocationObject();
         if (loc != null)
+        {
             foreach (var id in loc.ContentsSnapshot)
             {
                 var o = ObjectRegistry.Get(id).FirstOrDefault();
                 if (o?.ExternalCmdSet != null) yield return o.ExternalCmdSet;
             }
+            // the location's OWN set too — dispatch consults it
+            // (CommandDispatcher locObj.ExternalCmdSet check), so Help/None
+            // suggestions must include it or they disagree with dispatch.
+            // Yielded last to preserve dispatch precedence (contents first).
+            if (loc.ExternalCmdSet != null) yield return loc.ExternalCmdSet;
+        }
         foreach (var id in go.ContentsSnapshot)
         {
             var o = ObjectRegistry.Get(id).FirstOrDefault();
@@ -63,7 +70,7 @@ public static class CommandHelpers
                 return [];
             }
         }
-        if (raw == "me") return [caller];
+        if (raw.Equals("me", StringComparison.OrdinalIgnoreCase)) return [caller];
         if (raw.Equals("here", StringComparison.OrdinalIgnoreCase))
         {
             var locHere = caller.ResolveLocationObject();
@@ -132,7 +139,7 @@ public static class CommandHelpers
         return list[0];
     }
 
-    // ----- Centralized message dialects (audit:152) -----
+    // ----- Centralized message dialects -----
     // The Python originals spell these differently per command; behavior is
     // preserved exactly — one home for the literals, no unification.
     public static void MsgNo(IMessageTarget go) => go.Msg("No.");

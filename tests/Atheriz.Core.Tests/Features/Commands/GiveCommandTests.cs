@@ -26,10 +26,11 @@ public class GiveCommandTests
     }
 
     [Fact]
-    public void Give_OtherCharacter_MovesToTarget()
+    public void Give_OtherCharacter_RequiresPossession()
     {
-        // Parity with Python: search finds characters in the room and move_to
-        // has no carrier check, so this follows the same path as items.
+        // Parity with Python (give.py:162): only inventory can be given —
+        // room-ground characters are refused with "You don't have that."
+        // , same path as items.
         ObjectRegistry.ClearAll();
         try
         {
@@ -47,8 +48,9 @@ public class GiveCommandTests
             giver.ClearMessages();
             var job = CommandDispatcher.DispatchLoggedIn(giver, "give bob to alice", immediate: true);
             RunJob(job);
-            Assert.Contains(bob.Id, alice.ContentsSnapshot);
-            Assert.DoesNotContain(bob.Id, room.ContentsSnapshot);
+            Assert.Contains("You don't have that.", giver.PeekMessages());
+            Assert.Contains(bob.Id, room.ContentsSnapshot);
+            Assert.DoesNotContain(bob.Id, alice.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

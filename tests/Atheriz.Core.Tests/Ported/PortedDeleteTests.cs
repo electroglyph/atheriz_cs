@@ -144,6 +144,7 @@ public class PortedDeleteTests
         using var env = GlobalTestEnv.Enter();
         var caller = MakeCaller();
         var nh = NodeHandler.GetCurrent() ?? new NodeHandler();
+        NodeHandler.SetCurrent(nh);
         var room = MakeRoom("del7");
         Assert.Equal(room, nh.GetNode(room.Coord));
         var result = room.Delete(caller);
@@ -196,8 +197,8 @@ public class PortedDeleteTests
                 else if (o is Tuple<string, object[]> tt) ops.Add((tt.Item1, tt.Item2));
                 else ops.Add(ch.GetDelOps());
             }
-            if (ops.Count > 0) ObjectRegistry.DeleteObjects(db, ops);
-            else ObjectRegistry.DeleteObjects(db, new List<(string, object[])>{ ch.GetDelOps() });
+            if (ops.Count > 0) ObjectRegistry.DeleteObjects(db, ops.Select(o => Convert.ToInt32(o.Params[0])).ToList());
+            else ObjectRegistry.DeleteObjects(db, new List<int> { ch.Id });
         }
         Assert.True(ch.IsDeleted);
         Assert.DoesNotContain(ch.Id, ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));
@@ -218,7 +219,7 @@ public class PortedDeleteTests
         using var dbCheck = new AtherizDbContext(path);
         Assert.NotNull(dbCheck.Objects.Find(item.Id));
         var ops = new List<(string Sql, object[] Params)> { item.GetDelOps() };
-        ObjectRegistry.DeleteObjects(db, ops);
+        ObjectRegistry.DeleteObjects(db, ops.Select(o => Convert.ToInt32(o.Params[0])).ToList());
         using var db2 = new AtherizDbContext(path);
         Assert.Null(db2.Objects.Find(item.Id));
     }

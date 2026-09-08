@@ -21,8 +21,7 @@ public class PortedTelnetTestsPart3
     private sealed class TestableConn : TelnetConnection
     {
         public TestableConn(object r, object w):base(r,w){}
-        public void SetPending(int v){ var f=typeof(TelnetConnection).GetField("_pendingBytes", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance); f!.SetValue(this,v); }
-        public int GetPending(){ var f=typeof(TelnetConnection).GetField("_pendingBytes", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance); return (int)f!.GetValue(this)!; }
+        public int GetPending(){ var lim = (PendingLimiter)typeof(TelnetConnection).GetField("_limiter", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(this)!; return lim.PendingBytes; }
         public void SetClosing(bool v){ var f=typeof(TelnetConnection).GetField("_closing", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance); f!.SetValue(this,v); }
     }
 

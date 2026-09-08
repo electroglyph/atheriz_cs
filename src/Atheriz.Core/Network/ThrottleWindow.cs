@@ -11,6 +11,13 @@ public static class ThrottleWindow
 {
     private static double MonotonicNow() => global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
 
+    // Sweep threshold for the amortized TTL eviction in ShouldLog.
+    private const int MaxHostsBeforeSweep = 1024;
+    // Per-call opportunistic bound: examine at most this many entries (O(1),
+    // not O(n)) so small dicts still evict promptly (pinned by
+    // ThrottleWindow_EvictsExpiredHosts) without taxing every call.
+    private const int MaxEvictProbePerCall = 16;
+
     /// <summary>
     /// Per-host throttling — mirrors <c>manager.py:17-24</c> and <c>websocket.py:20-27</c>.
     /// Returns true if log should be emitted (window elapsed), false if throttled.
@@ -19,17 +26,33 @@ public static class ThrottleWindow
     {
         lock (syncLock)
         {
-            // TTL eviction: drop fully-expired hosts so per-host dicts cannot
-            // grow without bound (DoS memory). O(n) scan, fine for logging
-            // paths; the alternative (no eviction) leaks an entry per host.
-            if (last.Count > 0)
+            // Amortized TTL eviction : Python (manager.py:17-24) does
+            // no eviction at all; a per-call O(n) sweep here taxed every
+            // throttled message under the serializing lock. Sweep fully only
+            // once the dict exceeds a cap; every call additionally evicts
+            // expired entries among a bounded probe prefix (O(1)), so small
+            // dicts still drain promptly while the common path stays flat.
+            if (last.Count > MaxHostsBeforeSweep)
             {
                 List<string>? expired = null;
-                foreach (var kv in last)
-                    if (now - kv.Value >= window)
-                        (expired ??= new List<string>()).Add(kv.Key);
+                foreach (var entry in last)
+                    if (now - entry.Value >= window)
+                        (expired ??= new List<string>()).Add(entry.Key);
                 if (expired != null)
                     foreach (var k in expired) last.Remove(k);
+            }
+            else if (last.Count > 0)
+            {
+                List<string>? expiredFew = null;
+                int probed = 0;
+                foreach (var entry in last)
+                {
+                    if (probed++ >= MaxEvictProbePerCall) break;
+                    if (now - entry.Value >= window)
+                        (expiredFew ??= new List<string>()).Add(entry.Key);
+                }
+                if (expiredFew != null)
+                    foreach (var k in expiredFew) last.Remove(k);
             }
             if (last.TryGetValue(host, out var prev) && now - prev < window) return false;
             last[host] = now;

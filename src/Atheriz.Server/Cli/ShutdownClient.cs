@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Security;
 using System.Text;
 using System.Text.Json;
 
@@ -32,11 +33,19 @@ public static class ShutdownClient
         {
             // Loopback only: the token is a bearer secret, but the peer is
             // always localhost here. Self-signed dev certs cannot chain-verify,
-            // so chain validation is skipped ONLY when the request targets a
-            // loopback host — never blind-trust a non-loopback peer.
+            // so chain/name errors are tolerated ONLY on a loopback host —
+            // never blind-trust a non-loopback peer. (Inspect SslPolicyErrors
+            // instead of returning true unchecked.)
             using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (req, cert, chain, errors) =>
-                req is System.Net.Http.HttpRequestMessage m && m.RequestUri is Uri u &&
-                (u.Host == "localhost" || u.Host == "127.0.0.1" || u.Host == "::1") };
+            {
+                if (req is not System.Net.Http.HttpRequestMessage m || m.RequestUri is not Uri u) return false;
+                bool loopback = u.Host == "localhost" || u.Host == "127.0.0.1" || u.Host == "::1";
+                if (errors == SslPolicyErrors.None) return true;
+                if (!loopback || cert == null) return false;
+                const SslPolicyErrors loopbackTolerated =
+                    SslPolicyErrors.RemoteCertificateChainErrors | SslPolicyErrors.RemoteCertificateNameMismatch;
+                return (errors & ~loopbackTolerated) == 0;
+            } };
             using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
             var req = new HttpRequestMessage(HttpMethod.Post, url);
             req.Headers.Add("X-Admin-Token", token);
@@ -100,14 +109,9 @@ public static class ShutdownClient
             }
         }
         catch { }
-        // CWD-tree scan only. Never scan /tmp: an attacker-planted admin.token there
-        // would hand CLI control to the wrong server.
-        try
-        {
-            foreach (var f in Directory.GetFiles(Directory.GetCurrentDirectory(), "admin.token", SearchOption.AllDirectories))
-                if (f.EndsWith("secret/admin.token", StringComparison.Ordinal)) return f;
-        }
-        catch { }
+        // no blind CWD-tree scan — a planted admin.token in a nested
+        // directory would hand CLI control to the wrong server. Lookup is
+        // scoped: configured secret dir, upward secret/ walk, /proc probe.
         return null;
     }
 }

@@ -35,7 +35,7 @@ public class PortedUnloggedinCommandsTestsPart2
         var host="203.0.113.5";
         ObjectRegistry.ClearCreationCooldown(host);
         Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest",host,1000,60));
-        Assert.True(ObjectRegistry.CreationCooldownActive("account",host,1001));
+        Assert.True(ObjectRegistry.CreationCooldownActive(host,1001));
         ObjectRegistry.ClearCreationCooldown(host);
     }
     [Fact] public void CharSelection_HintWithChars()

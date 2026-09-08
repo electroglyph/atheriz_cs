@@ -42,7 +42,8 @@ public static class LockPolicies
                 predicate = accessing => accessing.IsBuilder;
                 return true;
             case PcView:
-                predicate = accessing => !target.IsPc || accessing.IsConnected || target.IsConnected;
+                // Port of base_obj.py:164 — tests only the *target's* connection.
+                predicate = accessing => !target.IsPc || target.IsConnected;
                 return true;
             case NotSelf:
                 predicate = accessing => accessing.Id != target.Id;

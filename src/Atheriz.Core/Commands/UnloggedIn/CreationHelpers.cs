@@ -10,8 +10,18 @@ public static class CreationCooldownHelper
 {
     public static string RateKey(IMessageTarget caller)
     {
-        string host = (caller as BaseConnection)?.ClientHost ?? "?";
-        return caller is BaseConnection bc ? (host != "?" ? host : bc.GetHashCode().ToString()) : "?";
+        // Port of create.py:31 — host string when available, else id(caller).
+        // Non-connection callers get identity keys : sharing the
+        // "?" bucket bypassed throttling entirely via the early-true in
+        // TryReserveCreationCooldown. Identity (not Id-hash) matches
+        // Python id() and survives same-Id reloads without stale buckets.
+        if (caller is BaseConnection bc)
+        {
+            string host = bc.ClientHost ?? "?";
+            if (!string.IsNullOrEmpty(host) && host != "?") return host;
+        }
+        if (caller is null) return "?";
+        return System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(caller).ToString();
     }
 
     // Mirrors try_reserve_creation_cooldown: messages + false when rate-limited.

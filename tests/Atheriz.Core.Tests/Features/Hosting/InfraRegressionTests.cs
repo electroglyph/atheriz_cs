@@ -5,7 +5,7 @@ using Atheriz.Server.Infrastructure;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// P1-16 Batch C: ServerLifecycle readiness, AssetPathResolver table,
+// ServerLifecycle readiness, AssetPathResolver table,
 // SyncChecker settings/excludes, GameTemplate assembly/namespace homes.
 [Collection("Ported")]
 public class InfraRegressionTests
@@ -13,7 +13,7 @@ public class InfraRegressionTests
     [Fact]
     public void DoShutdown_ClearsStartupSucceeded_ReadyGoesDark()
     {
-        // /ready must stop reporting ok once shutdown begins (P1-16: DoShutdown
+        // /ready must stop reporting ok once shutdown begins (DoShutdown
         // never cleared the flag).
         using var env = GlobalTestEnv.Enter();
         var settings = new AtherizSettings { SavePath = env.TempPath, TimeSystemEnabled = false, AutosaveMinutes = 0 };
@@ -31,7 +31,7 @@ public class InfraRegressionTests
     public void ResolveCandidates_FirstExistingWins_Deduped()
     {
         // The resolution table must keep priority order and collapse duplicate
-        // rows (P1-16: appBaseDir/wwwroot appeared twice).
+        // rows (appBaseDir/wwwroot appeared twice).
         using var env = GlobalTestEnv.Enter();
         var dir = Path.Combine(env.TempPath, "wwwroot");
         Directory.CreateDirectory(dir);
@@ -44,7 +44,7 @@ public class InfraRegressionTests
     [Fact]
     public void CheckSync_SettingsParam_DisablesCheck()
     {
-        // Explicit settings (not Global) gate the sync check (P1-16).
+        // Explicit settings (not Global) gate the sync check .
         using var env = GlobalTestEnv.Enter();
         var game = Path.Combine(env.TempPath, "game");
         Directory.CreateDirectory(Path.Combine(game, "web", "templates", "webclient"));
@@ -80,7 +80,7 @@ public class InfraRegressionTests
     [Fact]
     public void GameTemplate_CheckedInSources_CarryAssemblyDescription_AndMyGameNamespace()
     {
-        // P1-16: checked-in template mirrors the scaffold emitters (AI()).
+        // checked-in template mirrors the scaffold emitters (AI()).
         var asmInfo = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.GameTemplate/AssemblyInfo.cs");
         Assert.Contains("AssemblyDescription", asmInfo);
         var custom = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.GameTemplate/CustomObject.cs");

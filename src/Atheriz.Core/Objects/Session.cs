@@ -35,7 +35,26 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     public GameObject? Puppet; // Port of session.py:25 puppet
     // stack of (prev_puppet, target). Each target carries its own _puppet_restore manifest (excluded from pickling by __getstate__).
     // Lives on the session (never pickled) so transient restore state stays off saved objects. Port of session.py:29 puppet_stack
-    public List<(GameObject? Prev, GameObject Target)> PuppetStack { get; } = new();
+    private readonly List<(GameObject? Prev, GameObject Target)> _puppetStack = new();
+    // snapshot, not the live list — an escaped List lets any holder
+    // mutate the unwind stack without session.Lock. Writers use the entry
+    // methods below; every caller already holds session.Lock (single critical
+    // sections), so the mutators take no lock themselves.
+    public IReadOnlyList<(GameObject? Prev, GameObject Target)> PuppetStack
+    {
+        get { lock (Lock) { return _puppetStack.ToList(); } }
+    }
+    internal void PushPuppetEntry(GameObject? prev, GameObject target) => _puppetStack.Add((prev, target));
+    internal bool TryPopPuppetEntry(out GameObject? prev, out GameObject target)
+    {
+        if (_puppetStack.Count == 0) { prev = null; target = null!; return false; }
+        var last = _puppetStack[^1];
+        _puppetStack.RemoveAt(_puppetStack.Count - 1);
+        prev = last.Prev;
+        target = last.Target;
+        return true;
+    }
+    internal void ClearPuppetEntries() => _puppetStack.Clear();
     /// <summary>
     /// Hot-reload rewire: point Puppet/LastPuppet/PuppetStack entries at the
     /// replacement instance (matched by id). Python's __class__ swap preserves
@@ -49,19 +68,18 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                 Puppet = replacement;
             if (LastPuppet != null && LastPuppet.Id == replacement.Id && !ReferenceEquals(LastPuppet, replacement))
                 LastPuppet = replacement;
-            for (int i = 0; i < PuppetStack.Count; i++)
+            for (int i = 0; i < _puppetStack.Count; i++)
             {
-                var (prev, target) = PuppetStack[i];
+                var (prev, target) = _puppetStack[i];
                 var nprev = (prev != null && prev.Id == replacement.Id && !ReferenceEquals(prev, replacement)) ? replacement : prev;
                 var ntarget = (target.Id == replacement.Id && !ReferenceEquals(target, replacement)) ? replacement : target;
                 if (!ReferenceEquals(nprev, prev) || !ReferenceEquals(ntarget, target))
-                    PuppetStack[i] = (nprev, ntarget);
+                    _puppetStack[i] = (nprev, ntarget);
             }
         }
     }
     // Wontfix: puppet snapshot incomplete — only is_pc/privilege_level per puppet.py:110,138-142.
     // Do NOT store quelled/can_hear/is_mapable; document here. Port of puppet.py:110 restore_snapshot = {"is_pc":..., "privilege_level":...}
-    public Dictionary<string, object> PuppetRestore { get; } = new(StringComparer.Ordinal); // spec extra, kept for parity but target holds actual snapshot
     public int TermWidth; // Port of session.py:30 term_width = settings.CLIENT_DEFAULT_WIDTH via settings.py:121
     public int TermHeight; // Port of session.py:31 term_height
     public int MapWidth; // Port of session.py:32 map_width
@@ -115,11 +133,38 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             InputFuture = null; // Port of session.py:45 self.input_future = None
             masked = InputMasked; // Port of session.py:46 masked = self._input_masked
             InputMasked = false; // Port of session.py:47 self._input_masked = False
-            stack = new List<(GameObject? Prev, GameObject Target)>(PuppetStack); // Port of session.py:48 stack, self.puppet_stack = self.puppet_stack, []
-            PuppetStack.Clear();
+            stack = new List<(GameObject? Prev, GameObject Target)>(_puppetStack); // Port of session.py:48 stack, self.puppet_stack = self.puppet_stack, []
+            ClearPuppetEntries();
             puppet = Puppet; // Port of session.py:49 puppet = self.puppet
             Puppet = null; // Port of session.py:50 self.puppet = None
             if (puppet != null) LastPuppet = puppet; // Port of session.py:51 self.last_puppet = puppet if puppet is not None else self.last_puppet
+            // Port of session.py:81-86 unwind any in-progress puppet chain.
+            // Runs INSIDE the lock : a Puppet landing between the
+            // snapshot and the unwind would otherwise leak IsPc + privilege
+            // on the NPC. Restore helpers take only the target's lock
+            // (session -> object order, same as Puppet/Unpuppet).
+            while (stack.Count > 0)
+            {
+                var (_, target) = stack[stack.Count - 1];
+                stack.RemoveAt(stack.Count - 1);
+                // Port of session.py:83-85 if restore := getattr(target, "_puppet_restore", None): target.__dict__.update(restore); del target._puppet_restore
+                // GameObject carries the snapshot as a typed internal member (same
+                // assembly) — no dynamic/reflection needed.
+                // Wontfix: only is_pc/privilege_level per puppet.py:110 — handled in GameObject.RestorePuppetSnapshot
+                try
+                {
+                    var restore = target.GetPuppetRestore();
+                    if (restore != null)
+                    {
+                        target.RestorePuppetSnapshot(restore);
+                        target.ClearPuppetRestore();
+                    }
+                }
+                catch
+                {
+                    // One bad target must not break the unwind loop.
+                }
+            }
         }
         // Port of session.py:52-56 if masked and self.connection is not None: send echo_on
         if (masked && Connection != null)
@@ -141,32 +186,11 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             // If we had a captured SynchronizationContext/TaskScheduler, we could post, but TrySetCanceled is safe.
         }
         // Port of session.py:81-86 unwind any in-progress puppet chain before autosave
-        while (stack.Count > 0)
-        {
-            var (_, target) = stack[stack.Count - 1];
-            stack.RemoveAt(stack.Count - 1);
-            // Port of session.py:83-85 if restore := getattr(target, "_puppet_restore", None): target.__dict__.update(restore); del target._puppet_restore
-            // GameObject carries the snapshot as a typed internal member (same
-            // assembly) — no dynamic/reflection needed.
-            // Wontfix: only is_pc/privilege_level per puppet.py:110 — handled in GameObject.RestorePuppetSnapshot
-            try
-            {
-                var restore = target.GetPuppetRestore();
-                if (restore != null)
-                {
-                    target.RestorePuppetSnapshot(restore);
-                    target.ClearPuppetRestore();
-                }
-            }
-            catch
-            {
-                // One bad target must not break the unwind loop.
-            }
-        }
+        // (unwind itself runs inside the lock above).
         // Port of session.py:86-114 if puppet: elapsed handling, puppet.session=None, seconds_played, at_disconnect, is_temporary cleanup
         if (puppet != null)
         {
-            double elapsed = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - ConnTime; // Port of session.py:87 elapsed = time.time() - self.conn_time
+            double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - ConnTime; // Port of session.py:87 elapsed = time.time() - self.conn_time
             if (ConnTime > 0.0 && elapsed > 0) // Port of session.py:88 if self.conn_time >0 and elapsed>0
             {
                 puppet.Session = null; // Port of session.py:89 puppet.session = None

@@ -15,38 +15,52 @@ public sealed class ReloadCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var channel = GlobalServices.GetServerChannel();
-        if (channel != null)
-        {
-            try { channel.Msg("Server is reloading..."); } catch (Exception) { }
-        }
-        try { Atheriz.Core.ServerEvents.AtServerReload(); } catch (Exception) { }
-        try { AtherizLogger.LogInformation($"Reload triggered by {go.Name} ({go.Id})"); } catch (Exception) { }
-        string result;
+        Atheriz.Core.Objects.GameObject? channel;
         try
         {
-            // Port of reloader.reload_game_logic() — use PluginReloader sync wrapper or ServerLifecycle
-            try
-            {
-                var task = Atheriz.Core.Plugins.PluginReloader.ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(), AtherizSettings.Global);
-                result = task.GetAwaiter().GetResult();
-            }
-            catch
-            {
-                // fallback to ServerLifecycle.DoReload which handles ticker/map save
-                try { Atheriz.Core.Globals.StartStop.DoReload(AtherizSettings.Global); result = "Reload completed."; }
-                catch (Exception ex2) { result = $"Reload failed: {ex2.Message}"; }
-            }
+            // the channel fetch itself can throw; keep it inside
+            // try so a broken channel service still reaches the reload.
+            channel = GlobalServices.GetServerChannel();
+            try { channel?.Msg("Server is reloading..."); } catch (Exception) { }
+            try { Atheriz.Core.ServerEvents.AtServerReload(); } catch (Exception) { }
+            try { AtherizLogger.LogInformation($"Reload triggered by {go.Name} ({go.Id})"); } catch (Exception) { }
         }
-        catch (Exception ex) { result = $"Reload failed: {ex.Message}"; }
-        if (channel != null)
+        catch (Exception ex) { try { go.Msg($"Reload failed: {ex.Message}"); } catch (Exception) { } return; }
+        // never block the command thread on the async reload work
+        // (Python reload.py:43 runs it inline, stalling dispatch). The
+        // continuation reports the first cause instead of swallowing it.
+        var capturedGo = go;
+        var capturedChannel = channel;
+        try
         {
-            try { channel.Msg(result); } catch (Exception) { }
-            try { go.Msg(result); } catch (Exception) { }
+            // Port of reloader.reload_game_logic() — use PluginReloader async API or ServerLifecycle
+            Atheriz.Core.Plugins.PluginReloader.ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(), AtherizSettings.Global)
+                .ContinueWith(t =>
+                {
+                    string result;
+                    try
+                    {
+                        if (t.IsCanceled) result = "Reload canceled.";
+                        else if (t.IsFaulted)
+                        {
+                            // fallback to ServerLifecycle.DoReload which handles ticker/map save
+                            try { Atheriz.Core.Globals.StartStop.DoReload(AtherizSettings.Global); result = "Reload completed."; }
+                            catch (Exception ex2) { result = $"Reload failed: {ex2.Message}"; }
+                        }
+                        else result = t.Result;
+                    }
+                    catch (Exception ex) { result = $"Reload failed: {ex.Message}"; }
+                    if (capturedChannel != null)
+                    {
+                        try { capturedChannel.Msg(result); } catch (Exception) { }
+                        try { capturedGo.Msg(result); } catch (Exception) { }
+                    }
+                    else
+                    {
+                        try { capturedGo.Msg(result); } catch (Exception) { }
+                    }
+                }, TaskScheduler.Default);
         }
-        else
-        {
-            go.Msg(result);
-        }
+        catch (Exception ex) { try { go.Msg($"Reload failed: {ex.Message}"); } catch (Exception) { } }
     }
 }

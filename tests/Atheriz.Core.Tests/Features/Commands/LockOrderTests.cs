@@ -21,6 +21,8 @@ public class LockOrderTests
         n1.AddLink(new NodeLink("north", new Coord(area, 0, 1, 0)));
         n2.AddLink(new NodeLink("south", new Coord(area, 0, 0, 0)));
         grid.AddNode(n1); grid.AddNode(n2); areaObj.AddGrid(grid); nh.AddArea(areaObj);
+        // Explicit registration: the constructor does not publish.
+        ObjectRegistry.AddObject(n1); ObjectRegistry.AddObject(n2);
         return (n1, nh);
     }
 

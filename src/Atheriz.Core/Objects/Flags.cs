@@ -52,21 +52,21 @@ public sealed class Flags
         switch (name)
         {
             case nameof(IsPc): case "is_pc": case "_isPc": if (_isPc == value) return false; _isPc = value; return true;
-            case nameof(IsNpc): case "is_npc": if (_isNpc == value) return false; _isNpc = value; return true;
-            case nameof(IsItem): case "is_item": if (_isItem == value) return false; _isItem = value; return true;
-            case nameof(IsMapable): case "is_mapable": if (_isMapable == value) return false; _isMapable = value; return true;
-            case nameof(IsContainer): case "is_container": if (_isContainer == value) return false; _isContainer = value; return true;
-            case nameof(IsScript): case "is_script": if (_isScript == value) return false; _isScript = value; return true;
-            case nameof(IsTickable): case "is_tickable": case "_is_tickable": if (_isTickable == value) return false; _isTickable = value; return true;
-            case nameof(IsAccount): case "is_account": if (_isAccount == value) return false; _isAccount = value; return true;
-            case nameof(IsChannel): case "is_channel": if (_isChannel == value) return false; _isChannel = value; return true;
-            case nameof(IsNode): case "is_node": if (_isNode == value) return false; _isNode = value; return true;
-            case nameof(IsModified): case "is_modified": if (_isModified == value) return false; _isModified = value; return true;
-            case nameof(IsDeleted): case "is_deleted": if (_isDeleted == value) return false; _isDeleted = value; return true;
-            case nameof(IsConnected): case "is_connected": if (_isConnected == value) return false; _isConnected = value; return true;
-            case nameof(IsTemporary): case "is_temporary": if (_isTemporary == value) return false; _isTemporary = value; return true;
-            case nameof(IsBanned): case "is_banned": if (_isBanned == value) return false; _isBanned = value; return true;
-            case nameof(CanHear): case "can_hear": if (_canHear == value) return false; _canHear = value; return true;
+            case nameof(IsNpc): case "is_npc": case "_isNpc": if (_isNpc == value) return false; _isNpc = value; return true;
+            case nameof(IsItem): case "is_item": case "_isItem": if (_isItem == value) return false; _isItem = value; return true;
+            case nameof(IsMapable): case "is_mapable": case "_isMapable": if (_isMapable == value) return false; _isMapable = value; return true;
+            case nameof(IsContainer): case "is_container": case "_isContainer": if (_isContainer == value) return false; _isContainer = value; return true;
+            case nameof(IsScript): case "is_script": case "_isScript": if (_isScript == value) return false; _isScript = value; return true;
+            case nameof(IsTickable): case "is_tickable": case "_is_tickable": case "_isTickable": if (_isTickable == value) return false; _isTickable = value; return true;
+            case nameof(IsAccount): case "is_account": case "_isAccount": if (_isAccount == value) return false; _isAccount = value; return true;
+            case nameof(IsChannel): case "is_channel": case "_isChannel": if (_isChannel == value) return false; _isChannel = value; return true;
+            case nameof(IsNode): case "is_node": case "_isNode": if (_isNode == value) return false; _isNode = value; return true;
+            case nameof(IsModified): case "is_modified": case "_isModified": if (_isModified == value) return false; _isModified = value; return true;
+            case nameof(IsDeleted): case "is_deleted": case "_isDeleted": if (_isDeleted == value) return false; _isDeleted = value; return true;
+            case nameof(IsConnected): case "is_connected": case "_isConnected": if (_isConnected == value) return false; _isConnected = value; return true;
+            case nameof(IsTemporary): case "is_temporary": case "_isTemporary": if (_isTemporary == value) return false; _isTemporary = value; return true;
+            case nameof(IsBanned): case "is_banned": case "_isBanned": if (_isBanned == value) return false; _isBanned = value; return true;
+            case nameof(CanHear): case "can_hear": case "_canHear": if (_canHear == value) return false; _canHear = value; return true;
             default: return false;
         }
     }

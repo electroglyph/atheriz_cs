@@ -217,14 +217,21 @@ public class PortedConnectionTestsPart2
     [Fact] public void DispatchUnknownCmdLogged()
     {
         using var env = GlobalTestEnv.Enter();
-        var mgr = MakeMgr();
-        var c = new FakeConnection();
-        using var cap = new CaptureAtherizLog();
-        mgr.Dispatch(c, "foobar", new List<object?>(), new Dictionary<string,object?>());
-        Thread.Sleep(50);
-        var log = cap.Read();
-        Assert.Contains("foobar", log);
-        mgr.Atp.Stop(wait:false);
+        // filtered levels no longer echo to stderr — capture at
+        // Debug level explicitly.
+        Atheriz.Core.AtherizLogger.ApplySettings(new Atheriz.Core.Settings.AtherizSettings { LogLevel = "debug" });
+        try
+        {
+            var mgr = MakeMgr();
+            var c = new FakeConnection();
+            using var cap = new CaptureAtherizLog();
+            mgr.Dispatch(c, "foobar", new List<object?>(), new Dictionary<string,object?>());
+            Thread.Sleep(50);
+            var log = cap.Read();
+            Assert.Contains("foobar", log);
+            mgr.Atp.Stop(wait:false);
+        }
+        finally { Atheriz.Core.AtherizLogger.ApplySettings(new Atheriz.Core.Settings.AtherizSettings { LogLevel = "info" }); }
     }
 
     // ----- TestThreadSafety -----
@@ -493,7 +500,7 @@ public class PortedConnectionTestsPart2
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var host="203.0.113.10";
         Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest", host, now, 60));
-        Assert.True(ObjectRegistry.CreationCooldownActive("account", host, now) || !ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60));
+        Assert.True(ObjectRegistry.CreationCooldownActive(host, now) || !ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60));
         ObjectRegistry.ClearAll();
     }
 

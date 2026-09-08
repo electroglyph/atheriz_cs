@@ -30,6 +30,7 @@ public class PortedMoreCommandsTests
         var c = MakeCaller();
         var coord = new Coord("test_look", 0,0,0);
         var room = new Node(coord, desc: "A nice room.");
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
         new LookCommand().Run(c, null);
         Assert.Contains(c.PeekMessages(), m => m.Contains("A nice room") || m.Contains("nice"));
@@ -113,6 +114,7 @@ public class PortedMoreCommandsTests
         using var env = GlobalTestEnv.Enter();
         var coord = new Coord("test_emote", 0,0,0);
         var room = new Node(coord, desc: "Room");
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c = MakeCaller();
         c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
         var pa = new GameArgumentParser.ParsedArgs();
@@ -151,6 +153,7 @@ public class PortedMoreCommandsTests
         using var env = GlobalTestEnv.Enter();
         var coord = new Coord("test_give", 0,0,0);
         var room = new Node(coord, desc: "Room");
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c = MakeCaller();
         c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
         // give via dispatcher with no args should show help or "Give it to whom?"
@@ -165,6 +168,7 @@ public class PortedMoreCommandsTests
         using var env = GlobalTestEnv.Enter();
         var coord = new Coord("test_give2", 0,0,0);
         var room = new Node(coord, desc: "Room");
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var giver = new TestGiveCaller("Alice");
         giver.IsConnected = true;
         ObjectRegistry.AddObject(giver);
@@ -230,7 +234,7 @@ public class PortedMoreCommandsTests
     }
 
     [Fact]
-    public void Reload_RunNoChannel()
+    public async Task Reload_RunNoChannel()
     {
         using var env = GlobalTestEnv.Enter();
         var c = GameObject.Create("Admin");
@@ -238,6 +242,13 @@ public class PortedMoreCommandsTests
         ObjectRegistry.AddObject(c);
         c.ClearMessages();
         new ReloadCommand().Run(c, null);
+        // reload no longer blocks; the result arrives via continuation.
+        var end = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (DateTime.UtcNow < end)
+        {
+            if (c.PeekMessages().Any(m => m.ToLowerInvariant().Contains("reload"))) break;
+            await Task.Delay(50);
+        }
         Assert.Contains(c.PeekMessages(), m => m.ToLowerInvariant().Contains("reload"));
     }
 
@@ -312,6 +323,7 @@ public class PortedMoreCommandsTests
         var c=MakeCaller();
         var coord=new Coord("test_blocked",0,0,0);
         var room=new Node(coord, desc:"Secret");
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         room.AddLock("view", _=>false);
         c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         new LookCommand().Run(c, null);
@@ -333,6 +345,7 @@ public class PortedMoreCommandsTests
     {
         using var env=GlobalTestEnv.Enter();
         var coord=new Coord("test_give3",0,0,0); var room=new Node(coord);
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c=MakeCaller(); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"apple"};
         // Our Give expects at least 1 token then checks <2 => Give it to whom?
@@ -344,6 +357,7 @@ public class PortedMoreCommandsTests
     {
         using var env=GlobalTestEnv.Enter();
         var coord=new Coord("test_give4",0,0,0); var room=new Node(coord);
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c=MakeCaller(); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"apple","bob"};
         new GiveCommand().Run(c, pa);
@@ -354,6 +368,7 @@ public class PortedMoreCommandsTests
     {
         using var env=GlobalTestEnv.Enter();
         var coord=new Coord("test_give5",0,0,0); var room=new Node(coord);
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c=GameObject.Create("Alice", isPc:true); c.IsConnected=true; ObjectRegistry.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord); room.AddObject(c);
         var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"apple","Alice"};
         // Ensure apple in inventory
@@ -366,6 +381,7 @@ public class PortedMoreCommandsTests
     {
         using var env=GlobalTestEnv.Enter();
         var coord=new Coord("test_give6",0,0,0); var room=new Node(coord);
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c=MakeCaller(); c.IsConnected=true; c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord); room.AddObject(c);
         var target=GameObject.Create("Bob", isPc:true); target.IsContainer=true; target.IsConnected=true; ObjectRegistry.AddObject(target); room.AddObject(target);
         var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"apple","bob"};
@@ -377,6 +393,7 @@ public class PortedMoreCommandsTests
     {
         using var env=GlobalTestEnv.Enter();
         var coord=new Coord("test_give7",0,0,0); var room=new Node(coord);
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c=MakeCaller(); c.IsConnected=true; c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord); room.AddObject(c);
         var target=GameObject.Create("Bob", isPc:true); target.IsContainer=true; target.IsConnected=true; ObjectRegistry.AddObject(target); room.AddObject(target);
         var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"apple","to","bob"};
@@ -384,13 +401,20 @@ public class PortedMoreCommandsTests
         Assert.Contains(c.PeekMessages(), m=>m=="You don't have that.");
     }
     [Fact]
-    public void Reload_RunWithChannel()
+    public async Task Reload_RunWithChannel()
     {
         using var env=GlobalTestEnv.Enter();
         var c=GameObject.Create("Admin"); c.PrivilegeLevel=Privilege.Admin; ObjectRegistry.AddObject(c); c.ClearMessages();
         var chan=new Channel(); chan.Name="server"; chan.Id=IdGenerator.GetUniqueId(); ObjectRegistry.AddObject(chan);
         // Our ReloadCommand checks ObjectRegistry.FilterBy IsChannel first, will find server channel and send msg to it
         new ReloadCommand().Run(c, null);
+        // reload no longer blocks; the result arrives via continuation.
+        var end = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (DateTime.UtcNow < end)
+        {
+            if (c.PeekMessages().Any(m=>m.Contains("Reload"))) break;
+            await Task.Delay(50);
+        }
         Assert.Contains(c.PeekMessages(), m=>m.Contains("Reload"));
     }
     [Fact]

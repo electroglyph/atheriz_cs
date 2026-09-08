@@ -22,10 +22,12 @@ public static class KestrelConfig
         // Fail fast on an unparseable interface: silently serving on loopback
         // (or Any) would expose the admin token on an unintended interface.
         IPAddress ip;
-        if (host == "::") ip = IPAddress.IPv6Any;
-        else if (!IPAddress.TryParse(host, out ip!))
+        // "::" binds dual-stack via ListenAnyIP, not via a bare
+        // IPv6Any socket whose IPv4 behavior is OS-dependent. No special
+        // case needed: IPAddress.TryParse("::") already succeeds.
+        if (!IPAddress.TryParse(host, out ip!))
             throw new InvalidOperationException($"Unparseable WebserverInterface '{host}'; refusing to bind an unintended interface.");
-        bool dualStackAny = host == "0.0.0.0";
+        bool dualStackAny = host == "0.0.0.0" || host == "::";
 
         void ConfigureEndpoint(Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions listen)
         {

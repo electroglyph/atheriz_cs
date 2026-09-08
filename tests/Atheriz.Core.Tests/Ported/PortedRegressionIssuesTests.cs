@@ -15,11 +15,11 @@ public class PortedRegressionIssuesTests
         var now = 1000.0;
         ObjectRegistry.ClearCreationCooldown(host);
         Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest", host, now, 60));
-        Assert.True(ObjectRegistry.CreationCooldownActive("account", host, now + 1));
+        Assert.True(ObjectRegistry.CreationCooldownActive(host, now + 1));
         Assert.False(ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60));
         ObjectRegistry.ClearCreationCooldown(host);
-        Assert.False(ObjectRegistry.CreationCooldownActive("guest", host, now + 1));
-        Assert.False(ObjectRegistry.CreationCooldownActive("character", host, now + 1));
+        Assert.False(ObjectRegistry.CreationCooldownActive(host, now + 1));
+        Assert.False(ObjectRegistry.CreationCooldownActive(host, now + 1));
         Assert.True(ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60));
         ObjectRegistry.ClearCreationCooldown(host);
     }
@@ -31,7 +31,7 @@ public class PortedRegressionIssuesTests
         ObjectRegistry.ClearCreationCooldown(host);
         Assert.True(ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60));
         ObjectRegistry.ClearCreationCooldown(host);
-        Assert.False(ObjectRegistry.CreationCooldownActive("account", host, now + 1));
+        Assert.False(ObjectRegistry.CreationCooldownActive(host, now + 1));
         Assert.True(ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60));
         ObjectRegistry.ClearCreationCooldown(host);
     }

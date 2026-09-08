@@ -3,10 +3,10 @@ using System.Text.RegularExpressions;
 using Atheriz.Core.Utils;
 namespace Atheriz.Server.Infrastructure;
 /// <summary>Generates game folder — C# analogue of <c>atheriz new my_game</c>. Mirrors <c>new.py:create_game_folder</c>.</summary>
-// Reflection note (P0-1 EXEMPT per owner ruling): GetHookMethods/BuildParamList/
-// GenerateHooksFor use System.Reflection to EMIT game source text (compile-time-
-// style codegen, like a source generator) — never to invoke or inspect live
-// objects. This is legitimate codegen, not runtime reflection.
+// Reflection note: GetHookMethods/BuildParamList/GenerateHooksFor use
+// System.Reflection to EMIT game source text (compile-time-style codegen,
+// like a source generator) — never to invoke or inspect live objects.
+// This is legitimate codegen, not runtime reflection.
 public static class GameTemplateGenerator
 {
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
@@ -43,22 +43,36 @@ public static class GameTemplateGenerator
         }
         // Decide if we need to (re)create world — fresh folder OR overwrite forces fresh DB
         bool shouldSetup = !folderExistsInitially || overwrite;
+        if (folderExistsInitially && !overwrite)
+        {
+            // interactive Replace rewrites every template — the saved
+            // world is re-created with it (new code on the old DB desyncs
+            // hooks/alarms). Credentials are prompted below like a fresh setup.
+            shouldSetup = true;
+        }
         // When overwriting an existing folder, wipe the save leaf so DoSetup
         // starts fresh (handles `new test --overwrite` bare-name case).
-        // Containment: the wipe is confined to <folder>/save/** (a save leaf
-        // is always guardable per GuardWipePath) plus exact database file
-        // names below — folder top-level files are never deleted. A stale
-        // save dir with no DB markers (aborted setup) still wipes: `new
-        // --overwrite` means fresh world, and the pre-existing integration
-        // test pins stale.txt removal for exactly that shape.
+        // Containment: the wipe is confined to <folder>/save/** (asserted
+        // below — folder top-level files are never deleted). This is
+        // deliberate operator intent (`--overwrite` names the folder), not a
+        // world-membership decision, so it does NOT consult GuardWipePath
+        // (which gates `reset` on initialized-world markers): a
+        // stale save dir with no DB markers (aborted setup) still wipes, and
+        // the pre-existing integration test pins stale.txt removal for
+        // exactly that shape.
         if (overwrite && folderExistsInitially)
         {
             try
             {
                 var saveDirForWipe = Path.Combine(folderPath, "save");
+                // Confinement asserts: exactly the save leaf of the designated
+                // folder, never a root, never outside the folder.
+                Atheriz.Core.Utils.PathGuards.DenyRoot(saveDirForWipe);
+                if (!string.Equals(Path.GetFullPath(saveDirForWipe).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                        Path.Combine(Path.GetFullPath(folderPath), "save"), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Refusing to wipe outside the game save leaf: {saveDirForWipe}");
                 if (Directory.Exists(saveDirForWipe))
                 {
-                    Atheriz.Core.Utils.PathGuards.GuardWipePath(saveDirForWipe, overwrite);
                     foreach (var f in Directory.GetFiles(saveDirForWipe, "*", SearchOption.AllDirectories))
                         try { File.Delete(f); } catch { }
                 }
@@ -166,6 +180,7 @@ public static class GameTemplateGenerator
     {
         var csprojName = gameName + ".csproj"; var csprojPath = Path.Combine(folderPath, csprojName);
         string coreRef = "../src/Atheriz.Core/Atheriz.Core.csproj";
+        bool coreFound = false;
         try
         {
             var asmDir = Path.GetDirectoryName(typeof(GameTemplateGenerator).Assembly.Location) ?? "";
@@ -173,11 +188,21 @@ public static class GameTemplateGenerator
             for (int i = 0; i < 8 && cur != null; i++)
             {
                 var cand = Path.Combine(cur.FullName, "src", "Atheriz.Core", "Atheriz.Core.csproj");
-                if (File.Exists(cand)) { var rel = Path.GetRelativePath(folderPath, cand); coreRef = rel; if (!File.Exists(Path.Combine(folderPath, rel)) && Path.IsPathRooted(cand)) coreRef = cand; break; }
+                if (File.Exists(cand)) { var rel = Path.GetRelativePath(folderPath, cand); coreRef = rel; if (!File.Exists(Path.Combine(folderPath, rel)) && Path.IsPathRooted(cand)) coreRef = cand; coreFound = true; break; }
                 cur = cur.Parent;
             }
         } catch { }
-        var csproj = $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>\n  <ItemGroup><ProjectReference Include=\"{coreRef}\" /></ItemGroup>\n</Project>\n";
+        // When the upward search fails (published/relocated engine) the
+        // relative default dangles, so fall back to the NuGet package and
+        // the scaffold always references a resolvable Atheriz.Core.
+        string refXml;
+        if (coreFound) refXml = $"<ProjectReference Include=\"{coreRef}\" />";
+        else
+        {
+            var coreVersion = typeof(Atheriz.Core.Globals.ObjectRegistry).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+            refXml = $"<PackageReference Include=\"Atheriz.Core\" Version=\"{coreVersion}\" />";
+        }
+        var csproj = $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>\n  <ItemGroup>{refXml}</ItemGroup>\n</Project>\n";
         Console.WriteLine($"  Creating {csprojName}...");
         File.WriteAllText(csprojPath, csproj);
         var files = new Dictionary<string,string>{["GameSettings.cs"]=GS(gameName),["CustomObject.cs"]=CO(gameName),["CustomNode.cs"]=CN(gameName),["CustomAccount.cs"]=CA(gameName),["CustomChannel.cs"]=CC(gameName),["CustomScript.cs"]=CS(gameName),["AssemblyInfo.cs"]=AI(gameName),["README.md"]=RM(gameName)};
@@ -272,28 +297,43 @@ public static class GameTemplateGenerator
         try { nic = new System.Reflection.NullabilityInfoContext(); } catch { }
         foreach (var p in ps)
         {
-            var t = FriendlyType(p.ParameterType);
+            // preserve ref/out/in/params — a dropped modifier emits
+            // an override that does not match the base signature (compile
+            // break in the generated game) or silently changes semantics.
+            var pt = p.ParameterType;
+            string modifier = "";
+            if (pt.IsByRef)
+            {
+                pt = pt.GetElementType() ?? pt;
+                modifier = p.IsOut ? "out " : (p.IsIn ? "in " : "ref ");
+            }
+            bool isParams = p.GetCustomAttributes(typeof(ParamArrayAttribute), false).Length > 0;
+            var t = FriendlyType(pt);
             // If param is nullable reference (e.g., GameObject? ) but FriendlyType lost ?, restore via nullability context or default-null heuristic
             bool isNullable = false;
             if (nic != null) { try { var ni = nic.Create(p); isNullable = ni.WriteState == System.Reflection.NullabilityState.Nullable; } catch { } }
-            if (!isNullable && p.HasDefaultValue && p.DefaultValue == null && !p.ParameterType.IsValueType) isNullable = true;
+            if (!isNullable && p.HasDefaultValue && p.DefaultValue == null && !pt.IsValueType) isNullable = true;
             // Also check NullableAttribute directly
-            if (!isNullable && p.ParameterType.IsClass && t != "string" && t != "object")
+            if (!isNullable && pt.IsClass && t != "string" && t != "object")
             {
                 // Heuristic: many base hooks use nullable GameObject? — if FriendlyType is GameObject without ?, and param allows null, add ?
                 if (p.HasDefaultValue && p.DefaultValue == null) isNullable = true;
             }
-            if (isNullable && !t.EndsWith("?") && p.ParameterType.IsClass) t += "?";
+            if (isNullable && !t.EndsWith("?") && pt.IsClass) t += "?";
             // ValueTuple nullable not needed
             var name = p.Name ?? "arg";
-            string decl = $"{t} {name}";
-            if (p.HasDefaultValue)
+            string decl = $"{(isParams ? "params " : "")}{modifier}{t} {name}";
+            if (p.HasDefaultValue && !p.IsOut)
             {
                 var dv = p.DefaultValue;
                 string ds;
                 if (dv == null) ds = "null";
                 else if (dv is string s) ds = $"\"{s}\"";
                 else if (dv is bool b) ds = b ? "true" : "false";
+                else if (dv is char c) ds = $"'{c}'";
+                // InvariantCulture: a locale decimal comma would emit
+                // uncompilable code (e.g. `= 1,5` parses as two args).
+                else if (dv is IFormattable fmt) ds = fmt.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
                 else ds = dv.ToString() ?? "null";
                 decl += $" = {ds}";
             }
@@ -304,7 +344,14 @@ public static class GameTemplateGenerator
     private static string BuildArgList(System.Reflection.MethodInfo m)
     {
         var ps = m.GetParameters();
-        return string.Join(", ", ps.Select(p => p.Name ?? "arg"));
+        // Call-site mirrors of the modifiers (ref/out/in/params pass-through).
+        return string.Join(", ", ps.Select(p =>
+        {
+            string modifier = "";
+            var pt = p.ParameterType;
+            if (pt.IsByRef) modifier = p.IsOut ? "out " : (p.IsIn ? "in " : "ref ");
+            return modifier + (p.Name ?? "arg");
+        }));
     }
     private static string GenerateHooksFor(Type t)
     {

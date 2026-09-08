@@ -96,8 +96,9 @@ public static class StopHandler
             try { proc = Process.GetProcessById(pid.Value); }
             catch (ArgumentException) { Console.WriteLine("Process from PID file not found; removing stale PID file."); try { File.Delete(pidFilePath); } catch { } return; }
             catch (Exception ex) { Console.WriteLine($"Could not inspect PID {pid.Value}: {ex.Message}"); return; }
+            // Per-PID hold only: the port being listened on by *someone* while
+            // this pid is a server must never implicate this pid .
             bool listening = PidFile.IsProcessListeningOnPort(pid.Value, port);
-            if (!listening) listening = PidFile.IsPortListening(port) && PidFile.IsServerProcess(pid.Value);
             if (!listening)
             {
                 Console.WriteLine($"PID {pid} is not listening on port {port}; refusing to terminate an unverified process.");
@@ -106,7 +107,9 @@ public static class StopHandler
             bool isServer = PidFile.IsServerProcess(pid.Value);
             if (!isServer)
             {
-                Console.WriteLine($"PID {pid} is not listening on port {port}; refusing to terminate an unverified process.");
+                // name the failed check — this branch fired on the
+                // process-identity gate, not the port-listening gate above.
+                Console.WriteLine($"PID {pid} is not a verified Atheriz server process; refusing to terminate an unverified process.");
                 return;
             }
             Console.Write($"Stopping server process with PID: {pid}...");

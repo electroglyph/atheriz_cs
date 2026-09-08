@@ -5,10 +5,10 @@ using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Tests.Features.Utils;
 
-// Neighbor listing must agree with door-aware pathing: a link sealed by a
-// closed door the caller cannot open is not a usable move (Pathfind.cs:259-267
-// walks links without consulting doors, while AStar filters by caller/doors at
-// Pathfind.cs:164-166 via GetLinkNodesCaller at Pathfind.cs:74-110).
+// Neighbor listing shares AStar's caller dispatch (pathfind.py:122-126):
+// door-blind for caller=None, door-aware otherwise. A link sealed by a
+// closed door the caller cannot open is not a usable move for that caller,
+// while the null-caller view ignores doors like upstream.
 [Collection("Ported")]
 public sealed class NeighborsTests
 {
@@ -42,9 +42,15 @@ public sealed class NeighborsTests
             var (found, _, _) = Pathfind.AStar(a, b, caller, nh);
             Assert.False(found);
 
-            // Neighbor listing must refuse it too.
-            Assert.DoesNotContain(coordB, Pathfind.GetNeighbors(coordA, nh));
-            Assert.DoesNotContain(coordA, Pathfind.GetNeighbors(coordB, nh));
+            // Caller-aware neighbor listing refuses it too.
+            Assert.DoesNotContain(coordB, Pathfind.GetNeighbors(coordA, nh, caller));
+            Assert.DoesNotContain(coordA, Pathfind.GetNeighbors(coordB, nh, caller));
+
+            // Null-caller view is door-blind on both sides (upstream parity).
+            var (foundBlind, _, _) = Pathfind.AStar(a, b, null, nh);
+            Assert.True(foundBlind);
+            Assert.Contains(coordB, Pathfind.GetNeighbors(coordA, nh));
+            Assert.Contains(coordA, Pathfind.GetNeighbors(coordB, nh));
         }
         finally { NodeHandler.SetCurrent(null); ObjectRegistry.ClearAll(); }
     }

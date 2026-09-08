@@ -89,7 +89,7 @@ public sealed class AtherizDbContext : DbContext
 
         b.Entity<AreaRow>().ToTable("areas");
         b.Entity<TransitionRow>().ToTable("transitions");
-        b.Entity<TransitionRow>().HasKey(x => new { x.ToArea, x.ToX, x.ToY, x.ToZ });
+        b.Entity<TransitionRow>().HasKey(x => new { x.FromArea, x.FromX, x.FromY, x.FromZ, x.ToArea, x.ToX, x.ToY, x.ToZ });
         b.Entity<DoorRow>().ToTable("doors");
         b.Entity<DoorRow>().HasKey(x => new { x.Area, x.X, x.Y, x.Z });
         b.Entity<GameTimeRow>().ToTable("gametime");
@@ -103,7 +103,16 @@ public sealed class AtherizDbContext : DbContext
 
     private void ApplyWalPragmas()
     {
-        try { Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;"); }
+        // one statement per ExecuteSqlRaw. A multi-statement batch
+        // applies provider-dependently (partial apply on mid-batch failure);
+        // individual statements keep each pragma's success/failure explicit.
+        // (Python database_setup.py:76 uses executescript for the same three.)
+        try
+        {
+            Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+            Database.ExecuteSqlRaw("PRAGMA synchronous=NORMAL;");
+            Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;");
+        }
         catch (Exception ex)
         {
             // Loud: falling back to DELETE journaling on a multi-context workload
@@ -112,24 +121,24 @@ public sealed class AtherizDbContext : DbContext
             try { Database.ExecuteSqlRaw("PRAGMA journal_mode=DELETE;"); Database.ExecuteSqlRaw("PRAGMA synchronous=NORMAL;"); Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;"); }
             catch (Exception ex2) { AtherizLogger.LogError($"WAL fallback pragmas failed: {ex2.Message}", ex2); }
         }
-        try { Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;"); } catch (Exception ex3) { AtherizLogger.LogDebug($"Suppressed AtherizDbContext.ApplyWalPragmas busy_timeout: {ex3.Message}", "AtherizDbContext"); }
+    }
+
+    // truncate the WAL on shutdown so -wal/-shm files cannot grow
+    // unbounded across restarts. Best-effort: runs after the final save.
+    public void CheckpointWal()
+    {
+        DbWriteGate.Enter();
+        try { Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(TRUNCATE);"); }
+        catch (Exception ex) { try { AtherizLogger.LogError($"WAL checkpoint failed: {ex.Message}", ex); } catch { Console.Error.WriteLine($"WAL checkpoint failed: {ex.Message}"); } }
+        finally { DbWriteGate.Exit(); }
     }
 
     public async Task EnsureCreatedAsync(CancellationToken ct = default)
     {
-        await DbWriteGate.EnterAsync(ct);
-        try
+        using (await DbWriteGate.EnterAsync(ct).ConfigureAwait(false))
         {
             await Database.EnsureCreatedAsync(ct);
             try { ApplyWalPragmas(); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback: {ex.Message}"); }
-        }
-        finally
-        {
-            // The awaits above may resume on another pool thread, but the hold
-            // belongs to this async flow (AsyncLocal continuity), not to the
-            // taker thread — so the hop-aware exit is the correct pairing
-            // whether a hop happened or not (no thread-id compare to mis-pair).
-            DbWriteGate.ExitAfterThreadHop();
         }
     }
 

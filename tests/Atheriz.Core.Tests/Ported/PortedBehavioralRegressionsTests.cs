@@ -346,6 +346,7 @@ public class PortedBehavioralRegressionsTests
         var area = new NodeArea(name: "DoorA");
         var grid = new NodeGrid(area: "DoorA", z: 0);
         var room = new Node(from, desc: "room");
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         grid.Nodes[(0, 0)] = room;
         area.AddGrid(grid);
         nh.AddArea(area);
@@ -379,6 +380,7 @@ public class PortedBehavioralRegressionsTests
         var area = new NodeArea(name: "DoorB");
         var grid = new NodeGrid(area: "DoorB", z: 0);
         var room = new Node(from);
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         grid.Nodes[(0, 0)] = room;
         area.AddGrid(grid);
         nh.AddArea(area);

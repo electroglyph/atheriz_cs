@@ -40,9 +40,39 @@ public class InputFuncs
         // attribute name plus the method name when they differ (no triplication:
         // the derived lowercase form is covered by the comparer itself).
         var handlers = new Dictionary<string, Delegate>(StringComparer.OrdinalIgnoreCase);
+        // explicit registration list — the eight known handlers bind
+        // with no per-construction reflection (method-group delegates).
+        // Subclass extras (tests only in practice) register via the override
+        // hook below, mirroring Python get_handlers subclass discovery.
+        void Add(string name, Action<BaseConnection, List<object?>, Dictionary<string, object?>> del, string methodName)
+        {
+            handlers[name] = del;
+            if (!name.Equals(methodName, StringComparison.OrdinalIgnoreCase)) handlers[methodName] = del;
+        }
+        Add("text", Text, nameof(Text));
+        Add("term_size", TermSize, nameof(TermSize));
+        Add("map_size", MapSize, nameof(MapSize));
+        Add("screenreader", Screenreader, nameof(Screenreader));
+        Add("client_ready", ClientReady, nameof(ClientReady));
+        Add("map_edit", MapEditHandler, nameof(MapEditHandler));
+        Add("map_validate_moves", MapValidateMovesHandler, nameof(MapValidateMovesHandler));
+        Add("map_edit_legend", MapEditLegendHandler, nameof(MapEditLegendHandler));
+        RegisterExtraHandlers(handlers);
+        return handlers;
+    }
+
+    /// <summary>
+    /// Subclass hook for extra [InputFunc] handlers. The default discovers
+    /// methods declared on subclasses only (never re-scans the base eight);
+    /// exact-<see cref="InputFuncs"/> instances pay zero reflection.
+    /// </summary>
+    protected virtual void RegisterExtraHandlers(Dictionary<string, Delegate> handlers)
+    {
+        if (GetType() == typeof(InputFuncs)) return;
         var methods = GetType().GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
         foreach (var m in methods)
         {
+            if (m.DeclaringType == typeof(InputFuncs)) continue;
             var attr = m.GetCustomAttribute<InputFuncAttribute>();
             if (attr != null)
             {
@@ -64,10 +94,9 @@ public class InputFuncs
                         if (!name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) handlers[m.Name] = del2;
                     }
                 }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InputFuncs.GetHandlers: " + logEx.Message, "InputFuncs"); }
+                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InputFuncs.RegisterExtraHandlers: " + logEx.Message, "InputFuncs"); }
             }
         }
-        return handlers;
     }
 
     // Port of inputfuncs.py:240-301 text handler — core command dispatch
@@ -631,7 +660,9 @@ public class InputFuncs
         if (mi==null)
         {
             mi = new MapInfo(result.Chain.Area);
-            mh.SetMapInfo(result.Chain.Area, result.Chain.Z, mi);
+            // atomic publish — concurrent creators converge on the
+            // stored winner; a locally built loser is dropped, not last-wins.
+            mi = mh.GetOrAddMapInfo(result.Chain.Area, result.Chain.Z, mi);
         }
         var newEntries = new List<LegendEntry>();
         foreach (var eObj in legend)
@@ -705,6 +736,14 @@ public class ConnectionManager
     private static bool ShouldLogMalformed(string host) // port of manager.py:17-24
         => ThrottleWindow.ShouldLog(_malformedLast, _malformedLock, host, MalformedWindow);
 
+    // Port of websocket.py:15-27 oversize throttling (per-host 5s window),
+    // for the shared HandleCommand size cap .
+    private static readonly object _oversizeLock = new object();
+    private static readonly Dictionary<string, double> _oversizeLast = new();
+    private const double OversizeWindow = 5.0; // port of websocket.py:13
+    private static bool ShouldLogOversize(string host)
+        => ThrottleWindow.ShouldLog(_oversizeLast, _oversizeLock, host, OversizeWindow);
+
     // Reference equality comparer — mirrors id(connection) at manager.py:52,113,125
     private sealed class ReferenceEqualityComparer : IEqualityComparer<BaseConnection>
     {
@@ -718,7 +757,10 @@ public class ConnectionManager
     private readonly Dictionary<string, BaseConnection> _connections = new(); // port of manager.py:51
     private readonly Dictionary<BaseConnection, string> _connToId = new(ReferenceEqualityComparer.Instance); // port of manager.py:52
     private readonly Dictionary<string, int> _perIpCounts = new(); // port of manager.py:53
-    private int _sinceSweep; // amortized orphan-sweep counter (see RegisterConnection tail)
+    // orphan-sweep timer (started lazily on first registration).
+    // Reaping rides a 60s wall-clock cadence, not registration traffic.
+    private System.Threading.Timer? _orphanSweepTimer;
+    private int _sweepStarted;
     private readonly Dictionary<string, Delegate> _messageHandlers = new(StringComparer.OrdinalIgnoreCase); // port of manager.py:55
     private int _connectionCounter; // port of manager.py:56
 
@@ -760,42 +802,57 @@ public class ConnectionManager
         finally { _lock.ExitWriteLock(); }
     }
 
+    // pre-spawn admission probe. Mirrors the RegisterConnection
+    // gates (ban + per-IP + total) without creating a connection, so accept
+    // loops can refuse floods before queueing handler tasks. Authoritative
+    // enforcement stays in RegisterConnection (counts can shift between
+    // probe and register); a refused probe only avoids the spawn.
+    public bool ShouldRefusePreSpawn(string host)
+    {
+        if (ObjectRegistry.IsIpBanned(host)) return true;
+        _lock.EnterReadLock();
+        try
+        {
+            var limit = _settings.MaxConnectionsPerIp;
+            if (limit > 0 && host != "?" && _perIpCounts.TryGetValue(host, out var cnt) && cnt >= limit)
+                return true;
+            if (_settings.MaxTotalConnections > 0 && _connections.Count >= _settings.MaxTotalConnections)
+                return true;
+            return false;
+        }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    // refusal teardown runs outside the manager write lock (see
+    // RefuseConnection). Close() does task/socket work that used to stall
+    // every register/disconnect/count op while the lock was held.
     // Port of manager.py:70-119 register_connection
     public virtual bool RegisterConnection(string connId, BaseConnection connection)
     {
         var host = connection.ClientHost ?? "?"; // port of manager.py:76
         connection.RegisteredHost = host;
         var limit = _settings.MaxConnectionsPerIp; // port of manager.py:77
+        string? refusal = null;
         _lock.EnterWriteLock();
         try
         {
             if (ObjectRegistry.IsIpBanned(host)) // port of manager.py:79-85
-            {
-                try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Refusing connection from banned host {host}"); } catch { Console.Error.WriteLine($"[Network] Refusing connection from banned host {host}"); }
-                try { connection.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ReferenceEqualityComparer.RegisterConnection: " + logEx.Message, "ReferenceEqualityComparer"); }
-                return false;
-            }
-            if (limit > 0 && host != "?") // port of manager.py:86-101
+                refusal = $"[Network] Refusing connection from banned host {host}";
+            else if (limit > 0 && host != "?") // port of manager.py:86-101
             {
                 var sameHost = _perIpCounts.TryGetValue(host, out var cnt) ? cnt : 0;
                 // if overwriting same conn_id, don't count itself twice — manager.py:88-91
                 if (_connections.TryGetValue(connId, out var existing) && (existing.RegisteredHost ?? existing.ClientHost ?? "?") == host)
                     sameHost--;
                 if (sameHost >= limit)
-                {
-                    try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Refusing connection from {host}: per-IP limit ({limit}) reached"); } catch { Console.Error.WriteLine($"[Network] Refusing connection from {host}: per-IP limit ({limit}) reached"); }
-                    try { connection.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ReferenceEqualityComparer.RegisterConnection: " + logEx.Message, "ReferenceEqualityComparer"); }
-                    return false;
-                }
+                    refusal = $"[Network] Refusing connection from {host}: per-IP limit ({limit}) reached";
             }
             // Total-connection admission cap (0 = unlimited). Checked after the
             // per-IP gate so the refusal reason stays specific.
-            if (_settings.MaxTotalConnections > 0 && _connections.Count >= _settings.MaxTotalConnections)
+            if (refusal == null && _settings.MaxTotalConnections > 0 && _connections.Count >= _settings.MaxTotalConnections)
+                refusal = $"[Network] Refusing connection from {host}: total limit ({_settings.MaxTotalConnections}) reached";
+            if (refusal == null)
             {
-                try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Refusing connection from {host}: total limit ({_settings.MaxTotalConnections}) reached"); } catch { Console.Error.WriteLine($"[Network] Refusing connection from {host}: total limit ({_settings.MaxTotalConnections}) reached"); }
-                try { connection.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.RegisterConnection: " + logEx.Message, "ConnectionManager"); }
-                return false;
-            }
             // handle overwrite: adjust old host count — manager.py:102-113
             if (_connections.TryGetValue(connId, out var old))
             {
@@ -812,17 +869,34 @@ public class ConnectionManager
             _connToId[connection] = connId; // port of manager.py:115
             if (host != "?") // port of manager.py:116-117
                 _perIpCounts[host] = _perIpCounts.TryGetValue(host, out var v) ? v + 1 : 1;
+            }
         }
         finally { _lock.ExitWriteLock(); }
-        try { Atheriz.Core.AtherizLogger.LogInformation($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); } catch { Console.Error.WriteLine($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); } // port of manager.py:118
-        // Amortized orphan sweep: every 50th registration, drop sockets that
-        // never logged in and aged out (no login timeout exists upstream).
-        // Runs after the write lock is released; Disconnect is lock-safe.
-        if (System.Threading.Interlocked.Increment(ref _sinceSweep) % 50 == 0)
+        if (refusal != null)
         {
-            try { SweepOrphanedConnections(TimeSpan.FromMinutes(5)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.RegisterConnection: " + logEx.Message, "ConnectionManager"); }
+            RefuseConnection(connection, refusal);
+            return false;
+        }
+        try { Atheriz.Core.AtherizLogger.LogInformation($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); } catch { Console.Error.WriteLine($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); } // port of manager.py:118
+        // timer-driven orphan sweep. The old every-50th-registration
+        // amortization never reaped on a low-traffic server; the WS receive
+        // path has no idle timeout of its own, so this 60s cadence covers
+        // abandoned pre-login sockets on both transports. Starts lazily so
+        // short-lived/test instances pay nothing.
+        if (System.Threading.Interlocked.CompareExchange(ref _sweepStarted, 1, 0) == 0)
+        {
+            try { _orphanSweepTimer = new System.Threading.Timer(_ => { try { SweepOrphanedConnections(TimeSpan.FromMinutes(5)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager orphan sweep: " + logEx.Message, "ConnectionManager"); } }, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.RegisterConnection: " + logEx.Message, "ConnectionManager"); }
         }
         return true;
+    }
+
+    // refusal teardown. Runs after the manager write lock releases —
+    // Close() does task/socket work that must not stall concurrent
+    // register/disconnect/count ops. Messages mirror the old inline refuses.
+    private static void RefuseConnection(BaseConnection connection, string reason)
+    {
+        try { Atheriz.Core.AtherizLogger.LogWarning(reason); } catch { Console.Error.WriteLine(reason); }
+        try { connection.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.RefuseConnection: " + logEx.Message, "ConnectionManager"); }
     }
 
     /// <summary>
@@ -895,17 +969,27 @@ public class ConnectionManager
             // Fire-and-forget by design: disconnect() executes on the network
             // event loop and must not block on teardown (pinned by
             // DisconnectDoesNotBlockOnSlowTeardown: 0.5s teardown, <0.5s return).
-            // Pool full/stopped: never run teardown inline — at_disconnect()
-            // checkpoints the DB. Re-schedule with a short delay (same
-            // pattern as GameTime alarms); the delayed task re-queues
-            // onto the pool once it drains.
+            // Pool saturated but alive: never run teardown inline —
+            // re-schedule with a short delay (same pattern as GameTime
+            // alarms); the delayed task re-queues onto the pool once it
+            // drains. Pool STOPPED: the delay would drop the teardown
+            // silently (Delay never fires on a stopped pool), losing
+            // session/puppet cleanup with only a log line — run it inline
+            // instead . No event-loop throughput is left to protect
+            // on a stopped pool.
             bool queued = false;
             try { queued = Atp.AddTask(() => DoSessionDisconnect(session)); }
             catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Session teardown could not be queued during disconnect: {e}"); } catch { Console.Error.WriteLine($"[Network] Session teardown could not be queued during disconnect: {e}"); } }
             if (!queued)
             {
-                try { Atp.Delay(0.05, () => DoSessionDisconnect(session)); }
-                catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Session teardown could not be deferred during disconnect: {e}"); } catch { Console.Error.WriteLine($"[Network] Session teardown could not be deferred during disconnect: {e}"); } }
+                bool stopped = false;
+                try { stopped = Atp.IsStopped; } catch { }
+                if (stopped) DoSessionDisconnect(session);
+                else
+                {
+                    try { Atp.Delay(0.05, () => DoSessionDisconnect(session)); }
+                    catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Session teardown could not be deferred during disconnect: {e}"); } catch { Console.Error.WriteLine($"[Network] Session teardown could not be deferred during disconnect: {e}"); } }
+                }
             }
         }
         try { connection.Close(); } // port of manager.py:149-152
@@ -980,6 +1064,17 @@ public class ConnectionManager
     {
         try
         {
+            // size cap precedes the parse. WebsocketMaxMessageSize was
+            // enforced only at the WS edge (WebSocketProtocol); direct
+            // callers of this shared entry point could force a large parse.
+            int maxMessageSize = _settings.WebsocketMaxMessageSize;
+            if (rawMessage.Length > maxMessageSize)
+            {
+                var oversizeHost = connection.ClientHost ?? "?";
+                if (ShouldLogOversize(oversizeHost))
+                    try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Message too large from {oversizeHost} ({rawMessage.Length} bytes > {maxMessageSize} bytes)"); } catch { Console.Error.WriteLine($"[Network] Message too large from {oversizeHost} ({rawMessage.Length} bytes > {maxMessageSize} bytes)"); }
+                return;
+            }
             using var doc = JsonDocument.Parse(rawMessage);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 1) // port of manager.py:194

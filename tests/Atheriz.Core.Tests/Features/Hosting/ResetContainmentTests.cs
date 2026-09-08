@@ -7,7 +7,7 @@ using Atheriz.Server.Infrastructure;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// P0-3: destructive wipes (reset / overwrite scaffolding) must be contained
+// destructive wipes (reset / overwrite scaffolding) must be contained
 // to game save dirs — never a filesystem root or a foreign directory.
 [Collection("Ported")]
 public class ResetContainmentTests
@@ -27,14 +27,20 @@ public class ResetContainmentTests
     }
 
     [Fact]
-    public void GuardWipePath_AllowsSaveLeaf()
+    public void GuardWipePath_RequiresMarkersForSaveLeaf()
     {
+        // a bare `save` leaf is NOT sufficient — `new /tmp
+        // --overwrite` must not wipe /tmp/save. Only initialized worlds
+        // (markers) or --force inside a game folder pass.
         var dir = Path.Combine(Path.GetTempPath(), "atheriz_wipe_" + Guid.NewGuid().ToString("N"));
         try
         {
-            // Need not exist: reset recreates it.
-            CorePathGuards.GuardWipePath(Path.Combine(dir, "save"), false);
+            // Need not exist to probe: absent and marker-less leaves refuse.
+            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(Path.Combine(dir, "save"), false));
             Directory.CreateDirectory(Path.Combine(dir, "save"));
+            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(Path.Combine(dir, "save"), false));
+            // Markers restore the pass.
+            File.WriteAllText(Path.Combine(dir, "save", "database.sqlite3"), "x");
             CorePathGuards.GuardWipePath(Path.Combine(dir, "save"), false);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }

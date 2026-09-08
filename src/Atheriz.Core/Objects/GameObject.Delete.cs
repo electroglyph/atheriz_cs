@@ -13,7 +13,7 @@ public partial class GameObject
     // Port of base_obj.py:467 delete + object deletion lifecycle — caller optional for Account parity
     public virtual (int count, List<object> ops)? Delete(GameObject? caller = null, bool recursive = false)
     {
-        // B-OBJ-13: Account row delete is immediate regardless of static type.
+        // Account row delete is immediate regardless of static type.
         // (C# cannot override with a different return type, so the bool Delete
         // hides this method; route the base dispatch to the same immediate core.)
         if (this is Account acc) return acc.DeleteImmediate(caller);
@@ -58,7 +58,9 @@ public partial class GameObject
                     if (caller != null)
                     {
                         bool vetoed = false;
-                        try { vetoed = !content.AtDelete(caller); } catch { vetoed = false; }
+                        // a throwing AtDelete must not vanish silently —
+                        // log the swallow (still treated as "not vetoed").
+                        try { vetoed = !content.AtDelete(caller); } catch (Exception logEx) { vetoed = false; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as not vetoed): " + logEx.Message, "GameObject"); }
                         if (vetoed) continue;
                     }
                     if (depth + 1 >= maxDepth)
@@ -213,15 +215,17 @@ public partial class GameObject
             TeardownDeleted(this);
             // toDelete includes self plus any recursively deleted via Move failure path already added to ops
             // count is 1 plus the recursively deleted children above.
-            ObjectRegistry.RemoveObject(this);
+            // single RemoveObject — a second call here could delete
+            // a live re-add of this Id.)
             return (1 + deletedKids, ops);
         }
     }
 
     // Port of base_obj.py:349-426 _delete_object teardown: leave no dangling
     // follows, channel memberships, sessions, or tick slots. Shared by the
-    // recursive walk above and the non-recursive self-delete tail.
-    private static void TeardownDeleted(GameObject obj)
+    // recursive walk above and the non-recursive self-delete tail, plus
+    // Node.Delete's self teardown .
+    internal static void TeardownDeleted(GameObject obj)
     {
         try
         {
@@ -277,5 +281,8 @@ public partial class GameObject
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
         try { Objects.GlobalTickerHolder.Get()?.RemoveCoro(obj.AtTick, obj.TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+        // leave no dangling residue — a deleted id must not stay
+        // readable via PeekMessages/scans or keep installed hooks alive.
+        try { obj.Write(() => { obj._msgLog.Clear(); obj._hooks.Clear(); }); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
     }
 }

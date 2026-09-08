@@ -95,17 +95,19 @@ public static class PathGuards
     }
 
     /// <summary>
-    /// Containment for destructive wipes (<c>reset</c>, overwrite scaffolding).
-    /// The target must be a <c>save</c> leaf or a previously-initialized world
-    /// (<c>server.pid</c> / <c>database.sqlite3*</c> markers); anything else needs
-    /// an explicit <c>--force</c> inside a game folder.
+    /// Containment for destructive wipes (<c>reset</c>).
+    /// The target must be a previously-initialized world (<c>server.pid</c> /
+    //  <c>database.sqlite3*</c> markers); anything else needs an explicit
+    /// <c>--force</c> inside a game folder. A bare <c>save</c> leaf is NOT
+    /// sufficient on its own : <c>new /tmp --overwrite</c> must not
+    /// wipe <c>/tmp/save</c> contents. Overwrite scaffolding (<c>new</c>)
+    /// performs its own confined save-leaf wipe with explicit operator intent
+    /// instead of consulting this world-membership gate.
     /// </summary>
     public static void GuardWipePath(string path, bool force)
     {
         DenyRoot(path);
         var full = Path.GetFullPath(path);
-        var leaf = Path.GetFileName(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        if (leaf.Equals("save", StringComparison.OrdinalIgnoreCase)) return;
         if (Directory.Exists(full))
         {
             if (File.Exists(Path.Combine(full, "server.pid"))) return;
@@ -114,6 +116,6 @@ public static class PathGuards
         }
         if (force && GameUtils.IsInGameFolder()) return;
         throw new InvalidOperationException(
-            $"Refusing to wipe '{path}': not a game save directory (expected a 'save' leaf or an initialized world). Pass --force inside a game folder to override.");
+            $"Refusing to wipe '{path}': not an initialized world (expected world markers). Pass --force inside a game folder to override.");
     }
 }

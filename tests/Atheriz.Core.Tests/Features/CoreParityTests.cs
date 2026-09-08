@@ -15,11 +15,10 @@ public class CoreParityTests
     [Fact]
     public void MenuHelper_Matches_MenuPrompt()
     {
-        // Behavior pin: four names, one impl — they must behave identically
-        // until the aliases are removed.
-        Assert.Equal(
-            typeof(MenuPrompt).GetMethod("PromptWithTimeoutAsync") != null,
-            typeof(MenuHelper).GetMethods().Any(m => m.Name.StartsWith("PromptWithTimeout")));
+        // the MenuHelper alias is removed — one spelling lives on
+        // MenuPrompt (PromptWithTimeout + PromptWithTimeoutAsync).
+        Assert.NotNull(typeof(MenuPrompt).GetMethod("PromptWithTimeoutAsync"));
+        Assert.NotNull(typeof(MenuPrompt).GetMethod("PromptWithTimeout"));
     }
 
     [Fact]

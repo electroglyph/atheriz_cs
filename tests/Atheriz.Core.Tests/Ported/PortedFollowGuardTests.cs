@@ -15,6 +15,9 @@ public class PortedFollowGuardTests
         var grid = new NodeGrid(area, 0);
         var n1 = new Node(new Coord(area, 0, 0, 0));
         var n2 = new Node(new Coord(area, 0, 1, 0));
+        // The Node constructor does not publish to the registry —
+        // tests register explicitly, like production call sites.
+        ObjectRegistry.AddObject(n1); ObjectRegistry.AddObject(n2);
         n1.AddLink(new NodeLink("north", new Coord(area, 0, 1, 0)));
         n2.AddLink(new NodeLink("south", new Coord(area, 0, 0, 0)));
         grid.AddNode(n1); grid.AddNode(n2); areaObj.AddGrid(grid); nh.AddArea(areaObj);
@@ -99,6 +102,8 @@ public class PortedFollowGuardTests
         var n1 = new Node(new Coord("TestArea",0,0,0));
         var n2 = new Node(new Coord("TestArea",0,1,0));
         var n3 = new Node(new Coord("TestArea",9,9,0));
+        // Explicit registration: the constructor does not publish.
+        ObjectRegistry.AddObject(n1); ObjectRegistry.AddObject(n2); ObjectRegistry.AddObject(n3);
         n1.AddLink(new NodeLink("north", new Coord("TestArea",0,1,0)));
         n2.AddLink(new NodeLink("south", new Coord("TestArea",0,0,0)));
         grid.AddNode(n1); grid.AddNode(n2); grid.AddNode(n3); area.AddGrid(grid); nh.AddArea(area);
@@ -193,12 +198,10 @@ public class PortedFollowGuardTests
         new FollowCommand().Run(follower, new FollowCommand().Parser!.ParseArgs(new[]{"Leader"}));
         var script = leader.GetScriptsByType("FollowScript").First() as FollowScript;
         Assert.NotNull(script);
-        // _old_loc initially none via reflection
-        var oldLocField = typeof(FollowScript).GetField("_oldLoc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        Assert.Null(oldLocField.GetValue(script));
+        // pairing is a stack now; OldLoc peeks the top (empty first).
+        Assert.Null(script.OldLoc);
         script.at_pre_move(n2, "north");
-        var captured = oldLocField.GetValue(script) as GameObject;
-        Assert.Equal(n1, captured);
+        Assert.Equal(n1, script.OldLoc);
     }
 
     [Fact]
@@ -211,11 +214,13 @@ public class PortedFollowGuardTests
         new FollowCommand().Run(follower, new FollowCommand().Parser!.ParseArgs(new[]{"Leader"}));
         var script = leader.GetScriptsByType("FollowScript").First() as FollowScript;
         Assert.NotNull(script);
-        var oldLocField = typeof(FollowScript).GetField("_oldLoc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        oldLocField.SetValue(script, n1);
+        // seed the stack via a real pre-move capture, then post-move
+        // must pop it (OldLoc back to null).
+        script.at_pre_move(n2, "north");
+        Assert.NotNull(script.OldLoc);
         // Simulate leader already moved; now post_move should clear
         script.at_post_move(n2, "north");
-        Assert.Null(oldLocField.GetValue(script));
+        Assert.Null(script.OldLoc);
     }
 
     [Fact]
@@ -228,8 +233,8 @@ public class PortedFollowGuardTests
         new FollowCommand().Run(follower, new FollowCommand().Parser!.ParseArgs(new[]{"Leader"}));
         var script = leader.GetScriptsByType("FollowScript").First() as FollowScript;
         Assert.NotNull(script);
-        var oldLocField = typeof(FollowScript).GetField("_oldLoc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        oldLocField.SetValue(script, null);
+        // empty stack — nothing captured, so post-move is a no-op and
+        // the follower stays put.
         // Use MoveTo without triggering real FollowScript capture (manually set old to null)
         // We directly invoke at_post_move with null old_loc, follower should not move
         // Ensure leader is still at n1 before post_move, then after post_move follower stays
@@ -248,8 +253,8 @@ public class PortedFollowGuardTests
         new FollowCommand().Run(follower, new FollowCommand().Parser!.ParseArgs(new[]{"Leader"}));
         var script = leader.GetScriptsByType("FollowScript").First() as FollowScript;
         Assert.NotNull(script);
-        var oldLocField = typeof(FollowScript).GetField("_oldLoc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        oldLocField.SetValue(script, n1);
+        // no stack seeding needed — the no-followers check runs before
+        // the pop, so the script deletes regardless.
         // clear followers
         var f = typeof(GameObject).GetField("_followers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         (f.GetValue(leader) as HashSet<int>)!.Clear();
@@ -267,8 +272,9 @@ public class PortedFollowGuardTests
         new FollowCommand().Run(follower, new FollowCommand().Parser!.ParseArgs(new[]{"Leader"}));
         var script = leader.GetScriptsByType("FollowScript").First() as FollowScript;
         Assert.NotNull(script);
-        var oldLocField = typeof(FollowScript).GetField("_oldLoc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        oldLocField.SetValue(script, n1);
+        // capture via a real pre-move so the post-move attempts (and
+        // fails) the follower move.
+        script.at_pre_move(n2, "north");
         follower.InstallHook("at_pre_move", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
         follower.ClearMessages();
         script!.at_post_move(n2, "north");

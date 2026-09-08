@@ -52,6 +52,9 @@ public sealed class GameArgumentParser
         public object? ConstValue;
         public string[]? Choices;
         public bool Required;
+        // tracks an explicit required: opt-out/in (argparse forces
+        // Nargs.None positionals required; an explicit required:false opts out).
+        public bool RequiredExplicit;
         public bool IsHelp;
     }
 
@@ -60,7 +63,7 @@ public sealed class GameArgumentParser
         private readonly ArgumentDef _def;
         public Builder(ArgumentDef def) => _def = def;
         public Builder Help(string h) { _def.Help = h; return this; }
-        public Builder Required(bool v = true) { _def.Required = v; return this; }
+        public Builder Required(bool v = true) { _def.Required = v; _def.RequiredExplicit = true; return this; }
         public Builder Action(ArgAction a) { _def.Action = a; return this; }
         public Builder Nargs(NargsKind k) { _def.Nargs = k; return this; }
         public Builder Nargs(string s) => Nargs(ParseNargs(s));
@@ -96,13 +99,13 @@ public sealed class GameArgumentParser
         return new Builder(def);
     }
 
-    public Builder AddArgument(string name, string help = "", string nargs = "", string action = "", Type? type = null, object? defaultValue = null, string[]? choices = null, bool required = false)
+    public Builder AddArgument(string name, string help = "", string nargs = "", string action = "", Type? type = null, object? defaultValue = null, string[]? choices = null, bool? required = null)
     {
         // Handle case where caller passed two option strings positionally: AddArgument("-f","--flag")
         // In that case 'help' looks like an option (starts with -), treat as second alias rather than help text.
         // Guard requires BOTH strings to be option-like so genuine help text
         // starting with '-' on a positional is never misread as an alias.
-        if (name.StartsWith("-") && IsOptionLike(help) && string.IsNullOrEmpty(nargs) && string.IsNullOrEmpty(action) && type == null && defaultValue == null && choices == null && !required)
+        if (name.StartsWith("-") && IsOptionLike(help) && string.IsNullOrEmpty(nargs) && string.IsNullOrEmpty(action) && type == null && defaultValue == null && choices == null && required != true)
         {
             // treat as AddArgument(params ["-f","--flag"])
             var names = new List<string> { name, help };
@@ -117,7 +120,8 @@ public sealed class GameArgumentParser
         {
             Names = [name],
             Help = help,
-            Required = required,
+            Required = required ?? false,
+            RequiredExplicit = required.HasValue,
             Choices = choices,
             DefaultValue = defaultValue,
             Type = type,
@@ -133,10 +137,30 @@ public sealed class GameArgumentParser
         return new Builder(def);
     }
 
+    // usage names positionals (argparse shape), shared by help/usage.
+    private string BuildUsage()
+    {
+        var sb = new StringBuilder($"usage: {Prog}");
+        if (AddHelp) sb.Append(" [-h]");
+        foreach (var d in _defs)
+        {
+            if (d.IsHelp || d.Names.Any(n => n.StartsWith("-"))) continue;
+            sb.Append(d.Nargs switch
+            {
+                NargsKind.Optional => $" [{d.Dest}]",
+                NargsKind.ZeroOrMore => $" [{d.Dest} ...]",
+                NargsKind.OneOrMore => $" {d.Dest} [...]",
+                NargsKind.Remainder => " ...",
+                _ => $" {d.Dest}",
+            });
+        }
+        return sb.ToString();
+    }
+
     public string FormatHelp()
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"usage: {Prog} [-h] ...");
+        sb.AppendLine(BuildUsage());
         if (!string.IsNullOrEmpty(Description)) sb.AppendLine(Description);
         sb.AppendLine("options:");
         foreach (var d in _defs)
@@ -147,12 +171,22 @@ public sealed class GameArgumentParser
         return sb.ToString();
     }
 
-    public string FormatUsage() => $"usage: {Prog} ...\n";
+    public string FormatUsage() => BuildUsage() + "\n";
 
     public void PrintHelp() => throw new CommandError(FormatHelp());
-    public void PrintHelp(object? file) => throw new CommandError(FormatHelp());
+    // the file overload honors file (argparse print_help(file=...));
+    // null/absent file keeps the Msg-surface throw.
+    public void PrintHelp(object? file)
+    {
+        if (file is System.IO.TextWriter w) { w.Write(FormatHelp()); return; }
+        throw new CommandError(FormatHelp());
+    }
     public void PrintUsage() => throw new CommandError(FormatUsage());
-    public void PrintUsage(object? file) => throw new CommandError(FormatUsage());
+    public void PrintUsage(object? file)
+    {
+        if (file is System.IO.TextWriter w) { w.Write(FormatUsage()); return; }
+        throw new CommandError(FormatUsage());
+    }
     public void Error(string message) => throw new CommandError(message);
     public void Exit(int status = 0, string? message = null)
     {
@@ -174,11 +208,55 @@ public sealed class GameArgumentParser
         internal void Set(string k, object? v) => _map[k] = v;
     }
 
+    // Shared scalar conversion for options and single-value positionals
+    // : int/float/double convert uniformly and throw like
+    // argparse's "invalid <type> value" instead of keeping silent strings.
+    private static object ConvertTypedValue(Type? type, string display, string val)
+    {
+        if (type == typeof(int))
+        {
+            if (int.TryParse(val, out var iv)) return iv;
+            throw new CommandError($"argument {display}: invalid int value: '{val}'");
+        }
+        if (type == typeof(float))
+        {
+            if (float.TryParse(val, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var fv)) return fv;
+            throw new CommandError($"argument {display}: invalid float value: '{val}'");
+        }
+        if (type == typeof(double))
+        {
+            if (double.TryParse(val, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var dv)) return dv;
+            throw new CommandError($"argument {display}: invalid double value: '{val}'");
+        }
+        return val;
+    }
+
+    private static void CheckChoices(string[]? choices, string display, string val)
+    {
+        if (choices is not null && !choices.Contains(val))
+            throw new CommandError($"argument {display}: invalid choice: '{val}' (choose from {string.Join(", ", choices)})");
+    }
+
+    // argparse's negative-number matcher (also the C# negative fast path).
+    private static bool IsNegativeNumber(string tok)
+        // trailing-dot forms ("-5.") also parse as values. DELIBERATE
+        // extension beyond argparse's _negative_number_matcher
+        // (^-\d+$|^-\d*\.\d+$), which rejects them: with no digit-options
+        // defined the token is unambiguous, and float("-5.") is valid.
+        => System.Text.RegularExpressions.Regex.IsMatch(tok, @"^-\d+\.?$|^-\d*\.\d+$");
+
+    // An unknown -flag: starts with '-' but is not a bare '-' or a negative
+    // number. List consumers must stop at these (argparse treats them as
+    // unknown optionals) instead of swallowing them as values .
+    private static bool LooksLikeUnknownOption(string tok)
+        => tok.StartsWith("-") && tok.Length > 1 && !IsNegativeNumber(tok);
+
     public ParsedArgs ParseArgs(IReadOnlyList<string> argList)
     {
-        // help trigger
-        if (AddHelp && argList.Any(a => a == "-h" || a == "--help"))
-            throw new CommandError(FormatHelp());
+        // No blanket -h/--help pre-scan: help tokens inside free-text values
+        // must stay data . A standalone --help still reaches the
+        // IsHelp branch in the main loop (argparse likewise lets REMAINDER
+        // swallow --help once a positional has started).
         // init defaults
         var result = new ParsedArgs();
         foreach (var d in _defs)
@@ -206,22 +284,28 @@ public sealed class GameArgumentParser
             foreach (var n in d.Names) optionalMap[n] = d;
 
         int posIdx = 0;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         for (int i = 0; i < argList.Count; )
         {
             string tok = argList[i];
             if (optionalMap.TryGetValue(tok, out var opt))
             {
                 if (opt.IsHelp) throw new CommandError(FormatHelp());
+                // presence tracking so required flags with non-null
+                // bool defaults (store_true/store_false) are detectable.
+                seen.Add(opt.Dest);
                 if (opt.Action == ArgAction.StoreTrue) { result.Set(opt.Dest, true); i++; }
                 else if (opt.Action == ArgAction.StoreFalse) { result.Set(opt.Dest, false); i++; }
                 else
                 {
-                    // store: consume value(s)
+                    // store: consume value(s). List consumers stop at unknown
+                    // -flags (they are unrecognized optionals, not values);
+                    // a single-value store keeps argparse's greedy take.
                     if (opt.Nargs == NargsKind.ZeroOrMore || opt.Nargs == NargsKind.OneOrMore || opt.Nargs == NargsKind.Remainder)
                     {
                         var lst = new List<string>();
                         i++;
-                        while (i < argList.Count && !optionalMap.ContainsKey(argList[i]))
+                        while (i < argList.Count && !optionalMap.ContainsKey(argList[i]) && !LooksLikeUnknownOption(argList[i]))
                         {
                             lst.Add(argList[i++]);
                         }
@@ -241,17 +325,10 @@ public sealed class GameArgumentParser
                         i++;
                         if (i >= argList.Count) throw new CommandError($"argument {tok}: expected one argument");
                         string val = argList[i++];
-                        // type conversion
-                        object conv = val;
-                        if (opt.Type == typeof(int))
-                        {
-                            if (int.TryParse(val, out var iv)) conv = iv;
-                            else throw new CommandError($"argument {tok}: invalid int value: '{val}'");
-                        }
-                        else if (opt.Type == typeof(float) && float.TryParse(val, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var fv)) conv = fv;
+                        // type conversion (uniform with positionals)
+                        object conv = ConvertTypedValue(opt.Type, tok, val);
                         // choices
-                        if (opt.Choices is not null && !opt.Choices.Contains(val))
-                            throw new CommandError($"argument {tok}: invalid choice: '{val}' (choose from {string.Join(", ", opt.Choices)})");
+                        CheckChoices(opt.Choices, tok, val);
                         if (opt.Action == ArgAction.Append)
                         {
                             var cur = result.GetList(opt.Dest);
@@ -268,17 +345,31 @@ public sealed class GameArgumentParser
                 // optional looks like a negative number, a "-5"/"-.5" token
                 // is positional (so `set me score -5` parses the value).
                 // (C# commands never define digit options, like Python's.)
-                if (System.Text.RegularExpressions.Regex.IsMatch(tok, @"^-\d+$|^-\d*\.\d+$"))
+                if (IsNegativeNumber(tok))
                 {
                     if (posIdx >= positionalDefs.Count)
                         throw new CommandError($"unrecognized arguments: {tok}");
                     var pdNum = positionalDefs[posIdx];
-                    result.Set(pdNum.Dest, tok);
-                    posIdx++;
+                    // Same shape as the positional path below : list
+                    // positionals collect the token (lists stay string-typed);
+                    // single-value positionals convert + validate choices.
+                    // List defs do not advance posIdx so following tokens join.
+                    if (pdNum.Nargs == NargsKind.ZeroOrMore || pdNum.Nargs == NargsKind.OneOrMore || pdNum.Nargs == NargsKind.Remainder)
+                    {
+                        var negLst = result.GetList(pdNum.Dest);
+                        negLst.Add(tok);
+                        result.Set(pdNum.Dest, negLst);
+                    }
+                    else
+                    {
+                        CheckChoices(pdNum.Choices, pdNum.Names[0], tok);
+                        result.Set(pdNum.Dest, ConvertTypedValue(pdNum.Type, pdNum.Names[0], tok));
+                        posIdx++;
+                    }
                     i++;
                     continue;
                 }
-                // unknown optional — in Python this would error; mirror by throwing CommandError
+                    // unknown optional — in Python this would error; mirror by throwing CommandError
                 throw new CommandError($"unrecognized arguments: {tok}");
             }
             else
@@ -297,34 +388,28 @@ public sealed class GameArgumentParser
                 else if (pd.Nargs == NargsKind.ZeroOrMore)
                 {
                     var lst = result.GetList(pd.Dest);
-                    while (i < argList.Count && !optionalMap.ContainsKey(argList[i])) lst.Add(argList[i++]);
+                    while (i < argList.Count && !optionalMap.ContainsKey(argList[i]) && !LooksLikeUnknownOption(argList[i])) lst.Add(argList[i++]);
                     result.Set(pd.Dest, lst);
                     posIdx++;
                 }
                 else if (pd.Nargs == NargsKind.OneOrMore)
                 {
                     var lst = result.GetList(pd.Dest);
-                    while (i < argList.Count && !optionalMap.ContainsKey(argList[i])) lst.Add(argList[i++]);
+                    while (i < argList.Count && !optionalMap.ContainsKey(argList[i]) && !LooksLikeUnknownOption(argList[i])) lst.Add(argList[i++]);
                     if (lst.Count == 0) throw new CommandError($"the following arguments are required: {pd.Dest}");
                     result.Set(pd.Dest, lst);
                     posIdx++;
                 }
                 else if (pd.Nargs == NargsKind.Optional)
                 {
-                    result.Set(pd.Dest, tok);
+                    CheckChoices(pd.Choices, pd.Names[0], tok);
+                    result.Set(pd.Dest, ConvertTypedValue(pd.Type, pd.Names[0], tok));
                     i++; posIdx++;
                 }
                 else // None single value
                 {
-                    object conv = tok;
-                    if (pd.Type == typeof(int))
-                    {
-                        if (int.TryParse(tok, out var iv)) conv = iv;
-                        else throw new CommandError($"argument {pd.Names[0]}: invalid int value: '{tok}'");
-                    }
-                    if (pd.Choices is not null && !pd.Choices.Contains(tok))
-                        throw new CommandError($"argument {pd.Names[0]}: invalid choice: '{tok}'");
-                    result.Set(pd.Dest, conv);
+                    CheckChoices(pd.Choices, pd.Names[0], tok);
+                    result.Set(pd.Dest, ConvertTypedValue(pd.Type, pd.Names[0], tok));
                     i++; posIdx++;
                 }
             }
@@ -333,8 +418,10 @@ public sealed class GameArgumentParser
         foreach (var pd in positionalDefs)
         {
             bool isRequired = pd.Required || pd.Nargs == NargsKind.OneOrMore;
-            // positional with Nargs.None is required by default in Python argparse
-            if (!isRequired && pd.Nargs == NargsKind.None && !pd.Names.Any(n => n.StartsWith("-")))
+            // positional with Nargs.None is required by default in Python argparse,
+            // unless explicitly opted out via required:false .
+            if (!isRequired && pd.Nargs == NargsKind.None && !pd.Names.Any(n => n.StartsWith("-"))
+                && !(pd.RequiredExplicit && !pd.Required))
                 isRequired = true;
             if (isRequired)
             {
@@ -347,11 +434,11 @@ public sealed class GameArgumentParser
                 // keep null
             }
         }
-        // check required optionals
+        // check required optionals: presence on the command line is required
+        // (bool defaults make a null-check undetectable for store_true).
         foreach (var od in _defs.Where(d => d.Required && d.Names.Any(n => n.StartsWith("-"))))
         {
-            var v = result[od.Dest];
-            if (v is null) throw new CommandError($"the following arguments are required: {string.Join("/", od.Names)}");
+            if (!seen.Contains(od.Dest)) throw new CommandError($"the following arguments are required: {string.Join("/", od.Names)}");
         }
         return result;
     }

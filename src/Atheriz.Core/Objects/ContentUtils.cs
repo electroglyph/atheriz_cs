@@ -92,8 +92,10 @@ public static class ContentUtils
             result.Add(o);
             if (o.IsContainer)
             {
+                // one container's resolver failure must not drop the
+                // remaining siblings — log and continue, don't break.
                 try { result.AddRange(GatherContents(o, resolver, visited, depth + 1, looker)); }
-                catch { break; }
+                catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed ContentUtils.GatherContents: {ex.Message}", "ContentUtils"); }
             }
         }
         return result;

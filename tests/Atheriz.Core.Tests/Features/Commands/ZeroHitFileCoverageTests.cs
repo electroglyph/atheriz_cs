@@ -9,7 +9,7 @@ using Atheriz.Core.Persistence.Entities;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
-// P3: direct tests for previously zero-hit files — CommandPermissions,
+// direct tests for previously zero-hit files — CommandPermissions,
 // HelpFormatter, BanHelper (internal, via reflection), DoorDirectionCommand
 // (abstract path via OpenCommand), hook marker attributes, IJsonEntity.
 public sealed class ZeroHitFileCoverageTests
@@ -115,6 +115,7 @@ public sealed class ZeroHitFileCoverageTests
         var area = new NodeArea("ZeroHit");
         var grid = new NodeGrid("ZeroHit", 0);
         grid.Nodes[(0, 0)] = new Node(new Coord("ZeroHit", 0, 0, 0));
+        ObjectRegistry.AddObject((Node)grid.Nodes[(0, 0)]); // Explicit registration: the constructor does not publish.
         area.AddGrid(grid);
         nh.AddArea(area);
         caller.Location = new LocationRef.CoordLocation(new Coord("ZeroHit", 0, 0, 0));

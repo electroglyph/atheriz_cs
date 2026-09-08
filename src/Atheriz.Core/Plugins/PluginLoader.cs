@@ -1,6 +1,13 @@
 // Port of atheriz/reloader.py:14 _EXCLUDED_MODULES + 216 CLASS_INJECTIONS + 249 _apply_patch
 // Port of atheriz/atheriz.py:103 setup_game_folder (injection scanning)
 // Minimal faithful port using collectible AssemblyLoadContext — webclient sync off, no Windows ACL hardening.
+//
+// Reflection is confined to plugin discovery here (see SourceHygieneTests
+// exclusions): there is no non-reflection mechanism to enumerate a plugin
+// assembly's [EntityReplacement] marks, and self-registration would break
+// test isolation (module initializers run at assembly load) plus the plugin
+// SDK contract Python establishes (import + scan). Everything else in prod
+// stays reflection-free.
 
 using System.Reflection;
 using System.Runtime.Loader;
@@ -37,6 +44,12 @@ public sealed class PluginLoader : IDisposable
 
     private AssemblyLoadContext? _alc;
     private Assembly? _loaded;
+
+    // weak handle to the most recently unloaded ALC. Replacements +
+    // live patched instances root the collectible ALC, so Unload() alone can
+    // silently leak one ALC+assembly per reload; the weak ref lets callers
+    // VERIFY the unload actually completed (see WaitForUnload).
+    private WeakReference? _unloadedAlcRef;
 
     /// <summary>Registered replacements: base type → replacement type.</summary>
     public Dictionary<Type, Type> Replacements { get; } = new();
@@ -187,10 +200,38 @@ public sealed class PluginLoader : IDisposable
         _loaded = null;
         if (_alc != null)
         {
+            // keep a weak handle so the unload can be VERIFIED.
+            // Anything still rooting the ALC (a live patched instance, a
+            // leaked Type ref) keeps the weak ref alive — surfacing the leak
+            // instead of silently accumulating one assembly per reload.
+            _unloadedAlcRef = new WeakReference(_alc);
             try { _alc.Unload(); } catch (Exception ex) { Console.Error.WriteLine($"[PluginLoader] Unload failed: {ex.Message}"); }
             _alc = null;
         }
         Console.Error.WriteLine("[PluginLoader] Unloaded.");
+    }
+
+    /// <summary>
+    /// True when the most recently unloaded ALC has actually been collected
+    /// (no live roots remain). False means something still pins it — treat a
+    /// persistent false as a plugin-assembly leak, not a clean unload.
+    /// </summary>
+    public bool IsUnloaded => _unloadedAlcRef == null || !_unloadedAlcRef.IsAlive;
+
+    /// <summary>
+    /// Unloads then pumps GC/finalizers (bounded) until the ALC dies.
+    /// Returns true on verified unload; false names a leak, not success.
+    /// </summary>
+    public bool WaitForUnload(int maxPasses = 10)
+    {
+        Unload();
+        for (int i = 0; i < maxPasses && !IsUnloaded; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        GC.Collect();
+        return IsUnloaded;
     }
 
     public void Dispose()

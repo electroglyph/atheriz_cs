@@ -6,7 +6,7 @@ using System.Reflection;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// P3: thin CLI files get direct behavior pins — ProcessHelper terminate/escalate
+// thin CLI files get direct behavior pins — ProcessHelper terminate/escalate
 // waits and RestartHandler port-wait polling (TcpListener-driven, no daemons).
 [Collection("Ported")]
 public class CliLifecycleTests

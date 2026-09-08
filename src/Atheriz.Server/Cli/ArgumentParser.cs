@@ -15,7 +15,8 @@ public static class ArgumentParser
                 // not a silent fall back to the default port.
                 return i + 1 < a.Length ? a[i + 1] : string.Empty;
             // Glued short form: -p1234 / -p=1234 (argparse allows -p1234).
-            if (shortFlag != null && a[i].Length > shortFlag.Length + 1 && a[i].StartsWith(shortFlag, StringComparison.Ordinal))
+            // single-char values count — "-p1" (len 3) must parse.
+            if (shortFlag != null && a[i].Length > shortFlag.Length && a[i].StartsWith(shortFlag, StringComparison.Ordinal))
             {
                 var rest = a[i].Substring(shortFlag.Length);
                 if (rest.StartsWith("=", StringComparison.Ordinal)) rest = rest.Substring(1);

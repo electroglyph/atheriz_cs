@@ -34,6 +34,8 @@ public class MoveHookLockTests
         {
             var oldNode = new Node(new Coord("limbo", 3, 3, 0));
             var newNode = new Node(new Coord("limbo", 4, 4, 0));
+            // Explicit registration so old-loc resolution finds them.
+            ObjectRegistry.AddObject(oldNode); ObjectRegistry.AddObject(newNode);
             var mover = GameObject.Create("mover");
             ObjectRegistry.AddObject(mover);
             Assert.True(mover.MoveTo(oldNode));

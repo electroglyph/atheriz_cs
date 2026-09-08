@@ -240,22 +240,35 @@ public class PortedSessionTestsPart2
     // Port of test_disconnect_offloop.py
     // test_pool_full_disconnect_defers_teardown_off_loop: when the pool
     // rejects, teardown must be deferred off the calling thread — never run
-    // synchronously inside disconnect. (This test previously pinned a C#-only
-    // inline fallback; corrected to ground truth.)
+    // synchronously inside disconnect — while the pool is LIVE. (A STOPPED
+    // pool can never drain, so a stopped pool runs the teardown inline there instead
+    // of losing it; this test saturates a live pool for the honest "full"
+    // scenario.)
     [Fact] public void PoolFullDisconnectDefersTeardown()
     {
         using var env = GlobalTestEnv.Enter();
-        var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 1);
-        pool.Stop(wait:false);
+        var pool = new AsyncThreadPool(maxThreads: 1, queueLimit: 1);
         var mgr = new ConnectionManager(pool: pool);
         var conn = new FakeConnection();
         var rec = new RecordingPuppet("rec3");
         ObjectRegistry.AddObject(rec);
         conn.Session.Puppet = rec; rec.Session = conn.Session; conn.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds()-1;
         mgr.RegisterConnection("c1", conn);
+        // Saturate the live pool: worker blocked, queue full. The started
+        // gate makes saturation deterministic (worker must dequeue task1
+        // before task2 is enqueued, else task2 is spuriously rejected).
+        var gate = new ManualResetEventSlim(false);
+        var started = new ManualResetEventSlim(false);
+        Assert.True(pool.AddTask(() => { started.Set(); gate.Wait(TimeSpan.FromSeconds(30)); }));
+        Assert.True(started.Wait(TimeSpan.FromSeconds(10)));
+        Assert.True(pool.AddTask(() => { }));
         mgr.Disconnect(conn);
         Assert.Equal(0, rec.Calls);
         Assert.False(rec.Ran.IsSet);
+        // Drain: the deferred retry runs the teardown off-thread, exactly once.
+        gate.Set();
+        Assert.True(rec.Ran.Wait(TimeSpan.FromSeconds(10)));
+        Assert.Equal(1, rec.Calls);
         pool.Stop(wait:false);
     }
     [Fact] public void TeardownRunsExactlyOnceAcrossDoubleDisconnect()

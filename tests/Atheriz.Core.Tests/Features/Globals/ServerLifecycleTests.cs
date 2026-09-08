@@ -45,7 +45,7 @@ public class ServerLifecycleTests
         // the port keeps one shared lock so the documented ordering guarantee holds.
         var t = typeof(ServerLifecycle);
         var w = t.GetField("WorldLock", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null);
-        var s = t.GetField("ShutdownLock", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null);
-        Assert.Same(w, s);
+        Assert.Same(StartStop.WorldLock, w);
+        Assert.Null(t.GetField("ShutdownLock", BindingFlags.NonPublic | BindingFlags.Static));
     }
 }

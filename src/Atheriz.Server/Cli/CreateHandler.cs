@@ -9,7 +9,16 @@ public static class CreateHandler
     {
         var settings = StopHandler.EffectiveSettingsValue;
         var port = ArgumentParser.ParsePort(a);
-        var filtered = a.Where((v, i) => !(v == "--port" && i + 1 < a.Length) && !(i > 0 && a[i - 1] == "--port") && !v.StartsWith("--port=", StringComparison.Ordinal) && !(v == "-p" && i + 1 < a.Length) && !(i > 0 && a[i - 1] == "-p") && !ArgumentParser.IsGluedShortPort(v)).ToArray();
+        var filtered = a.Where((v, i) =>
+        {
+            // a trailing bare flag (i + 1 >= a.Length) carries no
+            // value — keep it (minus consumed-value/prefix/glued shapes) so
+            // the missing-value path reports it instead of a neighbor (or
+            // thin air) being consumed as its value.
+            if (i + 1 >= a.Length)
+                return !(i > 0 && a[i - 1] == "--port") && !(i > 0 && a[i - 1] == "-p") && !v.StartsWith("--port=", StringComparison.Ordinal) && !ArgumentParser.IsGluedShortPort(v);
+            return !(v == "--port") && !(i > 0 && a[i - 1] == "--port") && !v.StartsWith("--port=", StringComparison.Ordinal) && !(v == "-p") && !(i > 0 && a[i - 1] == "-p") && !ArgumentParser.IsGluedShortPort(v);
+        }).ToArray();
         if (filtered.Length < 3)
         {
             Console.Error.WriteLine("Usage: atheriz create <accountname> <charactername> <password> [--port N]");

@@ -76,6 +76,7 @@ public class PortedMapEditTestsPart3
         mi.LegendEntries.Add(new LegendEntry("★","shrine",(2,3)){ Show=true, Fg=170.0, Bg=null });
         mh.SetMapInfo("TestArea",0,mi);
         var node = new Node(new Coord("TestArea",0,0,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         grid.Nodes[(0,0)]=node;
         var conn = new FakeC();
@@ -109,6 +110,7 @@ public class PortedMapEditTestsPart3
         mi.LegendEntries.Add(new LegendEntry("X","test",null));
         mh.SetMapInfo("TestArea",0,mi);
         var node = new Node(new Coord("TestArea",0,0,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         grid.Nodes[(0,0)]=node;
         var conn = new FakeC();

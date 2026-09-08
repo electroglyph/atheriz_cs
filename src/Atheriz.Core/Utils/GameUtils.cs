@@ -110,6 +110,7 @@ public static class GameUtils
 
     public static int DiceRoll(int rolls, int faces)
     {
+        if (rolls > 0 && faces < 1) throw new ArgumentOutOfRangeException(nameof(faces));
         var result = 0;
         for (var i = 0; i < rolls; i++) result += Random.Shared.Next(1, faces + 1);
         return result;
@@ -391,32 +392,18 @@ public static class GameUtils
     // Port of atheriz/utils.py:642 _build_signature_from_code shim — in C# use MethodInfo.GetParameters
     public static ParameterInfo[] BuildSignature(Delegate del) => del.Method.GetParameters(); // Port of utils.py:642 shim
 
-    public static ParameterInfo[] BuildSignature(MethodInfo method) => method.GetParameters();
-
-    // Alias for Python name
-    public static ParameterInfo[] BuildSignatureFromCode(MethodInfo method) => BuildSignature(method);
-
     // Port of atheriz/utils.py:141 detach — deepcopy via JSON roundtrip (mirrors dill roundtrip)
     public static T? Detach<T>(T value)
     {
         if (value == null) return default;
-        try
-        {
-            var json = JsonSerializer.Serialize(value);
-            return JsonSerializer.Deserialize<T>(json);
-        }
-        catch
-        {
-            // B-UTL-2: never alias the live original on failure — callers mutate the
-            // result, so returning `value` would corrupt source state. Return a fresh
-            // blank instance (independent by construction); default when T cannot be
-            // materialized from empty JSON (e.g. value types).
-            try { return JsonSerializer.Deserialize<T>("{}"); } catch { return default; }
-        }
+        // Port of utils.py:538-550: raises if the value is not serializable
+        // at all — never hand back the live original, and never a silent
+        // blank that callers would mutate as if detached.
+        var json = JsonSerializer.Serialize(value);
+        return JsonSerializer.Deserialize<T>(json);
     }
 
     // Port of atheriz/utils.py:74 ensure_thread_safe — in C# explicit RWLock, no patch needed
-    // plan2.md rationale: C# uses explicit ReaderWriterLockSlim + Immutable snapshots instead of runtime __getattribute__ patch.
     public static void EnsureThreadSafe(Type t)
     {
         // no-op stub: thread-safety in C# is explicit via ReaderWriterLockSlim on GameObject/Node etc.

@@ -5,14 +5,6 @@ using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
-public sealed class BuildArgs
-{
-    public bool N; public bool E; public bool S; public bool W; public bool U; public bool D; public bool X;
-    public bool Room; public bool Road; public bool Path;
-    public string? Desc;
-    public bool Single; public bool Double; public bool Round; public bool None;
-}
-
 public sealed class BuildCommand : Command
 {
     public static readonly IReadOnlyDictionary<string, (int dx, int dy, int dz, string link, string back)> Directions
@@ -55,7 +47,7 @@ public sealed class BuildCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var goCaller)) return;
-        // Resolve args to flags (typed shapes only: BuildArgs or ParsedArgs)
+        // Resolve args to flags (production Run receives ParsedArgs via UseParser).
         bool n=false, e=false, s=false, w=false, u=false, d=false, x=false;
         bool room=false, road=false, path=false;
         string? desc=null;
@@ -65,13 +57,7 @@ public sealed class BuildCommand : Command
             caller.Msg(PrintHelp());
             return;
         }
-        if (args is BuildArgs ba)
-        {
-            n=ba.N; e=ba.E; s=ba.S; w=ba.W; u=ba.U; d=ba.D; x=ba.X;
-            room=ba.Room; road=ba.Road; path=ba.Path; desc=ba.Desc;
-            single=ba.Single; dbl=ba.Double; round=ba.Round; none=ba.None;
-        }
-        else if (args is GameArgumentParser.ParsedArgs pa)
+        if (args is GameArgumentParser.ParsedArgs pa)
         {
             n=pa.GetBool("n"); e=pa.GetBool("e"); s=pa.GetBool("s"); w=pa.GetBool("w"); u=pa.GetBool("u"); d=pa.GetBool("d"); x=pa.GetBool("x");
             room=pa.GetBool("room"); road=pa.GetBool("road"); path=pa.GetBool("path");
@@ -223,6 +209,10 @@ public sealed class BuildCommand : Command
                         // Hold the grid write lock across creation+insert (no exit/re-enter window).
                         // Grid lock is SupportsRecursion so re-entrant AddNode does not deadlock.
                         grid.AddNode(newNode);
+                        // the Node ctor no longer publishes to the
+                        // registry — register explicitly (mirrors
+                        // NodeHandler.AddNode's insert-then-publish order).
+                        Atheriz.Core.Globals.ObjectRegistry.AddObject(newNode);
                         caller.Msg($"Created new node at {newCoord}.");
                     }
                 }

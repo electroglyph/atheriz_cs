@@ -24,7 +24,7 @@ public static class AdminToken
     /// </summary>
     public static string EnsureToken(string secretPath)
     {
-        // Guard — atheriz.py:559-563 (Core; Server wrapper deleted P1-16)
+        // Guard — atheriz.py:559-563 (Core; Server wrapper deleted as redundant)
         Atheriz.Core.Utils.PathGuards.GuardSecretPath(secretPath);
         Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(secretPath);
 
@@ -38,8 +38,6 @@ public static class AdminToken
                 var existing = File.ReadAllText(tokenFile, Encoding.UTF8).Trim();
                 if (!string.IsNullOrEmpty(existing))
                 {
-                    // Ensure perms 0o600 even for existing (best-effort)
-                    FsUtil.TryChmod0600(tokenFile);
                     return existing;
                 }
             }
@@ -56,8 +54,7 @@ public static class AdminToken
             var data = Encoding.UTF8.GetBytes(token);
             fs.Write(data, 0, data.Length);
             fs.Flush(true); // fsync before return — token must survive a crash
-            FsUtil.TryChmod0600(tokenFile);
-            // Also try chmod 0o600 fallthrough — atheriz.py:599-602
+            // single chmod at creation (the old fallthrough duplicate is gone).
             FsUtil.TryChmod0600(tokenFile);
             return token;
         }
@@ -129,14 +126,9 @@ public static class AdminToken
     /// Returns null if allowed, error string otherwise.
     /// Caller should check RemoteIp loopback + FixedTimeEquals.
     /// This helper works with HttpContext.
-    /// The token file is re-read only when its size/mtime changes (rotation
-    /// stays exact: a rewrite bumps mtime, a delete misses File.Exists below).
+    /// the 64B token file is re-read per request (no mtime/length
+    /// cache — a read of 64 bytes is cheaper than cache-coherence doubt).
     /// </summary>
-    private static readonly object _tokenCacheLock = new();
-    private static string? _cachedTokenPath;
-    private static string? _cachedToken;
-    private static DateTime _cachedTokenMtimeUtc;
-    private static long _cachedTokenLength = -1;
 
     public static string? CheckAdmin(string secretPath, string? remoteIp, string? providedToken, string action)
     {
@@ -149,24 +141,7 @@ public static class AdminToken
         string expected;
         try
         {
-            var mtime = File.GetLastWriteTimeUtc(tokenFile);
-            var length = new FileInfo(tokenFile).Length;
-            lock (_tokenCacheLock)
-            {
-                if (_cachedTokenPath == tokenFile && _cachedToken != null
-                    && _cachedTokenMtimeUtc == mtime && _cachedTokenLength == length)
-                {
-                    expected = _cachedToken;
-                }
-                else
-                {
-                    expected = File.ReadAllText(tokenFile, Encoding.UTF8).Trim();
-                    _cachedTokenPath = tokenFile;
-                    _cachedToken = expected;
-                    _cachedTokenMtimeUtc = mtime;
-                    _cachedTokenLength = length;
-                }
-            }
+            expected = File.ReadAllText(tokenFile, Encoding.UTF8).Trim();
         }
         catch { return "Token file not found."; }
 

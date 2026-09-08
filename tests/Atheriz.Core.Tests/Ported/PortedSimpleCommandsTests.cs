@@ -64,6 +64,7 @@ public class PortedSimpleCommandsTests
         var c = MakeCaller(builder: true);
         var coord = new Coord("test_simple", 0,0,0);
         var loc = new Node(coord, desc: "");
+        ObjectRegistry.AddObject(loc); // Explicit registration: the constructor does not publish.
         c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
         var pa = new GameArgumentParser.ParsedArgs();
         pa["text"] = new List<string>{"Line1","\\n","Line2"};

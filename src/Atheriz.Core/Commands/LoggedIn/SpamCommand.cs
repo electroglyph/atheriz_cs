@@ -47,21 +47,27 @@ public sealed class SpamCommand : Command
                 account.AddCharacter(character);
                 ObjectRegistry.AddObject(account);
                 ObjectRegistry.AddObject(character);
-                ObjectRegistry.SaveObjects(settings.SavePath);
                 created.Add((an, pw, cn));
             }
             catch (InvalidOperationException) { go.Msg($"Account '{an}' already exists, skipping..."); }
             catch (Exception ex) { go.Msg($"Failed {an}: {ex.Message}"); }
         }
+        // single save after the loop, not O(n) saves inside it.
+        // Best-effort: spam's job is creating the accounts in-registry; a
+        // bad save path reports instead of discarding the created accounts.
+        try { ObjectRegistry.SaveObjects(settings.SavePath); }
+        catch (Exception ex) { go.Msg($"Save failed: {ex.Message}"); }
         var credsFile = Path.Combine(settings.SavePath, "spam_accounts.txt");
         try
         {
             Directory.CreateDirectory(settings.SavePath);
             using var f = new StreamWriter(credsFile, false, System.Text.Encoding.UTF8);
             f.NewLine = "\n";
-            f.Write("# Account Name | Password | Character Name\n");
-            foreach (var (a, p, c) in created)
-                f.Write($"{a}|{p}|{c}\n");
+            // passwords are never persisted — account/character
+            // names only (Python's plaintext password column removed).
+            f.Write("# Account Name | Character Name\n");
+            foreach (var (a, _, c) in created)
+                f.Write($"{a}|{c}\n");
         }
         catch (Exception) { }
         sw.Stop();

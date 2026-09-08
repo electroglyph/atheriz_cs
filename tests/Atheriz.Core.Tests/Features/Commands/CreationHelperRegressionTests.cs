@@ -4,7 +4,7 @@ using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
-// P1-12: CreationCooldownHelper + SessionPuppetHelper extraction + sync-stub parity.
+// CreationCooldownHelper + SessionPuppetHelper extraction + sync-stub parity.
 public sealed class CreationHelperRegressionTests
 {
     [Fact]

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// P0-4: TLS must fail closed — a configured-but-broken cert never silently
+// TLS must fail closed — a configured-but-broken cert never silently
 // serves the admin token over plaintext.
 public class TlsFailClosedTests
 {

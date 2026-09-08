@@ -13,6 +13,9 @@ public class PortedNodeCacheTests
     {
         using var env = GlobalTestEnv.Enter();
         var node = new Node(new Coord("test",1,1,0));
+        // The Node constructor does not publish to the registry —
+        // call sites register explicitly.
+        ObjectRegistry.AddObject(node);
         var got = ObjectRegistry.Get(node.Id);
         Assert.Single(got);
         Assert.Same(node, got[0]);
@@ -37,9 +40,11 @@ public class PortedNodeCacheTests
         var grid = new NodeGrid("test",0);
         var a = new Node(new Coord("test",0,0,0));
         grid.AddNode(a);
+        ObjectRegistry.AddObject(a);
         Assert.Single(ObjectRegistry.Get(a.Id));
         var b = new Node(new Coord("test",0,0,0));
         grid.AddNode(b);
+        ObjectRegistry.AddObject(b);
         Assert.Empty(ObjectRegistry.Get(a.Id));
         Assert.Single(ObjectRegistry.Get(b.Id));
     }

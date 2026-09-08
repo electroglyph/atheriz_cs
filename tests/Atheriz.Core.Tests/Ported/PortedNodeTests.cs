@@ -272,6 +272,7 @@ public class PortedNodeTests
     {
         using var env = GlobalTestEnv.Enter();
         var handler = new NodeHandler();
+        NodeHandler.SetCurrent(handler);
         var area1 = new NodeArea("Area1");
         var area2 = new NodeArea("Area2");
         handler.AddArea(area1); handler.AddArea(area2);
@@ -289,6 +290,7 @@ public class PortedNodeTests
     {
         using var env = GlobalTestEnv.Enter();
         var handler = new NodeHandler();
+        NodeHandler.SetCurrent(handler);
         var area1 = new NodeArea("Area1");
         var area2 = new NodeArea("Area2");
         handler.AddArea(area1); handler.AddArea(area2);
@@ -305,6 +307,7 @@ public class PortedNodeTests
     {
         using var env = GlobalTestEnv.Enter();
         var handler = new NodeHandler();
+        NodeHandler.SetCurrent(handler);
         var area1 = new NodeArea("Area1");
         var area2 = new NodeArea("Area2");
         handler.AddArea(area1); handler.AddArea(area2);
@@ -408,6 +411,7 @@ public class PortedNodeTests
         var obj = GameObject.Create("item"); ObjectRegistry.AddObject(obj);
         obj.Location = new Persistence.Dto.LocationRef.CoordLocation(node.Coord); node.AddObject(obj);
         Assert.Equal(node.Coord, ((Persistence.Dto.LocationRef.CoordLocation)obj.Location).Coord);
+        ObjectRegistry.AddObject(node); ObjectRegistry.AddObject(fallback); // Explicit registration: the constructor does not publish.
         node.Delete(caller, recursive:false);
         Assert.NotNull(obj.Location);
         Assert.False(obj.Location is Persistence.Dto.LocationRef.CoordLocation cl && cl.Coord.Equals(node.Coord));
@@ -419,6 +423,7 @@ public class PortedNodeTests
         var area = $"test_area_{Guid.NewGuid():N}";
         var node = new Node(new Coord(area,5,5,0));
         var homeNode = new Node(new Coord(area,0,0,0));
+        ObjectRegistry.AddObject(node); ObjectRegistry.AddObject(homeNode); // Explicit registration: the constructor does not publish.
         var caller = GameObject.Create("caller"); ObjectRegistry.AddObject(caller);
         var obj = GameObject.Create("item"); ObjectRegistry.AddObject(obj);
         obj.Home = new Persistence.Dto.LocationRef.CoordLocation(homeNode.Coord);
@@ -437,6 +442,7 @@ public class PortedNodeTests
         caller.Location = new Persistence.Dto.LocationRef.CoordLocation(fallback.Coord); fallback.AddObject(caller);
         var obj = GameObject.Create("item"); ObjectRegistry.AddObject(obj);
         obj.Location = new Persistence.Dto.LocationRef.CoordLocation(node.Coord); node.AddObject(obj);
+        ObjectRegistry.AddObject(node); ObjectRegistry.AddObject(fallback); // Explicit registration: the constructor does not publish.
         node.Delete(caller, recursive:false);
         Assert.Equal(fallback.Coord, ((Persistence.Dto.LocationRef.CoordLocation)obj.Location).Coord);
     }

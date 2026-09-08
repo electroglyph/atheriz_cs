@@ -50,15 +50,30 @@ public static class TlsCertLoader
                 return leaf;
             }
         }
+        // Keyless public-only file: fail HERE, not at handshake time
+        // (Kestrel would otherwise die on first connection).
         try
         {
-            return X509Certificate2.CreateFromPem(pemText);
+            return RequireKey(X509Certificate2.CreateFromPem(pemText), certFile);
         }
+        catch (System.Security.Cryptography.CryptographicException) { throw; }
         catch
         {
-            try { return X509Certificate2.CreateFromPemFile(certFile); }
-            catch { return new X509Certificate2(certFile); }
+            try { return RequireKey(X509Certificate2.CreateFromPemFile(certFile), certFile); }
+            catch (System.Security.Cryptography.CryptographicException) { throw; }
+            catch { return RequireKey(new X509Certificate2(certFile), certFile); }
         }
+    }
+
+    private static X509Certificate2 RequireKey(X509Certificate2 cert, string certFile)
+    {
+        if (!cert.HasPrivateKey)
+        {
+            cert.Dispose();
+            throw new System.Security.Cryptography.CryptographicException(
+                $"SSL certificate has no private key: {certFile}");
+        }
+        return cert;
     }
 
     /// <summary>

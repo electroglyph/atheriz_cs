@@ -20,6 +20,8 @@ public class PortedMoveTests
         // Add reciprocal links for reverse lookup
         n1.AddLink(new NodeLink("north", new Coord(area, 0, 1, 0), new List<string>{"n"}));
         n2.AddLink(new NodeLink("south", new Coord(area, 0, 0, 0), new List<string>{"s"}));
+        // Explicit registration: the constructor does not publish.
+        ObjectRegistry.AddObject(n1); ObjectRegistry.AddObject(n2);
         return (n1, n2, area);
     }
 
@@ -150,6 +152,8 @@ public class PortedMoveTests
         var area = $"test_area_{Guid.NewGuid():N}";
         var n1 = new Node(new Coord(area, 0, 0, 0));
         var n2 = new Node(new Coord(area, 0, 1, 0));
+        // Explicit registration: the constructor does not publish.
+        ObjectRegistry.AddObject(n1); ObjectRegistry.AddObject(n2);
         // ensure empty
         return (n1, n2);
     }

@@ -10,7 +10,7 @@ using System.Text.Json;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// P3: AdminRoutes / StaticFileConfig / ProtocolBootstrap / ReloadHandler exercised
+// AdminRoutes / StaticFileConfig / ProtocolBootstrap / ReloadHandler exercised
 // through a real in-process Kestrel on a dynamic localhost port (no TestHost package).
 [Collection("Ported")]
 public class ServerHostingDirectTests

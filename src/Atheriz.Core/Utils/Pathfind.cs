@@ -13,21 +13,17 @@ internal sealed class PathNode : IComparable<PathNode>
     public int G { get; set; }
     public int H { get; set; }
     public int F { get; set; }
-    private readonly long _seq;
-    private static long _nextSeq;
     public PathNode(PathNode? parent, Node position)
     {
         Parent = parent;
         Position = position;
         G = 0; H = 0; F = 0;
-        _seq = System.Threading.Interlocked.Increment(ref _nextSeq);
     }
     // Port of pathfind.py:20 __eq__ via position
     public override bool Equals(object? obj) => obj is PathNode o && Position.Coord.Equals(o.Position.Coord);
     public override int GetHashCode() => Position.Coord.GetHashCode();
-    // Port of pathfind.py:23 __lt__/__gt__ via f — F-only, like heapq.
-    // (H/seq tiebreaks were dead: the queue keys on F and never consults
-    // CompareTo, so they only misled readers about expansion order.)
+    // Port of pathfind.py:23 __lt__/__gt__ via f — the open queue orders
+    // nodes through this comparer, exactly like heapq.
     public int CompareTo(PathNode? other)
     {
         if (other is null) return 1;
@@ -52,7 +48,7 @@ public static class Pathfind
         return path;
     }
 
-    // Port of pathfind.py:58 get_link_nodes — without caller (no door check)
+    // Port of pathfind.py:58-66 get_link_nodes (door-blind, no caller).
     private static List<Node> GetLinkNodes(Node node, NodeHandler handler)
     {
         List<NodeLink> links;
@@ -68,7 +64,7 @@ public static class Pathfind
         return result;
     }
 
-    // Port of pathfind.py:68 get_link_nodes_caller — with door closed/locked + access checks
+    // Port of pathfind.py:68+ get_link_nodes_caller (door-aware).
     private static List<Node> GetLinkNodesCaller(Node node, NodeHandler handler, GameObject? caller)
     {
         List<NodeLink> links;
@@ -118,8 +114,9 @@ public static class Pathfind
         var endNode = new PathNode(null, end);
         endNode.G = endNode.H = endNode.F = 0;
 
-        // Port of pathfind.py:102 open_list + closed_set + open_by_pos
-        var openQueue = new PriorityQueue<PathNode, int>();
+        // Port of pathfind.py:102 open_list + closed_set + open_by_pos.
+        // The queue orders nodes via CompareTo, like heapq via __lt__.
+        var openQueue = new PriorityQueue<PathNode, PathNode>();
         var closedSet = new HashSet<Coord>();
         var openByPos = new Dictionary<Coord, PathNode>();
         int iterations = 0;
@@ -135,9 +132,11 @@ public static class Pathfind
             catch { maxIterations = 50000; }
         }
         // Port of pathfind.py:110 heapify + heappush start
-        openQueue.Enqueue(startNode, startNode.F);
+        openQueue.Enqueue(startNode, startNode);
         openByPos[start.Coord] = startNode;
-        var currentNode = startNode;
+        // The start entry is dequeued up front so the loop body below always
+        // works on a queue-issued node, never a pre-loop stand-in.
+        var currentNode = openQueue.Dequeue();
         // Port of pathfind.py:114 while True:
         while (true)
         {
@@ -150,11 +149,13 @@ public static class Pathfind
             // Port of pathfind.py:119 if iterations > max_iterations: return False
             if (iterations > maxIterations)
                 return (false, [], closedSet.ToList());
-            // Port of pathfind.py:121 children = [] + nodes = get_link_nodes(...)
+            // Port of pathfind.py:121-126: blind expansion for caller=None,
+            // door-aware expansion otherwise — AStar and GetNeighbors share
+            // this dispatch so neighbor lists agree with pathfinding.
             var children = new List<PathNode>();
             var nodes = caller == null
-                ? GetLinkNodes(currentNode.Position, nh) // Port of pathfind.py:122-124 caller is None branch
-                : GetLinkNodesCaller(currentNode.Position, nh, caller); // Port of pathfind.py:125 else branch
+                ? GetLinkNodes(currentNode.Position, nh)
+                : GetLinkNodesCaller(currentNode.Position, nh, caller);
             foreach (var n in nodes)
             {
                 var node = new PathNode(currentNode, n);
@@ -184,14 +185,14 @@ public static class Pathfind
                     // Port of pathfind.py:145 if child.g < existing.g: push + update
                     if (child.G < existing.G)
                     {
-                        openQueue.Enqueue(child, child.F);
+                        openQueue.Enqueue(child, child);
                         openByPos[child.Position.Coord] = child;
                     }
                 }
                 else
                 {
                     // Port of pathfind.py:148-150 else push
-                    openQueue.Enqueue(child, child.F);
+                    openQueue.Enqueue(child, child);
                     openByPos[child.Position.Coord] = child;
                 }
             }
@@ -212,11 +213,11 @@ public static class Pathfind
     }
 
     // Spec wrapper — Port of pathfind.py:39 FindPath(Coord start, Coord goal, handler, maxIterations=50000)
-    public static List<Coord>? FindPath(Coord start, Coord goal, NodeHandler handler, int maxIterations = 50000)
+    public static List<Coord>? FindPath(Coord start, Coord goal, NodeHandler handler, int? maxIterations = null)
         => FindPath(start, goal, handler, null, maxIterations);
 
     // Overload with caller for door-aware pathfind — preserves pathfind.py:39 caller param
-    public static List<Coord>? FindPath(Coord start, Coord goal, NodeHandler handler, GameObject? caller, int maxIterations = 50000)
+    public static List<Coord>? FindPath(Coord start, Coord goal, NodeHandler handler, GameObject? caller, int? maxIterations = null)
     {
         // Port of pathfind.py:39 + honors MAX_ASTAR_ITERATIONS via AtherizSettings
         if (handler == null) handler = NodeHandler.GetCurrent()!;
@@ -224,31 +225,32 @@ public static class Pathfind
         var s = handler.GetNode(start);
         var e = handler.GetNode(goal);
         if (s == null || e == null) return null;
-        // Port of pathfind.py:109 — settings value only, no env inputs.
-        int effective = maxIterations;
-        if (maxIterations == 50000)
+        // Port of pathfind.py:109 — an explicit cap wins; otherwise the
+        // configured value (null marks "no explicit cap", so any configured
+        // value, including the default, is honored as-is).
+        int effective;
+        if (maxIterations.HasValue) effective = maxIterations.Value;
+        else
         {
-            try
-            {
-                var cfg = AtherizSettings.Global.MaxAstarIterations;
-                if (cfg != 50000) effective = cfg;
-            }
-            catch { }
+            try { effective = AtherizSettings.Global.MaxAstarIterations; }
+            catch { effective = 50000; }
         }
         var (found, path, _) = AStar(s, e, caller, handler, effective);
         if (!found) return null;
         return path.Select(n => n.Coord).ToList();
     }
 
-    // Port of pathfind.py neighbors via Links + doors (door-aware like AStar:
-    // a link sealed by a closed door the caller cannot open is not a usable move).
+    // Neighbor listing shares AStar's caller dispatch (blind for
+    // caller=None, door-aware otherwise) so the two never diverge.
     public static List<Coord> GetNeighbors(Coord c, NodeHandler? handler = null, GameObject? caller = null)
     {
         var nh = handler ?? NodeHandler.GetCurrent();
         if (nh == null) return [];
         var node = nh.GetNode(c);
         if (node == null) return [];
-        var neighbors = GetLinkNodesCaller(node, nh, caller);
+        var neighbors = caller == null
+            ? GetLinkNodes(node, nh)
+            : GetLinkNodesCaller(node, nh, caller);
         return neighbors.Select(n => n.Coord).ToList();
     }
 

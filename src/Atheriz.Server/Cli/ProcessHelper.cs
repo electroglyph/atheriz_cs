@@ -44,16 +44,17 @@ public static class ProcessHelper
         }
     }
 
-    public static async Task WaitForPidExitAsync(int pid)
+    public static async Task<bool> WaitForPidExitAsync(int pid)
     {
         for (int i = 0; i < 50; i++)
         {
             bool exists = true;
             try { using var p = Process.GetProcessById(pid); exists = !p.HasExited; } catch (ArgumentException) { exists = false; } catch { }
-            if (!exists) break;
+            if (!exists) return true;
             await Task.Delay(100);
             Console.Write(".");
         }
+        try { using var q = Process.GetProcessById(pid); return q.HasExited; } catch (ArgumentException) { return true; } catch { return false; }
     }
 
     internal static class NativeMethods

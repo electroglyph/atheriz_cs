@@ -155,8 +155,8 @@ public sealed class CommandTests
         var job = CommandDispatcher.DispatchLoggedIn(puppet, "unknowncmd arg1 arg2", immediate: true);
         Assert.NotNull(job);
         job!.Func(job.Caller, job.Args);
-        // none command will msg Huh?
-        Assert.Contains(puppet.PeekMessages(), m => m.Contains("Huh?"));
+        // none command msgs the none.py "not found" shape.
+        Assert.Contains(puppet.PeekMessages(), m => m.Contains("not found"));
         CommandRegistry.Reset();
     }
 

@@ -9,6 +9,8 @@ public sealed class NoneCommand : Command
     public override bool Hide => true;
     public override string Desc => "None.";
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("none", nargs: "*", help: "None."); }
+    // Port of atheriz/commands/unloggedin/none.py:NoneCommand (ignored-only
+    // filter, no Hide/Access gate; levenshtein over the full text).
     public override void Run(IMessageTarget caller, object? args)
     {
         var pa = args as GameArgumentParser.ParsedArgs;
@@ -19,7 +21,7 @@ public sealed class NoneCommand : Command
         var ignored = AtherizSettings.Global.AutoAliasIgnoredKeys;
         var cmds = CommandRegistry.UnloggedIn.GetKeys().Where(k => !ignored.Contains(k)).ToList();
         if (cmds.Count == 0) { caller.Msg($"Command \"{text}\" not found."); return; }
-        string? best = StringDistance.BestMatch(text.Split(' ')[0].ToLowerInvariant(), cmds);
+        string? best = StringDistance.BestMatch(text, cmds);
         caller.Msg($"Command \"{text}\" not found, did you mean: \"{best}\"?");
     }
 }

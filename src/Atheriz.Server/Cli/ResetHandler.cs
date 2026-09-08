@@ -26,12 +26,16 @@ public static class ResetHandler
             var resp = Console.ReadLine();
             if (!string.Equals(resp, "y", StringComparison.OrdinalIgnoreCase)) { Console.WriteLine("Aborted."); return; }
         }
+        // Ports that must be free before the wipe: the CLI override plus the
+        // configured ports, so a mismatched --port cannot blind the guard
+        // to the running server's real listeners.
+        var watchPorts = new List<int> { port };
+        if (settings.WebserverPort != port) watchPorts.Add(settings.WebserverPort);
+        if (settings.TelnetEnabled && !watchPorts.Contains(settings.TelnetPort)) watchPorts.Add(settings.TelnetPort);
         try
         {
             var props = IPGlobalProperties.GetIPGlobalProperties();
             var listeners = props.GetActiveTcpListeners();
-            var watchPorts = new List<int> { port };
-            if (settings.TelnetEnabled) watchPorts.Add(settings.TelnetPort);
             foreach (var ep in listeners)
             {
                 if (watchPorts.Contains(ep.Port))
@@ -50,21 +54,48 @@ public static class ResetHandler
             Console.WriteLine("Stopping server...");
             await StopHandler.HandleStopAsync(a);
             Console.Write($"Waiting for server (PID {pid}) to stop...");
-            await ProcessHelper.WaitForPidExitAsync(pid.Value);
+            bool stopped = await ProcessHelper.WaitForPidExitAsync(pid.Value);
             Console.WriteLine(" Done.");
             await Task.Delay(500);
+            // Liveness re-check before the irreversible wipe: the stop above
+            // may have missed (e.g. a --port override that doesn't match the
+            // running server). Never delete live data — fail closed.
+            if (!stopped || Infrastructure.PidFile.IsServerProcess(pid.Value))
+            {
+                try
+                {
+                    var props = IPGlobalProperties.GetIPGlobalProperties();
+                    foreach (var ep in props.GetActiveTcpListeners())
+                    {
+                        if (watchPorts.Contains(ep.Port) && Infrastructure.PidFile.IsProcessListeningOnPort(pid.Value, ep.Port))
+                        {
+                            Console.WriteLine($"Port {ep.Port} still listening; abort");
+                            return;
+                        }
+                    }
+                }
+                catch { }
+                Console.WriteLine("Warning: Process still exists after kill.");
+                return;
+            }
         }
 
         try { Atheriz.Core.Persistence.AtherizDbContext.CloseDatabase(); } catch { }
         try { Atheriz.Core.Persistence.AtherizDbContextFactory.CloseDatabase(); } catch { }
 
         Console.WriteLine("Deleting game data...");
-        try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath, force); } catch (Exception ex) { Console.WriteLine(ex.Message); return; }
-        try
+        // Nothing to wipe (fresh folder): skip the world-membership gate —
+        // GuardWipePath demands markers precisely so a live/foreign dir is
+        // never deleted, but an absent dir needs no protection.
+        if (Directory.Exists(savePath))
         {
-            if (Directory.Exists(savePath)) Directory.Delete(savePath, recursive: true);
+            try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath, force); } catch (Exception ex) { Console.WriteLine(ex.Message); return; }
+            try
+            {
+                Directory.Delete(savePath, recursive: true);
+            }
+            catch (Exception ex) { Console.WriteLine($"Failed to delete save: {ex.Message}"); return; }
         }
-        catch (Exception ex) { Console.WriteLine($"Failed to delete save: {ex.Message}"); }
         try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return; }
         Directory.CreateDirectory(savePath);
         Atheriz.Core.Utils.FsUtil.TryChmod0700(savePath);
@@ -76,7 +107,9 @@ public static class ResetHandler
         try
         {
             // Port of atheriz.py reset: local initial_setup.do_setup() with no superuser (limbo world only).
-            Atheriz.Core.InitialSetup.DoSetup(savePath);
+            // Explicit no-prompt creds : reset must never interactively
+            // ask for a superuser mid-wipe; env creds still apply when set.
+            Atheriz.Core.InitialSetup.DoSetup(savePath, prompt: false);
             Console.WriteLine("Success! New world created.");
         }
         catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); return; }
@@ -84,6 +117,10 @@ public static class ResetHandler
         // Port of atheriz.py:1629 reset always daemonizes after setup.
         var resetSpawnArgs = new List<string> { "--port", port.ToString() };
         if (host != null) { resetSpawnArgs.Add("--host"); resetSpawnArgs.Add(host); }
+        // respawn preserves the CLI telnet-port override, else the
+        // replacement silently binds the configured default instead.
+        var resetTelnetPort = ArgumentParser.ParseTelnetPort(a);
+        if (resetTelnetPort != null) { resetSpawnArgs.Add("--telnet-port"); resetSpawnArgs.Add(resetTelnetPort.ToString()!); }
         await DaemonSpawner.SpawnDaemonAsync(resetSpawnArgs.ToArray(), Directory.GetCurrentDirectory());
     }
 }

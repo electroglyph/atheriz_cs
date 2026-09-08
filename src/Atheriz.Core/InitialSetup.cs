@@ -51,7 +51,7 @@ public static class InitialSetup
         }
     }
 
-    public static void DoSetup(string savePath, string? username = null, string? password = null, string? secretPath = null)
+    public static void DoSetup(string savePath, string? username = null, string? password = null, string? secretPath = null, bool prompt = true)
     {
         // Port of initial_setup.py:49 logger.info — not duplicated to stdout (new.py:740 already prints)
         // Ensure savePath absolute for guard
@@ -83,6 +83,9 @@ public static class InitialSetup
         var settings = AtherizSettings.Global;
         // Build NodeArea 9x9x9
         var nh = new NodeHandler(autoLoad: false);
+        // the setup world becomes current explicitly (the ctor no
+        // longer publishes helpers as current).
+        Atheriz.Core.Globals.NodeHandler.SetCurrent(nh);
         var area = new NodeArea(LIMBO_AREA);
         for (int z = 0; z < LIMBO_GRID; z++)
         {
@@ -93,6 +96,10 @@ public static class InitialSetup
                     var coord = new Coord(LIMBO_AREA, x, y, z);
                     var node = new Node(coord, desc: LIMBO_DESC);
                     grid.Nodes[(x, y)] = node;
+                    // the Node ctor no longer publishes to the
+                    // registry — register explicitly so ResolveLocationObject
+                    // finds limbo nodes.
+                    Atheriz.Core.Globals.ObjectRegistry.AddObject(node);
                 }
             area.AddGrid(grid);
         }
@@ -169,7 +176,7 @@ public static class InitialSetup
             u = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME")?.Trim();
             if (string.IsNullOrWhiteSpace(u))
             {
-                if (!Console.IsInputRedirected)
+                if (prompt && !Console.IsInputRedirected)
                 {
                     // Explicit Console.Out (not Logger): interactive prompts must stay
                     // on stdout interleaved with stdin reads, mirroring print()/input().
@@ -181,8 +188,10 @@ public static class InitialSetup
             if (string.IsNullOrWhiteSpace(u))
             {
                 Console.Error.WriteLine("Error: Username cannot be empty.");
-                // still save world without account? Python would return early after error during creation — we mimic that
-                // but limbo already saved, so return
+                // Port of initial_setup.py: mh.save()/nh.save() precede the
+                // credential prompts — limbo is durable even with no superuser
+                // . The message below is only printed on commit.
+                setupTx.Commit();
                 Console.Out.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
                 return;
             }
@@ -194,7 +203,7 @@ public static class InitialSetup
             p = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD")?.Trim();
             if (string.IsNullOrWhiteSpace(p))
             {
-                if (!Console.IsInputRedirected)
+                if (prompt && !Console.IsInputRedirected)
                 {
                     Console.Out.Write("Enter superuser password: ");
                     // simple no-echo fallback
@@ -217,6 +226,8 @@ public static class InitialSetup
             if (string.IsNullOrWhiteSpace(p))
             {
                 Console.Error.WriteLine("Error: Password cannot be empty.");
+                // Limbo commits (see username branch above).
+                setupTx.Commit();
                 Console.Out.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
                 return;
             }
@@ -247,8 +258,12 @@ public static class InitialSetup
         ObjectRegistry.AddObject(alarmObj);
         try { alarmObj.MoveTo(alarmNode); } catch {}
 
-        var gtSettings = new AtherizSettings { SavePath = absSave };
-        var gt = new Globals.GameTime(gtSettings, autoLoad: false);
+        // seed the clock from the operator's time settings (the same
+        // AtherizSettings.Global the nodes/map above use), not defaults —
+        // custom TickMinutes/SecondsPerMinute/calendar must apply to the
+        // seed clock too. (Setup persists via the explicit db handle, so no
+        // SavePath override is needed here.)
+        var gt = new Globals.GameTime(settings, autoLoad: false);
         gt.AddAlarm("?", "0", alarmObj, repeat: true);
         gt.Save(db);
 

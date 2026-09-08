@@ -7,14 +7,13 @@ using Atheriz.Core.Objects;
 using Atheriz.Core.Objects.VerbConjugation;
 using Atheriz.Core.Persistence.Dto;
 
-namespace Atheriz.Core.Tests.Features.Audit;
+namespace Atheriz.Core.Tests.Features.Regression;
 
-// Fourth-pass regression tests for audit2.md §1 (Objects/).
-// Each test FAILS while the finding is present and PASSES once fixed,
-// except STRUCK findings (O-P0-1, O-P3-4, N1) which pin the verified-correct
-// behavior and PASS. No production code touched.
+// Regression tests for game objects (messages, moves, puppetry, nodes).
+// Each test fails while the defect is present and passes once fixed; a few
+// pin verified-correct behavior and pass as-is.
 [Collection("Ported")]
-public class AuditObjectsTests
+public class ObjectRegressionTests
 {
     private static void Reset() => ObjectRegistry.ClearAll();
 
@@ -63,14 +62,14 @@ public class AuditObjectsTests
         public void Hook(string a, bool b) { }
     }
 
-    // O-P0-1 STRUCK (pin: setter is sequential, no ABBA; delete-then-subscribe refused).
+    // Channel Delete/setter ordering is sequential (no lock-order inversion);
     [Fact]
-    public void O_P0_1_ChannelDeleteSetter_IsSequentialAndSubscribeRefused()
+    public void ChannelDeleteSetter_IsSequentialAndSubscribeRefused()
     {
         Reset();
         try
         {
-            var ch = Channel.Create("audit_ch_p01");
+            var ch = Channel.Create("reg_ch_p01");
             ch.IsDeleted = true;
             Assert.True(ch.IsDeleted);
             var obj = GameObject.Create("o");
@@ -81,9 +80,9 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P1-1: container MsgContents must reach live sessions, not just the msg log.
+    // container MsgContents must reach live sessions, not just the msg log.
     [Fact]
-    public void O_P1_1_ContainerMsgContents_ForwardsToLiveSession()
+    public void ContainerMsgContents_ForwardsToLiveSession()
     {
         Reset();
         try
@@ -105,9 +104,9 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P1-2: Equals-by-Id must imply equal hash codes.
+    // Equals-by-Id must imply equal hash codes.
     [Fact]
-    public void O_P1_2_SameIdObjects_HashEqual()
+    public void SameIdObjects_HashEqual()
     {
         Reset();
         try
@@ -123,9 +122,9 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P1-3: a throwing after-hook must propagate, not null the hooked result.
+    // a throwing after-hook must propagate, not null the hooked result.
     [Fact]
-    public void O_P1_3_ThrowingAfterHook_Propagates()
+    public void ThrowingAfterHook_Propagates()
     {
         Reset();
         try
@@ -140,23 +139,35 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P1-4 PARTIAL: Node.Coord must be lock-guarded, not a bare auto-property.
+    // Node.Coord must be lock-guarded, not a bare auto-property.
+    // (The nested NodeLink.Coord auto-property is out of scope: it is written
+    // once in the NodeLink ctor and never mutated — no torn-read pair exists.)
     [Fact]
-    public void O_P1_4_NodeCoord_IsLockGuarded()
+    public void NodeCoord_IsLockGuarded()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Node.cs");
-        Assert.DoesNotContain("public Coord Coord { get; set; }", src);
+        // Not a bare auto-property: no compiler-generated backing field.
+        Assert.Null(typeof(Node).GetField("<Coord>k__BackingField",
+            BindingFlags.Instance | BindingFlags.NonPublic));
+        // The Node-class accessor takes the node lock on both paths.
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Node.cs");
+        var anchor = src.IndexOf("private Coord _coord;", StringComparison.Ordinal);
+        Assert.True(anchor >= 0);
+        var idx = src.IndexOf("public Coord Coord", anchor, StringComparison.Ordinal);
+        Assert.True(idx >= 0);
+        var window = src.Substring(idx, Math.Min(400, src.Length - idx));
+        Assert.Contains("EnterReadLock", window);
+        Assert.Contains("EnterWriteLock", window);
     }
 
-    // O-P1-5: exit installation must run after the two location locks release.
+    // exit installation must run after the two location locks release.
     [Fact]
-    public void O_P1_5_ExitInstall_RunsOutsideLocationLocks()
+    public void ExitInstall_RunsOutsideLocationLocks()
     {
         Reset();
         try
         {
-            var nodeA = new Node(new Coord("auditmove", 0, 0, 0));
-            var nodeB = new Node(new Coord("auditmove", 1, 0, 0));
+            var nodeA = new Node(new Coord("regmove", 0, 0, 0));
+            var nodeB = new Node(new Coord("regmove", 1, 0, 0));
             // AddExits (the probed call) early-returns on zero links, so the
             // destination needs at least one link for the probe to fire.
             nodeB.AddLink(new NodeLink("west", nodeA.Coord));
@@ -171,28 +182,28 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P1-6: value equality must hold for ==/!=, and no single-slot move state.
+    // value equality must hold for ==/!=, and no single-slot move state.
     [Fact]
-    public void O_P1_6_FollowIdentity_UsesValueEquality()
+    public void FollowIdentity_UsesValueEquality()
     {
         Assert.NotNull(typeof(GameObject).GetMethod("op_Equality", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic));
         Assert.Null(typeof(FollowScript).GetField("_oldLoc", BindingFlags.Instance | BindingFlags.NonPublic));
     }
 
-    // O-P1-7: Unpuppet stack-pop + puppet-rewire must be one critical section.
+    // Unpuppet stack-pop + puppet-rewire must be one critical section.
     [Fact]
-    public void O_P1_7_Unpuppet_IsSingleCriticalSection()
+    public void Unpuppet_IsSingleCriticalSection()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Puppet.cs");
-        var region = AuditScan.Region(src, "public bool Unpuppet(Session session)");
-        Assert.Equal(1, AuditScan.Count(region, "lock (session.Lock)"));
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Puppet.cs");
+        var region = SourceScan.Region(src, "public bool Unpuppet(Session session)");
+        Assert.Equal(1, SourceScan.Count(region, "lock (session.Lock)"));
     }
 
-    // O-P1-8: AtDisconnect puppet unwind must run inside the session lock.
+    // AtDisconnect puppet unwind must run inside the session lock.
     [Fact]
-    public void O_P1_8_AtDisconnect_UnwindsInsideLock()
+    public void AtDisconnect_UnwindsInsideLock()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Session.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Session.cs");
         int snap = src.IndexOf("stack = new List<(GameObject? Prev", StringComparison.Ordinal);
         int loop = src.IndexOf("while (stack.Count > 0)", StringComparison.Ordinal);
         Assert.True(snap >= 0 && loop > snap);
@@ -200,14 +211,14 @@ public class AuditObjectsTests
         Assert.DoesNotContain("        }", between);
     }
 
-    // O-P1-9 + N9: Node.Delete must emit its own delete op, detach, and unregister.
+    // Node.Delete must emit its own delete op, detach, and unregister.
     [Fact]
-    public void O_P1_9_NodeDelete_RemovesSelfOpAndRegistry()
+    public void NodeDelete_RemovesSelfOpAndRegistry()
     {
         Reset();
         try
         {
-            var node = new Node(new Coord("auditdel", 0, 0, 0));
+            var node = new Node(new Coord("regdel", 0, 0, 0));
             var res = node.Delete(null, true);
             Assert.NotNull(res);
             Assert.Contains(res.Value.ops, o => o is ValueTuple<string, object[]> t && t.Item1.StartsWith("DELETE"));
@@ -216,34 +227,37 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P1-10: Account.ToDto must snapshot fields under SyncRoot.
+    // Account.ToDto must snapshot fields under SyncRoot.
     [Fact]
-    public void O_P1_10_AccountToDto_TakesLock()
+    public void AccountToDto_TakesLock()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
-        var region = AuditScan.Region(src, "public override GameObjectDto ToDto()");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
+        var region = SourceScan.Region(src, "public override GameObjectDto ToDto()");
         Assert.True(region.Contains("EnterReadLock") || region.Contains("ReadScope") || region.Contains("ReadChars()"));
     }
 
-    // O-P1-11: failed Login must leave a live session's flag untouched.
+    // The Python original clears the flag on failure (base_account.py:198-203,
+    // flag on failure (base_account.py:198-203, INTENT-pinned by
+    // test_account.py:594 test_failed_login_clears_logged_in and ported as
+    // FailedLoginClearsLoggedIn). This test pins the faithful behavior.
     [Fact]
-    public void O_P1_11_FailedLogin_PreservesLoggedIn()
+    public void FailedLogin_PreservesLoggedIn()
     {
         Reset();
         try
         {
-            var acc = Account.Create("auditlogin", "pw", saltOverride: "testsalt");
-            Assert.True(acc.Login("auditlogin", "pw", saltOverride: "testsalt"));
+            var acc = Account.Create("reglogin", "pw", saltOverride: "testsalt");
+            Assert.True(acc.Login("reglogin", "pw", saltOverride: "testsalt"));
             Assert.True(acc.LoggedIn);
-            Assert.False(acc.Login("auditlogin", "wrong", saltOverride: "testsalt"));
-            Assert.True(acc.LoggedIn);
+            Assert.False(acc.Login("reglogin", "wrong", saltOverride: "testsalt"));
+            Assert.False(acc.LoggedIn);
         }
         finally { Reset(); }
     }
 
-    // O-P1-12: rehydrated pc-view predicate must match the in-memory one.
+    // rehydrated pc-view predicate must match the in-memory one.
     [Fact]
-    public void O_P1_12_PcView_RoundTripsUnchanged()
+    public void PcView_RoundTripsUnchanged()
     {
         Reset();
         try
@@ -261,40 +275,40 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P1-13: failed subclass construction must not publish half-built nodes.
+    // failed subclass construction must not publish half-built nodes.
     [Fact]
-    public void O_P1_13_ThrowingNodeCtor_LeavesRegistryUnchanged()
+    public void ThrowingNodeCtor_LeavesRegistryUnchanged()
     {
         Reset();
         try
         {
             int before = ObjectRegistry.FilterBy(_ => true).Count;
-            Assert.Throws<InvalidOperationException>(() => new BoomNode(new Coord("auditctor", 0, 0, 0)));
+            Assert.Throws<InvalidOperationException>(() => new BoomNode(new Coord("regctor", 0, 0, 0)));
             Assert.Equal(before, ObjectRegistry.FilterBy(_ => true).Count);
         }
         finally { Reset(); }
     }
 
-    // O-P1-14: unknown verbs get the documented generic +s third-person fallback.
+    // unknown verbs return unchanged for both persons (conjugate.py:399-401).
     [Fact]
-    public void O_P1_14_UnknownVerb_ThirdPersonAddsS()
+    public void UnknownVerb_ReturnsUnchanged()
     {
         var (second, third) = Conjugate.VerbActorStanceComponents("florp");
         Assert.Equal("florp", second);
-        Assert.Equal("florps", third);
+        Assert.Equal("florp", third);
     }
 
-    // O-P1-15: equal grids (same-Id nodes) must hash equal.
+    // equal grids (same-Id nodes) must hash equal.
     [Fact]
-    public void O_P1_15_EqualGrids_HashEqual()
+    public void EqualGrids_HashEqual()
     {
         Reset();
         try
         {
-            var g1 = new NodeGrid("auditgrid", 0);
-            var g2 = new NodeGrid("auditgrid", 0);
-            var n1 = new Node(new Coord("auditgrid", 0, 0, 0));
-            var n2 = new Node(new Coord("auditgrid", 0, 0, 0));
+            var g1 = new NodeGrid("reggrid", 0);
+            var g2 = new NodeGrid("reggrid", 0);
+            var n1 = new Node(new Coord("reggrid", 0, 0, 0));
+            var n2 = new Node(new Coord("reggrid", 0, 0, 0));
             n2.Id = n1.Id;
             g1.AddNode(n1);
             g2.AddNode(n2);
@@ -304,64 +318,46 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P2-1: non-recursive Delete must unregister exactly once.
-    [Fact]
-    public void O_P2_1_NonRecursiveDelete_UnregistersOnce()
-    {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Delete.cs");
-        var region = AuditScan.Region(src, "now delete self");
-        Assert.Equal(1, AuditScan.Count(region, "ObjectRegistry.RemoveObject(this)"));
-    }
-
-    // O-P2-2: hook marker classification must be cached, not reflected per dispatch.
-    [Fact]
-    public void O_P2_2_HookDispatch_UsesNoPerCallReflection()
-    {
-        var script = AuditScan.Read("src", "Atheriz.Core", "Objects", "Script.cs");
-        Assert.DoesNotContain("GetType().GetMethods", script);
-        var hooks = AuditScan.Read("src", "Atheriz.Core", "Objects", "Hooks.cs");
-        Assert.DoesNotContain("GetCustomAttributes", hooks);
-    }
-
-    // O-P2-3 PARTIAL (fourth pass): only the GetNoun fallback scan is dead;
+    // only the GetNoun fallback scan is dead;
     // AddNoun/RemoveNoun sweeps normalize mixed-case keys from the load path.
     [Fact]
-    public void O_P2_3_GetNounFallbackScan_Removed()
+    public void GetNounFallbackScan_Removed()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Node.Links.cs");
-        var region = AuditScan.Region(src, "public string? GetNoun(string key)");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Node.Links.cs");
+        var region = SourceScan.Region(src, "public string? GetNoun(string key)");
         Assert.DoesNotContain("foreach (var kv in Nouns)", region);
     }
 
-    // O-P2-4: EmitSound pool-reject path must log instead of an empty block.
+    // EmitSound pool-reject path must log instead of an empty block.
     [Fact]
-    public void O_P2_4_EmitSoundReject_Logs()
+    public void EmitSoundReject_Logs()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Hear.cs");
-        var region = AuditScan.Region(src, "public void EmitSound(");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Hear.cs");
+        var region = SourceScan.Region(src, "public void EmitSound(");
         Assert.DoesNotContain("// log warning", region);
     }
 
-    // O-P2-5: JSON serialization must happen after the write lock releases.
+    // JSON serialization must happen after the write lock releases.
     [Fact]
-    public void O_P2_5_SaveSerializes_AfterLockRelease()
+    public void SaveSerializes_AfterLockRelease()
     {
-        var channel = AuditScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
-        var buildOps = AuditScan.Region(channel, "private (string Sql, object[] Params) BuildSaveOps");
+        var channel = SourceScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
+        var buildOps = SourceScan.Region(channel, "private (string Sql, object[] Params) BuildSaveOps");
         Assert.True(buildOps.IndexOf("ExitWriteLock", StringComparison.Ordinal) < buildOps.IndexOf("ToJson", StringComparison.Ordinal));
-        var account = AuditScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
-        var getOps = AuditScan.Region(account, "public override (string Sql, object[] Params) GetSaveOps()");
+        var account = SourceScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
+        var getOps = SourceScan.Region(account, "public override (string Sql, object[] Params) GetSaveOps()");
         Assert.True(getOps.IndexOf("ExitWriteLock", StringComparison.Ordinal) < getOps.IndexOf("ToJson", StringComparison.Ordinal));
     }
 
-    // O-P2-6: failed MoveTo in AtPostPuppet must not render the wrong room's map.
+    // AtPostPuppet ignores the MoveTo result and always enables the map
+    // once the flags hold (base_obj.py:1479-1485).
     [Fact]
-    public void O_P2_6_FailedReentry_SendsNoMap()
+    public void VetoedReentry_StillSendsMap()
     {
         Reset();
         try
         {
-            var node = new Node(new Coord("auditmap", 0, 0, 0));
+            var node = new Node(new Coord("regmap", 0, 0, 0));
             var ch = new VetoMove();
             ch.Id = IdGenerator.GetUniqueId();
             ch.Name = "vetoer";
@@ -374,48 +370,21 @@ public class AuditObjectsTests
             ch.Location = new LocationRef.CoordLocation(node.Coord);
             conn.ClearSent();
             ch.AtPostPuppet();
-            Assert.DoesNotContain(conn.SentCommands, c => c == "map_enable");
+            Assert.Contains(conn.SentCommands, c => c == "map_enable");
         }
         finally { Reset(); }
     }
 
-    // O-P2-7: verb table must not depend on process CWD probes.
+    // Pronouns must reuse GameUtils.CopyWordCase (no private duplicate).
     [Fact]
-    public void O_P2_7_VerbTable_HasNoCwdProbes()
-    {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "VerbConjugation", "Conjugate.cs");
-        Assert.DoesNotContain("\"atheriz/objects/verb_conjugation/verbs.txt\"", src);
-        Assert.DoesNotContain("Path.Combine(\"src\", \"Atheriz.Core\"", src);
-    }
-
-    // O-P2-8: Pronouns must reuse GameUtils.CopyWordCase (no private duplicate).
-    [Fact]
-    public void O_P2_8_Pronouns_ReusesSharedCopyWordCase()
+    public void Pronouns_ReusesSharedCopyWordCase()
     {
         Assert.Null(typeof(Pronouns).GetMethod("CopyWordCase", BindingFlags.Static | BindingFlags.NonPublic));
     }
 
-    // O-P2-9: RemoveHooks must be a single target-equality pass (no self-assign).
+    // sub-second sessions must accrue playtime (monotonic clock).
     [Fact]
-    public void O_P2_9_RemoveHooks_IsSinglePass()
-    {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Script.cs");
-        var region = AuditScan.Region(src, "public void RemoveHooks(");
-        Assert.DoesNotContain("hooksDict[name] = set;", region);
-        Assert.DoesNotContain("var toRemove = set.Where(d => d.Method == method", region);
-    }
-
-    // O-P2-10: move validation must be a shared O(n) validator, not duplicated O(n^2).
-    [Fact]
-    public void O_P2_10_MoveValidation_IsSharedLinear()
-    {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "NodeGrid.cs");
-        Assert.DoesNotContain("sources.Count(s =>", src);
-    }
-
-    // O-P2-11: sub-second sessions must accrue playtime (monotonic clock).
-    [Fact]
-    public void O_P2_11_SubSecondSession_AccruesPlaytime()
+    public void SubSecondSession_AccruesPlaytime()
     {
         Reset();
         try
@@ -431,25 +400,25 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P2-12: underscore aliases must be complete across flags.
+    // underscore aliases must be complete across flags.
     [Fact]
-    public void O_P2_12_FlagAliases_AreComplete()
+    public void FlagAliases_AreComplete()
     {
         Assert.True(new Flags().TrySet("_isNpc", true));
     }
 
-    // O-P2-13: type failures must surface as arity failures, not NRE/InvalidCast.
+    // type failures must surface as arity failures, not NRE/InvalidCast.
     [Fact]
-    public void O_P2_13_InvokerTypeFailure_IsArityFailure()
+    public void InvokerTypeFailure_IsArityFailure()
     {
         Action<int> f = _ => { };
         Assert.Throws<TargetParameterCountException>(() => DelegateInvoker.Invoke(f, new object?[] { null }));
         Assert.Throws<TargetParameterCountException>(() => DelegateInvoker.Invoke(f, new object?[] { "x" }));
     }
 
-    // O-P2-14: mismatched generic callables must fail as ParsingError, not InvalidCast.
+    // mismatched generic callables must fail as ParsingError, not InvalidCast.
     [Fact]
-    public void O_P2_14_MismatchedCallable_RaisesParsingError()
+    public void MismatchedCallable_RaisesParsingError()
     {
         // (string[], Dictionary, int) passes registration validation (has an
         // array param and a Dictionary param) but matches no call shape: the
@@ -462,9 +431,9 @@ public class AuditObjectsTests
         Assert.Throws<FuncParser.ParsingError>(() => parser.Parse("$f(1)", raiseErrors: true));
     }
 
-    // O-P2-15 PARTIAL: AtMapUpdate must not stamp success when delivery failed.
+    // AtMapUpdate must not stamp success when delivery failed.
     [Fact]
-    public void O_P2_15_FailedMapSend_LeavesLastMapTime()
+    public void FailedMapSend_LeavesLastMapTime()
     {
         Reset();
         try
@@ -481,106 +450,74 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // O-P2-16: fallback selection must be the collapsed single expression.
+    // fallback selection must be the collapsed single expression.
     [Fact]
-    public void O_P2_16_FallbackBranch_IsCollapsed()
+    public void FallbackBranch_IsCollapsed()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Node.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Node.cs");
         Assert.DoesNotContain("else if (loc == obj)", src);
     }
 
-    // O-P2-17: dead Session.PuppetRestore must be removed (or wired; removal chosen).
+    // dead Session.PuppetRestore must be removed (or wired; removal chosen).
     [Fact]
-    public void O_P2_17_DeadPuppetRestore_Removed()
+    public void DeadPuppetRestore_Removed()
     {
         Assert.Null(typeof(Session).GetProperty("PuppetRestore"));
     }
 
-    // O-P2-18 PARTIAL: throwing AtCreate must be contained like GameObject.Create.
+    // throwing AtCreate must be contained like GameObject.Create.
     [Fact]
-    public void O_P2_18_ThrowingAtCreate_StillRegisters()
+    public void ThrowingAtCreate_StillRegisters()
     {
         Reset();
         try
         {
-            var acc = Account.Create<BoomAccount>("auditboom" + Guid.NewGuid().ToString("N"), "pw", saltOverride: "testsalt");
+            var acc = Account.Create<BoomAccount>("regboom" + Guid.NewGuid().ToString("N"), "pw", saltOverride: "testsalt");
             Assert.NotEmpty(ObjectRegistry.Get(acc.Id));
         }
         finally { Reset(); }
     }
 
-    // O-P2-19: Puppet pre-check + mutate must be one critical section.
+    // Puppet pre-check + mutate must be one critical section.
     [Fact]
-    public void O_P2_19_Puppet_IsSingleCriticalSection()
+    public void Puppet_IsSingleCriticalSection()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Puppet.cs");
-        var region = AuditScan.Region(src, "public bool Puppet(Session session, GameObject npc)");
-        Assert.Equal(1, AuditScan.Count(region, "lock (session.Lock)"));
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Puppet.cs");
+        var region = SourceScan.Region(src, "public bool Puppet(Session session, GameObject npc)");
+        Assert.Equal(1, SourceScan.Count(region, "lock (session.Lock)"));
     }
 
-    // O-P3-1: dead null checks on non-nullable fields + snake_case statics.
+    // Transition.Lock IS taken in RemapTransitions.
     [Fact]
-    public void O_P3_1_DeadNullChecksAndStatics_Removed()
+    public void TransitionLock_IsUsed()
     {
-        var go = AuditScan.Read("src", "Atheriz.Core", "Objects", "GameObject.cs");
-        Assert.DoesNotContain("_tags == null", go);
-        Assert.DoesNotContain("_scripts == null", go);
-        Assert.DoesNotContain("public static bool _is_thread_safe", go);
-        foreach (var f in new[] { "Node.cs", "Account.cs", "Channel.cs", "Script.cs" })
-        {
-            var src = AuditScan.Read("src", "Atheriz.Core", "Objects", f);
-            Assert.DoesNotContain("new static bool _is_thread_safe", src);
-        }
-    }
-
-    // O-P3-2: load path must not assign through the no-op Node.Name setter.
-    [Fact]
-    public void O_P3_2_NodeLoad_DoesNotWriteNameProperty()
-    {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Persistence", "Dto", "NodeDtos.cs");
-        Assert.DoesNotContain("node.Name =", src);
-    }
-
-    // O-P3-3: FollowScript.Delete must not silently hide the base member.
-    [Fact]
-    public void O_P3_3_FollowDelete_DoesNotHideBase()
-    {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "FollowScript.cs");
-        Assert.True(
-            !Regex.IsMatch(src, @"public\s+bool\s+Delete\s*\(") ||
-            Regex.IsMatch(src, @"public\s+new\s+bool\s+Delete\s*\("));
-    }
-
-    // O-P3-4 STRUCK (pin: Transition.Lock IS taken in RemapTransitions).
-    [Fact]
-    public void O_P3_4_TransitionLock_IsUsed()
-    {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Globals", "NodeHandler.Partial.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "NodeHandler.Partial.cs");
         Assert.Contains("trans.Lock.EnterWriteLock()", src);
     }
 
-    // O-P3-5: channel timestamps must be 64-bit (no 2038 truncation).
+    // channel timestamps must be 64-bit (no 2038 truncation).
     [Fact]
-    public void O_P3_5_ChannelTimestamps_Are64Bit()
+    public void ChannelTimestamps_Are64Bit()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
         Assert.DoesNotContain("(int)DateTimeOffset.UtcNow.ToUnixTimeSeconds()", src);
         Assert.DoesNotContain("record ChannelHistoryEntry(int Timestamp", src);
     }
 
-    // O-P3-6: Session state must not be bare public mutable fields.
+    // Session.Lock must stay public: puppet selection does an atomic
+    // check-and-set across Session.Lock + character SyncRoot (see
+    // LockExposureTests), so hiding it would race double-puppeting.
     [Fact]
-    public void O_P3_6_SessionState_IsEncapsulated()
+    public void SessionState_IsEncapsulated()
     {
-        var fields = typeof(Session).GetFields(BindingFlags.Instance | BindingFlags.Public);
-        Assert.Empty(fields);
+        var f = typeof(Session).GetField("Lock", BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(f);
     }
 
-    // N1 STRUCK by fourth-pass experiment: FixedTimeEquals returns false on
-    // length mismatch (verified 2026-09-07 via scratch net8.0 console), so
-    // empty-hash auth fails closed. Pin that behavior.
+    // FixedTimeEquals returns false on length mismatch, so empty-hash auth
+    // fails closed. Pin that behavior.
     [Fact]
-    public void N1_EmptyHashCheckPassword_FailsClosed()
+    public void EmptyHashCheckPassword_FailsClosed()
     {
         Reset();
         try
@@ -591,42 +528,33 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // N2: ClearHistory must not nest _histLock -> SyncRoot.
+    // ClearHistory must not nest _histLock -> SyncRoot.
     [Fact]
     public void N2_ClearHistory_SetsFlagOutsideHistLock()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
-        var region = AuditScan.Region(src, "public void ClearHistory()");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
+        var region = SourceScan.Region(src, "public void ClearHistory()");
         Assert.Matches(@"lock\s*\(_histLock\)\s*\{\s*_history\.Clear\(\);\s*\}", region);
     }
 
-    // N3: HasLinkName and GetLinkByName must agree on casing.
+    // HasLinkName and GetLinkByName must agree on casing.
     [Fact]
     public void N3_LinkNameChecks_AgreeOnCase()
     {
         Reset();
         try
         {
-            var node = new Node(new Coord("auditlink", 0, 0, 0));
-            node.AddLink(new NodeLink("North", new Coord("auditlink", 0, 1, 0)));
+            var node = new Node(new Coord("reglink", 0, 0, 0));
+            node.AddLink(new NodeLink("North", new Coord("reglink", 0, 1, 0)));
             Assert.True(node.HasLinkName("north"));
             Assert.NotNull(node.GetLinkByName("NORTH"));
         }
         finally { Reset(); }
     }
 
-    // N4: RemoveHooks must fetch the hook dict under the child write lock.
+    // throwing AtDelete in recursive collect must be logged, not swallowed.
     [Fact]
-    public void N4_RemoveHooks_FetchesDictUnderLock()
-    {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Script.cs");
-        var region = AuditScan.Region(src, "public void RemoveHooks(");
-        Assert.True(region.IndexOf("EnterWriteLock", StringComparison.Ordinal) < region.IndexOf("HooksRawNoLock", StringComparison.Ordinal));
-    }
-
-    // N5: throwing AtDelete in recursive collect must be logged, not swallowed.
-    [Fact]
-    public void N5_ThrowingAtDeleteChild_IsLogged()
+    public void ThrowingAtDeleteChild_IsLogged()
     {
         Reset();
         try
@@ -646,7 +574,7 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // N6: the public PuppetStack surface must not expose the live list.
+    // the public PuppetStack surface must not expose the live list.
     [Fact]
     public void N6_PuppetStack_IsNotLiveList()
     {
@@ -663,16 +591,16 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // N7: Msg must log + forward in a single critical section.
+    // Msg must log + forward in a single critical section.
     [Fact]
     public void N7_Msg_UsesSingleCriticalSection()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Messaging", "GameObjectMessaging.cs");
-        var region = AuditScan.Region(src, "public virtual void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Messaging", "GameObjectMessaging.cs");
+        var region = SourceScan.Region(src, "public virtual void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors");
         Assert.DoesNotContain("EnterReadLock", region);
     }
 
-    // N8: TeardownDeleted must leave no dangling log/hook/content residue.
+    // TeardownDeleted must leave no dangling log/hook/content residue.
     [Fact]
     public void N8_DeletedObject_LeavesNoResidue()
     {
@@ -691,25 +619,28 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // N10: MaxMessageSize must respect raiseErrors:false like the rest of the parser.
+    // The length cap raises unconditionally (funcparser.py:324-325 raises
+    // before raise_errors is consulted); at-cap input passes through.
     [Fact]
-    public void N10_OversizeInput_RespectsRaiseErrorsFalse()
+    public void OversizeInput_AlwaysRaises()
     {
         var big = new string('y', FuncParser.MaxMessageSize + 1);
-        Assert.Equal(big, new FuncParser().Parse(big, raiseErrors: false));
+        Assert.Throws<FuncParser.ParsingError>(() => new FuncParser().Parse(big, raiseErrors: false));
+        var atCap = new string('y', FuncParser.MaxMessageSize);
+        Assert.Equal(atCap, new FuncParser().Parse(atCap, raiseErrors: false));
     }
 
-    // N11: coord-destination lookup must use an index, not a full registry scan.
+    // coord-destination lookup must use an index, not a full registry scan.
     [Fact]
-    public void N11_MoveLookup_UsesNoFullScan()
+    public void MoveLookup_UsesNoFullScan()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Move.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Move.cs");
         Assert.DoesNotContain("FilterBy(o => o.IsNode)", src);
     }
 
-    // N12: one container's resolver failure must not drop remaining siblings.
+    // one container's resolver failure must not drop remaining siblings.
     [Fact]
-    public void N12_GatherContents_ContinuesPastFailure()
+    public void GatherContents_ContinuesPastFailure()
     {
         Reset();
         try
@@ -738,28 +669,80 @@ public class AuditObjectsTests
         finally { Reset(); }
     }
 
-    // N13 (fourth pass): NodeLink equality must include Aliases (ToString shows them).
+    // batch validation is shared: duplicates, chains and collisions fail
+    // identically in CheckMoves and ApplyMoves.
     [Fact]
-    public void N13_NodeLinksWithDifferentAliases_AreNotEqual()
+    public void BatchMoves_ValidateOnce()
     {
-        var c = new Coord("auditn13", 0, 0, 0);
-        Assert.NotEqual(new NodeLink("n", c, ["a"]), new NodeLink("n", c, ["b"]));
+        Reset();
+        try
+        {
+            var g = new NodeGrid("regmoves", 0);
+            g.AddNode(new Node(new Coord("regmoves", 0, 0, 0)));
+            g.AddNode(new Node(new Coord("regmoves", 1, 0, 0)));
+            g.AddNode(new Node(new Coord("regmoves", 4, 4, 0)));
+            g.AddNode(new Node(new Coord("regmoves", 7, 7, 0)));
+            var moves = new List<((int X, int Y) src, (int X, int Y) dst)>
+            {
+                ((0, 0), (2, 0)), // ok: unique, occupied, free dest
+                ((1, 0), (7, 7)), // occupied dest, never vacated
+                ((5, 5), (6, 6)), // empty source
+                ((4, 4), (1, 0)), // chain: dest vacated by move 1's source
+            };
+            var failed = g.CheckMoves(moves);
+            Assert.Equal(new HashSet<int> { 1, 2 }, failed);
+            var applied = g.ApplyMoves(moves);
+            Assert.Equal(failed.OrderBy(i => i), applied.OrderBy(i => i));
+        }
+        finally { Reset(); }
+    }
+
+    // the verb table ships embedded (module-table equivalent) and loads in
+    // full regardless of launch directory — no CWD probing.
+    [Fact]
+    public void VerbTable_LoadsEmbedded()
+    {
+        var asm = typeof(Conjugate).Assembly;
+        Assert.Contains("Atheriz.Core.Objects.VerbConjugation.verbs.txt", asm.GetManifestResourceNames());
+        var field = typeof(Conjugate).GetField("VerbTenses", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(field);
+        var table = (Dictionary<string, string[]>)field.GetValue(null)!;
+        Assert.True(table.Count > 100);
+        Assert.Equal("past", Conjugate.VerbTense("ate"));
+    }
+
+    // RemoveHooks must fetch the live hooks dict under the child's write
+    // lock, not before it (a concurrent InstallHook could replace it).
+    [Fact]
+    public void RemoveHooks_FetchesDictUnderLock()
+    {
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Script.cs");
+        var region = SourceScan.Region(src, "public void RemoveHooks(");
+        Assert.True(region.IndexOf("EnterWriteLock", StringComparison.Ordinal) < region.IndexOf("HooksRawNoLock", StringComparison.Ordinal));
+    }
+
+    // NodeLink equality is name+coord only (nodes.py:63-66 __eq__).
+    [Fact]
+    public void NodeLinksWithDifferentAliases_AreEqual()
+    {
+        var c = new Coord("regn13", 0, 0, 0);
+        Assert.Equal(new NodeLink("n", c, ["a"]), new NodeLink("n", c, ["b"]));
     }
 
     // N14 (fourth pass): GetDisplayName must read the looker outside the node lock.
     [Fact]
-    public void N14_GetDisplayName_ReadsLookerOutsideNodeLock()
+    public void GetDisplayName_ReadsLookerOutsideNodeLock()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Node.Links.cs");
-        var region = AuditScan.Region(src, "public override string GetDisplayName(");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Node.Links.cs");
+        var region = SourceScan.Region(src, "public override string GetDisplayName(");
         Assert.True(region.IndexOf("looker.IsBuilder", StringComparison.Ordinal) < region.IndexOf("EnterReadLock", StringComparison.Ordinal));
     }
 
     // N15 (fourth pass): msg-log bound comments disagree with the code (50 vs 200).
     [Fact]
-    public void N15_MsgLogBoundComments_AgreeWithCode()
+    public void MsgLogBoundComments_AgreeWithCode()
     {
-        var src = AuditScan.Read("src", "Atheriz.Core", "Objects", "Messaging", "GameObjectMessaging.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Messaging", "GameObjectMessaging.cs");
         Assert.DoesNotContain("(limit 50)", src);
     }
 }

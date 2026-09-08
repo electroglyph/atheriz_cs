@@ -19,16 +19,9 @@ public sealed class WebSocketConnection : BaseConnection
     public System.Net.WebSockets.WebSocket WebSocket { get; }
     private Task? _closeTask;
     private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1); // port of websocket.py:44 _send_lock = asyncio.Lock()
-    private readonly PendingLimiter _limiter; // sole accounting (P1.6 single source of truth)
-    // Legacy reflection shims retained for compat (not authoritative, no drift)
-#pragma warning disable CS0169
-    private readonly object _pendingLock = new object();
-    private readonly HashSet<Task> _pendingTasks = new();
-    private int _pendingCount;
-    private int _pendingBytes;
-    private readonly Dictionary<Task, int> _pendingBytesByTask = new();
+    private readonly PendingLimiter _limiter; // sole accounting (single source of truth)
+    // Close flag (with _limiter.IsClosing forms IsClosing).
     private bool _closing;
-#pragma warning restore CS0169
 
     private readonly AtherizSettings _settings;
 
@@ -44,8 +37,15 @@ public sealed class WebSocketConnection : BaseConnection
     {
         if (disposing)
         {
-            // Let in-flight sends finish (bounded) before Abort/Dispose.
-            SpinWait.SpinUntil(() => { try { return _limiter.SnapshotTasks().Count == 0; } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Dispose: " + logEx.Message, "WebSocketConnection"); return true; } }, 250);
+            // join in-flight sends (bounded by the longest write/TLS
+            // timeouts) before Abort/Dispose instead of a 250ms spin that
+            // proceeds mid-write and hides the loss in ObjectDisposedException.
+            try
+            {
+                var pending = _limiter.SnapshotTasks().ToArray();
+                if (pending.Length != 0) Task.WhenAll(pending).Wait(TimeSpan.FromSeconds(10));
+            }
+            catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Dispose: " + logEx.Message, "WebSocketConnection"); }
             try { WebSocket.Abort(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.Dispose: " + logEx.Message, "WebSocketConnection"); }
             try { WebSocket.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.Dispose: " + logEx.Message, "WebSocketConnection"); }
             try { _sendLock.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.Dispose: " + logEx.Message, "WebSocketConnection"); }
@@ -128,6 +128,10 @@ public sealed class WebSocketConnection : BaseConnection
             // and the task observed (the old split leaked the limiter slot).
             task = Task.Run(() => LockedSendAsync(data));
             _limiter.Track(task, nb);
+            // the completion callback rides the owning try — if the
+            // attach itself throws, the catch below releases the reservation
+            // instead of leaking the limiter slot (port of websocket.py:106-109).
+            _ = task.ContinueWith(t => TaskDone(t), TaskScheduler.Default);
         }
         catch (Exception e) // port of websocket.py:99-103
         {
@@ -136,7 +140,6 @@ public sealed class WebSocketConnection : BaseConnection
             Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Error sending command: {e}");
             return;
         }
-        try { _ = task.ContinueWith(t => TaskDone(t)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.SendCommand: " + logEx.Message, "WebSocketConnection"); } // port of websocket.py:106-109
     }
 
     // port of websocket.py:116-137 _close_websocket — now via limiter snapshot

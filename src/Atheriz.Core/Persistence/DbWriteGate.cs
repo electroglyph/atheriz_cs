@@ -11,13 +11,12 @@ namespace Atheriz.Core.Persistence;
 /// no-op, and a thread that never took the gate cannot release it (a Release
 /// on the 1→0 step happens only on the taker thread), so neither can free
 /// another flow's slot.
-/// Take is deliberately synchronous (EnterAsync returns a completed task):
-/// AsyncLocal writes made after an await inside the taker land in a forked
-/// ExecutionContext and never propagate back to the caller's flow, so the
-/// matching Exit would see count 0 and leak the permit (a permanent hang
-/// under any contention). Recording the hold with no await in between keeps
-/// it visible to the caller's flow, including across later await thread-hops
-/// (paired with ExitAfterThreadHop at the async call site when a hop happened).
+/// Take is available in two forms. The synchronous Enter records the hold in
+/// AsyncLocal with no await in between, keeping it visible to the caller's
+/// flow (see Enter). The async EnterAsync instead returns a lease: an
+/// AsyncLocal write made after an await lands in a forked ExecutionContext
+/// and never propagates back to the caller's flow, so the matching exit
+/// would see count 0 and leak the permit.
 /// </summary>
 public static class DbWriteGate
 {
@@ -33,8 +32,24 @@ public static class DbWriteGate
 
     public static bool IsHeld => _recursion.Value > 0;
 
+    // Owner check : the AsyncLocal count alone cannot tell a
+    // same-flow re-entry from a Task.Run-inherited copy on a thread that
+    // never called Enter — the holder thread id can. A count>0 on any other
+    // thread is a fork, never ownership. Used by TryEnter, which can refuse
+    // safely; Enter/EnterAsync deliberately keep count-based passthrough
+    // (see below).
+    private static bool IsOwnerFlow() =>
+        _recursion.Value > 0 && Environment.CurrentManagedThreadId == Volatile.Read(ref _holderThreadId);
+
     public static void Enter()
     {
+        // Deliberately count-based, NOT thread-checked 
+        // a blocking Enter on a forked flow would deadlock whenever the
+        // holder joins the fork (WriteGateTests.ChildFlow pins the
+        // must-complete pattern), so passthrough is the only safe choice
+        // for the blocking take. Fork *concurrency* under Enter remains the
+        // caller's responsibility — same as Python's RLock, which would
+        // deadlock this pattern outright. TryEnter (below) refuses forks.
         if (_recursion.Value > 0)
         {
             _recursion.Value++;
@@ -45,17 +60,39 @@ public static class DbWriteGate
         Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
     }
 
-    public static Task EnterAsync(CancellationToken ct = default)
+    public static async Task<WriteHold> EnterAsync(CancellationToken ct = default)
     {
-        if (_recursion.Value > 0)
-        {
-            _recursion.Value++;
-            return Task.CompletedTask;
-        }
-        _sem.Wait(ct);
-        _recursion.Value = 1;
+        // genuinely async take — awaiting the semaphore frees the
+        // pool thread instead of blocking it, so saturated saves no longer
+        // pin drain workers. Recorded as a lease (not AsyncLocal): an
+        // AsyncLocal write made after an await lands in a forked
+        // ExecutionContext and never propagates back to the caller's flow,
+        // so the matching exit would see count 0 and leak the permit.
+        // Re-entrant on a flow already holding via sync Enter (AsyncLocal
+        // reads flow down reliably): nested hold, no semaphore take.
+        // Mixed nesting the other way (sync Enter inside an async lease) is
+        // unsupported — no such call pattern exists.
+        if (_recursion.Value > 0) return WriteHold.Nested();
+        await _sem.WaitAsync(ct).ConfigureAwait(false);
         Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
-        return Task.CompletedTask;
+        return WriteHold.Owned();
+    }
+
+    /// <summary>
+    /// Async-take lease from <see cref="EnterAsync"/>. Dispose releases the
+    /// semaphore hold (no-op for nested holds). Thread-agnostic: the owning
+    /// flow may exit on another pool thread after awaits.
+    /// </summary>
+    public readonly struct WriteHold : IDisposable
+    {
+        private readonly bool _owns;
+        internal WriteHold(bool owns) => _owns = owns;
+        internal static WriteHold Nested() => new(false);
+        internal static WriteHold Owned() => new(true);
+        public void Dispose()
+        {
+            if (_owns) _sem.Release();
+        }
     }
 
     /// <summary>
@@ -65,9 +102,20 @@ public static class DbWriteGate
     /// </summary>
     public static bool TryEnter(TimeSpan timeout)
     {
-        if (_recursion.Value > 0)
+        if (IsOwnerFlow())
         {
             _recursion.Value++;
+            return true;
+        }
+        // Fork (or fresh flow): a forked copy is never ownership — fail
+        // fast instead of running DB work concurrently with the holder
+        // . A stale copy (semaphore free) is adopted as a fresh
+        // take; a live holder means refusal, never inheritance.
+        if (_recursion.Value > 0)
+        {
+            if (!_sem.Wait(TimeSpan.Zero)) return false;
+            _recursion.Value = 1;
+            Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
             return true;
         }
         if (!_sem.Wait(timeout))
@@ -101,32 +149,6 @@ public static class DbWriteGate
             System.Diagnostics.Debug.Fail("DbWriteGate.Exit on a thread that never took the gate (forked AsyncLocal copy).");
 #endif
             _recursion.Value = 0;
-            return;
-        }
-        _recursion.Value = 0;
-        _sem.Release();
-    }
-
-    /// <summary>
-    /// Paired exit for <see cref="EnterAsync"/> when awaits between take and
-    /// exit may have resumed on a different pool thread (same flow, new
-    /// thread). Mirrors <see cref="Exit"/> unwinding but attests ownership via
-    /// the caller's take/exit pairing instead of the taker-thread check.
-    /// </summary>
-    internal static void ExitAfterThreadHop()
-    {
-        var c = _recursion.Value;
-        if (c <= 0)
-        {
-#if DEBUG
-            System.Diagnostics.Debug.Fail("DbWriteGate.ExitAfterThreadHop without a matching EnterAsync on this flow (permit leaked).");
-#endif
-            _recursion.Value = 0;
-            return;
-        }
-        if (c > 1)
-        {
-            _recursion.Value = c - 1;
             return;
         }
         _recursion.Value = 0;

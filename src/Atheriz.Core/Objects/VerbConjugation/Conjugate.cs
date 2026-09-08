@@ -52,34 +52,57 @@ public static class Conjugate
     {
         var raw = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         bool loadedFromFile = false;
-        // F015: probe the module directory first (verbatim Python: os.path.dirname(__file__)/verbs.txt —
-        // the build copies verbs.txt to the output dir preserving its project-relative path), then
-        // flattened/manual layouts, then CWD-relative spots. No absolute host paths: a hardcoded
-        // /home/... path breaks every other machine with no fallback signal.
-        var candidatePaths = new[]
+        void ParseLines(IEnumerable<string> lines)
         {
-            Path.Combine(AppContext.BaseDirectory, "Objects", "VerbConjugation", "verbs.txt"),
-            Path.Combine(AppContext.BaseDirectory, "verbs.txt"),
-            "atheriz/objects/verb_conjugation/verbs.txt",
-            Path.Combine("src", "Atheriz.Core", "Objects", "VerbConjugation", "verbs.txt"),
-        };
-        string? found = candidatePaths.FirstOrDefault(File.Exists);
-        if (found != null)
-        {
-            try
+            foreach (var line in lines)
             {
-                foreach (var line in File.ReadAllLines(found))
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    var parts = line.Split(',').Select(p => p.Trim()).ToArray();
-                    if (parts.Length == 0 || string.IsNullOrEmpty(parts[0])) continue;
-                    // Keep at least 12 cols; keep all cols (negated included) for verb_conjugate negate handling
-                    // Ensure length at least 12, but keep whatever file provides (up to 24)
-                    raw[parts[0]] = parts;
-                }
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                var parts = line.Split(',').Select(p => p.Trim()).ToArray();
+                if (parts.Length == 0 || string.IsNullOrEmpty(parts[0])) continue;
+                // Keep at least 12 cols; keep all cols (negated included) for verb_conjugate negate handling
+                // Ensure length at least 12, but keep whatever file provides (up to 24)
+                raw[parts[0]] = parts;
+            }
+        }
+        static IEnumerable<string> ReadLines(StreamReader reader)
+        {
+            string? line;
+            while ((line = reader.ReadLine()) != null) yield return line;
+        }
+        // The module table ships embedded in the assembly (the equivalent of
+        // Python's os.path.dirname(__file__)/verbs.txt) and always wins, so
+        // identical builds load the identical table whatever the launch
+        // directory holds. (Resource-blob read only — no member reflection.)
+        try
+        {
+            using var stream = typeof(Conjugate).Assembly.GetManifestResourceStream("Atheriz.Core.Objects.VerbConjugation.verbs.txt");
+            if (stream != null)
+            {
+                using var reader = new StreamReader(stream);
+                ParseLines(ReadLines(reader));
                 if (raw.Count > 100) loadedFromFile = true;
             }
-            catch { raw.Clear(); }
+        }
+        catch { raw.Clear(); }
+        if (!loadedFromFile)
+        {
+            // Fallback: build-output copy, then dev-tree spots. No bare
+            // CWD probe — a foreign verbs.txt must never shadow the module table.
+            var candidatePaths = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "Objects", "VerbConjugation", "verbs.txt"),
+                Path.Combine(AppContext.BaseDirectory, "verbs.txt"),
+            };
+            string? found = candidatePaths.FirstOrDefault(File.Exists);
+            if (found != null)
+            {
+                try
+                {
+                    ParseLines(File.ReadAllLines(found));
+                    if (raw.Count > 100) loadedFromFile = true;
+                }
+                catch { raw.Clear(); }
+            }
         }
         if (!loadedFromFile)
         {
@@ -214,7 +237,9 @@ public static class Conjugate
     public static string? VerbTense(string verb)
     {
         var infinitive = VerbInfinitive(verb);
-        if (!VerbTenses.TryGetValue(infinitive, out var data)) return infinitive;
+        // Port of conjugate.py:259-262 — unknown verbs have no tense data,
+        // so None is returned (pinned by test_verb_conjugate.py:203).
+        if (!VerbTenses.TryGetValue(infinitive, out var data)) return null;
         foreach (var kv in VerbTensesKeys)
         {
             var tense = kv.Key;
@@ -223,6 +248,7 @@ public static class Conjugate
             if (idx + VerbTensesKeys.Count < data.Length && data[idx + VerbTensesKeys.Count] == verb) return tense;
         }
         if (string.Equals(infinitive, verb, StringComparison.OrdinalIgnoreCase)) return "infinitive";
+        // No table form matched (conjugate.py:263-267 falls off the end).
         return null;
     }
 
@@ -312,6 +338,8 @@ public static class Conjugate
     public static (string second, string third) VerbActorStanceComponents(string verb, bool plural = false)
     {
         var tense = VerbTense(verb);
+        // Port of conjugate.py:399-401: unknown tense returns the verb
+        // unchanged for both persons ("he florp", not "he florps").
         if (tense == null) return (verb, verb);
         var them = plural ? "*" : "3";
         var themSuff = plural ? "" : "s";
@@ -324,13 +352,6 @@ public static class Conjugate
             if (string.IsNullOrEmpty(youStr)) youStr = verb;
             var themStr = VerbPresent(verb, them);
             if (string.IsNullOrEmpty(themStr)) themStr = verb + themSuff; // verbatim conjugate.py:409 (naive +s kept)
-            // fallback for generic unknown where VerbPresent returns infinitive unchanged but we still want +s for third
-            if (!plural && themStr == verb && !string.Equals(youStr, verb, StringComparison.OrdinalIgnoreCase))
-            {
-                // if verb is base infinitive and themStr equals verb, add s
-                // Check if verb is infinitive form; then third should be +s
-                if (VerbInfinitive(verb) == verb) themStr = verb + themSuff;
-            }
             return (youStr, themStr);
         }
         else

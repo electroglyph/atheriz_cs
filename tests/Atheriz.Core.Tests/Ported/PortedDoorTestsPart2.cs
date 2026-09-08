@@ -25,6 +25,8 @@ public class PortedDoorTestsPart2
         var grid = new NodeGrid("TestArea", 0);
         var startNode = new Node(new Coord("TestArea", 0, 0, 0));
         grid.Nodes[(0,0)] = startNode;
+        // Explicit registration: the constructor does not publish.
+        ObjectRegistry.AddObject(startNode);
         area.AddGrid(grid);
         nh.AddArea(area);
         return (nh, area, grid, startNode);

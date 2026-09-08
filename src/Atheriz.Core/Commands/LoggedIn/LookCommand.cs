@@ -63,6 +63,9 @@ public sealed class LookCommand : Command
             }
         }
         if (found.Count > 1) { CommandHelpers.MsgMultipleMatches(puppet, targetName); return; }
+        // Defense in depth : AtLook gates internally, but the call
+        // site checks first so a denied target never reaches hooks/rendering.
+        if (!found[0].Access(puppet, "view")) { puppet.Msg("You can't see anything."); return; }
         puppet.Msg(puppet.AtLook(found[0]));
     }
 
@@ -77,10 +80,11 @@ public sealed class LookCommand : Command
         }
         if (loc is not Node)
         {
-            var appearance = puppet.AtLook(loc);
-            if (appearance.Trim() == $"{loc.Name}:" && !string.IsNullOrEmpty(puppet.Desc))
-            { puppet.Msg(puppet.Desc); return; }
-            puppet.Msg(appearance);
+            // show the location's own appearance as-is. The old code
+            // substituted the VIEWER's desc when the appearance was a bare
+            // "name:" (empty desc) — echoing self. Python just shows
+            // caller.at_look(loc) (look.py:20-30,66-72).
+            puppet.Msg(puppet.AtLook(loc));
             return;
         }
         if (!loc.Access(puppet, "view")) { puppet.Msg("You can't see anything."); return; }

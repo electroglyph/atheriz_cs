@@ -31,7 +31,7 @@ public static class GlobalTestEnv
 
         // Port 118-183 clear globals
         ObjectRegistry.ClearAll();
-        ObjectRegistry.AlwaysSaveAll = false; // P2: save-bypass flag must not leak across tests // Port 119 _clear_all_objects_nonblocking
+        ObjectRegistry.AlwaysSaveAll = false; // save-bypass flag must not leak across tests // Port 119 _clear_all_objects_nonblocking
         IdGenerator.SetId(-1); // Port 163
         ClearTickerIfExists(); // Port 47 _clear_ticker
         GlobalServices.Reset(); // Port 166-172 _NODE_HANDLER etc
@@ -73,11 +73,11 @@ public static class GlobalTestEnv
         try { if (Directory.Exists(scope.TempPath)) Directory.Delete(scope.TempPath, recursive: true); } catch (Exception ex) { Console.Error.WriteLine($"rmtree failed: {ex}"); } // Port 232
 
         Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", scope.OrigEnvSavePath); // Port 238
-        SaltProvider.Clear(); // P2: wipe legacy slot AND per-path dict
+        SaltProvider.Clear(); // wipe legacy slot AND per-path dict
         if (scope.OrigSalt is not null) SaltProvider.SetSalt(scope.OrigSalt); // Port 239
 
         ObjectRegistry.ClearAll();
-        ObjectRegistry.AlwaysSaveAll = false; // P2: save-bypass flag must not leak across tests // Port 240
+        ObjectRegistry.AlwaysSaveAll = false; // save-bypass flag must not leak across tests // Port 240
         IdGenerator.SetId(-1);
         ClearTickerIfExists();
         GlobalServices.Reset();
@@ -103,11 +103,11 @@ public static class GlobalTestEnv
         try { if (Directory.Exists(scope.TempPath)) Directory.Delete(scope.TempPath, recursive: true); } catch (Exception ex) { Console.Error.WriteLine($"rmtree failed: {ex}"); }
 
         Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", scope.OrigEnvSavePath);
-        SaltProvider.Clear(); // P2: wipe legacy slot AND per-path dict
+        SaltProvider.Clear(); // wipe legacy slot AND per-path dict
         if (scope.OrigSalt is not null) SaltProvider.SetSalt(scope.OrigSalt);
 
         ObjectRegistry.ClearAll();
-        ObjectRegistry.AlwaysSaveAll = false; // P2: save-bypass flag must not leak across tests
+        ObjectRegistry.AlwaysSaveAll = false; // save-bypass flag must not leak across tests
         IdGenerator.SetId(-1);
         ClearTickerIfExists();
         GlobalServices.Reset();

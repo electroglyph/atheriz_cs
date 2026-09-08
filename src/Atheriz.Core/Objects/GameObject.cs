@@ -23,8 +23,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     private double _secondsPlayed; // Port of base_obj.py:103-104 _seconds_played + seconds_played property
 
     // --- identity ---
-    private static long s_nextHashId;
-    private readonly long _hashId = System.Threading.Interlocked.Increment(ref s_nextHashId);
     private int _id = -1;
     private string _name = "";
     private string _desc = "";
@@ -164,6 +162,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 }
             }
             catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
+            bool sent = false;
             try
             {
                 // Port of base_obj.py:790-801 self.msg(map={map, pos, symbol, legend, min_x, max_y, area, show_legend})
@@ -181,19 +180,24 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 Session? sess = null;
                 try { sess = Session; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
                 var conn = sess?.Connection;
+                // stamp LastMapTime only when delivery
+                // succeeded. Python (base_obj.py:813+) has no try/catch here,
+                // so a failed send raises before the stamp line; the C#
+                // swallow-then-stamp turned failures into success stamps.
                 if (conn != null)
                 {
                     conn.SendCommand("map", new List<object?> { payload }, null);
+                    sent = true;
                 }
                 else
                 {
                     // Fallback for test harnesses without connection — store via _msgLog like original Python would via session.msg
                     // Use MsgInternal path via Session if available, otherwise log
-                    try { Msg($"[map:{name}]"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
+                    try { Msg($"[map:{name}]"); sent = true; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
                 }
             }
             catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
-            LastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            if (sent) LastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
             return 0;
         }, mapStr, entries, minX, maxY, showLegend, name);
     }
@@ -234,7 +238,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             var sess = _session;
             if (sess != null && sess.ConnTime > 0)
             {
-                double elapsed = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - sess.ConnTime; // Port of base_obj.py:662 time.time() - session.conn_time
+                double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - sess.ConnTime; // Port of base_obj.py:662 time.time() - session.conn_time
                 if (elapsed > 0) baseVal += elapsed;
             }
             return baseVal;
@@ -257,6 +261,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         get => Read(() => new List<string>(_aliases));
         set => Write(() => { _aliases = new List<string>(value); _flags.IsModified = true; });
     }
+    // Null-tolerant (hasattr equivalent): reflection/test teardown can force
+    // a null field, mirroring Python's deleted-attr guard (test_tags.py:187).
     public HashSet<string> TagsSnapshot => Read(() => _tags == null ? new HashSet<string>() : new HashSet<string>(_tags));
     public HashSet<int> ContentsSnapshot => Read(() => new HashSet<int>(_contents));
     public HashSet<int> ScriptsSnapshot => Read(() => new HashSet<int>(_scripts));
@@ -289,7 +295,19 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         if (obj is GameObject o) return Id != -1 && Id == o.Id;
         return false;
     }
-    public override int GetHashCode() => _hashId.GetHashCode();
+    // Port of nodes.py:92 — hash by registry id, matching Equals above.
+    public override int GetHashCode() => Id.GetHashCode();
+
+    // ==/!= use the same Id value-equality as Equals (nodes.py:85-93),
+    // so same-Id reload instances compare equal instead of falling back to
+    // reference identity (which stranded followers after reloads).
+    public static bool operator ==(GameObject? a, GameObject? b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a is null || b is null) return false;
+        return a.Id != -1 && a.Id == b.Id;
+    }
+    public static bool operator !=(GameObject? a, GameObject? b) => !(a == b);
 
 
     // --- tag ops ---
@@ -348,7 +366,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         _lock.EnterWriteLock();
         try
         {
-            // B-OBJ-14: re-check under write lock; a channel deleted in the race
+            // re-check under write lock; a channel deleted in the race
             // must not land in _channels. Uses the lock-free snapshot: taking
             // _histLock here (via IsDeleted) would nest peer → channel and
             // deadlock against Msg delivery (channel → peer).
@@ -512,7 +530,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         HashSet<int> ids;
         using (ReadScope())
         {
-            if (_scripts == null || _scripts.Count==0) return false; ids = new HashSet<int>(_scripts);
+            if (_scripts.Count==0) return false; ids = new HashSet<int>(_scripts);
         }
         string needle = scriptType.ToLowerInvariant();
         foreach (var id in ids)
@@ -531,7 +549,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         HashSet<int> ids;
         using (ReadScope())
         {
-            if (_scripts == null || _scripts.Count==0) return new List<Script>(); ids = new HashSet<int>(_scripts);
+            if (_scripts.Count==0) return new List<Script>(); ids = new HashSet<int>(_scripts);
         }
         string needle = scriptType.ToLowerInvariant();
         var list = new List<Script>();
@@ -602,7 +620,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         o._flags.IsTemporary = dto.IsTemporary;
         o._flags.IsDeleted = dto.IsDeleted;
         o._flags.IsModified = dto.IsModified;
-        // B-OBJ-6: restore roundtripped fields (missing in old saves → DTO defaults).
+        // restore roundtripped fields (missing in old saves → DTO defaults).
         o._flags.CanHear = dto.CanHear;
         o._flags.IsTickable = dto.IsTickable;
         o._tickSeconds = dto.TickSeconds != 0 ? dto.TickSeconds : 1.0;
@@ -666,7 +684,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
 
     public virtual (string Sql, object[] Params) GetSaveOpsClearing() => Persistence.Converters.GameObjectDtoConverter.GetSaveOpsClearing(this);
 
-    private GameObjectDto ToDtoUnsafe() => BuildDto(); // caller holds _lock; delegate to single BuildDto (update.md 3.3)
+    private GameObjectDto ToDtoUnsafe() => BuildDto(); // caller holds _lock; delegate to single BuildDto
 
     public (string Sql, object[] Params) GetDelOps() => ("DELETE FROM objects WHERE id = ?", [Id]);
 
@@ -735,7 +753,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         return obj;
     }
 
-    // --- persistence helpers exposed for GameObjectDtoConverter (P1.5 split) ---
+    // --- persistence helpers exposed for GameObjectDtoConverter ---
     internal void SetIdRaw(int id)
     {
         _lock.EnterWriteLock();

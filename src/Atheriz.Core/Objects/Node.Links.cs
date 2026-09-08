@@ -38,7 +38,8 @@ public partial class Node
         try
         {
             if (Nouns.TryGetValue(key.ToLowerInvariant(), out var v)) return v;
-            foreach (var kv in Nouns) if (kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase)) return kv.Value;
+            // the OrdinalIgnoreCase dict makes a post-TryGetValue
+            // manual scan unreachable — deleted.
             return null;
         }
         finally { SyncRoot.ExitReadLock(); }
@@ -56,11 +57,13 @@ public partial class Node
         try { return Links.ToList(); }
         finally { SyncRoot.ExitReadLock(); }
     }
-    // Port of nodes.py:579
+    // Port of nodes.py:579. Case-insensitive like GetLinkByName :
+    // existence guards must agree with lookups.
     public bool HasLinkName(string name)
     {
+        var low = name.ToLowerInvariant();
         SyncRoot.EnterReadLock();
-        try { return Links.Any(l => l.Name == name); }
+        try { return Links.Any(l => l.Name.ToLowerInvariant() == low || l.Aliases.Any(a => a.Equals(low, StringComparison.OrdinalIgnoreCase))); }
         finally { SyncRoot.ExitReadLock(); }
     }
     // Port of nodes.py:590
@@ -345,14 +348,15 @@ public partial class Node
     // Port of nodes.py:926 get_display_name
     public override string GetDisplayName(GameObject? looker = null)
     {
+        // read the looker's flag BEFORE taking the node lock (self->looker
+        // nesting under concurrency). The builder bit decides everything.
+        if (looker == null || !looker.IsBuilder) return "";
         SyncRoot.EnterReadLock();
         try
         {
-            if (looker != null && looker.IsBuilder)
-                return GameUtils.WrapTruecolor($"({Coord.Area},{Coord.X},{Coord.Y},{Coord.Z})\n", fg: 170);
+            return GameUtils.WrapTruecolor($"({Coord.Area},{Coord.X},{Coord.Y},{Coord.Z})\n", fg: 170);
         }
         finally { SyncRoot.ExitReadLock(); }
-        return "";
     }
     // Port of nodes.py:945 return_appearance
     public override string ReturnAppearance(GameObject? looker = null)

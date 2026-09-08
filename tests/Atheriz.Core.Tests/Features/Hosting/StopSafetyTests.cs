@@ -11,7 +11,7 @@ using Atheriz.Server.Infrastructure;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// P0-5: `stop` must never terminate an unverified process, and a refused
+// `stop` must never terminate an unverified process, and a refused
 // graceful-shutdown request must abort instead of escalating into signals.
 [Collection("Ported")]
 public class StopSafetyTests
@@ -211,7 +211,7 @@ public class StopSafetyTests
     [Fact]
     public async Task Create_WithLiveServerAnsweringError_DoesNotTouchDatabase()
     {
-        // P0-5: any HTTP answer — even {status:"error"} — proves a live server
+        // any HTTP answer — even {status:"error"} — proves a live server
         // owns this world: print its message and return, never create offline.
         using var env = GlobalTestEnv.Enter();
         var before = ObjectRegistry.Count;
