@@ -31,7 +31,7 @@ public sealed class ExamCommand : Command
             target = CommandHelpers.ResolveObject(go, targetStr!);
             if (target == null) return;
         }
-        if (target.IsNode && target is Node nodeTarget)
+        if (target is Node nodeTarget)
         {
             string areaName;
             try
@@ -48,8 +48,8 @@ public sealed class ExamCommand : Command
         var dict = new Dictionary<string, object?>();
         var propNames = new HashSet<string>();
         foreach (var (k, v, p) in collected) { dict[k] = v; if (p) propNames.Add(k); }
-        var sorted = dict.Keys.ToList();
-        foreach (var key in sorted)
+        var keysInOrder = dict.Keys.ToList();
+        foreach (var key in keysInOrder)
         {
             var val = dict[key];
             var valOutput = FormatValue(val, key);

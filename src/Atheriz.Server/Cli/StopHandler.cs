@@ -78,7 +78,7 @@ public static class StopHandler
                     Console.WriteLine(" Done.");
                     try
                     {
-                        var cwdL = new FileInfo($"/proc/{foundPid}/cwd").LinkTarget; if (!string.IsNullOrEmpty(cwdL)) { var pf = Path.Combine(cwdL, "save", "server.pid"); if (File.Exists(pf)) try { File.Delete(pf); } catch { } }
+                        var cwdL = new FileInfo($"/proc/{foundPid}/cwd").LinkTarget; if (!string.IsNullOrEmpty(cwdL)) { var pf = Path.Combine(cwdL, "save", "server.pid"); PidFile.ReleaseIfOwner(pf, foundPid); }
                     }
                     catch { }
                     return;
@@ -94,7 +94,7 @@ public static class StopHandler
         {
             Process? proc = null;
             try { proc = Process.GetProcessById(pid.Value); }
-            catch (ArgumentException) { Console.WriteLine("Process from PID file not found; removing stale PID file."); try { File.Delete(pidFilePath); } catch { } return; }
+            catch (ArgumentException) { Console.WriteLine("Process from PID file not found; removing stale PID file."); PidFile.ReleaseIfOwner(pidFilePath, pid.Value); return; }
             catch (Exception ex) { Console.WriteLine($"Could not inspect PID {pid.Value}: {ex.Message}"); return; }
             // Per-PID hold only: the port being listened on by *someone* while
             // this pid is a server must never implicate this pid .
@@ -113,13 +113,7 @@ public static class StopHandler
                 return;
             }
             Console.Write($"Stopping server process with PID: {pid}...");
-            ProcessHelper.RequestTerminate(proc);
-            if (!await ProcessHelper.WaitForExitDotsAsync(proc, 50))
-            {
-                Console.Write(" Timeout! Force killing...");
-                try { proc.Kill(entireProcessTree: false); } catch (Exception ex) { Console.WriteLine($" Failed: {ex.Message}"); return; }
-                await ProcessHelper.WaitForExitDotsAsync(proc, 30);
-            }
+            await ProcessHelper.KillProcessWithDots(proc);
             Console.WriteLine(" Done.");
             if (File.Exists(pidFilePath))
             {
@@ -127,7 +121,10 @@ public static class StopHandler
                 {
                     bool stillRunning = false;
                     try { stillRunning = !proc.HasExited; } catch { }
-                    if (!stillRunning) File.Delete(pidFilePath);
+                    // Owner-verified: only remove the file when it still names
+                    // the process just stopped — never a successor's pid file
+                    // across the kill/delete window (pid reuse).
+                    if (!stillRunning) PidFile.ReleaseIfOwner(pidFilePath, pid.Value);
                     else Console.WriteLine("\nWarning: Process still exists after kill.");
                 }
                 catch { }

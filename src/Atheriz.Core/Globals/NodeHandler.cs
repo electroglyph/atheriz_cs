@@ -148,10 +148,10 @@ public partial class NodeHandler
                                         }
                                         else
                                         {
-                                            // A3-G-7 residue: the fresh row has no Z grid at
-                                            // all — the same hole one level up. Materialize
-                                            // the grid on the replacement area and re-insert
-                                            // rather than evicting the live-modified node.
+                                            // The fresh row has no Z grid at all — the same hole one
+                                            // level up. Materialize the grid on the replacement
+                                            // area and re-insert rather than evicting the
+                                            // live-modified node.
                                             // `na` is still local (published below), so no
                                             // lock beyond the fresh grid's own is needed.
                                             var fresh = new NodeGrid(na.Name, n.Coord.Z);
@@ -309,6 +309,34 @@ public partial class NodeHandler
         }
     }
 
+    // Read-lock scan for a dirty area subtree (area/grid/node flags).
+    // Flags do not bubble up (a node edit sets only the node flag), so a
+    // clean area flag alone never proves a clean subtree — walk it all.
+    private static bool AreaSubtreeDirty(NodeArea a)
+    {
+        a.Lock.EnterReadLock();
+        List<NodeGrid> grids;
+        bool areaDirty;
+        try { areaDirty = a.IsModified; grids = a.Grids.Values.ToList(); }
+        finally { a.Lock.ExitReadLock(); }
+        if (areaDirty) return true;
+        foreach (var g in grids)
+        {
+            g.Lock.EnterReadLock();
+            List<Node> nodes;
+            bool gridDirty;
+            try { gridDirty = g.IsModified; nodes = g.Nodes.Values.ToList(); }
+            finally { g.Lock.ExitReadLock(); }
+            if (gridDirty) return true;
+            foreach (var n in nodes)
+            {
+                // Node.IsModified is via GameObject flag (read lock internally)
+                if (n.IsModified) return true;
+            }
+        }
+        return false;
+    }
+
     private bool IsDirty()
     {
         List<NodeArea> areas;
@@ -317,29 +345,7 @@ public partial class NodeHandler
             if (_modified) return true;
             areas = _areas.Values.ToList();
         }
-        foreach (var a in areas)
-        {
-            a.Lock.EnterReadLock();
-            List<NodeGrid> grids;
-            bool areaDirty;
-            try { areaDirty = a.IsModified; grids = a.Grids.Values.ToList(); }
-            finally { a.Lock.ExitReadLock(); }
-            if (areaDirty) return true;
-            foreach (var g in grids)
-            {
-                g.Lock.EnterReadLock();
-                List<Node> nodes;
-                bool gridDirty;
-                try { gridDirty = g.IsModified; nodes = g.Nodes.Values.ToList(); }
-                finally { g.Lock.ExitReadLock(); }
-                if (gridDirty) return true;
-                foreach (var n in nodes)
-                {
-                    // Node.IsModified is via GameObject flag (read lock internally)
-                    if (n.IsModified) return true;
-                }
-            }
-        }
+        foreach (var a in areas) if (AreaSubtreeDirty(a)) return true;
         Lock2.EnterReadLock();
         try { if (_modified2) return true; }
         finally { Lock2.ExitReadLock(); }
@@ -406,15 +412,22 @@ public partial class NodeHandler
         HashSet<Coord> doorDeletes;
         using (ReadScope3()) { doorsRefs = _doors.Select(kv => (kv.Key, new Dictionary<string, Door>(kv.Value))).ToList(); doorsWas = _modified3; doorGen0 = _doorGen; doorDeletes = new HashSet<Coord>(_removedDoors); doorDeletes.ExceptWith(_doors.Keys); }
 
-        // Detach copies (fresh locks, is_modified false)
-        var transitionsSnap = transRefs.Select(t => new Transition(t.FromCoord, t.ToCoord, t.Name)).ToList();
-        var doorsSnap = doorsRefs.Select(kv => (kv.Item1, kv.Item2.ToDictionary(kv2 => kv2.Key, kv2 =>
+        // Detach copies (fresh locks, is_modified false). Clean domains are
+        // skipped before paying for the copies: their rows are already
+        // persisted and tombstones ride the delete sets below, not the snaps.
+        bool saveAll = force || ObjectRegistry.AlwaysSaveAll;
+        var transitionsSnap = (saveAll || transWas || transDeletes.Count > 0)
+            ? transRefs.Select(t => new Transition(t.FromCoord, t.ToCoord, t.Name)).ToList()
+            : new List<Transition>();
+        var doorsSnap = (saveAll || doorsWas || doorDeletes.Count > 0)
+            ? doorsRefs.Select(kv => (kv.Item1, kv.Item2.ToDictionary(kv2 => kv2.Key, kv2 =>
         {
             var d = kv2.Value;
             d.Lock.EnterReadLock();
             try { return new Door(d.FromCoord, d.ToCoord, d.FromExit, d.ToExit, d.SymbolCoord, d.ClosedSymbol, d.OpenSymbol, d.Closed, d.Locked); }
             finally { d.Lock.ExitReadLock(); }
-        }))).ToList();
+        }))).ToList()
+            : new List<(Coord, Dictionary<string, Door>)>();
 
         var clearedAreas = new List<NodeArea>();
         var clearedGrids = new List<NodeGrid>();
@@ -428,6 +441,13 @@ public partial class NodeHandler
         {
             foreach (var a in areaRefs)
             {
+                // Skip clean areas before paying for the DTO walk: with no
+                // force and no save-all, an area whose whole subtree is
+                // unmodified contributes nothing to this checkpoint
+                // (tombstones ride areaDeletes below, not the DTOs). A flag
+                // set after this scan survives for the next checkpoint —
+                // nothing is cleared without being written.
+                if (!force && !ObjectRegistry.AlwaysSaveAll && !AreaSubtreeDirty(a)) continue;
                 bool wasArea;
                 Dictionary<int, NodeGrid> gridsSnap;
                 Dictionary<string, JsonElement> dataCopy;

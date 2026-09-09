@@ -27,4 +27,19 @@ public class PortedReloadTests
         Assert.True(ticker.Slots.Count >= 0);
         Autosave.StopAutosave(ticker);
     }
+    [Fact] public void Reload_BootsMissingGameTimeFromPassedSettings()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var ticker = GlobalServices.GetAsyncTicker();
+        var settings = new Atheriz.Core.Settings.AtherizSettings { SavePath = env.TempPath };
+        StartStop.DoReload(ticker: ticker, settings: settings);
+        try
+        {
+            var gt = GlobalServices.GetGameTime(settings);
+            var field = typeof(GameTime).GetField("_settings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(field);
+            Assert.Same(settings, field!.GetValue(gt));
+        }
+        finally { try { GlobalServices.GetGameTime(settings).Stop(ticker); } catch { } }
+    }
 }

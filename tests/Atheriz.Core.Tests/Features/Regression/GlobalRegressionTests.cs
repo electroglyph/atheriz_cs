@@ -365,9 +365,9 @@ public class GlobalRegressionTests
         finally { NodeHandler.SetCurrent(null); Reset(); }
     }
 
-    // load graft grid-absent hole (A3-G-7 residue): the fresh row has no Z grid
-    // at all — the same hole one level up. The live-modified node survives via
-    // a materialized grid, not eviction.
+    // Load graft grid-absent hole: the fresh row has no Z grid at all — the
+    // same hole one level up. The live-modified node survives via a
+    // materialized grid, not eviction.
     [Fact]
     public void LoadGraft_MissingGridReinsertsLiveModifiedNode()
     {

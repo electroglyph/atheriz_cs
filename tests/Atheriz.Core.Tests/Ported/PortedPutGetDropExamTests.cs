@@ -723,4 +723,61 @@ public class PortedPutGetDropExamTests
         Assert.True(apple.MoveTo(room));
         Assert.Contains(apple.Id, room.ContentsSnapshot);
     }
+    // Each parser defines a single positional dest, so keys from other
+    // commands' parsers are ignored (callers go through their own parser).
+    [Fact] public void Get_NonTargetDestKey_ShowsHelp()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var c = MakeCaller();
+        var room = MakeRoom(new Coord("get2",0,0,0));
+        c.MoveTo(room);
+        var cmd = new GetCommand();
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["args"] = new List<string>{"apple"} };
+        cmd.Run(c, args);
+        Assert.Contains("usage:", string.Join(" ", c.PeekMessages()));
+    }
+    [Fact] public void Drop_NonObjectDestKey_ShowsHelp()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var c = MakeCaller();
+        var room = MakeRoom(new Coord("drop2",0,0,0));
+        c.MoveTo(room);
+        var cmd = new DropCommand();
+        var args = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs { ["target"] = new List<string>{"apple"} };
+        cmd.Run(c, args);
+        Assert.Contains("usage:", string.Join(" ", c.PeekMessages()));
+    }
+    // Type checks are by interface, not by type-name substring: the live lock
+    // type renders as <RLock>, real tuples keep ToString rendering, and
+    // unrelated types with Tuple/HashSet in their name get normal element
+    // rendering instead of hijacked tuple/set rendering.
+    // Generic so IsGenericType is true: the old name-substring check
+    // hijacked any generic type with Tuple in its name.
+    private sealed class FakeTupleBox<T> : List<T> { public FakeTupleBox(IEnumerable<T> e) : base(e) {} }
+    private sealed class FakeHashSetCache : List<string> { public FakeHashSetCache(IEnumerable<string> e) : base(e) {} }
+    [Fact] public void FormatValue_RealLockRendersAsRLock()
+    {
+        var res = ExamFormatter.FormatValue(new System.Threading.ReaderWriterLockSlim(), null) as string;
+        Assert.Equal("<RLock>", res);
+    }
+    [Fact] public void FormatValue_ValueTupleKeepsToStringRendering()
+    {
+        var res = ExamFormatter.FormatValue((1, "a"), null) as string;
+        Assert.Equal((1, "a").ToString(), res);
+    }
+    [Fact] public void FormatValue_NonTupleTypeWithTupleInNameRendersElements()
+    {
+        var res = ExamFormatter.FormatValue(new FakeTupleBox<int>(new[]{1, 2}), null) as string;
+        Assert.Equal("[1, 2]", res);
+    }
+    [Fact] public void FormatValue_NonSetTypeWithHashSetInNameRendersList()
+    {
+        var res = ExamFormatter.FormatValue(new FakeHashSetCache(new[]{"a"}), null) as string;
+        Assert.Equal("[a]", res);
+    }
+    [Fact] public void FormatValue_HashSetOfObjectsRendersSet()
+    {
+        var res = ExamFormatter.FormatValue(new HashSet<string>{"a"}, null) as string;
+        Assert.Equal("{a}", res);
+    }
 }

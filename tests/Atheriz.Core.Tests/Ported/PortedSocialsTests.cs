@@ -176,4 +176,28 @@ public class PortedSocialsTests
         Assert.Empty(a.PeekMessages());
         Assert.Empty(b.PeekMessages());
     }
+
+    private sealed class SayHookRecorder
+    {
+        public int Fired;
+        [After] public void Record(object? a, object? b, object? c, object? d, object? e, object? f, object? g, object? h) => Fired++;
+    }
+
+    [Fact] public void UntargetedSocial_FiresAtSayHook()
+    {
+        using var env=GlobalTestEnv.Enter();
+        var (room, alice, bob)=MakeEnv();
+        var rec=new SayHookRecorder();
+        alice.InstallHook("at_say", (Action<object?, object?, object?, object?, object?, object?, object?, object?>)rec.Record);
+        var cmd=new SocialsCommand();
+        var pa=new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs(); pa.CmdString="smile"; pa["target"]=new List<string>();
+        cmd.Run(alice, pa);
+        // Routed through the AtSay entry: game-code at_say hooks observe socials.
+        Assert.Equal(1, rec.Fired);
+        // Established wording unchanged for actor and room.
+        var aliceText=string.Join(" ", alice.PeekMessages());
+        Assert.Contains("You smile", aliceText);
+        var bobText=string.Join(" ", bob.PeekMessages());
+        Assert.Contains("Alice", bobText); Assert.Contains("smiles", bobText.ToLowerInvariant());
+    }
 }

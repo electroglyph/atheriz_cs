@@ -104,7 +104,9 @@ public partial class GameObject
             }
             else
             {
-                type = "say";
+                // A caller-supplied type (emote and friends route through this
+                // same entry) is preserved; plain say passes none and keeps "say".
+                type = msgType ?? "say";
                 if (selfText is true) selfText = "{self} say, \"\x1b[1;37m{speech}\x1b[0m\"";
                 locText ??= "{object} says, \"\x1b[1;37m{speech}\x1b[0m\"";
                 recvText ??= message;

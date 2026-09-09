@@ -67,8 +67,8 @@ public class PortedDeleteTickableTests
     [Fact]
     public void ConcurrentTickSecondsSwap_LeavesSingleRegistration()
     {
-        // A3-O-11: the TickSeconds swap spanned separate locks, so racing swaps
-        // each removed their own stale-read old interval and added their own —
+        // The TickSeconds swap spanned separate locks, so racing swaps each
+        // removed their own stale-read old interval and added their own —
         // stale intervals kept firing alongside the fresh one. Predicate and
         // mutation share one write hold now.
         using var env = GlobalTestEnv.Enter();

@@ -1,5 +1,7 @@
 // Port of atheriz/tests/test_salt_creation.py:1
+using Atheriz.Core;
 using Atheriz.Core.Globals;
+using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Ported;
 
@@ -95,6 +97,34 @@ public class PortedSaltCreationTests
         {
             SaltProvider.Clear();
             try{Directory.Delete(tmp,true);}catch{}
+        }
+    }
+    [Fact] public void DoSetup_SeedsDefaultSaltSlotForOddCwdLogin()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var game = Path.Combine(Path.GetTempPath(), $"salt_setup_{Guid.NewGuid():N}");
+        var elsewhere = Path.Combine(Path.GetTempPath(), $"salt_cwd_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(game);
+        Directory.CreateDirectory(elsewhere);
+        var orig = Directory.GetCurrentDirectory();
+        try
+        {
+            // Park outside any game folder: the default salt slot must still
+            // verify the superuser created from the game's secret folder.
+            Directory.SetCurrentDirectory(elsewhere);
+            var save = Path.Combine(game, "save");
+            var secret = Path.Combine(game, "secret");
+            InitialSetup.DoSetup(save, "admin", "password123", secret);
+            var account = ObjectRegistry.FilterBy(o => o.Name == "admin").FirstOrDefault() as Account;
+            Assert.NotNull(account);
+            Assert.True(account!.Login("admin", "password123"));
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(orig);
+            SaltProvider.Clear();
+            try{Directory.Delete(game,true);}catch{}
+            try{Directory.Delete(elsewhere,true);}catch{}
         }
     }
 }

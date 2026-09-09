@@ -223,4 +223,61 @@ public class PortedDeleteTests
         using var db2 = new AtherizDbContext(path);
         Assert.Null(db2.Objects.Find(item.Id));
     }
+
+    private sealed class PlanterChild : GameObject
+    {
+        public GameObject? Parent;
+        public GameObject? Planted;
+        public override bool AtDelete(GameObject? caller)
+        {
+            // Plants a post-snapshot arrival: the walk already snapshotted the
+            // parent, so this orphan is only reachable via the straggler sweep.
+            if (Parent != null && Planted == null)
+            {
+                Planted = GameObject.Create("LateOrphan");
+                ObjectRegistry.AddObject(Planted);
+                Assert.True(Planted.MoveTo(Parent));
+            }
+            return true;
+        }
+    }
+
+    [Fact]
+    public void AddObjectToDeletedParentIsRefused()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = MakeCaller();
+        var container = GameObject.Create("Chest", isContainer: true);
+        ObjectRegistry.AddObject(container);
+        Assert.NotNull(container.Delete(caller, recursive: false));
+        var orphan = GameObject.Create("Orphan");
+        ObjectRegistry.AddObject(orphan);
+        container.AddObject(orphan);
+        Assert.DoesNotContain(orphan.Id, container.ContentsSnapshot);
+        Assert.False(orphan.Location is Persistence.Dto.LocationRef.ObjectLocation ol && ol.ObjectId == container.Id);
+    }
+
+    [Fact]
+    public void RecursiveDeleteKillsLateArrivalPlantedMidWalk()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = MakeCaller();
+        var room = MakeRoom("delLate");
+        var container = GameObject.Create("Chest", isContainer: true);
+        ObjectRegistry.AddObject(container);
+        Assert.True(container.MoveTo(room));
+        var planter = new PlanterChild { Parent = container };
+        planter.Name = "Planter";
+        planter.Id = IdGenerator.GetUniqueId();
+        ObjectRegistry.AddObject(planter);
+        Assert.True(planter.MoveTo(container));
+        var ops = container.Delete(caller, recursive: true);
+        Assert.NotNull(ops);
+        Assert.NotNull(planter.Planted);
+        var orphan = planter.Planted!;
+        // The orphan landed after the parent's walk snapshot: it must not
+        // escape deletion with a dangling location at the deleted parent.
+        Assert.True(orphan.IsDeleted);
+        Assert.DoesNotContain(orphan.Id, ObjectRegistry.FilterBy(_ => true).Select(o => o.Id));
+    }
 }

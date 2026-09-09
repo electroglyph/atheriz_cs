@@ -243,7 +243,10 @@ public static class ExamFormatter
         }
         if (val == null) return "None";
         if (val is string s) return s;
-        if (val.GetType().Name == "RLock") return "<RLock>";
+        // Typed lock check: no type named RLock exists in C# (the name is a
+        // leftover of the original RLock); the live lock type is
+        // ReaderWriterLockSlim, matched here directly.
+        if (val is System.Threading.ReaderWriterLockSlim) return "<RLock>";
         // dict handling before general IEnumerable
         if (val is System.Collections.IDictionary genDict)
         {
@@ -261,11 +264,17 @@ public static class ExamFormatter
         var valType2 = val.GetType();
         if (val is System.Collections.IEnumerable en2 && val is not string)
         {
-            if (valType2.IsGenericType && valType2.Name.Contains("Tuple")) return val.ToString() ?? "<unprintable>";
+            // Tuples render via ToString (matched by interface, not by name,
+            // so unrelated generic types with Tuple in their name are left
+            // to the element rendering below).
+            if (val is ITuple) return val.ToString() ?? "<unprintable>";
             var elems = new List<string>();
             foreach (var e in en2) elems.Add(FormatValue(e, null) as string ?? e?.ToString() ?? "");
-            if (val is System.Collections.Generic.HashSet<int> || val is System.Collections.Generic.HashSet<string> || val.GetType().Name.Contains("HashSet")) return "{" + string.Join(", ", elems) + "}";
-            if (val is System.Array || val.GetType().Name.Contains("Tuple")) return "(" + string.Join(", ", elems) + ")";
+            // Set check by generic definition: matches HashSet of any element
+            // type without catching unrelated types that merely contain
+            // HashSet in their name.
+            if (valType2.IsGenericType && valType2.GetGenericTypeDefinition() == typeof(System.Collections.Generic.HashSet<>)) return "{" + string.Join(", ", elems) + "}";
+            if (val is System.Array) return "(" + string.Join(", ", elems) + ")";
             return "[" + string.Join(", ", elems) + "]";
         }
         try { return val.ToString() ?? "<unprintable>"; } catch { return "<unprintable>"; }

@@ -313,9 +313,9 @@ public static class StartStop
             var nh = TryGetNodeHandler();
             if (nh == null) return;
             List<NodeArea> areas;
-            nh.Lock.EnterReadLock();
-            try { areas = nh.GetAreas(); }
-            finally { nh.Lock.ExitReadLock(); }
+            // GetAreas snapshots under its own read lock; wrapping it in
+            // another read here only works via lock recursion.
+            areas = nh.GetAreas();
             foreach (var area in areas)
             {
                 List<NodeGrid> grids;
@@ -421,7 +421,10 @@ public static class StartStop
                 {
                     try
                     {
-                        var gt = GlobalServices.GetGameTime();
+                        // Boot from the passed settings like DoStartup does — the
+                        // ambient global would give the wrong SavePath/cadence on
+                        // an explicit-settings reload.
+                        var gt = GlobalServices.GetGameTime(settings);
                         var t = ticker ?? TryGetTicker() ?? GlobalServices.GetAsyncTicker();
                         gt.Start(t);
                     }
@@ -468,13 +471,13 @@ public static class StartStop
         // Crash-consistency journal: see AutosaveTick.
         Persistence.CheckpointJournal.MarkDirty(settings.SavePath);
         bool ok = true;
-        // A3-G-3: one transaction for all three groups. WithGateAndTransaction
-        // joins an ambient transaction instead of opening its own, so opening
-        // one here makes the checkpoint atomic: a crash (or a failing group)
-        // rolls back objects+map+node together instead of tearing between
-        // groups. The gate is held for the whole checkpoint because the inner
-        // saves skip their own gate take once the ambient transaction exists —
-        // without this a concurrent tick could interleave mid-checkpoint.
+        // One transaction for all three groups. WithGateAndTransaction joins an
+        // ambient transaction instead of opening its own, so opening one here
+        // makes the checkpoint atomic: a crash (or a failing group) rolls back
+        // objects+map+node together instead of tearing between groups. The gate
+        // is held for the whole checkpoint because the inner saves skip their
+        // own gate take once the ambient transaction exists — without this a
+        // concurrent tick could interleave mid-checkpoint.
         // Bounded take: on timeout the checkpoint still runs (old shape, journal
         // still detects) rather than skipping the shutdown save entirely.
         bool atomic = DbWriteGate.TryEnter(TimeSpan.FromSeconds(30));

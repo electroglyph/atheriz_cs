@@ -108,9 +108,9 @@ public static class GameTemplateGenerator
         }
         // When overwriting an existing folder, wipe the save leaf so DoSetup
         // starts fresh (handles `new test --overwrite` bare-name case).
-        // A3-S-1: this runs AFTER credential validation (a failed prompt must
-        // leave the save dir intact) and AFTER a liveness probe (wiping under
-        // a live server must be refused, not raced).
+        // This runs AFTER credential validation (a failed prompt must leave the
+        // save dir intact) and AFTER a liveness probe (wiping under a live
+        // server must be refused, not raced).
         // Containment: the wipe is confined to <folder>/save/** (asserted
         // below — folder top-level files are never deleted). This is
         // deliberate operator intent (`--overwrite` names the folder), not a
@@ -140,6 +140,15 @@ public static class GameTemplateGenerator
                     foreach (var f in Directory.GetFiles(saveDirForWipe, "*", SearchOption.AllDirectories))
                         try { File.Delete(f); } catch { }
                 }
+                // A stale secret/admin.token would survive as the "fresh"
+                // game's credential: delete it so setup regenerates a fresh
+                // token below (AdminToken.EnsureToken creates when missing).
+                try
+                {
+                    var staleToken = Path.Combine(folderPath, "secret", "admin.token");
+                    if (File.Exists(staleToken)) File.Delete(staleToken);
+                }
+                catch { }
                 var dbFile = Path.Combine(folderPath, "save", "database.sqlite3");
                 foreach (var f in new[] { dbFile, dbFile + "-wal", dbFile + "-shm", dbFile + ".journal" })
                     try { if (File.Exists(f)) File.Delete(f); } catch { }
@@ -185,11 +194,11 @@ public static class GameTemplateGenerator
         return true;
     }
 
-    // A3-S-1 liveness probe: refuse --overwrite while a verified server owns
-    // the folder. Only a pid file naming a live, verified server process
-    // refuses — stale/dead/unparseable/foreign pids fall through to the wipe
-    // (aborted setups must stay re-creatable). Uses the same per-PID
-    // verification as stop (never name-prefix trust).
+    // Liveness probe: refuse --overwrite while a verified server owns the
+    // folder. Only a pid file naming a live, verified server process refuses
+    // — stale/dead/unparseable/foreign pids fall through to the wipe (aborted
+    // setups must stay re-creatable). Uses the same per-PID verification as
+    // stop (never name-prefix trust).
     private static bool IsLiveServerFolder(string folderPath)
     {
         try
@@ -313,6 +322,11 @@ public static class GameTemplateGenerator
         if (t == typeof(System.Text.Json.JsonElement)) return "JsonElement";
         return n2;
     }
+    // Escape a default for emitted C#: a quote, backslash or newline would
+    // otherwise emit an uncompilable Custom*.cs override signature.
+    private static string EscapeCsString(string s) => s
+        .Replace("\\", "\\\\").Replace("\0", "\\0").Replace("\r", "\\r")
+        .Replace("\n", "\\n").Replace("\t", "\\t").Replace("\"", "\\\"");
     private static string BuildParamList(System.Reflection.MethodInfo m)
     {
         var ps = m.GetParameters();
@@ -353,9 +367,9 @@ public static class GameTemplateGenerator
                 var dv = p.DefaultValue;
                 string ds;
                 if (dv == null) ds = "null";
-                else if (dv is string s) ds = $"\"{s}\"";
+                else if (dv is string s) ds = "\"" + EscapeCsString(s) + "\"";
                 else if (dv is bool b) ds = b ? "true" : "false";
-                else if (dv is char c) ds = $"'{c}'";
+                else if (dv is char c) ds = "'" + EscapeCsString(c.ToString()).Replace("'", "\\'") + "'";
                 // InvariantCulture: a locale decimal comma would emit
                 // uncompilable code (e.g. `= 1,5` parses as two args).
                 else if (dv is IFormattable fmt) ds = fmt.ToString(null, System.Globalization.CultureInfo.InvariantCulture);

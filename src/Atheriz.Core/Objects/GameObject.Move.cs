@@ -58,7 +58,15 @@ public partial class GameObject
     {
         if (obj == null) return;
         _lock.EnterWriteLock();
-        try { _contents.Add(obj.Id); _flags.IsModified = true; }
+        try
+        {
+            // A deleted container accepts no new contents: without this, an add
+            // landing after a recursive-delete walk snapshot escapes deletion
+            // with a dangling location at a deleted parent. The child is left
+            // untouched at its previous location.
+            if (_flags.IsDeleted) return;
+            _contents.Add(obj.Id); _flags.IsModified = true;
+        }
         finally { _lock.ExitWriteLock(); }
         // Update obj's Location to this (if obj is not Node — Nodes use CoordLocation)
         if (!obj.IsNode)
@@ -212,7 +220,10 @@ public partial class GameObject
             }
         }
 
-        // Resolve old location (live map only — F005 removed the ever-created resurrection cache)
+        // Resolve old location from the live map first; if the in-memory link
+        // is gone, fall back to the ever-created registry entry so an
+        // unloaded-but-persisted location still resolves instead of stranding
+        // the move with no source to detach from.
         GameObject? oldLoc = ResolveLocationObject();
         if (oldLoc == null && Location is LocationRef.ObjectLocation olLoc)
             oldLoc = ObjectRegistry.GetEver(olLoc.ObjectId);
@@ -284,16 +295,15 @@ public partial class GameObject
             }
         }
 
-        // A3-O-7: the pre-gates above run with no location locks held and hooks
-        // can move things (see the comment above). If `this` is no longer where
-        // the gates ran, abort instead of removing from a stale room and
-        // double-inserting into the destination.
+        // The pre-gates above run with no location locks held and hooks can move
+        // things (see the comment above). If `this` is no longer where the gates
+        // ran, abort instead of removing from a stale room and double-inserting
+        // into the destination.
         if (!ReferenceEquals(ResolveLocationObject(), oldLoc)) return false;
 
         // Try to acquire locks in order (deadlock avoidance)
         // For C# we use ReaderWriterLockSlim EnterWriteLock with recursion; acquire all, do move, release reverse
         // We do not have NodeGrid locks accessible, so we only lock GameObject/Node SyncRoots.
-        // The Python also does grid checks; we simulate deleted/grid presence checks.
         foreach (var o in toLock)
         {
             o.SyncRoot.EnterWriteLock();
@@ -305,30 +315,22 @@ public partial class GameObject
         {
             // Port of base_obj.py:1187-1206 checks inside _do_with_nodes
             if (destObj.IsDeleted) return false; // Port of base_obj.py:1187 if is_deleted: return False
-            // For Node destinations, check grid presence (dest_grid.nodes.get(...) is destination)
-            if (destObj.IsNode && destObj is Node destNode)
-            {
-                // Best-effort grid presence check: if we can find Node via ObjectRegistry and its coord matches, assume present.
-                // In full port with NodeHandler, would check dest_grid.nodes.get((x,y)) is dest.
-                // Here we just check not deleted (already) and that Node is still registered
-                var check = ObjectRegistry.Get(destNode.Id);
-                if (check.Count == 0 || !ReferenceEquals(check[0], destNode))
-                {
-                    // Not in registry — treat as deleted
-                    // But allow if Node is newly created and not yet registered? For tests, registry add needed.
-                    // We'll allow if not found but is not deleted — skip fail.
-                }
-            }
+            // No grid-presence probe here: the old probe's arms both fell through
+            // to the move (dead block paying a registry lookup per move for no
+            // decision), so unregistered-but-live nodes stay movable.
 
-            // Update _contents sets — Port of base_obj.py:1203-1206
-            if (oldLoc != null)
+            // Update _contents sets — Port of base_obj.py:1203-1206.
+            // A move to the current location skips the remove/add churn: the
+            // membership is already correct, and stamping both ends dirty
+            // buys a checkpoint write for no state change.
+            if (oldLoc != null && !ReferenceEquals(destObj, oldLoc))
             {
                 oldLoc._contents.Remove(this.Id);
                 destObj._contents.Add(this.Id);
                 oldLoc.IsModified = true;
                 destObj.IsModified = true;
             }
-            else
+            else if (oldLoc == null)
             {
                 // No old loc — just add to destination
                 destObj._contents.Add(this.Id);
@@ -557,7 +559,11 @@ internal static class MapHandlerSingleton
         lock (_lock)
         {
             if (_instance != null) return _instance;
-            try { return GlobalServices.GetMapHandler(); } catch { return null; }
+            // Cache the fallback: without this every node-move pays a full
+            // global lookup, and only Set() ever populated the slot.
+            try { _instance = GlobalServices.GetMapHandler(); }
+            catch { return null; }
+            return _instance;
         }
     }
     public static void Set(MapHandler handler) { lock (_lock) { _instance = handler; } }

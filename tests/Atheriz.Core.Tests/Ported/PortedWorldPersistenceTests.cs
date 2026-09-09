@@ -37,7 +37,7 @@ public class PortedWorldPersistenceTests
     {
         using var env = GlobalTestEnv.Enter();
         var mh = GlobalServices.GetMapHandler();
-        var mi = mh.GetOrCreatePublic("CleanArea",0);
+        var mi = mh.EnsureMapInfo("CleanArea",0);
         mi.MapChanged = false; mi.IsModified = false;
         using(var db=new AtherizDbContext(env.TempPath)){ db.Database.EnsureCreated(); mh.Save(db, force:false); }
         Assert.False(mi.MapChanged);

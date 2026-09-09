@@ -10,7 +10,7 @@ public class CustomNode : Node
     public CustomNode() : base() { }
     public CustomNode(Coord coord, string name = "room", string desc = "") : base(coord, name, desc) { }
 
-    public override bool AtDelete(GameObject caller)
+    public override bool AtDelete(GameObject? caller)
     {
         return base.AtDelete(caller);
     }

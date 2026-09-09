@@ -16,7 +16,13 @@ public class Script : GameObject
         IsScript = true;
     }
 
-    public GameObject? Child => _child;
+    public GameObject? Child
+    {
+        // Locked read: every write takes SyncRoot, so a bare field read can
+        // observe a half-published re-attach and detach hooks from the wrong
+        // (previous) child.
+        get { SyncRoot.EnterReadLock(); try { return _child; } finally { SyncRoot.ExitReadLock(); } }
+    }
 
     public override IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
     {
@@ -181,7 +187,12 @@ public class Script : GameObject
     public void RemoveHooks(GameObject? child = null)
     {
         // Port of base_script.py:219 child = self.child if child is None else child
-        child ??= _child;
+        if (child == null)
+        {
+            SyncRoot.EnterReadLock();
+            try { child = _child; }
+            finally { SyncRoot.ExitReadLock(); }
+        }
         if (child == null) return; // Port of base_script.py:220-222 if child is None: logger.error...
         // marker classification cached per type (HookMarkerCache).
         var atFuncs = HookMarkerCache.ForType(GetType());

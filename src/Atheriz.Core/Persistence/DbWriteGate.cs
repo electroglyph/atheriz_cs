@@ -35,9 +35,9 @@ public static class DbWriteGate
     // Owner check : the AsyncLocal count alone cannot tell a
     // same-flow re-entry from a Task.Run-inherited copy on a thread that
     // never called Enter — the holder thread id can. A count>0 on any other
-    // thread is a fork, never ownership. Used by TryEnter, which can refuse
-    // safely; Enter/EnterAsync deliberately keep count-based passthrough
-    // (see below).
+    // thread is a fork, never ownership. Used by TryEnter and EnterAsync,
+    // which refuse live-holder forks; Enter deliberately keeps count-based
+    // passthrough (see below).
     private static bool IsOwnerFlow() =>
         _recursion.Value > 0 && Environment.CurrentManagedThreadId == Volatile.Read(ref _holderThreadId);
 
@@ -70,8 +70,20 @@ public static class DbWriteGate
         // so the matching exit would see count 0 and leak the permit.
         // Re-entrant on a flow already holding via sync Enter (AsyncLocal
         // reads flow down reliably): nested hold, no semaphore take.
+        // A forked copy (count inherited, different thread) is never
+        // ownership — same rule as TryEnter: refuse while the holder is live,
+        // adopt as a fresh take when the copy is stale. Without this the fork
+        // would run DB work concurrently with the holder under a no-op lease.
         // Mixed nesting the other way (sync Enter inside an async lease) is
         // unsupported — no such call pattern exists.
+        if (_recursion.Value > 0 && !IsOwnerFlow())
+        {
+            if (!_sem.Wait(TimeSpan.Zero))
+                throw new InvalidOperationException("DbWriteGate.EnterAsync refused on a forked flow while another flow holds the gate.");
+            _recursion.Value = 1;
+            Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
+            return WriteHold.Owned();
+        }
         if (_recursion.Value > 0) return WriteHold.Nested();
         await _sem.WaitAsync(ct).ConfigureAwait(false);
         Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
@@ -130,11 +142,7 @@ public static class DbWriteGate
         var c = _recursion.Value;
         if (c <= 0)
         {
-#if DEBUG
-            System.Diagnostics.Debug.Fail("DbWriteGate.Exit without a matching Enter on this flow.");
-#endif
-            _recursion.Value = 0;
-            return;
+            throw new InvalidOperationException("DbWriteGate.Exit without a matching Enter on this flow.");
         }
         if (c > 1)
         {
@@ -143,13 +151,13 @@ public static class DbWriteGate
         }
         if (Environment.CurrentManagedThreadId != Volatile.Read(ref _holderThreadId))
         {
-            // Inherited copy on a thread that never took the gate: drop our
-            // forked count but never free another flow's slot.
-#if DEBUG
-            System.Diagnostics.Debug.Fail("DbWriteGate.Exit on a thread that never took the gate (forked AsyncLocal copy).");
-#endif
+            // Inherited copy on a thread that never took the gate: this is the
+            // await-under-Enter shape (Enter, await, resume elsewhere). Fail
+            // fast instead of leaking the permit and hanging all later Enters;
+            // async flows must use EnterAsync. Balanced child Enter/Exit pairs
+            // never reach here (their count is above 1 when they unwind).
             _recursion.Value = 0;
-            return;
+            throw new InvalidOperationException("DbWriteGate.Exit on a thread that never took the gate: do not await under a sync Enter — use EnterAsync instead.");
         }
         _recursion.Value = 0;
         _sem.Release();

@@ -371,4 +371,55 @@ public class PortedMapEditTests
         draw.Run(caller, null);
         Assert.Contains(caller.PeekMessages(), m=> m.Contains("No active connection"));
     }
+
+    private sealed class ThrowingConn : BaseConnection
+    {
+        public ThrowingConn() : base("throw") { ClientHost = "10.0.0.1"; }
+        public override void SendCommand(string cmd, List<object?>? args=null, Dictionary<string,object?>? kwargs=null) => throw new InvalidOperationException("boom");
+        public override void Close() { }
+    }
+
+    // The connection session must win over the puppet's session link: a
+    // connection caller whose puppet session went stale still has a live
+    // connection and must reach the editor, not "No active connection".
+    [Fact] public void DrawCommand_ConnectionSessionSurvivesStalePuppetSession()
+    {
+        using var env = GlobalTestEnv.Enter();
+        Reset();
+        var node = new Node(new Coord("TestArea",2,0,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
+        var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
+        grid.Nodes[(2,0)]=node;
+        var caller = GameObject.Create("SessCaller", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
+        node.AddObject(caller);
+        caller.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(node.Coord);
+        var conn = new FakeConn();
+        conn.Session.Connection = conn;
+        conn.Session.Puppet = caller;
+        caller.Session = null!;
+        var draw = new Atheriz.Core.Commands.LoggedIn.DrawCommand();
+        draw.Run(conn, null);
+        Assert.Single(conn.Sent.Where(s=>s.Cmd=="launch_draw"));
+    }
+
+    // A failed launch_draw send must surface to the caller instead of
+    // reporting success unconditionally.
+    [Fact] public void DrawCommand_SendFailure_Reported()
+    {
+        using var env = GlobalTestEnv.Enter();
+        Reset();
+        var node = new Node(new Coord("TestArea",3,0,0));
+        ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
+        var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
+        grid.Nodes[(3,0)]=node;
+        var caller = GameObject.Create("FailCaller", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
+        node.AddObject(caller);
+        caller.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(node.Coord);
+        var conn = new ThrowingConn();
+        caller.Session = new Session(conn); caller.Session.Connection = conn; conn.Session.Puppet = caller;
+        var draw = new Atheriz.Core.Commands.LoggedIn.DrawCommand();
+        draw.Run(caller, null);
+        Assert.DoesNotContain(caller.PeekMessages(), m=> m.Contains("Opening AtheriZ Draw"));
+        Assert.Contains(caller.PeekMessages(), m=> m.Contains("Could not open the map editor."));
+    }
 }

@@ -233,4 +233,42 @@ public class PortedMazePathfindTests
         var s = new AtherizSettings();
         Assert.Equal(50000, s.MaxAstarIterations);
     }
+    [Fact] public void RepeatMazeEvictsPriorGenerationNodes()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = GameObject.Create("Builder", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
+        var nh = GlobalServices.GetNodeHandler(); NodeHandler.SetCurrent(nh);
+        var mh = GlobalServices.GetMapHandler();
+        MazeCommand.MapHandlerFactory = ()=> mh;
+        MazeCommand.NodeHandlerFactory = ()=> nh;
+        MazeCommand.ThreadPoolFactory = ()=> new Atheriz.Core.Concurrency.AsyncThreadPool();
+        var cmd = new MazeCommand();
+        cmd.Run(caller, null);
+        var gen1 = new HashSet<int>(ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Area == "maze1").Select(o => o.Id));
+        Assert.NotEmpty(gen1);
+        caller.ClearMessages();
+        cmd.Run(caller, null);
+        var survivors = gen1.Where(id => ObjectRegistry.Get(id).Count > 0).ToList();
+        Assert.Empty(survivors);
+    }
+    private sealed class ImmobileBuilder : GameObject
+    {
+        public override bool AtPreMove(GameObject? destination, string? toExit = null) => false;
+    }
+    [Fact] public void MazeMoveFailureReported()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = new ImmobileBuilder();
+        caller.Name = "Builder"; caller.IsPc = true; caller.PrivilegeLevel = Privilege.Builder;
+        caller.Id = IdGenerator.GetUniqueId(); ObjectRegistry.AddObject(caller);
+        var nh = GlobalServices.GetNodeHandler(); NodeHandler.SetCurrent(nh);
+        var mh = GlobalServices.GetMapHandler();
+        MazeCommand.MapHandlerFactory = ()=> mh;
+        MazeCommand.NodeHandlerFactory = ()=> nh;
+        MazeCommand.ThreadPoolFactory = ()=> new Atheriz.Core.Concurrency.AsyncThreadPool();
+        new MazeCommand().Run(caller, null);
+        var txt = string.Join(" ", caller.PeekMessages());
+        Assert.Contains("moving to:", txt);
+        Assert.Contains("Could not move to", txt);
+    }
 }

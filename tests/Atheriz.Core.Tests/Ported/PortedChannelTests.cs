@@ -543,11 +543,39 @@ public class PortedChannelTests
         Assert.DoesNotContain("m-0", outStr);
     }
 
+    [Fact] public void GetCommand_NameDescPairingSurvivesConcurrentRename()
+    {
+        // Name and Desc were read under two independent locks, so a rename
+        // landing between them cached a new-key/old-desc command until the
+        // next rename. GetCommand now reads both under one hold and Rename
+        // writes both under one hold: every command pairs a key with the
+        // desc written alongside it, never a mix of two renames. (One read
+        // hold alone cannot fix this — the tear is created by the writer, so
+        // the pin hammers the paired Rename path.)
+        using var env = GlobalTestEnv.Enter();
+        var chan = Channel.Create("c15n-1");
+        chan.Desc = "c15d-1";
+        const int renames = 2000;
+        var writerDone = 0;
+        var writer = Task.Run(() =>
+        {
+            for (int i = 0; i < renames; i++) chan.Rename("c15n" + i, "c15d" + i);
+            Volatile.Write(ref writerDone, 1);
+        });
+        while (Volatile.Read(ref writerDone) == 0)
+        {
+            var cmd = (Atheriz.Core.Commands.BaseChannelCommand)chan.GetCommand()!;
+            Assert.NotNull(cmd);
+            Assert.Equal(cmd.Desc, "c15d" + cmd.Key.Substring("c15n".Length));
+        }
+        Assert.True(writer.Wait(TimeSpan.FromSeconds(30)));
+    }
+
     [Fact] public void GetCommand_SnapshotsIdOutsideChannelLock()
     {
-        // A3-O-3: Id was read under _histLock while Name/Desc were snapshotted
-        // outside (object→channel order inversion). All three are snapshots now:
-        // the command always carries the channel's Id, even under a rename hammer.
+        // Id was read under _histLock while Name/Desc were snapshotted outside
+        // (object→channel order inversion). All three are snapshots now: the
+        // command always carries the channel's Id, even under a rename hammer.
         using var env = GlobalTestEnv.Enter();
         var chan = Channel.Create("o3chan");
         var cmd = chan.GetCommand();

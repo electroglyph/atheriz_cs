@@ -12,12 +12,18 @@ public static class TestHandler
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = "test " + string.Join(" ", a.Select(x => $"\"{x}\"")),
             UseShellExecute = false,
         };
+        // ArgumentList, not string-concatenated Arguments: an arg containing
+        // a quote could otherwise break out of its pair and reshape the command.
+        psi.ArgumentList.Add("test");
+        foreach (var x in a) psi.ArgumentList.Add(x);
         try
         {
             var proc = Process.Start(psi);
+            // Unbounded wait is the policy: `atheriz test` is a foreground
+            // command that streams the suite to completion. Bounding it would
+            // kill long suites mid-run and corrupt their result.
             proc?.WaitForExit();
             return proc?.ExitCode ?? 0;
         }

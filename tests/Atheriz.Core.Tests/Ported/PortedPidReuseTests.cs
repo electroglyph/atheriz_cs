@@ -1,51 +1,46 @@
 // Port of atheriz/tests/test_pid_reuse.py:1
 using System.Diagnostics;
+using Atheriz.Server.Infrastructure;
 
 namespace Atheriz.Core.Tests.Ported;
 
 [Collection("Ported")]
 public class PortedPidReuseTests
 {
-    private static bool IsServerProcess(int pid)
-    {
-        try
-        {
-            var proc = Process.GetProcessById(pid);
-            var name = proc.ProcessName.ToLowerInvariant();
-            if (proc.HasExited) return false;
-            return name.StartsWith("python") || name.StartsWith("atheriz") || name.Contains("dotnet");
-        }
-        catch { return false; }
-    }
-
     [Fact]
-    public void AcceptsCurrentProcess()
+    public void RejectsCurrentTestHost()
     {
+        // The gate trusts only this engine's server shapes: the test host
+        // (dotnet host, test-assembly command line) is refused, so `stop`
+        // can never terminate a test run on pid reuse.
         using var env = GlobalTestEnv.Enter();
-        Assert.True(IsServerProcess(Environment.ProcessId));
+        Assert.False(PidFile.IsServerProcess(Environment.ProcessId));
     }
 
     [Fact]
     public void RejectsNonexistentPid()
     {
         using var env = GlobalTestEnv.Enter();
-        Assert.False(IsServerProcess(int.MaxValue));
+        Assert.False(PidFile.IsServerProcess(int.MaxValue));
     }
 
     [Fact]
-    public void RejectsLiveNonPythonPid()
+    public void RejectsLiveUnrelatedPid()
     {
+        // A live process that is not a server fails the gate: no bare
+        // process-name trust remains.
         using var env = GlobalTestEnv.Enter();
-        // Find a non-dotnet process if possible; fallback to assert false for max int
-        var procs = Process.GetProcesses();
-        int? nonDotnet = null;
-        foreach(var p in procs)
+        using var sleeper = Process.Start(new ProcessStartInfo
         {
-            try{ var n=p.ProcessName.ToLowerInvariant(); if(!n.Contains("dotnet") && !n.Contains("python") && !n.Contains("atheriz")) { nonDotnet=p.Id; break; } } catch{}
+            FileName = "sleep",
+            Arguments = "30",
+            UseShellExecute = false,
+        });
+        Assert.NotNull(sleeper);
+        try
+        {
+            Assert.False(PidFile.IsServerProcess(sleeper!.Id));
         }
-        if (nonDotnet==null) Assert.False(IsServerProcess(int.MaxValue));
-        else Assert.False(IsServerProcess(nonDotnet.Value) && Process.GetProcessById(nonDotnet.Value).ProcessName.ToLowerInvariant().StartsWith("python"));
-        // At least ensure current logic rejects int.MaxValue
-        Assert.False(IsServerProcess(int.MaxValue));
+        finally { try { sleeper.Kill(); } catch { } }
     }
 }

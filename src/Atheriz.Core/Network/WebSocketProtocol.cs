@@ -246,63 +246,67 @@ public sealed class WebSocketProtocol : BaseProtocol
         // (explicit Map), not here: only IWebSocketApp doubles register.
         if (app is not IWebSocketApp wapp) return;
 
+        // Create the endpoint delegate that mirrors websocket.py:163-199
+        Func<IWebSocketPeer, System.Threading.Tasks.Task> endpoint = async (IWebSocketPeer peer) =>
         {
+            string clientHost = (peer.Client as IWebSocketClientInfo)?.Host ?? "?";
+            // is_ip_banned check (port of websocket.py:166)
+            try {
+                if (Atheriz.Core.Globals.ObjectRegistry.IsIpBanned(clientHost)) {
+                    try { await peer.CloseAsync(0, null); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+                    return;
+                }
+            } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+            try { await peer.AcceptAsync(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+            var mgr = ConnectionManager.GlobalInstance ?? new ConnectionManager(settings: settings);
+            string connId = mgr.GenerateConnectionId();
+            // Peer doubles have no real socket: the fallback connection drops
+            // sends loudly (the old dynamic branch resolved the same way).
+            BaseConnection connection = new FallbackConnection(connId) { ClientHost = clientHost };
+                    if (!mgr.RegisterConnection(connId, connection!))
+                    {
+                        // Refused (ban/total-cap): close the peer instead of
+                        // returning to a Close() that only logs — otherwise the
+                        // socket dangles to client timeout, unregistered and
+                        // unswept. Nothing was registered, so nothing to sweep.
+                        try { await peer.CloseAsync(1013, "Server unavailable"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+                        return;
+                    }
+            try
             {
-                // Create the endpoint delegate that mirrors websocket.py:163-199
-                Func<IWebSocketPeer, System.Threading.Tasks.Task> endpoint = async (IWebSocketPeer peer) =>
+                while (true)
                 {
-                    string clientHost = (peer.Client as IWebSocketClientInfo)?.Host ?? "?";
-                    // is_ip_banned check (port of websocket.py:166)
-                    try {
-                        if (Atheriz.Core.Globals.ObjectRegistry.IsIpBanned(clientHost)) {
-                            try { await peer.CloseAsync(0, null); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
-                            return;
-                        }
-                    } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
-                    try { await peer.AcceptAsync(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
-                    var mgr = ConnectionManager.GlobalInstance ?? new ConnectionManager(settings: settings);
-                    string connId = mgr.GenerateConnectionId();
-                    // Peer doubles have no real socket: the fallback connection drops
-                    // sends loudly (the old dynamic branch resolved the same way).
-                    BaseConnection connection = new FallbackConnection(connId) { ClientHost = clientHost };
-                    if (!mgr.RegisterConnection(connId, connection!)) return;
-                    try
+                    string raw = await peer.ReceiveTextAsync();
+                    int byteCount = System.Text.Encoding.UTF8.GetByteCount(raw);
+                    if (byteCount > settings.WebsocketMaxMessageSize)
                     {
-                        while (true)
-                        {
-                            string raw = await peer.ReceiveTextAsync();
-                            int byteCount = System.Text.Encoding.UTF8.GetByteCount(raw);
-                            if (byteCount > settings.WebsocketMaxMessageSize)
-                            {
-                                // oversize handling port of websocket.py:181-192 — throttled via ThrottleWindow (5s per host)
-                                bool shouldLog = true;
-                                try { shouldLog = ShouldLogOversize(clientHost); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
-                                if (shouldLog) Atheriz.Core.AtherizLogger.LogWarning($"[WebSocket] Message too large from {clientHost} ({byteCount} bytes > {settings.WebsocketMaxMessageSize} bytes)");
-                                try { await peer.CloseAsync(1009, "Message too large"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
-                                break;
-                            }
-                            mgr.HandleCommand(connection!, raw);
-                        }
+                        // oversize handling port of websocket.py:181-192 — throttled via ThrottleWindow (5s per host)
+                        bool shouldLog = true;
+                        try { shouldLog = ShouldLogOversize(clientHost); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+                        if (shouldLog) Atheriz.Core.AtherizLogger.LogWarning($"[WebSocket] Message too large from {clientHost} ({byteCount} bytes > {settings.WebsocketMaxMessageSize} bytes)");
+                        try { await peer.CloseAsync(1009, "Message too large"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+                        break;
                     }
-                    catch (Exception ex)
-                    {
-                        // Port of websocket.py except WebSocketDisconnect: clean peer
-                        // disconnects stay silent, everything else is logged.
-                        if (ex is not IWebSocketDisconnect)
-                        {
-                            Atheriz.Core.AtherizLogger.LogWarning($"[WebSocket] Connection error: {ex}");
-                        }
-                    }
-                    finally
-                    {
-                        try { mgr.Disconnect(connection!); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
-                    }
-                };
-                // Register the endpoint against the typed app contract.
-                wapp.WebSocket("/ws", endpoint);
-                return;
+                    mgr.HandleCommand(connection!, raw);
+                }
             }
-        }
+            catch (Exception ex)
+            {
+                // Port of websocket.py except WebSocketDisconnect: clean peer
+                // disconnects stay silent, everything else is logged.
+                if (ex is not IWebSocketDisconnect)
+                {
+                    Atheriz.Core.AtherizLogger.LogWarning($"[WebSocket] Connection error: {ex}");
+                }
+            }
+            finally
+            {
+                try { mgr.Disconnect(connection!); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+            }
+        };
+        // Register the endpoint against the typed app contract.
+        wapp.WebSocket("/ws", endpoint);
+        return;
     }
 
     private sealed class FallbackConnection : BaseConnection

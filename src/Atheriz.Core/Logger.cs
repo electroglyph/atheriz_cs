@@ -19,7 +19,10 @@ public static class AtherizLogger
     private static ILogger? _cachedDefault;
     private static LogLevel _level = LogLevel.Information; // Port of logger.py:28 default info
     private static LogLevel _appliedLevel = LogLevel.Information; // minimum level the live factory was built with
-    private static string _savePath = "save";
+    // Volatile: published under _lock in ApplySettings but read under the
+    // separate _fileLock in AppendToFile, so the lock alone gives readers
+    // no visibility edge; volatility covers the cross-lock publish.
+    private static volatile string _savePath = "save";
     // the write-only latch is gone — every write attempts
     // the append (a transient failure never mutes later writes). Last failure
     // ticks are recorded lock-free for backoff/diagnostics; a healed directory
@@ -42,7 +45,9 @@ public static class AtherizLogger
     public static void ApplySettings(AtherizSettings? settings = null)
     {
         var s = settings ?? AtherizSettings.Global;
-        _savePath = s.SavePath ?? "save";
+        // Published with the level/factory state under one hold so a
+        // concurrent ApplySettings cannot interleave path and level.
+        lock (_lock) { _savePath = s.SavePath ?? "save"; }
         // Port of logger.py:21 level_map debug/info/warning/error/critical
         var map = new Dictionary<string, LogLevel>(StringComparer.OrdinalIgnoreCase)
         {

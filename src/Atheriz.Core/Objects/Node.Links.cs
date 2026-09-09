@@ -146,9 +146,9 @@ public partial class Node
     // Port of nodes.py:677
     public bool AddLinkIfAbsent(string name, Func<NodeLink> factory)
     {
-        // A3-O-5: guards fold case like HasLinkName/GetLinkByName — ordinal
-        // guards let AddLinkIfAbsent("North") + AddLinkIfAbsent("north") install
-        // a shadowed unreachable link.
+        // Guards fold case like HasLinkName/GetLinkByName — ordinal guards let
+        // AddLinkIfAbsent("North") + AddLinkIfAbsent("north") install a shadowed
+        // unreachable link.
         SyncRoot.EnterReadLock();
         try { if (Links.Any(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return false; }
         finally { SyncRoot.ExitReadLock(); }
@@ -179,8 +179,8 @@ public partial class Node
         SyncRoot.EnterWriteLock();
         try
         {
-            // A3-O-5: RemoveLink folds case like the lookups — RemoveLink("NORTH")
-            // must find the "north" that GetLinkByName finds.
+            // RemoveLink folds case like the lookups — RemoveLink("NORTH") must
+            // find the "north" that GetLinkByName finds.
             var idx = Links.FindIndex(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             if (idx >= 0) { found = Links[idx]; Links.RemoveAt(idx); IsModified = true; }
         }
@@ -196,20 +196,13 @@ public partial class Node
     }
 
     // Port of nodes.py:711 add_exits
-    public void AddExits(GameObject obj, bool internalCall = false)
+    public void AddExits(GameObject obj)
     {
         obj.InternalCmdSet?.RemoveByTag("exits");
         List<NodeLink> snap;
-        if (internalCall)
-        {
-            snap = Links; // direct reference when already locked? keep snapshot
-        }
-        else
-        {
-            SyncRoot.EnterReadLock();
-            try { snap = Links.ToList(); }
-            finally { SyncRoot.ExitReadLock(); }
-        }
+        SyncRoot.EnterReadLock();
+        try { snap = Links.ToList(); }
+        finally { SyncRoot.ExitReadLock(); }
         if (snap.Count == 0) return;
         var cmds = new List<Command>();
         foreach (var n in snap)
@@ -248,7 +241,13 @@ public partial class Node
     public new void AddObject(GameObject obj)
     {
         SyncRoot.EnterWriteLock();
-        try { AddContent(obj.Id); obj.IsModified = true; IsModified = true; }
+        try
+        {
+            // Same deleted-parent refusal as the container path: a deleted node
+            // accepts no new contents (membership would point at a gone node).
+            if (IsDeleted) return;
+            AddContent(obj.Id); obj.IsModified = true; IsModified = true;
+        }
         finally { SyncRoot.ExitWriteLock(); }
         // Like MoveTo into a node, membership implies the node's coord.
         try { obj.Location = new Persistence.Dto.LocationRef.CoordLocation(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }

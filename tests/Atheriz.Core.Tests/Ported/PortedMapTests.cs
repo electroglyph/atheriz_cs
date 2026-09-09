@@ -953,15 +953,12 @@ public class PortedMapTests
     [Fact] public void FPSLimit_ZeroFpsLimitNeverThrottlesUnforcedRenders()
     {
         using var env = GlobalTestEnv.Enter();
-        var orig = AtherizSettings.Global.MapFpsLimit;
-        try {
-            AtherizSettings.Global.MapFpsLimit = 0;
-            var mi = new MapInfo(); mi.PreGrid[(0,0)]="X"; mi.PreRender();
-            var listener = new FakeListener(); listener.Id=99; listener.LastMapTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); listener.MapEnabled=true; listener.AtPreMapRenderImpl=g=>g;
-            mi.AddListener(listener);
-            mi.Render(force:false);
-            Assert.Equal(1, listener.AtMapUpdateCount);
-        } finally { AtherizSettings.Global.MapFpsLimit = orig; }
+        var mi = new MapInfo(); mi.Settings = new AtherizSettings { MapFpsLimit = 0 };
+        mi.PreGrid[(0,0)]="X"; mi.PreRender();
+        var listener = new FakeListener(); listener.Id=99; listener.LastMapTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); listener.MapEnabled=true; listener.AtPreMapRenderImpl=g=>g;
+        mi.AddListener(listener);
+        mi.Render(force:false);
+        Assert.Equal(1, listener.AtMapUpdateCount);
     }
     [Fact] public void FPSLimit_PositiveFpsLimitStillThrottles()
     {
@@ -974,6 +971,21 @@ public class PortedMapTests
             mi.AddListener(listener);
             mi.Render(force:false);
             Assert.Equal(0, listener.AtMapUpdateCount);
+        } finally { AtherizSettings.Global.MapFpsLimit = orig; }
+    }
+    [Fact] public void FPSLimit_ExplicitSettingsOverrideAmbientGlobal()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var orig = AtherizSettings.Global.MapFpsLimit;
+        try {
+            AtherizSettings.Global.MapFpsLimit = 1;
+            var mi = new MapInfo(); mi.Settings = new AtherizSettings { MapFpsLimit = 0 };
+            mi.PreGrid[(0,0)]="X"; mi.PreRender();
+            var listener = new FakeListener(); listener.Id=99; listener.LastMapTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); listener.MapEnabled=true; listener.AtPreMapRenderImpl=g=>g;
+            mi.AddListener(listener);
+            mi.Render(force:false);
+            mi.Render(force:false);
+            Assert.Equal(2, listener.AtMapUpdateCount);
         } finally { AtherizSettings.Global.MapFpsLimit = orig; }
     }
 
@@ -1031,5 +1043,35 @@ public class PortedMapTests
         using (mi.BatchUpdate()) { }
         Assert.Equal("X", mi.PreGrid[(0,0)]);
         Assert.Equal("─", mi.PreGrid[(1,0)]);
+    }
+    [Fact] public void CoordReader_ExactPairRoundTrips()
+    {
+        var e = System.Text.Json.JsonSerializer.Deserialize<LegendEntry>("{\"Symbol\":\"s\",\"Coord\":[3,4]}", JsonOptions.Default)!;
+        Assert.Equal((3, 4), e.Coord);
+    }
+    [Fact] public void CoordReader_SingletonAndExtrasThrow()
+    {
+        Assert.Throws<System.Text.Json.JsonException>(() => System.Text.Json.JsonSerializer.Deserialize<LegendEntry>("{\"Symbol\":\"s\",\"Coord\":[3]}", JsonOptions.Default));
+        Assert.Throws<System.Text.Json.JsonException>(() => System.Text.Json.JsonSerializer.Deserialize<LegendEntry>("{\"Symbol\":\"s\",\"Coord\":[3,4,5]}", JsonOptions.Default));
+    }
+    [Fact] public void MapSave_ClearTombstonesDeletedWithoutDirtyProbe()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var handler = new MapHandler(autoLoad:false);
+        var mi = new MapInfo("tomb");
+        mi.PreGrid[(0,0)]="#";
+        handler.SetMapInfo("tomb",0,mi);
+        using (var db = AtherizDbContextFactory.Create(env.TempPath))
+            handler.Save(db, force:true);
+        using (var db = AtherizDbContextFactory.Create(env.TempPath))
+            Assert.NotNull(db.MapData.Find("tomb", 0));
+        handler.Clear();
+        // Clear tombstones keys without dirtying any surviving item, so a
+        // separate IsDirty probe reports clean and must not gate the save.
+        Assert.False(handler.IsDirty());
+        using (var db = AtherizDbContextFactory.Create(env.TempPath))
+            handler.Save(db, force:false);
+        using (var db = AtherizDbContextFactory.Create(env.TempPath))
+            Assert.Null(db.MapData.Find("tomb", 0));
     }
 }

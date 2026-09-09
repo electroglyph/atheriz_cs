@@ -29,9 +29,18 @@ public static class WebSocketHandler
         System.Net.WebSockets.WebSocket webSocket;
         try { webSocket = await context.WebSockets.AcceptWebSocketAsync(); } catch { return; }
 
-        var connId = ConnectionManager.GlobalInstance?.GenerateConnectionId() ?? $"conn_{Guid.NewGuid()}";
+        var manager = ConnectionManager.GlobalInstance;
+        if (manager is null)
+        {
+            // Fail closed: without the global manager this socket would live
+            // in a private throwaway world (uncounted, no broadcasts or
+            // presence). Post-startup the global is always set; null means a
+            // miswired host, so refuse the socket instead of forking a world.
+            try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.InternalServerError, "Server not ready", default); } catch { }
+            return;
+        }
+        var connId = manager.GenerateConnectionId();
         var connection = new WebSocketConnection(webSocket, sessionId: connId, settings: settings, clientHost: clientHost);
-        var manager = ConnectionManager.GlobalInstance ?? new ConnectionManager(settings: settings);
         if (!manager.RegisterConnection(connId, connection)) return;
 
         try

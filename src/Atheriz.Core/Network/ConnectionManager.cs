@@ -249,24 +249,16 @@ public class InputFuncs
     {
         if (v is List<object?> lst && lst.Count==3)
         {
+            // Positional ints are the only list shape: the all-int recheck
+            // below used to repeat this, and a JsonElement whole-value check
+            // can never match inside a proven-List branch (the whole-value
+            // case has its own branch after this one).
             if (lst[0] is int a && lst[1] is int b && lst[2] is int c)
             {
                 if (a==-1 && b==-1 && c==-1) return true;
                 return a>=0 && a<=255 && b>=0 && b<=255 && c>=0 && c<=255;
             }
-            if (lst.All(x=> x is int)) {
-                var ints = lst.Cast<int>().ToArray();
-                if (ints[0]==-1 && ints[1]==-1 && ints[2]==-1) return true;
-                return ints.All(x=> x>=0 && x<=255);
-            }
-            // JsonElement case
-            if (v is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Array)
-            {
-                var arr = je.EnumerateArray().Select(e=> e.TryGetInt32(out var iv)?iv:-999).ToArray();
-                if (arr.Length!=3) return false;
-                if (arr[0]==-1 && arr[1]==-1 && arr[2]==-1) return true;
-                return arr.All(x=> x>=0 && x<=255);
-            }
+            return false;
         }
         if (v is System.Text.Json.JsonElement jel && jel.ValueKind==System.Text.Json.JsonValueKind.Array)
         {
@@ -406,7 +398,9 @@ public class InputFuncs
         else if (seqObj is long sl) seq=(int)sl;
         else if (seqObj is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var jsi)) seq=jsi;
         else return;
-        if (key is not string || cellsObj is not List<object?> && cellsObj is not System.Text.Json.JsonElement) {
+        // key is a string here (null returned above), so only the cells shape
+        // still needs checking.
+        if (cellsObj is not List<object?> && cellsObj is not System.Text.Json.JsonElement) {
             // try to normalize cells via ToList? For JsonElement list it will be list of JsonElements -> still allowed but need validation path
             if (cellsObj is System.Text.Json.JsonElement je2 && je2.ValueKind==System.Text.Json.JsonValueKind.Array) { }
             else return;
@@ -794,12 +788,12 @@ public class ConnectionManager
         lock (_globalLock) _globalInstance ??= this;
     }
 
-    // Port of manager.py:65-68 generate_connection_id
+    // Port of manager.py:65-68 generate_connection_id. A bare counter needs
+    // no manager lock: Interlocked owns the increment.
     public virtual string GenerateConnectionId()
     {
-        _lock.EnterWriteLock();
-        try { _connectionCounter++; return $"conn_{_connectionCounter}"; }
-        finally { _lock.ExitWriteLock(); }
+        var n = Interlocked.Increment(ref _connectionCounter);
+        return $"conn_{n}";
     }
 
     // pre-spawn admission probe. Mirrors the RegisterConnection
@@ -853,11 +847,16 @@ public class ConnectionManager
                 refusal = $"[Network] Refusing connection from {host}: total limit ({_settings.MaxTotalConnections}) reached";
             if (refusal == null)
             {
+            // Re-registering the same conn id from the same host replaces the same
+            // registration, so it must not increment the per-IP counter again —
+            // double-counting leaks the bucket toward a false limit refusal.
+            var sameHostReregister = false;
             // handle overwrite: adjust old host count — manager.py:102-113
             if (_connections.TryGetValue(connId, out var old))
             {
                 var oldHost = old.RegisteredHost ?? old.ClientHost ?? "?";
-                if (oldHost != "?" && oldHost != host)
+                if (oldHost == host) sameHostReregister = true;
+                else if (oldHost != "?" && oldHost != host)
                 {
                     var cnt = _perIpCounts.TryGetValue(oldHost, out var c) ? c - 1 : -1;
                     if (cnt <= 0) _perIpCounts.Remove(oldHost);
@@ -867,7 +866,7 @@ public class ConnectionManager
             }
             _connections[connId] = connection; // port of manager.py:114
             _connToId[connection] = connId; // port of manager.py:115
-            if (host != "?") // port of manager.py:116-117
+            if (host != "?" && !sameHostReregister) // port of manager.py:116-117
                 _perIpCounts[host] = _perIpCounts.TryGetValue(host, out var v) ? v + 1 : 1;
             }
         }
@@ -951,16 +950,13 @@ public class ConnectionManager
                     }
                 }
             }
-            else if (connId == null && connection != null)
-            {
-                // legacy fallback without O(N) scan under lock: lookup via id map only — manager.py:134-136
-            }
         }
         finally { _lock.ExitWriteLock(); }
 
         if (string.IsNullOrEmpty(connId)) return; // port of manager.py:138
 
-        lock (connection.Lock) { connection.SetDisconnected(true); } // port of manager.py:139-140
+        // SetDisconnected locks internally; no outer connection lock needed.
+        connection.SetDisconnected(true); // port of manager.py:139-140
         connection.ClearPendingInput(); // port of manager.py:141
         var session = connection.Session; // port of manager.py:142
         if (session != null)
@@ -1068,7 +1064,10 @@ public class ConnectionManager
             // enforced only at the WS edge (WebSocketProtocol); direct
             // callers of this shared entry point could force a large parse.
             int maxMessageSize = _settings.WebsocketMaxMessageSize;
-            if (rawMessage.Length > maxMessageSize)
+            // Byte budget, not char count: Length is only a fast prefilter
+            // (bytes always >= chars, so Length-over already refuses); a
+            // short multibyte string can still carry 4x the nominal bytes.
+            if (rawMessage.Length > maxMessageSize || System.Text.Encoding.UTF8.GetByteCount(rawMessage) > maxMessageSize)
             {
                 var oversizeHost = connection.ClientHost ?? "?";
                 if (ShouldLogOversize(oversizeHost))

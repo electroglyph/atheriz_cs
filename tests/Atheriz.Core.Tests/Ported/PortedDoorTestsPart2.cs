@@ -463,4 +463,96 @@ public class PortedDoorTestsPart2
         Assert.True(canAcquire);
         // Note: full lock-held-during-broadcast check requires instrumentation that C# port does not fully support; this faithful stub verifies open/close succeed without deadlock
     }
+
+    private sealed class ThrowingMapDoor : Door
+    {
+        public ThrowingMapDoor(Coord from, Coord to) : base(from, to, "n", "s", null, "", "", true, false) { }
+        public override void MapOpen() => throw new System.InvalidOperationException("boom");
+        public override void MapClose() => throw new System.InvalidOperationException("boom");
+    }
+
+    [Fact] public void TryOpen_ThrowingMapStep_StillOpens()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (nh, area, grid, startNode) = SetupArea();
+        var caller = MakeCaller(startNode);
+        var door = new ThrowingMapDoor(new Coord("TestArea", 0, 0, 0), new Coord("TestArea", 0, 0, 1));
+        Assert.True(door.TryOpen(caller));
+        Assert.False(door.IsClosed);
+    }
+
+    [Fact] public void TryClose_ThrowingMapStep_StillCloses()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (nh, area, grid, startNode) = SetupArea();
+        var caller = MakeCaller(startNode);
+        var door = new ThrowingMapDoor(new Coord("TestArea", 0, 0, 0), new Coord("TestArea", 0, 0, 1));
+        door.ForceOpen();
+        Assert.True(door.TryClose(caller));
+        Assert.True(door.IsClosed);
+    }
+
+    [Fact] public void GetNodes_PairedEndpointsSurviveConcurrentCoordRewrite()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var nh = new NodeHandler(autoLoad:false);
+        NodeHandler.SetCurrent(nh);
+        Node Track(string area, int y)
+        {
+            var n = new Node(new Coord(area, 0, y, 0));
+            ObjectRegistry.AddObject(n);
+            return n;
+        }
+        void AddArea(string area, Node n1, Node n2)
+        {
+            var a = new NodeArea(area);
+            var g = new NodeGrid(area, 0);
+            g.Nodes[(0,0)] = n1; g.Nodes[(0,1)] = n2;
+            a.AddGrid(g); nh.AddArea(a);
+        }
+        AddArea("A", Track("A", 0), Track("A", 1));
+        AddArea("B", Track("B", 0), Track("B", 1));
+        var door = Door.Create(new Coord("A", 0, 0, 0), "n", new Coord("A", 0, 1, 0), "s");
+        // Non-vacuity preamble: both generations resolve before the race starts.
+        var (preA, preB) = door.GetNodes();
+        Assert.NotNull(preA); Assert.NotNull(preB);
+        Assert.Equal("A", preA!.Coord.Area); Assert.Equal("A", preB!.Coord.Area);
+        door.FromCoord = new Coord("B", 0, 0, 0); door.ToCoord = new Coord("B", 0, 1, 0);
+        var (postA, postB) = door.GetNodes();
+        Assert.NotNull(postA); Assert.NotNull(postB);
+        door.SetEndpoints(new Coord("A", 0, 0, 0), new Coord("A", 0, 1, 0));
+        var stop = new System.Threading.ManualResetEventSlim(false);
+        var writers = new System.Collections.Generic.List<System.Threading.Thread>();
+        for (int w = 0; w < 4; w++)
+        {
+            var writer = new System.Threading.Thread(() =>
+            {
+                bool flip = false;
+                while (!stop.IsSet)
+                {
+                    flip = !flip;
+                    string area = flip ? "A" : "B";
+                    door.SetEndpoints(new Coord(area, 0, 0, 0), new Coord(area, 0, 1, 0));
+                }
+            });
+            writer.IsBackground = true;
+            writers.Add(writer);
+        }
+        foreach (var writer in writers) writer.Start();
+        long paired = 0;
+        try
+        {
+            for (int i = 0; i < 100000; i++)
+            {
+                var (from, to) = door.GetNodes();
+                if (from != null && to != null)
+                {
+                    paired++;
+                    Assert.Equal(from.Coord.Area, to.Coord.Area);
+                }
+            }
+        }
+        finally { stop.Set(); foreach (var writer in writers) writer.Join(15000); }
+        Assert.True(paired > 0);
+    }
 }

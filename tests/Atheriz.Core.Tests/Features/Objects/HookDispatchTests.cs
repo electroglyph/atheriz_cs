@@ -16,6 +16,12 @@ public class HookDispatchTests
 
         [Replace]
         public int WrongArity(GameObject? a, GameObject? b, GameObject? c) => 99;
+
+        [Before]
+        public string BeforeWrongArity(GameObject? a, GameObject? b, GameObject? c) => "never";
+
+        [After]
+        public string AfterBoom(GameObject? target) => throw new InvalidOperationException("boom-after");
     }
 
     private static Delegate HookFor(string name, Type delegateType)
@@ -45,5 +51,29 @@ public class HookDispatchTests
         var obj = new GameObject();
         obj.InstallHook("at_look", HookFor("WrongArity", typeof(Func<GameObject?, GameObject?, GameObject?, int>)));
         Assert.Equal("orig", obj.Hookable<string>("at_look", () => "orig", (GameObject?)null));
+    }
+
+    [Fact]
+    public void BeforeHook_ArityMismatch_SkippedOriginalRuns()
+    {
+        // A mis-signed before hook gets the replace-hook treatment (skip +
+        // loud log), not an exception out of the entry point: MoveTo-style
+        // callers see a normal return instead of a reflection throw.
+        var obj = new GameObject();
+        obj.InstallHook("at_look", HookFor("BeforeWrongArity", typeof(Func<GameObject?, GameObject?, GameObject?, string>)));
+        Assert.Equal("orig", obj.Hookable<string>("at_look", () => "orig", (GameObject?)null));
+    }
+
+    [Fact]
+    public void AfterHook_ThrowOnArgsOnlyArity_Propagates()
+    {
+        // The hook skips the args+result attempt on arity, matches the
+        // args-only attempt, and throws there: the error propagates instead
+        // of being swallowed by the fallback's old catch-all.
+        var obj = new GameObject();
+        obj.InstallHook("at_look", HookFor("AfterBoom", typeof(Func<GameObject?, string>)));
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            obj.Hookable<string>("at_look", () => "orig", (GameObject?)null));
+        Assert.Equal("boom-after", ex.Message);
     }
 }

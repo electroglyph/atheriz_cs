@@ -1,6 +1,5 @@
 // Port of atheriz/commands/loggedin/shutdown.py:79
 using System.Net.Http;
-using System.Threading;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Commands;
 using Atheriz.Core.Settings;
@@ -15,6 +14,9 @@ public sealed class ShutdownCommand : Command
     public override bool Hide => true;
     public override bool UseParser => false;
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
+    // One shared client: a fresh HttpClient per shutdown burns a socket
+    // pool per invocation and strands sockets in TIME_WAIT after dispose.
+    private static readonly HttpClient SharedShutdownClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
@@ -38,12 +40,15 @@ public sealed class ShutdownCommand : Command
         var capturedUrl = url;
         try
         {
-            var thread = new Thread(() =>
+            // Task pool thread, not a raw Thread: same background semantics
+            // without a per-invocation OS thread. Replies go through Msg,
+            // whose log append + session read hold as one critical section
+            // with the socket send outside the lock — safe cross-thread.
+            _ = Task.Run(() =>
             {
                 try
                 {
-                    using var client = new HttpClient();
-                    client.Timeout = TimeSpan.FromSeconds(30);
+                    var client = SharedShutdownClient;
                     var req = new HttpRequestMessage(HttpMethod.Post, capturedUrl);
                     req.Headers.Add("X-Admin-Token", capturedToken);
                     var resp = client.SendAsync(req).GetAwaiter().GetResult();
@@ -77,9 +82,6 @@ public sealed class ShutdownCommand : Command
                 catch (HttpRequestException ex) { capturedGo.Msg($"Error connecting to shutdown endpoint: {ex.Message}"); }
                 catch (Exception ex) { capturedGo.Msg($"Shutdown error: {ex.Message}"); }
             });
-            thread.IsBackground = true;
-            thread.Name = "shutdown-request";
-            thread.Start();
         }
         catch (Exception ex) { go.Msg($"Shutdown error: {ex.Message}"); }
     }

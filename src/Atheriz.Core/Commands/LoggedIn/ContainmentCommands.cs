@@ -18,9 +18,9 @@ public sealed class GetCommand : Command
         var loc = go.ResolveLocationObject();
         if (loc == null) { CommandHelpers.MsgNo(go); return; }
         string? objName = null, sourceName = null;
-        var tokens = pa.GetList("args");
-        if (tokens.Count == 0) tokens = pa.GetList("target");
-        if (tokens.Count == 0) tokens = pa.GetList("object");
+        // The parser defines a single positional dest ("target"); live input
+        // never carries other keys, so no fallback dests are read here.
+        var tokens = pa.GetList("target");
         if (tokens.Count == 0) { go.Msg(PrintHelp()); return; }
         int fromIdx = -1;
         for (int i=0;i<tokens.Count;i++) if (tokens[i].Equals("from", StringComparison.OrdinalIgnoreCase)) { fromIdx=i; break; }
@@ -207,10 +207,10 @@ public sealed class DropCommand : Command
         string? dropName = null;
         if (pa != null)
         {
-            var lst = pa.GetList("object");
-            if (lst.Count == 0) lst = pa.GetList("target");
-            if (lst.Count == 0) lst = pa.GetList("args");
-            if (lst.Count > 0) dropName = string.Join(" ", lst).Trim();
+        // The parser defines a single positional dest ("object"); live input
+        // never carries other keys, so no fallback dests are read here.
+        var lst = pa.GetList("object");
+        if (lst.Count > 0) dropName = string.Join(" ", lst).Trim();
         }
         if (string.IsNullOrWhiteSpace(dropName)) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject();

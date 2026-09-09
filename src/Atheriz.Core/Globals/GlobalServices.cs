@@ -276,6 +276,9 @@ public static class GlobalServices
         _singletonLock.EnterWriteLock();
         try { _nodeHandler = nh; }
         finally { _singletonLock.ExitWriteLock(); }
+        // Publish the twin slot too: NodeHandler.GetCurrent reads a separate
+        // static, so setting only this slot would fork the two singletons.
+        NodeHandler.SetCurrent(nh);
     }
     public static void SetMapHandler(MapHandler mh)
     {

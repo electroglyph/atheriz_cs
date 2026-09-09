@@ -474,9 +474,9 @@ public class PortedNodeTests
 
     [Fact] public void LinkNameCaseDisciplineAgrees()
     {
-        // A3-O-5: lookups folded case but add/remove guards were ordinal, so
-        // AddLinkIfAbsent("north") after "North" installed a shadowed link and
-        // RemoveLink("NORTH") missed the "north" that Get finds.
+        // Lookups fold case so the guards must too: AddLinkIfAbsent("north")
+        // after "North" installed a shadowed link and RemoveLink("NORTH")
+        // missed the "north" that Get finds.
         using var env = GlobalTestEnv.Enter();
         var node = new Node(new Coord("casearea",0,0,0));
         Assert.True(node.AddLinkIfAbsent("North", () => new NodeLink("North", new Coord("casearea",0,1,0))));
@@ -489,9 +489,9 @@ public class PortedNodeTests
 
     [Fact] public void ConcurrentAddLinkWithAddRemoveNode_DoesNotThrow()
     {
-        // A3-O-12: AddNode read node.Links under the grid lock only and
-        // RemoveNode enumerated it with no lock at all — a concurrent AddLink
-        // tore the enumeration (InvalidOperationException). Both snapshot now.
+        // AddNode read node.Links under the grid lock only and RemoveNode
+        // enumerated it with no lock at all — a concurrent AddLink tore the
+        // enumeration (InvalidOperationException). Both snapshot now.
         using var env = GlobalTestEnv.Enter();
         var grid = new NodeGrid("racegrid",0);
         var node = new Node(new Coord("racegrid",0,0,0));
@@ -510,5 +510,50 @@ public class PortedNodeTests
             Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(60)));
         });
         Assert.Null(ex);
+    }
+    [Fact] public void GetNode_SurvivesConcurrentAreaReplacement()
+    {
+        // The area→grid→node traversal holds one handler read lock, so a
+        // RemoveArea+AddArea landing mid-traversal cannot tear the walk: torn
+        // dictionary reads would throw, and every returned node matches the
+        // requested coord. Regression net for the single-hold traversal.
+        using var env = GlobalTestEnv.Enter();
+        var name = $"g11_{Guid.NewGuid():N}";
+        var coord = new Coord(name, 0, 0, 0);
+        var nh = new NodeHandler(autoLoad: false);
+        NodeHandler.SetCurrent(nh);
+        void Seed(int g)
+        {
+            var area = new NodeArea(name);
+            var grid = new NodeGrid(name, 0);
+            grid.Nodes[(0, 0)] = new Node(coord, desc: "g" + g);
+            area.AddGrid(grid);
+            nh.AddArea(area);
+        }
+        Seed(0);
+        int mismatched = 0;
+        int writerDone = 0;
+        var ex = Record.Exception(() =>
+        {
+            var writer = Task.Run(() => { for (int i = 1; i <= 200; i++) { nh.RemoveArea(name); Seed(i); } Volatile.Write(ref writerDone, 1); });
+            var reader = Task.Run(() =>
+            {
+                // Span the writer's whole run (bounded): nulls are legitimate
+                // (removal windows); any returned node must match coord.
+                for (int i = 0; i < 20000 || (Volatile.Read(ref writerDone) == 0 && i < 2000000); i++)
+                {
+                    var n = nh.GetNode(coord);
+                    if (n != null && !n.Coord.Equals(coord)) Interlocked.Increment(ref mismatched);
+                }
+            });
+            Assert.True(Task.WaitAll(new[] { writer, reader }, TimeSpan.FromSeconds(60)));
+        });
+        Assert.Null(ex);
+        Assert.Equal(0, mismatched);
+        // Writer finished: the final generation resolves (non-vacuity — the
+        // area was present and replaced throughout the hammer).
+        var final = nh.GetNode(coord);
+        Assert.NotNull(final);
+        Assert.Equal("g200", final!.Desc);
     }
 }

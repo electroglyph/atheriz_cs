@@ -35,7 +35,7 @@ public sealed class HelpCommand : Command
                 // all production callers and test doubles (MockCaller has no Session).
             }
             catch (Exception) { }
-            var cmds = cs.GetAll().Distinct().Where(c => !c.Hide && c.Access(caller)).OrderBy(c => c.Category).ThenBy(c => c.Key).ToList();
+            var cmds = cs.GetAll().Where(c => !c.Hide && c.Access(caller)).OrderBy(c => c.Category).ThenBy(c => c.Key).ToList();
             caller.Msg("\n" + HelpFormatter.Format(cmds, sr, tw + 2));
             return;
         }

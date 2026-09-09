@@ -15,8 +15,12 @@ public static class DaemonSpawner
         h.Length > 0 && h.Length <= 255 && h.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_' or ':' or '[' or ']' or '%');
 
     // Port of atheriz.py:1285 spawn_daemon: Popen start --foreground with stdout/stderr to save/server.log.
-    public static async Task SpawnDaemonAsync(string[] origArgs, string folder)
+    // Returns false when nothing was spawned (invalid args, spawn failure):
+    // the caller holds the pid claim and must release it on false, or the
+    // pid file points at a dead CLI.
+    public static async Task<bool> SpawnDaemonAsync(string[] origArgs, string folder)
     {
+        bool spawned = false;
         try
         {
             var dll = typeof(Program).Assembly.Location;
@@ -28,7 +32,7 @@ public static class DaemonSpawner
             if (telnetPort.HasValue) { argList.Add("--telnet-port"); argList.Add(telnetPort.Value.ToString()); }
             if (!string.IsNullOrEmpty(host))
             {
-                if (!IsSafeHost(host!)) { Console.Error.WriteLine($"Invalid --host value: {host}"); return; }
+                if (!IsSafeHost(host!)) { Console.Error.WriteLine($"Invalid --host value: {host}"); return false; }
                 argList.Add("--host"); argList.Add(host!);
             }
             var saveLog = Path.Combine(Path.GetFullPath(folder), "save", "server.log");
@@ -83,58 +87,36 @@ public static class DaemonSpawner
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"bash spawn failed: {ex.Message}, trying direct");
-                var psi2 = new ProcessStartInfo
-                {
-                    FileName = "dotnet",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WorkingDirectory = Path.GetFullPath(folder),
-                };
-                psi2.ArgumentList.Add(dll);
-                foreach (var a in argList) psi2.ArgumentList.Add(a);
-                try
-                {
-                    // attach the log stream to the fallback child.
-                    // Python passes the log fd as the daemon's stdout/stderr
-                    // (atheriz.py:1403-1405); the .NET equivalent is piped
-                    // redirect with a pump appending to the log. (The bash
-                    // primary path above stays the durable route: its >>
-                    // redirect survives spawner exit, this pump does not.)
-                    psi2.RedirectStandardOutput = true;
-                    psi2.RedirectStandardError = true;
-                    var p2 = Process.Start(psi2);
-                    if (p2 != null)
-                    {
-                        daemonPid = p2.Id;
-                        object logGate = new();
-                        void Pump(object? _, DataReceivedEventArgs e)
-                        {
-                            if (e.Data is null) return;
-                            lock (logGate) File.AppendAllText(saveLog, e.Data + "\n");
-                        }
-                        p2.OutputDataReceived += Pump;
-                        p2.ErrorDataReceived += Pump;
-                        p2.BeginOutputReadLine();
-                        p2.BeginErrorReadLine();
-                    }
-                }
-                catch { }
+                // Bash-less host: the bash redirect above is what keeps
+                // server.log alive after the spawner exits. An in-process pump
+                // would die with this process and leave the child writing to
+                // a readerless pipe (block/SIGPIPE, lost log) despite
+                // "Logging to:" being printed — so fail loudly instead of
+                // spawning a time-bomb daemon. Use --foreground on such hosts.
+                Console.Error.WriteLine($"bash spawn failed: {ex.Message}. Cannot daemonize without bash; not spawning (use --foreground instead).");
+                return false;
             }
             if (daemonPid != -1)
             {
+                spawned = true;
                 Console.WriteLine($"Server started with PID: {daemonPid}");
                 Console.WriteLine($"Server starting in background (PID {daemonPid}), log: {saveLog}");
-                var effSettings = StopHandler.EffectiveSettingsValue;
-                int effPort = port ?? effSettings.WebserverPort;
-                string effHost = host ?? effSettings.WebserverInterface;
+                // Display values come from the explicit spawn flags plus the
+                // shipped defaults (the child's baseline): the child runs in
+                // the target folder with its own resolved config, so the
+                // parent's settings must never feed these lines. Inherited
+                // environment survives into the child, so the env TLS probe
+                // stays valid. Anything else is in save/server.log.
+                var shippedDefaults = new Atheriz.Core.Settings.AtherizSettings();
+                int effPort = port ?? shippedDefaults.WebserverPort;
+                string effHost = host ?? shippedDefaults.WebserverInterface;
                 string dispHost = effHost.Contains(':') ? $"[{effHost}]" : effHost;
-                bool hasSsl = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ATHERIZ_SSL_CERTFILE")) || !string.IsNullOrEmpty(effSettings.SslCertFile);
+                bool hasSsl = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ATHERIZ_SSL_CERTFILE"));
                 string effScheme = hasSsl ? "https" : "http";
                 if (effHost == "0.0.0.0" || effHost == "::") Console.WriteLine($"Web server running on {effScheme}://localhost:{effPort}");
                 else Console.WriteLine($"Web server running on {effScheme}://{dispHost}:{effPort}");
                 Console.WriteLine($"Web server listening on {effScheme}://{dispHost}:{effPort}");
-                if (effSettings.WebsocketEnabled)
+                if (shippedDefaults.WebsocketEnabled)
                 {
                     string wssScheme = hasSsl ? "wss" : "ws";
                     Console.WriteLine($"WebSocket server available at {wssScheme}://{dispHost}:{effPort}/ws");
@@ -144,5 +126,6 @@ public static class DaemonSpawner
         }
         catch (Exception ex) { Console.Error.WriteLine($"Failed to spawn daemon: {ex.Message}"); }
         await Task.CompletedTask;
+        return spawned;
     }
 }

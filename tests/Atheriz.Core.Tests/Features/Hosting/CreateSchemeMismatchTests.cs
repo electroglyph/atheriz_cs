@@ -6,7 +6,7 @@ using Atheriz.Server.Cli;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// A3-S-2: `create` probed the admin API with a single scheme. On a scheme
+// `create` probed the admin API with a single scheme. On a scheme mismatch
 // mismatch (settings say https, server speaks plaintext or vice versa) the
 // null response fell through to the offline DB path — writing directly
 // against a LIVE server. It must retry once with the flipped scheme first,
@@ -127,8 +127,8 @@ public class CreateSchemeMismatchTests
     [Fact(Timeout = 120000)]
     public async Task Create_UnreachableLiveServer_RefusesOfflineWrites()
     {
-        // A3-S-2, second half: a null admin response is "unreachable", not "not
-        // running". With the token file gone (both schemes unreachable) but the
+        // A null admin response is "unreachable", not "not running".
+        // With the token file gone (both schemes unreachable) but the
         // server live, offline direct-DB writes must be refused via the pid probe.
         if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";

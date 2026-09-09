@@ -24,7 +24,7 @@ public class Account : GameObject
     {
         IsAccount = true;
     }
-    public override bool AtDelete(GameObject caller)
+    public override bool AtDelete(GameObject? caller)
     {
         // Unconditional true (test_account.py:88 — not access-gated like the base),
         // routed through the hook pipeline so game code can veto via at_delete hooks.
@@ -44,7 +44,7 @@ public class Account : GameObject
     internal (int count, List<object> ops)? DeleteImmediate(GameObject? caller)
     {
         // Port of base_account.py:53 delete.
-        if (!AtDelete(caller!)) return null;
+        if (!AtDelete(caller)) return null;
         var ops = new List<(string Sql, object[] Params)>();
         if (!IsTemporary) ops.Add(GetDelOps());
         // Mark deleted and unregister BEFORE the DB delete so a concurrent
@@ -68,7 +68,10 @@ public class Account : GameObject
                 // DB failure: roll back so the account stays live (base_account.py:78-82).
                 SyncRoot.EnterWriteLock();
                 try { IsDeleted = false; } finally { SyncRoot.ExitWriteLock(); }
-                ObjectRegistry.AddObject(this);
+                // The rollback re-add must not mask the original DB failure:
+                // a duplicate-id throw here would replace the real error.
+                try { ObjectRegistry.AddObject(this); }
+                catch (Exception rbEx) { AtherizLogger.LogDebug("Suppressed Account.DeleteImmediate rollback: " + rbEx.Message, "Account"); }
                 throw;
             }
         }
@@ -136,8 +139,12 @@ public class Account : GameObject
         try { curName = Name; curHash = _passwordHash; }
         finally { SyncRoot.ExitReadLock(); }
         var hash = HashPassword(password, saltOverride);
-        bool ok = string.Equals(curName, name, StringComparison.OrdinalIgnoreCase)
-            && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(hash), Encoding.UTF8.GetBytes(curHash));
+        // Both comparisons always run: short-circuiting the constant-time
+        // compare on a name mismatch would let a caller distinguish "wrong
+        // name" from "wrong password" by timing.
+        bool nameOk = string.Equals(curName, name, StringComparison.OrdinalIgnoreCase);
+        bool hashOk = CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(hash), Encoding.UTF8.GetBytes(curHash));
+        bool ok = nameOk && hashOk;
         SyncRoot.EnterWriteLock();
         try { _loggedIn = ok; }
         finally { SyncRoot.ExitWriteLock(); }

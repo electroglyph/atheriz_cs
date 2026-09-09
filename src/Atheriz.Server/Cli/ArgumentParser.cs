@@ -68,6 +68,16 @@ public static class ArgumentParser
         return v;
     }
 
+    // Port of argparse "expected one argument" for --host (exit 2): the flag
+    // is present but carries no value (bare `--host` / `--host=`). Without
+    // this the empty string leaks into per-command parsing (foreground binds
+    // WebserverInterface="", create eats the flag as a positional).
+    public static bool HasBareHost(string[] a)
+    {
+        var v = GetOptionValue(a, "--host", null, HostPrefix);
+        return v != null && v.Length == 0;
+    }
+
     public static bool HasFlag(string[] a, string longFlag, string? shortFlag = null)
         => a.Contains(longFlag, StringComparer.Ordinal) || (shortFlag != null && a.Contains(shortFlag, StringComparer.Ordinal));
 

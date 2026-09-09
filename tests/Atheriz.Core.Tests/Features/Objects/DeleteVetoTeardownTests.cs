@@ -17,7 +17,7 @@ public class DeleteVetoTeardownTests
             IsContainer = true;
         }
 
-        public override bool AtDelete(GameObject caller) => false;
+        public override bool AtDelete(GameObject? caller) => false;
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class DeleteVetoTeardownTests
     [Fact]
     public void ConcurrentDelete_SingleWinner_NoDoubleTeardown()
     {
-        // A3-O-9: two racing Deletes both walked, both emitted GetDelOps, both
+        // Two racing Deletes both walked, both emitted GetDelOps, both tore
         // tore down (double session close / ticker remove). The atomic claim
         // lets exactly one winner through; losers see already-gone.
         ObjectRegistry.ClearAll();

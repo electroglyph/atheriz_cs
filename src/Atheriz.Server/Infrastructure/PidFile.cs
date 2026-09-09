@@ -24,8 +24,7 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
-    /// Mirrors <c>atheriz/atheriz.py:458-472 _pid_is_server_process</c>.
-    /// Python uses <c>psutil.pid_exists + proc.name().lower().startswith(("python","atheriz"))</c>.
+    /// Whether <paramref name="pid"/> is one of this engine's server processes.
     /// A bare <c>Contains("dotnet")</c> name match is NOT enough: it also matches the
     /// test host (which loads <c>Atheriz.Server.dll</c>). For dotnet-hosted processes we
     /// additionally require the command line to mention Atheriz, so `stop` can never
@@ -46,10 +45,12 @@ public sealed class PidFile : IDisposable
             try { name = proc.ProcessName ?? ""; }
             catch { return false; }
             var lower = name.ToLowerInvariant();
-            // atheriz.py:470 — startswith python/atheriz. A bare substring is
-            // NOT enough (would match my-atheriz-malware, editor buffers).
-            if (lower.StartsWith("python") || lower.StartsWith("atheriz"))
-                return true;
+            // Only this engine's processes are ever servers, so only its
+            // shapes are trusted: single-file publishes (module filename
+            // below) and `dotnet Atheriz.Server.dll` (command line below).
+            // Bare process-name prefixes (python*/atheriz*) are NOT trusted:
+            // a stale pid reused by an unrelated process would otherwise pass
+            // the stop gates straight to SIGTERM/SIGKILL.
             // Fallback: check main module filename if available (helps when process name truncated)
             try
             {
@@ -165,7 +166,7 @@ public sealed class PidFile : IDisposable
             if (Directory.Exists("/proc"))
             {
                 // collect inodes for listening sockets on port via /proc/net/tcp*
-                var targetInodes = GetListeningInodes(port);
+                var targetInodes = GetListeningInodes(port, out _);
                 if (targetInodes.Count > 0)
                 {
                     foreach (var dir in Directory.GetDirectories("/proc"))
@@ -228,13 +229,18 @@ public sealed class PidFile : IDisposable
     /// shared /proc/net/tcp* LISTEN-inode parser (was duplicated in
     /// the port locator and the single-pid verifier). Returns the inodes of
     /// sockets in LISTEN state on <paramref name="port"/>.
+    /// <paramref name="tablesRead"/> reports whether the tables were readable
+    /// at all: false on non-Linux (no /proc/net/tcp) or on read errors, so
+    /// callers can fail closed instead of degrading into a global check.
     /// </summary>
-    private static HashSet<string> GetListeningInodes(int port)
+    private static HashSet<string> GetListeningInodes(int port, out bool tablesRead)
     {
         var targetInodes = new HashSet<string>();
+        tablesRead = false;
         foreach (var netFile in new[] { "/proc/net/tcp", "/proc/net/tcp6" })
         {
             if (!File.Exists(netFile)) continue;
+            tablesRead = true;
             var lines = File.ReadAllLines(netFile);
             foreach (var line in lines.Skip(1))
             {
@@ -274,14 +280,19 @@ public sealed class PidFile : IDisposable
 
     /// <summary>
     /// Verify pid actually holds LISTEN on port (mirrors _process_listening_by_port).
+    /// Fail closed: when per-PID verification is unavailable (no /proc tables
+    /// on non-Linux, unreadable fd dir, unexpected errors) the answer is
+    /// "not verified", never the global port check — degrading to the global
+    /// check would let `stop` signal an unverified process on pid reuse.
     /// </summary>
     public static bool IsProcessListeningOnPort(int pid, int port)
     {
         // Quick check via /proc/net/tcp + fd as above for single pid
         try
         {
-            var targetInodes = GetListeningInodes(port);
-            if (targetInodes.Count == 0) return IsPortListening(port);
+            var targetInodes = GetListeningInodes(port, out bool tablesRead);
+            if (!tablesRead) return false;
+            if (targetInodes.Count == 0) return false;
             var fdDir = $"/proc/{pid}/fd";
             if (!Directory.Exists(fdDir)) return false;
             foreach (var fd in Directory.GetFiles(fdDir))
@@ -296,7 +307,7 @@ public sealed class PidFile : IDisposable
             }
             return false;
         }
-        catch { return IsPortListening(port); }
+        catch { return false; }
     }
 
     /// <summary>
@@ -312,14 +323,49 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
+    /// Live pid + fresh file = a concurrent starter still booting (the daemon
+    /// parent holds the parent pid until it exits; the child re-claims right
+    /// after). Wait bounded for the claim to go stale (file replaced/gone or
+    /// pid dead); true means the caller should re-read and proceed, false
+    /// means a genuinely running server that must be refused. An old file
+    /// naming a live pid never waits — that server is already running.
+    /// </summary>
+    private static bool FreshLiveClaimWentStale(string pidPath, int oldPid)
+    {
+        try
+        {
+            if ((DateTime.UtcNow - File.GetLastWriteTimeUtc(pidPath)).TotalSeconds >= 2.0)
+                return false;
+        }
+        catch { return false; }
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        // Bounded poll without Thread.Sleep (banned in production): a fresh
+        // ManualResetEventSlim waited with timeout is the accepted idle here.
+        using var beat = new ManualResetEventSlim(false);
+        while (DateTime.UtcNow < deadline)
+        {
+            beat.Wait(100);
+            if (TryReadPid(pidPath) != oldPid) return true;
+            if (!IsServerProcess(oldPid)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Attempts to atomically acquire the PID file at <c>{savePath}/server.pid</c>.
     /// Mirrors <c>atheriz/atheriz.py:486-555 start_server</c> PID race:
     ///   - if file exists: read old_pid, if IsServerProcess → fail ("already running")
     ///   - else remove stale and try CreateNew
     ///   - on FileExistsError re-read and verify again (up to 3 attempts)
-    /// Also matches <c>spawn_daemon:1165-1235</c> concurrent spawn handling with age check.
+    /// Also matches <c>spawn_daemon:1165-1235</c> concurrent spawn handling (no age
+    /// gate: a live rival returns "already running" before the stale path).
     /// Returns true if acquired; caller must Dispose/Release.
     /// </summary>
+    // Single source for the "already running" refusal: both stale/live
+    // refusal sites below format this constant, and Program.cs keeps no
+    // prose copy (a comment copy once let a grep-pin pass while the live
+    // message lived here).
+    internal const string AlreadyRunningMessagePrefix = "Server is already running with PID:";
     public static bool TryAcquire(string savePath, out PidFile? pidFile, out string? reason, int webserverPort = 9999)
     {
         pidFile = null;
@@ -331,38 +377,41 @@ public sealed class PidFile : IDisposable
 
         var pidPath = Path.Combine(savePath, "server.pid");
 
-        // First stale check — atheriz.py:486-496
-        if (File.Exists(pidPath))
-        {
-            int? oldPid = TryReadPid(pidPath);
-            if (oldPid.HasValue && IsServerProcess(oldPid.Value))
-            {
-                reason = $"Server is already running with PID: {oldPid.Value}";
-                return false;
-            }
-
-            // Stale: verify the port is actually free before deleting — deleting a stale
-            // file while something still LISTENs risks a split-brain second server.
-            // Unconditional : a corrupt/unparseable pid file must not
-            // bypass this guard merely because TryReadPid returned null.
-            if (IsPortListening(webserverPort))
-            {
-                reason = $"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.";
-                return false;
-            }
-
-            // Remove stale — atheriz.py:495. (No age/starting branch: the
-            // live-PID check above already returned for a server process, so
-            // any "just created" file reaching here is stale by definition.)
-            try { File.Delete(pidPath); Console.WriteLine("Removing stale PID file."); }
-            catch (Exception ex) { reason = $"Failed to remove stale PID file: {ex.Message}"; return false; }
-        }
-
         int currentPid = Environment.ProcessId; // atheriz.py:507 pid = os.getpid()
 
-        // Atomic create attempts — atheriz.py:517-554 (3 retries)
+        // Atomic create attempts — atheriz.py:517-554 (3 retries). The stale
+        // check runs inside the loop so a fresh live claim that goes stale
+        // mid-wait is re-read instead of refused.
         for (int attempt = 0; attempt < 3; attempt++)
         {
+            // First stale check — atheriz.py:486-496
+            if (File.Exists(pidPath))
+            {
+                int? oldPid = TryReadPid(pidPath);
+                if (oldPid.HasValue && IsServerProcess(oldPid.Value))
+                {
+                    if (FreshLiveClaimWentStale(pidPath, oldPid.Value)) continue;
+                    reason = $"{AlreadyRunningMessagePrefix} {oldPid.Value}";
+                    return false;
+                }
+
+                // Stale: verify the port is actually free before deleting — deleting a stale
+                // file while something still LISTENs risks a split-brain second server.
+                // Unconditional : a corrupt/unparseable pid file must not
+                // bypass this guard merely because TryReadPid returned null.
+                if (IsPortListening(webserverPort))
+                {
+                    reason = $"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.";
+                    return false;
+                }
+
+                // Remove stale — atheriz.py:495. (No age/starting branch: the
+                // live-PID check above already returned for a server process, so
+                // any "just created" file reaching here is stale by definition.)
+                try { File.Delete(pidPath); Console.WriteLine("Removing stale PID file."); }
+                catch (Exception ex) { reason = $"Failed to remove stale PID file: {ex.Message}"; return false; }
+            }
+
             try
             {
                 // Mirrors open(pid_file, "x") + os.open O_EXCL 0o600
@@ -387,7 +436,8 @@ public sealed class PidFile : IDisposable
                 int? oldPid = TryReadPid(pidPath);
                 if (oldPid.HasValue && IsServerProcess(oldPid.Value))
                 {
-                    reason = $"Server is already running with PID: {oldPid.Value}";
+                    if (FreshLiveClaimWentStale(pidPath, oldPid.Value)) continue;
+                    reason = $"{AlreadyRunningMessagePrefix} {oldPid.Value}";
                     return false;
                 }
 
@@ -400,28 +450,9 @@ public sealed class PidFile : IDisposable
                     return false;
                 }
 
-                // Check age for concurrent winner — atheriz.py:1188-1225
-                try
-                {
-                    var mtime = File.GetLastWriteTimeUtc(pidPath);
-                    var ageSec = (DateTime.UtcNow - mtime).TotalSeconds;
-                    if (ageSec < 2.0)
-                    {
-                        // Might be concurrent spawn winner; but if pid is dead we still clean?
-                        // If pid dead and age <2s, treat as stale but wait? Python treats as already starting
-                        // We check if oldPid not server process → still delete
-                        if (!oldPid.HasValue || !IsServerProcess(oldPid.Value))
-                        {
-                            // stale concurrent file with dead pid → delete and retry
-                            try { File.Delete(pidPath); } catch { }
-                            continue;
-                        }
-                        reason = "Server is already starting (concurrent spawn)";
-                        return false;
-                    }
-                }
-                catch { }
-
+                // No age gate: a live rival PID returned "already running"
+                // above, so anything reaching here is stale by definition —
+                // delete and retry.
                 try { File.Delete(pidPath); } catch { }
                 if (attempt == 2)
                 {
@@ -487,6 +518,27 @@ public sealed class PidFile : IDisposable
         }
         catch { }
         _acquired = false;
+    }
+
+    /// <summary>
+    /// Owner-verified delete for CLI paths that never acquired the file
+    /// (e.g. <c>stop</c> acting on another process's pid file): deletes only
+    /// when the file still contains <paramref name="expectedPid"/>, so a stale
+    /// stop handle can never remove a live successor's pid file across the
+    /// read/kill/delete window (pid reuse).
+    /// </summary>
+    public static bool ReleaseIfOwner(string pidPath, int expectedPid)
+    {
+        try
+        {
+            if (File.Exists(pidPath) && TryReadPid(pidPath) == expectedPid)
+            {
+                File.Delete(pidPath);
+                return true;
+            }
+        }
+        catch { }
+        return false;
     }
 
     public void Dispose()

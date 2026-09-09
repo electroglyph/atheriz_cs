@@ -596,4 +596,41 @@ public class PortedTelnetTests
             AtherizSettings.Global.TelnetNawsMaxRows = origMaxRows;
         }
     }
+    private sealed class FusingWriter : ITelnetWriter
+    {
+        public List<string> Writes = new(); public List<(byte,byte)> Iacs = new(); public List<(byte,byte,string)> Fused = new();
+        public void Write(string text)=> Writes.Add(text);
+        public void Iac(byte cmd, byte opt)=> Iacs.Add((cmd,opt));
+        public void IacWithText(byte cmd, byte opt, string text)=> Fused.Add((cmd,opt,text));
+        public void Close(){}
+        public int? GetWriteBufferSize()=> 0;
+        public void SetExtCallback(byte opt, Action<int,int> cb){}
+        public string? GetPeerHost()=> "1.2.3.4";
+    }
+    [Fact] public void PromptMaskedFusedSingleWriterCall()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var w = new FusingWriter();
+        var conn = new TelnetConnection(new object(), w);
+        conn.SendCommand("prompt_masked", new List<object?>{"secret"});
+        Thread.Sleep(100);
+        Assert.Single(w.Fused);
+        Assert.Equal((byte)251, w.Fused[0].Item1); Assert.Equal((byte)1, w.Fused[0].Item2);
+        Assert.Contains("secret", w.Fused[0].Item3);
+        Assert.Empty(w.Iacs); Assert.Empty(w.Writes);
+    }
+    private sealed class CountingStream : System.IO.MemoryStream
+    {
+        public int WriteCalls;
+        public override void Write(byte[] buffer, int offset, int count) { WriteCalls++; base.Write(buffer, offset, count); }
+    }
+    [Fact] public void StreamWriterIacWithTextSingleLockedWrite()
+    {
+        using var ms = new CountingStream();
+        using var tcp = new System.Net.Sockets.TcpClient();
+        var w = new TelnetStreamWriter(ms, tcp);
+        w.IacWithText(251, 1, "hi");
+        Assert.Equal(1, ms.WriteCalls);
+        Assert.Equal(new byte[]{255,251,1,(byte)'h',(byte)'i'}, ms.ToArray());
+    }
 }

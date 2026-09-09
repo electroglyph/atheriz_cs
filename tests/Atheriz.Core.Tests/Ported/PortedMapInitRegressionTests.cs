@@ -272,8 +272,8 @@ public class PortedMapInitRegressionTests
     [Fact]
     public void DoSetup_PromptHoldsNoWriteGate()
     {
-        // A3-G-4: the seed held DbWriteGate (and an open sqlite transaction)
-        // across interactive credential prompts — every slow operator became
+        // The seed held DbWriteGate (and an open sqlite transaction) across
+        // interactive credential prompts — every slow operator became
         // a TimeoutException (and a pinned DB) for all concurrent savers.
         // Prompts resolve before the gate/tx open now: while blocked in the
         // username prompt, the gate must be acquirable, and the empty-username

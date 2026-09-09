@@ -23,7 +23,7 @@ public static class NewHandler
         }).ToArray();
         if (filtered.Length < 1 || filtered[0].StartsWith("-", StringComparison.Ordinal))
         {
-            Console.Error.WriteLine("Usage: atheriz new <foldername> [--port N] [--host HOST] [--foreground|-f]");
+            Console.Error.WriteLine("Usage: atheriz new <foldername> [--port N] [--host HOST] [--foreground|-f] [--overwrite|--force]");
             Console.Error.WriteLine("atheriz: error: the following arguments are required: foldername");
             throw new CliExitException(2);
         }

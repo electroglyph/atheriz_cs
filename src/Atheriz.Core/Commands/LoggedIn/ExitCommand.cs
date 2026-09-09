@@ -81,13 +81,7 @@ public sealed class LoggedInExitCommand : Command
                     try { moved = c.MoveTo(dest, null, false, true, lookup); }
                     catch
                     {
-                        bool closedOk = false;
-                        try { closedOk = door.TryClose(c); } catch { closedOk = false; }
-                        if (!closedOk)
-                        {
-                            try { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } } catch (Exception) { }
-                            try { door.MapClose(); } catch (Exception) { }
-                        }
+                        RestoreClosedDoor(door, c);
                         throw;
                     }
                     if (moved)
@@ -96,13 +90,7 @@ public sealed class LoggedInExitCommand : Command
                     }
                     else
                     {
-                        bool closedOk = false;
-                        try { closedOk = door.TryClose(c); } catch { closedOk = false; }
-                        if (!closedOk)
-                        {
-                            try { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } } catch (Exception) { }
-                            try { door.MapClose(); } catch (Exception) { }
-                        }
+                        RestoreClosedDoor(door, c);
                     }
                     return;
                 }
@@ -131,6 +119,19 @@ public sealed class LoggedInExitCommand : Command
     {
         CallerId = go.Id;
         DoMove();
+    }
+
+    // Best-effort re-close after a refused or failed move through an opened
+    // door: TryClose first, forced flag + map step when it refuses or throws.
+    internal static void RestoreClosedDoor(Door door, GameObject c)
+    {
+        bool closedOk = false;
+        try { closedOk = door.TryClose(c); } catch { closedOk = false; }
+        if (!closedOk)
+        {
+            try { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } } catch (Exception) { }
+            try { door.MapClose(); } catch (Exception) { }
+        }
     }
 
     // Shared with Objects.ExitCommand (exit objects move through the same

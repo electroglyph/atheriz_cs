@@ -139,4 +139,40 @@ public class ConcurrencyTests
         pool.Stop();
         Assert.False(pool.AddTask(() => { }));
     }
+
+    [Fact]
+    public async Task ThreadPool_Delay_FullQueue_RunsInline()
+    {
+        // A full queue at fire time must not silently drop the delayed
+        // callback: it runs inline on the timer thread instead.
+        using var pool = new AsyncThreadPool(maxThreads: 1, queueLimit: 1, reliefLimit: 0);
+        var block = new ManualResetEventSlim(false);
+        var started = new ManualResetEventSlim(false);
+        pool.AddTask(() => { started.Set(); block.Wait(5000); });
+        Assert.True(started.Wait(2000));
+        Assert.True(pool.AddTask(() => { }));
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        pool.Delay(TimeSpan.FromMilliseconds(50), () => tcs.TrySetResult(true));
+        var completed = await Task.WhenAny(tcs.Task, Task.Delay(2000)) == tcs.Task;
+        block.Set();
+        pool.Stop();
+        Assert.True(completed, "Delayed callback was dropped instead of running inline on a full queue");
+    }
+
+    [Fact]
+    public async Task ThreadPool_DelayAsync_FullQueue_RunsInline()
+    {
+        using var pool = new AsyncThreadPool(maxThreads: 1, queueLimit: 1, reliefLimit: 0);
+        var block = new ManualResetEventSlim(false);
+        var started = new ManualResetEventSlim(false);
+        pool.AddTask(() => { started.Set(); block.Wait(5000); });
+        Assert.True(started.Wait(2000));
+        Assert.True(pool.AddTask(() => { }));
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        pool.Delay(TimeSpan.FromMilliseconds(50), async () => { await Task.Yield(); tcs.TrySetResult(true); });
+        var completed = await Task.WhenAny(tcs.Task, Task.Delay(2000)) == tcs.Task;
+        block.Set();
+        pool.Stop();
+        Assert.True(completed, "Delayed async callback was dropped instead of running inline on a full queue");
+    }
 }

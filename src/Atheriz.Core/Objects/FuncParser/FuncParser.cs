@@ -572,7 +572,7 @@ public class FuncParser
         if (string.IsNullOrEmpty(text)) return text;
         // need to handle reservedKwargs that may contain caller/receiver/mapping for actor stance later? But instance parse's callables are generic; for actor stance we need to handle via reserved.
         // Use internal parser with instance fields
-        return ParseInternal(text, raiseErrors, escape, strip, returnStr, reservedKwargs, _callables, _startChar, _escapeChar, _maxNesting, _defaultKwargs);
+        return ParseInternal(text, raiseErrors, escape, strip, returnStr, reservedKwargs, _callables, _startChar, _escapeChar, _maxNesting, _defaultKwargs, this);
     }
     // Overload with actor/receiver/mapping convenience
     public object? Parse(string? text, GameObject? caller, GameObject? receiver, IDictionary<string, object?>? mapping, bool raiseErrors = false, bool escape = false, bool strip = false, bool returnStr = true)
@@ -636,8 +636,12 @@ public class FuncParser
     public static string Parse(string? text, IDictionary<string, object?>? mapping, bool raiseErrors = false)
         => Parse(text, null, null, mapping, raiseErrors);
 
-    // Shared internal parser (instance-like)
-    private static object? ParseInternal(string str, bool raiseErrors, bool escapeMode, bool stripMode, bool returnStr, IDictionary<string, object?>? reservedKwargs, IReadOnlyDictionary<string, ParserCallable> callables, char startChar, char escapeChar, int maxNesting, IReadOnlyDictionary<string, object?> defaultKwargs)
+    // Shared internal parser (instance-like). owner is the instance whose
+    // Parse/Execute entry routed here (null on the static legacy path, which
+    // genuinely has no instance): generic callables already capture their
+    // owning instance at wrap time, and this threads the same reference into
+    // the merged kwargs so ParserCallable callables see one consistent value.
+    private static object? ParseInternal(string str, bool raiseErrors, bool escapeMode, bool stripMode, bool returnStr, IDictionary<string, object?>? reservedKwargs, IReadOnlyDictionary<string, ParserCallable> callables, char startChar, char escapeChar, int maxNesting, IReadOnlyDictionary<string, object?> defaultKwargs, FuncParser? owner = null)
     {
         var callstack = new List<ParsedFunc>();
         int quoted = -1;
@@ -671,9 +675,8 @@ public class FuncParser
             foreach(var kv in defaultKwargs) merged[kv.Key]=kv.Value;
             foreach(var kv in pf.Kwargs) merged[kv.Key]=kv.Value;
             if(reservedKwargs!=null) foreach(var kv in reservedKwargs) merged[kv.Key]=kv.Value;
-            merged["funcparser"] = null; // placeholder, will set to instance? For static we pass null or a dummy
+            merged["funcparser"] = owner; // instance entry supplies the live parser, matching Execute; the static legacy path has no instance
             merged["raise_errors"] = re;
-            // For instance we could pass actual parser, but for internal static we pass null; callables that check funcparser will see null
             // Build ParserContext from merged
             var c = new ParserContext{ RaiseErrors=re };
             if(merged.TryGetValue("caller", out var co2) && co2 is GameObject gco2) c.Caller=gco2;

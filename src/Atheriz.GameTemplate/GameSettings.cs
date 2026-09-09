@@ -11,10 +11,8 @@ using Atheriz.Core.Settings;
 /// register entity replacements via <c>[EntityReplacement]</c> and <see cref="Atheriz.Core.Plugins.PluginLoader"/>.
 /// </summary>
 /// <remarks>
-/// Template source for <c>atheriz new</c> — copied/scaffolded into new game folders by
-/// <c>GameTemplateGenerator</c>. The concrete sample instance at <c>test/</c> is a live
-/// game folder (with <c>save/</c>, <c>secret/</c>, <c>web/</c>) built as <c>test/test.csproj</c>
-/// and included in <c>Atheriz.sln</c> under solution folder <c>samples</c>.
+/// Template source for <c>atheriz new</c> — scaffolded into new game folders by
+/// <c>GameTemplateGenerator</c> as the generated game's settings file.
 /// </remarks>
 public static class GameSettings
 {

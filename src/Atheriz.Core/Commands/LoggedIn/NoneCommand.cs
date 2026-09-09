@@ -10,7 +10,11 @@ public sealed class NoneCommand : Command
     public override string Key => "none";
     public override bool Hide => true;
     public override string Desc => "Fallback for unknown commands.";
-    public override bool UseParser => false;
+    // Same parsed shape as the unlogged fallback: identical inputs suggest
+    // identically pre/post login (quotes, dash-input) instead of raw-vs-parsed.
+    // Same parsed shape as the unlogged fallback: identical inputs suggest
+    // identically pre/post login (quotes, dash-input) instead of raw-vs-parsed.
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("none", nargs: "*", help: "Fallback for unknown commands."); }
 
     public override void Run(IMessageTarget caller, object? args)
     {

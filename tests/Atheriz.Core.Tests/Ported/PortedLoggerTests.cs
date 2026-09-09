@@ -102,4 +102,38 @@ public class PortedLoggerTests
         Assert.Contains("AtherizLogger.Rotate", fileLoggerSrc);
         Assert.DoesNotContain("private const long MaxBytes", fileLoggerSrc);
     }
+
+    [Fact]
+    public void ApplySettings_PublishesSavePathUnderContention()
+    {
+        using var env = GlobalTestEnv.Enter();
+        // The path slot is published under the settings hold and volatile for
+        // the file-writer lock's readers; hammer both sides and require no
+        // throw, no stuck join, and a landed publication at the end.
+        var dirA = Path.Combine(env.TempPath, "logA");
+        var dirB = Path.Combine(env.TempPath, "logB");
+        Directory.CreateDirectory(dirA); Directory.CreateDirectory(dirB);
+        var setA = new Atheriz.Core.Settings.AtherizSettings { LogLevel = "info", SavePath = dirA };
+        var setB = new Atheriz.Core.Settings.AtherizSettings { LogLevel = "info", SavePath = dirB };
+        var fld = typeof(AtherizLogger).GetField("_savePath", BindingFlags.NonPublic|BindingFlags.Static);
+        Assert.NotNull(fld);
+        var errors = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+        int stop = 0;
+        var writers = Enumerable.Range(0, 4).Select(i => new System.Threading.Thread(() => {
+            try { for (int k = 0; k < 200 && System.Threading.Volatile.Read(ref stop) == 0; k++) AtherizLogger.LogInformation("contention line " + i); }
+            catch (Exception ex) { errors.Add(ex); }
+        })).ToList();
+        var appliers = Enumerable.Range(0, 2).Select(_ => new System.Threading.Thread(() => {
+            try { for (int k = 0; k < 50; k++) AtherizLogger.ApplySettings(k % 2 == 0 ? setA : setB); }
+            catch (Exception ex) { errors.Add(ex); }
+        })).ToList();
+        writers.ForEach(t => t.Start()); appliers.ForEach(t => t.Start());
+        appliers.ForEach(t => Assert.True(t.Join(10000)));
+        System.Threading.Volatile.Write(ref stop, 1);
+        writers.ForEach(t => Assert.True(t.Join(10000)));
+        Assert.Empty(errors);
+        AtherizLogger.ApplySettings(setA);
+        Assert.Equal(dirA, fld!.GetValue(null));
+        AtherizLogger.ApplySettings(new Atheriz.Core.Settings.AtherizSettings { LogLevel = "info", SavePath = env.TempPath });
+    }
 }

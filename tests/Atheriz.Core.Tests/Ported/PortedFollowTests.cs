@@ -166,8 +166,8 @@ public class PortedFollowTests
     [Fact]
     public void FollowScript_EveryPostMove_PopsItsPartner()
     {
-        // A3-O-2: every pre-move pushes exactly one entry, so every post-move
-        // must pop exactly one — including failed moves (null destination) and
+        // Every pre-move pushes exactly one entry, so every post-move must pop
+        // exactly one — including failed moves (null destination) and
         // follower-less moves (script teardown). Otherwise entries leak and
         // later moves pop stale rooms.
         using var env = GlobalTestEnv.Enter();

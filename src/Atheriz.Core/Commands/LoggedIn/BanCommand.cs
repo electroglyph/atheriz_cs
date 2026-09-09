@@ -30,6 +30,9 @@ public sealed class BanCommand : Command
         bool ip = pa.GetBool("ip");
         var target = BanHelper.ResolveTarget(go, targetName);
         if (target == null) return;
+        // No self-exempt idiom on purpose: banning yourself locks your own
+        // account (worse than deleting a disposable object), so self-ban
+        // stays refused by the equal-or-higher rule below like any peer's.
         if (target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot ban someone of equal or higher privilege."); return; }
         GameObject? acct = null;
         List<GameObject> acctChars = [];

@@ -316,4 +316,35 @@ public class ObjectTests
         o.AddContent(1);
         Assert.True(o.IsModified);
     }
+
+    private sealed class ThrowingInitNode : Node
+    {
+        public ThrowingInitNode() : base(new Coord("limbo", 0, 0, 0)) { }
+        public override void AtInit() => throw new InvalidOperationException("boom");
+    }
+
+    // Node.ResolveRelations contains throwing hooks like the base — a throwing
+    // AtInit must not abort relation resolution.
+    [Fact]
+    public void ResolveRelations_ThrowingAtInit_DoesNotPropagate()
+    {
+        using var _ = GlobalTestEnv.Enter();
+        var node = new ThrowingInitNode();
+        var ex = Record.Exception(() => node.ResolveRelations());
+        Assert.Null(ex);
+    }
+
+    // No grid-presence probe gates the move: moving to a live node that was
+    // never registered still succeeds (the old probe's arms both fell through
+    // to the move, so enforcement would be a behavior change).
+    [Fact]
+    public void MoveTo_UnregisteredLiveNode_Succeeds()
+    {
+        using var _ = GlobalTestEnv.Enter();
+        var node = new Node(new Coord("limbo", 0, 0, 0));
+        var o = new GameObject();
+        Assert.True(o.MoveTo(node, force: true, announce: false));
+        Assert.Equal(node.Coord, ((Persistence.Dto.LocationRef.CoordLocation)o.Location).Coord);
+        Assert.Contains(o.Id, node.ContentsSnapshot);
+    }
 }

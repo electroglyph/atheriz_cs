@@ -453,12 +453,15 @@ public class PortedCriticalFixesTests
         Assert.Contains("python", src.ToLower(), StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact] public void StopServerFallbackKillsVerifiedPythonListener()
+    [Fact] public void StopServerFallbackKillsVerifiedDotnetListenerOnly()
     {
         using var env = GlobalTestEnv.Enter();
-        // Gate: verify PidFile's IsServerProcess logic for dotnet/python
+        // Gate: PidFile's IsServerProcess trusts only this engine's shapes
+        // (dotnet host + server-assembly cmdline, single-file module name).
+        // Bare process-name prefixes are not trusted: a stale pid reused by
+        // an unrelated process must never pass the stop gates.
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/PidFile.cs");
-        Assert.Contains("python", src.ToLower(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("StartsWith(\"python\")", src);
         Assert.Contains("dotnet", src.ToLower(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("IsServerProcess", src);
     }

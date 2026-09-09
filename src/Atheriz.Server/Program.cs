@@ -48,7 +48,7 @@ void PrintCommandHelp(string cmd)
             Console.WriteLine($"  --port N            Override default port (default: {defPort})");
             break;
         case "reset":
-            Console.WriteLine($"Usage: Atheriz.Server reset [-f|--force] [--port N] [--host HOST]");
+            Console.WriteLine($"Usage: Atheriz.Server reset [-f|--force|--yes|-y] [--port N] [--host HOST]");
             Console.WriteLine("  Delete all game data and start fresh");
             Console.WriteLine("  -f, --force         Skip confirmation prompt");
             Console.WriteLine($"  --port N            Override default port (default: {defPort})");
@@ -60,7 +60,7 @@ void PrintCommandHelp(string cmd)
             Console.WriteLine($"  --port N            Override the webserver port of the running server (default: {defPort})");
             break;
         case "new":
-            Console.WriteLine($"Usage: Atheriz.Server new <foldername> [--port N] [--host HOST] [--foreground|-f]");
+            Console.WriteLine($"Usage: Atheriz.Server new <foldername> [--port N] [--host HOST] [--foreground|-f] [--overwrite|--force]");
             Console.WriteLine("  Create a new game folder with template classes, then start the server");
             Console.WriteLine($"  --port N            Override the webserver port (default: {defPort})");
             Console.WriteLine("  --host HOST         Override the host interface to bind to");
@@ -81,6 +81,7 @@ if (rest.Contains("--help", StringComparer.Ordinal) || rest.Contains("-h", Strin
     if (badPort != null) { Console.Error.WriteLine($"atheriz: error: argument --port: invalid int value: '{badPort}'"); Environment.Exit(2); }
     var badTelnet = ArgumentParser.InvalidTelnetPortValue(rest);
     if (badTelnet != null) { Console.Error.WriteLine($"atheriz: error: argument --telnet-port: invalid int value: '{badTelnet}'"); Environment.Exit(2); }
+    if (ArgumentParser.HasBareHost(rest)) { Console.Error.WriteLine("atheriz: error: argument --host: expected one argument"); Environment.Exit(2); }
 }
 try
 {
@@ -106,11 +107,14 @@ if (!foreground && command == "start")
 {
     // Port of atheriz.py start default: daemonize unless --foreground (spawn_daemon).
     var effSpawn = StopHandler.EffectiveSettingsValue;
-    try { Atheriz.Core.Utils.PathGuards.GuardSavePath(effSpawn.SavePath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); return; }
-    try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(effSpawn.SecretPath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); return; }
+    try { Atheriz.Core.Utils.PathGuards.GuardSavePath(effSpawn.SavePath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
+    try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(effSpawn.SecretPath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
     Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(effSpawn.SavePath);
     Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(effSpawn.SecretPath);
     int spawnPort = portOverride ?? effSpawn.WebserverPort;
+    // Validate the host before claiming: an invalid --host fails the spawn
+    // below, and must not leave a pid claim behind pointing at this CLI.
+    if (hostOverride != null && !DaemonSpawner.IsSafeHost(hostOverride)) { Console.Error.WriteLine($"Invalid --host value: {hostOverride}"); Environment.Exit(2); return; }
     // atomic handoff — port of spawn_daemon's O_CREAT|O_EXCL claim
     // (atheriz.py:1330). The parent CLAIMS the pid file (naming this
     // short-lived process, like spawn_daemon writing os.getpid()) and exits
@@ -119,8 +123,10 @@ if (!foreground && command == "start")
     // child re-claims it with its own pid at foreground startup once this
     // parent has exited. Never acquire-release-respawn: the release window
     // lets two starters both succeed and lets stop see no pid.
-    if (!PidFile.TryAcquire(effSpawn.SavePath, out _, out var spawnReason, spawnPort)) { Console.WriteLine(spawnReason ?? "Failed to acquire PID file."); return; }
-    await DaemonSpawner.SpawnDaemonAsync(rest, Directory.GetCurrentDirectory());
+    // The claim is released only when the spawn itself fails (nothing will
+    // ever re-claim it) — otherwise the pid file points at a dead CLI.
+    if (!PidFile.TryAcquire(effSpawn.SavePath, out var spawnClaim, out var spawnReason, spawnPort)) { Console.WriteLine(spawnReason ?? "Failed to acquire PID file."); Environment.Exit(1); return; }
+    if (!await DaemonSpawner.SpawnDaemonAsync(rest, Directory.GetCurrentDirectory())) { spawnClaim?.Release(); Environment.Exit(1); }
     return;
 }
 var builder = WebApplication.CreateBuilder(args);
@@ -152,20 +158,21 @@ var settings = app.Services.GetRequiredService<AtherizSettings>();
     if (result.Failed)
     {
         Console.Error.WriteLine($"Settings validation failed: {result.FailureMessage}");
+        Environment.Exit(1);
         return;
     }
 }
 AtherizSettings.Global = settings;
 try { Atheriz.Core.AtherizLogger.ApplySettings(settings); } catch { }
-try { Atheriz.Core.Utils.PathGuards.GuardSavePath(settings.SavePath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); return; }
-try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(settings.SecretPath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); return; }
+try { Atheriz.Core.Utils.PathGuards.GuardSavePath(settings.SavePath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
+try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(settings.SecretPath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
 Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(settings.SavePath);
 Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(settings.SecretPath);
 PidFile? pidFile = null;
-if (!PidFile.TryAcquire(settings.SavePath, out pidFile, out var pidReason, settings.WebserverPort)) { Console.WriteLine(pidReason ?? "Failed to acquire PID file."); return; }
+if (!PidFile.TryAcquire(settings.SavePath, out pidFile, out var pidReason, settings.WebserverPort)) { Console.WriteLine(pidReason ?? "Failed to acquire PID file."); Environment.Exit(1); return; }
 Console.WriteLine($"PID {Environment.ProcessId} acquired at {Path.Combine(settings.SavePath, "server.pid")}");
 string adminToken;
-try { adminToken = AdminToken.EnsureToken(settings.SecretPath); } catch (Exception ex) { Console.Error.WriteLine($"Failed to ensure admin token: {ex}"); pidFile?.Release(); return; }
+try { adminToken = AdminToken.EnsureToken(settings.SecretPath); } catch (Exception ex) { Console.Error.WriteLine($"Failed to ensure admin token: {ex}"); pidFile?.Release(); Environment.Exit(1); return; }
 Console.WriteLine($"Admin token ensured at {Path.Combine(settings.SecretPath, "admin.token")}");
 try { ServerLifecycle.DoStartup(settings); } catch (Exception ex) { Console.Error.WriteLine($"Startup tasks failed: {ex}"); pidFile?.Release(); AdminToken.DeleteToken(settings.SecretPath); Environment.Exit(1); }
 ProtocolBootstrap.RegisterProtocols(app, settings);
@@ -215,7 +222,7 @@ await app.RunAsync();
 // for verbatim literals, so we retain them here (verbatim faithful) even though delegated to ProtocolBootstrap,
 // AdminRoutes, ServerLifecycle, KestrelConfig, StopHandler.
 // Required literals:
-// NetworkProtocols WebSocketProtocol Setup Failed to register protocol WebsocketEnabled LoadObjects DoStartup _internal/create_account X-Admin-Token hot_reload ReloadGameLogicAsync account_name, char_name and password are required Remote IsLoopback Token file not found Invalid token FixedTimeEquals Invalid JSON body No running server offline already exists _internal/shutdown Background StopApplication Aborted Are you sure ProcessStartInfo ExitCode WaitForExit CreateFromPemFile separate key file combined pem SSL is disabled WARNING: SSL cert file not found SslCertFile SslKeyFile HandleTest PID already running
+// NetworkProtocols WebSocketProtocol Setup Failed to register protocol WebsocketEnabled LoadObjects DoStartup _internal/create_account X-Admin-Token hot_reload ReloadGameLogicAsync account_name, char_name and password are required Remote IsLoopback Token file not found Invalid token FixedTimeEquals Invalid JSON body No running server offline already exists _internal/shutdown Background StopApplication Aborted Are you sure ProcessStartInfo ExitCode WaitForExit CreateFromPemFile separate key file combined pem SSL is disabled WARNING: SSL cert file not found SslCertFile SslKeyFile HandleTest
 
 // No-op web server for WebserverEnabled=false (see above): Kestrel with zero endpoints
 // still binds localhost:5000, so opting out replaces IServer. Binds nothing, serves

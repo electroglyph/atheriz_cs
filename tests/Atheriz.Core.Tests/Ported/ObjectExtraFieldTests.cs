@@ -58,7 +58,7 @@ public class ObjectExtraFieldTests
     }
 
     [Fact]
-    public void ScreenReader_NoExtraMessage()
+    public void ScreenReader_Toggle_ConfirmsNewState()
     {
         using var env = GlobalTestEnv.Enter();
         var conn = new FakeConnection();
@@ -69,8 +69,41 @@ public class ObjectExtraFieldTests
         var cmd = new Atheriz.Core.Commands.UnloggedIn.ScreenReaderCommand();
         go.ClearMessages();
         cmd.Run(go, null);
-        // Python screenreader has no msg, only send_command
-        Assert.DoesNotContain(go.PeekMessages(), m => m.ToLower().Contains("screenreader"));
+        // The toggle confirms on the message path: telnet callers with no
+        // control-channel display otherwise see nothing change.
+        Assert.Contains(go.PeekMessages(), m => m.ToLower().Contains("screenreader mode on."));
+    }
+
+    [Fact]
+    public void ScreenReader_GameObjectCaller_TogglesSession()
+    {
+        // The typed ISessionProvider branch handles GameObject callers, so the
+        // command works with no per-type fallback.
+        using var env = GlobalTestEnv.Enter();
+        var conn = new FakeConnection();
+        var sess = new Session { Connection = conn };
+        var go = GameObject.Create("srgo", isPc: true);
+        go.Session = sess;
+        sess.Puppet = go;
+        var cmd = new Atheriz.Core.Commands.UnloggedIn.ScreenReaderCommand();
+        Assert.False(sess.ScreenReader);
+        cmd.Run(go, null);
+        Assert.True(sess.ScreenReader);
+        cmd.Run(go, null);
+        Assert.False(sess.ScreenReader);
+    }
+
+    [Fact]
+    public void ScreenReader_ConnectionCaller_TogglesSession()
+    {
+        // The typed ISessionProvider branch handles connection callers too.
+        using var env = GlobalTestEnv.Enter();
+        var conn = new FakeConnection();
+        var sess = conn.Session;
+        var cmd = new Atheriz.Core.Commands.UnloggedIn.ScreenReaderCommand();
+        Assert.False(sess.ScreenReader);
+        cmd.Run(conn, null);
+        Assert.True(sess.ScreenReader);
     }
 
     [Fact]

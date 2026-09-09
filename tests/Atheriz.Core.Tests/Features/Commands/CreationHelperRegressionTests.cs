@@ -76,4 +76,16 @@ public sealed class CreationHelperRegressionTests
         Assert.NotNull(conn.Session.Puppet);
         Assert.Equal("PupGuest", conn.Session.Puppet!.Name);
     }
+
+    [Fact]
+    public void New_NoAccountPath_ClearsCooldown()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var conn = new TestConn("c3", "198.51.100.13");
+        conn.Session.Account = null;
+        var cmd = new NewCharacterCommand();
+        cmd.Run(conn, "NoAcctA M"); // no-account path: validates only, creates nothing
+        cmd.Run(conn, "NoAcctB M"); // same host: must NOT be rate-limited
+        Assert.Contains(conn.Sent, s => s.Args.Any(a => a?.ToString()?.Contains("Would create character NoAcctB") == true));
+    }
 }

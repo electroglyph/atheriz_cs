@@ -18,8 +18,9 @@ public partial class GameObject
     /// Hookable wrapper: advisory before (ignore return), replace (first only), after (can mutate result).
     /// Mirrors <c>base_obj.hookable</c> semantics where before cannot abort.
     /// Hooks run through a compiled, statically-typed invoker (no DynamicInvoke):
-    /// arity mismatches surface as <see cref="TargetParameterCountException"/> so call
-    /// sites keep their fallback behavior, and hook errors propagate unwrapped.
+    /// before/replace arity mismatches are skipped with a warning and after
+    /// hooks fall back from args+result to args-only, so call sites keep their
+    /// fallback behavior; genuine hook errors propagate unwrapped.
     /// </summary>
     public T Hookable<T>(string funcName, Func<T> original, params object?[] args)
     {
@@ -57,7 +58,12 @@ public partial class GameObject
         {
             // Advisory: return ignored. Hook errors propagate raw (previously
             // TIE-unwrapped — same observable, no reflection wrapper).
-            DelegateInvoker.Invoke(h, args);
+            // Arity mismatches get the replace-hook treatment (skip + loud
+            // log): a mis-signed before hook must not throw out of the entry
+            // point (e.g. AtPreMove failing MoveTo with an exception instead
+            // of a false return).
+            try { DelegateInvoker.Invoke(h, args); }
+            catch (TargetParameterCountException ex) { AtherizLogger.LogWarning($"Skipped GameObject.Hookable before-hook with mismatched signature: {ex.Message}", "GameObject"); }
         }
 
         var result = original();
@@ -74,16 +80,18 @@ public partial class GameObject
                 invoked = true;
             }
             catch (TargetParameterCountException) { }
-            // No catch-all: a throwing after-hook propagates (base_obj.py:66
-            // `result = h(*args)` raises raw) instead of nulling the result.
+            // A throwing after-hook propagates instead of nulling the
+            // result — and the args-only fallback below is arity-only for the
+            // same reason: genuine hook errors surface, only a second arity
+            // mismatch falls through to the original result.
             if (!invoked)
             {
-                try { newResult = DelegateInvoker.Invoke(h, args); invoked = true; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Hookable: " + logEx.Message, "GameObject"); }
+                try { newResult = DelegateInvoker.Invoke(h, args); invoked = true; }
+                catch (TargetParameterCountException) { }
             }
             // Port of base_obj.py:64-66 — an after-hook replaces the result
             // unconditionally, including with null (reference types).
             if (invoked && (newResult is T t || (newResult == null && default(T) == null))) result = (T)newResult!;
-            else if (invoked && newResult != null && typeof(T) == typeof(string) && newResult is string s) result = (T)(object)s;
         }
         // Hooks present but none marked before/after/replace: silently run original
         // (adaptation — Python raised ValueError; aborting here would break game code).

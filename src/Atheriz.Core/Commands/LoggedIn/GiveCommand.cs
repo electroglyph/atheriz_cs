@@ -93,7 +93,9 @@ public sealed class GiveCommand : Command
         bool givenAny = false;
         foreach (var obj in objsToGive.ToList())
         {
-            if (obj.Id == target.Id) continue;
+            // An item that IS the target cannot be moved into itself: report it
+            // like the veto/move-fail paths instead of skipping silently.
+            if (obj.Id == target.Id) { go.Msg($"You can't give {obj.Name} to itself."); continue; }
             // Port of give.py:172-177 — a veto reports, then skips the item.
             if (!obj.AtPreGive(go, target)) { go.Msg($"You can't give {obj.GetDisplayName(go)} to {target.GetDisplayName(go)}."); continue; }
             if (obj.MoveTo(target))

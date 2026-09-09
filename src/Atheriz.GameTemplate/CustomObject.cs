@@ -27,7 +27,7 @@ public class CustomObject : GameObject
         base.AtCreate();
     }
 
-    public override bool AtDelete(GameObject caller)
+    public override bool AtDelete(GameObject? caller)
     {
         return base.AtDelete(caller);
     }

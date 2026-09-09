@@ -34,7 +34,7 @@ public class ChannelCommandInstallTests
     [Fact]
     public void ConcurrentSubscribe_BothCommandsSurvive()
     {
-        // A3-O-4: two racing Subscribes both saw a null InternalCmdSet, both
+        // Two racing Subscribes both saw a null InternalCmdSet, both
         // allocated, and the second orphaned the first channel's command.
         // The set itself is allocated under the peer write lock now.
         ObjectRegistry.ClearAll();

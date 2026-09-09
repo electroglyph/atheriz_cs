@@ -165,6 +165,50 @@ public class PersistenceRegressionTests
     }
 
     [Fact]
+    public async Task DoSetupAsync_MigratesDestinationOnlyTransitionsTable()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var dir = Path.Combine(Path.GetTempPath(), "atheriz-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            AtherizDbContextFactory.DoSetup(dir);
+            var data = JsonSerializer.Serialize(
+                new Atheriz.Core.Objects.Transition(
+                    new Atheriz.Core.Coord("A", 0, 1, 0),
+                    new Atheriz.Core.Coord("B", 0, 2, 0), "door"),
+                Atheriz.Core.Persistence.JsonOptions.Default);
+            var cs = new SqliteConnectionStringBuilder { DataSource = Path.Combine(dir, "database.sqlite3") }.ToString();
+            using (var conn = new SqliteConnection(cs))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "DROP TABLE \"transitions\"; CREATE TABLE \"transitions\" (\"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))";
+                cmd.ExecuteNonQuery();
+                cmd.CommandText = "INSERT INTO \"transitions\" VALUES ('B',0,2,0,@d)";
+                cmd.Parameters.AddWithValue("@d", data);
+                cmd.ExecuteNonQuery();
+            }
+            await AtherizDbContextFactory.DoSetupAsync(dir);
+            using (var conn = new SqliteConnection(cs))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "PRAGMA table_info(\"transitions\")";
+                var cols = new List<string>();
+                using (var r = cmd.ExecuteReader())
+                    while (r.Read()) cols.Add(r.GetString(1));
+                Assert.Contains("FromArea", cols);
+                cmd.CommandText = "SELECT \"FromArea\",\"FromX\",\"FromY\",\"FromZ\" FROM \"transitions\"";
+                using var r2 = cmd.ExecuteReader();
+                Assert.True(r2.Read());
+                Assert.Equal("A", r2.GetString(0));
+            }
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
     public void Journal_DirtyClean_Roundtrip()
     {
         using var env = GlobalTestEnv.Enter();

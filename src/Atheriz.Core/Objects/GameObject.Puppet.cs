@@ -418,7 +418,7 @@ public partial class GameObject
         Hookable("at_create", () => 0);
     }
 
-    public virtual bool AtDelete(GameObject caller) // Port of base_obj.py:467 at_delete
+    public virtual bool AtDelete(GameObject? caller) // Port of base_obj.py:467 at_delete
     {
         return Hookable("at_delete", () => Access(caller, "delete"), caller);
     }

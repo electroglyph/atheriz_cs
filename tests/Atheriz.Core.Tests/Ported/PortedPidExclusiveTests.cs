@@ -69,4 +69,60 @@ public class PortedPidExclusiveTests
         Assert.NotNull(type);
         Assert.True(true);
     }
+
+    private static int FreePort()
+    {
+        var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        l.Start();
+        var port = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        return port;
+    }
+
+    private static int ExitedPid()
+    {
+        using var p = System.Diagnostics.Process.Start(new ProcessStartInfo
+        {
+            FileName = "true",
+            UseShellExecute = false,
+        });
+        p!.WaitForExit(5000);
+        return p.Id;
+    }
+
+    [Fact]
+    public void TryAcquire_LiveBranches_RouteThroughFreshClaimWait()
+    {
+        // Structural pin: both live-claim branches wait bounded on a fresh
+        // claim (a concurrent starter still booting) instead of refusing a
+        // server that is already starting. The wait itself is timing and is
+        // covered by the live-server lifecycle suite; no foreign stand-in
+        // process can pass the identity gate, so the wiring is pinned here.
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/PidFile.cs");
+        var start = src.IndexOf("public static bool TryAcquire(", StringComparison.Ordinal);
+        var end = src.IndexOf("private static void DirSync(", StringComparison.Ordinal);
+        var body = src.Substring(start, end - start);
+        Assert.Equal(2, body.Split("FreshLiveClaimWentStale(pidPath, oldPid.Value)", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void TryAcquire_DeadClaim_AcquiresWithoutWaiting()
+    {
+        // Dead pid in the file is stale, not live: no fresh-claim wait, the
+        // claim is taken on the first attempt.
+        using var env = GlobalTestEnv.Enter();
+        var dir = Path.Combine(Path.GetTempPath(), "atheriz-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        Atheriz.Server.Infrastructure.PidFile? claim = null;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "server.pid"), ExitedPid().ToString());
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Assert.True(Atheriz.Server.Infrastructure.PidFile.TryAcquire(dir, out claim, out _, FreePort()));
+            sw.Stop();
+            Assert.NotNull(claim);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"stale claim waited ({sw.Elapsed.TotalSeconds:F2}s)");
+        }
+        finally { try { claim?.Dispose(); } catch { } try { Directory.Delete(dir, true); } catch { } }
+    }
 }

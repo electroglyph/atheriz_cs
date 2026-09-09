@@ -509,7 +509,7 @@ public class PortedAutosaveTests
 
     [Fact] public void ExplicitSettingsTickCleansExplicitJournalPath()
     {
-        // A3-G-1: MarkDirty honored explicit settings but MarkClean resolved the
+        // MarkDirty honored explicit settings but MarkClean resolved the ambient
         // ambient path, so the explicit DB stayed dirty forever (phantom torn
         // checkpoint on every boot). The tick must clean the path it dirtied.
         // NOTE: ResolveSavePath prefers ATHERIZ_SAVE_PATH over settings, so the
@@ -544,7 +544,7 @@ public class PortedAutosaveTests
 
     [Fact] public void ExplicitSettingsTickSavesHandlersToExplicitDb()
     {
-        // A3-G-2: handler saves used the ambient singleton DB while objects
+        // Handler saves used the ambient singleton DB while objects used the
         // used the explicit one — torn world by construction. Every section
         // of the tick now commits to the tick's explicit DB. (Same
         // ATHERIZ_SAVE_PATH/CWD isolation as the journal test above.)
@@ -572,6 +572,41 @@ public class PortedAutosaveTests
             try { using var dbAmb = new AtherizDbContext(ambientSave); leaked = dbAmb.Areas.Any(); }
             catch (Microsoft.Data.Sqlite.SqliteException) { leaked = false; }
             Assert.False(leaked, "node areas must not leak into the ambient DB");
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(prevCwd);
+            Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", prevEnv);
+        }
+    }
+    [Fact] public void CachedGameTimeFallbackSavesToExplicitDb()
+    {
+        // The tick must serve the Start-registered GameTime through the
+        // cached slot into the explicit-settings DB (not the ambient one).
+        Reset();
+        using var env = GlobalTestEnv.Enter();
+        var prevCwd = Directory.GetCurrentDirectory();
+        var prevEnv = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
+        var ambientHome = Path.Combine(env.TempPath, "timeambient");
+        Directory.CreateDirectory(ambientHome);
+        Directory.SetCurrentDirectory(ambientHome);
+        Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", null);
+        try
+        {
+            var explicitDir = Path.Combine(env.TempPath, "timeexplicit");
+            Directory.CreateDirectory(explicitDir);
+            var s = new AtherizSettings { SavePath = explicitDir, TimeSystemEnabled = true, AutosaveMinutes = 1 };
+            var ticker = new AsyncTicker(new AsyncThreadPool(maxThreads: 2, queueLimit: 100));
+            try
+            {
+                Autosave.StartAutosave(ticker, s,
+                    new MapHandler(autoLoad: false), new NodeHandler(autoLoad: false),
+                    new GameTime(s, autoLoad: false));
+                Autosave.AutosaveTick(s, null, null, null);
+            }
+            finally { try { Autosave.StopAutosave(ticker); } catch { } ticker.Clear(); }
+            using var db = AtherizDbContextFactory.CreateForSettings(s);
+            Assert.NotNull(db.GameTime.Find(0));
         }
         finally
         {

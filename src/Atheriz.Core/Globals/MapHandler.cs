@@ -28,10 +28,15 @@ public sealed class TupleCoordConverter : JsonConverter<(int X, int Y)?>
             if (reader.TokenType == JsonTokenType.EndArray) return null;
             int x = reader.GetInt32();
             reader.Read();
-            int y = 0;
-            if (reader.TokenType != JsonTokenType.EndArray) { y = reader.GetInt32(); reader.Read(); }
-            // consume EndArray if not yet
-            while (reader.TokenType != JsonTokenType.EndArray && reader.Read()) { }
+            // A coord is exactly [x, y]: a singleton would invent y=0 and
+            // extras would silently truncate, so both throw like the
+            // fallthrough below instead of fabricating a coordinate.
+            if (reader.TokenType == JsonTokenType.EndArray)
+                throw new JsonException("Coord array must have exactly 2 elements ([x, y]); got 1.");
+            int y = reader.GetInt32();
+            reader.Read();
+            if (reader.TokenType != JsonTokenType.EndArray)
+                throw new JsonException("Coord array must have exactly 2 elements ([x, y]); extras are not allowed.");
             return (x, y);
         }
         if (reader.TokenType == JsonTokenType.StartObject)
@@ -571,7 +576,9 @@ public class MapInfo
         double fpsLimit = 0;
         try
         {
-            int limit = AtherizSettings.Global.MapFpsLimit;
+            // The handler's own settings, not the ambient global: an
+            // explicit-settings boot must throttle with its own limit.
+            int limit = Settings.MapFpsLimit;
             if (limit > 0) fpsLimit = 1.0 / limit;
             else fpsLimit = 0;
         }
@@ -855,8 +862,11 @@ public class MapHandler
     }
     public virtual void Save(AtherizDbContext db, bool force = false)
     {
-        if (!force && !ObjectRegistry.AlwaysSaveAll && !_settings.AlwaysSaveAll && !IsDirty()) return;
-
+        // No separate IsDirty probe here: dirtiness is derived from the
+        // snapshot below (per-item flags + tombstone sets). A probe-then-
+        // snapshot gap drops tombstones (Clear dirties no surviving item,
+        // so a false probe returns before the deletes are even read) and
+        // misses late edits at shutdown's single non-force save.
         List<((string Area, int Z) Key, MapInfo Info)> refs;
         HashSet<(string Area, int Z)> deletes;
         Lock.EnterReadLock();
@@ -1050,6 +1060,7 @@ public class MapHandler
         finally { Lock.ExitUpgradeableReadLock(); }
     }
 
+    [Obsolete("Use EnsureMapInfo: identical lookup, one name going forward.")]
     public MapInfo GetOrCreatePublic(string area, int z) => GetOrCreate(area, z);
     public MapInfo EnsureMapInfo(string area, int z) => GetOrCreate(area, z);
 

@@ -54,7 +54,10 @@ public sealed class NewCharacterCommand : Command
         }
         else
         {
-            // For GameObject test caller, just validate
+            // For GameObject test caller, just validate.
+            // Nothing is created on this path, so release the entry reservation:
+            // otherwise the next `new` from the same caller is rate-limited.
+            CreationCooldownHelper.Clear(caller);
             var exists = ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0;
             if (exists) caller.Msg($"Character with this name ({name}) already exists.");
             else caller.Msg($"Would create character {name} (no account session).");

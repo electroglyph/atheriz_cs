@@ -25,7 +25,26 @@ public static class RestartHandler
             {
                 var oldPid = int.Parse(File.ReadAllText(pidPath2, System.Text.Encoding.UTF8).Trim());
                 Console.Write($"Waiting for server (PID {oldPid}) to stop...");
-                await ProcessHelper.WaitForPidExitAsync(oldPid);
+                bool exited = await ProcessHelper.WaitForPidExitAsync(oldPid);
+                if (!exited)
+                {
+                    // 5s grace expired and the old server is stuck: escalate to
+                    // SIGKILL, but only after re-verifying the pid still names
+                    // our server — it may have been recycled mid-wait.
+                    bool ours = false;
+                    try { ours = File.Exists(pidPath2) && int.Parse(File.ReadAllText(pidPath2, System.Text.Encoding.UTF8).Trim()) == oldPid && Infrastructure.PidFile.IsServerProcess(oldPid); } catch { }
+                    if (ours)
+                    {
+                        Console.Write(" grace expired; force killing...");
+                        try { using var stuck = Process.GetProcessById(oldPid); try { stuck.Kill(entireProcessTree: false); } catch { } } catch { }
+                        exited = await ProcessHelper.WaitForPidExitAsync(oldPid);
+                    }
+                    if (!exited && ours)
+                    {
+                        Console.WriteLine($" old server (PID {oldPid}) did not stop; aborting restart.");
+                        return false;
+                    }
+                }
                 Console.WriteLine(" Done.");
             }
             catch { }
@@ -33,9 +52,15 @@ public static class RestartHandler
         else await Task.Delay(500);
 
         // Wait for the old server to release the port before spawning the
-        // replacement, so the new bind does not race the old listener.
+        // replacement, so the new bind does not race the old listener. Abort
+        // the spawn when the port never frees: the child would fail to bind
+        // while the old server keeps running, after the operator was told a
+        // restart happened.
         if (!await WaitForPortFreeAsync(portVal, 100))
-            Console.WriteLine($"Warning: port {portVal} still listening after stop; the new server may fail to bind.");
+        {
+            Console.WriteLine($"Error: port {portVal} still listening after stop; aborting restart (not spawning).");
+            return false;
+        }
 
         if (fg) { Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms"); return true; }
         var spawnArgs = new List<string>();

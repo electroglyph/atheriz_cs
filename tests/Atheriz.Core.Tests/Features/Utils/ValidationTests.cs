@@ -213,13 +213,14 @@ public sealed class ValidationTests
     }
 
     [Fact]
-    public void AccountValidation_NullInput_Parity()
+    public void AccountValidation_NullInput_ReturnsEmptyMessage()
     {
-        // Python parity: validate_password(None) hits `if not password` and
-        // returns the empty message, while validate_name(None) crashes on
-        // None.strip() (AttributeError) — mirrored here as NullReference.
+        // Null fails the same way as empty: every caller handles the string
+        // via Msg(err), so both validators return the empty message instead
+        // of splitting throw-vs-return by method.
         Assert.Equal("Password cannot be empty.", Validation.ValidatePassword(null!));
-        Assert.Throws<ArgumentNullException>(() => Validation.ValidateAccountName(null!));
+        Assert.Equal("Name cannot be empty.", Validation.ValidateAccountName(null!));
+        Assert.Equal("Name cannot be empty.", Validation.ValidateCharacterName(null!));
     }
 
     // --- PathGuards: absolute-path guards plus legacy spellings ---

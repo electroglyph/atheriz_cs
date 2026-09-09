@@ -254,4 +254,67 @@ public class StopSafetyTests
         Assert.Contains("IsProcessListeningOnPort(foundPid", src);
         Assert.Contains("AuthRejected", src);
     }
+
+    [Fact]
+    public void ReleaseIfOwner_DeletesOnlyMatchingPid()
+    {
+        // A stale stop handle must never remove a live successor's pid file.
+        var dir = Path.Combine(Path.GetTempPath(), "atheriz-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var pf = Path.Combine(dir, "server.pid");
+            File.WriteAllText(pf, "11111");
+            Assert.True(PidFile.ReleaseIfOwner(pf, 11111));
+            Assert.False(File.Exists(pf));
+            File.WriteAllText(pf, "22222");
+            Assert.False(PidFile.ReleaseIfOwner(pf, 11111));
+            Assert.Equal("22222", File.ReadAllText(pf).Trim());
+            Assert.False(PidFile.ReleaseIfOwner(Path.Combine(dir, "missing.pid"), 11111));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void HandleStop_NoRawPidDeletes()
+    {
+        // Structural pin: every pid-file delete in stop goes through the
+        // owner-verified release, never a raw File.Delete.
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/StopHandler.cs");
+        Assert.DoesNotContain("File.Delete(pidFilePath)", src);
+        Assert.DoesNotContain("File.Delete(pf)", src);
+        Assert.Contains("ReleaseIfOwner", src);
+    }
+
+    [Fact]
+    public void PerPidPortCheck_AttributesListenerToHolderOnly()
+    {
+        // A bound port is attributed to its holder and to nobody else — the
+        // true path must keep working after the fail-closed change below.
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            Assert.True(PidFile.IsProcessListeningOnPort(Environment.ProcessId, port));
+            Assert.False(PidFile.IsProcessListeningOnPort(999999, port));
+        }
+        finally { listener.Stop(); }
+    }
+
+    [Fact]
+    public void PerPidPortCheck_FailClosedNeverGlobal()
+    {
+        // Structural pin: the per-PID check must fail closed (false) when
+        // verification is unavailable — never degrade to the global port
+        // check, which would let `stop` signal an unverified process. The
+        // unavailable-tables path only triggers off-Linux, so the wiring is
+        // pinned structurally; the Linux-observable paths above pin behavior.
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/PidFile.cs");
+        var start = src.IndexOf("public static bool IsProcessListeningOnPort", StringComparison.Ordinal);
+        var end = src.IndexOf("public static string LocateServerPidFile", StringComparison.Ordinal);
+        var body = src.Substring(start, end - start);
+        Assert.DoesNotContain("return IsPortListening(port)", body);
+        Assert.Contains("if (!tablesRead) return false", body);
+    }
 }

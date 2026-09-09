@@ -37,7 +37,7 @@ public class GameFolderRejectTests
     [Fact]
     public void NewOverwrite_FailedValidation_LeavesSaveDirIntact()
     {
-        // A3-S-1: the save-leaf wipe ran BEFORE credential validation — a
+        // The save-leaf wipe ran BEFORE credential validation — a failed
         // failed prompt destroyed the world it then refused to build. The wipe
         // now runs after validation, so refusal leaves everything intact.
         var root = Path.Combine(Path.GetTempPath(), "atheriz_newval_" + Guid.NewGuid().ToString("N"));
@@ -89,6 +89,40 @@ public class GameFolderRejectTests
         {
             Assert.True(GameTemplateGenerator.CreateGameFolder(folder, overwrite: true));
             Assert.False(File.Exists(Path.Combine(save, "stale.txt")));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", oldUser);
+            Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", oldPass);
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void NewOverwrite_StaleAdminToken_WipedForRegeneration()
+    {
+        // A stale secret/admin.token must not survive as the "fresh" game's
+        // credential: overwrite deletes it, and the token helper recreates a
+        // fresh one when missing (server startup regenerates at boot).
+        var root = Path.Combine(Path.GetTempPath(), "atheriz_newtok_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var folder = Path.Combine(root, "s1tok");
+        Directory.CreateDirectory(folder);
+        var secret = Path.Combine(folder, "secret");
+        Directory.CreateDirectory(secret);
+        var token = Path.Combine(secret, "admin.token");
+        File.WriteAllText(token, "stale-token");
+        var oldUser = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME");
+        var oldPass = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
+        Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", "s1admin");
+        Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", "s1Pass123");
+        try
+        {
+            Assert.True(GameTemplateGenerator.CreateGameFolder(folder, overwrite: true));
+            Assert.False(File.Exists(token), "stale admin.token must not survive --overwrite");
+            var fresh = AdminToken.EnsureToken(secret);
+            Assert.False(string.IsNullOrEmpty(fresh));
+            Assert.True(File.Exists(token), "token helper must regenerate when missing");
         }
         finally
         {
@@ -150,9 +184,9 @@ public class GameFolderRejectTests
     [Fact(Timeout = 120000)]
     public async Task NewOverwrite_RefusesLiveServerFolder()
     {
-        // A3-S-1: `new --overwrite` wiped the save leaf with zero liveness
-        // probes — racing a running server. A verified-live server.pid now
-        // refuses the overwrite before anything is deleted.
+        // `new --overwrite` wiped the save leaf with zero liveness probes,
+        // racing a running server. A verified-live server.pid now refuses the
+        // overwrite before anything is deleted.
         if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
         var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net8.0/Atheriz.Server.dll";

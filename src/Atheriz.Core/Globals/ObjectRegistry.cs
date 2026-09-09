@@ -320,10 +320,7 @@ public static class ObjectRegistry
             {
                 AllObjects.Clear();
                 _keysByRef.Clear();
-                // directly set without extra lock (already holding IdGenerator lock via LockObj)
-                // Use SetId which will re-lock but recursion on same lock object is not allowed for Monitor; use field directly
-                // So we set via reflection-safe direct field access under lock
-                // Instead call SetId which uses same lock object — would deadlock (Monitor re-enter not allowed if same thread? Actually Monitor is re-entrant, so okay)
+                // Already holding IdGenerator.LockObj; SetId is safe (Monitor is re-entrant).
                 IdGenerator.SetId(-1);
             }
             finally { AllLock.ExitWriteLock(); }
@@ -700,11 +697,12 @@ public static class ObjectRegistry
         if (ids.Count == 0) return;
         DbTransactionHelper.WithGateAndTransaction(db, ctx =>
         {
-            foreach (var id in ids)
-            {
-                var row = ctx.Objects.Find(id);
-                if (row != null) ctx.Objects.Remove(row);
-            }
+            // Single set-based delete, not per-id Find+Remove (N+1
+            // round-trips). Deletes stay loud on failure (unlike the save
+            // paths' closed-DB skip): callers roll back the in-memory removal
+            // on throw, so swallowing here would resurrect the row on next
+            // load. The asymmetry is intentional.
+            ctx.Objects.Where(o => ids.Contains(o.Id)).ExecuteDelete();
         });
     }
 }

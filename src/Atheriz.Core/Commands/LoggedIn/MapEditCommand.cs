@@ -27,8 +27,10 @@ public sealed class DrawCommand : Command
             caller.Msg("You must be in a valid location to open the map editor.");
             return;
         }
-        // session/connection
-        Session? session = go?.Session;
+        // session/connection — prefer the caller's own session (a connection
+        // caller stays live even when its puppet's session link is stale),
+        // falling back to the resolved puppet's session.
+        Session? session = (caller as ISessionProvider)?.Session ?? go?.Session;
         Atheriz.Core.Network.BaseConnection? conn = session?.Connection;
         if (conn == null)
         {
@@ -47,7 +49,7 @@ public sealed class DrawCommand : Command
         }
         string ip = conn.ClientHost ?? "?";
 
-        string key = MapEdit.Grant(ip, area, z, go?.Session);
+        string key = MapEdit.Grant(ip, area, z, session);
         string rawSym = go?.Symbol ?? "X";
         if (string.IsNullOrEmpty(rawSym)) rawSym = "X";
         string plain = GameUtils.StripAnsi(rawSym);
@@ -140,8 +142,8 @@ public sealed class DrawCommand : Command
             var argsList = new List<object?> { key, payload };
             var kw = new Dictionary<string, object?>();
             conn.SendCommand("launch_draw", argsList, kw);
+            caller.Msg("Opening AtheriZ Draw in a new tab.");
         }
-        catch (Exception) { }
-        caller.Msg("Opening AtheriZ Draw in a new tab.");
+        catch (Exception) { caller.Msg("Could not open the map editor."); }
     }
 }

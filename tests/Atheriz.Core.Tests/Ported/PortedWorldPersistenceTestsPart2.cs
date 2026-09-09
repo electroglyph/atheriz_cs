@@ -76,7 +76,7 @@ public class PortedWorldPersistenceTestsPart2
         area = uniq;
         var barrier = new System.Threading.Barrier(2);
         var results = new System.Collections.Concurrent.ConcurrentBag<Atheriz.Core.Globals.MapInfo>();
-        void GetOrCreate() { barrier.SignalAndWait(); var mi = mh.GetOrCreatePublic(area, z); results.Add(mi); }
+        void GetOrCreate() { barrier.SignalAndWait(); var mi = mh.EnsureMapInfo(area, z); results.Add(mi); }
         var t1 = new System.Threading.Thread(new System.Threading.ThreadStart(GetOrCreate));
         var t2 = new System.Threading.Thread(new System.Threading.ThreadStart(GetOrCreate));
         t1.Start(); t2.Start();

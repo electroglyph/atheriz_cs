@@ -177,7 +177,13 @@ public static class Pronouns
         }
         else
         {
-            pronounType = (string)sourceType;
+            // A single-typed source keeps its own type, unless the caller explicitly
+            // requested a different valid type (parameter or options): defaulting
+            // above can only reproduce the source type here, so any other valid
+            // value is an explicit request and must survive.
+            var single = (string)sourceType;
+            if (!PronounTypes.Contains(pronounType ?? "") || pronounType == single)
+                pronounType = single;
         }
 
         // viewpoint conversion

@@ -66,11 +66,8 @@ public static class ShutdownClient
             Console.WriteLine("Could not contact server for graceful shutdown (server might be hung or stopped).");
             return ShutdownRequestResult.Unreachable;
         }
-        if (resp.StatusCode == 401 || resp.StatusCode == 403)
-        {
-            Console.WriteLine("Server refused the shutdown request (not authorized); aborting without touching processes.");
-            return ShutdownRequestResult.AuthRejected;
-        }
+        // Auth failures arrive as HTTP 200 + {status:"error"} by route
+        // design (AdminRoutes), never as 401/403 — read the body below.
         try
         {
             using var doc = JsonDocument.Parse(resp.Body);
@@ -100,8 +97,6 @@ public static class ShutdownClient
             {
                 try
                 {
-                    var link = Path.Combine($"/proc/{lpid}/cwd");
-                    if (Directory.Exists(link)) { }
                     var realCwd = new FileInfo($"/proc/{lpid}/cwd").LinkTarget;
                     if (!string.IsNullOrEmpty(realCwd)) { var p3 = Path.Combine(realCwd, "secret", "admin.token"); if (File.Exists(p3)) return p3; }
                 }

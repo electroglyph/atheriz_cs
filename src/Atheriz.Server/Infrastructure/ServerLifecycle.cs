@@ -18,8 +18,6 @@ public static class ServerLifecycle
     // (Monitor is re-entrant; nesting is safe). the alias is gone —
     // one name, one lock.
     // Port of startstop.py:19 _shutdown_completed
-    private static readonly object WorldLock = StartStop.WorldLock;
-    // Port of startstop.py:19 _shutdown_completed
     private static bool _shutdownCompleted = false;
     // Readiness flag for /ready (liveness stays /health per AGENTS webclient constraint).
     // Set only after DoStartup runs to completion; cleared when a new startup begins.

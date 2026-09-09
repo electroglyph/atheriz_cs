@@ -125,6 +125,24 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         }
     }
 
+    // Retry scheduler with re-arm: when the capped scheduler is full the retry
+    // is dropped, so re-arm through the cap after a delay instead of losing the
+    // drain — otherwise queued input stalls until unrelated input arrives.
+    // One pending re-arm timer per stalled connection (chain, not fan-out);
+    // RetryDrain itself no-ops when there is nothing to do.
+    private static void ScheduleRetryDrain(BaseConnection self)
+    {
+        if (TryScheduleRetryDrain(self)) return;
+        lock (self.Lock)
+        {
+            if (self._disposed || self._disconnected || self._inputQueue.Count == 0) return;
+        }
+        _ = Task.Delay(TimeSpan.FromMilliseconds(250)).ContinueWith(_ =>
+        {
+            try { ScheduleRetryDrain(self); } catch { }
+        });
+    }
+
     private AsyncThreadPool ResolvePool()
     {
         // mirrors get_async_threadpool() import inside method at connection.py:80
@@ -155,6 +173,9 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             {
                 var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds(); // port of connection.py:87
                 if (!ThrottleWindow.ShouldLog(ref _lastInputBusy, 1.0, now)) return; // port of connection.py:88-90 via ThrottleWindow
+                // The busy log below reports this count: capture the full
+                // queue size here, not just on the pool-failure path.
+                pendingCount = _inputQueue.Count;
                 notifyBusy = true; // port of connection.py:91
             }
             else
@@ -181,7 +202,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             try
             {
                 // port of connection.py:108 threading.Timer(0.05, self._retry_drain).start()
-                TryScheduleRetryDrain(this);
+                ScheduleRetryDrain(this);
             }
             catch (Exception logEx) { try { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.EnqueueInput: " + logEx.Message, "BaseConnection"); } catch { } }
         }
@@ -210,7 +231,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         }
         if (TryAddDrainTask()) return; // port of connection.py:126-127
         lock (Lock) { _inputRunning = false; } // port of connection.py:128-129
-        TryScheduleRetryDrain(this); // port of connection.py:131
+        ScheduleRetryDrain(this); // port of connection.py:131
     }
 
     // Port of connection.py:135-153 _drain_input

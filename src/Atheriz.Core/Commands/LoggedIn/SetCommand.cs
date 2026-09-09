@@ -160,10 +160,11 @@ public sealed class SetCommand : Command
         }
         catch (InvalidOperationException) { go.Msg($"'{attr}' is a read-only attribute and cannot be set."); return; }
         // A property whose type can never convert from text (e.g. LocationRef)
-        // is unsettable from the command line: same read-only bucket Python's
-        // AttributeError lands in. Malformed values for convertible types fall
+        // is unsettable from the command line, so it gets its own message
+        // rather than the read-only one: the attribute exists, the text just
+        // cannot become its type. Malformed values for convertible types fall
         // through to the conversion message below.
-        catch (InvalidCastException) { go.Msg($"'{attr}' is a read-only attribute and cannot be set."); return; }
+        catch (InvalidCastException) { go.Msg($"'{attr}' cannot be set from text."); return; }
         catch (Exception ex) { go.Msg($"Could not set '{attr}': {ex.Message}"); return; }
         string repr;
         if (value == null) repr = "None";

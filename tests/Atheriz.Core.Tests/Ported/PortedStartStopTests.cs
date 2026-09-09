@@ -359,7 +359,7 @@ public class PortedStartStopTests
 
     [Fact] public void DoShutdown_FailingGroup_RollsBackWholeCheckpoint()
     {
-        // A3-G-3: the checkpoint was 3 independent commits — a failing group
+        // The checkpoint was 3 independent commits — a failing group left
         // left earlier groups committed (torn world). One transaction now: a
         // node-save failure rolls back the already-staged objects, and the
         // journal stays dirty so the next boot detects it.

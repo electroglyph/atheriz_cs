@@ -88,12 +88,13 @@ public sealed class SocialsCommand : Command
         }
         var targetNames = pa?.GetList("target") ?? [];
         string targetName = string.Join(" ", targetNames);
-        var loc = go.ResolveLocationObject() as Node;
         if (string.IsNullOrWhiteSpace(targetName))
         {
             string msg = templates.self;
-            if (loc != null) loc.MsgContents(msg, fromObj: go, mapping: new Dictionary<string, object?> { ["you"] = go });
-            else go.MsgContents(msg, fromObj: go, mapping: new Dictionary<string, object?> { ["you"] = go });
+            // Same AtSay entry as say so game-code hooks observe socials; the
+            // template text keeps the established wording for actor and room.
+            go.AtSayFull(msg, msgSelf: msg, msgLocation: msg,
+                mapping: new Dictionary<string, object?> { ["you"] = go });
         }
         else
         {
@@ -105,8 +106,8 @@ public sealed class SocialsCommand : Command
             if (targets.Count > 1) { go.Msg($"Multiple matches for '{targetName}'. Be more specific."); return; }
             var target = targets[0];
             string msg = templates.target;
-            if (loc != null) loc.MsgContents(msg, fromObj: go, mapping: new Dictionary<string, object?> { ["you"] = go, ["target"] = target });
-            else go.MsgContents(msg, fromObj: go, mapping: new Dictionary<string, object?> { ["you"] = go, ["target"] = target });
+            go.AtSayFull(msg, msgSelf: msg, msgLocation: msg,
+                mapping: new Dictionary<string, object?> { ["you"] = go, ["target"] = target });
         }
     }
 }

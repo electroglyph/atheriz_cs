@@ -111,6 +111,50 @@ public class PortedSqliteTests
         Assert.DoesNotContain(t, nh.Dumped);
         Assert.DoesNotContain(door, nh.Dumped);
     }
+    [Fact] public void SaveSkipsCleanAreasBeforeDtoWalk()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var nh = new RecordingNodeHandler();
+        foreach (var name in new[] { "AreaA", "AreaB" })
+        {
+            var area = new NodeArea(name);
+            var grid = new NodeGrid(name, 0);
+            grid.Nodes[(0, 0)] = new Node(new Coord(name, 0, 0, 0), desc: "plain");
+            area.AddGrid(grid);
+            nh.AddArea(area);
+        }
+        using (var db = new AtherizDbContext(env.TempPath)) { db.Database.EnsureCreated(); nh.Save(db); }
+        nh.Dumped.Clear();
+        var target = nh.GetNode(new Coord("AreaA", 0, 0, 0))!;
+        target.Desc = "edited";
+        using (var db = new AtherizDbContext(env.TempPath)) { nh.Save(db); }
+        Assert.Single(nh.Dumped);
+        // Round-trip: the dirty node persisted and the skipped area survived.
+        var nh2 = new NodeHandler(autoLoad: false);
+        nh2.Load(new AtherizDbContext(env.TempPath));
+        Assert.Equal("edited", nh2.GetNode(new Coord("AreaA", 0, 0, 0))!.Desc);
+        Assert.NotNull(nh2.GetNode(new Coord("AreaB", 0, 0, 0)));
+    }
+    [Fact] public void SaveSkipsCleanAreasWhenOnlyTransitionsDirty()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var nh = new RecordingNodeHandler();
+        var area = new NodeArea("AreaT");
+        var grid = new NodeGrid("AreaT", 0);
+        grid.Nodes[(0, 0)] = new Node(new Coord("AreaT", 0, 0, 0));
+        area.AddGrid(grid);
+        nh.AddArea(area);
+        var t1 = new Transition(new Coord("AreaT", 0, 0, 0), new Coord("AreaT", 1, 1, 0), "path");
+        nh.AddTransition(t1);
+        using (var db = new AtherizDbContext(env.TempPath)) { db.Database.EnsureCreated(); nh.Save(db); }
+        nh.Dumped.Clear();
+        var t2 = new Transition(new Coord("AreaT", 1, 1, 0), new Coord("AreaT", 2, 2, 0), "path2");
+        nh.AddTransition(t2);
+        using (var db = new AtherizDbContext(env.TempPath)) { nh.Save(db); }
+        Assert.Equal(2, nh.Dumped.Count);
+        Assert.All(nh.Dumped, d => Assert.IsType<Transition>(d));
+        Assert.DoesNotContain(t2, nh.Dumped);
+    }
     [Fact] public void LoadedObjects_Threadsafe()
     {
         using var env = GlobalTestEnv.Enter();

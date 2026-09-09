@@ -18,10 +18,13 @@ public sealed class EmoteCommand : Command
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa == null) { p.Msg(PrintHelp()); return; }
         var lst = pa.GetList("text");
-        var loc = p.ResolveLocationObject();
-        if (lst.Count > 0 && loc != null)
+        if (lst.Count > 0 && p.ResolveLocationObject() != null)
         {
-            loc.MsgContents($"{p.Name} {string.Join(" ", lst)}", fromObj: p, msgType: "emote");
+            string text = $"{p.Name} {string.Join(" ", lst)}";
+            // Same AtSay entry as say so game-code hooks observe emotes; the
+            // literal text keeps the established wording for actor and room.
+            p.AtSayFull(text, msgSelf: text, msgLocation: text, msgType: "emote",
+                mapping: new Dictionary<string, object?> { ["you"] = p });
         }
         else p.Msg(PrintHelp());
     }

@@ -95,6 +95,11 @@ public class TelnetConnection : BaseConnection
         if (Writer is ITelnetWriter itw0) itw0.Iac(cmd, opt);
     }
 
+    private void WriterIacText(byte cmd, byte opt, string text)
+    {
+        if (Writer is ITelnetWriter itw0) itw0.IacWithText(cmd, opt, text);
+    }
+
     private void WriterClose()
     {
         if (Writer is ITelnetWriter itw0) itw0.Close();
@@ -168,6 +173,30 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
         }
     }
 
+    // Fused IAC-then-text as one writer call: a broadcast from another thread
+    // cannot slip between the WILL ECHO bytes and the prompt they govern.
+    // IAC bytes are control, not reserved (same accounting as OffloopIac).
+    public void OffloopIacText(byte teloptCmd, byte teloptOpt, string text, int nb)
+    {
+        text = TelnetText(text);
+        try
+        {
+            if (CheckWriteBufferExceeded()) return;
+            WriterIacText(teloptCmd, teloptOpt, text);
+            CheckWriteBufferExceeded(" after write");
+        }
+        catch (ObjectDisposedException) { } // post-dispose write race: writer already gone
+        catch (Exception e)
+        {
+Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e}");
+            Close();
+        }
+        finally
+        {
+            _limiter.ReleaseSync(nb);
+        }
+    }
+
     public int PendingBytes => _limiter.PendingBytes;
     public bool IsClosing => _limiter.IsClosing || _closing;
     // Expose limiter for testing / inspection (kept internal)
@@ -215,16 +244,18 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
             else if (IsClosing) return;
             // Loop-thread parity: inline delivery (see text/prompt above); the
             // buffer check above keeps the pre-close path IAC-free. IAC bytes
-            // are control, not reserved.
+            // are control, not reserved. The IAC and prompt go out as one
+            // fused writer call (and one scheduled unit off-loop) so another
+            // thread's bytes cannot slip between them.
             if (IsOnLoopThread())
             {
-                OffloopIac(WILL, ECHO);
-                if (!string.IsNullOrEmpty(text)) OffloopWrite(text, nb);
+                if (string.IsNullOrEmpty(text)) OffloopIac(WILL, ECHO);
+                else OffloopIacText(WILL, ECHO, text, nb);
             }
             else
             {
-                ScheduleWrite(() => OffloopIac(WILL, ECHO), 0);
-                if (!string.IsNullOrEmpty(text)) ScheduleWrite(() => OffloopWrite(text, nb), nb);
+                if (string.IsNullOrEmpty(text)) ScheduleWrite(() => OffloopIac(WILL, ECHO), 0);
+                else ScheduleWrite(() => OffloopIacText(WILL, ECHO, text, nb), nb);
             }
             // OffloopWrite releases via its finally; prompt_masked without text reserves nothing.
         }
@@ -265,6 +296,10 @@ public interface ITelnetWriter : ITelnetBufferSource
     void Close();
     void SetExtCallback(byte opt, Action<int, int> callback);
     string? GetPeerHost();
+    // Fused IAC-then-text write. Default keeps old split behavior; the stream
+    // writer overrides with one locked byte write so a broadcast cannot slip
+    // between the IAC negotiation bytes and the prompt they govern.
+    void IacWithText(byte cmd, byte opt, string text) { Iac(cmd, opt); Write(text); }
     // Priority-ordered buffer-size sources (port of telnet.py:138-156
     // transport → writer → _transport chain). Default is just this writer.
     IReadOnlyList<ITelnetBufferSource> BufferSources => [this];
@@ -289,14 +324,19 @@ public sealed class TelnetStreamWriter : ITelnetWriter
     private readonly object _writeLock = new object();
     private int _pendingWriteBytes; // buffered-not-flushed bytes (see Write)
     private Action<int,int>? _nawsCallback;
-    public TelnetStreamWriter(Stream stream, TcpClient client) { _stream = stream; _client = client; }
+    public TelnetStreamWriter(Stream stream, TcpClient client)
+    {
+        _stream = stream; _client = client;
+        // Armed once at connect, not per write: the property is a syscall,
+        // and nothing in the writer's lifetime changes it afterwards.
+        try { _client.SendTimeout = 2000; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Connect: " + logEx.Message, "TelnetStreamWriter"); }
+    }
     public void Write(string text)
     {
         // Bounded write: a peer that never drains must not stall
         // the game thread forever. SendTimeout turns a wedged peer into a
         // SocketException instead of an indefinite block. Socket.SendTimeout
         // has no effect on SslStream, so TLS writes get an explicit timeout.
-        try { _client.SendTimeout = 2000; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Write: " + logEx.Message, "TelnetStreamWriter"); }
         var bytes = Encoding.UTF8.GetBytes(text);
         lock (_writeLock)
         {
@@ -319,6 +359,29 @@ public sealed class TelnetStreamWriter : ITelnetWriter
         }
     }
     public void Iac(byte cmd, byte opt) { var bytes = new byte[] { 255, cmd, opt }; lock (_writeLock) { _pendingWriteBytes += bytes.Length; try { if (_stream is SslStream) { var wt = _stream.WriteAsync(bytes, 0, bytes.Length); if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out"); } else _stream.Write(bytes, 0, bytes.Length); } finally { _pendingWriteBytes -= bytes.Length; } } }
+    // Fused IAC-then-text in one locked stream write: no other thread's bytes
+    // can slip between the negotiation bytes and the prompt they govern.
+    public void IacWithText(byte cmd, byte opt, string text)
+    {
+        var textBytes = Encoding.UTF8.GetBytes(text);
+        var bytes = new byte[3 + textBytes.Length];
+        bytes[0] = 255; bytes[1] = cmd; bytes[2] = opt;
+        Buffer.BlockCopy(textBytes, 0, bytes, 3, textBytes.Length);
+        lock (_writeLock)
+        {
+            _pendingWriteBytes += bytes.Length;
+            try
+            {
+                if (_stream is SslStream)
+                {
+                    var wt = _stream.WriteAsync(bytes, 0, bytes.Length);
+                    if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out");
+                }
+                else _stream.Write(bytes, 0, bytes.Length);
+            }
+            finally { _pendingWriteBytes -= bytes.Length; }
+        }
+    }
     public void Close() { try { _stream.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Close: " + logEx.Message, "TelnetStreamWriter"); } try { _client.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Close: " + logEx.Message, "TelnetStreamWriter"); } }
     // Port of telnet.py:138-156 — pending (buffered, unflushed) bytes, not capacity.
     public int? GetWriteBufferSize() => Volatile.Read(ref _pendingWriteBytes);
@@ -351,6 +414,9 @@ public sealed class TelnetProtocol : BaseProtocol
         // tiny-line streams no longer pay O(chunk^2). State machine mirrors
         // the original exactly: split-CRLF holdback, overlong dropping (null
         // yield), \r\n / \r\x00 stripping, EOF tail.
+        // Read errors throw IOException (deliberate): a broken transport must
+        // not look like a graceful disconnect. The accept loop logs the error
+        // and disconnects; only clean EOF (read 0) ends the stream quietly.
         var buf = new System.Text.StringBuilder();
         var dropping = false; var eof = false;
         int head = 0; // buf[0..head) consumed; visible content is buf[head..]
@@ -399,7 +465,11 @@ public sealed class TelnetProtocol : BaseProtocol
             head = consume;
             if (dropping || line.Length > maxLine) { yield return null; dropping = false; } else yield return line;
         }
-        if (buf.Length - head > 0 && !dropping)
+        // EOF tail: an overlong tail closed by EOF (not a newline) yields the
+        // same drop marker as a mid-stream overlong line — vanishing silently
+        // would hide dropped input from the log-completeness accounting.
+        if (dropping) { yield return null; dropping = false; }
+        else if (buf.Length - head > 0)
         {
             var tail = buf.ToString(head, buf.Length - head);
             if (tail != "\r")
@@ -417,8 +487,9 @@ public sealed class TelnetProtocol : BaseProtocol
         return -1;
     }
 
-    // F016: single TextReader overload (StreamReader binds here implicitly). Read errors are
-    // treated as EOF (clean disconnect path) rather than propagating out of the accept loop.
+    // F016: single TextReader overload (StreamReader binds here implicitly).
+    // (An older revision claimed read errors surface as clean EOF; they
+    // throw IOException and the accept loop logs + disconnects — see above.)
     public static X509Certificate2? BuildTelnetSslContext(AtherizSettings? settings = null)
     {
         settings ??= AtherizSettings.Global;

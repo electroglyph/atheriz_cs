@@ -107,6 +107,26 @@ public partial class NodeHandler
         try { _areas[area.Name]=area; _modified=true; _areaGen++; }
         finally { Lock.ExitWriteLock(); }
     }
+    public void ReplaceArea(NodeArea area)
+    {
+        // Evict-then-install: a blind overwrite orphans the prior
+        // generation's nodes in the registry (stale ids with no tombstone).
+        // Collect under the handler lock, evict after release (RemoveObject
+        // takes the registry AllLock) — same order as Clear().
+        List<Node> evict = new();
+        Lock.EnterWriteLock();
+        try
+        {
+            if (_areas.TryGetValue(area.Name, out var old))
+                foreach (var g in old.Grids.Values)
+                    foreach (var n in g.Nodes.Values)
+                        evict.Add(n);
+            _areas[area.Name]=area; _modified=true; _areaGen++;
+        }
+        finally { Lock.ExitWriteLock(); }
+        foreach (var n in evict)
+            try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.ReplaceArea: " + logEx.Message, "NodeHandler"); }
+    }
     public void RemoveArea(string name)
     {
         NodeArea? area=null;
@@ -158,10 +178,19 @@ public partial class NodeHandler
     }
     public Node? GetNode(Coord coord)
     {
-        var area=GetArea(coord.Area);
-        if(area==null) return null;
-        var grid=area.GetGrid(coord.Z);
-        return grid?.GetNode(coord.X,coord.Y);
+        // Single-hold snapshot: area→grid→node resolve under one handler read
+        // hold, so Clear/RemoveArea cannot swap the generation mid-traversal
+        // and hand back a node from a discarded area. The nested area/grid
+        // takes follow the established handler→area→grid order and re-enter
+        // cleanly (all three locks allow recursion).
+        Lock.EnterReadLock();
+        try
+        {
+            if (!_areas.TryGetValue(coord.Area, out var area)) return null;
+            var grid = area.GetGrid(coord.Z);
+            return grid?.GetNode(coord.X, coord.Y);
+        }
+        finally { Lock.ExitReadLock(); }
     }
     public void RemoveNode(Coord coord)
     {
@@ -276,18 +305,24 @@ public partial class NodeHandler
                     try
                     {
                         int fdx = 0, fdy = 0, tdx = 0, tdy = 0;
-                        if (oldToNewFull.TryGetValue(door.FromCoord, out var newFrom))
+                        var from = door.FromCoord;
+                        var to = door.ToCoord;
+                        if (oldToNewFull.TryGetValue(from, out var newFrom))
                         {
-                            fdx = newFrom.X - door.FromCoord.X;
-                            fdy = newFrom.Y - door.FromCoord.Y;
-                            door.FromCoord = newFrom;
+                            fdx = newFrom.X - from.X;
+                            fdy = newFrom.Y - from.Y;
+                            from = newFrom;
                         }
-                        if (oldToNewFull.TryGetValue(door.ToCoord, out var newTo))
+                        if (oldToNewFull.TryGetValue(to, out var newTo))
                         {
-                            tdx = newTo.X - door.ToCoord.X;
-                            tdy = newTo.Y - door.ToCoord.Y;
-                            door.ToCoord = newTo;
+                            tdx = newTo.X - to.X;
+                            tdy = newTo.Y - to.Y;
+                            to = newTo;
                         }
+                        // Paired publish (see Door.SetEndpoints): two separate
+                        // sets would strand a mixed generation for concurrent
+                        // GetNodes snapshots.
+                        door.SetEndpoints(from, to);
                         // The symbol cell is stamped into both endpoint grids,
                         // but it is a single coord: it cannot follow two
                         // different deltas. The From side anchors door identity

@@ -268,6 +268,9 @@ public sealed class AsyncTicker
                 }
             }
             catch (OperationCanceledException) { }
+            // Any other loop fault would kill the timer with the evidence
+            // trapped in an unobserved task: log it where it happens.
+            catch (Exception ex) { try { Console.Error.WriteLine(ex.ToString()); } catch { } }
         }
 
         public void Start()
@@ -279,6 +282,9 @@ public sealed class AsyncTicker
                 _cts = new CancellationTokenSource();
                 try { _future = Task.Run(() => TimerAsync(_cts.Token), _cts.Token); }
                 catch { _running = false; try { _cts.Dispose(); } catch (ObjectDisposedException) { } _cts = null; throw; }
+                // A canceled task means the loop never ran: do not report a
+                // running ticker whose timer is already dead.
+                if (_future is { IsCanceled: true }) { _running = false; try { _cts.Dispose(); } catch (ObjectDisposedException) { } _cts = null; }
             }
         }
 

@@ -297,7 +297,7 @@ internal static class GameObjectDtoConverter
         if (dto.Location is LocationRef.CoordLocation cl) return cl.Coord;
         if (dto.Extra != null && dto.Extra.TryGetValue("Coord", out var ce))
         {
-            try { return JsonSerializer.Deserialize<Coord>(ce.GetRawText())!; }
+            try { return JsonSerializer.Deserialize<Coord>(ce.GetRawText(), JsonOptions.Default)!; }
             catch (Exception ex) { AtherizLogger.LogError($"Bad Extra Coord for object {dto.Id}; using limbo origin.", ex); }
         }
         return new Coord("limbo", 0, 0, 0);

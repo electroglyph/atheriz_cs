@@ -206,6 +206,10 @@ public static class AtherizDbContextFactory
         // would shadow legacy save/time migration (time.py:72-74 migrates only
         // when the row is missing). The old check-then-add also raced
         // concurrent setups into PK conflicts.
+        // Destination-only transitions tables migrate here too, same as sync
+        // DoSetup: without it an async boot leaves the old shape behind and
+        // EF queries referencing the source columns fail.
+        MigrateTransitionsTable(ctx);
     }
 
     // Parameterless overload using default settings SavePath

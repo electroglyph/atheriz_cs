@@ -70,8 +70,8 @@ public sealed class Menu{
   while(true){
     var display=cur; if(Options.Count>0){var lines=new List<string>{$"\n{display}"}; foreach(var kv in Options)lines.Add(OptionDescs.TryGetValue(kv.Key,out var dd)?$"  [{kv.Key}] {dd}":$"  [{kv.Key}]"); display=string.Join("\r\n",lines);}
    var inp = await MenuPrompt.PromptWithTimeoutAsync(session, display, Timeout); if(inp==null)break; // Port of menu.py:153-156 via MenuPrompt
-   var clean=inp.ToLowerInvariant().Trim(); if(!Options.TryGetValue(clean,out var h))continue; // Port of menu.py:82
-   try{var keep=await h(session,inp); if(!keep)return true;}catch(Exception ex){try{AtherizLogger.LogError($"menu handle_input failed: {ex}");}catch{} break;} // Port of menu.py:85; true = handler-directed exit, false = timeout/exhaustion/error
+   var clean=inp.ToLowerInvariant().Trim(); if(!Options.TryGetValue(clean,out var h)){try{AtherizLogger.LogDebug($"menu unknown key: {clean}");}catch{} continue;} // Port of menu.py:82
+   try{var keepGoing=await h(session,inp); if(!keepGoing)return true;}catch(Exception ex){try{AtherizLogger.LogError($"menu handle_input failed: {ex}");}catch{} break;} // Port of menu.py:85; handler true = keep prompting, false = done (Run true = exited)
   } return false;
  }
  public static Task RunMenu(Session s,Menu m,string p)=>m.Run(s,p); // Port of menu.py:135

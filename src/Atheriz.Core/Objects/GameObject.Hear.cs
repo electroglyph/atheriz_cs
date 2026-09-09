@@ -92,7 +92,8 @@ public partial class GameObject
     {
         Hookable<int>("at_emit_sound", () =>
         {
-            if (string.IsNullOrEmpty(soundMsg)) return 0;
+            // AtHear renders desc+msg, so only skip when there is nothing to render at all.
+            if (string.IsNullOrEmpty(soundMsg) && string.IsNullOrEmpty(soundDesc)) return 0;
             var loc = ResolveLocationObject();
             var allow1 = AtPreEmitSound(this, soundDesc, soundMsg, loudness, isSay);
             if (!allow1.ok) return 0;

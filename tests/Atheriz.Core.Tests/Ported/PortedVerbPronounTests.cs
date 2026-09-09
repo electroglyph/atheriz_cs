@@ -197,4 +197,6 @@ public class PortedVerbPronounTests
     [Fact] public void ReflexiveThemselves(){ var (s,o)=Pronouns.PronounToViewpoints("themselves"); Assert.Equal("yourselves", s); Assert.Equal("themselves", o); }
     [Fact] public void ReflexiveHimselfTo2nd(){ var (s,o)=Pronouns.PronounToViewpoints("himself", "2nd"); Assert.Equal("yourself", s); Assert.Equal("himself", o); }
     [Fact] public void ReflexiveOurselves(){ var (s,o)=Pronouns.PronounToViewpoints("ourselves"); Assert.Equal("ourselves", s); } // check exists
+    [Fact] public void SingleTypedSourceHonorsExplicitTypeOption(){ var (s,o)=Pronouns.PronounToViewpoints("he", new[]{"pa"}); Assert.Equal("your", s); Assert.Equal("he", o); }
+    [Fact] public void SingleTypedSourceHonorsExplicitTypeKwarg(){ var (s,o)=Pronouns.PronounToViewpoints("he", pronounType:"possessive adjective"); Assert.Equal("your", s); }
 }

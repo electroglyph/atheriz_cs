@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Atheriz.Core.Settings;
 using Atheriz.Server.Infrastructure;
 using Microsoft.AspNetCore.StaticFiles;
@@ -6,6 +7,9 @@ namespace Atheriz.Server.Hosting;
 
 public static class StaticFileConfig
 {
+    // Content-hashed bundle filename (e.g. app.ab12cd34.js): compiled once,
+    // matched per static-file response for the immutable cache header.
+    private static readonly Regex HashedBundlePattern = new(@"\.[0-9a-fA-F]{8,}\.[a-z0-9]+$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     public static (string? staticCandidate, string? templatesCandidate) Configure(WebApplication app, AtherizSettings settings)
     {
         var staticCandidate = AssetPathResolver.ResolveWwwRoot(app.Environment.ContentRootPath, AppContext.BaseDirectory);
@@ -27,7 +31,7 @@ public static class StaticFileConfig
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
                     else if (path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase))
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=86400";
-                    else if (System.Text.RegularExpressions.Regex.IsMatch(path, @"\.[0-9a-fA-F]{8,}\.[a-z0-9]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    else if (HashedBundlePattern.IsMatch(path))
                         // Content-hashed bundle filename (e.g. app.ab12cd34.js):
                         // immutable regardless of directory prefix.
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";

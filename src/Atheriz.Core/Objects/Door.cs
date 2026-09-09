@@ -39,6 +39,20 @@ public class Door
     private string _doorDesc = "";
     private int? _keyId;
     public Coord FromCoord { get => ReadProp(ref _fromCoord); set => SetProp(ref _fromCoord, value); }
+    // Paired endpoint publish: the two setters above are single-field (kept for
+    // callers that move one end), but a GetNodes snapshot landing between two
+    // separate sets pairs endpoints from different generations — no read-side
+    // hold can repair that. Writers moving both ends publish via this one hold.
+    public void SetEndpoints(Coord from, Coord to)
+    {
+        bool changed;
+        using (WriteScope())
+        {
+            changed = !_fromCoord.Equals(from) || !_toCoord.Equals(to);
+            _fromCoord = from; _toCoord = to;
+        }
+        if (changed) MarkNodeDoorsModified();
+    }
     public string FromExit { get => ReadProp(ref _fromExit); set => SetProp(ref _fromExit, value ?? ""); }
     public Coord ToCoord { get => ReadProp(ref _toCoord); set => SetProp(ref _toCoord, value); }
     public string ToExit { get => ReadProp(ref _toExit); set => SetProp(ref _toExit, value ?? ""); }
@@ -187,11 +201,17 @@ public class Door
     public (Node? fromNode, Node? toNode) GetNodes()
     {
         var nh = NodeHandler.GetCurrent();
+        // Snapshot both endpoints under one read hold: resolving them via two
+        // separate property reads admits a coord setter between them and pairs
+        // nodes from different generations. Resolution itself stays outside the
+        // hold (it takes handler locks).
+        Coord from, to;
+        using (ReadScope()) { from = _fromCoord; to = _toCoord; }
         Node? fromNode = null, toNode = null;
         if (nh != null)
         {
-            fromNode = nh.GetNode(FromCoord);
-            toNode = nh.GetNode(ToCoord);
+            fromNode = nh.GetNode(from);
+            toNode = nh.GetNode(to);
         }
         return (fromNode, toNode);
     }
@@ -237,9 +257,15 @@ public class Door
             loc?.MsgContents($"$You(target) $conj(try) to open the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
             return false;
         }
-        MapOpen();
-        loc?.MsgContents($"$You(target) $conj(open) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
-        AtOpen(caller);
+        // The flip above already fired the dirty mark, so a throw in the map
+        // paint, the announce, or the hook must not unwind the open: contain it.
+        try
+        {
+            MapOpen();
+            loc?.MsgContents($"$You(target) $conj(open) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            AtOpen(caller);
+        }
+        catch (Exception ex) { AtherizLogger.LogDebug("Suppressed Door.TryOpen post-open: " + ex.Message, "Door"); }
         return true;
     }
     // Port of base_door.py:106 wrapper for spec.
@@ -290,10 +316,16 @@ public class Door
             toNode?.MsgContents($"$You(target) $conj(try) to close the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
             return false;
         }
-        MapClose();
-        fromNode?.MsgContents($"$You(target) $conj(close) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
-        toNode?.MsgContents($"$You(target) $conj(close) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
-        AtClose(caller);
+        // Same containment as the open path: the flip and dirty mark already
+        // happened, so map/announce/hook failures are logged, not propagated.
+        try
+        {
+            MapClose();
+            fromNode?.MsgContents($"$You(target) $conj(close) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            toNode?.MsgContents($"$You(target) $conj(close) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            AtClose(caller);
+        }
+        catch (Exception ex) { AtherizLogger.LogDebug("Suppressed Door.TryClose post-close: " + ex.Message, "Door"); }
         return true;
     }
     public bool Close(GameObject? caller = null) => caller != null ? TryClose(caller) : ForceClose();

@@ -23,10 +23,10 @@ public class ObjectMessagingTests
     // --- Hear veto/addressing/desc-only ---
 
     [Fact]
-    public void EmitSound_DescOnly_ReachesNobody()
+    public void EmitSound_DescOnly_ReachesHearer()
     {
-        // Python parity (base_obj.py:1893-1894: early return on empty
-        // soundMsg): desc-only sounds never propagate.
+        // AtHear renders desc+msg, so a desc-only sound still propagates;
+        // only a fully empty sound is dropped.
         ObjectRegistry.ClearAll();
         try
         {
@@ -38,7 +38,7 @@ public class ObjectMessagingTests
             Assert.True(hearer.MoveTo(room));
             hearer.ClearMessages();
             emitter.AtEmitSound("a loud crash", "", 60.0, false);
-            Assert.Empty(hearer.PeekMessages());
+            Assert.Contains(hearer.PeekMessages(), m => m.Contains("a loud crash"));
         }
         finally { ObjectRegistry.ClearAll(); }
     }

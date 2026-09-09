@@ -173,10 +173,21 @@ public class PortedSoundTests
         var (emitter, centerNode) = Place(nh, new Coord(AREA,4,4,4));
         var l = new TrackingObject(); l.Name="L"; l.IsNpc=true; l.CanHear=true; l.Id=IdGenerator.GetUniqueId(); ObjectRegistry.AddObject(l);
         l.Location=new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(centerNode.Coord); centerNode.AddObject(l);
+        emitter.AtEmitSound("","",100.0,false);
+        Assert.Empty(l.Heard);
+        emitter.AtEmitSound(null!,null!,100.0,false);
+        Assert.Empty(l.Heard);
+    }
+    [Fact] public void DescOnlyStillPropagates()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (nh,_) = MakeCube();
+        var (emitter, centerNode) = Place(nh, new Coord(AREA,4,4,4));
+        var l = new TrackingObject(); l.Name="L"; l.IsNpc=true; l.CanHear=true; l.Id=IdGenerator.GetUniqueId(); ObjectRegistry.AddObject(l);
+        l.Location=new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(centerNode.Coord); centerNode.AddObject(l);
         emitter.AtEmitSound("desc","",100.0,false);
-        Assert.Empty(l.Heard);
-        emitter.AtEmitSound("desc",null!,100.0,false);
-        Assert.Empty(l.Heard);
+        Assert.Single(l.Heard);
+        Assert.Equal("desc", l.Heard[0].desc);
     }
     [Fact] public void NoLocationNoPropagationDoesNotThrow()
     {

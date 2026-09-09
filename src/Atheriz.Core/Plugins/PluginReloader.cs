@@ -41,9 +41,12 @@ public static class PluginReloader
         try { _reloadGate.Release(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ExitGate: " + logEx.Message, "PluginReloader"); }
     }
     private static PluginLoader? _loader;
-    // Port of reloader.py:249 _apply_patch transient preserves
+    // Port of reloader.py:249 _apply_patch transient preserves. Bare
+    // spellings (session/listeners/command) never matched a field — the port
+    // renamed them _-prefixed — so only the resolving spellings are listed:
+    // a rename that stops resolving is caught by the field-coverage test.
     private static readonly HashSet<string> _transientFields = new(StringComparer.Ordinal)
-    { "session","_session","listeners","_listeners","command","_command","_lock","_hooks","_msgLog" };
+    { "_session","_listeners","_command","_lock","_hooks","_msgLog" };
     // Shared exclusion check (also used by PluginLoader): exact filename match only.
     // Never substring-match the full path — "MySystem.Game.dll" must not match "System.*".
     internal static bool IsExcludedAssembly(string p)
@@ -245,9 +248,13 @@ public static class PluginReloader
         {
             IReadOnlySet<Delegate> coros;
             try { coros = kv.Value.Coros; } catch { continue; }
+            // One id set per sweep, not per delegate: rebuilding it inside
+            // the per-delegate walk is O(tickables x delegates).
+            var tickableIds = new HashSet<int>();
+            foreach (var obj in tickables) tickableIds.Add(obj.Id);
             foreach (var d in coros.ToList())
             {
-                if (!TargetsTickable(d.Target, tickables)) continue;
+                if (!TargetsTickable(d.Target, tickableIds)) continue;
                 try
                 {
                     var iv = TimeSpan.FromSeconds(kv.Key);
@@ -265,18 +272,18 @@ public static class PluginReloader
         public int GetHashCode(object obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
     }
 
-    private static bool TargetsTickable(object? target, List<GameObject> tickables)
+    private static bool TargetsTickable(object? target, HashSet<int> tickableIds)
     {
         if (target == null) return false;
-        foreach (var obj in tickables)
-            if (ReferenceEquals(target, obj)) return true;
+        // Same instance shares the id, and a pre-patch delegate targets the
+        // OLD instance, which shares the replacement's registry id but never
+        // the reference — one id check covers both.
+        if (target is GameObject self && tickableIds.Contains(self.Id)) return true;
         // Id match : a pre-patch delegate targets the OLD instance,
         // which shares the replacement's registry id but never the reference.
         // Closure walk: Release builds one display class holding the tickable
         // directly; Debug splits captures across linked display classes
         // (CS$<>8__locals) — recurse through compiler-generated frames.
-        var ids = new HashSet<int>();
-        foreach (var obj in tickables) ids.Add(obj.Id);
         var seen = new HashSet<object>(IdentityComparer.Instance);
         var queue = new Queue<object>();
         queue.Enqueue(target);
@@ -289,7 +296,7 @@ public static class PluginReloader
                 var cur = queue.Dequeue();
                 if (cur is GameObject go)
                 {
-                    if (ids.Contains(go.Id)) return true;
+                    if (tickableIds.Contains(go.Id)) return true;
                     continue; // never walk live game objects' fields
                 }
                 if (!IsCompilerGenerated(cur.GetType())) continue;

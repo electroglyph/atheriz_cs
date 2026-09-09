@@ -25,7 +25,10 @@ public class PortedContentsTests
         var a = MakeObj("a"); var b = MakeObj("b");
         var list = new List<GameObject>{a,b};
         var res = ContentUtils.FilterVisible(list, null);
-        Assert.Same(list, res);
+        // Same contents, independent list: mutating the result must not
+        // alias the caller's collection.
+        Assert.Equal(list, res);
+        Assert.NotSame(list, res);
     }
 
     [Fact]
@@ -503,6 +506,52 @@ public class PortedContentsTests
             Assert.IsType<List<GameObject>>(result);
         }
         finally { ContentUtils.MaxSearchDepth = orig; }
+    }
+
+    [Fact]
+    public void SearchSkipsTopLevelResolverFailure()
+    {
+        // The nested walk already tolerated a throwing resolver, but a throw
+        // on a top-level id aborted the whole search. Both levels now
+        // log-and-continue: siblings around the bad id are still found.
+        using var env = GlobalTestEnv.Enter();
+        var box = GameObject.Create("box", isContainer: true);
+        ObjectRegistry.AddObject(box);
+        var good1 = GameObject.Create("apple");
+        ObjectRegistry.AddObject(good1);
+        var bad = GameObject.Create("badapple");
+        ObjectRegistry.AddObject(bad);
+        var good2 = GameObject.Create("applepie");
+        ObjectRegistry.AddObject(good2);
+        box.AddObject(good1);
+        box.AddObject(bad);
+        box.AddObject(good2);
+        int badId = bad.Id;
+        GameObject? resolver(int id) => id == badId
+            ? throw new InvalidOperationException("resolver-boom")
+            : ObjectRegistry.Get(id).FirstOrDefault();
+        var res = ContentUtils.Search(box, "all apple", resolver);
+        Assert.Contains(good1, res);
+        Assert.DoesNotContain(bad, res);
+    }
+
+    [Fact]
+    public void SearchNonRecursiveStillFiltersView()
+    {
+        // The recursive walk applies the looker view filter per object, so
+        // Search re-filters only the flat path. The flat path must keep
+        // filtering: a looker denied view sees nothing either way.
+        using var env = GlobalTestEnv.Enter();
+        var bag = GameObject.Create("bag", isContainer: true);
+        ObjectRegistry.AddObject(bag);
+        var hidden = GameObject.Create("gem");
+        ObjectRegistry.AddObject(hidden);
+        hidden.AddLock("view", _ => false);
+        var looker = MakeObj("looker");
+        bag.AddObject(hidden);
+        GameObject? resolver(int id) => ObjectRegistry.Get(id).FirstOrDefault();
+        Assert.Empty(ContentUtils.Search(bag, "gem", resolver, recursive: false, looker: looker));
+        Assert.Empty(ContentUtils.Search(bag, "gem", resolver, recursive: true, looker: looker));
     }
 
     // Port of test_contents_search.py:456 test_singular_search_returns_each_object_once — dedup singular

@@ -60,6 +60,9 @@ public sealed class PendingLimiter
     /// </summary>
     public bool TryReserve(int nb)
     {
+        // Zero reserves nothing: taking a count slot here would leak, since
+        // the release side is (correctly) a no-op for zero.
+        if (nb == 0) return true;
         lock (_lock)
         {
             if (!CanReserveLocked(nb)) return false;

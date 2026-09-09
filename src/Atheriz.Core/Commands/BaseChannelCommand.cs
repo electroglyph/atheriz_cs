@@ -14,6 +14,11 @@ public class BaseChannelCommand : Command
     public override string Desc => _desc;
     public override string Category => "Communication";
 
+    /// <summary>
+    /// Renames this command. Must be called before the command is added to a
+    /// <see cref="CmdSet"/>: the set snapshots keys at registration, so a
+    /// post-add rename orphans the command from Get/AutoAlias/Help.
+    /// </summary>
     public void SetKey(string k)
     {
         _key = k;

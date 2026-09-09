@@ -342,25 +342,19 @@ public static class Conjugate
         // unchanged for both persons ("he florp", not "he florps").
         if (tense == null) return (verb, verb);
         var them = plural ? "*" : "3";
-        var themSuff = plural ? "" : "s";
 
         if (tense.Contains("participle") || tense.Contains("plural"))
             return (verb, verb);
         if (tense == "infinitive" || tense.Contains("present"))
         {
-            var youStr = VerbPresent(verb, "2");
-            if (string.IsNullOrEmpty(youStr)) youStr = verb;
-            var themStr = VerbPresent(verb, them);
-            if (string.IsNullOrEmpty(themStr)) themStr = verb + themSuff; // verbatim conjugate.py:409 (naive +s kept)
-            return (youStr, themStr);
+            // VerbPresent never returns empty (infinitive fallback), so no
+            // empty-guard is needed on either form.
+            return (VerbPresent(verb, "2"), VerbPresent(verb, them));
         }
         else
         {
-            var youStr = VerbPast(verb, "2");
-            if (string.IsNullOrEmpty(youStr)) youStr = verb;
-            var themStr = VerbPast(verb, them);
-            if (string.IsNullOrEmpty(themStr)) themStr = verb + themSuff;
-            return (youStr, themStr);
+            // Same contract on the past path: VerbPast falls back to the verb.
+            return (VerbPast(verb, "2"), VerbPast(verb, them));
         }
     }
 }

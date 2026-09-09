@@ -70,22 +70,28 @@ public static class InitialSetup
         }
         catch (Exception ex) { Console.Error.WriteLine($"Salt setup warning: {ex.Message}"); }
 
-        // Reset registries for fresh world (mirrors globals cleared by conftest)
+        // Reset registries for fresh world (mirrors globals cleared by conftest).
+        // (ClearAll already resets the Id generator — no separate SetId.)
         ObjectRegistry.ClearAll();
-        // Ensure Id generator clean
-        IdGenerator.SetId(-1);
         // Clear any existing node/map/time singletons that might cache old save path
-        try { Globals.GlobalServices.Reset(); } catch { }
+        try { Globals.GlobalServices.Reset(); } catch (Exception ex) { Console.Error.WriteLine($"Singleton reset warning: {ex.Message}"); }
         SaltProvider.Clear();
         // Re-seed salt after clear
-        try { SaltProvider.GetSalt(absSecret); } catch {}
+        try { SaltProvider.GetSalt(absSecret); } catch (Exception ex) { Console.Error.WriteLine($"Salt re-seed warning: {ex.Message}"); }
+        // Seed the default slot with the same value: runtime password checks
+        // call GetSalt() with no path, which otherwise reads CWD-relative
+        // "secret/salt.txt" (a different file, or a throw outside a game
+        // folder) instead of this game's salt.
+        try { SaltProvider.SetSalt(SaltProvider.GetSalt(absSecret)); } catch (Exception ex) { Console.Error.WriteLine($"Default salt seed warning: {ex.Message}"); }
 
         var settings = AtherizSettings.Global;
         // Build NodeArea 9x9x9
         var nh = new NodeHandler(autoLoad: false);
         // the setup world becomes current explicitly (the ctor no
-        // longer publishes helpers as current).
-        Atheriz.Core.Globals.NodeHandler.SetCurrent(nh);
+        // longer publishes helpers as current). Published through the
+        // singleton setter so GlobalServices and GetCurrent agree —
+        // publishing only one slot would fork same-process readers.
+        Globals.GlobalServices.SetNodeHandler(nh);
         var area = new NodeArea(LIMBO_AREA);
         for (int z = 0; z < LIMBO_GRID; z++)
         {
@@ -146,12 +152,15 @@ public static class InitialSetup
             mi.PreRender();
             mh.SetMapInfo(LIMBO_AREA, z, mi);
         }
+        // Same twin-slot publish as the node handler above: readers through
+        // GlobalServices must see the seed world, not a stale handler.
+        Globals.GlobalServices.SetMapHandler(mh);
         // Persist nodes and map.
-        // A3-G-4: resolve credentials BEFORE taking the write gate or opening
-        // the seed transaction. Holding either across interactive ReadLine/
-        // ReadKey turned every slow operator into a TimeoutException (and a
-        // pinned DB) for all concurrent savers. The gate/tx span below covers
-        // EnsureCreated + saves only.
+        // Resolve credentials BEFORE taking the write gate or opening the seed
+        // transaction. Holding either across interactive ReadLine/ReadKey turned
+        // every slow operator into a TimeoutException (and a pinned DB) for all
+        // concurrent savers. The gate/tx span below covers EnsureCreated +
+        // saves only.
         // Resolve username/password — mirrors initial_setup.py:98-123
         string? u = username;
         string? p = password;

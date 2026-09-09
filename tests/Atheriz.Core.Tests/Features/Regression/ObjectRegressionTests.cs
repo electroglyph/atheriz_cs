@@ -36,7 +36,7 @@ public class ObjectRegressionTests
     private sealed class BoomDelete : GameObject
     {
         public BoomDelete() { Id = IdGenerator.GetUniqueId(); }
-        public override bool AtDelete(GameObject caller) => throw new InvalidOperationException("veto-boom");
+        public override bool AtDelete(GameObject? caller) => throw new InvalidOperationException("veto-boom");
     }
 
     private sealed class VetoMove : GameObject

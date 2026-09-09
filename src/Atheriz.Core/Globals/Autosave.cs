@@ -84,7 +84,7 @@ public static class Autosave
             // volatile read — written under _lock by Start/Stop on
             // other threads; a torn read would save via a stale handler.
             var mh = mapHandler ?? Volatile.Read(ref _cachedMap) ?? GlobalServices.GetMapHandler();
-            // A3-G-2: save into the explicit-settings DB, not the ambient one.
+            // Save into the explicit-settings DB, not the ambient one.
             // The parameterless Save() persists singleton state via the ambient
             // path — under explicit settings that tore the world (objects in
             // DB-A, handlers in DB-B). Each section keeps its own commit so a
@@ -102,7 +102,7 @@ public static class Autosave
         try
         {
             var nh = nodeHandler ?? Volatile.Read(ref _cachedNodes) ?? GlobalServices.GetNodeHandler();
-            // A3-G-2: explicit-settings DB (see map section above).
+                // Explicit-settings DB (see map section above).
             using var dbNode = AtherizDbContextFactory.CreateForSettings(settings);
             nh.Save(dbNode);
         }
@@ -117,8 +117,8 @@ public static class Autosave
         {
             try
             {
-                var gt = gameTime ?? _cachedTime ?? GlobalServices.GetGameTime();
-                // A3-G-2: explicit-settings DB (see map section above).
+                var gt = gameTime ?? Volatile.Read(ref _cachedTime) ?? GlobalServices.GetGameTime();
+            // Explicit-settings DB (see map section above).
                 using var dbTime = AtherizDbContextFactory.CreateForSettings(settings);
                 gt.Save(dbTime);
             }

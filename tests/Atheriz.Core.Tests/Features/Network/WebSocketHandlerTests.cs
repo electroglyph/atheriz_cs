@@ -185,4 +185,26 @@ public class WebSocketHandlerTests
             ConnectionManager.GlobalInstance = null;
         }
     }
+
+    [Fact]
+    public async Task Ws_NullGlobalManager_ClosesWithoutDispatch()
+    {
+        // Fail closed: with no global manager the socket is refused, never
+        // served from a private throwaway world (uncounted, no broadcasts).
+        ConnectionManager.GlobalInstance = null;
+        try
+        {
+            var fake = new FragmentSocket(new byte[] { (byte)'x' }, fragment: 1);
+            var settings = new AtherizSettings { WebsocketMaxMessageSize = 100_000 };
+            var http = new DefaultHttpContext();
+            http.Connection.RemoteIpAddress = IPAddress.Loopback;
+            http.Features.Set<IHttpWebSocketFeature>(new StaticWsFeature(fake));
+            await WebSocketHandler.HandleAsync(http, settings).WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.Equal(WebSocketCloseStatus.InternalServerError, fake.CloseStatus);
+        }
+        finally
+        {
+            ConnectionManager.GlobalInstance = null;
+        }
+    }
 }

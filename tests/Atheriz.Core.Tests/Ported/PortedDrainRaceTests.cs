@@ -195,4 +195,38 @@ public class PortedDrainRaceTests
         }
         finally { ConnectionManager.GlobalInstance = prev; flakyPool.Stop(wait:false); realPool.Stop(wait:false); mgr.Atp.Stop(wait:false); }
     }
+
+    [Fact]
+    public void DroppedRetryDrain_RearmsAfterCapFrees()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var realPool = new AsyncThreadPool(maxThreads:4, queueLimit:1000);
+        bool rejectAll = true;
+        bool Flaky(Func<Task> runner, string name)
+        {
+            if (rejectAll) return false;
+            return realPool.AddTask(runner, name);
+        }
+        var flakyPool = new FlakyPool(Flaky);
+        var mgr = new ConnectionManager(pool: flakyPool);
+        var prev = ConnectionManager.GlobalInstance;
+        ConnectionManager.GlobalInstance = mgr;
+        // Force the capped retry scheduler to drop the retry at enqueue time:
+        // a dropped drain must re-arm instead of stalling the queue forever.
+        var counterField = typeof(BaseConnection).GetField("_outstandingRetryDrains", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        int savedCounter = (int)counterField.GetValue(null)!;
+        try
+        {
+            var conn = new FakeConnection();
+            var rec = new DrainRecorder();
+            counterField.SetValue(null, 2000);
+            conn.EnqueueInput(rec.MakeHandler("only"), new List<object?>(), new Dictionary<string, object?>());
+            counterField.SetValue(null, savedCounter);
+            rejectAll = false;
+            Assert.True(Wait(() => rec.Ran.Count == 1, 5000), "dropped retry-drain never re-armed: queued input stalled");
+            var q = (System.Collections.ICollection)typeof(BaseConnection).GetField("_inputQueue", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(conn)!;
+            Assert.Empty(q);
+        }
+        finally { counterField.SetValue(null, savedCounter); ConnectionManager.GlobalInstance = prev; flakyPool.Stop(wait:false); realPool.Stop(wait:false); mgr.Atp.Stop(wait:false); }
+    }
 }

@@ -72,8 +72,8 @@ public class WanderCommandTests
     [Fact]
     public void Wander_SpawnedNpcs_HaveDistinctIds()
     {
-        // A3-C-12: the wanderer ctor peeked the counter (GetId) instead of
-        // allocating (GetUniqueId), so every wanderer shared one Id.
+        // The wanderer ctor peeked the counter (GetId) instead of allocating
+        // (GetUniqueId), so every wanderer shared one Id.
         ObjectRegistry.ClearAll();
         NodeHandler.SetCurrent(null);
         try

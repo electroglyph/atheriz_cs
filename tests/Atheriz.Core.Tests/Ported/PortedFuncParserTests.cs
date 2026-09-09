@@ -233,6 +233,24 @@ public class PortedFuncParserTests
         // Verify that Execute injected funcparser by checking captured context
         Assert.True(cap.ContainsKey("funcparser") || cap.ContainsKey("funcparser_obj"));
     }
+    [Fact] public void ParseInstanceFuncparserKwargMatchesExecute()
+    {
+        // Instance Execute supplied the live parser in the merged kwargs
+        // while instance Parse supplied null, so ParserCallable callables saw
+        // different kwargs["funcparser"] values for the same parser. Both
+        // entries now thread the owner through: the values agree and the
+        // instance's string form is present on both.
+        using var env=GlobalTestEnv.Enter();
+        string execVal = "", parseVal = "";
+        FuncParser.ParserCallable fnExec=(a,k,ctx,raw)=>{ execVal = k.TryGetValue("funcparser", out var v) ? v : "<missing>"; return ""; };
+        FuncParser.ParserCallable fnParse=(a,k,ctx,raw)=>{ parseVal = k.TryGetValue("funcparser", out var v) ? v : "<missing>"; return ""; };
+        var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["exfn"]=fnExec, ["pafn"]=fnParse});
+        var pf=new FuncParser.ParsedFunc(); pf.FuncName="exfn"; pf.FullStr.AddRange("$exfn()".ToCharArray());
+        p.Execute(pf);
+        p.Parse("$pafn()");
+        Assert.NotEqual("", execVal);
+        Assert.Equal(execVal, parseVal);
+    }
     [Fact] public void ExecuteRaiseErrorsKwargInjected()
     {
         using var env=GlobalTestEnv.Enter();

@@ -42,10 +42,10 @@ public class ServerLifecycleTests
     public void ServerLifecycle_WorldAndShutdownLocks_AreOneLock()
     {
         // Python has a single _WORLD_LOCK (with _shutdown_lock as an alias);
-        // the port keeps one shared lock so the documented ordering guarantee holds.
+        // the port holds StartStop.WorldLock directly — no private alias pair
+        // survives on ServerLifecycle, so the ordering guarantee has one name.
         var t = typeof(ServerLifecycle);
-        var w = t.GetField("WorldLock", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null);
-        Assert.Same(StartStop.WorldLock, w);
+        Assert.Null(t.GetField("WorldLock", BindingFlags.NonPublic | BindingFlags.Static));
         Assert.Null(t.GetField("ShutdownLock", BindingFlags.NonPublic | BindingFlags.Static));
     }
 }

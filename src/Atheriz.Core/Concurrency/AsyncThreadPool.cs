@@ -310,8 +310,16 @@ public class AsyncThreadPool : IDisposable
         if (spawn)
         {
             var t = new Thread(WorkLoop) { IsBackground = true, Name = $"AtherizRelief-{seq}" };
-            lock (_lock) _reliefThreads.Add(t);
-            t.Start(true);
+            // Start before list-add under one lock: a Start throw must neither
+            // leak the count nor leave a phantom entry. Relief is
+            // opportunistic — spawn failure degrades to unrelieved, so the
+            // count is restored and the failure stays local.
+            lock (_lock)
+            {
+                try { t.Start(true); }
+                catch { _reliefCount--; return; }
+                _reliefThreads.Add(t);
+            }
         }
     }
 
@@ -508,7 +516,9 @@ public class AsyncThreadPool : IDisposable
         {
             lock (_lock) if (_stopped) return;
             if (IsStalePool()) return;
-            AddTask(action);
+            // A full queue at fire time must not silently drop the delayed
+            // callback: run it inline on the timer thread instead.
+            if (!AddTask(action)) Run(action);
         }, TaskScheduler.Default);
     }
     public void Delay(TimeSpan delay, Func<Task> asyncFunc)
@@ -518,7 +528,7 @@ public class AsyncThreadPool : IDisposable
         {
             lock (_lock) if (_stopped) return;
             if (IsStalePool()) return;
-            AddTask(asyncFunc);
+            if (!AddTask(asyncFunc)) Run(asyncFunc);
         }, TaskScheduler.Default);
     }
     public void Delay(double seconds, Action action) => Delay(TimeSpan.FromSeconds(seconds), action);

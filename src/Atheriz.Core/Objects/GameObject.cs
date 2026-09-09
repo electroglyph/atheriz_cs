@@ -378,9 +378,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             {
                 _channels.Add(channel.Id);
                 _flags.IsModified = true;
-                // A3-O-4: the InternalCmdSet itself is allocated here, under the
-                // peer write lock — allocating it outside (after release) let two
-                // racing Subscribes both see null, both allocate, and the second
+                // The InternalCmdSet itself is allocated here, under the peer write
+                // lock — allocating it outside (after release) let two racing
+                // Subscribes both see null, both allocate, and the second
                 // silently orphan the first channel's installed command.
                 InternalCmdSet ??= new Commands.CmdSet();
                 added = true;
@@ -776,15 +776,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // Typed extra helpers for GrottoObject (replaces reflection on _extra)
     public bool TryGetExtraJson(string key, out System.Text.Json.JsonElement value)
     {
-        System.Text.Json.JsonElement tmp = default;
-        bool found = false;
-        Read(() =>
-        {
-            if (_extra.TryGetValue(key, out var v)) { tmp = v; found = true; }
-            return 0;
-        });
-        value = tmp;
-        return found;
+        // Direct locked read via the typed Read helper: the old shape wrapped
+        // the lookup in a dummy Func<int> and smuggled the result through an
+        // out-param temporary, which read as lock-borrowing instead of a lookup.
+        var hit = Read(() => _extra.TryGetValue(key, out var v) ? (true, v) : (false, v));
+        value = hit.Item2;
+        return hit.Item1;
     }
     public void SetExtraJson(string key, System.Text.Json.JsonElement value) => Write(() => { _extra[key] = value; _flags.IsModified = true; });
     public bool TryRemoveExtraJson(string key) => Write(() => { var r = _extra.Remove(key); if (r) _flags.IsModified = true; return r; });
@@ -798,10 +795,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // Callers that already hold the target write lock mutate via the raw helpers below.
     public void AddFollower(int id) => Write(() => { if (_followers.Add(id)) _flags.IsModified = true; });
     public void RemoveFollower(int id) => Write(() => { if (_followers.Remove(id)) _flags.IsModified = true; });
-    public void ClearFollowersExcept(HashSet<int>? keep = null) => Write(() => { _followers.RemoveWhere(id => keep == null || !keep.Contains(id)); _flags.IsModified = true; });
+    public void ClearFollowersExcept(HashSet<int>? keep = null) => Write(() => { if (_followers.RemoveWhere(id => keep == null || !keep.Contains(id)) > 0) _flags.IsModified = true; });
     internal void AddFollowerRawNoLock(int id) { if (_followers.Add(id)) _flags.IsModified = true; }
     internal void RemoveFollowerRawNoLock(int id) { if (_followers.Remove(id)) _flags.IsModified = true; }
-    internal void ClearFollowersRawNoLock(HashSet<int>? keep = null) { _followers.RemoveWhere(id => keep == null || !keep.Contains(id)); _flags.IsModified = true; }
+    internal void ClearFollowersRawNoLock(HashSet<int>? keep = null) { if (_followers.RemoveWhere(id => keep == null || !keep.Contains(id)) > 0) _flags.IsModified = true; }
 
     // Typed channel-id ops (F001: replaces _channels reflection in GroupExtensions).
     internal void AddChannelId(int chId) => Write(() => { if (!_channels.Contains(chId)) { _channels.Add(chId); _flags.IsModified = true; } });
@@ -818,7 +815,15 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             if (_extra.TryGetValue("banReason", out var v2) && v2.ValueKind == System.Text.Json.JsonValueKind.String) return v2.GetString() ?? "";
             return "";
         });
-        set => Write(() => { _extra["ban_reason"] = System.Text.Json.JsonSerializer.SerializeToElement(value); _flags.IsModified = true; });
+        set => Write(() =>
+        {
+            // A legacy "banReason" key reads as a fallback but must not linger
+            // once the canonical spelling is written: two keys would disagree
+            // on the next raw-extra read.
+            _extra.Remove("banReason");
+            _extra["ban_reason"] = System.Text.Json.JsonSerializer.SerializeToElement(value);
+            _flags.IsModified = true;
+        });
     }
 
     // --- messaging helpers for converter wrappers kept thin ---

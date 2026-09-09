@@ -232,7 +232,7 @@ public sealed class BuildCommand : Command
                 newNode.AddLinkIfAbsent(backLinkName, () => new NodeLink(backLinkName, loc.Coord, aliases));
             }
 
-            var mi = mh.GetOrCreatePublic(newCoord.Area, newCoord.Z);
+            var mi = mh.EnsureMapInfo(newCoord.Area, newCoord.Z);
             using (mi.BatchUpdate())
             {
                 if (room)

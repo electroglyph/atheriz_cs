@@ -15,7 +15,9 @@ public sealed class AtherizSettings
         set { lock (_globalLock) _global = value ?? new AtherizSettings(); }
     }
 
-    /// <summary>Shared default instance to avoid per-call <c>new AtherizSettings()</c> allocations.</summary>
+    /// <summary>Shared default instance to avoid per-call <c>new AtherizSettings()</c> allocations.
+    /// Borrowers must treat it as read-only: mutating it poisons every later borrower.
+    /// There are no mutating borrowers; P3BatchElevenTests.SettingsDefault_NeverMutated pins that.</summary>
     public static AtherizSettings Default { get; } = new();
     // Paths
     public string SavePath { get; set; } = "save";

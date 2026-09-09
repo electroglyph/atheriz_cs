@@ -51,7 +51,10 @@ public static class ContentUtils
 
     public static List<GameObject> FilterVisible(List<GameObject> objs, GameObject? looker)
     {
-        if (looker is null) return objs;
+        // The null-looker path returns a copy: handing out the input list by
+        // reference lets a caller mutate the owner's collection through the
+        // result.
+        if (looker is null) return new List<GameObject>(objs);
         return objs.Where(o => o != looker && o.Access(looker, "view")).ToList();
     }
 
@@ -64,7 +67,9 @@ public static class ContentUtils
     public static string GroupByName(List<GameObject> objs, GameObject? looker = null)
     {
         if (objs.Count == 0) return "";
-        var groups = new Dictionary<string,int>(StringComparer.Ordinal);
+        // Case-insensitive grouping matches the case-folding search: "Sword"
+        // and "sword" are found together, so they display as one stack.
+        var groups = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
         foreach (var o in objs)
         {
             var name = looker is not null ? o.GetDisplayName(looker) : o.Name;
@@ -86,7 +91,12 @@ public static class ContentUtils
         foreach (var id in ids)
         {
             if (!visited.Add(id)) continue;
-            var o = resolver(id);
+            // One bad id must not abort the whole walk at any depth: the
+            // nested call below is already failure-tolerant, so the top
+            // level resolves under the same log-and-continue treatment.
+            GameObject? o;
+            try { o = resolver(id); }
+            catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed ContentUtils.GatherContents: {ex.Message}", "ContentUtils"); continue; }
             if (o is null) continue;
             if (looker is not null && !o.Access(looker, "view")) continue;
             result.Add(o);
@@ -112,7 +122,9 @@ public static class ContentUtils
         if (q == "me") return [obj];
 
         var objs = recursive ? GatherContents(obj, resolver, looker: looker) : obj.ContentsSnapshot.Select(resolver).Where(o => o != null).Cast<GameObject>().ToList();
-        if (looker is not null)
+        // The recursive walk already applied the looker view filter per
+        // object; re-filter only the flat path, which resolves unfiltered.
+        if (looker is not null && !recursive)
             objs = objs.Where(o => o.Access(looker, "view")).ToList();
 
         if (q.StartsWith("#"))

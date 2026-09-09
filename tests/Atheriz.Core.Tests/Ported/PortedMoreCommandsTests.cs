@@ -330,6 +330,18 @@ public class PortedMoreCommandsTests
         Assert.Contains(c.PeekMessages(), m=>m=="You can't see anything.");
     }
     [Fact]
+    public void Look_ContainerLocationBlockedByAccess()
+    {
+        using var env=GlobalTestEnv.Enter();
+        var c=MakeCaller();
+        var box=GameObject.Create("Box");
+        ObjectRegistry.AddObject(box); // Explicit registration: Create does not publish.
+        box.AddLock("view", _=>false);
+        c.Location=new Persistence.Dto.LocationRef.ObjectLocation(box.Id);
+        new LookCommand().Run(c, null);
+        Assert.Contains(c.PeekMessages(), m=>m=="You can't see anything.");
+    }
+    [Fact]
     public void Emote_NoLocationFallsThrough()
     {
         using var env=GlobalTestEnv.Enter();
@@ -375,6 +387,19 @@ public class PortedMoreCommandsTests
         var apple=GameObject.Create("Apple", isItem:true); ObjectRegistry.AddObject(apple); apple.MoveTo(c);
         new GiveCommand().Run(c, pa);
         Assert.Contains(c.PeekMessages(), m=>m=="You already have that!");
+    }
+    [Fact]
+    public void Give_ItemIsTarget_ReportsInsteadOfSkippingSilently()
+    {
+        using var env=GlobalTestEnv.Enter();
+        var coord=new Coord("test_give5b",0,0,0); var room=new Node(coord);
+        ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
+        var c=GameObject.Create("Alice", isPc:true); c.IsConnected=true; ObjectRegistry.AddObject(c); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord); room.AddObject(c);
+        // Bag is both givable (in inventory) and resolvable as target (nested in room).
+        var bag=GameObject.Create("Bag"); bag.IsContainer=true; ObjectRegistry.AddObject(bag); bag.MoveTo(c);
+        var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"bag","bag"};
+        new GiveCommand().Run(c, pa);
+        Assert.Contains(c.PeekMessages(), m=>m=="You can't give Bag to itself.");
     }
     [Fact]
     public void Give_DontHaveIt()
@@ -449,5 +474,66 @@ public class PortedMoreCommandsTests
         c.ClearMessages();
         new ShutdownCommand().Run(c, null);
         Assert.Contains(c.PeekMessages(), m=>m.ToLowerInvariant().Contains("shutdown"));
+    }
+
+    private sealed class SayHookRecorder
+    {
+        public int Fired;
+        [After] public void Record(object? a, object? b, object? c, object? d, object? e, object? f, object? g, object? h) => Fired++;
+    }
+
+    [Fact]
+    public void Emote_FiresAtSayHook()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var coord = new Coord("test_emote_hook", 0, 0, 0);
+        var room = new Node(coord, desc: "Room");
+        ObjectRegistry.AddObject(room);
+        var c = MakeCaller();
+        c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
+        var observer = GameObject.Create("Bob");
+        ObjectRegistry.AddObject(observer);
+        observer.MoveTo(room);
+        var rec = new SayHookRecorder();
+        c.InstallHook("at_say", (Action<object?, object?, object?, object?, object?, object?, object?, object?>)rec.Record);
+        c.ClearMessages(); observer.ClearMessages();
+        var pa = new GameArgumentParser.ParsedArgs();
+        pa["text"] = new List<string> { "waves", "happily" };
+        new EmoteCommand().Run(c, pa);
+        // Routed through the AtSay entry: game-code at_say hooks observe emotes.
+        Assert.Equal(1, rec.Fired);
+        // Established wording unchanged for actor and room.
+        Assert.Contains(c.PeekMessages(), m => m.Contains("waves happily"));
+        Assert.Contains(observer.PeekMessages(), m => m.Contains("Alice") && m.Contains("waves happily"));
+    }
+
+    [Fact]
+    public void None_LoggedInExecuteReturnsParsedArgs()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var c = MakeCaller();
+        // Same parsed shape as the unlogged fallback: Execute must hand Run a
+        // ParsedArgs, not the raw string.
+        var (func, caller, args) = new NoneCommand().Execute(c, "lrok");
+        Assert.NotNull(func);
+        Assert.IsType<GameArgumentParser.ParsedArgs>(args);
+        func!(caller!, args);
+        var msg = string.Join(" ", c.PeekMessages());
+        Assert.Contains("did you mean", msg.ToLowerInvariant());
+    }
+
+    [Fact]
+    public void None_LoggedInUnbalancedQuoteMatchesUnlogged()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var c = MakeCaller();
+        // Parsed shape means unbalanced quotes diagnose identically pre/post login.
+        var (func, _, _) = new NoneCommand().Execute(c, "lrok \"foo");
+        Assert.Null(func);
+        Assert.Contains(c.PeekMessages(), m => m.Contains("Unbalanced quote"));
+        c.ClearMessages();
+        var (ufunc, _, _) = new Atheriz.Core.Commands.UnloggedIn.NoneCommand().Execute(c, "lrok \"foo");
+        Assert.Null(ufunc);
+        Assert.Contains(c.PeekMessages(), m => m.Contains("Unbalanced quote"));
     }
 }

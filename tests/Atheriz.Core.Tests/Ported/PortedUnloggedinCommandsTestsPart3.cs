@@ -116,7 +116,7 @@ public class PortedUnloggedinCommandsTestsPart3
         SaltProvider.Clear();
     }
 
-    // A3-C-27: the budget was off by one (`>` allowed Max+1 guesses). The ban
+    // The budget was off by one (`>` allowed Max+1 guesses). The ban must
     // must fire exactly on the Max-th failure, not one later.
     [Fact] public void Connect_BanFiresExactlyOnMaxAttempts()
     {

@@ -29,8 +29,8 @@ public sealed class HelpCommand : Command
                 try { sr = goc.Session?.ScreenReader ?? false; } catch (Exception) { }
                 try { tw = (goc.Session?.TermWidth ?? 80) - 2; if (tw < 20) tw = 20; } catch { tw = 80; }
             }
-            var all = CommandRegistry.LoggedIn.GetAll().Distinct().Where(c => !c.Hide && c.Access(caller)).ToList();
-            var sb = new StringBuilder(HelpFormatter.Format(all, sr, tw + 2));
+            var all = CommandRegistry.LoggedIn.GetAll().Where(c => !c.Hide && c.Access(caller)).ToList();
+            var sb = new StringBuilder("\n" + HelpFormatter.Format(all, sr, tw + 2));
             // local commands from location/inventory (single session lookup above)
             if (caller is Objects.GameObject go)
             {

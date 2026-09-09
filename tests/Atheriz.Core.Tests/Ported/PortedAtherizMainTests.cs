@@ -282,9 +282,9 @@ public class PortedAtherizMainTests
     [Fact] public void SkipsIfServerAlreadyRunning()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
-        Assert.Contains("PID", src);
-        Assert.Contains("already running", src.ToLower());
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/PidFile.cs");
+        Assert.Contains("AlreadyRunningMessagePrefix", src);
+        Assert.Contains("Server is already running with PID:", src);
     }
     [Fact] public void NoSslKwargsWhenUnset()
     {

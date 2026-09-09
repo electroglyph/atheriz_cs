@@ -39,8 +39,16 @@ public class Channel : GameObject
         return ch;
     }
 
-    public override void AtCreate() => Hookable("at_create", () => 0);
-    public override bool AtDelete(GameObject? caller) => Hookable("at_delete", () => true, caller);
+    // Renames the channel atomically: GetCommand snapshots Name+Desc under one
+    // read hold, so the pair must also be written under one write hold —
+    // separate Name=/Desc= sets can straddle a GetCommand and cache a mixed
+    // new-key/old-desc command. Use this for every post-registration rename.
+    public void Rename(string name, string desc)
+    {
+        using (WriteScope()) { Name = name; Desc = desc; }
+    }
+
+    public override void AtCreate() => Hookable("at_create", () => 0);    public override bool AtDelete(GameObject? caller) => Hookable("at_delete", () => true, caller);
 
     public override bool IsDeleted
     {
@@ -126,10 +134,15 @@ public class Channel : GameObject
     {
         // Snapshot Name/Desc/Id before locking: GameObject props take SyncRoot, so
         // reading them under _histLock would nest channel -> object (inversion;
-        // the fixed order everywhere is object -> channel). A3-O-3: Id used to be
-        // read inside the lock while Name/Desc were snapshotted outside.
-        string key = Name.ToLowerInvariant();
-        string desc = Desc;
+        // the fixed order everywhere is object -> channel). Id is read outside
+        // the lock alongside Name/Desc.
+        // Name and Desc share one ReadScope — two independent reads could cache
+        // a new-key/old-desc command across a concurrent rename. Pair with the
+        // single-hold Rename on the write side; the read hold alone cannot
+        // repair a tear the writer created between two separate sets.
+        string key;
+        string desc;
+        using (ReadScope()) { key = Name.ToLowerInvariant(); desc = Desc; }
         int id = Id;
         lock (_histLock)
         {

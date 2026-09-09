@@ -77,9 +77,11 @@ public sealed class MazeCommand : Command
         area1.AddGrid(tuple1.grid);
         area2.AddGrid(tuple2.grid);
         area3.AddGrid(tuple3.grid);
-        nh.AddArea(area1);
-        nh.AddArea(area2);
-        nh.AddArea(area3);
+        // Replace (not blind add): a repeat run must evict the prior
+        // generation's nodes from the registry instead of orphaning them.
+        nh.ReplaceArea(area1);
+        nh.ReplaceArea(area2);
+        nh.ReplaceArea(area3);
         // MapInfo with pre_grid and legend – use global MapHandler singleton directly
         try
         {
@@ -165,7 +167,8 @@ public sealed class MazeCommand : Command
             else go.Msg($"moving to: {start} ...");
             try { go.IsMapable = true; } catch (Exception) { }
             go.MapEnabled = true;
-            go.MoveTo(start);
+            if (!go.MoveTo(start))
+                go.Msg($"Could not move to {start.Coord}.");
         }
         else if (start == null)
         {

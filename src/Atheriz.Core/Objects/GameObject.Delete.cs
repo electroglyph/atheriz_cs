@@ -10,10 +10,10 @@ namespace Atheriz.Core.Objects;
 // Partial for deletion lifecycle — split from GameObject.Puppet.cs per file-organization hygiene.
 public partial class GameObject
 {
-    // A3-O-9: atomic delete claim. The IsDeleted probe below runs under a read
-    // lock and the claiming write comes far too late, so two racing Deletes
-    // both walked, both emitted GetDelOps, both tore down. The loser of this
-    // claim returns null (already-gone) instead.
+    // Atomic delete claim. The IsDeleted probe below runs under a read lock and
+    // the claiming write comes far too late, so two racing Deletes both walked,
+    // both emitted GetDelOps, both tore down. The loser of this claim returns
+    // null (already-gone) instead.
     private int _deleteClaimed;
 
     // Port of base_obj.py:467 delete + object deletion lifecycle — caller optional for Account parity
@@ -40,6 +40,7 @@ public partial class GameObject
     {
         var ops = new List<object>();
         var toDelete = new List<GameObject>();
+        int extraCount = 0;
 
         if (recursive)
         {
@@ -143,9 +144,9 @@ public partial class GameObject
                         try { loc.RemoveContent(obj.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
                     }
                 } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
-                // A3-O-9: only the thread that flips the flag tears down. A sibling
-                // delete (overlapping roots) that arrives late skips the physical
-                // section instead of double-closing sessions / removing tickers.
+                // Only the thread that flips the flag tears down. A sibling delete
+                // (overlapping roots) that arrives late skips the physical section
+                // instead of double-closing sessions / removing tickers.
                 bool mine = false;
                 try
                 {
@@ -168,10 +169,63 @@ public partial class GameObject
                 {
                     ObjectRegistry.RemoveObject(obj);
                     TeardownDeleted(obj);
+                    // Straggler sweep: contents that landed after this object's walk
+                    // snapshot but before its deleted flip above. The AddObject
+                    // refusal makes this post-flip snapshot complete — nothing can
+                    // land after the flip — so everything still located here is
+                    // deleted now instead of escaping with a dangling location at
+                    // a deleted parent.
+                    List<int> fresh;
+                    obj._lock.EnterReadLock();
+                    try { fresh = new List<int>(obj._contents); }
+                    finally { obj._lock.ExitReadLock(); }
+                    foreach (var cid in fresh)
+                    {
+                        if (!seen.Add(cid)) continue;
+                        var straggler = ObjectRegistry.Get(cid).FirstOrDefault();
+                        if (straggler == null) continue;
+                        bool stillHere = false;
+                        straggler._lock.EnterReadLock();
+                        try { stillHere = straggler._location is LocationRef.ObjectLocation ol && ol.ObjectId == obj.Id; }
+                        finally { straggler._lock.ExitReadLock(); }
+                        if (!stillHere) continue;
+                        // Same veto contract as the walk above: a throwing
+                        // AtDelete is a veto (fail-closed), never a propagation.
+                        // A vetoed straggler survives in place — the walk's
+                        // decision stands even at a deleted parent.
+                        (int count, List<object> ops)? r = null;
+                        try { r = straggler.Delete(caller, true); }
+                        catch (Exception logEx)
+                        {
+                            AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject");
+                            continue;
+                        }
+                        if (r != null) { ops.AddRange(r.Value.ops); extraCount += r.Value.count; }
+                        else if (straggler._flags.IsDeleted) continue;
+                        else
+                        {
+                            // Live, still here, untaken: veto or sibling race.
+                            // Probe once (like the walk) to honor a veto with
+                            // survival; only a passing probe falls through to
+                            // the detach a racy sibling left behind.
+                            bool vetoed = false;
+                            try { vetoed = caller != null && !straggler.AtDelete(caller); }
+                            catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
+                            if (vetoed) continue;
+                            try { obj.RemoveContent(straggler.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                            try
+                            {
+                                straggler._lock.EnterWriteLock();
+                                try { straggler._location = LocationRef.NullLocation.Instance; straggler._flags.IsModified = true; }
+                                finally { straggler._lock.ExitWriteLock(); }
+                            }
+                            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                        }
+                    }
                 }
             }
             // ops already collected; return
-            return (toDelete.Count, ops);
+            return (toDelete.Count + extraCount, ops);
         }
         else
         {
@@ -184,7 +238,10 @@ public partial class GameObject
             finally { _lock.ExitReadLock(); }
             var contentObjs = contentIds.Select(id => ObjectRegistry.Get(id).FirstOrDefault()).Where(o => o != null).Cast<GameObject>().ToList();
             int deletedKids = 0;
-            foreach (var content in contentObjs.ToList())
+            var processed = new HashSet<int>();
+            // Factored as a local so the post-flip straggler pass below shares
+            // the exact move-or-delete path.
+            void MoveOrDelete(GameObject content)
             {
                 bool moved = false;
                 try { moved = content.MoveTo(loc, force: false, announce: false); } catch { moved = false; }
@@ -218,6 +275,11 @@ public partial class GameObject
                     // No delete
                 }
             }
+            foreach (var content in contentObjs.ToList())
+            {
+                processed.Add(content.Id);
+                MoveOrDelete(content);
+            }
             // now delete self
             _lock.EnterWriteLock();
             try
@@ -227,6 +289,28 @@ public partial class GameObject
                 _flags.IsModified = true;
             }
             finally { _lock.ExitWriteLock(); }
+            // Straggler pass: the AddObject refusal makes this post-flip snapshot
+            // complete — anything here landed before the flip but after the
+            // pre-move snapshot, so it is moved or deleted now instead of
+            // escaping with a dangling location.
+            List<int> freshIds;
+            _lock.EnterReadLock();
+            try { freshIds = new List<int>(_contents); }
+            finally { _lock.ExitReadLock(); }
+            foreach (var fid in freshIds)
+            {
+                if (!processed.Add(fid)) continue;
+                var late = ObjectRegistry.Get(fid).FirstOrDefault();
+                if (late == null) continue;
+                // Only handle what is still here: a straggler that already moved
+                // away on its own must not be yanked back.
+                bool stillHere = false;
+                late._lock.EnterReadLock();
+                try { stillHere = late._location is LocationRef.ObjectLocation ol3 && ol3.ObjectId == this.Id; }
+                finally { late._lock.ExitReadLock(); }
+                if (!stillHere) continue;
+                MoveOrDelete(late);
+            }
             // detach from location
             try
             {

@@ -84,6 +84,8 @@ public sealed class LookCommand : Command
             // substituted the VIEWER's desc when the appearance was a bare
             // "name:" (empty desc) — echoing self. Python just shows
             // caller.at_look(loc) (look.py:20-30,66-72).
+            // Gated like the sibling paths: a denied container never reaches hooks/rendering.
+            if (!loc.Access(puppet, "view")) { puppet.Msg("You can't see anything."); return; }
             puppet.Msg(puppet.AtLook(loc));
             return;
         }

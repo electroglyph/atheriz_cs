@@ -220,18 +220,23 @@ public partial class Node : GameObject
     // Port of nodes.py:189
     public override void ResolveRelations()
     {
+        // Same containment as the base (GameObject.ResolveRelations wraps AddCoro,
+        // InstallHooks and AtInit each in try/log): a throwing ticker or hook
+        // must not abort relation resolution for the whole node.
         if (IsTickable)
         {
-            var at = GlobalTickerHolder.Get();
-            at?.AddCoro(AtTick, TickSeconds);
+            try { GlobalTickerHolder.Get()?.AddCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
         }
         HashSet<int> scripts = ScriptsSnapshot;
         foreach (var id in scripts)
         {
             var objs = ObjectRegistry.Get(id);
-            if (objs.Count > 0 && objs[0] is Script s) s.InstallHooks(this);
+            if (objs.Count > 0 && objs[0] is Script s)
+            {
+                try { s.InstallHooks(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
+            }
         }
-        AtInit();
+        try { AtInit(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
     }
 
     // Port of nodes.py:206 (state in base storage; Node adds ticker swap)
@@ -240,10 +245,10 @@ public partial class Node : GameObject
         get => base.TickSeconds;
         set
         {
-            // A3-O-11: predicate + mutation share one write hold (SyncRoot is
-            // recursive, so the base accessors nest safely). Across separate
-            // acquisitions two racing setters both saw stale state and both
-            // AddCoro'd, double-firing the ticker.
+            // Predicate + mutation share one write hold (SyncRoot is recursive, so
+            // the base accessors nest safely). Across separate acquisitions two
+            // racing setters both saw stale state and both AddCoro'd,
+            // double-firing the ticker.
             SyncRoot.EnterWriteLock();
             try
             {
@@ -267,7 +272,7 @@ public partial class Node : GameObject
         get => base.IsTickable;
         set
         {
-            // A3-O-11: same single-hold discipline as TickSeconds above.
+            // Same single-hold discipline as TickSeconds above.
             SyncRoot.EnterWriteLock();
             try
             {
@@ -446,13 +451,13 @@ public partial class Node : GameObject
     }
 
     // Port of nodes.py:479
-    public override bool AtDelete(GameObject caller)
+    public override bool AtDelete(GameObject? caller)
     {
         return Hookable("at_delete", () =>
         {
             if (!Access(caller, "delete"))
             {
-                try { caller.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.AtDelete: " + logEx.Message, "NoIdMarker"); }
+                try { caller?.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.AtDelete: " + logEx.Message, "NoIdMarker"); }
                 return false;
             }
             return true;

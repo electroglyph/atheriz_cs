@@ -47,14 +47,15 @@ public class ServerRegressionTests
         Assert.Contains("IsSafeHost", src);
     }
 
-    // the fallback spawn must attach the log stream to the child.
+    // the fallback spawn must fail loudly, never attach a pump that dies
+    // with the spawner and leaves the child on a readerless pipe.
     [Fact]
-    public void FallbackSpawn_AttachesLog()
+    public void FallbackSpawn_FailsLoudWithoutPump()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "DaemonSpawner.cs");
-        int i = src.IndexOf("trying direct", StringComparison.Ordinal);
-        Assert.True(i >= 0);
-        Assert.Contains("RedirectStandardOutput = true", src.Substring(i));
+        Assert.DoesNotContain("trying direct", src);
+        Assert.DoesNotContain("BeginOutputReadLine", src);
+        Assert.Contains("use --foreground instead", src);
     }
 
     // process identity must not match on a mere substring.

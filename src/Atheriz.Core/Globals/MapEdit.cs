@@ -49,14 +49,24 @@ public sealed class MapEditChain
     public List<Coord> Chain { get; set; } = new();
 
     public MapEditChain(string key, string ip, string area, int z, Session? session = null)
+        : this(key, ip, area, z, session, stamp: true)
+    {
+    }
+
+    // Copy paths use stamp:false and restore the source stamps: stamping here
+    // just to overwrite burns two clock reads per copy.
+    internal MapEditChain(string key, string ip, string area, int z, Session? session, bool stamp)
     {
         Key = key;
         Ip = ip;
         Area = area;
         Z = z;
         Session = session;
-        CreatedAt = DateTime.UtcNow;
-        CreatedMonotonic = MapEdit.GetMonotonic();
+        if (stamp)
+        {
+            CreatedAt = DateTime.UtcNow;
+            CreatedMonotonic = MapEdit.GetMonotonic();
+        }
         Chain = new List<Coord>();
     }
 }
@@ -96,15 +106,9 @@ public static class MapEdit
     public static readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.SupportsRecursion);
 
     // Port of spec: Dictionary<string,MapEditChain> chains — snapshot copy (never the live dict).
-    public static Dictionary<string, MapEditChain> chains
-    {
-        get
-        {
-            Lock.EnterReadLock();
-            try { return new Dictionary<string, MapEditChain>(_chains); }
-            finally { Lock.ExitReadLock(); }
-        }
-    }
+    // Single body with ChainsSnapshot below: two lock+copy implementations
+    // of the same snapshot would drift apart unnoticed.
+    public static Dictionary<string, MapEditChain> chains => (Dictionary<string, MapEditChain>)ChainsSnapshot;
     // Also provide capitalized alias per spec naming
     public static IReadOnlyDictionary<string, MapEditChain> ChainsSnapshot
     {
@@ -149,16 +153,23 @@ public static class MapEdit
         }
     }
 
+    // Drops previous-key mappings whose chain is gone. Caller must hold the
+    // write lock: every purge site already does (evict, discard, remove).
+    private static void CollectStalePreviousLocked()
+    {
+        var stale = new List<string>();
+        foreach (var kv in _previous)
+            if (!_chains.ContainsKey(kv.Value)) stale.Add(kv.Key);
+        foreach (var k in stale) { _previous.Remove(k); }
+    }
+
     // Port of mapedit.py _evict — no time-based expiry (valid while session
     // open); only drops stale previous-key mappings and enforces the cap.
     private static void EvictLocked(double nowMonotonic)
     {
         int cap = EffectiveCap();
         // Port of mapedit.py:50 stale = [p for p,cur in _previous if cur not in _chains]
-        var stale = new List<string>();
-        foreach (var kv in _previous)
-            if (!_chains.ContainsKey(kv.Value)) stale.Add(kv.Key);
-        foreach (var k in stale) { _previous.Remove(k); }
+        CollectStalePreviousLocked();
 
         // Port of mapedit.py:53-60 while len(_chains) > cap: oldest = min by created
         while (_chains.Count > cap)
@@ -177,9 +188,7 @@ public static class MapEdit
             if (removed != null && !string.IsNullOrEmpty(removed.PreviousKey))
                 _previous.Remove(removed.PreviousKey);
             // Port of mapedit.py:58-60 stale after eviction
-            var stale2 = new List<string>();
-            foreach (var kv in _previous) if (!_chains.ContainsKey(kv.Value)) stale2.Add(kv.Key);
-            foreach (var k in stale2) { _previous.Remove(k); }
+            CollectStalePreviousLocked();
         }
     }
 
@@ -217,7 +226,7 @@ public static class MapEdit
     // Copy-on-write snapshot: readers (incl. GetChain/Consume holders) never
     // observe torn in-place rotation, and external holders cannot corrupt
     // store state. Consume stores a fresh instance and returns a copy.
-    private static MapEditChain CopyOf(MapEditChain c) => new(c.Key, c.Ip, c.Area, c.Z, c.Session)
+    private static MapEditChain CopyOf(MapEditChain c) => new(c.Key, c.Ip, c.Area, c.Z, c.Session, stamp: false)
     {
         PreviousKey = c.PreviousKey,
         Seq = c.Seq,
@@ -383,20 +392,22 @@ public static class MapEdit
                 if (c != null && !string.IsNullOrEmpty(c.PreviousKey))
                     _previous.Remove(c.PreviousKey);
             }
-            var stale = new List<string>();
-            foreach (var kv in _previous) if (!_chains.ContainsKey(kv.Value)) stale.Add(kv.Key);
-            foreach (var k in stale) { _previous.Remove(k); }
+            CollectStalePreviousLocked();
         }
         finally { Lock.ExitWriteLock(); }
     }
 
-    // Port of spec: ValidateChain — faithful boolean check (does not consume)
-    public static bool ValidateChain(string key)
+    // Existence check for a chain key (presence only — no ip/seq check;
+    // use the ValidateChain(key, ip, seq) overload when those matter).
+    public static bool ChainExists(string key)
     {
         var c = GetChain(key);
         if (c == null) return false;
         return true;
     }
+
+    [Obsolete("Use ChainExists: this only checks key presence, not ip/seq.")]
+    public static bool ValidateChain(string key) => ChainExists(key);
 
     // Overload validating ip/seq without rotating (advisory)
     public static bool ValidateChain(string key, string ip, int seq)
@@ -448,9 +459,7 @@ public static class MapEdit
             // If key itself is a previous key
             if (_previous.Remove(key)) removed = true;
             // Clean stale
-            var stale = new List<string>();
-            foreach (var kv in _previous) if (!_chains.ContainsKey(kv.Value)) stale.Add(kv.Key);
-            foreach (var k in stale) { _previous.Remove(k); }
+            CollectStalePreviousLocked();
             return removed;
         }
         finally { Lock.ExitWriteLock(); }

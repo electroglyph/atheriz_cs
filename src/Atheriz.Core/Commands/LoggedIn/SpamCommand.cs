@@ -45,7 +45,6 @@ public sealed class SpamCommand : Command
                 if (home is Node node) character.MoveTo(node);
                 else if (home != null) character.MoveTo(home);
                 account.AddCharacter(character);
-                ObjectRegistry.AddObject(account);
                 ObjectRegistry.AddObject(character);
                 created.Add((an, pw, cn));
             }
@@ -71,6 +70,6 @@ public sealed class SpamCommand : Command
         }
         catch (Exception) { }
         sw.Stop();
-        go.Msg($"Created {created.Count} accounts/chars in {sw.Elapsed.TotalMilliseconds} milliseconds. Credentials saved to {credsFile}");
+        go.Msg($"Created {created.Count} accounts/chars in {sw.Elapsed.TotalMilliseconds} milliseconds. Names saved to {credsFile}");
     }
 }

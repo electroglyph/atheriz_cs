@@ -30,7 +30,7 @@ public class PortedNodeHooksTests
 
     [Fact] public void Move_HookRelocatesMidGate_AbortsStaleMove()
     {
-        // A3-O-7: pre-gates run unlocked and hooks can move things. A hook that
+        // Pre-gates run unlocked and hooks can move things. A hook that
         // relocates the mover must abort the in-flight move — not remove from
         // the stale room and double-insert into the destination.
         using var env=GlobalTestEnv.Enter();
