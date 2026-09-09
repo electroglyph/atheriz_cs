@@ -1,5 +1,3 @@
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands;
 
@@ -45,12 +43,12 @@ public class BaseChannelCommand : Command
     {
         get
         {
-            if (_channel != null && _channel.IsDeleted)
+            if (_channel is not null && _channel.IsDeleted)
             {
                 _channel = null;
                 throw new InvalidOperationException($"Channel {id} not found.");
             }
-            if (_channel == null)
+            if (_channel is null)
             {
                 var c = ObjectRegistry.Get(id);
                 if (c.Count > 0)
@@ -67,7 +65,7 @@ public class BaseChannelCommand : Command
         set
         {
             _channel = value;
-            if (value != null) id = value.Id;
+            if (value is not null) id = value.Id;
         }
     }
 
@@ -102,7 +100,7 @@ public class BaseChannelCommand : Command
             return;
         }
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null)
+        if (pa is null)
         {
             // Try to parse if args is raw string? For test they pass ParsedArgs directly
             caller.Msg(Parser!.FormatHelp());
@@ -145,7 +143,7 @@ public class BaseChannelCommand : Command
     // State save/restore excluding the live _channel reference.
     public Dictionary<string, object?> GetState()
     {
-        var d = new Dictionary<string, object?>();
+        Dictionary<string, object?> d = [];
         // In real dill, _channel popped; we simulate by not including
         d["id"] = id;
         // other fields like Key etc not needed

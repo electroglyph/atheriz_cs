@@ -1,6 +1,4 @@
-using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
 
@@ -52,10 +50,10 @@ public static class SessionPuppetHelper
     // double-checked session/deleted, ConnTime stamp. Messages + false when unavailable.
     public static bool TryAttach(BaseConnection conn, GameObject character)
     {
-        if (conn.Session == null) { conn.Msg("This character is not available."); return false; }
+        if (conn.Session is null) { conn.Msg("This character is not available."); return false; }
         bool notAvailable = false;
         character.SyncRoot.EnterReadLock();
-        try { if (character.Session != null || character.IsDeleted) notAvailable = true; }
+        try { if (character.Session is not null || character.IsDeleted) notAvailable = true; }
         finally { character.SyncRoot.ExitReadLock(); }
         if (notAvailable) { conn.Msg("This character is not available."); return false; }
         lock (conn.Session.Lock)
@@ -63,7 +61,7 @@ public static class SessionPuppetHelper
             character.SyncRoot.EnterWriteLock();
             try
             {
-                if (character.Session != null || character.IsDeleted) notAvailable = true;
+                if (character.Session is not null || character.IsDeleted) notAvailable = true;
                 else
                 {
                     conn.Session.Puppet = character;

@@ -105,7 +105,7 @@ public class PortedAutosaveTests
         var ticker = new AsyncTicker(new AsyncThreadPool(maxThreads:2, queueLimit:100));
         Autosave.StartAutosave(ticker, s);
         Autosave.StopAutosave(ticker);
-        Assert.Empty(ticker.Slots.Where(kv=>kv.Value.Coros.Any(d=>d.Method.Name.Contains("AutosaveTick"))));
+        Assert.DoesNotContain(ticker.Slots, kv=>kv.Value.Coros.Any(d=>d.Method.Name.Contains("AutosaveTick")));
         Assert.False(Autosave.AutosaveStarted);
         ticker.Clear();
     }
@@ -118,7 +118,7 @@ public class PortedAutosaveTests
         var ticker = new AsyncTicker(new AsyncThreadPool(maxThreads:2, queueLimit:100));
         Autosave.StartAutosave(ticker, s);
         Autosave.StopAutosave(ticker);
-        Assert.Empty(ticker.Slots.Where(kv=>kv.Value.Coros.Any(d=>d.Method.Name.Contains("AutosaveTick"))));
+        Assert.DoesNotContain(ticker.Slots, kv=>kv.Value.Coros.Any(d=>d.Method.Name.Contains("AutosaveTick")));
         ticker.Clear();
     }
 

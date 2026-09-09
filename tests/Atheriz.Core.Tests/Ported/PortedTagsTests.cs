@@ -242,7 +242,7 @@ public class PortedTagsTests
     {
         var obj=new GameObject();
         obj.AddTag("hero"); obj.AddTag("hero");
-        Assert.Single(obj.TagsSnapshot.Where(t=>t=="hero"));
+        Assert.Single(obj.TagsSnapshot, t=>t=="hero");
     }
     [Fact] public void AddTagSetsIsModified()
     {

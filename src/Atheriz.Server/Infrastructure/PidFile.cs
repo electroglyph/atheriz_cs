@@ -1,6 +1,4 @@
-using System.Diagnostics;
 using System.Net.NetworkInformation;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Server.Infrastructure;
 
@@ -56,7 +54,7 @@ public sealed class PidFile : IDisposable
             {
                 var mod = proc.MainModule?.FileName ?? "";
                 var fileName = Path.GetFileName(mod).ToLowerInvariant();
-                if (fileName.StartsWith("atheriz"))
+                if (fileName.StartsWith("atheriz", StringComparison.Ordinal))
                     return true;
                 // dotnet host: only trust when the command line names the server
                 // assembly itself. A bare "Atheriz" substring is NOT enough: the
@@ -131,7 +129,7 @@ public sealed class PidFile : IDisposable
             psi.ArgumentList.Add("-sTCP:LISTEN");
             psi.ArgumentList.Add("-t");
             using var p = Process.Start(psi);
-            if (p != null)
+            if (p is not null)
             {
                 string outp = ReadHelperOutput(p, TimeSpan.FromSeconds(5));
                 foreach (var line in outp.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -148,7 +146,7 @@ public sealed class PidFile : IDisposable
             psi2.ArgumentList.Add("-lptn");
             psi2.ArgumentList.Add($"sport = :{port}");
             using var p2 = Process.Start(psi2);
-            if (p2 != null)
+            if (p2 is not null)
             {
                 string outp = ReadHelperOutput(p2, TimeSpan.FromSeconds(5));
                 // parse pid=1234,
@@ -235,7 +233,7 @@ public sealed class PidFile : IDisposable
     /// </summary>
     private static HashSet<string> GetListeningInodes(int port, out bool tablesRead)
     {
-        var targetInodes = new HashSet<string>();
+        HashSet<string> targetInodes = [];
         tablesRead = false;
         foreach (var netFile in new[] { "/proc/net/tcp", "/proc/net/tcp6" })
         {
@@ -250,7 +248,7 @@ public sealed class PidFile : IDisposable
                 var st = parts[3];
                 if (st != "0A") continue; // LISTEN
                 var portHex = local.Split(':').LastOrDefault();
-                if (portHex == null) continue;
+                if (portHex is null) continue;
                 if (int.TryParse(portHex, System.Globalization.NumberStyles.HexNumber, null, out var pnum) && pnum == port)
                 {
                     var inode = parts[9];

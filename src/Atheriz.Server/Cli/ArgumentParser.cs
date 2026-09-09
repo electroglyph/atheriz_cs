@@ -10,13 +10,13 @@ public static class ArgumentParser
     {
         for (int i = 0; i < a.Length; i++)
         {
-            if (a[i] == longFlag || (shortFlag != null && a[i] == shortFlag))
+            if (a[i] == longFlag || (shortFlag is not null && a[i] == shortFlag))
                 // Missing value is invalid (argparse: "expected one argument"),
                 // not a silent fall back to the default port.
                 return i + 1 < a.Length ? a[i + 1] : string.Empty;
             // Glued short form: -p1234 / -p=1234 (argparse allows -p1234).
             // single-char values count — "-p1" (len 3) must parse.
-            if (shortFlag != null && a[i].Length > shortFlag.Length && a[i].StartsWith(shortFlag, StringComparison.Ordinal))
+            if (shortFlag is not null && a[i].Length > shortFlag.Length && a[i].StartsWith(shortFlag, StringComparison.Ordinal))
             {
                 var rest = a[i].Substring(shortFlag.Length);
                 if (rest.StartsWith("=", StringComparison.Ordinal)) rest = rest.Substring(1);
@@ -34,7 +34,7 @@ public static class ArgumentParser
     public static int? ParsePort(string[] a)
     {
         var v = GetOptionValue(a, "--port", "-p", PortPrefix);
-        if (v != null && int.TryParse(v, out var p)) return p;
+        if (v is not null && int.TryParse(v, out var p)) return p;
         return null;
     }
 
@@ -42,21 +42,21 @@ public static class ArgumentParser
     public static string? InvalidPortValue(string[] a)
     {
         var v = GetOptionValue(a, "--port", "-p", PortPrefix);
-        if (v != null && !int.TryParse(v, out _)) return v;
+        if (v is not null && !int.TryParse(v, out _)) return v;
         return null;
     }
 
     public static string? InvalidTelnetPortValue(string[] a)
     {
         var v = GetOptionValue(a, "--telnet-port", null, TelnetPortPrefix);
-        if (v != null && !int.TryParse(v, out _)) return v;
+        if (v is not null && !int.TryParse(v, out _)) return v;
         return null;
     }
 
     public static int? ParseTelnetPort(string[] a)
     {
         var v = GetOptionValue(a, "--telnet-port", null, TelnetPortPrefix);
-        if (v != null && int.TryParse(v, out var p)) return p;
+        if (v is not null && int.TryParse(v, out var p)) return p;
         var env = Environment.GetEnvironmentVariable("ATHERIZ_TELNET_PORT") ?? Environment.GetEnvironmentVariable("Atheriz__TelnetPort");
         if (int.TryParse(env, out var ep)) return ep;
         return null;
@@ -75,11 +75,11 @@ public static class ArgumentParser
     public static bool HasBareHost(string[] a)
     {
         var v = GetOptionValue(a, "--host", null, HostPrefix);
-        return v != null && v.Length == 0;
+        return v is not null && v.Length == 0;
     }
 
     public static bool HasFlag(string[] a, string longFlag, string? shortFlag = null)
-        => a.Contains(longFlag, StringComparer.Ordinal) || (shortFlag != null && a.Contains(shortFlag, StringComparer.Ordinal));
+        => a.Contains(longFlag, StringComparer.Ordinal) || (shortFlag is not null && a.Contains(shortFlag, StringComparer.Ordinal));
 
     // Glued short-port form (-p1234 / -p=1234), for stripping port flags out of
     // positional filters in the create/new handlers.

@@ -80,7 +80,7 @@ public class AsyncThreadPool : IDisposable
         {
             // Only real queued work is reported: the null control sentinels
             // Stop enqueues for worker shutdown are not user tasks.
-            lock (_queueLock) return _queue.Count(i => i != null);
+            lock (_queueLock) return _queue.Count(i => i is not null);
         }
     }
     public int QueueLimit
@@ -98,7 +98,7 @@ public class AsyncThreadPool : IDisposable
             lock (_lock)
             {
                 // Mimic Python's threads[0]=AsyncThread, threads[1:]=fixed workers
-                var list = new List<Thread>();
+                List<Thread> list = [];
                 // dummy async placeholder thread (not started) to keep index alignment for tests that check threads[1:]
                 // We create a stub thread that is not alive; Python's AsyncThread stops on pool stop.
                 var dummy = new Thread(() => {}) { IsBackground = true, Name = "AsyncThread0" };
@@ -268,16 +268,16 @@ public class AsyncThreadPool : IDisposable
                     {
                         task.ContinueWith(t =>
                         {
-                            if (t.IsFaulted && t.Exception != null) try { AtherizLogger.LogError(t.Exception.ToString()); } catch { Console.Error.WriteLine(t.Exception.ToString()); }
+                            if (t.IsFaulted && t.Exception is not null) try { AtherizLogger.LogError(t.Exception.ToString()); } catch { Console.Error.WriteLine(t.Exception.ToString()); }
                         }, TaskScheduler.Default);
                     }
                     catch { }
                     try { AtherizLogger.LogError($"Work item exceeded {WorkItemInlineWaitSeconds}s without completing; worker slot released."); } catch { }
                     return;
                 }
-                if (task.IsFaulted && task.Exception != null) try { AtherizLogger.LogError(task.Exception.ToString()); } catch { Console.Error.WriteLine(task.Exception.ToString()); }
+                if (task.IsFaulted && task.Exception is not null) try { AtherizLogger.LogError(task.Exception.ToString()); } catch { Console.Error.WriteLine(task.Exception.ToString()); }
             }
-            else if (task.IsFaulted && task.Exception != null)
+            else if (task.IsFaulted && task.Exception is not null)
             {
                 try { AtherizLogger.LogError(task.Exception.ToString()); } catch { Console.Error.WriteLine(task.Exception.ToString()); }
             }
@@ -366,7 +366,7 @@ public class AsyncThreadPool : IDisposable
                         snapshot = new Dictionary<long, (string, double)>(_currentTasks);
                     }
                 }
-                if (snapshot != null)
+                if (snapshot is not null)
                     LogStarvation(qsize, busy, saturatedFor, snapshot);
             }
             else
@@ -452,7 +452,7 @@ public class AsyncThreadPool : IDisposable
             var r = BindDelegate(del, args)();
             // A returned Task is not a loop coroutine (no loop exists here),
             // but it must not go unobserved: log faults like _do_async does.
-            if (r is Task t) _ = t.ContinueWith(ct => { if (ct.IsFaulted && ct.Exception != null) try { AtherizLogger.LogError(ct.Exception.ToString()); } catch (Exception) { } }, TaskScheduler.Default);
+            if (r is Task t) _ = t.ContinueWith(ct => { if (ct.IsFaulted && ct.Exception is not null) try { AtherizLogger.LogError(ct.Exception.ToString()); } catch (Exception) { } }, TaskScheduler.Default);
         }
         catch (Exception ex) { try { AtherizLogger.LogError(ex.ToString()); } catch (Exception) { } }
     }
@@ -504,7 +504,7 @@ public class AsyncThreadPool : IDisposable
         try
         {
             var cur = Globals.GlobalServices.TryGetPool();
-            return cur != null && !ReferenceEquals(cur, this);
+            return cur is not null && !ReferenceEquals(cur, this);
         }
         catch { return false; }
     }
@@ -554,7 +554,7 @@ public class AsyncThreadPool : IDisposable
                 while (_queue.Count > 0)
                 {
                     var it = _queue.Dequeue();
-                    if (it != null) preserved.Add(it);
+                    if (it is not null) preserved.Add(it);
                 }
                 int needed = preserved.Count + Math.Max(1, _fixedThreads.Count);
                 if (_queueLimit != 0 && needed > _queueLimit)
@@ -590,7 +590,7 @@ public class AsyncThreadPool : IDisposable
             foreach (var t in reliefSnap) t.Join(TimeSpan.FromSeconds(1));
             lock (_lock) _reliefThreads.RemoveAll(t => !t.IsAlive);
 
-            if (_watchdogThread != null && _watchdogThread.IsAlive)
+            if (_watchdogThread is not null && _watchdogThread.IsAlive)
             {
                 _watchdogThread.Join(TimeSpan.FromSeconds(1));
             }

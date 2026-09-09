@@ -1,9 +1,5 @@
 // Port of atheriz/commands/loggedin/maze.py:17 — maze generation with legend and threadpool pathfind
 using Atheriz.Core.Concurrency;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Utils;
-using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -59,7 +55,7 @@ public sealed class MazeCommand : Command
             var globalNh = GlobalServices.GetNodeHandler();
             NodeHandler? factoryNh = null;
             try { factoryNh = NodeHandlerFactory(); } catch (Exception) { }
-            if (factoryNh != null && !ReferenceEquals(factoryNh, globalNh))
+            if (factoryNh is not null && !ReferenceEquals(factoryNh, globalNh))
             {
                 // Test injected custom handler via factory – honour it (keeps MazeMapsStoredInPreGrid passing)
                 nh = factoryNh;
@@ -88,7 +84,7 @@ public sealed class MazeCommand : Command
             var globalMh = GlobalServices.GetMapHandler();
             MapHandler? factoryMh = null;
             try { factoryMh = MapHandlerFactory(); } catch (Exception) { }
-            if (factoryMh != null && !ReferenceEquals(factoryMh, globalMh))
+            if (factoryMh is not null && !ReferenceEquals(factoryMh, globalMh))
             {
                 // Test injected custom MapHandler – honour it to keep PortedMaze tests passing,
                 // but if global already has limbo maps and factory is empty, prefer global to preserve limbo
@@ -104,29 +100,29 @@ public sealed class MazeCommand : Command
         var maze2Exit = tuple2.grid.GetRandomNode();
         var maze3Exit = tuple3.grid.GetRandomNode();
         string exitSymbol = GameUtils.WrapXterm256("!", fg: 9);
-        var mi1 = new MapInfo("maze1", tuple1.map, null, new List<LegendEntry> { new LegendEntry(exitSymbol, "to maze2", maze1Exit != null ? (maze1Exit.Coord.X, maze1Exit.Coord.Y) : null) });
-        var mi2 = new MapInfo("maze2", tuple2.map, null, new List<LegendEntry> { new LegendEntry(exitSymbol, "to maze3", maze2Exit != null ? (maze2Exit.Coord.X, maze2Exit.Coord.Y) : null) });
-        var mi3 = new MapInfo("maze3", tuple3.map, null, new List<LegendEntry> { new LegendEntry(exitSymbol, "to maze1", maze3Exit != null ? (maze3Exit.Coord.X, maze3Exit.Coord.Y) : null) });
+        var mi1 = new MapInfo("maze1", tuple1.map, null, new List<LegendEntry> { new LegendEntry(exitSymbol, "to maze2", maze1Exit is not null ? (maze1Exit.Coord.X, maze1Exit.Coord.Y) : null) });
+        var mi2 = new MapInfo("maze2", tuple2.map, null, new List<LegendEntry> { new LegendEntry(exitSymbol, "to maze3", maze2Exit is not null ? (maze2Exit.Coord.X, maze2Exit.Coord.Y) : null) });
+        var mi3 = new MapInfo("maze3", tuple3.map, null, new List<LegendEntry> { new LegendEntry(exitSymbol, "to maze1", maze3Exit is not null ? (maze3Exit.Coord.X, maze3Exit.Coord.Y) : null) });
         mh.SetMapInfo("maze1", 0, mi1);
         mh.SetMapInfo("maze2", 0, mi2);
         mh.SetMapInfo("maze3", 0, mi3);
-        if (maze1Exit != null && maze2Exit != null) maze1Exit.AddLink(new NodeLink("down", new Coord("maze2", 0, 0, 0), new List<string>{"d"}));
-        if (maze2Exit != null && maze3Exit != null) maze2Exit.AddLink(new NodeLink("down", new Coord("maze3", 0, 0, 0), new List<string>{"d"}));
-        if (maze3Exit != null) maze3Exit.AddLink(new NodeLink("down", new Coord("maze1", 0, 0, 0), new List<string>{"d"}));
+        if (maze1Exit is not null && maze2Exit is not null) maze1Exit.AddLink(new NodeLink("down", new Coord("maze2", 0, 0, 0), new List<string>{"d"}));
+        if (maze2Exit is not null && maze3Exit is not null) maze2Exit.AddLink(new NodeLink("down", new Coord("maze3", 0, 0, 0), new List<string>{"d"}));
+        if (maze3Exit is not null) maze3Exit.AddLink(new NodeLink("down", new Coord("maze1", 0, 0, 0), new List<string>{"d"}));
         var start = nh.GetNode(new Coord("maze1", 0, 0, 0));
         var end = maze1Exit;
         // Faithful to atheriz/commands/loggedin/maze.py:97-107 — queue do_pathfind first,
         // then the "moving to" message, map_enabled, and move_to, with no delay.
         // do_pathfind sends unbackground itself before background, so the highlight
         // can never be cleared by the area-change unbackground that move_to triggers.
-        if (start != null && end != null)
+        if (start is not null && end is not null)
         {
             var capturedConn = go.Session?.Connection;
             bool queued = false;
             try
             {
                 var pool = ThreadPoolFactory();
-                if (pool != null)
+                if (pool is not null)
                 {
                     queued = pool.AddTask(() =>
                     {
@@ -144,7 +140,7 @@ public sealed class MazeCommand : Command
                                 {
                                     var bgPayload = new Dictionary<string, object?> { ["color"] = new List<int> { 83, 128, 56 }, ["coords"] = path.Select(n => (object)new List<int> { n.Coord.X, n.Coord.Y }).ToList() };
                                     try { capturedConn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
-                                    if (capturedConn == null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
+                                    if (capturedConn is null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
                                 } catch (Exception) { }
                             }
                             else
@@ -154,7 +150,7 @@ public sealed class MazeCommand : Command
                                 {
                                     var bgPayload = new Dictionary<string, object?> { ["color"] = new List<int> { 90, 0, 0 }, ["coords"] = dead.Select(c => (object)new List<int> { c.X, c.Y }).ToList() };
                                     try { capturedConn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
-                                    if (capturedConn == null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
+                                    if (capturedConn is null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
                                 } catch (Exception) { }
                             }
                         }
@@ -170,7 +166,7 @@ public sealed class MazeCommand : Command
             if (!go.MoveTo(start))
                 go.Msg($"Could not move to {start.Coord}.");
         }
-        else if (start == null)
+        else if (start is null)
         {
             // No node at origin skip move (test expects not called)
         }
@@ -183,10 +179,10 @@ public sealed class MazeCommand : Command
     }
     public static Dictionary<(int,int), List<(int,int)>> CreateMaze(int width, int height)
     {
-        var visited = new Dictionary<(int,int), bool>();
+        Dictionary<(int,int), bool> visited = [];
         List<(int,int)> GetValid((int,int) coord)
         {
-            var list = new List<(int,int)>();
+            List<(int,int)> list = [];
             if (coord.Item1 > 0) list.Add((coord.Item1 - 1, coord.Item2));
             if (coord.Item1 < width - 1) list.Add((coord.Item1 + 1, coord.Item2));
             if (coord.Item2 > 0) list.Add((coord.Item1, coord.Item2 - 1));
@@ -196,26 +192,26 @@ public sealed class MazeCommand : Command
         var start = (0,0);
         var valid = GetValid(start);
         var current = start;
-        var path = new List<(int,int)>();
-        var maze = new Dictionary<(int,int), List<(int,int)>>();
-        var nodes = maze.GetValueOrDefault(current, new List<(int,int)>());
+        List<(int,int)> path = [];
+        Dictionary<(int,int), List<(int,int)>> maze = [];
+        var nodes = maze.GetValueOrDefault(current, []);
         bool done = false;
         while (!done)
         {
-            if (valid.Count == 0) { path = path.Take(path.Count - 1).ToList(); if (path.Count == 0) { done = true; break; } current = path.Last(); nodes = maze.GetValueOrDefault(current, new List<(int,int)>()); valid = GetValid(current); continue; }
+            if (valid.Count == 0) { path = path.Take(path.Count - 1).ToList(); if (path.Count == 0) { done = true; break; } current = path.Last(); nodes = maze.GetValueOrDefault(current, []); valid = GetValid(current); continue; }
             var c = valid[Random.Shared.Next(valid.Count)];
             visited[c] = true;
             path.Add(c);
             if (nodes.Count == 0) maze[current] = new List<(int,int)>{c}; else { nodes.Add(c); maze[current] = nodes; }
             current = c;
-            nodes = maze.GetValueOrDefault(current, new List<(int,int)>());
+            nodes = maze.GetValueOrDefault(current, []);
             valid = GetValid(current);
             while (valid.Count == 0)
             {
                 path = path.Take(path.Count - 1).ToList();
                 if (path.Count == 0) { done = true; break; }
                 current = path.Last();
-                nodes = maze.GetValueOrDefault(current, new List<(int,int)>());
+                nodes = maze.GetValueOrDefault(current, []);
                 valid = GetValid(current);
             }
         }
@@ -223,7 +219,7 @@ public sealed class MazeCommand : Command
     }
     public static (Dictionary<(int,int), string> map, NodeGrid grid) CreateMap(Dictionary<(int,int), List<(int,int)>> maze, int width, int height, string area)
     {
-        var map = new Dictionary<(int,int), string>();
+        Dictionary<(int,int), string> map = [];
         var grid = new NodeGrid(area, 0);
         foreach (var kv in maze)
         {
@@ -236,10 +232,10 @@ public sealed class MazeCommand : Command
                 if (d == (k.Item1, k.Item2+1)) n=true;
                 if (d == (k.Item1, k.Item2-1)) s=true;
             }
-            if (k.Item1 > 0 && maze.GetValueOrDefault((k.Item1-1,k.Item2), new List<(int,int)>()).Contains(k)) w=true;
-            if (k.Item1 < width-1 && maze.GetValueOrDefault((k.Item1+1,k.Item2), new List<(int,int)>()).Contains(k)) e=true;
-            if (k.Item2 > 0 && maze.GetValueOrDefault((k.Item1,k.Item2-1), new List<(int,int)>()).Contains(k)) s=true;
-            if (k.Item2 < height-1 && maze.GetValueOrDefault((k.Item1,k.Item2+1), new List<(int,int)>()).Contains(k)) n=true;
+            if (k.Item1 > 0 && maze.GetValueOrDefault((k.Item1-1,k.Item2), []).Contains(k)) w=true;
+            if (k.Item1 < width-1 && maze.GetValueOrDefault((k.Item1+1,k.Item2), []).Contains(k)) e=true;
+            if (k.Item2 > 0 && maze.GetValueOrDefault((k.Item1,k.Item2-1), []).Contains(k)) s=true;
+            if (k.Item2 < height-1 && maze.GetValueOrDefault((k.Item1,k.Item2+1), []).Contains(k)) n=true;
             var node = new Node(new Coord(area, k.Item1, k.Item2, 0), "Somewhere in a mysterious maze.");
             if (n) node.AddLink(new NodeLink("north", new Coord(area, k.Item1, k.Item2+1, 0), new List<string>{"n"}));
             if (s) node.AddLink(new NodeLink("south", new Coord(area, k.Item1, k.Item2-1, 0), new List<string>{"s"}));

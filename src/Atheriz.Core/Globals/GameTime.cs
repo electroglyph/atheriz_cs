@@ -1,10 +1,6 @@
-using System.Text.Json;
 using Atheriz.Core.Concurrency;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Entities;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Globals;
@@ -70,7 +66,7 @@ public class GameTime
             {
                 CallerId = e.CallerId,
                 Repeat = e.Repeat,
-                Data = e.Data == null ? null : e.Data.ToDictionary(kv => kv.Key, kv => kv.Value.Clone())
+                Data = e.Data is null ? null : e.Data.ToDictionary(kv => kv.Key, kv => kv.Value.Clone())
             }).ToList();
         }
         var json = JsonSerializer.Serialize(dto, JsonOptions.Default);
@@ -88,7 +84,7 @@ public class GameTime
         {
             db.Database.EnsureCreated();
             var row = db.GameTime.AsNoTracking().FirstOrDefault(r => r.Id == 0);
-            if (row == null)
+            if (row is null)
             {
                 if (TryLoadLegacyFile(db)) return;
                 _lock.EnterWriteLock();
@@ -107,7 +103,7 @@ public class GameTime
                 finally { _lock.ExitWriteLock(); }
                 return;
             }
-            if (dto == null)
+            if (dto is null)
             {
                 _lock.EnterWriteLock();
                 try { _ticks = 0; _alarms.Clear(); }
@@ -124,7 +120,7 @@ public class GameTime
                     var parts = kv.Key.Split('|');
                     if (parts.Length != 2) continue;
                     var key = (parts[0], parts[1]);
-                    var list = new List<AlarmEntry>();
+                    List<AlarmEntry> list = [];
                     foreach (var a in kv.Value)
                     {
                         // validate data is dict or null — already typed
@@ -155,7 +151,7 @@ public class GameTime
             var root = doc.RootElement;
             long ticks = 0;
             if (root.TryGetProperty("ticks", out var tp) && tp.ValueKind == JsonValueKind.Number) ticks = tp.GetInt64();
-            var alarms = new Dictionary<(string, string), List<AlarmEntry>>();
+            Dictionary<(string, string), List<AlarmEntry>> alarms = [];
             if (root.TryGetProperty("alarms", out var ap) && ap.ValueKind == JsonValueKind.Object)
             {
                 foreach (var prop in ap.EnumerateObject())
@@ -178,7 +174,7 @@ public class GameTime
                     }
                     catch { continue; }
                     if (prop.Value.ValueKind != JsonValueKind.Array) continue;
-                    var list = new List<AlarmEntry>();
+                    List<AlarmEntry> list = [];
                     foreach (var elem in prop.Value.EnumerateArray())
                     {
                         if (elem.ValueKind != JsonValueKind.Array) continue;
@@ -189,7 +185,7 @@ public class GameTime
                         Dictionary<string, JsonElement>? data = null;
                         if (arr[2].ValueKind == JsonValueKind.Object)
                         {
-                            data = new Dictionary<string, JsonElement>();
+                            data = [];
                             foreach (var dprop in arr[2].EnumerateObject()) data[dprop.Name] = dprop.Value.Clone();
                         }
                         else if (arr[2].ValueKind != JsonValueKind.Null) continue; // skip non-dict
@@ -238,15 +234,15 @@ public class GameTime
 
     public void AddAlarm(string hour, string minute, GameObject caller, bool repeat = false, Dictionary<string, JsonElement>? data = null)
     {
-        if (caller == null) return;
+        if (caller is null) return;
         AddAlarm(hour, minute, caller.Id, repeat, data);
     }
 
     // Overload for validation test: data as object must throw if not dict/null
     public void AddAlarm(string hour, string minute, GameObject caller, bool repeat, object? data)
     {
-        if (caller == null) return;
-        if (data != null && data is not Dictionary<string, JsonElement> && data is not Dictionary<string, object>)
+        if (caller is null) return;
+        if (data is not null && data is not Dictionary<string, JsonElement> && data is not Dictionary<string, object>)
             throw new ArgumentException($"alarm data must be a dict or None, got {data.GetType().Name}");
         Dictionary<string, JsonElement>? dict = null;
         if (data is Dictionary<string, JsonElement> d) dict = d;
@@ -262,8 +258,8 @@ public class GameTime
 
     public void AddAlarm(string hour, string minute, int callerId, bool repeat = false, Dictionary<string, JsonElement>? data = null)
     {
-        if (hour == null) throw new ArgumentNullException(nameof(hour));
-        if (minute == null) throw new ArgumentNullException(nameof(minute));
+        ArgumentNullException.ThrowIfNull(hour);
+        ArgumentNullException.ThrowIfNull(minute);
         hour = hour.ToString();
         minute = minute.ToString();
         // Clone elements on the way in: JsonElement borrows its source
@@ -271,7 +267,7 @@ public class GameTime
         // the caller disposes its document. Clone throws here for
         // already-dead input — fail fast at the boundary, not at save time.
         Dictionary<string, JsonElement>? owned = null;
-        if (data != null)
+        if (data is not null)
         {
             try { owned = data.ToDictionary(kv => kv.Key, kv => kv.Value.Clone()); }
             catch (ObjectDisposedException ex)
@@ -284,7 +280,7 @@ public class GameTime
             var key = (hour, minute);
             if (!_alarms.TryGetValue(key, out var list))
             {
-                list = new List<AlarmEntry>();
+                list = [];
                 _alarms[key] = list;
             }
             list.Add(new AlarmEntry { CallerId = callerId, Repeat = repeat, Data = owned });
@@ -327,7 +323,7 @@ public class GameTime
 
     public void RemoveAlarm(string hour, string minute, GameObject caller)
     {
-        if (caller == null) return;
+        if (caller is null) return;
         RemoveAlarm(hour, minute, caller.Id);
     }
 
@@ -426,7 +422,7 @@ public class GameTime
         bool ours;
         lock (_startLock)
         {
-            ours = _runningTicker == null || ReferenceEquals(_runningTicker, ticker);
+            ours = _runningTicker is null || ReferenceEquals(_runningTicker, ticker);
             if (ours) { _runningTicker = null; Started = false; }
         }
         if (ours) ticker.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
@@ -442,9 +438,9 @@ public class GameTime
     private void StopOwnedFallbacks()
     {
         var t = Interlocked.Exchange(ref _ownedTicker, null);
-        if (t != null) try { t.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, "GameTimePersistDto"); }
+        if (t is not null) try { t.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, "GameTimePersistDto"); }
         var p = Interlocked.Exchange(ref _ownedPool, null);
-        if (p != null) try { p.Stop(wait: false); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, "GameTimePersistDto"); }
+        if (p is not null) try { p.Stop(wait: false); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, "GameTimePersistDto"); }
     }
 
     public bool SunUp()
@@ -465,7 +461,7 @@ public class GameTime
         finally { _lock.ExitWriteLock(); }
 
         var after = GetTime();
-        var callers = new List<((string Hour, string Minute) Key, AlarmEntry Entry)>();
+        List<((string Hour, string Minute) Key, AlarmEntry Entry)> callers = [];
         _lock.EnterReadLock();
         try
         {

@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/follow.py:192
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -44,10 +42,10 @@ public sealed class FollowCommand : Command
         // without cleanup strands a stale id on the old leader (owner decision
         // 2026-09-08). Runs outside all object locks (registry -> object order).
         var prevId = go.Following;
-        if (prevId != null && prevId != target.Id)
+        if (prevId is not null && prevId != target.Id)
         {
             var prev = Atheriz.Core.Globals.ObjectRegistry.Get(prevId.Value).FirstOrDefault();
-            if (prev != null)
+            if (prev is not null)
             {
                 try { prev.RemoveFollower(go.Id); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed FollowCommand old-leader cleanup: " + logEx.Message, "FollowCommand"); }
             }
@@ -56,7 +54,7 @@ public sealed class FollowCommand : Command
         try
         {
             target.AddFollowerRawNoLock(go.Id);
-            if (fresh != null)
+            if (fresh is not null)
             {
                 if (!target.GetScriptsByType("FollowScript").Any()) target.AddScript(fresh);
                 else orphan = fresh;
@@ -64,7 +62,7 @@ public sealed class FollowCommand : Command
             go.Following = target.Id;
         }
         finally { target.SyncRoot.ExitWriteLock(); }
-        if (orphan != null) Atheriz.Core.Globals.ObjectRegistry.RemoveObject(orphan);
+        if (orphan is not null) Atheriz.Core.Globals.ObjectRegistry.RemoveObject(orphan);
         var loc2 = go.ResolveLocationObject();
         if (loc2 is Node node && target.Access(go, "view")) node.MsgContents($"$You(caller) $conj(start) following $you(target).", exclude: null, fromObj: go, mapping: new Dictionary<string, object?> { ["caller"] = go, ["target"] = target });
     }
@@ -79,9 +77,9 @@ public sealed class UnfollowCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        if (go.Following == null) { go.Msg("You aren't following anyone."); return; }
+        if (go.Following is null) { go.Msg("You aren't following anyone."); return; }
         var leader = ObjectRegistry.Get(go.Following.Value).FirstOrDefault();
-        if (leader != null)
+        if (leader is not null)
         {
             leader.RemoveFollower(go.Id);
             if (go.Access(leader, "view")) leader.Msg($"{go.GetDisplayName(leader)} is no longer following you.");
@@ -117,12 +115,12 @@ public sealed class NofollowCommand : Command
         {
             go.Msg("You will no longer allow others to follow you.");
             var followers = go.FollowersSnapshot.ToList();
-            var keep = new HashSet<int>();
+            HashSet<int> keep = [];
             foreach (var id in followers)
             {
                 var follower = ObjectRegistry.Get(id).FirstOrDefault();
-                if (follower != null && follower.IsBuilder) { keep.Add(id); continue; }
-                if (follower != null)
+                if (follower is not null && follower.IsBuilder) { keep.Add(id); continue; }
+                if (follower is not null)
                 {
                     follower.Following = null;
                     if (go.Access(follower, "view")) follower.Msg($"{go.GetDisplayName(follower)} is no longer leading you.");

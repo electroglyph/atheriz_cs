@@ -61,7 +61,7 @@ public static class AssetPathResolver
         yield return Path.Combine(Directory.GetCurrentDirectory(), subB);
         yield return Path.Combine(contentRoot, subA);
         yield return Path.Combine(contentRoot, subB);
-        if (engineDir != null) yield return engineDir;
+        if (engineDir is not null) yield return engineDir;
         yield return Path.Combine(appBaseDir, subA);
         yield return Path.Combine(appBaseDir, subB);
     }
@@ -78,7 +78,7 @@ public static class AssetPathResolver
     {
         var engineTemplates = ResolveEngineTemplates();
         var result = ResolveCandidates(ResolveTable(contentRoot, appBaseDir, engineTemplates, Path.Combine("web", "templates"), "templates"));
-        if (result == null && engineTemplates != null && Directory.Exists(engineTemplates))
+        if (result is null && engineTemplates is not null && Directory.Exists(engineTemplates))
             return engineTemplates;
         return result;
     }

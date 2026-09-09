@@ -1,5 +1,4 @@
 // Port of atheriz/globals/* load pattern (AsNoTracking + Deserialize + lock)
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Persistence;
@@ -39,7 +38,7 @@ public static class JsonTableLoader
             try
             {
                 var dto = deserialize(row.Data);
-                if (dto != null)
+                if (dto is not null)
                 {
                     try { add(dto, row); }
                     catch (Exception ex) { failed++; AtherizLogger.LogDebug($"Suppressed JsonTableLoader.LoadList<{typeof(TRow).Name}> add: {ex.Message}", "JsonTableLoader"); }
@@ -63,14 +62,14 @@ public static class JsonTableLoader
             AtherizLogger.LogError($"LoadInto<{typeof(TRow).Name}> query failed; loading as empty.", ex);
             return;
         }
-        var buffer = new List<(TDto dto, TRow row)>();
+        List<(TDto dto, TRow row)> buffer = [];
         int bad = 0;
         foreach (var row in rows)
         {
             try
             {
                 var dto = deserialize(row.Data);
-                if (dto != null) buffer.Add((dto, row));
+                if (dto is not null) buffer.Add((dto, row));
                 else bad++;
             }
             catch (Exception) { bad++; }
@@ -97,14 +96,14 @@ public static class JsonTableLoader
             AtherizLogger.LogError($"LoadAll<{typeof(TRow).Name}> query failed; loading as empty.", ex);
             return [];
         }
-        var outList = new List<TDto>();
+        List<TDto> outList = [];
         int bad = 0;
         foreach (var row in rows)
         {
             try
             {
                 var dto = deserialize(row.Data);
-                if (dto != null) outList.Add(dto);
+                if (dto is not null) outList.Add(dto);
                 else bad++;
             }
             catch (Exception) { bad++; }

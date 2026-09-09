@@ -1,7 +1,5 @@
 // Port of atheriz/objects/contents.py:search + atheriz/commands/loggedin/delete.py:47-65 + ban.py helpers (dedup)
 using System.Diagnostics.CodeAnalysis;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands;
 
@@ -28,23 +26,23 @@ public static class CommandHelpers
     public static IEnumerable<CmdSet> LocalVerbSets(GameObject go)
     {
         var loc = go.ResolveLocationObject();
-        if (loc != null)
+        if (loc is not null)
         {
             foreach (var id in loc.ContentsSnapshot)
             {
                 var o = ObjectRegistry.Get(id).FirstOrDefault();
-                if (o?.ExternalCmdSet != null) yield return o.ExternalCmdSet;
+                if (o?.ExternalCmdSet is not null) yield return o.ExternalCmdSet;
             }
             // the location's OWN set too — dispatch consults it
             // (CommandDispatcher locObj.ExternalCmdSet check), so Help/None
             // suggestions must include it or they disagree with dispatch.
             // Yielded last to preserve dispatch precedence (contents first).
-            if (loc.ExternalCmdSet != null) yield return loc.ExternalCmdSet;
+            if (loc.ExternalCmdSet is not null) yield return loc.ExternalCmdSet;
         }
         foreach (var id in go.ContentsSnapshot)
         {
             var o = ObjectRegistry.Get(id).FirstOrDefault();
-            if (o?.ExternalCmdSet != null) yield return o.ExternalCmdSet;
+            if (o?.ExternalCmdSet is not null) yield return o.ExternalCmdSet;
         }
     }
     /// <summary>
@@ -57,16 +55,16 @@ public static class CommandHelpers
         string raw = name.Trim();
         // Handle parenthesized coord like "(area,0,0,0)" -> strip parens for detection
         string inner = raw;
-        if (inner.StartsWith("(") && inner.EndsWith(")")) inner = inner[1..^1];
+        if (inner.StartsWith("(", StringComparison.Ordinal) && inner.EndsWith(")", StringComparison.Ordinal)) inner = inner[1..^1];
         // Coord detection: 4 parts with last 3 ints
         if (inner.Contains(","))
         {
             var parts = inner.Split(',').Select(p => p.Trim()).ToList();
-            if (parts.Count == 4 && int.TryParse(parts[1], out var x) && int.TryParse(parts[2], out var y) && int.TryParse(parts[3], out var z))
+            if (parts is [var areaName, var xs, var ys, var zs] && int.TryParse(xs, out var x) && int.TryParse(ys, out var y) && int.TryParse(zs, out var z))
             {
-                var coord = new Coord(parts[0], x, y, z);
+                var coord = new Coord(areaName, x, y, z);
                 var node = ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(coord)).FirstOrDefault() as GameObject;
-                if (node != null) return [node];
+                if (node is not null) return [node];
                 return [];
             }
         }
@@ -74,9 +72,9 @@ public static class CommandHelpers
         if (raw.Equals("here", StringComparison.OrdinalIgnoreCase))
         {
             var locHere = caller.ResolveLocationObject();
-            return locHere != null ? [locHere] : [];
+            return locHere is not null ? [locHere] : [];
         }
-        if (raw.StartsWith("#"))
+        if (raw.StartsWith("#", StringComparison.Ordinal))
         {
             if (!int.TryParse(raw[1..], out var id)) return [];
             var objs = ObjectRegistry.Get(id);
@@ -88,7 +86,7 @@ public static class CommandHelpers
         if (matches.Count == 0)
         {
             var loc = caller.ResolveLocationObject();
-            if (loc != null && loc.Access(caller, "view"))
+            if (loc is not null && loc.Access(caller, "view"))
             {
                 if (loc is Node node) matches = node.Search(raw, true, caller);
                 else matches = ContentUtils.Search(loc, raw, id => ObjectRegistry.Get(id).FirstOrDefault(), true, caller);
@@ -113,10 +111,10 @@ public static class CommandHelpers
     public static GameObject? ResolveObject(GameObject caller, string query, Func<GameObject, bool>? filter = null)
     {
         var list = SearchWithFallback(caller, query);
-        if (filter != null) list = list.Where(filter).ToList();
+        if (filter is not null) list = list.Where(filter).ToList();
         if (list.Count == 0)
         {
-            if (query.StartsWith("#"))
+            if (query.StartsWith("#", StringComparison.Ordinal))
             {
                 if (!int.TryParse(query[1..], out var id))
                 {

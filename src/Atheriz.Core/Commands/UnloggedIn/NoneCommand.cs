@@ -1,5 +1,3 @@
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
 
@@ -15,7 +13,7 @@ public sealed class NoneCommand : Command
     {
         var pa = args as GameArgumentParser.ParsedArgs;
         string text = "";
-        if (pa != null) text = string.Join(" ", pa.GetList("none"));
+        if (pa is not null) text = string.Join(" ", pa.GetList("none"));
         else text = (args as string ?? "").Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; }
         var ignored = AtherizSettings.Global.AutoAliasIgnoredKeys;

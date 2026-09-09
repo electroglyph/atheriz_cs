@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Atheriz.Core.Persistence;
 
 namespace Atheriz.Core.Persistence.Dto;
@@ -75,12 +74,12 @@ public static class GameObjectDtoSerializer
 
     public static string ToJson(GameObjectDto dto)
     {
-        if (ToJsonHook != null) return ToJsonHook(dto);
+        if (ToJsonHook is not null) return ToJsonHook(dto);
         return JsonSerializer.Serialize(dto, JsonOpts);
     }
     public static GameObjectDto FromJson(string json)
     {
-        if (FromJsonHook != null) return FromJsonHook(json);
+        if (FromJsonHook is not null) return FromJsonHook(json);
         return JsonSerializer.Deserialize<GameObjectDto>(json, JsonOpts)
             ?? throw new InvalidDataException("Failed to deserialize GameObjectDto");
     }

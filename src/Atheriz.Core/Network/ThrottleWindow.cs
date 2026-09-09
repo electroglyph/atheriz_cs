@@ -37,8 +37,8 @@ public static class ThrottleWindow
                 List<string>? expired = null;
                 foreach (var entry in last)
                     if (now - entry.Value >= window)
-                        (expired ??= new List<string>()).Add(entry.Key);
-                if (expired != null)
+                        (expired ??= []).Add(entry.Key);
+                if (expired is not null)
                     foreach (var k in expired) last.Remove(k);
             }
             else if (last.Count > 0)
@@ -49,9 +49,9 @@ public static class ThrottleWindow
                 {
                     if (probed++ >= MaxEvictProbePerCall) break;
                     if (now - entry.Value >= window)
-                        (expiredFew ??= new List<string>()).Add(entry.Key);
+                        (expiredFew ??= []).Add(entry.Key);
                 }
-                if (expiredFew != null)
+                if (expiredFew is not null)
                     foreach (var k in expiredFew) last.Remove(k);
             }
             if (last.TryGetValue(host, out var prev) && now - prev < window) return false;

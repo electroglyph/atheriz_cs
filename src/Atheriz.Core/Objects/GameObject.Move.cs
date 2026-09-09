@@ -1,5 +1,3 @@
-using Atheriz.Core.Globals;
-using Atheriz.Core.Commands;
 using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Objects;
@@ -18,8 +16,8 @@ public partial class GameObject
         {
             // Port of base_obj.py:1067-1071
             var locObj = ResolveLocationObject();
-            if (locObj != null && !locObj.Access(this, "exit")) return false; // Port of base_obj.py:1067 if self.location and not self.location.access(self,"exit"): return False
-            if (destination != null && !destination.Access(this, "enter")) return false; // Port of base_obj.py:1069 if destination and not destination.access(self,"enter"): return False
+            if (locObj is not null && !locObj.Access(this, "exit")) return false; // Port of base_obj.py:1067 if self.location and not self.location.access(self,"exit"): return False
+            if (destination is not null && !destination.Access(this, "enter")) return false; // Port of base_obj.py:1069 if destination and not destination.access(self,"enter"): return False
             return true;
         }, destination, toExit);
     }
@@ -56,7 +54,7 @@ public partial class GameObject
     // Keep existing AddContent/RemoveContent; add object overloads for API parity spec: AddObject(GameObject), RemoveObject, ForContents(Action)
     public void AddObject(GameObject obj) // Port of base_obj.py:823 add_object
     {
-        if (obj == null) return;
+        if (obj is null) return;
         _lock.EnterWriteLock();
         try
         {
@@ -77,7 +75,7 @@ public partial class GameObject
 
     public void RemoveObject(GameObject obj) // Port of base_obj.py:834 remove_object
     {
-        if (obj == null) return;
+        if (obj is null) return;
         _lock.EnterWriteLock();
         try { _contents.Remove(obj.Id); _flags.IsModified = true; }
         finally { _lock.ExitWriteLock(); }
@@ -134,7 +132,7 @@ public partial class GameObject
         {
             // O(1) handler index first, registry scan only for ungridded nodes.
             destObj = ObjectRegistry.FindNodeByCoord(coord);
-            if (destObj == null) return false; // destination Node not found
+            if (destObj is null) return false; // destination Node not found
         }
         else if (destination is LocationRef locRef)
         {
@@ -160,10 +158,10 @@ public partial class GameObject
         }
 
         // Port of base_obj.py:1109-1117 if destination is None: remove from loc, location=None, at_post_move
-        if (destObj == null)
+        if (destObj is null)
         {
             GameObject? locObj = ResolveLocationObject();
-            if (locObj != null)
+            if (locObj is not null)
             {
                 // Need to handle both GameObject container and Node container
                 // For Node, need NodeLock handling? Simplified via RemoveContent
@@ -186,14 +184,14 @@ public partial class GameObject
         if (!destObj.IsNode)
         {
             var cur = destObj;
-            var seen = new HashSet<int>();
-            while (cur != null)
+            HashSet<int> seen = [];
+            while (cur is not null)
             {
                 if (cur == this || cur.Id == this.Id) return false; // Port of base_obj.py:1122-1123
                 if (!seen.Add(cur.Id)) return false; // cycle
                 // Get next location in chain
                 var next = cur.ResolveLocationObject();
-                if (next == null) break;
+                if (next is null) break;
                 if (next.IsNode) break; // stop at node per Python is_node check
                 cur = next;
             }
@@ -204,7 +202,7 @@ public partial class GameObject
             // cap silently allows cycles in wide containers.
             if (IsContainer)
             {
-                var visited = new HashSet<int>();
+                HashSet<int> visited = [];
                 var stack = new Stack<int>(ContentsSnapshot);
                 while (stack.Count > 0)
                 {
@@ -212,7 +210,7 @@ public partial class GameObject
                     if (!visited.Add(cid)) continue;
                     if (cid == destObj.Id) return false;
                     var obj = ObjectRegistry.Get(cid).FirstOrDefault();
-                    if (obj != null && obj.IsContainer)
+                    if (obj is not null && obj.IsContainer)
                     {
                         foreach (var sub in obj.ContentsSnapshot) stack.Push(sub);
                     }
@@ -225,7 +223,7 @@ public partial class GameObject
         // unloaded-but-persisted location still resolves instead of stranding
         // the move with no source to detach from.
         GameObject? oldLoc = ResolveLocationObject();
-        if (oldLoc == null && Location is LocationRef.ObjectLocation olLoc)
+        if (oldLoc is null && Location is LocationRef.ObjectLocation olLoc)
             oldLoc = ObjectRegistry.GetEver(olLoc.ObjectId);
 
         // --- sort_locks helper: NodeGrid before Node before GameObject (Id/Coord ordering) ---
@@ -235,7 +233,7 @@ public partial class GameObject
         // For grid locks: would need NodeGrid.Lock before Node.Lock; we best-effort acquire Node locks in sorted order,
         // and attempt grid locks if resolvable (omitted if handler not available).
         List<GameObject> toLock = new();
-        if (oldLoc != null) toLock.Add(oldLoc);
+        if (oldLoc is not null) toLock.Add(oldLoc);
         toLock.Add(destObj);
         toLock.Sort((a, b) =>
         {
@@ -267,7 +265,7 @@ public partial class GameObject
         // pre-gates run with NO location locks held (user hooks can
         // move things and take other locks, so they must not run under the
         // sort_locks order established below).
-        if (oldLoc != null)
+        if (oldLoc is not null)
         {
             if (oldLoc.IsNode)
             {
@@ -323,14 +321,14 @@ public partial class GameObject
             // A move to the current location skips the remove/add churn: the
             // membership is already correct, and stamping both ends dirty
             // buys a checkpoint write for no state change.
-            if (oldLoc != null && !ReferenceEquals(destObj, oldLoc))
+            if (oldLoc is not null && !ReferenceEquals(destObj, oldLoc))
             {
                 oldLoc._contents.Remove(this.Id);
                 destObj._contents.Add(this.Id);
                 oldLoc.IsModified = true;
                 destObj.IsModified = true;
             }
-            else if (oldLoc == null)
+            else if (oldLoc is null)
             {
                 // No old loc — just add to destination
                 destObj._contents.Add(this.Id);
@@ -341,7 +339,7 @@ public partial class GameObject
             // Deferred until after both location locks release (see below):
             // AddExitsForObject nests node->object and must not extend the
             // two-lock hold .
-            if (destObj.IsNode && oldLoc != null)
+            if (destObj.IsNode && oldLoc is not null)
                 installExits = true;
 
             // Update our location and last_touched_by — Port of base_obj.py:1249-1252 / 1313-1315
@@ -385,7 +383,7 @@ public partial class GameObject
 
         // advisory leave/receive hooks run AFTER location locks are
         // released (oldLoc/destObj locals stay valid). No locks held here.
-        if (oldLoc != null)
+        if (oldLoc is not null)
         {
             if (oldLoc.IsNode)
             {
@@ -411,7 +409,7 @@ public partial class GameObject
         AtPostMove(destObj, toExit);
 
         // Announce handling — Port of base_obj.py:1339-1353
-        if (announce && oldLoc != null && oldLoc.IsNode && destObj.IsNode)
+        if (announce && oldLoc is not null && oldLoc.IsNode && destObj.IsNode)
         {
             // cross-node announce: compute reverse_link (get_reverse_link) and call announce_move_to/from
             string? reverseName = null;
@@ -435,7 +433,7 @@ public partial class GameObject
             try
             {
                 var mapHandler = MapHandlerSingleton.Get(); // best-effort global singleton if exists
-                if (mapHandler != null)
+                if (mapHandler is not null)
                 {
                     Coord? oldCoord = null;
                     if (oldLoc is Node oldN2) oldCoord = oldN2.Coord;
@@ -493,7 +491,7 @@ public partial class GameObject
 
     public void AnnounceMoveFrom(GameObject destination, string? fromExit) // Port of base_obj.py:1514 announce_move_from
     {
-        if (destination == null) return;
+        if (destination is null) return;
         // Hoisted: an inline index-initializer mapping followed by further
         // named args misparses (Roslyn reads `{ ["mover"]` as a collection
         // element); a local avoids it. Announces carry type="move"
@@ -521,7 +519,7 @@ public partial class GameObject
 
     public void AnnounceMoveTo(GameObject sourceLocation, string? toExit) // Port of base_obj.py:1550 announce_move_to
     {
-        if (sourceLocation == null) return;
+        if (sourceLocation is null) return;
         var moveMapping = new Dictionary<string, object?> { ["mover"] = this };
         var moveExclude = new List<GameObject> { this };
         if (sourceLocation is Node srcNode)
@@ -558,7 +556,7 @@ internal static class MapHandlerSingleton
     {
         lock (_lock)
         {
-            if (_instance != null) return _instance;
+            if (_instance is not null) return _instance;
             // Cache the fallback: without this every node-move pays a full
             // global lookup, and only Set() ever populated the slot.
             try { _instance = GlobalServices.GetMapHandler(); }

@@ -1,6 +1,4 @@
 using Atheriz.Core.Persistence.Entities;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Persistence;

@@ -1,12 +1,6 @@
-using System.Text;
-using System.Text.Json;
-using Atheriz.Core;
-using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Plugins;
-using Atheriz.Core.Settings;
-using Atheriz.Server.Infrastructure;
 
 namespace Atheriz.Server.Hosting;
 
@@ -20,7 +14,7 @@ public static class AdminRoutes
             var provided = ctx.Request.Headers["X-Admin-Token"].FirstOrDefault() ?? string.Empty;
             var err = AdminToken.CheckAdmin(settings.SecretPath, remoteIp, provided, action);
             error = err;
-            return err == null;
+            return err is null;
         }
 
         app.MapPost("/_internal/hot_reload", async (HttpContext ctx) =>
@@ -114,7 +108,7 @@ public static class AdminRoutes
 
             // Size-capped body read: reject oversized payloads without allocating them.
             using var doc = await ReadCappedJsonBodyAsync(ctx, 64 * 1024);
-            if (doc == null)
+            if (doc is null)
             {
                 return Results.Json(new { status = "error", message = "Invalid JSON body." });
             }
@@ -126,7 +120,7 @@ public static class AdminRoutes
                 return Results.Json(new { status = "error", message = "account_name, char_name and password are required." });
 
             string? vErr = ValidateAccountName(accountName, settings) ?? ValidateCharacterName(charName, settings) ?? ValidatePassword(password, settings);
-            if (vErr != null) return Results.Json(new { status = "error", message = vErr });
+            if (vErr is not null) return Results.Json(new { status = "error", message = vErr });
 
             try
             {

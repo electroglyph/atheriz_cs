@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/exit.py:104
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -30,10 +28,10 @@ public sealed class LoggedInExitCommand : Command
         {
             // Python's run just calls do_move which fetches via caller_id; if CallerId not set, set it from caller
             if (CallerId == -1) CallerId = go.Id;
-            if (Location == null)
+            if (Location is null)
             {
                 var loc = go.ResolveLocationObject() as Node;
-                if (loc != null) Location = loc.Coord;
+                if (loc is not null) Location = loc.Coord;
             }
             DoMove();
         }
@@ -47,32 +45,32 @@ public sealed class LoggedInExitCommand : Command
     public void DoMove()
     {
         var nh = NodeHandler.GetCurrent();
-        if (nh == null) return;
+        if (nh is null) return;
         var lst = ObjectRegistry.Get(CallerId);
         GameObject? c = null;
         if (lst.Count > 0) c = lst[0];
-        if (c == null)
+        if (c is null)
         {
             try { Console.Error.WriteLine($"Exit command with invalid caller. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}"); } catch (Exception) { }
             return;
         }
-        if (Location == null || Destination == null)
+        if (Location is null || Destination is null)
         {
             try { Console.Error.WriteLine($"invalid Exit command. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}"); } catch (Exception) { }
             return;
         }
         var dest = nh.GetNode(Destination.Value);
-        if (dest == null)
+        if (dest is null)
         {
             // Port of exit.py:43-45: log-only, no mover message.
             try { Console.Error.WriteLine($"Error getting destination node for: {Destination}"); } catch (Exception) { }
             return;
         }
         var doors = nh.GetDoors(Location.Value);
-        if (doors != null)
+        if (doors is not null)
         {
             string lookup = ExitName;
-            if (doors.TryGetValue(lookup, out var door) && door != null)
+            if (doors.TryGetValue(lookup, out var door) && door is not null)
             {
                 if (door.Closed && door.TryOpen(c))
                 {
@@ -139,9 +137,9 @@ public sealed class LoggedInExitCommand : Command
     // exit.py:95-103.
     internal static void ClearFollowing(GameObject c)
     {
-        if (c.Following == null) return;
+        if (c.Following is null) return;
         var leader = ObjectRegistry.Get(c.Following.Value).FirstOrDefault();
-        if (leader != null)
+        if (leader is not null)
         {
             try
             {

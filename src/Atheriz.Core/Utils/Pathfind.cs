@@ -1,6 +1,3 @@
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Utils;
 
@@ -37,9 +34,9 @@ public static class Pathfind
     // Port of pathfind.py:30 get_path
     private static List<Node> GetPath(PathNode currentNode)
     {
-        var path = new List<Node>();
+        List<Node> path = [];
         var current = currentNode;
-        while (current != null)
+        while (current is not null)
         {
             path.Add(current.Position);
             current = current.Parent;
@@ -53,13 +50,13 @@ public static class Pathfind
     {
         List<NodeLink> links;
         node.NodeLock.EnterReadLock();
-        try { links = node.Links != null ? new List<NodeLink>(node.Links) : []; }
+        try { links = node.Links is not null ? new List<NodeLink>(node.Links) : []; }
         finally { node.NodeLock.ExitReadLock(); }
-        var result = new List<Node>();
+        List<Node> result = [];
         foreach (var l in links)
         {
             var n = handler.GetNode(l.Coord);
-            if (n != null) result.Add(n);
+            if (n is not null) result.Add(n);
         }
         return result;
     }
@@ -69,16 +66,16 @@ public static class Pathfind
     {
         List<NodeLink> links;
         node.NodeLock.EnterReadLock();
-        try { links = node.Links != null ? new List<NodeLink>(node.Links) : []; }
+        try { links = node.Links is not null ? new List<NodeLink>(node.Links) : []; }
         finally { node.NodeLock.ExitReadLock(); }
         if (links.Count == 0) return [];
         var doors = handler.GetDoors(node.Coord); // Port of pathfind.py:73 doors = nh.get_doors(node.coord)
-        var result = new List<Node>();
+        List<Node> result = [];
         foreach (var l in links)
         {
-            if (doors != null)
+            if (doors is not null)
             {
-                if (doors.TryGetValue(l.Name, out var d) && d != null)
+                if (doors.TryGetValue(l.Name, out var d) && d is not null)
                 {
                     bool closed, locked;
                     // Port of pathfind.py:79-85 with d.lock: closed/locked + fallback
@@ -98,7 +95,7 @@ public static class Pathfind
                 }
             }
             var n = handler.GetNode(l.Coord);
-            if (n != null) result.Add(n);
+            if (n is not null) result.Add(n);
         }
         return result;
     }
@@ -107,7 +104,7 @@ public static class Pathfind
     public static (bool Found, List<Node> Path, List<Coord> ClosedSet) AStar(Node start, Node end, GameObject? caller = null, NodeHandler? handler = null, int? maxIterationsOverride = null)
     {
         var nh = handler ?? NodeHandler.GetCurrent();
-        if (nh == null) return (false, [], []);
+        if (nh is null) return (false, [], []);
         // Port of pathfind.py:98 start_node/end_node
         var startNode = new PathNode(null, start);
         startNode.G = startNode.H = startNode.F = 0;
@@ -117,12 +114,12 @@ public static class Pathfind
         // Port of pathfind.py:102 open_list + closed_set + open_by_pos.
         // The queue orders nodes via CompareTo, like heapq via __lt__.
         var openQueue = new PriorityQueue<PathNode, PathNode>();
-        var closedSet = new HashSet<Coord>();
-        var openByPos = new Dictionary<Coord, PathNode>();
+        HashSet<Coord> closedSet = [];
+        Dictionary<Coord, PathNode> openByPos = [];
         int iterations = 0;
         // Port of pathfind.py:106 grid = start.grid
         var grid = start.Grid;
-        if (grid == null) return (false, [], []);
+        if (grid is null) return (false, [], []);
         // Port of pathfind.py:109 max_iterations = settings.MAX_ASTAR_ITERATIONS.
         int maxIterations;
         if (maxIterationsOverride.HasValue) maxIterations = maxIterationsOverride.Value;
@@ -152,8 +149,8 @@ public static class Pathfind
             // Port of pathfind.py:121-126: blind expansion for caller=None,
             // door-aware expansion otherwise — AStar and GetNeighbors share
             // this dispatch so neighbor lists agree with pathfinding.
-            var children = new List<PathNode>();
-            var nodes = caller == null
+            List<PathNode> children = [];
+            var nodes = caller is null
                 ? GetLinkNodes(currentNode.Position, nh)
                 : GetLinkNodesCaller(currentNode.Position, nh, caller);
             foreach (var n in nodes)
@@ -220,11 +217,11 @@ public static class Pathfind
     public static List<Coord>? FindPath(Coord start, Coord goal, NodeHandler handler, GameObject? caller, int? maxIterations = null)
     {
         // Port of pathfind.py:39 + honors MAX_ASTAR_ITERATIONS via AtherizSettings
-        if (handler == null) handler = NodeHandler.GetCurrent()!;
-        if (handler == null) return null;
+        if (handler is null) handler = NodeHandler.GetCurrent()!;
+        if (handler is null) return null;
         var s = handler.GetNode(start);
         var e = handler.GetNode(goal);
-        if (s == null || e == null) return null;
+        if (s is null || e is null) return null;
         // Port of pathfind.py:109 — an explicit cap wins; otherwise the
         // configured value (null marks "no explicit cap", so any configured
         // value, including the default, is honored as-is).
@@ -245,10 +242,10 @@ public static class Pathfind
     public static List<Coord> GetNeighbors(Coord c, NodeHandler? handler = null, GameObject? caller = null)
     {
         var nh = handler ?? NodeHandler.GetCurrent();
-        if (nh == null) return [];
+        if (nh is null) return [];
         var node = nh.GetNode(c);
-        if (node == null) return [];
-        var neighbors = caller == null
+        if (node is null) return [];
+        var neighbors = caller is null
             ? GetLinkNodes(node, nh)
             : GetLinkNodesCaller(node, nh, caller);
         return neighbors.Select(n => n.Coord).ToList();

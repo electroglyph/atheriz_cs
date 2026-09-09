@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/set.py:243
-using System.Text.Json;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -89,22 +87,22 @@ public sealed class SetCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { go.Msg(PrintHelp()); return; }
+        if (pa is null) { go.Msg(PrintHelp()); return; }
         var targetStr = pa.GetString("target") ?? "";
         var attr = pa.GetString("attribute") ?? "";
         var raw = pa.GetString("value") ?? "";
         var target = SetHelper.ResolveTarget(go, targetStr);
-        if (target == null) return;
+        if (target is null) return;
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }
         object? value;
         try
         {
             string trimmed = raw.Trim();
             // tuple handling: Python ast.literal_eval supports tuples '(1,2)' -> treat as array
-            if (trimmed.StartsWith("(") && trimmed.EndsWith(")"))
+            if (trimmed.StartsWith("(", StringComparison.Ordinal) && trimmed.EndsWith(")", StringComparison.Ordinal))
             {
                 string inner = trimmed.Substring(1, trimmed.Length - 2).Trim();
-                if (inner.EndsWith(",")) inner = inner.Substring(0, inner.Length - 1).TrimEnd();
+                if (inner.EndsWith(",", StringComparison.Ordinal)) inner = inner.Substring(0, inner.Length - 1).TrimEnd();
                 string norm = "[" + inner + "]";
                 norm = NormalizeValueText(norm);
                 try
@@ -117,12 +115,12 @@ public sealed class SetCommand : Command
             // Port of set.py:141-143 unconditional literal_eval: a leading
             // sign or dot still denotes a number (JSON parses "-5" natively;
             // "+5"/".5" are normalized first since JSON rejects them).
-            else if (raw.TrimStart().StartsWith("\"") || raw.TrimStart().StartsWith("'") || trimmed == "True" || trimmed == "False" || trimmed == "None" || (trimmed.Length > 0 && (char.IsDigit(trimmed[0]) || trimmed[0] == '-' || trimmed[0] == '+' || trimmed[0] == '.')) || trimmed.StartsWith("[") || trimmed.StartsWith("{"))
+            else if (raw.TrimStart().StartsWith("\"", StringComparison.Ordinal) || raw.TrimStart().StartsWith("'", StringComparison.Ordinal) || trimmed == "True" || trimmed == "False" || trimmed == "None" || (trimmed.Length > 0 && (char.IsDigit(trimmed[0]) || trimmed[0] == '-' || trimmed[0] == '+' || trimmed[0] == '.')) || trimmed.StartsWith("[", StringComparison.Ordinal) || trimmed.StartsWith("{", StringComparison.Ordinal))
             {
                 string candidate = raw;
                 string candTrim = candidate.TrimStart();
-                if (candTrim.StartsWith("+")) candidate = candTrim.Substring(1);
-                else if (candTrim.StartsWith(".")) candidate = "0" + candidate.TrimStart();
+                if (candTrim.StartsWith("+", StringComparison.Ordinal)) candidate = candTrim.Substring(1);
+                else if (candTrim.StartsWith(".", StringComparison.Ordinal)) candidate = "0" + candidate.TrimStart();
                 try { value = JsonSerializer.Deserialize<JsonElement>(candidate); }
                 catch { value = null; }
                 if (value is null)
@@ -145,7 +143,7 @@ public sealed class SetCommand : Command
             else value = raw;
         }
         catch { value = raw; }
-        if (value == null && raw.Trim() != "None" && raw.Trim() != "null") value = raw;
+        if (value is null && raw.Trim() != "None" && raw.Trim() != "null") value = raw;
         if (SetHelper.IsProtected(attr))
         {
             if (!go.IsSuperUser) { go.Msg($"'{attr}' is protected and cannot be set."); return; }
@@ -167,7 +165,7 @@ public sealed class SetCommand : Command
         catch (InvalidCastException) { go.Msg($"'{attr}' cannot be set from text."); return; }
         catch (Exception ex) { go.Msg($"Could not set '{attr}': {ex.Message}"); return; }
         string repr;
-        if (value == null) repr = "None";
+        if (value is null) repr = "None";
         else if (value is string s) repr = $"'{s}'";
         else if (value is bool b) repr = b ? "True" : "False";
         else
@@ -198,11 +196,11 @@ public sealed class UnsetCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { go.Msg(PrintHelp()); return; }
+        if (pa is null) { go.Msg(PrintHelp()); return; }
         var targetStr = pa.GetString("target") ?? "";
         var attr = pa.GetString("attribute") ?? "";
         var target = SetHelper.ResolveTarget(go, targetStr);
-        if (target == null) return;
+        if (target is null) return;
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }
         // Port of unset.py:226 — only the shared protected set is checked.
         if (SetHelper.IsProtected(attr))

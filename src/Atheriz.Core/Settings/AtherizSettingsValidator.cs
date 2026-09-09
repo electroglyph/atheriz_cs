@@ -17,7 +17,7 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
 
     public ValidateOptionsResult Validate(string? name, AtherizSettings options)
     {
-        var failures = new List<string>();
+        List<string> failures = [];
 
         if (options.MaxCharacters <= 0 || options.MaxCharacters > 100)
             failures.Add($"MaxCharacters must be >0 and <=100 (was {options.MaxCharacters}).");

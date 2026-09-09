@@ -1,4 +1,3 @@
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -20,14 +19,14 @@ public sealed class NoneCommand : Command
     {
         var pa = args as GameArgumentParser.ParsedArgs;
         string text = "";
-        if (pa != null) text = string.Join(" ", pa.GetList("none"));
+        if (pa is not null) text = string.Join(" ", pa.GetList("none"));
         else text = (args as string ?? "").Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; } // none.py:25
         var ignored = Atheriz.Core.Settings.AtherizSettings.Global.AutoAliasIgnoredKeys;
         // Port of none.py:28-36: internal + global keys, ignored-only filter
         // (no Hide/Access gate — hidden commands are suggested upstream too).
-        var choices = new List<string>();
-        if (caller is Objects.GameObject go && go.InternalCmdSet != null)
+        List<string> choices = [];
+        if (caller is Objects.GameObject go && go.InternalCmdSet is not null)
             foreach (var k in go.InternalCmdSet.GetKeys())
                 if (!ignored.Contains(k) && !choices.Contains(k)) choices.Add(k);
         foreach (var k in CommandRegistry.LoggedIn.GetKeys())

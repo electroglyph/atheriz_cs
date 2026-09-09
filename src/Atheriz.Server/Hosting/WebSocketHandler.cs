@@ -1,7 +1,4 @@
-using System.Text;
-using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Server.Hosting;
 

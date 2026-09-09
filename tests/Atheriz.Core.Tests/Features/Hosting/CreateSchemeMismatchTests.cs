@@ -74,7 +74,7 @@ public class CreateSchemeMismatchTests
     public async Task Create_SchemeMismatch_FlippedRetryFindsLiveServer()
     {        if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net8.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePort();
         var telnetPort = FindFreePort();
@@ -132,7 +132,7 @@ public class CreateSchemeMismatchTests
         // server live, offline direct-DB writes must be refused via the pid probe.
         if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net8.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePort();
         var telnetPort = FindFreePort();

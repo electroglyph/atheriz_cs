@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/get.py:87 + put.py:174 + drop.py:66
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -14,9 +12,9 @@ public sealed class GetCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { go.Msg(PrintHelp()); return; }
+        if (pa is null) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject();
-        if (loc == null) { CommandHelpers.MsgNo(go); return; }
+        if (loc is null) { CommandHelpers.MsgNo(go); return; }
         string? objName = null, sourceName = null;
         // The parser defines a single positional dest ("target"); live input
         // never carries other keys, so no fallback dests are read here.
@@ -42,7 +40,7 @@ public sealed class GetCommand : Command
         if (objName == "all")
         {
             GameObject source;
-            if (sourceName != null)
+            if (sourceName is not null)
             {
                 var cont = CommandHelpers.SearchWithFallback(go, sourceName);
                 if (cont.Count == 0) { go.Msg($"'{sourceName}' not found."); return; }
@@ -70,7 +68,7 @@ public sealed class GetCommand : Command
             return;
         }
         // Single object case
-        if (sourceName != null)
+        if (sourceName is not null)
         {
             var cont = CommandHelpers.SearchWithFallback(go, sourceName);
             if (cont.Count == 0) { go.Msg($"'{sourceName}' not found."); return; }
@@ -136,7 +134,7 @@ public sealed class PutCommand : Command
         try { loc = goCaller.ResolveLocationObject(); } catch (Exception) { }
         List<GameObject> destList = new();
         try { destList = goCaller.Search(destName!, true, goCaller); } catch (Exception) { }
-        if (destList.Count==0 && loc != null)
+        if (destList.Count==0 && loc is not null)
         {
             try { if (loc.Access(goCaller, "put")) destList = loc.Search(destName!, true, goCaller); } catch (Exception) { }
         }
@@ -146,27 +144,27 @@ public sealed class PutCommand : Command
         bool IsLoop(GameObject obj, GameObject destC)
         {
             var cur = destC;
-            var seen = new HashSet<int>();
-            while (cur != null && !cur.IsNode)
+            HashSet<int> seen = [];
+            while (cur is not null && !cur.IsNode)
             {
                 if (ReferenceEquals(cur, obj) || cur.Id == obj.Id) return true;
                 if (!seen.Add(cur.Id)) return true;
                 var nxt = cur.ResolveLocationObject();
-                if (nxt == null || nxt.IsNode) break;
+                if (nxt is null || nxt.IsNode) break;
                 cur = nxt;
             }
             return false;
         }
         if (objName == "all")
         {
-            var contents = goCaller.ContentsSnapshot.Select(id => ObjectRegistry.Get(id).FirstOrDefault()).Where(o=>o!=null).Cast<GameObject>().ToList();
+            var contents = goCaller.ContentsSnapshot.Select(id => ObjectRegistry.Get(id).FirstOrDefault()).Where(o=>o is not null).Cast<GameObject>().ToList();
             foreach (var obj in contents.ToList())
             {
                 if (obj.Id == destObj.Id) { caller.Msg($"You can't put {obj.Name} in {destObj.Name} - it would create a containment loop."); continue; }
                 if (IsLoop(obj, destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name} - it would create a containment loop."); continue; }
                 if (!obj.AtPrePut(goCaller, destObj)) continue;
                 if (!obj.MoveTo(destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name}."); continue; }
-                if (loc != null)
+                if (loc is not null)
                 {
                     try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, mapping: null, exclude: new List<GameObject>{goCaller}); } catch (Exception) { }
                 }
@@ -184,7 +182,7 @@ public sealed class PutCommand : Command
             if (IsLoop(obj, destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name} - it would create a containment loop."); continue; }
             if (!obj.AtPrePut(goCaller, destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name}."); continue; }
             if (!obj.MoveTo(destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name}."); continue; }
-            if (loc != null)
+            if (loc is not null)
             {
                 try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, exclude: new List<GameObject>{goCaller}); } catch (Exception) { }
             }
@@ -205,7 +203,7 @@ public sealed class DropCommand : Command
         var pa = args as GameArgumentParser.ParsedArgs;
         // Extract drop name robustly
         string? dropName = null;
-        if (pa != null)
+        if (pa is not null)
         {
         // The parser defines a single positional dest ("object"); live input
         // never carries other keys, so no fallback dests are read here.
@@ -214,7 +212,7 @@ public sealed class DropCommand : Command
         }
         if (string.IsNullOrWhiteSpace(dropName)) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject();
-        if (loc == null) { go.Msg("You can't drop something here!"); return; }
+        if (loc is null) { go.Msg("You can't drop something here!"); return; }
         // Intentional: Drop checks the "put" lock, not "drop" — verbatim atheriz/commands/loggedin/drop.py:26.
         if (!loc.Access(go, "put")) { go.Msg("You can't drop something here!"); return; }
         dropName = dropName!.Trim();

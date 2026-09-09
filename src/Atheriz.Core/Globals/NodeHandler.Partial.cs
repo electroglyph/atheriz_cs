@@ -1,4 +1,3 @@
-using Atheriz.Core.Objects;
 namespace Atheriz.Core.Globals;
 
 public partial class NodeHandler
@@ -35,7 +34,7 @@ public partial class NodeHandler
     {
         List<string>? rem = null;
         foreach (var kv in d) if (Equals(kv.Value, door)) (rem ??= new()).Add(kv.Key);
-        if (rem != null) foreach (var k in rem) d.Remove(k);
+        if (rem is not null) foreach (var k in rem) d.Remove(k);
     }
     public void RemoveDoor(Door door)
     {
@@ -60,9 +59,9 @@ public partial class NodeHandler
         try
         {
             var mh = MapHandlerSingleton.Get();
-            if (mh != null && door.SymbolCoord != null)
+            if (mh is not null && door.SymbolCoord is not null)
             {
-                var seen = new HashSet<(string, int)>();
+                HashSet<(string, int)> seen = [];
                 foreach (var coord in new[] { door.FromCoord, door.ToCoord })
                 {
                     if (coord.Equals(default(Coord))) continue;
@@ -146,7 +145,7 @@ public partial class NodeHandler
         Lock.EnterWriteLock();
         try
         {
-            evict = new List<Node>();
+            evict = [];
             foreach (var a in _areas.Values)
                 foreach (var g in a.Grids.Values)
                     foreach (var n in g.Nodes.Values)
@@ -205,15 +204,15 @@ public partial class NodeHandler
             var area = GetArea(coord.Area);
             var grid = area?.GetGrid(coord.Z);
             grid?.RemoveNode((coord.X, coord.Y));
-            if (node != null) ObjectRegistry.RemoveObject(node);
+            if (node is not null) ObjectRegistry.RemoveObject(node);
             _modified = true; _areaGen++;
         }
         finally { Lock.ExitWriteLock(); }
     }
     public List<Node> GetNodes(List<Coord> coords)
     {
-        var res=new List<Node>();
-        foreach(var c in coords){ var n=GetNode(c); if(n!=null) res.Add(n); }
+        List<Node> res = [];
+        foreach(var c in coords){ var n=GetNode(c); if(n is not null) res.Add(n); }
         return res;
     }
     public void AddTransition(Transition t)
@@ -244,18 +243,18 @@ public partial class NodeHandler
     public List<Transition> FindTransitions(int? fromZ=null,int? toZ=null,string? fromArea=null,string? toArea=null)
     {
         int req=0;
-        if(fromZ!=null) req++; if(toZ!=null) req++; if(fromArea!=null) req++; if(toArea!=null) req++;
-        var res=new List<Transition>();
+        if(fromZ is not null) req++; if(toZ is not null) req++; if(fromArea is not null) req++; if(toArea is not null) req++;
+        List<Transition> res = [];
         Lock2.EnterReadLock();
         try
         {
             foreach(var t in _transitions.Values)
             {
                 int m=0;
-                if(fromZ!=null && t.FromCoord.Z==fromZ) m++;
-                if(toZ!=null && t.ToCoord.Z==toZ) m++;
-                if(fromArea!=null && t.FromCoord.Area==fromArea) m++;
-                if(toArea!=null && t.ToCoord.Area==toArea) m++;
+                if(fromZ is not null && t.FromCoord.Z==fromZ) m++;
+                if(toZ is not null && t.ToCoord.Z==toZ) m++;
+                if(fromArea is not null && t.FromCoord.Area==fromArea) m++;
+                if(toArea is not null && t.ToCoord.Area==toArea) m++;
                 if(m==req) res.Add(t);
             }
         }
@@ -269,7 +268,7 @@ public partial class NodeHandler
         Lock3.EnterWriteLock();
         try
         {
-            var relocated = new Dictionary<Coord, Dictionary<string, Door>>();
+            Dictionary<Coord, Dictionary<string, Door>> relocated = [];
             foreach (var oldFull in oldToNewFull.Keys.ToList())
             {
                 if (_doors.TryGetValue(oldFull, out var dict))
@@ -291,11 +290,11 @@ public partial class NodeHandler
                     // 2026-09-08 — never silently clobber on a merge).
                     foreach (var kv in doorsDict)
                     {
-                        if (!existing.ContainsKey(kv.Key)) existing[kv.Key] = kv.Value;
-                        else try { AtherizLogger.LogWarning($"RemapDoors: dropping relocated door '{kv.Key}' at {newFull} (destination already has one)."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemapDoors: " + logEx.Message, "NodeHandler"); }
+                        if (!existing.TryAdd(kv.Key, kv.Value))
+                            try { AtherizLogger.LogWarning($"RemapDoors: dropping relocated door '{kv.Key}' at {newFull} (destination already has one)."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemapDoors: " + logEx.Message, "NodeHandler"); }
                     }
             }
-            var seenRef = new HashSet<Door>();
+            HashSet<Door> seenRef = [];
             foreach (var doorsDict in relocated.Values)
             {
                 foreach (var door in doorsDict.Values)
@@ -330,7 +329,7 @@ public partial class NodeHandler
                         // the To delta applies only when From did not move.
                         int dx = (fdx != 0 || fdy != 0) ? fdx : tdx;
                         int dy = (fdx != 0 || fdy != 0) ? fdy : tdy;
-                        if (door.SymbolCoord != null && (dx != 0 || dy != 0))
+                        if (door.SymbolCoord is not null && (dx != 0 || dy != 0))
                             door.SymbolCoord = (door.SymbolCoord.Value.X + dx, door.SymbolCoord.Value.Y + dy);
                     }
                     finally { door.Lock.ExitWriteLock(); }
@@ -342,7 +341,7 @@ public partial class NodeHandler
     }
     // Overload for NodeGrid call with only Coord map
     public void RemapDoors(Dictionary<Coord, Coord> oldToNewFull)
-        => RemapDoors(oldToNewFull, new Dictionary<(int,int),(int,int)>());
+        => RemapDoors(oldToNewFull, []);
 
     // Port of nodes.py:1194 transition remap
     public void RemapTransitions(Dictionary<Coord, Coord> oldToNewFull)

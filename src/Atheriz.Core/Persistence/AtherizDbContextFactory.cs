@@ -1,5 +1,4 @@
 using Atheriz.Core.Persistence.Entities;
-using Atheriz.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Persistence;
@@ -48,7 +47,7 @@ public static class AtherizDbContextFactory
     // Port of test helper: in-memory or temp file context
     public static AtherizDbContext CreateForTests(string? savePath = null)
     {
-        if (savePath == null)
+        if (savePath is null)
         {
             var opts = new DbContextOptionsBuilder<AtherizDbContext>().UseSqlite("Data Source=:memory:").Options;
             var ctx = new AtherizDbContext(opts);
@@ -97,41 +96,35 @@ public static class AtherizDbContextFactory
             try
             {
                 bool hasTable = false, hasSource = false;
-                using (var pragma = conn.CreateCommand())
+                using var pragma = conn.CreateCommand();
+                pragma.CommandText = "PRAGMA table_info(\"transitions\")";
+                using var r = pragma.ExecuteReader();
+                while (r.Read())
                 {
-                    pragma.CommandText = "PRAGMA table_info(\"transitions\")";
-                    using var r = pragma.ExecuteReader();
-                    while (r.Read())
-                    {
-                        hasTable = true;
-                        if (NormCol(r.GetString(1)) == "fromarea")
-                            hasSource = true;
-                    }
+                    hasTable = true;
+                    if (NormCol(r.GetString(1)) == "fromarea")
+                        hasSource = true;
                 }
                 if (!hasTable || hasSource) return;
-                var rows = new List<(string ToArea, int ToX, int ToY, int ToZ, string? Data)>();
-                using (var sel = conn.CreateCommand())
+                List<(string ToArea, int ToX, int ToY, int ToZ, string? Data)> rows = [];
+                using var sel = conn.CreateCommand();
+                // SELECT * with normalized ordinals: old tables come in
+                // Python snake_case (to_area) or C# PascalCase (ToArea).
+                sel.CommandText = "SELECT * FROM \"transitions\"";
+                using var r2 = sel.ExecuteReader();
+                var ord = new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal);
+                while (r2.Read())
                 {
-                    // SELECT * with normalized ordinals: old tables come in
-                    // Python snake_case (to_area) or C# PascalCase (ToArea).
-                    sel.CommandText = "SELECT * FROM \"transitions\"";
-                    using var r = sel.ExecuteReader();
-                    var ord = new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal);
-                    while (r.Read())
-                    {
-                        if (ord.Count == 0)
-                            for (int i = 0; i < r.FieldCount; i++) ord[NormCol(r.GetName(i))] = i;
-                        rows.Add((GetStr(r, ord, "toarea"), GetInt(r, ord, "tox"), GetInt(r, ord, "toy"), GetInt(r, ord, "toz"), GetMaybeStr(r, ord, "data")));
-                    }
+                    if (ord.Count == 0)
+                        for (int i = 0; i < r2.FieldCount; i++) ord[NormCol(r2.GetName(i))] = i;
+                    rows.Add((GetStr(r2, ord, "toarea"), GetInt(r2, ord, "tox"), GetInt(r2, ord, "toy"), GetInt(r2, ord, "toz"), GetMaybeStr(r2, ord, "data")));
                 }
                 int dropped = 0;
                 using var txn = conn.BeginTransaction();
-                using (var mk = conn.CreateCommand())
-                {
-                    mk.Transaction = txn;
-                    mk.CommandText = "CREATE TABLE \"transitions_new\" (\"FromArea\" TEXT NOT NULL, \"FromX\" INTEGER NOT NULL, \"FromY\" INTEGER NOT NULL, \"FromZ\" INTEGER NOT NULL, \"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"FromArea\",\"FromX\",\"FromY\",\"FromZ\",\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))";
-                    mk.ExecuteNonQuery();
-                }
+                using var mk = conn.CreateCommand();
+                mk.Transaction = txn;
+                mk.CommandText = "CREATE TABLE \"transitions_new\" (\"FromArea\" TEXT NOT NULL, \"FromX\" INTEGER NOT NULL, \"FromY\" INTEGER NOT NULL, \"FromZ\" INTEGER NOT NULL, \"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"FromArea\",\"FromX\",\"FromY\",\"FromZ\",\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))";
+                mk.ExecuteNonQuery();
                 foreach (var row in rows)
                 {
                     Objects.Transition? t = null;
@@ -141,7 +134,7 @@ public static class AtherizDbContextFactory
                             t = System.Text.Json.JsonSerializer.Deserialize<Objects.Transition>(row.Data, JsonOptions.Default);
                     }
                     catch { t = null; }
-                    if (t == null) { dropped++; continue; }
+                    if (t is null) { dropped++; continue; }
                     using var ins = conn.CreateCommand();
                     ins.Transaction = txn;
                     ins.CommandText = "INSERT OR IGNORE INTO \"transitions_new\" VALUES (@fa,@fx,@fy,@fz,@ta,@tx,@ty,@tz,@d)";
@@ -156,18 +149,14 @@ public static class AtherizDbContextFactory
                     AddParam(ins, "@d", (object?)row.Data ?? DBNull.Value);
                     ins.ExecuteNonQuery();
                 }
-                using (var drop = conn.CreateCommand())
-                {
-                    drop.Transaction = txn;
-                    drop.CommandText = "DROP TABLE \"transitions\"";
-                    drop.ExecuteNonQuery();
-                }
-                using (var ren = conn.CreateCommand())
-                {
-                    ren.Transaction = txn;
-                    ren.CommandText = "ALTER TABLE \"transitions_new\" RENAME TO \"transitions\"";
-                    ren.ExecuteNonQuery();
-                }
+                using var drop = conn.CreateCommand();
+                drop.Transaction = txn;
+                drop.CommandText = "DROP TABLE \"transitions\"";
+                drop.ExecuteNonQuery();
+                using var ren = conn.CreateCommand();
+                ren.Transaction = txn;
+                ren.CommandText = "ALTER TABLE \"transitions_new\" RENAME TO \"transitions\"";
+                ren.ExecuteNonQuery();
                 txn.Commit();
                 AtherizLogger.LogWarning($"MigrateTransitionsTable: rebuilt destination-only table, migrated {rows.Count - dropped}/{rows.Count} rows, dropped {dropped} undecodable.");
             }

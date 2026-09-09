@@ -2,7 +2,6 @@
 // Port of atheriz/settings.py defaults
 namespace MyGame;
 
-using Atheriz.Core.Settings;
 
 /// <summary>
 /// Game settings — mirrors generated <c>settings.py</c>.

@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Reflection;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Atheriz.Core.Utils;
@@ -94,15 +93,15 @@ public static class GameUtils
         var q = v * (1 - s * f);
         var t = v * (1 - s * (1 - f));
         double r, g, b;
-        switch (i % 6)
+        (r, g, b) = (i % 6) switch
         {
-            case 0: r = v; g = t; b = p; break;
-            case 1: r = q; g = v; b = p; break;
-            case 2: r = p; g = v; b = t; break;
-            case 3: r = p; g = q; b = v; break;
-            case 4: r = t; g = p; b = v; break;
-            default: r = v; g = p; b = q; break;
-        }
+            0 => (v, t, p),
+            1 => (q, v, p),
+            2 => (p, v, t),
+            3 => (p, q, v),
+            4 => (t, p, v),
+            _ => (v, p, q),
+        };
         return ((int)Math.Round(r * 255), (int)Math.Round(g * 255), (int)Math.Round(b * 255));
     }
 
@@ -206,7 +205,7 @@ public static class GameUtils
     {
         if (radius < 0 || radius > MaxSphereRadius) throw new ArgumentOutOfRangeException(nameof(radius), $"radius {radius} out of bounds [0, {MaxSphereRadius}]");
         var (cx, cy, cz) = center;
-        var points = new List<(int, int, int)>();
+        List<(int, int, int)> points = [];
         var r2 = radius * radius;
         var r = (int)radius;
         for (var x = cx - r; x <= cx + r; x++)
@@ -310,7 +309,7 @@ public static class GameUtils
     // Port of atheriz/utils.py:434 compress_whitespace
     public static string CompressWhitespace(string text, int maxLinebreaks = 1, int maxSpacing = 2)
     {
-        if (text == null) return "";
+        if (text is null) return "";
         text = text.TrimEnd();
         text = ReEmpty.Replace(text, "\n\n");
         text = Regex.Replace(text, $@"(?<=\S) {{{maxSpacing},}}", new string(' ', maxSpacing));
@@ -341,7 +340,7 @@ public static class GameUtils
     {
         if (obj is IEnumerable<T> seq && obj is not string) return seq;
         if (obj is T t) return new[] { t };
-        if (obj == null) return new T[] { default! };
+        if (obj is null) return new T[] { default! };
         // fallback: try cast
         try { return new[] { (T)obj }; } catch { return Array.Empty<T>(); }
     }
@@ -368,17 +367,17 @@ public static class GameUtils
     // Port of atheriz/utils.py:536 iter_to_str
     public static string IterToString(IEnumerable<object?>? iterable, string sep = ",", string endsep = ", and", bool addQuote = false)
     {
-        if (iterable == null) return "";
+        if (iterable is null) return "";
         // mimic make_iter then list
         var list = iterable.ToList();
         if (list.Count == 0) return "";
         List<string> strs = addQuote ? list.Select(v => $"\"{v}\"").ToList() : list.Select(v => v?.ToString() ?? "").ToList();
         var normSep = sep?.Trim() ?? ",";
-        var normEnd = endsep != null ? endsep.Trim() : "";
+        var normEnd = endsep is not null ? endsep.Trim() : "";
         // handle empty endsep case like Python: if endsep falsy, keep as is (null/empty)
         if (!string.IsNullOrEmpty(normEnd))
         {
-            if (normEnd.StartsWith(normSep) && normEnd != normSep)
+            if (normEnd.StartsWith(normSep, StringComparison.Ordinal) && normEnd != normSep)
                 normEnd = strs.Count < 3 ? normEnd.Substring(1) : normEnd;
             else if (normEnd.Length > 0 && !Punctuation.Contains(normEnd[0]))
                 normEnd = " " + normEnd.Trim();
@@ -395,7 +394,7 @@ public static class GameUtils
     // Port of atheriz/utils.py:141 detach — deepcopy via JSON roundtrip (mirrors dill roundtrip)
     public static T? Detach<T>(T value)
     {
-        if (value == null) return default;
+        if (value is null) return default;
         // Port of utils.py:538-550: raises if the value is not serializable
         // at all — never hand back the live original, and never a silent
         // blank that callers would mutate as if detached.

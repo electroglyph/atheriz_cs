@@ -1,6 +1,5 @@
 // Port of atheriz/atheriz.py:224-319 check_webclient_sync + format_webclient_sync_warning
 using System.Security.Cryptography;
-using System.Text;
 
 namespace Atheriz.Server.Infrastructure;
 
@@ -18,7 +17,7 @@ public static class WebclientSyncChecker
             var rel = Path.GetRelativePath(root, f);
             // Normalize to forward slashes like Python Path.relative_to
             rel = rel.Replace(Path.DirectorySeparatorChar, '/');
-            if (excludeDirNames != null && excludeDirNames.Count > 0)
+            if (excludeDirNames is not null && excludeDirNames.Count > 0)
             {
                 var dir = Path.GetDirectoryName(rel)?.Replace(Path.DirectorySeparatorChar, '/');
                 if (!string.IsNullOrEmpty(dir) && dir.Split('/').Any(seg => excludeDirNames.Contains(seg))) continue;
@@ -61,7 +60,7 @@ public static class WebclientSyncChecker
         if (!Directory.Exists(gameWeb)) return null;
 
         string? engineWeb = engineWebOverride ?? ResolveEngineWeb(contentRoot);
-        if (engineWeb == null || !Directory.Exists(engineWeb)) return null;
+        if (engineWeb is null || !Directory.Exists(engineWeb)) return null;
 
         var summary = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.Ordinal);
         foreach (var area in new[] { "templates", "static" })
@@ -127,7 +126,7 @@ public static class WebclientSyncChecker
             Path.Combine(Directory.GetCurrentDirectory(), "web"),
         };
         var resolved = AssetPathResolver.ResolveCandidates(candidates.Select(Path.GetFullPath));
-        if (resolved != null) return resolved;
+        if (resolved is not null) return resolved;
         if (Directory.Exists(Path.Combine(contentRoot, "wwwroot")))
             return Path.Combine(contentRoot, "web");
         return null;
@@ -147,11 +146,11 @@ public static class WebclientSyncChecker
         foreach (var area in new[] { "templates", "static" })
         {
             if (!summary.TryGetValue(area, out var d)) continue;
-            var missing = d.TryGetValue("missing", out var m) ? m : new List<string>();
-            var different = d.TryGetValue("different", out var diff) ? diff : new List<string>();
-            var extra = d.TryGetValue("extra", out var e) ? e : new List<string>();
+            var missing = d.TryGetValue("missing", out var m) ? m : [];
+            var different = d.TryGetValue("different", out var diff) ? diff : [];
+            var extra = d.TryGetValue("extra", out var e) ? e : [];
             if (missing.Count == 0 && different.Count == 0 && extra.Count == 0) continue;
-            var parts = new List<string>();
+            List<string> parts = [];
             if (different.Count > 0) parts.Add($"{different.Count} modified");
             if (missing.Count > 0) parts.Add($"{missing.Count} missing");
             if (extra.Count > 0) parts.Add($"{extra.Count} extra");
@@ -198,8 +197,8 @@ public static class WebclientSyncChecker
         }
         if (osName == "nt")
         {
-            lines.Add($"    xcopy \"{rel}\\templates\\webclient\" \"web\\templates\\webclient\\\" /E /Y /I");
-            lines.Add($"    xcopy \"{rel}\\static\\webclient\" \"web\\static\\webclient\\\" /E /Y /I");
+            lines.Add($""""    xcopy "{rel}\templates\webclient" "web\templates\webclient\" /E /Y /I"""");
+            lines.Add($""""    xcopy "{rel}\static\webclient" "web\static\webclient\" /E /Y /I"""");
         }
         else
         {

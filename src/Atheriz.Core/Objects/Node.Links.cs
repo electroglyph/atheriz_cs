@@ -1,7 +1,3 @@
-using Atheriz.Core.Globals;
-using Atheriz.Core.Utils;
-using Atheriz.Core.Commands;
-using System.Text.Json;
 namespace Atheriz.Core.Objects;
 
 public partial class Node
@@ -185,13 +181,13 @@ public partial class Node
             if (idx >= 0) { found = Links[idx]; Links.RemoveAt(idx); IsModified = true; }
         }
         finally { SyncRoot.ExitWriteLock(); }
-        if (found != null && Coord.Area != found.Coord.Area)
+        if (found is not null && Coord.Area != found.Coord.Area)
         {
             var nh = NodeHandler.GetCurrent();
             nh?.RemoveTransition(found.Coord);
         }
         // also remove exits from occupants
-        if (found != null)
+        if (found is not null)
             foreach (var o in GetContents()) try { o.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveLink: " + logEx.Message, "Node"); }
     }
 
@@ -204,7 +200,7 @@ public partial class Node
         try { snap = Links.ToList(); }
         finally { SyncRoot.ExitReadLock(); }
         if (snap.Count == 0) return;
-        var cmds = new List<Command>();
+        List<Command> cmds = [];
         foreach (var n in snap)
         {
             var ec = new ExitCommand();
@@ -218,7 +214,7 @@ public partial class Node
             cmds.Add(ec);
         }
         var set = obj.InternalCmdSet;
-        if (set == null) { set = new CmdSet(); obj.InternalCmdSet = set; }
+        if (set is null) { set = new CmdSet(); obj.InternalCmdSet = set; }
         try { set.Adds(cmds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddExits: " + logEx.Message, "Node"); }
     }
     public new void AddExitsForObject(GameObject obj) => AddExits(obj);
@@ -271,16 +267,16 @@ public partial class Node
     // Port of nodes.py:770 msg_contents
     public void MsgContents(string? text, List<GameObject>? exclude = null, GameObject? fromObj = null, Dictionary<string, object?>? mapping = null, bool raiseErrors = false, string? msgType = null)
     {
-        if (text == null) text = "";
-        if (mapping != null) mapping = new Dictionary<string, object?>(mapping, StringComparer.Ordinal);
-        mapping ??= new Dictionary<string, object?>();
+        if (text is null) text = "";
+        if (mapping is not null) mapping = new Dictionary<string, object?>(mapping, StringComparer.Ordinal);
+        mapping ??= [];
         var you = fromObj ?? this;
-        if (!mapping.ContainsKey("you")) mapping["you"] = you;
+        mapping.TryAdd("you", you);
         var contents = GetContents();
-        HashSet<GameObject>? excl = exclude != null ? new HashSet<GameObject>(exclude) : null;
+        HashSet<GameObject>? excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
         foreach (var receiver in contents)
         {
-            if (excl != null && excl.Contains(receiver)) continue;
+            if (excl is not null && excl.Contains(receiver)) continue;
             string outMsg;
             try { outMsg = FuncParser.Parse(text, you, receiver, mapping, raiseErrors); } catch { outMsg = text; }
             if (!string.IsNullOrEmpty(outMsg))
@@ -308,7 +304,7 @@ public partial class Node
     // Port of nodes.py:843 get_display_characters
     public string GetDisplayCharacters(GameObject? looker = null)
     {
-        if (looker == null) return "";
+        if (looker is null) return "";
         var contents = GetContents();
         var chars = contents.Where(x => (x.IsPc || x.IsNpc) && x != looker && x.Access(looker, "view")).ToList();
         var names = ContentUtils.GroupByName(chars, looker);
@@ -317,7 +313,7 @@ public partial class Node
     // Port of nodes.py:863 get_display_exits
     public string GetDisplayExits(GameObject? looker = null)
     {
-        if (Links == null) return "";
+        if (Links is null) return "";
         string names;
         SyncRoot.EnterReadLock();
         try { names = string.Join(", ", Links.Select(l => l.Name)); }
@@ -330,8 +326,8 @@ public partial class Node
         var header = $"{GameUtils.WrapXterm256("Doors:", fg: 15, bold: true)} ";
         var nh = NodeHandler.GetCurrent();
         var d = nh?.GetDoors(Coord);
-        if (d == null || d.Count == 0) return "";
-        var parts = new List<string>();
+        if (d is null || d.Count == 0) return "";
+        List<string> parts = [];
         int idx = 0;
         foreach (var door in d.Values)
         {
@@ -354,7 +350,7 @@ public partial class Node
     {
         // read the looker's flag BEFORE taking the node lock (self->looker
         // nesting under concurrency). The builder bit decides everything.
-        if (looker == null || !looker.IsBuilder) return "";
+        if (looker is null || !looker.IsBuilder) return "";
         SyncRoot.EnterReadLock();
         try
         {
@@ -365,7 +361,7 @@ public partial class Node
     // Port of nodes.py:945 return_appearance
     public override string ReturnAppearance(GameObject? looker = null)
     {
-        if (looker == null) return "You see nothing here.";
+        if (looker is null) return "You see nothing here.";
         const string tmpl = "{name}{desc}{doors}{exits}{characters}{things}";
         return tmpl.Replace("{name}", GetDisplayName(looker))
                    .Replace("{desc}", GetDisplayDesc(looker))

@@ -1,6 +1,4 @@
 using System.Text.RegularExpressions;
-using Atheriz.Core.Settings;
-using Atheriz.Server.Infrastructure;
 using Microsoft.AspNetCore.StaticFiles;
 
 namespace Atheriz.Server.Hosting;
@@ -14,7 +12,7 @@ public static class StaticFileConfig
     {
         var staticCandidate = AssetPathResolver.ResolveWwwRoot(app.Environment.ContentRootPath, AppContext.BaseDirectory);
         var templatesCandidate = AssetPathResolver.ResolveTemplates(app.Environment.ContentRootPath, AppContext.BaseDirectory);
-        if (staticCandidate != null)
+        if (staticCandidate is not null)
         {
             Console.WriteLine($"Serving static files from: {staticCandidate}");
             var contentTypeProvider = new FileExtensionContentTypeProvider();
@@ -47,7 +45,7 @@ public static class StaticFileConfig
             try
             {
                 var syncSummary = WebclientSyncChecker.CheckSync(Directory.GetCurrentDirectory(), app.Environment.ContentRootPath, null);
-                if (syncSummary != null)
+                if (syncSummary is not null)
                     Console.WriteLine(WebclientSyncChecker.FormatWarning(syncSummary, Directory.GetCurrentDirectory(), app.Environment.ContentRootPath, null, null));
             }
             catch (Exception ex) { Console.Error.WriteLine($"Webclient sync check failed: {ex.Message}"); }
@@ -61,12 +59,12 @@ public static class StaticFileConfig
         {
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
             ctx.Response.Headers.Pragma = "no-cache";
-            if (templatesCandidate != null)
+            if (templatesCandidate is not null)
             {
                 var tpl = Path.Combine(templatesCandidate, "index.html");
                 if (File.Exists(tpl)) return Results.File(tpl, contentType: "text/html");
             }
-            if (staticCandidate != null)
+            if (staticCandidate is not null)
             {
                 var idx = Path.Combine(staticCandidate, "index.html");
                 if (File.Exists(idx)) return Results.File(idx, contentType: "text/html");
@@ -77,12 +75,12 @@ public static class StaticFileConfig
         {
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
             ctx.Response.Headers.Pragma = "no-cache";
-            if (staticCandidate != null)
+            if (staticCandidate is not null)
             {
                 var compiled = Path.Combine(staticCandidate, "webclient", "index.html");
                 if (File.Exists(compiled)) return Results.File(compiled, contentType: "text/html");
             }
-            if (templatesCandidate != null)
+            if (templatesCandidate is not null)
             {
                 var tpl = Path.Combine(templatesCandidate, "webclient", "index.html");
                 if (File.Exists(tpl)) return Results.File(tpl, contentType: "text/html");
@@ -96,7 +94,7 @@ public static class StaticFileConfig
             // Entry HTML is never cached (hashed bundles underneath are immutable).
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
             ctx.Response.Headers.Pragma = "no-cache";
-            if (staticCandidate != null)
+            if (staticCandidate is not null)
             {
                 var compiledDraw = Path.Combine(staticCandidate, "atheriz_draw", "index.html");
                 if (File.Exists(compiledDraw)) return Results.File(compiledDraw, contentType: "text/html");

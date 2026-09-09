@@ -293,7 +293,7 @@ public class ServerRegressionTests
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Utils", "Pathfind.cs");
         Assert.Contains("private static List<Node> GetLinkNodes(Node node, NodeHandler handler)", src);
-        Assert.Contains("caller == null", src);
+        Assert.Contains("caller is null", src);
     }
 
     // the open queue orders nodes via CompareTo (heapq __lt__ parity);

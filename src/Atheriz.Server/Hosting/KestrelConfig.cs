@@ -1,5 +1,4 @@
 using System.Net;
-using Atheriz.Core.Settings;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
 

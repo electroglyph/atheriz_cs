@@ -1,7 +1,3 @@
-using System.Diagnostics;
-using System.Text;
-using Atheriz.Core.Settings;
-using Atheriz.Server.Infrastructure;
 using Microsoft.Extensions.Configuration;
 
 namespace Atheriz.Server.Cli;
@@ -25,7 +21,7 @@ public static class StopHandler
             try { builder.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true); } catch { }
             var cfg = builder.Build();
             var s = cfg.GetSection("Atheriz").Get<AtherizSettings>();
-            if (s != null) return s;
+            if (s is not null) return s;
         }
         catch { }
         return AtherizSettings.Global;
@@ -90,7 +86,7 @@ public static class StopHandler
         }
         int? pid = null;
         try { pid = int.Parse(File.ReadAllText(pidFilePath, Encoding.UTF8).Trim()); } catch { Console.WriteLine("Invalid PID file content."); }
-        if (pid != null)
+        if (pid is not null)
         {
             Process? proc = null;
             try { proc = Process.GetProcessById(pid.Value); }

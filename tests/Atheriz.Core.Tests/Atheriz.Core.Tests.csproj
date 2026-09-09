@@ -1,12 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- xUnit1031 (no blocking waits in tests) is suppressed project-wide on purpose:
+         50+ regression pins REQUIRE blocking waits with timeouts — deadlock/lock-order
+         proofs assert Task.Wait(TimeSpan)/IsCompleted/IsCompletedSuccessfully, which
+         await cannot express ("assert this did NOT finish in N seconds while a lock
+         is held"). xunit runs with no SynchronizationContext, so the analyzer's
+         deadlock rationale does not apply. New tests should still prefer await
+         where no blocking semantic is being pinned. -->
+    <NoWarn>$(NoWarn);xUnit1031</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,5 +1,3 @@
-using Atheriz.Core.Globals;
-using Atheriz.Core.Commands;
 using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Objects;
@@ -22,7 +20,7 @@ public partial class GameObject
     {
         return Hookable("at_look", () =>
         {
-            if (target == null) return "You see nothing here."; // Port of base_obj.py:2085
+            if (target is null) return "You see nothing here."; // Port of base_obj.py:2085
             if (!target.Access(this, "view")) return $"You can't look at '{target.GetDisplayName(this)}'."; // Port of base_obj.py:2087
             string desc;
             if (target is Node node) desc = node.ReturnAppearance(this);
@@ -36,7 +34,7 @@ public partial class GameObject
     {
         return Hookable("return_appearance", () =>
         {
-            if (looker == null) return "";
+            if (looker is null) return "";
             // Simplified appearance: name + desc + things
             var name = GetDisplayName(looker);
             var desc = Desc;

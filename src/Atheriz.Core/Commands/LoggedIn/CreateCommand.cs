@@ -1,7 +1,4 @@
 // Port of atheriz/commands/loggedin/create.py:53
-using Atheriz.Core.Objects;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -26,7 +23,7 @@ public sealed class CreateCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { go.Msg(PrintHelp()); return; }
+        if (pa is null) { go.Msg(PrintHelp()); return; }
         var name = pa.GetString("name");
         if (string.IsNullOrWhiteSpace(name)) { go.Msg(PrintHelp()); return; }
         var descList = pa.GetList("desc");

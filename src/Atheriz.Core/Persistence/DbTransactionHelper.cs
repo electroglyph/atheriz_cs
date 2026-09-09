@@ -1,5 +1,4 @@
 // Port of atheriz/database_setup.py:Database.lock RLock scaffold + do_setup transaction
-using Atheriz.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Persistence;
@@ -67,7 +66,7 @@ public static class CheckpointJournal
             using var db = AtherizDbContextFactory.Create(savePath);
             db.Database.EnsureCreated();
             var row = db.Checkpoints.Find(RowId);
-            return row != null && row.State == "dirty";
+            return row is not null && row.State == "dirty";
         }
         finally { DbWriteGate.Exit(); }
     }
@@ -75,7 +74,7 @@ public static class CheckpointJournal
     private static void Upsert(AtherizDbContext db, string state)
     {
         var row = db.Checkpoints.Find(RowId);
-        if (row == null)
+        if (row is null)
             db.Checkpoints.Add(new Entities.CheckpointRow
             {
                 Id = RowId,
@@ -113,7 +112,7 @@ public static class DbTransactionHelper
         // on this context (e.g. InitialSetup's single-transaction seed) runs inline —
         // a second BeginTransaction on the same connection throws. The outer
         // transaction owns atomicity; SaveChanges joins it. (Caller must EnsureCreated.)
-        if (db.Database.CurrentTransaction != null)
+        if (db.Database.CurrentTransaction is not null)
         {
             work(db);
             db.SaveChanges();
@@ -166,7 +165,7 @@ public static class DbTransactionHelper
     /// <summary>True when <paramref name="ex"/> (or any inner) is SQLITE_BUSY (5) or SQLITE_LOCKED (6).</summary>
     internal static bool IsBusyConflict(Exception ex)
     {
-        for (var e = ex; e != null; e = e.InnerException)
+        for (var e = ex; e is not null; e = e.InnerException)
         {
             if (e is Microsoft.Data.Sqlite.SqliteException se
                 && (se.SqliteErrorCode == 5 || se.SqliteErrorCode == 6))
@@ -180,7 +179,7 @@ public static class DbTransactionHelper
         where T : class, IJsonEntity
     {
         var existing = find();
-        if (existing != null)
+        if (existing is not null)
             existing.Data = json;
         else
         {
@@ -195,7 +194,7 @@ public static class DbTransactionHelper
         where T : class, IJsonEntity
     {
         var existing = find();
-        if (existing != null)
+        if (existing is not null)
         {
             existing.Data = json;
             configure(existing);

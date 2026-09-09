@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/desc.py:35
-using Atheriz.Core.Objects;
-using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -18,12 +16,12 @@ public sealed class DescCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { go.Msg(PrintHelp()); return; }
+        if (pa is null) { go.Msg(PrintHelp()); return; }
         var lst = pa.GetList("text");
         if (lst.Count > 0)
         {
             var loc = go.ResolveLocationObject();
-            if (loc == null) { CommandHelpers.MsgNowhereExclaim(go); return; }
+            if (loc is null) { CommandHelpers.MsgNowhereExclaim(go); return; }
             string newDesc = string.Join(" ", lst).Replace("\\n", "\n");
             if (loc is Node node) node.Desc = newDesc;
             else loc.Desc = newDesc;

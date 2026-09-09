@@ -84,7 +84,7 @@ public class PortedServerIntegrationTests
     {
         if (!OperatingSystem.IsLinux()) return; // only on linux where atheriz.sh works
         var repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net8.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return; // skip if not built
         var port = FindFreePortInt();
         var telnetPort = FindFreePortInt();
@@ -186,7 +186,7 @@ public class PortedServerIntegrationTests
     {
         if (!OperatingSystem.IsLinux()) return;
         var repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net8.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePortInt();
         var telnetPort = FindFreePortInt();

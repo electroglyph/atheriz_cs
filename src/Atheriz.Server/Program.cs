@@ -1,8 +1,5 @@
-using System.Text;
-using Atheriz.Core.Settings;
 using Atheriz.Server.Cli;
 using Atheriz.Server.Hosting;
-using Atheriz.Server.Infrastructure;
 string[] rawArgs = args;
 string command = "--help";
 string[] rest = Array.Empty<string>();
@@ -77,10 +74,10 @@ void PrintCommandHelp(string cmd)
 if (rest.Contains("--help", StringComparer.Ordinal) || rest.Contains("-h", StringComparer.Ordinal)) { PrintCommandHelp(command); return; }
 // Port of argparse type=int for --port: non-int port is a usage error (exit 2).
 {
-    var badPort = ArgumentParser.ParsePort(rest) == null ? ArgumentParser.InvalidPortValue(rest) : null;
-    if (badPort != null) { Console.Error.WriteLine($"atheriz: error: argument --port: invalid int value: '{badPort}'"); Environment.Exit(2); }
+    var badPort = ArgumentParser.ParsePort(rest) is null ? ArgumentParser.InvalidPortValue(rest) : null;
+    if (badPort is not null) { Console.Error.WriteLine($"atheriz: error: argument --port: invalid int value: '{badPort}'"); Environment.Exit(2); }
     var badTelnet = ArgumentParser.InvalidTelnetPortValue(rest);
-    if (badTelnet != null) { Console.Error.WriteLine($"atheriz: error: argument --telnet-port: invalid int value: '{badTelnet}'"); Environment.Exit(2); }
+    if (badTelnet is not null) { Console.Error.WriteLine($"atheriz: error: argument --telnet-port: invalid int value: '{badTelnet}'"); Environment.Exit(2); }
     if (ArgumentParser.HasBareHost(rest)) { Console.Error.WriteLine("atheriz: error: argument --host: expected one argument"); Environment.Exit(2); }
 }
 try
@@ -114,7 +111,7 @@ if (!foreground && command == "start")
     int spawnPort = portOverride ?? effSpawn.WebserverPort;
     // Validate the host before claiming: an invalid --host fails the spawn
     // below, and must not leave a pid claim behind pointing at this CLI.
-    if (hostOverride != null && !DaemonSpawner.IsSafeHost(hostOverride)) { Console.Error.WriteLine($"Invalid --host value: {hostOverride}"); Environment.Exit(2); return; }
+    if (hostOverride is not null && !DaemonSpawner.IsSafeHost(hostOverride)) { Console.Error.WriteLine($"Invalid --host value: {hostOverride}"); Environment.Exit(2); return; }
     // atomic handoff — port of spawn_daemon's O_CREAT|O_EXCL claim
     // (atheriz.py:1330). The parent CLAIMS the pid file (naming this
     // short-lived process, like spawn_daemon writing os.getpid()) and exits
@@ -136,10 +133,10 @@ builder.Services.AddOptions<AtherizSettings>().ValidateOnStart();
 // Overrides must be added to Configuration before app.Build so IOptionsMonitor.CurrentValue reflects them; AddSingleton delegates read after Build.
 builder.Services.AddSingleton(sp => sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<AtherizSettings>>().CurrentValue);
 builder.Services.AddSingleton<Atheriz.Core.Network.ConnectionManager>(sp => new Atheriz.Core.Network.ConnectionManager(settings: sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<AtherizSettings>>().CurrentValue));
-if (portOverride != null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:WebserverPort"] = portOverride.Value.ToString() });
+if (portOverride is not null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:WebserverPort"] = portOverride.Value.ToString() });
 var telnetPortOverride = ArgumentParser.ParseTelnetPort(rest);
-if (telnetPortOverride != null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:TelnetPort"] = telnetPortOverride.Value.ToString() });
-if (hostOverride != null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:WebserverInterface"] = hostOverride, ["Atheriz:TelnetInterface"] = hostOverride });
+if (telnetPortOverride is not null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:TelnetPort"] = telnetPortOverride.Value.ToString() });
+if (hostOverride is not null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:WebserverInterface"] = hostOverride, ["Atheriz:TelnetInterface"] = hostOverride });
 builder.Host.ConfigureHostOptions(o => o.ShutdownTimeout = TimeSpan.FromSeconds(5));
 // Honored opt-out (owner decision 2026-09-08): Kestrel with zero endpoints still binds
 // its localhost:5000 default, so opting out of HTTP means replacing the server, not

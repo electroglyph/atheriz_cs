@@ -1,8 +1,4 @@
 using System.Text.RegularExpressions;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Utils;
-using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -19,10 +15,10 @@ public sealed class DrawCommand : Command
         // typed BaseConnection (ClientHost/SendCommand). A raw BaseConnection caller
         // resolves via its session puppet. No reflection.
         GameObject? go = caller as GameObject;
-        if (go == null && caller is Atheriz.Core.Network.BaseConnection bc0 && bc0.Session.Puppet is GameObject pgo)
+        if (go is null && caller is Atheriz.Core.Network.BaseConnection bc0 && bc0.Session.Puppet is GameObject pgo)
             go = pgo;
         Node? loc = go?.ResolveLocationObject() as Node;
-        if (loc == null)
+        if (loc is null)
         {
             caller.Msg("You must be in a valid location to open the map editor.");
             return;
@@ -32,7 +28,7 @@ public sealed class DrawCommand : Command
         // falling back to the resolved puppet's session.
         Session? session = (caller as ISessionProvider)?.Session ?? go?.Session;
         Atheriz.Core.Network.BaseConnection? conn = session?.Connection;
-        if (conn == null)
+        if (conn is null)
         {
             caller.Msg("No active connection.");
             return;
@@ -42,7 +38,7 @@ public sealed class DrawCommand : Command
         MapHandler mh;
         try { mh = GlobalServices.GetMapHandler(); } catch { mh = new MapHandler(autoLoad:false); }
         var mi = mh.GetMapInfo(area, z);
-        if (mi == null)
+        if (mi is null)
         {
             mi = new MapInfo(area);
             mh.SetMapInfo(area, z, mi);
@@ -57,7 +53,7 @@ public sealed class DrawCommand : Command
         if (string.IsNullOrEmpty(plain)) plain = "X";
         if (plain.Length > 2) plain = plain.Substring(0, 2);
 
-        var payload = new Dictionary<string, object?>
+        Dictionary<string, object?> payload = new()
         {
             ["area"] = area,
             ["z"] = z,
@@ -82,7 +78,7 @@ public sealed class DrawCommand : Command
         // helper to build room payload
         Dictionary<string, object?> RoomPayload(Node node)
         {
-            var exits = new List<Dictionary<string, object?>>();
+            List<Dictionary<string, object?>> exits = [];
             foreach (var link in node.GetLinks())
             {
                 if (link.Coord.Equals(default)) continue;
@@ -103,19 +99,19 @@ public sealed class DrawCommand : Command
             };
         }
 
-        var seen = new HashSet<(int,int)>();
+        HashSet<(int,int)> seen = [];
         var gridList = (List<List<object?>>)payload["grid"]!;
         var roomsList = (List<Dictionary<string, object?>>)payload["rooms"]!;
         foreach (var kv in gridSnap)
         {
             gridList.Add(new List<object?>{ kv.Key.X, kv.Key.Y, kv.Value });
-            if (nodeGrid == null) continue;
+            if (nodeGrid is null) continue;
             var node = nodeGrid.GetNode(kv.Key);
-            if (node == null) continue;
+            if (node is null) continue;
             seen.Add(kv.Key);
             roomsList.Add(RoomPayload(node));
         }
-        if (nodeGrid != null)
+        if (nodeGrid is not null)
         {
             nodeGrid.Lock.EnterReadLock();
             List<( (int X,int Y) coord, Node node)> extra = new();
@@ -140,7 +136,7 @@ public sealed class DrawCommand : Command
         try
         {
             var argsList = new List<object?> { key, payload };
-            var kw = new Dictionary<string, object?>();
+            Dictionary<string, object?> kw = [];
             conn.SendCommand("launch_draw", argsList, kw);
             caller.Msg("Opening AtheriZ Draw in a new tab.");
         }

@@ -3,8 +3,6 @@
 // curated public members. Game-code subclasses extend the dump by overriding
 // GameObject.GetExamMembers.
 using System.Runtime.CompilerServices;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -101,18 +99,18 @@ public static class ExamFormatter
 
     public static object FormatValue(object? val, string? hint)
     {
-        if (hint != null && (hint.Contains("password", StringComparison.OrdinalIgnoreCase) || hint.Contains("secret", StringComparison.OrdinalIgnoreCase))) return "<hidden>";
+        if (hint is not null && (hint.Contains("password", StringComparison.OrdinalIgnoreCase) || hint.Contains("secret", StringComparison.OrdinalIgnoreCase))) return "<hidden>";
         if (hint == "internal_cmdset") return "<hidden>";
         if (hint == "external_cmdset")
         {
-            if (val == null) return "None";
+            if (val is null) return "None";
             if (val is CmdSet cs)
             {
-                var seen = new HashSet<int>();
-                var keys = new List<string>();
+                HashSet<int> seen = [];
+                List<string> keys = [];
                 foreach (var cmd in cs.GetAll())
                 {
-                    if (cmd == null) continue;
+                    if (cmd is null) continue;
                     if (!seen.Add(RuntimeHelpers.GetHashCode(cmd))) continue;
                     keys.Add(cmd.Key);
                 }
@@ -122,12 +120,12 @@ public static class ExamFormatter
         }
         if (hint == "followers")
         {
-            if (val == null) return "set()";
+            if (val is null) return "set()";
             try
             {
                 if (val is System.Collections.IEnumerable en)
                 {
-                    var ids = new List<int>();
+                    List<int> ids = [];
                     foreach (var e in en) if (e is int i) ids.Add(i);
                     else if (int.TryParse(e?.ToString(), out var pi)) ids.Add(pi);
                     if (ids.Count == 0) return "set()";
@@ -152,19 +150,19 @@ public static class ExamFormatter
                 int id = Convert.ToInt32(val);
                 if (id == -1) return "-1";
                 var name = ObjectRegistry.Get(id).FirstOrDefault()?.Name;
-                return name != null ? $"{id} ({name})" : id.ToString();
+                return name is not null ? $"{id} ({name})" : id.ToString();
             }
             catch (Exception) { }
             return val?.ToString() ?? "None";
         }
         if (hint == "scripts")
         {
-            if (val == null) return "set()";
+            if (val is null) return "set()";
             try
             {
                 if (val is System.Collections.IEnumerable en)
                 {
-                    var ids = new List<int>();
+                    List<int> ids = [];
                     bool allInts = true;
                     int count = 0;
                     foreach (var e in en) { count++; if (e is int i) ids.Add(i); else { allInts = false; break; } }
@@ -177,12 +175,12 @@ public static class ExamFormatter
         }
         if (hint == "_contents")
         {
-            if (val == null) return "set()";
+            if (val is null) return "set()";
             try
             {
                 if (val is System.Collections.IEnumerable en)
                 {
-                    var ids = new List<int>();
+                    List<int> ids = [];
                     bool allInts = true;
                     int count = 0;
                     foreach (var e in en) { count++; if (e is int i) ids.Add(i); else { allInts = false; break; } }
@@ -196,7 +194,7 @@ public static class ExamFormatter
         {
             // Python returns list[str] where first is "" and rest are "lock: [lambda...]"
             var lines = new List<string> { "" };
-            if (val != null)
+            if (val is not null)
             {
                 try
                 {
@@ -206,8 +204,8 @@ public static class ExamFormatter
                         {
                             string lockName = kv.Key?.ToString() ?? "";
                             var callables = kv.Value as System.Collections.IEnumerable;
-                            var bodies = new List<string>();
-                            if (callables != null)
+                            List<string> bodies = [];
+                            if (callables is not null)
                             {
                                 foreach (var fn in callables)
                                 {
@@ -225,23 +223,23 @@ public static class ExamFormatter
         }
         if (hint == "session")
         {
-            if (val == null) return "None";
+            if (val is null) return "None";
             if (val is not Session sess) return val.ToString() ?? "Session()";
-            var parts = new List<string>();
+            List<string> parts = [];
             // getattr-style guards — one throwing accessor (e.g. a
             // puppet whose Name raises) must not abort the whole exam list.
             var acc = SafeGet(() => sess.Account);
-            if (acc != null) parts.Add($"account={SafeGet(() => acc.Name) ?? "?"} (#{SafeGet(() => acc.Id)})");
+            if (acc is not null) parts.Add($"account={SafeGet(() => acc.Name) ?? "?"} (#{SafeGet(() => acc.Id)})");
             var conn = SafeGet(() => sess.Connection);
-            if (conn != null) parts.Add($"conn={SafeGet(() => conn.ClientHost) ?? SafeGet(() => conn.SessionId) ?? "?"}");
+            if (conn is not null) parts.Add($"conn={SafeGet(() => conn.ClientHost) ?? SafeGet(() => conn.SessionId) ?? "?"}");
             var puppet = SafeGet(() => sess.Puppet);
-            if (puppet != null) parts.Add($"puppet={SafeGet(() => puppet.Name) ?? "?"} (#{SafeGet(() => puppet.Id)})");
+            if (puppet is not null) parts.Add($"puppet={SafeGet(() => puppet.Name) ?? "?"} (#{SafeGet(() => puppet.Id)})");
             var tw = SafeGet(() => sess.TermWidth); var th = SafeGet(() => sess.TermHeight);
             if (tw != 0 && th != 0) parts.Add($"w={tw}, h={th}");
             if (SafeGet(() => sess.ScreenReader)) parts.Add("sr=True");
             return parts.Count > 0 ? "Session(" + string.Join(", ", parts) + ")" : "Session()";
         }
-        if (val == null) return "None";
+        if (val is null) return "None";
         if (val is string s) return s;
         // Typed lock check: no type named RLock exists in C# (the name is a
         // leftover of the original RLock); the live lock type is
@@ -250,7 +248,7 @@ public static class ExamFormatter
         // dict handling before general IEnumerable
         if (val is System.Collections.IDictionary genDict)
         {
-            var items = new List<string>();
+            List<string> items = [];
             foreach (System.Collections.DictionaryEntry kv in genDict)
             {
                 var kf = FormatValue(kv.Key, null) as string ?? kv.Key?.ToString() ?? "";
@@ -268,7 +266,7 @@ public static class ExamFormatter
             // so unrelated generic types with Tuple in their name are left
             // to the element rendering below).
             if (val is ITuple) return val.ToString() ?? "<unprintable>";
-            var elems = new List<string>();
+            List<string> elems = [];
             foreach (var e in en2) elems.Add(FormatValue(e, null) as string ?? e?.ToString() ?? "");
             // Set check by generic definition: matches HashSet of any element
             // type without catching unrelated types that merely contain

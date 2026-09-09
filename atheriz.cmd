@@ -10,8 +10,8 @@ REM strip trailing backslash
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "PROJECT_ROOT=%SCRIPT_DIR%"
 set "SERVER_PROJ=%PROJECT_ROOT%\src\Atheriz.Server\Atheriz.Server.csproj"
-set "SERVER_DLL_DEBUG=%PROJECT_ROOT%\src\Atheriz.Server\bin\Debug\net8.0\Atheriz.Server.dll"
-set "SERVER_DLL_RELEASE=%PROJECT_ROOT%\src\Atheriz.Server\bin\Release\net8.0\Atheriz.Server.dll"
+  set "SERVER_DLL_DEBUG=%PROJECT_ROOT%\src\Atheriz.Server\bin\Debug\net10.0\Atheriz.Server.dll"
+  set "SERVER_DLL_RELEASE=%PROJECT_ROOT%\src\Atheriz.Server\bin\Release\net10.0\Atheriz.Server.dll"
 set "PUBLISH_DLL=%PROJECT_ROOT%\publish\Atheriz.Server.dll"
 
 where dotnet >nul 2>nul

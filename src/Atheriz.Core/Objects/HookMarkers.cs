@@ -20,7 +20,7 @@ internal static class HookMarkerCache
     public static IReadOnlyList<(string Name, MethodInfo Method, HookKind Kind)> ForType(Type t) =>
         _byType.GetOrAdd(t, static type =>
         {
-            var list = new List<(string, MethodInfo, HookKind)>();
+            List<(string, MethodInfo, HookKind)> list = [];
             foreach (var m in type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
             {
                 if (!m.Name.StartsWith("at_", StringComparison.Ordinal)) continue;

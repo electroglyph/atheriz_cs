@@ -1,11 +1,8 @@
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Network;
 
@@ -18,7 +15,7 @@ public sealed class WebSocketConnection : BaseConnection
     // port of websocket.py:33-45 WebSocketConnection.__init__
     public System.Net.WebSockets.WebSocket WebSocket { get; }
     private Task? _closeTask;
-    private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1); // port of websocket.py:44 _send_lock = asyncio.Lock()
+    private readonly SemaphoreSlim _sendLock = new(1, 1); // port of websocket.py:44 _send_lock = asyncio.Lock()
     private readonly PendingLimiter _limiter; // sole accounting (single source of truth)
     // Close flag (with _limiter.IsClosing forms IsClosing).
     private bool _closing;
@@ -66,7 +63,7 @@ public sealed class WebSocketConnection : BaseConnection
             var ex = task.Exception?.InnerException ?? task.Exception;
             if (ex is OperationCanceledException) { }
             else if (ex is ObjectDisposedException) { } // post-dispose race: socket already gone
-            else if (ex != null) try { Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Async task failed: {ex}"); } catch { Console.Error.WriteLine($"[WebSocket] Async task failed: {ex}"); }
+            else if (ex is not null) try { Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Async task failed: {ex}"); } catch { Console.Error.WriteLine($"[WebSocket] Async task failed: {ex}"); }
         }
         else if (task.IsCanceled) { }
     }
@@ -108,8 +105,8 @@ public sealed class WebSocketConnection : BaseConnection
     {
         if (cmd == "echo_on") return; // port of websocket.py:73-74
         if (cmd == "prompt_masked") cmd = "prompt"; // port of websocket.py:75-76
-        args ??= new List<object?>();
-        kwargs ??= new Dictionary<string, object?>();
+        args ??= [];
+        kwargs ??= [];
         var data = JsonSerializer.Serialize(new object[] { cmd, args, kwargs }); // port of websocket.py:81
         var nb = Encoding.UTF8.GetByteCount(data); // port of websocket.py:82
         if (IsClosing) return;
@@ -136,7 +133,7 @@ public sealed class WebSocketConnection : BaseConnection
         catch (Exception e) // port of websocket.py:99-103
         {
             _limiter.ReleaseSync(nb);
-            if (task != null) try { task.ContinueWith(t => TaskDone(t), TaskScheduler.Default); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.SendCommand: " + logEx.Message, "WebSocketConnection"); }
+            if (task is not null) try { task.ContinueWith(t => TaskDone(t), TaskScheduler.Default); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.SendCommand: " + logEx.Message, "WebSocketConnection"); }
             Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Error sending command: {e}");
             return;
         }
@@ -220,7 +217,7 @@ public interface IWebSocketDisconnect { }
 public sealed class WebSocketProtocol : BaseProtocol
 {
     // Oversize throttling — port of websocket.py:15-27 (now via ThrottleWindow)
-    private static readonly object _oversizeLock = new object();
+    private static readonly object _oversizeLock = new();
     private static readonly Dictionary<string, double> _oversizeLast = new();
     private const double OversizeWindow = 5.0; // port of websocket.py:17
 

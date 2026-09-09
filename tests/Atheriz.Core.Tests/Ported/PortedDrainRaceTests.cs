@@ -182,7 +182,7 @@ public class PortedDrainRaceTests
             var rec = new DrainRecorder();
             conn.EnqueueInput(rec.MakeHandler("only"), new List<object?>(), new Dictionary<string, object?>());
             var q = (System.Collections.ICollection)typeof(BaseConnection).GetField("_inputQueue", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(conn)!;
-            Assert.Equal(1, q.Count);
+            Assert.Single(q);
             var running = (bool)typeof(BaseConnection).GetField("_inputRunning", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(conn)!;
             Assert.False(running);
             // Now make pool succeed and wait for automatic retry via Timer(0.05) without new enqueue

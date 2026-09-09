@@ -90,10 +90,10 @@ public sealed class GameArgumentParser
         string raw = names[0];
         if (names.Length > 1)
         {
-            var longOpt = names.FirstOrDefault(n => n.StartsWith("--"));
-            if (longOpt != null) raw = longOpt;
+            var longOpt = names.FirstOrDefault(n => n.StartsWith("--", StringComparison.Ordinal));
+            if (longOpt is not null) raw = longOpt;
         }
-        if (raw.StartsWith("-")) raw = raw.TrimStart('-').Replace("-", "_");
+        if (raw.StartsWith("-", StringComparison.Ordinal)) raw = raw.TrimStart('-').Replace("-", "_");
         def.Dest = raw;
         _defs.Add(def);
         return new Builder(def);
@@ -105,13 +105,13 @@ public sealed class GameArgumentParser
         // In that case 'help' looks like an option (starts with -), treat as second alias rather than help text.
         // Guard requires BOTH strings to be option-like so genuine help text
         // starting with '-' on a positional is never misread as an alias.
-        if (name.StartsWith("-") && IsOptionLike(help) && string.IsNullOrEmpty(nargs) && string.IsNullOrEmpty(action) && type == null && defaultValue == null && choices == null && required != true)
+        if (name.StartsWith("-", StringComparison.Ordinal) && IsOptionLike(help) && string.IsNullOrEmpty(nargs) && string.IsNullOrEmpty(action) && type is null && defaultValue is null && choices is null && required != true)
         {
             // treat as AddArgument(params ["-f","--flag"])
             var names = new List<string> { name, help };
             var def2 = new ArgumentDef { Names = names };
-            string raw2 = names.FirstOrDefault(n => n.StartsWith("--")) ?? names[0];
-            if (raw2.StartsWith("-")) raw2 = raw2.TrimStart('-').Replace("-", "_");
+            string raw2 = names.FirstOrDefault(n => n.StartsWith("--", StringComparison.Ordinal)) ?? names[0];
+            if (raw2.StartsWith("-", StringComparison.Ordinal)) raw2 = raw2.TrimStart('-').Replace("-", "_");
             def2.Dest = raw2;
             _defs.Add(def2);
             return new Builder(def2);
@@ -130,7 +130,7 @@ public sealed class GameArgumentParser
         if (!string.IsNullOrEmpty(action)) def.Action = action switch { "store_true" => ArgAction.StoreTrue, "store_false" => ArgAction.StoreFalse, "append" => ArgAction.Append, _ => ArgAction.Store };
         // dest
         string raw = name;
-        if (raw.StartsWith("-")) raw = raw.TrimStart('-').Replace("-", "_");
+        if (raw.StartsWith("-", StringComparison.Ordinal)) raw = raw.TrimStart('-').Replace("-", "_");
         def.Dest = raw;
         if (type is not null) def.Type = type;
         _defs.Add(def);
@@ -144,7 +144,7 @@ public sealed class GameArgumentParser
         if (AddHelp) sb.Append(" [-h]");
         foreach (var d in _defs)
         {
-            if (d.IsHelp || d.Names.Any(n => n.StartsWith("-"))) continue;
+            if (d.IsHelp || d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))) continue;
             sb.Append(d.Nargs switch
             {
                 NargsKind.Optional => $" [{d.Dest}]",
@@ -190,7 +190,7 @@ public sealed class GameArgumentParser
     public void Error(string message) => throw new CommandError(message);
     public void Exit(int status = 0, string? message = null)
     {
-        if (message != null) throw new CommandError(message);
+        if (message is not null) throw new CommandError(message);
     }
 
     // Parsed result: dict dest -> object, plus CmdString
@@ -249,7 +249,7 @@ public sealed class GameArgumentParser
     // number. List consumers must stop at these (argparse treats them as
     // unknown optionals) instead of swallowing them as values .
     private static bool LooksLikeUnknownOption(string tok)
-        => tok.StartsWith("-") && tok.Length > 1 && !IsNegativeNumber(tok);
+        => tok.StartsWith("-", StringComparison.Ordinal) && tok.Length > 1 && !IsNegativeNumber(tok);
 
     public ParsedArgs ParseArgs(IReadOnlyList<string> argList)
     {
@@ -266,7 +266,7 @@ public sealed class GameArgumentParser
             else if (d.Action == ArgAction.StoreFalse) result.Set(d.Dest, true);
             else if (d.Nargs == NargsKind.ZeroOrMore || d.Nargs == NargsKind.OneOrMore || d.Nargs == NargsKind.Remainder)
                 result.Set(d.Dest, new List<string>());
-            else if (d.Names.Any(n => n.StartsWith("-")))
+            else if (d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal)))
             {
                 // optional with store: default null
                 result.Set(d.Dest, null);
@@ -278,9 +278,9 @@ public sealed class GameArgumentParser
             }
         }
 
-        var positionalDefs = _defs.Where(d => !d.Names.Any(n => n.StartsWith("-")) && !d.IsHelp).ToList();
-        var optionalMap = new Dictionary<string, ArgumentDef>();
-        foreach (var d in _defs.Where(d => d.Names.Any(n => n.StartsWith("-"))))
+        var positionalDefs = _defs.Where(d => !d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal)) && !d.IsHelp).ToList();
+        Dictionary<string, ArgumentDef> optionalMap = [];
+        foreach (var d in _defs.Where(d => d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))))
             foreach (var n in d.Names) optionalMap[n] = d;
 
         int posIdx = 0;
@@ -314,7 +314,7 @@ public sealed class GameArgumentParser
                     // a single-value store keeps argparse's greedy take.
                     if (opt.Nargs == NargsKind.ZeroOrMore || opt.Nargs == NargsKind.OneOrMore || opt.Nargs == NargsKind.Remainder)
                     {
-                        var lst = new List<string>();
+                        List<string> lst = [];
                         i++;
                         while (i < argList.Count && !optionalMap.ContainsKey(argList[i]) && !LooksLikeUnknownOption(argList[i]))
                         {
@@ -350,7 +350,7 @@ public sealed class GameArgumentParser
                     }
                 }
             }
-            else if (tok.StartsWith("-") && tok.Length > 1)
+            else if (tok.StartsWith("-", StringComparison.Ordinal) && tok.Length > 1)
             {
                 // Port of argparse negative-number handling: when no defined
                 // optional looks like a negative number, a "-5"/"-.5" token
@@ -442,7 +442,7 @@ public sealed class GameArgumentParser
             bool isRequired = pd.Required || pd.Nargs == NargsKind.OneOrMore;
             // positional with Nargs.None is required by default in Python argparse,
             // unless explicitly opted out via required:false .
-            if (!isRequired && pd.Nargs == NargsKind.None && !pd.Names.Any(n => n.StartsWith("-"))
+            if (!isRequired && pd.Nargs == NargsKind.None && !pd.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))
                 && !(pd.RequiredExplicit && !pd.Required))
                 isRequired = true;
             if (isRequired)
@@ -458,7 +458,7 @@ public sealed class GameArgumentParser
         }
         // check required optionals: presence on the command line is required
         // (bool defaults make a null-check undetectable for store_true).
-        foreach (var od in _defs.Where(d => d.Required && d.Names.Any(n => n.StartsWith("-"))))
+        foreach (var od in _defs.Where(d => d.Required && d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))))
         {
             if (!seen.Contains(od.Dest)) throw new CommandError($"the following arguments are required: {string.Join("/", od.Names)}");
         }

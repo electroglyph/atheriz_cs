@@ -2,8 +2,6 @@
 // Dynamically generated via get_class_hooks
 #nullable enable
 namespace MyGame;
-using Atheriz.Core;
-using Atheriz.Core.Objects;
 /// <summary>Custom Node — mirrors test/node.py</summary>
 public class CustomNode : Node
 {

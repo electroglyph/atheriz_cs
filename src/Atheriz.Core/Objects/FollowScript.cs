@@ -1,4 +1,3 @@
-using Atheriz.Core.Globals;
 
 namespace Atheriz.Core.Objects;
 
@@ -36,11 +35,11 @@ public sealed class FollowScript : Script
         // below used to skip the pop, leaking one entry per failed move and
         // shifting the pairing of all later moves.
         if (!_oldLocStack.TryPop(out var oldLoc)) oldLoc = null;
-        if (destination == null) return;
+        if (destination is null) return;
         var child = Child;
-        if (child == null) { Delete(); return; }
+        if (child is null) { Delete(); return; }
         if (child.FollowersSnapshot.Count == 0) { Delete(); return; }
-        if (oldLoc == null) return;
+        if (oldLoc is null) return;
         List<int> followers;
         // Snapshot followers under lock via the typed snapshot (no reflection).
         followers = child.FollowersSnapshot.ToList();
@@ -66,7 +65,7 @@ public sealed class FollowScript : Script
         IsDeleted = true;
         ObjectRegistry.RemoveObject(this);
         var child = Child;
-        if (child != null)
+        if (child is not null)
         {
             RemoveHooks(child);
         }

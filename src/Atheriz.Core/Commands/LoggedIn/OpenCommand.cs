@@ -1,5 +1,4 @@
 // Port of atheriz/commands/loggedin/open.py:345
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

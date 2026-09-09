@@ -1,7 +1,4 @@
-using System.Diagnostics;
 using System.Net.Security;
-using System.Text;
-using System.Text.Json;
 
 namespace Atheriz.Server.Cli;
 
@@ -25,7 +22,7 @@ public static class ShutdownClient
     internal static async Task<AdminResponse?> PostAdminAsync(int port, string secretPath, string path, string? jsonPayload, bool tlsOn)
     {
         var tokenFile = FindTokenFile(secretPath, port);
-        if (tokenFile == null || !File.Exists(tokenFile)) return null;
+        if (tokenFile is null || !File.Exists(tokenFile)) return null;
         string token;
         try { token = File.ReadAllText(tokenFile, Encoding.UTF8).Trim(); } catch { return null; }
         var url = $"{(tlsOn ? "https" : "http")}://localhost:{port}{path}";
@@ -41,7 +38,7 @@ public static class ShutdownClient
                 if (req is not System.Net.Http.HttpRequestMessage m || m.RequestUri is not Uri u) return false;
                 bool loopback = u.Host == "localhost" || u.Host == "127.0.0.1" || u.Host == "::1";
                 if (errors == SslPolicyErrors.None) return true;
-                if (!loopback || cert == null) return false;
+                if (!loopback || cert is null) return false;
                 const SslPolicyErrors loopbackTolerated =
                     SslPolicyErrors.RemoteCertificateChainErrors | SslPolicyErrors.RemoteCertificateNameMismatch;
                 return (errors & ~loopbackTolerated) == 0;
@@ -49,7 +46,7 @@ public static class ShutdownClient
             using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
             var req = new HttpRequestMessage(HttpMethod.Post, url);
             req.Headers.Add("X-Admin-Token", token);
-            if (jsonPayload != null) req.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+            if (jsonPayload is not null) req.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
             var resp = await client.SendAsync(req);
             var body = await resp.Content.ReadAsStringAsync();
             return new AdminResponse((int)resp.StatusCode, body);
@@ -61,7 +58,7 @@ public static class ShutdownClient
     {
         Console.WriteLine("Requesting graceful shutdown via internal API...");
         var resp = await PostAdminAsync(port, secretPath, "/_internal/shutdown", null, tlsOn);
-        if (resp == null)
+        if (resp is null)
         {
             Console.WriteLine("Could not contact server for graceful shutdown (server might be hung or stopped).");
             return ShutdownRequestResult.Unreachable;
@@ -88,7 +85,7 @@ public static class ShutdownClient
         try
         {
             var cur = new DirectoryInfo(Directory.GetCurrentDirectory());
-            for (int i = 0; i < 6 && cur != null; i++) { var p = Path.Combine(cur.FullName, "secret", "admin.token"); if (File.Exists(p)) return p; var p2 = Path.Combine(cur.FullName, "save", "..", "secret", "admin.token"); if (File.Exists(Path.GetFullPath(p2))) return Path.GetFullPath(p2); cur = cur.Parent; }
+            for (int i = 0; i < 6 && cur is not null; i++) { var p = Path.Combine(cur.FullName, "secret", "admin.token"); if (File.Exists(p)) return p; var p2 = Path.Combine(cur.FullName, "save", "..", "secret", "admin.token"); if (File.Exists(Path.GetFullPath(p2))) return Path.GetFullPath(p2); cur = cur.Parent; }
         }
         catch { }
         try

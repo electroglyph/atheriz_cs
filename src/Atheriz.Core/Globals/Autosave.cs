@@ -1,6 +1,5 @@
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Persistence;
-using Atheriz.Core.Settings;
 using Microsoft.Extensions.Logging;
 
 namespace Atheriz.Core.Globals;
@@ -57,7 +56,7 @@ public static class Autosave
     public static void AutosaveTick(AtherizSettings? settings, MapHandler? mapHandler = null, NodeHandler? nodeHandler = null, GameTime? gameTime = null)
     {
         settings ??= _cachedSettings ?? AtherizSettings.Global;
-        var failures = new List<string>();
+        List<string> failures = [];
 
         // Crash-consistency journal: dirty before tables, clean
         // after all commit. A crash between tables leaves dirty behind.
@@ -132,13 +131,13 @@ public static class Autosave
         if (failures.Count > 0)
         {
             try { AtherizLogger.LogError($"Autosave failed for: {string.Join(", ", failures)}"); } catch { Console.Error.WriteLine($"Autosave failed for: {string.Join(", ", failures)}"); }
-            try { var ch = GlobalServices.GetServerChannel(); if (ch != null) ch.Msg($"Autosave failed for: {string.Join(", ", failures)}"); } catch (Exception) { }
+            try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg($"Autosave failed for: {string.Join(", ", failures)}"); } catch (Exception) { }
         }
         else
         {
             CheckpointJournal.MarkClean(AtherizDbContextFactory.ResolveSavePath(settings));
             try { AtherizLogger.LogInformation("Autosave completed."); } catch { Console.Error.WriteLine("Autosave completed."); }
-            try { var ch = GlobalServices.GetServerChannel(); if (ch != null) ch.Msg("Autosave completed."); } catch (Exception) { }
+            try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg("Autosave completed."); } catch (Exception) { }
         }
     }
 
@@ -178,9 +177,9 @@ public static class Autosave
         AsyncTicker? ticker;
         lock (_lock)
         {
-            if (_autosaveStarted && _globalTicker != null) return;
+            if (_autosaveStarted && _globalTicker is not null) return;
             if (_autosaveStarted) return;
-            if (_globalTicker == null)
+            if (_globalTicker is null)
                 _globalTicker = new AsyncTicker();
             ticker = _globalTicker;
         }
@@ -191,7 +190,7 @@ public static class Autosave
     {
         AsyncTicker? ticker;
         lock (_lock) { ticker = _globalTicker ?? _startedTicker; }
-        if (ticker != null)
+        if (ticker is not null)
         {
             try { StopAutosave(ticker); } catch (Exception) { }
         }
@@ -203,12 +202,12 @@ public static class Autosave
         {
             if (!_autosaveStarted) return;
             double? interval = _registeredInterval;
-            if (interval == null)
+            if (interval is null)
             {
                 try { AtherizLogger.LogWarning("Autosave was started but no registered interval is known; the tick cannot be removed."); } catch { Console.Error.WriteLine("Autosave was started but no registered interval is known; the tick cannot be removed."); }
                 try
                 {
-                    var fallback = _cachedSettings != null ? IntervalSeconds(_cachedSettings) : 0;
+                    var fallback = _cachedSettings is not null ? IntervalSeconds(_cachedSettings) : 0;
                     if (fallback != 0) ticker.RemoveCoro(AutosaveTick, fallback);
                 }
                 catch (Exception) { }
@@ -252,7 +251,7 @@ public static class Autosave
             gt = _globalTicker;
             _globalTicker = null;
         }
-        if (gt != null)
+        if (gt is not null)
         {
             try { gt.Clear(); } catch (Exception) { }
             try { gt.Stop(); } catch (Exception) { }

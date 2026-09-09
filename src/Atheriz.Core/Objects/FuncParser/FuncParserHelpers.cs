@@ -47,7 +47,7 @@ public static class FuncParserHelpers
             return Regex.Replace(template, @"\{(\w+)\}", m =>
             {
                 var key = m.Groups[1].Value;
-                return TryGetValue(key, out var v) && v != null ? v.ToString()! : m.Value;
+                return TryGetValue(key, out var v) && v is not null ? v.ToString()! : m.Value;
             });
         }
     }
@@ -119,13 +119,13 @@ public static class FuncParserHelpers
         width = Math.Min(width.Value, MaxTextWidth);
         indent = Math.Max(0, Math.Min(indent, width.Value));
         // Simplified: split words, fill lines
-        var lines = new List<string>();
+        List<string> lines = [];
         var paragraphs = text.Split('\n');
         foreach (var para in paragraphs)
         {
             if (string.IsNullOrWhiteSpace(para)) { lines.Add(new string(fillchar[0], width.Value)); continue; }
             var words = para.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var curLine = new List<string>();
+            List<string> curLine = [];
             int curLen = 0;
             foreach (var w in words)
             {
@@ -277,7 +277,7 @@ public static class FuncParserHelpers
     // --- SafeConvertToTypes port (funcparser_helpers.py:404) ---
     public static (object?[] args, Dictionary<string,object?> kwargs) SafeConvertToTypes(object? converters, object?[] args, Dictionary<string,object?> kwargs, bool raiseErrors = true)
     {
-        if (converters == null) return (args, kwargs);
+        if (converters is null) return (args, kwargs);
         IEnumerable<object>? argConvs = null;
         IDictionary<string, object>? kwConvs = null;
         // Try to extract ValueTuple Item1/Item2 via ITuple
@@ -287,26 +287,26 @@ public static class FuncParserHelpers
                 var p2 = tup.Length>=2 ? tup[1] : null;
                 if(p1 is IEnumerable<object> e) argConvs = e;
                 else if(p1 is System.Collections.IEnumerable en) argConvs = en.Cast<object>();
-                else if(p1 != null) argConvs = new[]{p1};
+                else if(p1 is not null) argConvs = new[]{p1};
                 if(p2 is IDictionary<string, object> d) kwConvs = d;
-                else if(p2 is System.Collections.IDictionary id) { var nd=new Dictionary<string,object>(); foreach(System.Collections.DictionaryEntry kv in id) nd[kv.Key.ToString()!] = kv.Value!; kwConvs=nd; }
+                else if(p2 is System.Collections.IDictionary id) { Dictionary<string,object> nd = []; foreach(System.Collections.DictionaryEntry kv in id) nd[kv.Key.ToString()!] = kv.Value!; kwConvs=nd; }
                 else if(p2 is IDictionary<string, object?> d2b) kwConvs = d2b.ToDictionary(kv=>kv.Key, kv=>(object)kv.Value!);
             }else{
                 if(converters is object[] arr && arr.Length==2){
-                    if(arr[0] is IEnumerable<object> e2) argConvs=e2; else if(arr[0] is System.Collections.IEnumerable en2) argConvs=en2.Cast<object>(); else if(arr[0]!=null) argConvs=new[]{arr[0]};
+                    if(arr[0] is IEnumerable<object> e2) argConvs=e2; else if(arr[0] is System.Collections.IEnumerable en2) argConvs=en2.Cast<object>(); else if(arr[0] is not null) argConvs=new[]{arr[0]};
                     if(arr[1] is IDictionary<string, object> d2) kwConvs=d2;
                 }
             }
         }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser.SafeConvertToTypes: " + logEx.Message, "SafeArithParser"); }
-        if(argConvs==null && kwConvs==null){
+        if(argConvs is null && kwConvs is null){
             // converters is single arg converters?
             if(converters is IEnumerable<object> e3) argConvs=e3;
             else argConvs = new[]{converters};
         }
-        var argList = argConvs?.ToList() ?? new List<object>();
+        var argList = argConvs?.ToList() ?? [];
         var kwDict = kwConvs ?? new Dictionary<string, object>();
         // Convert args
-        if(args != null && argList.Count>0){
+        if(args is not null && argList.Count>0){
             var argsCopy = args.ToList();
             for(int i=0;i< Math.Min(argsCopy.Count, argList.Count); i++){
                 var conv = argList[i];
@@ -329,7 +329,7 @@ public static class FuncParserHelpers
             }
             args = argsCopy.ToArray();
         }
-        if(kwDict.Count>0 && kwargs!=null){
+        if(kwDict.Count>0 && kwargs is not null){
             foreach(var kv in kwDict){
                 if(!kwargs.ContainsKey(kv.Key)) continue;
                 var conv = kv.Value;
@@ -349,22 +349,22 @@ public static class FuncParserHelpers
                 }
             }
         }
-        return (args ?? Array.Empty<object?>(), kwargs ?? new Dictionary<string, object?>());
+        return (args ?? Array.Empty<object?>(), kwargs ?? []);
     }
 
     // Overload for python-like call: (converters, *args, **kwargs) with raiseErrors kw
     public static (object?[] args, Dictionary<string,object?> kwargs) SafeConvertToTypes(object? converters, object? arg1, bool raiseErrors = true)
-        => SafeConvertToTypes(converters, new object?[]{arg1}, new Dictionary<string,object?>(), raiseErrors);
+        => SafeConvertToTypes(converters, new object?[]{arg1}, [], raiseErrors);
 
     private static object? _SafeEval(object? inp)
     {
-        if(inp==null) return "";
+        if(inp is null) return "";
         if(inp is not string s) return inp;
         if(string.IsNullOrEmpty(s)) return "";
         // try literal eval
         try{
             var lit = _TryLiteralEval(s);
-            if(lit != null || s.Trim()=="[]" || s.Trim()=="()") return lit;
+            if(lit is not null || s.Trim()=="[]" || s.Trim()=="()") return lit;
         }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser._SafeEval: " + logEx.Message, "SafeArithParser"); }
         // try arith
         try{
@@ -372,7 +372,7 @@ public static class FuncParserHelpers
         }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser._SafeEval: " + logEx.Message, "SafeArithParser"); }
         // manual containers
         var parts = _ManualParseContainers(s);
-        if(parts != null) return parts;
+        if(parts is not null) return parts;
         throw new FuncParser.ParsingError($"Errors converting '{s}' to python: literal_eval raised, arith_eval raised");
     }
 
@@ -385,7 +385,7 @@ public static class FuncParserHelpers
         // quoted string
         if(t.Length>=2 && ((t[0]=='\'' && t[^1]=='\'') || (t[0]=='"' && t[^1]=='"'))) return t.Substring(1, t.Length-2);
         // list
-        if(t.StartsWith("[") && t.EndsWith("]")){
+        if(t.StartsWith("[", StringComparison.Ordinal) && t.EndsWith("]", StringComparison.Ordinal)){
             var inner = t.Substring(1, t.Length-2).Trim();
             if(string.IsNullOrEmpty(inner)) return new List<object?>();
             // try split respecting quotes/brackets - if nested brackets, fail -> throw to trigger manual rejection?
@@ -396,8 +396,8 @@ public static class FuncParserHelpers
                 throw new ArgumentException("nested");
             }
             var elems = _ManualParseContainers(t);
-            if(elems!=null){
-                var res=new List<object?>();
+            if(elems is not null){
+                List<object?> res = [];
                 foreach(var e in elems){
                     var ev = _TryLiteralEval(e);
                     res.Add(ev ?? e);
@@ -407,18 +407,18 @@ public static class FuncParserHelpers
             return inner.Split(',').Select(x=> x.Trim().Trim('\'','"')).Cast<object?>().ToList();
         }
         // tuple
-        if(t.StartsWith("(") && t.EndsWith(")")){
+        if(t.StartsWith("(", StringComparison.Ordinal) && t.EndsWith(")", StringComparison.Ordinal)){
             var inner = t.Substring(1, t.Length-2).Trim();
             if(string.IsNullOrEmpty(inner)) return new List<object?>();
             if(inner.Contains("(") || inner.Contains("[")){
                 // For Python, (1,(2,3)) should be parsed as nested tuple -> we need to succeed via literal eval path
                 // Attempt recursive parse: split top-level commas outside nested
                 var parts = SplitTopLevel(inner);
-                if(parts==null) throw new ArgumentException("nested fail");
-                var list=new List<object?>();
+                if(parts is null) throw new ArgumentException("nested fail");
+                List<object?> list = [];
                 foreach(var p in parts){
                     var v=_TryLiteralEval(p.Trim());
-                    if(v==null) throw new ArgumentException("fail");
+                    if(v is null) throw new ArgumentException("fail");
                     list.Add(v);
                 }
                 // Return as list or tuple? Python returns tuple; we return list equivalent but test will compare via sequence equality
@@ -428,8 +428,8 @@ public static class FuncParserHelpers
                 return list;
             }
             var elems2 = _ManualParseContainers(t);
-            if(elems2!=null){
-                var res2=new List<object?>();
+            if(elems2 is not null){
+                List<object?> res2 = [];
                 foreach(var e in elems2){
                     // try int
                     if(int.TryParse(e, out var iv2)) res2.Add(iv2);
@@ -447,8 +447,8 @@ public static class FuncParserHelpers
         var containerEnd = new Dictionary<char,char>{{'(',')'},{'[',']'},{'{','}'}};
         if(!containerEnd.ContainsKey(inp[0]) || inp[^1]!=containerEnd[inp[0]]) return null;
         var inner = inp.Substring(1, inp.Length-2);
-        var parts=new List<string>();
-        var cur=new List<char>();
+        List<string> parts = [];
+        List<char> cur = [];
         bool inSingle=false, inDouble=false, escaped=false;
         for(int i=0;i<inner.Length;i++){
             char ch=inner[i];
@@ -467,8 +467,8 @@ public static class FuncParserHelpers
 
     private static List<string>? SplitTopLevel(string inner)
     {
-        var parts=new List<string>();
-        var cur=new List<char>();
+        List<string> parts = [];
+        List<char> cur = [];
         int depthParen=0, depthBracket=0, depthBrace=0;
         bool inSingle=false,inDouble=false, escaped=false;
         for(int i=0;i<inner.Length;i++){

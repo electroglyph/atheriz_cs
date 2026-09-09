@@ -193,8 +193,7 @@ public class PortedUnloggedinCommandsTestsPart3
         cmd.Run(conn, parsed);
         // Verify hash still uses 600k iterations via direct check
         var hash = Account.HashPassword("pw123456", "testsalt");
-        using var pbkdf2 = new System.Security.Cryptography.Rfc2898DeriveBytes("pw123456", System.Text.Encoding.UTF8.GetBytes("testsalt"), 600_000, System.Security.Cryptography.HashAlgorithmName.SHA256);
-        var expected = Convert.ToHexString(pbkdf2.GetBytes(32)).ToLowerInvariant();
+        var expected = Convert.ToHexString(System.Security.Cryptography.Rfc2898DeriveBytes.Pbkdf2("pw123456", System.Text.Encoding.UTF8.GetBytes("testsalt"), 600_000, System.Security.Cryptography.HashAlgorithmName.SHA256, 32)).ToLowerInvariant();
         Assert.Equal(expected, hash);
         SaltProvider.Clear();
     }
@@ -307,7 +306,7 @@ public class PortedUnloggedinCommandsTestsPart3
         }
         Assert.Equal(5, guests.Count);
         foreach(var g in guests) ObjectRegistry.RemoveObject(g);
-        Assert.Empty(guests.Where(g=> ObjectRegistry.Get(g.Id).Count>0));
+        Assert.DoesNotContain(guests, g=> ObjectRegistry.Get(g.Id).Count>0);
     }
 
     // Port of test_duplicate_account — already exists

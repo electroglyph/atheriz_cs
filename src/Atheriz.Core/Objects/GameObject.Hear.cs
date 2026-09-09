@@ -1,6 +1,4 @@
 // Port of atheriz/objects/base_obj.py:1776 at_hear and related
-using Atheriz.Core.Globals;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Objects;
 
@@ -47,7 +45,7 @@ public partial class GameObject
         {
             if (!IsPc) return 0.0;
         var loc = ResolveLocationObject();
-        if (loc == null) return 0;
+        if (loc is null) return 0;
         string adj = " deafening";
         foreach (var (thr, desc) in LoudnessLevels) { if (loudness < thr) { adj = desc; break; } }
         if (isSay && !string.IsNullOrEmpty(soundMsg))
@@ -61,7 +59,7 @@ public partial class GameObject
         }
         var emitterLoc = emitter.ResolveLocationObject();
         // if same location or emitter has no location -> direct
-        if (emitterLoc == loc || emitterLoc == null)
+        if (emitterLoc == loc || emitterLoc is null)
         {
             Msg($"You hear something{adj}: {soundDesc}{soundMsg}");
         }
@@ -73,7 +71,7 @@ public partial class GameObject
                 {
                     Coord? ec = emitterLoc is Node en ? en.Coord : (Coord?)null;
                     Coord? lc = loc is Node ln ? ln.Coord : (Coord?)null;
-                    if (ec != null && lc != null && ec.Value.Area == lc.Value.Area)
+                    if (ec is not null && lc is not null && ec.Value.Area == lc.Value.Area)
                     {
                         var direction = GameUtils.GetDir(lc.Value, ec.Value);
                         int zDiff = ec.Value.Z - lc.Value.Z;
@@ -98,7 +96,7 @@ public partial class GameObject
             var allow1 = AtPreEmitSound(this, soundDesc, soundMsg, loudness, isSay);
             if (!allow1.ok) return 0;
             soundDesc = allow1.desc; soundMsg = allow1.msg; loudness = allow1.loudness; isSay = allow1.isSay;
-            if (loc != null)
+            if (loc is not null)
             {
                 // loc pre emit
                 if (loc is Node nodeLoc)
@@ -122,12 +120,12 @@ public partial class GameObject
                     var nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();
                     var c = srcNode.Coord;
                     var area = nh.GetArea(c.Area);
-                    if (area != null)
+                    if (area is not null)
                     {
                         // Determine attenuation at source
                         bool open = false;
                         var doors = nh.GetDoors(c);
-                        if (doors != null && doors.Count>0)
+                        if (doors is not null && doors.Count>0)
                         {
                             foreach (var d in doors.Values) if (!d.Closed) { open=true; break; }
                         }
@@ -140,7 +138,7 @@ public partial class GameObject
                         var queue = new Queue<(Node node, double loud)>();
                         foreach (var neighbor in area.GetNeighbors(sourceLocal))
                         {
-                            if (neighbor != null)
+                            if (neighbor is not null)
                             {
                                 var ncoord = (neighbor.Coord.X, neighbor.Coord.Y, neighbor.Coord.Z);
                                 seen.Add(ncoord);
@@ -158,7 +156,7 @@ public partial class GameObject
                             {
                                 foreach (var neighbor in area.GetNeighbors(ncoord))
                                 {
-                                    if (neighbor==null) continue;
+                                    if (neighbor is null) continue;
                                     var nnc = (neighbor.Coord.X, neighbor.Coord.Y, neighbor.Coord.Z);
                                     if (!seen.Contains(nnc))
                                     {
@@ -180,7 +178,7 @@ public partial class GameObject
         try
         {
             var pool = GlobalServices.GetAsyncThreadPool();
-            if (pool != null)
+            if (pool is not null)
             {
                 if (!pool.AddTask(() => AtEmitSound(soundDesc, soundMsg, loudness, isSay)))
                 {

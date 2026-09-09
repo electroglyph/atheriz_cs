@@ -1,7 +1,6 @@
 // Port of atheriz/objects/verb_conjugation/pronouns.py:1
 using System.Collections.Generic;
 using System.Linq;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Objects.VerbConjugation;
 
@@ -148,7 +147,7 @@ public static class Pronouns
             else gender = DefaultGender;
         }
 
-        if (options != null)
+        if (options is not null)
         {
             List<string> opts;
             if (options is string sopt)
@@ -197,8 +196,8 @@ public static class Pronouns
         else
         {
             var arr = targetViewpointObj as string[];
-            if (arr != null && arr.Contains(viewpoint!)) targetViewpoint = viewpoint!;
-            else targetViewpoint = arr != null && arr.Length > 0 ? arr[0] : viewpoint!;
+            if (arr is not null && arr.Contains(viewpoint!)) targetViewpoint = viewpoint!;
+            else targetViewpoint = arr?.FirstOrDefault() ?? viewpoint!;
             viewpoint = targetViewpoint;
         }
 

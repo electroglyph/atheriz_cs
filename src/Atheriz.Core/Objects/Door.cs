@@ -1,7 +1,3 @@
-using Atheriz.Core.Globals;
-using Atheriz.Core.Utils;
-using Atheriz.Core.Settings;
-using System.Text.Json;
 
 namespace Atheriz.Core.Objects;
 
@@ -92,7 +88,7 @@ public class Door
         try
         {
             var nh = NodeHandler.GetCurrent();
-            if (nh == null) return;
+            if (nh is null) return;
             nh.Lock3.EnterWriteLock();
             try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); }
         }
@@ -132,8 +128,8 @@ public class Door
         bool closed = true, bool locked = false)
     {
         var d = new Door();
-        if (fromCoord != null) d._fromCoord = fromCoord.Value;
-        if (toCoord != null) d._toCoord = toCoord.Value;
+        if (fromCoord is not null) d._fromCoord = fromCoord.Value;
+        if (toCoord is not null) d._toCoord = toCoord.Value;
         d._fromExit = fromExit ?? "";
         d._toExit = toExit ?? "";
         d._symbolCoord = symbolCoord;
@@ -208,7 +204,7 @@ public class Door
         Coord from, to;
         using (ReadScope()) { from = _fromCoord; to = _toCoord; }
         Node? fromNode = null, toNode = null;
-        if (nh != null)
+        if (nh is not null)
         {
             fromNode = nh.GetNode(from);
             toNode = nh.GetNode(to);
@@ -271,7 +267,7 @@ public class Door
     // Port of base_door.py:106 wrapper for spec.
     // A null caller bypasses access/map/hooks, so the fallback is an explicit
     // ForceOpen explicitly; the no-arg form stays for compat.
-    public bool Open(GameObject? caller = null) => caller != null ? TryOpen(caller) : ForceOpen();
+    public bool Open(GameObject? caller = null) => caller is not null ? TryOpen(caller) : ForceOpen();
     public bool ForceOpen()
     {
         bool opened;
@@ -328,7 +324,7 @@ public class Door
         catch (Exception ex) { AtherizLogger.LogDebug("Suppressed Door.TryClose post-close: " + ex.Message, "Door"); }
         return true;
     }
-    public bool Close(GameObject? caller = null) => caller != null ? TryClose(caller) : ForceClose();
+    public bool Close(GameObject? caller = null) => caller is not null ? TryClose(caller) : ForceClose();
     public bool ForceClose()
     {
         bool closed;
@@ -378,7 +374,7 @@ public class Door
         loc?.MsgContents($"$You(target) $conj(lock) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
         return true;
     }
-    public bool LockDoor(GameObject? caller = null) => caller != null ? TryLock(caller) : false;
+    public bool LockDoor(GameObject? caller = null) => caller is not null ? TryLock(caller) : false;
 
     // Port of base_door.py:271 try_unlock
     public virtual bool TryUnlock(GameObject caller)
@@ -413,7 +409,7 @@ public class Door
         loc?.MsgContents($"$You(target) $conj(try) to unlock the door, but it is already unlocked.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
         return false;
     }
-    public bool Unlock(GameObject? caller = null) => caller != null ? TryUnlock(caller) : false;
+    public bool Unlock(GameObject? caller = null) => caller is not null ? TryUnlock(caller) : false;
 
     // Port of base_door.py:313 map_close
     public virtual void MapClose()
@@ -421,16 +417,16 @@ public class Door
         // Port of base_door.py map_close gate: settings.MAP_ENABLED only.
         // (The old Default fallback + second Global check made the fallback dead.)
         var settings = AtherizSettings.Global;
-        if (!settings.MapEnabled || SymbolCoord == null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
+        if (!settings.MapEnabled || SymbolCoord is null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
         var mh = MapHandlerSingleton.Get();
-        if (mh == null) return;
-        var seen = new HashSet<(string, int)>();
+        if (mh is null) return;
+        HashSet<(string, int)> seen = [];
         foreach (var coord in new[] { FromCoord, ToCoord })
         {
             var key = (coord.Area, coord.Z);
             if (!seen.Add(key)) continue;
             var mi = mh.GetMapInfo(coord.Area, coord.Z);
-            if (mi != null)
+            if (mi is not null)
             {
                 mi.Lock.EnterWriteLock();
                 try
@@ -448,16 +444,16 @@ public class Door
     {
         // Port of base_door.py map_open gate: settings.MAP_ENABLED only (see MapClose).
         var settings = AtherizSettings.Global;
-        if (!settings.MapEnabled || SymbolCoord == null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
+        if (!settings.MapEnabled || SymbolCoord is null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
         var mh = MapHandlerSingleton.Get();
-        if (mh == null) return;
-        var seen = new HashSet<(string, int)>();
+        if (mh is null) return;
+        HashSet<(string, int)> seen = [];
         foreach (var coord in new[] { FromCoord, ToCoord })
         {
             var key = (coord.Area, coord.Z);
             if (!seen.Add(key)) continue;
             var mi = mh.GetMapInfo(coord.Area, coord.Z);
-            if (mi != null)
+            if (mi is not null)
             {
                 mi.Lock.EnterWriteLock();
                 try
@@ -511,7 +507,7 @@ public class Door
                 Locks = _locks.Select(kv =>
                 {
                     _lockPolicies.TryGetValue(kv.Key, out var pols);
-                    var names = pols != null && pols.Count == kv.Value.Count
+                    var names = pols is not null && pols.Count == kv.Value.Count
                         ? pols
                         : Enumerable.Repeat(LockPolicies.Custom, kv.Value.Count);
                     return $"{kv.Key}: {string.Join("|", names)}";

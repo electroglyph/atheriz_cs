@@ -1,7 +1,4 @@
 // Port of atheriz/commands/loggedin/door.py:482
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -27,7 +24,7 @@ public sealed class DoorCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { go.Msg(PrintHelp()); return; }
+        if (pa is null) { go.Msg(PrintHelp()); return; }
         bool north = pa.GetBool("north"), south = pa.GetBool("south"), east = pa.GetBool("east"), west = pa.GetBool("west"), up = pa.GetBool("up"), down = pa.GetBool("down");
         bool remove = pa.GetBool("remove"), auto = pa.GetBool("auto");
         if (!remove && !(north||south||east||west||up||down))
@@ -43,18 +40,18 @@ public sealed class DoorCommand : Command
             return;
         }
         var loc = go.ResolveLocationObject() as Node;
-        if (loc == null) { CommandHelpers.MsgInvalidLocation(go); return; }
+        if (loc is null) { CommandHelpers.MsgInvalidLocation(go); return; }
         var nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();
         if (remove)
         {
             var doors = nh.GetDoors(loc.Coord);
-            if (doors == null || doors.Count==0) { go.Msg("There are no doors here."); return; }
+            if (doors is null || doors.Count==0) { go.Msg("There are no doors here."); return; }
             void TryRemove(string longName, string shortName)
             {
                 Door? d = null;
                 if (doors.TryGetValue(longName, out var dd)) d = dd;
                 else if (doors.TryGetValue(shortName, out var d2)) d = d2;
-                if (d != null) { nh.RemoveDoor(d); go.Msg($"Removed {d}"); }
+                if (d is not null) { nh.RemoveDoor(d); go.Msg($"Removed {d}"); }
                 else go.Msg($"There is no door {longName}.");
             }
             if (north) TryRemove("north","n");
@@ -86,7 +83,7 @@ public sealed class DoorCommand : Command
                 bool active = def.flag switch { "north"=>north, "south"=>south, "east"=>east, "west"=>west, "up"=>up, "down"=>down, _=>false };
                 if (!active) continue;
                 var preCoord = new Coord(loc.Coord.Area, loc.Coord.X + def.dx*2, loc.Coord.Y + def.dy*2, loc.Coord.Z + def.dz*2);
-                if (nh.GetNode(preCoord) == null)
+                if (nh.GetNode(preCoord) is null)
                 { go.Msg($"There is no node at the destination coord {preCoord}, use -a to auto-create it."); return; }
             }
         }
@@ -97,7 +94,7 @@ public sealed class DoorCommand : Command
             var toCoord = new Coord(loc.Coord.Area, loc.Coord.X + def.dx*2, loc.Coord.Y + def.dy*2, loc.Coord.Z + def.dz*2);
             var doorCoord = new Coord(loc.Coord.Area, loc.Coord.X + def.dx, loc.Coord.Y + def.dy, loc.Coord.Z + def.dz);
             var toNode = nh.GetNode(toCoord);
-            if (toNode == null)
+            if (toNode is null)
             {
                 if (auto) { toNode = new Node(toCoord); nh.AddNode(toNode); }
                 else { go.Msg($"There is no node at the destination coord {toCoord}, use -a to auto-create it."); return; }
@@ -161,7 +158,7 @@ public sealed class DoorCommand : Command
     private static void ReplaceNodeWithDoor(NodeHandler nh, Coord doorCoord, GameObject caller, Node fallback)
     {
         var node = nh.GetNode(doorCoord);
-        if (node == null) return;
+        if (node is null) return;
         foreach (var obj in node.GetContents().ToList())
         {
             obj.MoveTo(fallback, force:true, announce:false);

@@ -40,7 +40,7 @@ public sealed class HelpCommand : Command
             return;
         }
         var cmd = cs.Get(query!);
-        if (cmd != null && cmd.Access(caller) && !cmd.Hide) { caller.Msg(PrintHelpFor(cmd)); return; }
+        if (cmd is not null && cmd.Access(caller) && !cmd.Hide) { caller.Msg(PrintHelpFor(cmd)); return; }
         caller.Msg("Command not found.");
     }
 }

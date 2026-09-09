@@ -87,12 +87,10 @@ public class PortedAccountTests
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("carol","abc123");
         // Independent compute via Rfc2898DeriveBytes with 600000 iterations SHA256, no call to Account.HashPassword for expected
-        using var pbkdf2 = new Rfc2898DeriveBytes("abc123", Encoding.UTF8.GetBytes("testsalt"), 600_000, HashAlgorithmName.SHA256);
-        var expected = Convert.ToHexString(pbkdf2.GetBytes(32)).ToLowerInvariant();
+        var expected = Convert.ToHexString(Rfc2898DeriveBytes.Pbkdf2("abc123", Encoding.UTF8.GetBytes("testsalt"), 600_000, HashAlgorithmName.SHA256, 32)).ToLowerInvariant();
         Assert.Equal(expected, acc.PasswordHash);
         // Also verify iteration count via that expected differs from fewer iterations (would be different)
-        using var pbkdf2Low = new Rfc2898DeriveBytes("abc123", Encoding.UTF8.GetBytes("testsalt"), 1000, HashAlgorithmName.SHA256);
-        var low = Convert.ToHexString(pbkdf2Low.GetBytes(32)).ToLowerInvariant();
+        var low = Convert.ToHexString(Rfc2898DeriveBytes.Pbkdf2("abc123", Encoding.UTF8.GetBytes("testsalt"), 1000, HashAlgorithmName.SHA256, 32)).ToLowerInvariant();
         Assert.NotEqual(low, acc.PasswordHash);
     }
     [Fact] public void EmptyNameRaisesValueError()
@@ -318,8 +316,7 @@ public class PortedAccountTests
         Assert.Equal(64, h.Length);
         // Iteration count is encoded in implementation; we verify that hashing same password twice same result and that different iterations would differ — not directly observable.
         // Ensure iterations constant is 600000 via checking that hash matches PBKDF2 with 600k
-        using var pbkdf2=new Rfc2898DeriveBytes("test-password", Encoding.UTF8.GetBytes("testsalt"), 600_000, HashAlgorithmName.SHA256);
-        var expected=Convert.ToHexString(pbkdf2.GetBytes(32)).ToLowerInvariant();
+        var expected=Convert.ToHexString(Rfc2898DeriveBytes.Pbkdf2("test-password", Encoding.UTF8.GetBytes("testsalt"), 600_000, HashAlgorithmName.SHA256, 32)).ToLowerInvariant();
         Assert.Equal(expected, h);
     }
     // Port of test_account.py:320 test_hash_password_uses_key_stretching_timing — slow mark, elapsed >0.001
@@ -331,8 +328,7 @@ public class PortedAccountTests
         sw.Stop();
         Assert.True(sw.Elapsed.TotalSeconds > 0.001, $"PBKDF2 600k should take >1ms, took {sw.Elapsed.TotalSeconds}s");
         // Also verify iteration count via mock equivalent: hash matches 600k
-        using var pbkdf2=new Rfc2898DeriveBytes("test-password", Encoding.UTF8.GetBytes("testsalt"), 600_000, HashAlgorithmName.SHA256);
-        var expected=Convert.ToHexString(pbkdf2.GetBytes(32)).ToLowerInvariant();
+        var expected=Convert.ToHexString(Rfc2898DeriveBytes.Pbkdf2("test-password", Encoding.UTF8.GetBytes("testsalt"), 600_000, HashAlgorithmName.SHA256, 32)).ToLowerInvariant();
         Assert.Equal(expected, Account.HashPassword("test-password", "testsalt"));
         Assert.Equal("sha256", "sha256"); // verbatim: iterations 600000, algo sha256
     }

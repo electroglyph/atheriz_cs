@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core;
 
@@ -67,14 +66,14 @@ public static class AtherizLogger
             // Factory-refresh: the console provider (and minimum level) freeze at first
             // construction, so a changed level rebuilds the factory instead of silently
             // sticking. Write() also re-checks _level per call, so in-flight writers stay correct.
-            if (_factory != null && _appliedLevel != _level)
+            if (_factory is not null && _appliedLevel != _level)
             {
                 try { _factory.Dispose(); } catch { }
                 _factory = null;
                 _cachedDefault = null;
             }
         }
-        if (_factory == null) SetupLogger();
+        if (_factory is null) SetupLogger();
         lock (_lock) { _appliedLevel = _level; }
     }
 
@@ -83,7 +82,7 @@ public static class AtherizLogger
     {
         lock (_lock)
         {
-            if (_factory != null) return;
+            if (_factory is not null) return;
             try
             {
                 _factory = LoggerFactory.Create(b =>
@@ -118,10 +117,10 @@ public static class AtherizLogger
     {
         lock (_lock)
         {
-            if (_factory != null) return _factory.CreateLogger(category);
+            if (_factory is not null) return _factory.CreateLogger(category);
             // fallback to default factory if not configured
             SetupLogger();
-            if (_factory != null) return _factory.CreateLogger(category);
+            if (_factory is not null) return _factory.CreateLogger(category);
             return new FallbackLogger(category);
         }
     }
@@ -153,7 +152,7 @@ public static class AtherizLogger
             if (!IsEnabled(logLevel)) return;
             var msg = formatter(state, exception);
             var line = $"{logLevel.ToString().ToUpperInvariant()}: {_cat}: {msg}";
-            if (exception != null) line += $"\n{exception}";
+            if (exception is not null) line += $"\n{exception}";
             try { Console.Error.WriteLine(line); } catch { }
             try { AppendToFile(logLevel, _cat, msg, exception); } catch { }
         }
@@ -172,7 +171,7 @@ public static class AtherizLogger
             var file = Path.Combine(dir, "server.log");
             try { Directory.CreateDirectory(dir); } catch { }
             var line = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} {level.ToString().ToUpperInvariant()}: {category}: {message}";
-            if (ex != null) line += $"\n{ex}";
+            if (ex is not null) line += $"\n{ex}";
             line += Environment.NewLine;
             // size check + rotate before append
             try
@@ -227,15 +226,15 @@ public static class AtherizLogger
         if (level < _level) return;
         ILogger? logger = null;
         lock (_lock) logger = _cachedDefault;
-        if (logger != null)
+        if (logger is not null)
         {
             try
             {
-                logger.Log(level, 0, message, ex, (s, e) => e != null ? $"{s}\n{e}" : s);
+                logger.Log(level, 0, message, ex, (s, e) => e is not null ? $"{s}\n{e}" : s);
                 AppendToFile(level, category, message, ex);
                 // Also echo to Console.Error for CaptureAtherizLog routing (throttling tests rely on Console.Error capture)
                 var line = $"{level.ToString().ToUpperInvariant()}: {category}: {message}";
-                if (ex != null) line += $"\n{ex}";
+                if (ex is not null) line += $"\n{ex}";
                 try { Console.Error.WriteLine(line); } catch { }
                 return;
             }
@@ -243,7 +242,7 @@ public static class AtherizLogger
         }
         // Fallback Console.Error — Port of logger.py:37 StreamHandler
         var line2 = $"{level.ToString().ToUpperInvariant()}: {category}: {message}";
-        if (ex != null) line2 += $"\n{ex}";
+        if (ex is not null) line2 += $"\n{ex}";
         try { Console.Error.WriteLine(line2); } catch { }
         try { AppendToFile(level, category, message, ex); } catch { }
     }

@@ -16,7 +16,7 @@ public static class ResetHandler
         int? pid = null;
         if (File.Exists(pidPath))
         {
-            try { pid = int.Parse(File.ReadAllText(pidPath, System.Text.Encoding.UTF8).Trim()); isRunning = pid != null && Infrastructure.PidFile.IsServerProcess(pid.Value); } catch { }
+            try { pid = int.Parse(File.ReadAllText(pidPath, System.Text.Encoding.UTF8).Trim()); isRunning = pid is not null && Infrastructure.PidFile.IsServerProcess(pid.Value); } catch { }
         }
         if (!force)
         {
@@ -41,7 +41,7 @@ public static class ResetHandler
                 if (watchPorts.Contains(ep.Port))
                 {
                     // Our own server holds these ports; it is stopped below. Anything else aborts.
-                    if (isRunning && pid != null && Infrastructure.PidFile.IsProcessListeningOnPort(pid.Value, ep.Port)) continue;
+                    if (isRunning && pid is not null && Infrastructure.PidFile.IsProcessListeningOnPort(pid.Value, ep.Port)) continue;
                     Console.WriteLine($"Port {ep.Port} still listening; abort");
                     return;
                 }
@@ -49,7 +49,7 @@ public static class ResetHandler
         }
         catch { }
 
-        if (isRunning && pid != null)
+        if (isRunning && pid is not null)
         {
             Console.WriteLine("Stopping server...");
             await StopHandler.HandleStopAsync(a);
@@ -116,11 +116,11 @@ public static class ResetHandler
 
         // Port of atheriz.py:1629 reset always daemonizes after setup.
         var resetSpawnArgs = new List<string> { "--port", port.ToString() };
-        if (host != null) { resetSpawnArgs.Add("--host"); resetSpawnArgs.Add(host); }
+        if (host is not null) { resetSpawnArgs.Add("--host"); resetSpawnArgs.Add(host); }
         // respawn preserves the CLI telnet-port override, else the
         // replacement silently binds the configured default instead.
         var resetTelnetPort = ArgumentParser.ParseTelnetPort(a);
-        if (resetTelnetPort != null) { resetSpawnArgs.Add("--telnet-port"); resetSpawnArgs.Add(resetTelnetPort.ToString()!); }
+        if (resetTelnetPort is not null) { resetSpawnArgs.Add("--telnet-port"); resetSpawnArgs.Add(resetTelnetPort.ToString()!); }
         await DaemonSpawner.SpawnDaemonAsync(resetSpawnArgs.ToArray(), Directory.GetCurrentDirectory());
     }
 }

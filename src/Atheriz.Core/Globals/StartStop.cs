@@ -4,9 +4,7 @@
 using System.Diagnostics;
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Network;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
-using Atheriz.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Globals;
@@ -121,7 +119,7 @@ public static class StartStop
                 {
                     var gt = GlobalServices.GetGameTime(settings);
                     // Port of get_game_time().start() — ticker is singleton; GameTime.Start expects ticker
-                    if (ticker != null)
+                    if (ticker is not null)
                         gt.Start(ticker);
                     else
                         gt.Start();
@@ -162,7 +160,7 @@ public static class StartStop
             try
             {
                 var channel = GlobalServices.GetServerChannel();
-                if (channel != null)
+                if (channel is not null)
                 {
                     try { channel.Msg("Server is shutting down!"); } catch (Exception) { }
                 }
@@ -180,7 +178,7 @@ public static class StartStop
                 try
                 {
                     var t = ticker ?? TryGetTicker();
-                    if (t != null) Autosave.StopAutosave(t);
+                    if (t is not null) Autosave.StopAutosave(t);
                     else Autosave.Reset(); // fallback placeholder
                 }
                 catch (Exception) { }
@@ -195,8 +193,8 @@ public static class StartStop
                     {
                         var gt = TryGetGameTime();
                         var t = ticker ?? TryGetTicker();
-                        if (gt != null && t != null) gt.Stop(t);
-                        else if (gt != null) gt.Stop();
+                        if (gt is not null && t is not null) gt.Stop(t);
+                        else if (gt is not null) gt.Stop();
                     }
                     catch (Exception) { }
                 });
@@ -213,7 +211,7 @@ public static class StartStop
             ShutdownStep("threadpool_stop", () =>
             {
                 var p = pool ?? TryGetPool();
-                if (p != null) p.Stop(wait: true, timeout: TimeSpan.FromSeconds(10));
+                if (p is not null) p.Stop(wait: true, timeout: TimeSpan.FromSeconds(10));
             });
 
             if (settings.AutosaveOnShutdown)
@@ -297,7 +295,7 @@ public static class StartStop
             foreach (var obj in ObjectRegistry.FilterBy(o => o.IsTickable))
             {
                 var atTick = TryGetAtTick(obj);
-                if (atTick == null) continue;
+                if (atTick is null) continue;
                 double seconds = 1.0;
                 try { seconds = obj.TickSeconds; } catch { seconds = 1.0; }
                 if (seconds <= 0) seconds = 1.0;
@@ -311,7 +309,7 @@ public static class StartStop
         try
         {
             var nh = TryGetNodeHandler();
-            if (nh == null) return;
+            if (nh is null) return;
             List<NodeArea> areas;
             // GetAreas snapshots under its own read lock; wrapping it in
             // another read here only works via lock recursion.
@@ -331,7 +329,7 @@ public static class StartStop
                     foreach (var node in nodes)
                     {
                         var atTick = TryGetAtTick(node);
-                        if (atTick == null) continue;
+                        if (atTick is null) continue;
                         double seconds = 1.0;
                         try { seconds = node.TickSeconds; } catch { seconds = 1.0; }
                         if (seconds <= 0) seconds = 1.0;
@@ -364,7 +362,7 @@ public static class StartStop
             try
             {
                 var ch = GlobalServices.GetServerChannel();
-                if (ch != null) try { ch.Msg("Server is reloading..."); } catch (Exception) { }
+                if (ch is not null) try { ch.Msg("Server is reloading..."); } catch (Exception) { }
             }
             catch (Exception) { }
 
@@ -382,8 +380,8 @@ public static class StartStop
                     {
                         var gt = TryGetGameTime();
                         var t = ticker ?? TryGetTicker();
-                        if (gt != null && t != null) gt.Stop(t);
-                        else if (gt != null) gt.Stop();
+                        if (gt is not null && t is not null) gt.Stop(t);
+                        else if (gt is not null) gt.Stop();
                     }
                     catch (Exception) { }
                 });
@@ -395,7 +393,7 @@ public static class StartStop
                 try
                 {
                     var t = ticker ?? TryGetTicker();
-                    if (t != null) Autosave.StopAutosave(t);
+                    if (t is not null) Autosave.StopAutosave(t);
                 }
                 catch (Exception) { }
             });
@@ -456,7 +454,7 @@ public static class StartStop
             try
             {
                 var ch = GlobalServices.GetServerChannel();
-                if (ch != null) try { ch.Msg("Server reloaded"); } catch (Exception) { }
+                if (ch is not null) try { ch.Msg("Server reloaded"); } catch (Exception) { }
             }
             catch (Exception) { }
 
@@ -590,11 +588,11 @@ public static class StartStop
     public static void RegisterGameServerEvent(string methodName, Action handler)
     {
         if (string.IsNullOrEmpty(methodName)) throw new ArgumentException("Server event name required.", nameof(methodName));
-        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        ArgumentNullException.ThrowIfNull(handler);
         lock (_gameServerEventLock)
         {
             if (!_gameServerEventHandlers.TryGetValue(methodName, out var list))
-                _gameServerEventHandlers[methodName] = list = new List<Action>();
+                _gameServerEventHandlers[methodName] = list = [];
             list.Add(handler);
         }
     }
@@ -615,7 +613,7 @@ public static class StartStop
         // Game-side handlers registered via RegisterGameServerEvent.
         List<Action>? handlers = null;
         lock (_gameServerEventLock) { if (_gameServerEventHandlers.TryGetValue(methodName, out var list)) handlers = new List<Action>(list); }
-        if (handlers != null)
+        if (handlers is not null)
         {
             foreach (var h in handlers)
             {

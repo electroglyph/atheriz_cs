@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
 using Atheriz.Core.Persistence.Dto;
 
@@ -20,7 +19,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     // Port of session.py:16-38
     // Guards puppet / puppet_stack / input_future, which are written by game workers and read by per-connection input drain (#31).
     // Scalar fields (term/map dims, screenreader) are single atomic stores under the GIL and need no lock — we still guard writes.
-    public readonly object Lock = new object(); // Port of session.py:21 lock = threading.RLock()
+    public readonly object Lock = new(); // Port of session.py:21 lock = threading.RLock()
     public Account? Account
     {
         get => _account;
@@ -64,14 +63,14 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     {
         lock (Lock)
         {
-            if (Puppet != null && Puppet.Id == replacement.Id && !ReferenceEquals(Puppet, replacement))
+            if (Puppet is not null && Puppet.Id == replacement.Id && !ReferenceEquals(Puppet, replacement))
                 Puppet = replacement;
-            if (LastPuppet != null && LastPuppet.Id == replacement.Id && !ReferenceEquals(LastPuppet, replacement))
+            if (LastPuppet is not null && LastPuppet.Id == replacement.Id && !ReferenceEquals(LastPuppet, replacement))
                 LastPuppet = replacement;
             for (int i = 0; i < _puppetStack.Count; i++)
             {
                 var (prev, target) = _puppetStack[i];
-                var nprev = (prev != null && prev.Id == replacement.Id && !ReferenceEquals(prev, replacement)) ? replacement : prev;
+                var nprev = (prev is not null && prev.Id == replacement.Id && !ReferenceEquals(prev, replacement)) ? replacement : prev;
                 var ntarget = (target.Id == replacement.Id && !ReferenceEquals(target, replacement)) ? replacement : target;
                 if (!ReferenceEquals(nprev, prev) || !ReferenceEquals(ntarget, target))
                     _puppetStack[i] = (nprev, ntarget);
@@ -98,7 +97,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     {
         Connection = connection;
         Account = account;
-        if (account != null) AccountId = account.Id;
+        if (account is not null) AccountId = account.Id;
         TermWidth = 78; // Port of settings.CLIENT_DEFAULT_WIDTH via session.py:30-31 + settings.py:121-122
         TermHeight = 45;
         ConnTime = 0.0; // Port of session.py:35 conn_time = 0.0
@@ -137,7 +136,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             ClearPuppetEntries();
             puppet = Puppet; // Port of session.py:49 puppet = self.puppet
             Puppet = null; // Port of session.py:50 self.puppet = None
-            if (puppet != null) LastPuppet = puppet; // Port of session.py:51 self.last_puppet = puppet if puppet is not None else self.last_puppet
+            if (puppet is not null) LastPuppet = puppet; // Port of session.py:51 self.last_puppet = puppet if puppet is not None else self.last_puppet
             // Port of session.py:81-86 unwind any in-progress puppet chain.
             // Runs INSIDE the lock : a Puppet landing between the
             // snapshot and the unwind would otherwise leak IsPc + privilege
@@ -154,7 +153,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                 try
                 {
                     var restore = target.GetPuppetRestore();
-                    if (restore != null)
+                    if (restore is not null)
                     {
                         target.RestorePuppetSnapshot(restore);
                         target.ClearPuppetRestore();
@@ -167,12 +166,12 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             }
         }
         // Port of session.py:52-56 if masked and self.connection is not None: send echo_on
-        if (masked && Connection != null)
+        if (masked && Connection is not null)
         {
             try { Connection.SendCommand("echo_on"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
         }
         // Port of session.py:57-79 if future is not None: try loop.call_soon_threadsafe(cancel)
-        if (future != null)
+        if (future is not null)
         {
             // C# equivalent of Python's asyncio loop.call_soon_threadsafe(_do_cancel)
             // Use TrySetCanceled thread-safe; if Task already completed, no-op (mirrors InvalidStateError pass)
@@ -188,7 +187,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         // Port of session.py:81-86 unwind any in-progress puppet chain before autosave
         // (unwind itself runs inside the lock above).
         // Port of session.py:86-114 if puppet: elapsed handling, puppet.session=None, seconds_played, at_disconnect, is_temporary cleanup
-        if (puppet != null)
+        if (puppet is not null)
         {
             double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - ConnTime; // Port of session.py:87 elapsed = time.time() - self.conn_time
             if (ConnTime > 0.0 && elapsed > 0) // Port of session.py:88 if self.conn_time >0 and elapsed>0
@@ -235,7 +234,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                 try { puppet.IsDeleted = true; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
             }
         }
-        if (Account != null) // Port of session.py:115-116 if self.account: self.account.at_disconnect()
+        if (Account is not null) // Port of session.py:115-116 if self.account: self.account.at_disconnect()
         {
             try { Account.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
         }
@@ -254,8 +253,8 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     // a msgType becomes the command (mirrors connection.py popping the kwarg key).
     public void Msg(string text, string? msgType = null)
     {
-        if (Connection == null) return;
-        if (msgType == null) Connection.Msg(text);
+        if (Connection is null) return;
+        if (msgType is null) Connection.Msg(text);
         else Connection.MsgKw(new Dictionary<string, object?> { [msgType] = text });
     }
 
@@ -279,7 +278,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             // Port of session.py:131-156 try create_future via running loop else fallback to connection loop or threadpool loop
             // In C# we always use TaskCompletionSource with RunContinuationsAsynchronously (thread-safe)
             future = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (prev != null && !prev.Task.IsCompleted) // Port of session.py:157 if prev is not None and not prev.done():
+            if (prev is not null && !prev.Task.IsCompleted) // Port of session.py:157 if prev is not None and not prev.done():
             {
                 if (prevMasked && !mask) // Port of session.py:158 if prev_masked and not mask:
                     needRestore = true; // Port of session.py:159 need_restore = True
@@ -292,7 +291,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             InputMasked = mask; // Port of session.py:163 self._input_masked = mask
         }
         // Port of session.py:164-189 if prev is not None: loop.call_soon_threadsafe(set_result(""))
-        if (prev != null)
+        if (prev is not null)
         {
             try
             {
@@ -331,8 +330,8 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         lock (Lock)
         {
             f = InputFuture;
-            if (f == null) return false;
-            if (token != null && !ReferenceEquals(f, token)) return false; // newer prompt owns the slot
+            if (f is null) return false;
+            if (token is not null && !ReferenceEquals(f, token)) return false; // newer prompt owns the slot
             InputFuture = null;
             InputMasked = false;
         }

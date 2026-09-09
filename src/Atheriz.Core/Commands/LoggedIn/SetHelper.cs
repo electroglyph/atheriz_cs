@@ -1,7 +1,4 @@
 // Port of atheriz/commands/loggedin/set.py:11-243 helpers (PROTECTED_ATTRIBUTES + _resolve_target + FindProp)
-using System.Text.Json;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Commands.LoggedIn;
@@ -147,7 +144,7 @@ public static class SetHelper
     // PascalCase (is_pc -> IsPc). Mixed-case spellings (Is_Pc) do NOT
     // resolve: like Python's setattr creating a junk attribute, they fall
     // through to the extras store instead of hitting the real property.
-    public static bool HasKnownProp(GameObject o, string attr) => FindEntry(o, attr) != null;
+    public static bool HasKnownProp(GameObject o, string attr) => FindEntry(o, attr) is not null;
 
     // Canonical privilege names have no settable property (get-only IsBuilder/
     // IsSuperUser) but must still be guarded case-insensitively.
@@ -159,13 +156,13 @@ public static class SetHelper
     // compare explicitly). Resolution stays case-sensitive (FindEntry): unknown
     // spellings fall through to extras like Python's setattr junk attribute.
     public static bool IsProtected(string attr) =>
-        attr.StartsWith("_") ||
+        attr.StartsWith("_", StringComparison.Ordinal) ||
         Protected.Any(p => p.Equals(attr, StringComparison.OrdinalIgnoreCase)) ||
         ProtectedCanonical.Contains(attr);
 
     public static bool HasAttr(GameObject o, string attr)
     {
-        if (FindEntry(o, attr) != null) return true;
+        if (FindEntry(o, attr) is not null) return true;
         // Typed extra check (no _extra reflection).
         return o.HasExtra(attr);
     }
@@ -173,11 +170,11 @@ public static class SetHelper
     public static void SetAttr(GameObject o, string attr, object? val)
     {
         var e = FindEntry(o, attr);
-        if (e != null)
+        if (e is not null)
         {
-            if (e.Set == null) throw new InvalidOperationException();
+            if (e.Set is null) throw new InvalidOperationException();
             var targetType = Nullable.GetUnderlyingType(e.ValueType) ?? e.ValueType;
-            object? conv = val == null ? null : Convert.ChangeType(val, targetType);
+            object? conv = val is null ? null : Convert.ChangeType(val, targetType);
             e.Set(o, conv);
             return;
         }

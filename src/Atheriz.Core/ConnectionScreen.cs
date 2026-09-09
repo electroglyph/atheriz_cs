@@ -1,9 +1,5 @@
 // Port of atheriz/connection_screen.py:1-95
 using System.Reflection;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core;
 
@@ -107,7 +103,7 @@ public static class ConnectionScreen
         var guestText = GuestText(settings);
 
         // Build main screen with ANSI truecolor if not screenreader — Port of connection_screen.py:81-94
-        bool isScreenReader = session != null && session.ScreenReader; // Port of connection_screen.py:81 session.screenreader
+        bool isScreenReader = session is not null && session.ScreenReader; // Port of connection_screen.py:81 session.screenreader
         string raw;
         if (isScreenReader)
         {

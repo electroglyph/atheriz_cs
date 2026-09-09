@@ -1,9 +1,6 @@
 // Port of atheriz/server_events.py:8-96
 using System.Reflection;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core;
 
@@ -21,7 +18,7 @@ public static class ServerEvents
     // Python is pass (silent); the hook walk stays as the game-code extension point.
     public static void AtServerStart(object? sender)
     {
-        if (sender != null) InvokeHooks("at_server_start", sender); // Port of base_obj hookable iteration
+        if (sender is not null) InvokeHooks("at_server_start", sender); // Port of base_obj hookable iteration
         else InvokeHooks("at_server_start");
     }
 
@@ -31,7 +28,7 @@ public static class ServerEvents
     // Python is pass (silent); the hook walk stays as the game-code extension point.
     public static void AtServerStop(object? sender)
     {
-        if (sender != null) InvokeHooks("at_server_stop", sender);
+        if (sender is not null) InvokeHooks("at_server_stop", sender);
         else InvokeHooks("at_server_stop");
     }
 
@@ -41,7 +38,7 @@ public static class ServerEvents
     // Python is pass (silent); the hook walk stays as the game-code extension point.
     public static void AtServerReload(object? sender)
     {
-        if (sender != null) InvokeHooks("at_server_reload", sender);
+        if (sender is not null) InvokeHooks("at_server_reload", sender);
         else InvokeHooks("at_server_reload");
     }
 
@@ -55,9 +52,9 @@ public static class ServerEvents
         void Out(string s) => (output ?? Console.Out).WriteLine(s);
         // Port of server_events.py:19-96 faithful validation + creation, console output replaces print
         var err = Commands.UnloggedIn.Validation.ValidatePassword(password);
-        if (err != null) { Out(err); return; }
+        if (err is not null) { Out(err); return; }
         err = Commands.UnloggedIn.Validation.ValidateCharacterName(charName);
-        if (err != null) { Out(err); return; }
+        if (err is not null) { Out(err); return; }
         var existsLc = charName.ToLowerInvariant();
         // Lock narrowing: the creation lock guards ONLY check-then-insert (registry
         // mutations + race rollback). MoveTo messaging, SaveObjects persistence, console
@@ -73,7 +70,7 @@ public static class ServerEvents
         // C# tests use real Nodes without handler indexing (no mocks), so also consult the live registry.
         Node? home = GlobalServices.GetNodeHandler().GetNode(settings.DefaultHome);
         home ??= ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(settings.DefaultHome)).FirstOrDefault() as Node;
-        if (home == null)
+        if (home is null)
         {
             Out($"Default home {settings.DefaultHome} not found; aborting char create");
             return;
@@ -82,7 +79,7 @@ public static class ServerEvents
         // their message and print after the lock releases (CheckPassword I/O
         // stays: it is part of the check-then-insert critical section).
         string? failMsg = null;
-        var progressMsgs = new List<string>();
+        List<string> progressMsgs = [];
         // Local section: `return` below exits the lock, not the method —
         // captured messages print after the lock releases.
         void CreateUnderLock()
@@ -128,12 +125,12 @@ public static class ServerEvents
             }
         }
         err = Commands.UnloggedIn.Validation.ValidateAccountName(accountName);
-        if (err != null) { failMsg = err; return; }
+        if (err is not null) { failMsg = err; return; }
         progressMsgs.Add($"Creating account '{accountName}'...");
         Account account;
         try { account = Account.Create(accountName, password); }
         catch (InvalidOperationException) { failMsg = $"Account '{accountName}' already exists."; return; }
-        if (account == null) { failMsg = $"Account '{accountName}' already exists."; return; }
+        if (account is null) { failMsg = $"Account '{accountName}' already exists."; return; }
         ObjectRegistry.AddObject(account);
         progressMsgs.Add($"Creating character '{charName}'...");
         var ch2 = GameObject.Create(charName, isPc: true);
@@ -152,8 +149,8 @@ public static class ServerEvents
         }
         CreateUnderLock();
         foreach (var m in progressMsgs) Out(m);
-        if (failMsg != null) { Out(failMsg); return; }
-        if (doneChar != null && doneAcc != null && doneHome != null)
+        if (failMsg is not null) { Out(failMsg); return; }
+        if (doneChar is not null && doneAcc is not null && doneHome is not null)
         {
             doneChar.MoveTo(doneHome);
             // honor settingsOverride — the parameterless save lands
@@ -182,7 +179,7 @@ public static class ServerEvents
     // printed "Success! …"); no broadcast, no hook fan-out.
     public static void AtCharCreate(GameObject character, Account account)
     {
-        if (character == null || account == null) return;
+        if (character is null || account is null) return;
         AtherizLogger.LogInformation($"Character '{character.Name}' created for account '{account.Name}'.");
     }
 
@@ -204,9 +201,9 @@ public static class ServerEvents
                 {
                     switch (pascal)
                     {
-                        case "AtServerStart": o.AtServerStart(args.Length > 0 ? args[0] : null); break;
-                        case "AtServerStop": o.AtServerStop(args.Length > 0 ? args[0] : null); break;
-                        case "AtServerReload": o.AtServerReload(args.Length > 0 ? args[0] : null); break;
+                        case "AtServerStart": o.AtServerStart(args.FirstOrDefault()); break;
+                        case "AtServerStop": o.AtServerStop(args.FirstOrDefault()); break;
+                        case "AtServerReload": o.AtServerReload(args.FirstOrDefault()); break;
                         default: break;
                     }
                 }

@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/ban.py:13-63 helpers (_resolve_target/_find_account/_target_ip)
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -8,7 +6,7 @@ internal static class BanHelper
 {
     internal static GameObject? ResolveTarget(GameObject caller, string name)
     {
-        if (name.StartsWith("#"))
+        if (name.StartsWith("#", StringComparison.Ordinal))
         {
             if (!int.TryParse(name[1..], out var id))
             {
@@ -48,7 +46,7 @@ internal static class BanHelper
     {
         var sess = target.Session;
         var acct = sess?.Account as GameObject;
-        if (acct != null) return acct;
+        if (acct is not null) return acct;
         var accounts = ObjectRegistry.FilterBy(x => x.IsAccount && (x as Account)?.Characters.Contains(target.Id) == true);
         return accounts.FirstOrDefault();
     }
@@ -57,7 +55,7 @@ internal static class BanHelper
     {
         var sess = target.Session;
         var conn = sess?.Connection;
-        if (conn == null) return null;
+        if (conn is null) return null;
         var host = conn.ClientHost;
         if (string.IsNullOrEmpty(host) || host == "?") return null;
         return host;

@@ -1,6 +1,4 @@
 using Atheriz.Core;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Objects;
 
@@ -19,7 +17,7 @@ public sealed class NodeGrid
     {
         Area = area;
         Z = z;
-        if (data != null) Data = data;
+        if (data is not null) Data = data;
     }
     // Port of nodes.py:979
     public override string ToString() => $"NodeGrid(z={Z}, area={Area})";
@@ -81,7 +79,7 @@ public sealed class NodeGrid
     // Port of nodes.py:1001
     public List<GameObject> FilterContents(Func<GameObject, bool> pred)
     {
-        var res = new List<GameObject>();
+        List<GameObject> res = [];
         Lock.EnterReadLock();
         try
         {
@@ -123,7 +121,7 @@ public sealed class NodeGrid
             coordSnap = node.Coord;
         }
         finally { Lock.ExitWriteLock(); }
-        if (old != null && !ReferenceEquals(old, node))
+        if (old is not null && !ReferenceEquals(old, node))
         {
             try { AtherizLogger.LogWarning($"Overwriting node at {node.Coord}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeGrid.AddNode: " + logEx.Message, "NodeGrid"); }
             old.IsDeleted = true;
@@ -132,7 +130,7 @@ public sealed class NodeGrid
         if (linksSnap.Count > 0)
         {
             var nh = NodeHandler.GetCurrent();
-            if (nh != null)
+            if (nh is not null)
                 foreach (var l in linksSnap)
                     if (Area != l.Coord.Area)
                         nh.AddTransition(new Transition(coordSnap, l.Coord, l.Name));
@@ -151,7 +149,7 @@ public sealed class NodeGrid
         if (linksSnap.Count > 0)
         {
             var nh = NodeHandler.GetCurrent();
-            if (nh != null)
+            if (nh is not null)
                 foreach (var l in linksSnap)
                     if (Area != l.Coord.Area) nh.RemoveTransition(l.Coord);
         }
@@ -173,9 +171,9 @@ public sealed class NodeGrid
         List<((int X, int Y) src, (int X, int Y) dst)> moves,
         HashSet<(int, int)> occupied)
     {
-        var failed = new HashSet<int>();
+        HashSet<int> failed = [];
         var sources = moves.Select(m => m.src).ToList();
-        var sourceCounts = new Dictionary<(int, int), int>();
+        Dictionary<(int, int), int> sourceCounts = [];
         foreach (var s in sources)
             sourceCounts[s] = sourceCounts.TryGetValue(s, out var n) ? n + 1 : 1;
         var sourceSet = new HashSet<(int, int)>(sources);
@@ -196,7 +194,7 @@ public sealed class NodeGrid
         try
         {
             var occupied = new HashSet<(int, int)>(Nodes.Keys);
-            if (context != null)
+            if (context is not null)
                 foreach (var (cs, cd) in context) { occupied.Remove(cs); occupied.Add(cd); }
             return ValidateMoves(moves, occupied);
         }
@@ -261,7 +259,7 @@ public sealed class NodeGrid
 
         // door remap via NodeHandler
         var nh = NodeHandler.GetCurrent();
-        if (nh != null && oldToNewFull.Count > 0)
+        if (nh is not null && oldToNewFull.Count > 0)
         {
             nh.RemapDoors(oldToNewFull, remap);
             nh.RemapTransitions(oldToNewFull);
@@ -277,7 +275,7 @@ public sealed class NodeGrid
                     if (link.Coord.Area != Area) crossLinks.Add((node, link));
         }
         finally { Lock.ExitReadLock(); }
-        if (nh != null)
+        if (nh is not null)
             foreach (var (node, link) in crossLinks) nh.AddTransition(new Transition(node.Coord, link.Coord, link.Name));
 
         // rebuild ExitCommands

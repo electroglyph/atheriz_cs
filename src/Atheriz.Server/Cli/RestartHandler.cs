@@ -1,4 +1,3 @@
-using System.Diagnostics;
 
 namespace Atheriz.Server.Cli;
 
@@ -63,13 +62,13 @@ public static class RestartHandler
         }
 
         if (fg) { Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms"); return true; }
-        var spawnArgs = new List<string>();
-        if (port != null) { spawnArgs.Add("--port"); spawnArgs.Add(port.ToString()!); }
-        if (host != null) { spawnArgs.Add("--host"); spawnArgs.Add(host); }
+        List<string> spawnArgs = [];
+        if (port is not null) { spawnArgs.Add("--port"); spawnArgs.Add(port.ToString()!); }
+        if (host is not null) { spawnArgs.Add("--host"); spawnArgs.Add(host); }
         // respawn preserves the CLI telnet-port override, else the
         // replacement silently binds the configured default instead.
         var telnetPort = ArgumentParser.ParseTelnetPort(a);
-        if (telnetPort != null) { spawnArgs.Add("--telnet-port"); spawnArgs.Add(telnetPort.ToString()!); }
+        if (telnetPort is not null) { spawnArgs.Add("--telnet-port"); spawnArgs.Add(telnetPort.ToString()!); }
         await DaemonSpawner.SpawnDaemonAsync(spawnArgs.ToArray(), Directory.GetCurrentDirectory());
         // Wait for the new server to come up on the port (bounded).
         if (!await WaitForPortUpAsync(portVal, 150)) Console.WriteLine($"Warning: port {portVal} not listening yet; check save/server.log.");

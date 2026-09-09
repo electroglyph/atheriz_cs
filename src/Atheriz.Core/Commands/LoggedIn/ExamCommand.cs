@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/exam.py:265
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -24,12 +22,12 @@ public sealed class ExamCommand : Command
         if (string.IsNullOrEmpty(targetStr))
         {
             target = go.ResolveLocationObject();
-            if (target == null) { go.Msg("You are nowhere to examine."); return; }
+            if (target is null) { go.Msg("You are nowhere to examine."); return; }
         }
         else
         {
             target = CommandHelpers.ResolveObject(go, targetStr!);
-            if (target == null) return;
+            if (target is null) return;
         }
         if (target is Node nodeTarget)
         {
@@ -45,8 +43,8 @@ public sealed class ExamCommand : Command
         }
         else go.Msg($"Examining {target.Name} (#{target.Id}):");
         var collected = ExamFormatter.Collect(target);
-        var dict = new Dictionary<string, object?>();
-        var propNames = new HashSet<string>();
+        Dictionary<string, object?> dict = [];
+        HashSet<string> propNames = [];
         foreach (var (k, v, p) in collected) { dict[k] = v; if (p) propNames.Add(k); }
         var keysInOrder = dict.Keys.ToList();
         foreach (var key in keysInOrder)

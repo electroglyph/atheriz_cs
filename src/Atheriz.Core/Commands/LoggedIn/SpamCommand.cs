@@ -1,9 +1,5 @@
 // Port of atheriz/commands/loggedin/spam.py:78
 using System.IO;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -19,7 +15,7 @@ public sealed class SpamCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { go.Msg("Usage: spam <count>"); return; }
+        if (pa is null) { go.Msg("Usage: spam <count>"); return; }
         var countObj = pa["count"];
         int count = countObj is int i ? i : int.TryParse(countObj?.ToString(), out var parsed) ? parsed : 0;
         if (count > 1000) { go.Msg("Maximum count is 1000."); return; }
@@ -27,7 +23,7 @@ public sealed class SpamCommand : Command
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var settings = AtherizSettings.Global;
         var home = go.ResolveLocationObject();
-        var created = new List<(string a, string p, string c)>();
+        List<(string a, string p, string c)> created = [];
         for (int idx = 1; idx <= count; idx++)
         {
             string an = $"account{idx}";
@@ -38,12 +34,12 @@ public sealed class SpamCommand : Command
                 var existing = ObjectRegistry.FilterBy(o => o.IsAccount && o.Name.Equals(an, StringComparison.OrdinalIgnoreCase));
                 if (existing.Count > 0) { go.Msg($"Account '{an}' already exists, skipping..."); continue; }
                 var account = Account.Create(an, pw);
-                if (account == null) { go.Msg($"Account '{an}' already exists, skipping..."); continue; }
+                if (account is null) { go.Msg($"Account '{an}' already exists, skipping..."); continue; }
                 var character = GameObject.Create(cn, "", isPc: true, isMapable: true);
                 character.Symbol = "A";
                 character.Home = new Persistence.Dto.LocationRef.CoordLocation(settings.DefaultHome);
                 if (home is Node node) character.MoveTo(node);
-                else if (home != null) character.MoveTo(home);
+                else if (home is not null) character.MoveTo(home);
                 account.AddCharacter(character);
                 ObjectRegistry.AddObject(character);
                 created.Add((an, pw, cn));

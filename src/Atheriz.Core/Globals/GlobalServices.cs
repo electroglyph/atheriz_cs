@@ -1,11 +1,8 @@
 // Port of atheriz/globals/get.py:176 — centralized lazy singleton getters with RWL double-checked locking.
 // Mirrors _SINGLETON_LOCK=RLock, _ID_LOCK, get_* functions.
 // In C# we use ReaderWriterLockSlim(SupportsRecursion) for re-entrancy (Python RLock allows getter calling another getter).
-using Atheriz.Core.Commands;
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Network;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Globals;
 
@@ -35,13 +32,13 @@ public static class GlobalServices
     private static T GetOrCreateSingleton<T>(ref T? field, Func<T> factory) where T : class
     {
         var snap = Volatile.Read(ref field);
-        if (snap != null) return snap;
+        if (snap is not null) return snap;
         _singletonLock.EnterUpgradeableReadLock();
         try
         {
-            if (field != null) return field;
+            if (field is not null) return field;
             _singletonLock.EnterWriteLock();
-            try { if (field == null) field = factory(); return field!; }
+            try { if (field is null) field = factory(); return field!; }
             finally { _singletonLock.ExitWriteLock(); }
         }
         finally { _singletonLock.ExitUpgradeableReadLock(); }
@@ -92,7 +89,7 @@ public static class GlobalServices
         // singleton lock by Reset/ClearForShutdown on other threads.
         var ticker = Volatile.Read(ref _asyncTicker);
         var pool = Volatile.Read(ref _asyncThreadPool);
-        if (ticker != null || pool != null)
+        if (ticker is not null || pool is not null)
             return new GameTime(settings, ticker, pool, autoLoad: true);
         return new GameTime(settings, autoLoad: true);
     });
@@ -100,7 +97,7 @@ public static class GlobalServices
     {
         var ticker = Volatile.Read(ref _asyncTicker);
         var pool = Volatile.Read(ref _asyncThreadPool);
-        if (ticker != null || pool != null)
+        if (ticker is not null || pool is not null)
             return new GameTime(settings, ticker, pool, autoLoad: true);
         return new GameTime(settings, autoLoad: true);
     });
@@ -111,7 +108,7 @@ public static class GlobalServices
         _singletonLock.EnterUpgradeableReadLock();
         try
         {
-            if (_serverChannel != null)
+            if (_serverChannel is not null)
             {
                 bool isDel = false;
                 string name = "";
@@ -134,7 +131,7 @@ public static class GlobalServices
             try
             {
                 // Re-check after upgrade
-                if (_serverChannel != null)
+                if (_serverChannel is not null)
                 {
                     bool isDel = false;
                     string name = "";
@@ -147,7 +144,7 @@ public static class GlobalServices
                 }
                 // Port of get.py:117-126 filter_by lambda is_channel && name=="server" && not is_deleted
                 var c = ObjectRegistry.FilterBy(o =>
-                    o.IsChannel && (o.Name != null && o.Name.ToLowerInvariant() == "server") && !o.IsDeleted);
+                    o.IsChannel && (o.Name is not null && o.Name.ToLowerInvariant() == "server") && !o.IsDeleted);
                 if (c.Count > 0)
                 {
                     _serverChannel = c[0];
@@ -182,11 +179,11 @@ public static class GlobalServices
     public static ConnectionManager GetConnectionManager(AtherizSettings settings, AsyncThreadPool pool)
     {
         var snap = Volatile.Read(ref _connectionManager);
-        if (snap != null) return snap;
+        if (snap is not null) return snap;
         _singletonLock.EnterWriteLock();
         try
         {
-            if (_connectionManager == null)
+            if (_connectionManager is null)
             {
                 _connectionManager = ConnectionManager.GlobalInstance ?? new ConnectionManager(pool, settings);
                 ConnectionManager.GlobalInstance = _connectionManager;

@@ -1,6 +1,3 @@
-using System.Text.Json;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Persistence.Dto;
 
@@ -51,7 +48,7 @@ internal sealed class NodeAreaDto
                     // reconstruct; anything else falls through to plain Node.
                     Node? inst = null;
                     try { Node.TryCreatePersistedSubtype(nd.ObjectType!, nd.Coord, out inst); } catch { inst = null; }
-                    if (inst != null)
+                    if (inst is not null)
                     {
                             // Remove from ObjectRegistry the auto-registered instance's temporary id collision
                             try { ObjectRegistry.RemoveObject(inst); } catch (Exception) { }
@@ -61,12 +58,12 @@ internal sealed class NodeAreaDto
                             inst.Theme = nd.Theme ?? "";
                             inst.Symbol = nd.Symbol ?? "";
                             inst.LegendDesc = nd.LegendDesc;
-                            inst.Links = nd.Links ?? new List<NodeLink>();
+                            inst.Links = nd.Links ?? [];
                             inst.Nouns = nd.Nouns ?? new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
                             inst.SetIdRaw(nd.Id);
                             IdGenerator.EnsureAtLeast(nd.Id);
                             // Restore scripts into the shared base scripts set (typed; was _nodeScripts/_scripts reflection)
-                            if (nd.Scripts != null && nd.Scripts.Count > 0)
+                            if (nd.Scripts is not null && nd.Scripts.Count > 0)
                                 inst.RestoreScriptIds(nd.Scripts);
                             inst.IsModified=false;
                             node = inst;
@@ -80,11 +77,11 @@ internal sealed class NodeAreaDto
                 node.Theme = nd.Theme ?? "";
                 node.Symbol = nd.Symbol ?? "";
                 node.LegendDesc = nd.LegendDesc;
-                node.Links = nd.Links ?? new List<NodeLink>();
+                node.Links = nd.Links ?? [];
                 node.Nouns = nd.Nouns ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 node.SetIdRaw(nd.Id);
                 IdGenerator.EnsureAtLeast(nd.Id);
-                if (nd.Scripts != null && nd.Scripts.Count > 0)
+                if (nd.Scripts is not null && nd.Scripts.Count > 0)
                     node.RestoreScriptIds(nd.Scripts);
                 node.IsModified = false;
                 grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;

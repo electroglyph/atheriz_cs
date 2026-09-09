@@ -1,4 +1,3 @@
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Objects;
 
@@ -60,7 +59,7 @@ public static class ContentUtils
 
     public static List<GameObject> FilterContents(GameObject obj, Func<GameObject, bool> predicate)
     {
-        var contents = obj.ContentsSnapshot.Select(id => Globals.ObjectRegistry.Get(id).FirstOrDefault()).Where(o => o != null).Cast<GameObject>().ToList();
+        var contents = obj.ContentsSnapshot.Select(id => Globals.ObjectRegistry.Get(id).FirstOrDefault()).OfType<GameObject>().ToList();
         return contents.Where(predicate).ToList();
     }
 
@@ -86,7 +85,7 @@ public static class ContentUtils
     {
         visited ??= [];
         if (depth >= MaxSearchDepth) return [];
-        var result = new List<GameObject>();
+        List<GameObject> result = [];
         var ids = root.ContentsSnapshot;
         foreach (var id in ids)
         {
@@ -121,13 +120,13 @@ public static class ContentUtils
         try { q = query.ToLowerInvariant().Trim(); } catch { return []; }
         if (q == "me") return [obj];
 
-        var objs = recursive ? GatherContents(obj, resolver, looker: looker) : obj.ContentsSnapshot.Select(resolver).Where(o => o != null).Cast<GameObject>().ToList();
+        var objs = recursive ? GatherContents(obj, resolver, looker: looker) : obj.ContentsSnapshot.Select(resolver).OfType<GameObject>().ToList();
         // The recursive walk already applied the looker view filter per
         // object; re-filter only the flat path, which resolves unfiltered.
         if (looker is not null && !recursive)
             objs = objs.Where(o => o.Access(looker, "view")).ToList();
 
-        if (q.StartsWith("#"))
+        if (q.StartsWith("#", StringComparison.Ordinal))
         {
             if (!int.TryParse(q[1..], out var id)) return [];
             foreach (var o in objs) if (o.Id == id) return [o];
@@ -136,8 +135,8 @@ public static class ContentUtils
 
         var split = q.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
         if (split.Count == 0) return [];
-        var optional = new List<string>();
-        var required = new List<string>();
+        List<string> optional = [];
+        List<string> required = [];
         var count = 1;
         var index = 0;
         var start = 0;
@@ -192,7 +191,7 @@ public static class ContentUtils
             else required.Add(token);
         }
 
-        var matches = new List<GameObject>();
+        List<GameObject> matches = [];
         for (var i = 0; i < objs.Count; i++)
         {
             bool found = false;

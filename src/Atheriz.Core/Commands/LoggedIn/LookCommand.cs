@@ -1,4 +1,3 @@
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -38,19 +37,19 @@ public sealed class LookCommand : Command
         if (found.Count == 0)
         {
             var loc = puppet.ResolveLocationObject();
-            if (loc != null && loc.Access(puppet, "view"))
+            if (loc is not null && loc.Access(puppet, "view"))
             {
                 // noun/link fallback (not part of SearchWithFallback)
                 if (loc is Node node)
                 {
                     var noun = node.GetNoun(targetName.ToLowerInvariant());
-                    if (noun != null) { puppet.Msg(noun); return; }
+                    if (noun is not null) { puppet.Msg(noun); return; }
                     var link = node.GetLinks().FirstOrDefault(l => l.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase) || l.Aliases.Any(a => a.Equals(targetName, StringComparison.OrdinalIgnoreCase)));
-                    if (link != null)
+                    if (link is not null)
                     {
                         var nh = Globals.NodeHandler.GetCurrent();
                         var ln = nh?.GetNode(link.Coord);
-                        if (ln != null) { puppet.Msg(ln.ReturnAppearance(puppet)); return; }
+                        if (ln is not null) { puppet.Msg(ln.ReturnAppearance(puppet)); return; }
                     }
                 }
                 CommandHelpers.MsgNoMatchFound(puppet, targetName);
@@ -72,7 +71,7 @@ public sealed class LookCommand : Command
     private static void ShowLocation(GameObject puppet)
     {
         var loc = puppet.ResolveLocationObject();
-        if (loc == null)
+        if (loc is null)
         {
             if (!string.IsNullOrEmpty(puppet.Desc)) puppet.Msg(puppet.Desc);
             else CommandHelpers.MsgNowhere(puppet);

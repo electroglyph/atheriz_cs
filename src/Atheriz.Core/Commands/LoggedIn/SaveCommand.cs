@@ -1,8 +1,4 @@
 // Port of atheriz/commands/loggedin/save.py:32
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Commands;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/puppet.py:192 — snapshot only is_pc/privilege_level wontfix
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -18,9 +16,9 @@ public sealed class PuppetCommand : Command
         var query = pa?.GetString("target");
         if (string.IsNullOrWhiteSpace(query)) { go.Msg(PrintHelp()); return; }
         var sess = go.Session;
-        if (sess == null) { go.Msg("You have no active session."); return; }
+        if (sess is null) { go.Msg("You have no active session."); return; }
         var (target, err) = FindTarget(go, query!);
-        if (err != null) { go.Msg(err); return; }
+        if (err is not null) { go.Msg(err); return; }
         if (target == go) { go.Msg("You are already puppeting yourself."); return; }
         if (target!.IsAccount || target.IsChannel || target.IsNode) { go.Msg($"You cannot puppet {target.Name}."); return; }
         // Port of puppet.py:94 before :101 — permission precedes occupancy
@@ -28,12 +26,12 @@ public sealed class PuppetCommand : Command
         // the target is puppeted.
         if (!target.Access(go, "puppet")) { go.Msg($"You cannot puppet {target.Name}."); return; }
         if (target.IsDeleted) { go.Msg($"{target.Name} is not available."); return; }
-        if (target.Session != null && target.Session != sess) { go.Msg($"{target.Name} is already being puppeted."); return; }
+        if (target.Session is not null && target.Session != sess) { go.Msg($"{target.Name} is already being puppeted."); return; }
         bool ok = go.Puppet(sess, target);
         if (!ok)
         {
             // Puppet may have failed due to race (already puppeted/deleted) — faithful to puppet.py:115-136
-            if (target.Session != null && target.Session != sess) go.Msg($"{target.Name} is already being puppeted.");
+            if (target.Session is not null && target.Session != sess) go.Msg($"{target.Name} is already being puppeted.");
             else if (target.IsDeleted) go.Msg($"{target.Name} is not available.");
             else go.Msg($"You cannot puppet {target.Name}.");
             return;
@@ -43,7 +41,7 @@ public sealed class PuppetCommand : Command
     }
     private static (GameObject? t, string? err) FindTarget(GameObject caller, string query)
     {
-        if (query.StartsWith("#"))
+        if (query.StartsWith("#", StringComparison.Ordinal))
         {
             if (!int.TryParse(query[1..], out var id)) return (null, "Invalid ID format. Use #<number>.");
             var res = ObjectRegistry.Get(id);
@@ -68,7 +66,7 @@ public sealed class UnpuppetCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var sess = go.Session;
-        if (sess == null) { go.Msg("You have no active session."); return; }
+        if (sess is null) { go.Msg("You have no active session."); return; }
         bool ok = go.Unpuppet(sess);
         if (!ok) go.Msg("You are not puppeting anything.");
     }

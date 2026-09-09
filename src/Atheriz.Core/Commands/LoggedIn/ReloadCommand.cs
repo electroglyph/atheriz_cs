@@ -1,8 +1,4 @@
 // Port of atheriz/commands/loggedin/reload.py:43
-using Atheriz.Core.Objects;
-using Atheriz.Core.Commands;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -50,7 +46,7 @@ public sealed class ReloadCommand : Command
                         else result = t.Result;
                     }
                     catch (Exception ex) { result = $"Reload failed: {ex.Message}"; }
-                    if (capturedChannel != null)
+                    if (capturedChannel is not null)
                     {
                         try { capturedChannel.Msg(result); } catch (Exception) { }
                         try { capturedGo.Msg(result); } catch (Exception) { }

@@ -1,9 +1,5 @@
-using Atheriz.Core.Commands;
 using Atheriz.Core.Commands.LoggedIn;
-using Atheriz.Core.Globals;
 using Atheriz.Core.Persistence.Dto;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Objects;
 
@@ -20,7 +16,7 @@ public partial class GameObject
     public virtual (int count, List<object> ops)? Delete(GameObject? caller = null, bool recursive = false)
     {
         if (this is Account acc) return acc.DeleteImmediate(caller);
-        if (caller != null && !AtDelete(caller)) return null;
+        if (caller is not null && !AtDelete(caller)) return null;
         // quick check already deleted
         _lock.EnterReadLock();
         try { if (_flags.IsDeleted) return null; }
@@ -38,19 +34,19 @@ public partial class GameObject
 
     private (int count, List<object> ops)? DeleteCore(GameObject? caller, bool recursive)
     {
-        var ops = new List<object>();
-        var toDelete = new List<GameObject>();
+        List<object> ops = [];
+        List<GameObject> toDelete = [];
         int extraCount = 0;
 
         if (recursive)
         {
             // faithful port of base_obj.delete _collect_recursive with MAX_SEARCH_DEPTH
             int maxDepth = MaxSearchDepth;
-            var seen = new HashSet<int>();
+            HashSet<int> seen = [];
             var stack = new Stack<(GameObject obj, int depth)>();
             stack.Push((this, 0));
-            var order = new List<GameObject>();
-            var truncated = new List<GameObject>();
+            List<GameObject> order = [];
+            List<GameObject> truncated = [];
             while (stack.Count > 0)
             {
                 var (obj, depth) = stack.Pop();
@@ -65,7 +61,7 @@ public partial class GameObject
                 {
                     var cObjs = ObjectRegistry.Get(cid);
                     var content = cObjs.FirstOrDefault();
-                    if (content == null) continue;
+                    if (content is null) continue;
                     if (seen.Contains(content.Id)) continue;
                     if (truncated.Any(t => t.Id == content.Id)) continue;
                     // Honor each child's delete veto: a vetoed subtree is skipped,
@@ -73,7 +69,7 @@ public partial class GameObject
                     // (fail-closed): a buggy hook must not force deletion.
                     // The throw is still logged loudly (pinned by
                     // ThrowingAtDeleteChild_IsLogged).
-                    if (caller != null)
+                    if (caller is not null)
                     {
                         bool vetoed = false;
                         // a throwing AtDelete must not vanish silently —
@@ -139,7 +135,7 @@ public partial class GameObject
                 try
                 {
                     var loc = obj.ResolveLocationObject();
-                    if (loc != null)
+                    if (loc is not null)
                     {
                         try { loc.RemoveContent(obj.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
                     }
@@ -183,7 +179,7 @@ public partial class GameObject
                     {
                         if (!seen.Add(cid)) continue;
                         var straggler = ObjectRegistry.Get(cid).FirstOrDefault();
-                        if (straggler == null) continue;
+                        if (straggler is null) continue;
                         bool stillHere = false;
                         straggler._lock.EnterReadLock();
                         try { stillHere = straggler._location is LocationRef.ObjectLocation ol && ol.ObjectId == obj.Id; }
@@ -200,7 +196,7 @@ public partial class GameObject
                             AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject");
                             continue;
                         }
-                        if (r != null) { ops.AddRange(r.Value.ops); extraCount += r.Value.count; }
+                        if (r is not null) { ops.AddRange(r.Value.ops); extraCount += r.Value.count; }
                         else if (straggler._flags.IsDeleted) continue;
                         else
                         {
@@ -209,7 +205,7 @@ public partial class GameObject
                             // survival; only a passing probe falls through to
                             // the detach a racy sibling left behind.
                             bool vetoed = false;
-                            try { vetoed = caller != null && !straggler.AtDelete(caller); }
+                            try { vetoed = caller is not null && !straggler.AtDelete(caller); }
                             catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
                             if (vetoed) continue;
                             try { obj.RemoveContent(straggler.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
@@ -236,9 +232,9 @@ public partial class GameObject
             _lock.EnterReadLock();
             try { contentIds = new List<int>(_contents); }
             finally { _lock.ExitReadLock(); }
-            var contentObjs = contentIds.Select(id => ObjectRegistry.Get(id).FirstOrDefault()).Where(o => o != null).Cast<GameObject>().ToList();
+            var contentObjs = contentIds.Select(id => ObjectRegistry.Get(id).FirstOrDefault()).OfType<GameObject>().ToList();
             int deletedKids = 0;
-            var processed = new HashSet<int>();
+            HashSet<int> processed = [];
             // Factored as a local so the post-flip straggler pass below shares
             // the exact move-or-delete path.
             void MoveOrDelete(GameObject content)
@@ -267,7 +263,7 @@ public partial class GameObject
                     }
                     // then collect recursively (delete content and its children)
                     var r = content.Delete(caller, true);
-                    if (r != null) { ops.AddRange(r.Value.ops); deletedKids += r.Value.count; }
+                    if (r is not null) { ops.AddRange(r.Value.ops); deletedKids += r.Value.count; }
                 }
                 else
                 {
@@ -301,7 +297,7 @@ public partial class GameObject
             {
                 if (!processed.Add(fid)) continue;
                 var late = ObjectRegistry.Get(fid).FirstOrDefault();
-                if (late == null) continue;
+                if (late is null) continue;
                 // Only handle what is still here: a straggler that already moved
                 // away on its own must not be yanked back.
                 bool stillHere = false;
@@ -315,7 +311,7 @@ public partial class GameObject
             try
             {
                 var loc2 = this.ResolveLocationObject();
-                if (loc2 != null) loc2.RemoveContent(this.Id);
+                if (loc2 is not null) loc2.RemoveContent(this.Id);
             } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
             if (!this.IsTemporary)
                 ops.Add(this.GetDelOps());
@@ -358,7 +354,7 @@ public partial class GameObject
                 try
                 {
                     var follower = ObjectRegistry.Get(fid).FirstOrDefault();
-                    if (follower != null && follower.Following == obj.Id)
+                    if (follower is not null && follower.Following == obj.Id)
                         try { follower.Following = null; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
                 }
                 catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
@@ -372,7 +368,7 @@ public partial class GameObject
                 try
                 {
                     var ch = ObjectRegistry.Get(chId).FirstOrDefault() as Channel;
-                    if (ch != null) try { ch.RemoveListener(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                    if (ch is not null) try { ch.RemoveListener(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
                 }
                 catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
                 try { obj.UnsubscribeById(chId); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
@@ -382,7 +378,7 @@ public partial class GameObject
         try
         {
             var sess = obj.Session;
-            if (sess != null)
+            if (sess is not null)
             {
                 try { obj.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
                 try { sess.Connection?.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }

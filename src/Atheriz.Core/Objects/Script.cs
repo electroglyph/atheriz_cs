@@ -49,7 +49,7 @@ public class Script : GameObject
         SyncRoot.EnterWriteLock();
         try
         {
-            if (_child != null && !ReferenceEquals(_child, child))
+            if (_child is not null && !ReferenceEquals(_child, child))
                 throw new InvalidOperationException($"Script {Id} already attached to {_child} cannot be attached to {child}");
             _child = child;
         }
@@ -77,7 +77,7 @@ public class Script : GameObject
                 AtherizLogger.LogError($"Script {Id}: cannot bind hook {GetType().Name}.{method.Name}: {ex.Message}; hook skipped.");
                 continue;
             }
-            if (del == null)
+            if (del is null)
             {
                 AtherizLogger.LogError($"Script {Id}: cannot bind hook {GetType().Name}.{method.Name} (signature not expressible as Action/Func); hook skipped.");
                 continue;
@@ -113,14 +113,14 @@ public class Script : GameObject
             {
                 var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
                 delegateType = GetActionType(paramTypes);
-                if (delegateType == null) return null;
+                if (delegateType is null) return null;
             }
             else
             {
                 var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
-                var all = paramTypes.Concat(new[] { method.ReturnType }).ToArray();
+                var all = paramTypes.Append(method.ReturnType).ToArray();
                 delegateType = GetFuncType(all);
-                if (delegateType == null) return null;
+                if (delegateType is null) return null;
             }
             return method.CreateDelegate(delegateType!, this);
         }
@@ -187,13 +187,13 @@ public class Script : GameObject
     public void RemoveHooks(GameObject? child = null)
     {
         // Port of base_script.py:219 child = self.child if child is None else child
-        if (child == null)
+        if (child is null)
         {
             SyncRoot.EnterReadLock();
             try { child = _child; }
             finally { SyncRoot.ExitReadLock(); }
         }
-        if (child == null) return; // Port of base_script.py:220-222 if child is None: logger.error...
+        if (child is null) return; // Port of base_script.py:220-222 if child is None: logger.error...
         // marker classification cached per type (HookMarkerCache).
         var atFuncs = HookMarkerCache.ForType(GetType());
         // Port of base_script.py:233-240 with child.lock: mutate the hook sets

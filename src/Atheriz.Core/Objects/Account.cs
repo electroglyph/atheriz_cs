@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using Atheriz.Core.Globals;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Dto;
 
@@ -37,7 +36,7 @@ public class Account : GameObject
     // DeleteImmediate below (same immediate row delete), keeping both static types unified.
     public new bool Delete(GameObject? caller = null, bool unused = true)
     {
-        return DeleteImmediate(caller) != null;
+        return DeleteImmediate(caller) is not null;
     }
 
     // Shared immediate-delete core for both static types .
@@ -45,7 +44,7 @@ public class Account : GameObject
     {
         // Port of base_account.py:53 delete.
         if (!AtDelete(caller)) return null;
-        var ops = new List<(string Sql, object[] Params)>();
+        List<(string Sql, object[] Params)> ops = [];
         if (!IsTemporary) ops.Add(GetDelOps());
         // Mark deleted and unregister BEFORE the DB delete so a concurrent
         // checkpoint cannot resurrect the row. Mirrors Node.delete.
@@ -111,8 +110,7 @@ public class Account : GameObject
         var salt = saltOverride ?? SaltProvider.GetSalt();
         var saltBytes = Encoding.UTF8.GetBytes(salt);
         // 600k iterations SHA256, matching Python hashlib.pbkdf2_hmac 600_000
-        using var pbkdf2 = new Rfc2898DeriveBytes(password, saltBytes, 600_000, HashAlgorithmName.SHA256);
-        var hash = pbkdf2.GetBytes(32); // 256-bit
+        var hash = Rfc2898DeriveBytes.Pbkdf2(password, saltBytes, 600_000, HashAlgorithmName.SHA256, 32); // 256-bit
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 

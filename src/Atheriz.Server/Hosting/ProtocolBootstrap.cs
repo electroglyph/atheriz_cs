@@ -1,5 +1,4 @@
 using Atheriz.Core.Network;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Server.Hosting;
 
@@ -21,7 +20,7 @@ public static class ProtocolBootstrap
             try
             {
                 BaseProtocol? inst = CreateKnown(protoPath);
-                if (inst == null)
+                if (inst is null)
                 {
                     Console.WriteLine($"Failed to register protocol {protoPath}: type not found");
                     continue;

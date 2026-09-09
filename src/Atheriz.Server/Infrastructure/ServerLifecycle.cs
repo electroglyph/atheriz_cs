@@ -1,7 +1,5 @@
 using Atheriz.Core.Concurrency;
-using Atheriz.Core.Globals;
 using Atheriz.Core.Persistence;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Server.Infrastructure;
 

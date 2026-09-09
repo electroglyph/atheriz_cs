@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/noun.py:34
-using Atheriz.Core.Objects;
-using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -19,12 +17,12 @@ public sealed class NounCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null || string.IsNullOrWhiteSpace(pa.GetString("noun")) || pa.GetList("desc").Count == 0) { go.Msg(PrintHelp()); return; }
+        if (pa is null || string.IsNullOrWhiteSpace(pa.GetString("noun")) || pa.GetList("desc").Count == 0) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject() as Node;
-        if (loc == null) { CommandHelpers.MsgNo(go); return; }
+        if (loc is null) { CommandHelpers.MsgNo(go); return; }
         string noun = pa.GetString("noun")!;
         string desc = string.Join(" ", pa.GetList("desc"));
-        string mode = loc.GetNoun(noun) != null ? "Updated" : "Added";
+        string mode = loc.GetNoun(noun) is not null ? "Updated" : "Added";
         loc.AddNoun(noun, desc);
         go.Msg($"{mode} '{noun}'.");
     }

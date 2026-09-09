@@ -1,5 +1,4 @@
 using Atheriz.Core.Network;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
 

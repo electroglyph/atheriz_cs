@@ -1,4 +1,3 @@
-using Atheriz.Core.Globals;
 
 namespace Atheriz.Core.Commands;
 

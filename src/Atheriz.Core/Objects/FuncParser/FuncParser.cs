@@ -98,7 +98,7 @@ public class FuncParser
             ["random"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ if(a[0].Contains('.')){ double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); return rnd.NextDouble()*mx; } int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } { double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn); double.TryParse(a[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); bool isFloat=a[0].Contains('.')||a[1].Contains('.'); if(isFloat) return mn + (mx-mn)*rnd.NextDouble(); return rnd.Next((int)mn,(int)mx+1); } },
             ["randint"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } int.TryParse(a[0], out var mn2); int.TryParse(a[1], out var mx3); return rnd.Next(mn2,mx3+1); },
             ["choice"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; var rnd=Random.Shared;
-                if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[")&&single.EndsWith("]")){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.GenericCallable: " + logEx.Message, "ParsedFunc"); } } try{
+                if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[", StringComparison.Ordinal)&&single.EndsWith("]", StringComparison.Ordinal)){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.GenericCallable: " + logEx.Message, "ParsedFunc"); } } try{
                         var conv = FuncParserHelpers.SafeConvertToTypes( (new object[]{"py"}, new Dictionary<string,object>()), new object?[]{single}, new Dictionary<string,object?>(), ctx.RaiseErrors); if(conv.args.Length>0 && conv.args[0] is System.Collections.IEnumerable en && !(conv.args[0] is string)){ var list=en.Cast<object?>().ToArray(); if(list.Length>0) return list[rnd.Next(list.Length)]?.ToString()??""; } }catch{ if(ctx.RaiseErrors) throw; } if(ctx.RaiseErrors){
                         // For single non-list like "a", py conversion will have thrown if raiseErrors, so propagate
                         // Check if single was not list and not int, try py conversion for validation
@@ -129,7 +129,7 @@ public class FuncParser
             ["pluralize"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; // mirroring python logic with raise_errors handling via ctx.RaiseErrors
                 bool raise = ctx.RaiseErrors;
                 if(a.Length>2){ var singular=a[0]??""; var number=a[1]; var plural=a[2]??""; if(!int.TryParse(number?.ToString(), out var nNum)){ if(raise) throw new ParsingError($"pluralize: number '{number}' not an integer"); return singular; } int nn=Math.Abs(nNum); return nn==0||nn==1? singular : plural; }
-                if(a.Length>1){ var singular=a[0]??""; var number=a[1]; if(number==null || string.IsNullOrEmpty(number.ToString())){ if(raise) throw new ParsingError($"pluralize: number '{number}' not an integer"); return singular; } if(!int.TryParse(number.ToString(), out var n2)){ if(raise) throw new ParsingError($"pluralize: number '{number}' not an integer"); return singular; } int nn2=Math.Abs(n2); return nn2==0||nn2==1? singular : (singular+"s"); } return a[0]??""; },
+                if(a.Length>1){ var singular=a[0]??""; var number=a[1]; if(number is null || string.IsNullOrEmpty(number.ToString())){ if(raise) throw new ParsingError($"pluralize: number '{number}' not an integer"); return singular; } if(!int.TryParse(number.ToString(), out var n2)){ if(raise) throw new ParsingError($"pluralize: number '{number}' not an integer"); return singular; } int nn2=Math.Abs(n2); return nn2==0||nn2==1? singular : (singular+"s"); } return a[0]??""; },
         };
 
         ActorStanceCallables = new Dictionary<string, ParserCallable>(StringComparer.Ordinal)
@@ -190,15 +190,15 @@ public class FuncParser
         }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.SafePyEval: " + logEx.Message, "ParsedFunc"); }
         if(int.TryParse(s, out var i2)) return i2.ToString();
         if(double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d2)) return d2.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        if(s.StartsWith("[")&&s.EndsWith("]")) return s;
+        if(s.StartsWith("[", StringComparison.Ordinal)&&s.EndsWith("]", StringComparison.Ordinal)) return s;
         try{ return FuncParserHelpers.SafeArithEval(s).ToString(System.Globalization.CultureInfo.InvariantCulture); }catch{ return s; }
     }
 
     private static object? HandleYou(string[] args, Dictionary<string,string> kwargs, ParserContext ctx, ParsedFunc raw)
     {
         GameObject? caller = ctx.Caller;
-        if (args.Length>0 && ctx.Mapping != null && ctx.Mapping.TryGetValue(args[0], out var mapped) && mapped is GameObject go) caller = go;
-        if (caller==null || ctx.Receiver==null)
+        if (args.Length>0 && ctx.Mapping is not null && ctx.Mapping.TryGetValue(args[0], out var mapped) && mapped is GameObject go) caller = go;
+        if (caller is null || ctx.Receiver is null)
         {
             if(ctx.RaiseErrors) throw new ParsingError("No caller or receiver supplied to $you callable.");
             return raw.ToString();
@@ -217,8 +217,8 @@ public class FuncParser
     private static object? HandleYour(string[] args, Dictionary<string,string> kwargs, ParserContext ctx, ParsedFunc raw)
     {
         GameObject? caller = ctx.Caller;
-        if (args.Length>0 && ctx.Mapping != null && ctx.Mapping.TryGetValue(args[0], out var mapped) && mapped is GameObject go) caller = go;
-        if (caller==null || ctx.Receiver==null)
+        if (args.Length>0 && ctx.Mapping is not null && ctx.Mapping.TryGetValue(args[0], out var mapped) && mapped is GameObject go) caller = go;
+        if (caller is null || ctx.Receiver is null)
         {
             if(ctx.RaiseErrors) throw new ParsingError("No caller or receiver supplied to $your callable.");
             return raw.ToString();
@@ -235,7 +235,7 @@ public class FuncParser
     private static object? HandleConj(string[] args, Dictionary<string,string> kwargs, ParserContext ctx, ParsedFunc raw)
     {
         if(args.Length==0) return "";
-        if(ctx.Caller==null || ctx.Receiver==null)
+        if(ctx.Caller is null || ctx.Receiver is null)
         {
             if(ctx.RaiseErrors) throw new ParsingError("No caller/receiver supplied to $conj callable");
             return raw.ToString();
@@ -243,14 +243,14 @@ public class FuncParser
         var verb = args[0]??"";
         string? key = args.Length>1? args[1]: null;
         GameObject? obj = ctx.Caller;
-        if (key!=null && ctx.Mapping!=null && ctx.Mapping.TryGetValue(key, out var m) && m is GameObject go2) obj = go2;
+        if (key is not null && ctx.Mapping is not null && ctx.Mapping.TryGetValue(key, out var m) && m is GameObject go2) obj = go2;
         var (second, third) = Conjugate.VerbActorStanceComponents(verb, plural:false);
         return obj == ctx.Receiver ? second : third;
     }
     private static object? HandlePConj(string[] args, Dictionary<string,string> kwargs, ParserContext ctx, ParsedFunc raw)
     {
         if(args.Length==0) return "";
-        if(ctx.Caller==null || ctx.Receiver==null)
+        if(ctx.Caller is null || ctx.Receiver is null)
         {
             if(ctx.RaiseErrors) throw new ParsingError("No caller/receiver supplied to $conj callable");
             return raw.ToString();
@@ -258,9 +258,9 @@ public class FuncParser
         var verb = args[0]??"";
         string? key = args.Length>1? args[1]: null;
         GameObject? obj = ctx.Caller;
-        if (key!=null && ctx.Mapping!=null && ctx.Mapping.TryGetValue(key, out var m) && m is GameObject go2) obj = go2;
+        if (key is not null && ctx.Mapping is not null && ctx.Mapping.TryGetValue(key, out var m) && m is GameObject go2) obj = go2;
         bool plural=false;
-        if(obj!=null)
+        if(obj is not null)
         {
             string? g = obj is IGenderProvider gp ? gp.GetGender() : obj.Gender;
             if(!string.IsNullOrEmpty(g)) plural = g.Equals("plural", StringComparison.OrdinalIgnoreCase);
@@ -272,10 +272,10 @@ public class FuncParser
     {
         if(args.Length==0) return "";
         var pronoun = args[0]??"";
-        var options = new List<string>();
+        List<string> options = [];
         for(int i=1;i<args.Length;i++) options.Add(args[i]??"");
         GameObject? obj = ctx.Caller;
-        if(options.Count>0 && ctx.Mapping!=null && ctx.Mapping.ContainsKey(options[^1]))
+        if(options.Count>0 && ctx.Mapping is not null && ctx.Mapping.ContainsKey(options[^1]))
         {
             var last = options[^1];
             if(ctx.Mapping[last] is GameObject go) obj = go;
@@ -285,7 +285,7 @@ public class FuncParser
         if(options.Count==1) optObj = options[0];
         else if(options.Count>1) optObj = options;
         string? defaultGender = "neutral";
-        if(obj!=null){
+        if(obj is not null){
             string? g = obj is IGenderProvider gp ? gp.GetGender() : obj.Gender;
             if(!string.IsNullOrEmpty(g)) defaultGender = g;
         }
@@ -319,7 +319,7 @@ public class FuncParser
         _startChar = startChar;
         _escapeChar = escapeChar;
         _maxNesting = maxNesting;
-        _defaultKwargs = defaultKwargs != null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
+        _defaultKwargs = defaultKwargs is not null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
         ValidateCallables(_callables);
     }
 
@@ -332,7 +332,7 @@ public class FuncParser
         _startChar = startChar;
         _escapeChar = escapeChar;
         _maxNesting = maxNesting;
-        _defaultKwargs = defaultKwargs != null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
+        _defaultKwargs = defaultKwargs is not null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
         // Build wrapper for each generic that validates signature
         foreach(var kv in genericCallables){
             var del = kv.Value;
@@ -357,9 +357,9 @@ public class FuncParser
                         // inject reserved
                         kwargsObj["funcparser"] = this;
                         kwargsObj["raise_errors"] = ctx.RaiseErrors;
-                        if(ctx.Caller!=null) kwargsObj["caller"]=ctx.Caller;
-                        if(ctx.Receiver!=null) kwargsObj["receiver"]=ctx.Receiver;
-                        if(ctx.Mapping!=null) kwargsObj["mapping"]=ctx.Mapping;
+                        if(ctx.Caller is not null) kwargsObj["caller"]=ctx.Caller;
+                        if(ctx.Receiver is not null) kwargsObj["receiver"]=ctx.Receiver;
+                        if(ctx.Mapping is not null) kwargsObj["mapping"]=ctx.Mapping;
                         return DelegateInvoker.Invoke(del, new object?[]{ a, kwargsObj });
                     }
                     if(pars.Length==1 && pars[0].ParameterType.IsArray){
@@ -391,7 +391,7 @@ public class FuncParser
         _startChar = startChar;
         _escapeChar = escapeChar;
         _maxNesting = maxNesting;
-        _defaultKwargs = defaultKwargs != null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
+        _defaultKwargs = defaultKwargs is not null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
         var genDict = new Dictionary<string, Delegate>(StringComparer.Ordinal);
         foreach(var kv in mixedCallables){
             if(kv.Value is ParserCallable pc) _callables[kv.Key]=pc;
@@ -408,9 +408,9 @@ public class FuncParser
                             foreach(var kk in k) kwargsObj[kk.Key]=kk.Value;
                             kwargsObj["funcparser"]=this;
                             kwargsObj["raise_errors"]=ctx.RaiseErrors;
-                            if(ctx.Caller!=null) kwargsObj["caller"]=ctx.Caller;
-                            if(ctx.Receiver!=null) kwargsObj["receiver"]=ctx.Receiver;
-                            if(ctx.Mapping!=null) kwargsObj["mapping"]=ctx.Mapping;
+                            if(ctx.Caller is not null) kwargsObj["caller"]=ctx.Caller;
+                            if(ctx.Receiver is not null) kwargsObj["receiver"]=ctx.Receiver;
+                            if(ctx.Mapping is not null) kwargsObj["mapping"]=ctx.Mapping;
                             // try to match signature that expects string[] + Dictionary
                             return DelegateInvoker.Invoke(d, new object?[]{ a, kwargsObj });
                         }
@@ -502,7 +502,7 @@ public class FuncParser
         var merged = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach(var kv in _defaultKwargs) merged[kv.Key]=kv.Value;
         foreach(var kv in pf.Kwargs) merged[kv.Key]=kv.Value;
-        if(reservedKwargs!=null) foreach(var kv in reservedKwargs) merged[kv.Key]=kv.Value;
+        if(reservedKwargs is not null) foreach(var kv in reservedKwargs) merged[kv.Key]=kv.Value;
         merged["funcparser"]=this;
         merged["raise_errors"]=raiseErrors;
         // Extract caller/receiver/mapping for ctx
@@ -511,7 +511,7 @@ public class FuncParser
         if(merged.TryGetValue("receiver", out var ro) && ro is GameObject gro) ctx.Receiver=gro;
         if(merged.TryGetValue("mapping", out var mo) && mo is IDictionary<string, object?> md) ctx.Mapping=md;
         // Also try reserved directly
-        if(reservedKwargs!=null){
+        if(reservedKwargs is not null){
             if(reservedKwargs.TryGetValue("caller", out var c2) && c2 is GameObject g2) ctx.Caller=g2;
             if(reservedKwargs.TryGetValue("receiver", out var r2) && r2 is GameObject gr2) ctx.Receiver=gr2;
             if(reservedKwargs.TryGetValue("mapping", out var m2) && m2 is IDictionary<string, object?> mm2) ctx.Mapping=mm2;
@@ -567,7 +567,7 @@ public class FuncParser
     // Instance Parse that returns object? (string or raw)
     public object? Parse(string? text, bool raiseErrors = false, bool escape = false, bool strip = false, bool returnStr = true, IDictionary<string, object?>? reservedKwargs = null)
     {
-        if (text == null) return "";
+        if (text is null) return "";
         if (text.Length > MaxMessageSize) throw new ParsingError($"Input too long ({text.Length} chars)");
         if (string.IsNullOrEmpty(text)) return text;
         // need to handle reservedKwargs that may contain caller/receiver/mapping for actor stance later? But instance parse's callables are generic; for actor stance we need to handle via reserved.
@@ -578,9 +578,9 @@ public class FuncParser
     public object? Parse(string? text, GameObject? caller, GameObject? receiver, IDictionary<string, object?>? mapping, bool raiseErrors = false, bool escape = false, bool strip = false, bool returnStr = true)
     {
         var reserved = new Dictionary<string, object?>(StringComparer.Ordinal);
-        if(caller!=null) reserved["caller"]=caller;
-        if(receiver!=null) reserved["receiver"]=receiver;
-        if(mapping!=null) reserved["mapping"]=mapping;
+        if(caller is not null) reserved["caller"]=caller;
+        if(receiver is not null) reserved["receiver"]=receiver;
+        if(mapping is not null) reserved["mapping"]=mapping;
         var res = Parse(text, raiseErrors, escape, strip, returnStr, reserved);
         return res;
     }
@@ -590,23 +590,23 @@ public class FuncParser
     // Legacy static Parse used by GameObject
     public static string Parse(string? text, GameObject? actor, GameObject? receiver, IDictionary<string, object?>? mapping, bool raiseErrors = false, bool escape = false, bool strip = false)
     {
-        if (text == null) return "";
+        if (text is null) return "";
         if (text.Length > MaxMessageSize) throw new ParsingError($"Input too long ({text.Length} chars)");
         if (string.IsNullOrEmpty(text)) return text;
         bool hasFunc = text.Contains(StartChar);
-        bool hasDirector = mapping!=null && text.Contains('{') && text.Contains('}');
+        bool hasDirector = mapping is not null && text.Contains('{') && text.Contains('}');
         if (!hasFunc && !hasDirector) return text;
         string afterFunc = text;
         if(hasFunc){
             // use static actor callables for legacy
             var reserved = new Dictionary<string, object?>(StringComparer.Ordinal);
-            if(actor!=null) reserved["caller"]=actor;
-            if(receiver!=null) reserved["receiver"]=receiver;
-            if(mapping!=null) reserved["mapping"]=mapping;
+            if(actor is not null) reserved["caller"]=actor;
+            if(receiver is not null) reserved["receiver"]=receiver;
+            if(mapping is not null) reserved["mapping"]=mapping;
             var obj = ParseInternalStaticLegacy(text, raiseErrors, escape, strip, true, reserved);
             afterFunc = obj?.ToString() ?? "";
         }
-        if (hasDirector && mapping != null && receiver != null)
+        if (hasDirector && mapping is not null && receiver is not null)
         {
             var displayMap = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var kv in mapping)
@@ -617,7 +617,7 @@ public class FuncParser
             var safe = new FuncParserHelpers.SafeFormatMap(displayMap);
             afterFunc = safe.Format(afterFunc);
         }
-        else if (hasDirector && mapping != null)
+        else if (hasDirector && mapping is not null)
         {
             var displayMap = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var kv in mapping) displayMap[kv.Key] = kv.Value is GameObject go ? go.Name : kv.Value?.ToString() ?? "";
@@ -628,7 +628,7 @@ public class FuncParser
     }
     public static Dictionary<GameObject, string> ParseForContents(string? text, GameObject? actor, IEnumerable<GameObject> receivers, IDictionary<string, object?>? mapping, bool raiseErrors = false)
     {
-        var dict = new Dictionary<GameObject, string>();
+        Dictionary<GameObject, string> dict = [];
         foreach (var r in receivers)
             dict[r] = Parse(text, actor, r, mapping, raiseErrors);
         return dict;
@@ -643,7 +643,7 @@ public class FuncParser
     // the merged kwargs so ParserCallable callables see one consistent value.
     private static object? ParseInternal(string str, bool raiseErrors, bool escapeMode, bool stripMode, bool returnStr, IDictionary<string, object?>? reservedKwargs, IReadOnlyDictionary<string, ParserCallable> callables, char startChar, char escapeChar, int maxNesting, IReadOnlyDictionary<string, object?> defaultKwargs, FuncParser? owner = null)
     {
-        var callstack = new List<ParsedFunc>();
+        List<ParsedFunc> callstack = [];
         int quoted = -1;
         string quotedChar = "";
         int doubleQuoted = -1;
@@ -654,12 +654,12 @@ public class FuncParser
         string currentKwarg = "";
         object? execReturn = "";
         ParsedFunc? currFunc = null;
-        var fullstr = new List<char>();
-        var infuncstr = new List<char>();
+        List<char> fullstr = [];
+        List<char> infuncstr = [];
         bool literalInFuncStr = false;
         bool localReturnStr = returnStr;
         var ctxForStatic = new ParserContext{ RaiseErrors=raiseErrors };
-        if(reservedKwargs!=null){
+        if(reservedKwargs is not null){
             if(reservedKwargs.TryGetValue("caller", out var co) && co is GameObject gco) ctxForStatic.Caller=gco;
             if(reservedKwargs.TryGetValue("receiver", out var ro) && ro is GameObject gro) ctxForStatic.Receiver=gro;
             if(reservedKwargs.TryGetValue("mapping", out var mo) && mo is IDictionary<string, object?> md) ctxForStatic.Mapping=md;
@@ -674,7 +674,7 @@ public class FuncParser
             var merged = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach(var kv in defaultKwargs) merged[kv.Key]=kv.Value;
             foreach(var kv in pf.Kwargs) merged[kv.Key]=kv.Value;
-            if(reservedKwargs!=null) foreach(var kv in reservedKwargs) merged[kv.Key]=kv.Value;
+            if(reservedKwargs is not null) foreach(var kv in reservedKwargs) merged[kv.Key]=kv.Value;
             merged["funcparser"] = owner; // instance entry supplies the live parser, matching Execute; the static legacy path has no instance
             merged["raise_errors"] = re;
             // Build ParserContext from merged
@@ -683,9 +683,9 @@ public class FuncParser
             if(merged.TryGetValue("receiver", out var ro2) && ro2 is GameObject gro2) c.Receiver=gro2;
             if(merged.TryGetValue("mapping", out var mo2) && mo2 is IDictionary<string, object?> md2) c.Mapping=md2;
             // also use ctxForStatic as base
-            if(c.Caller==null) c.Caller=ctxForStatic.Caller;
-            if(c.Receiver==null) c.Receiver=ctxForStatic.Receiver;
-            if(c.Mapping==null) c.Mapping=ctxForStatic.Mapping;
+            if(c.Caller is null) c.Caller=ctxForStatic.Caller;
+            if(c.Receiver is null) c.Receiver=ctxForStatic.Receiver;
+            if(c.Mapping is null) c.Mapping=ctxForStatic.Mapping;
             var kwargsStr = merged.ToDictionary(kv=>kv.Key, kv=> kv.Value?.ToString() ?? "", StringComparer.Ordinal);
             try{
                 var ret = func(argsStr, kwargsStr, c, pf);
@@ -696,17 +696,17 @@ public class FuncParser
         int i=0, n=str.Length;
         while(i<n){
             char ch=str[i];
-            if(escaped){ if(currFunc!=null) infuncstr.Add(ch); else fullstr.Add(ch); escaped=false; i++; continue; }
-            if(ch==escapeChar){ if(i+1>=n){ if(currFunc!=null) infuncstr.Add(ch); else fullstr.Add(ch); i++; continue; } escaped=true; i++; continue; }
-            if(ch==startChar && i+1<n && str[i+1]==startChar){ if(currFunc!=null) infuncstr.Add(startChar); else fullstr.Add(startChar); i+=2; continue; }
-            if(ch==startChar && !(currFunc!=null && quoted>=0)){
-                if(currFunc!=null){
+            if(escaped){ if(currFunc is not null) infuncstr.Add(ch); else fullstr.Add(ch); escaped=false; i++; continue; }
+            if(ch==escapeChar){ if(i+1>=n){ if(currFunc is not null) infuncstr.Add(ch); else fullstr.Add(ch); i++; continue; } escaped=true; i++; continue; }
+            if(ch==startChar && i+1<n && str[i+1]==startChar){ if(currFunc is not null) infuncstr.Add(startChar); else fullstr.Add(startChar); i+=2; continue; }
+            if(ch==startChar && !(currFunc is not null && quoted>=0)){
+                if(currFunc is not null){
                     if(callstack.Count >= maxNesting -1){
                         if(raiseErrors) throw new ParsingError($"Only allows for parsing nesting function defs to a max depth of {maxNesting}.");
                         infuncstr.Add(ch); i++; continue;
                     }else{
                         if(execReturn is string es && es!=""){ foreach(var c in es) infuncstr.Add(c); execReturn=""; }
-                        else if(execReturn!=null && execReturn.ToString()!="" ){ foreach(var c in execReturn.ToString()!) infuncstr.Add(c); execReturn=""; }
+                        else if(execReturn is not null && execReturn.ToString()!="" ){ foreach(var c in execReturn.ToString()!) infuncstr.Add(c); execReturn=""; }
                         currFunc.CurrentKwarg=currentKwarg;
                         currFunc.InFuncStr=new List<char>(infuncstr);
                         currFunc.DoubleQuoted=quoted;
@@ -714,15 +714,15 @@ public class FuncParser
                         currFunc.OpenLParens=openLParens;
                         currFunc.OpenLSquare=openLSquare;
                         currFunc.OpenLCurly=openLCurly;
-                        currentKwarg=""; infuncstr=new List<char>(); quoted=-1; quotedChar=""; doubleQuoted=-1; openLParens=0; openLSquare=0; openLCurly=0; execReturn=""; literalInFuncStr=false;
+                        currentKwarg=""; infuncstr=[]; quoted=-1; quotedChar=""; doubleQuoted=-1; openLParens=0; openLSquare=0; openLCurly=0; execReturn=""; literalInFuncStr=false;
                         callstack.Add(currFunc);
                     }
                 }
                 currFunc=new ParsedFunc(ch); i++; continue;
             }
-            if(currFunc==null){ fullstr.Add(ch); localReturnStr=true; i++; continue; }
+            if(currFunc is null){ fullstr.Add(ch); localReturnStr=true; i++; continue; }
             if(execReturn is string ers && ers!="" && ch!=',' && ch!='=' && ch!=')'){ foreach(var c in ers) infuncstr.Add(c); execReturn=""; }
-            else if(execReturn!=null && execReturn.ToString()!="" && ch!=',' && ch!='=' && ch!=')'){ foreach(var c in execReturn.ToString()!) infuncstr.Add(c); execReturn=""; }
+            else if(execReturn is not null && execReturn.ToString()!="" && ch!=',' && ch!='=' && ch!=')'){ foreach(var c in execReturn.ToString()!) infuncstr.Add(c); execReturn=""; }
             if(ch=='"' || ch=='\''){
                 if(quoted>=0){
                     if(ch.ToString()==quotedChar){
@@ -735,22 +735,22 @@ public class FuncParser
             }
             if(quoted>=0){ infuncstr.Add(ch); i++; continue; }
             if(ch=='('){
-                if(string.IsNullOrEmpty(currFunc.FuncName)){ currFunc.FuncName=new string(infuncstr.ToArray()); currFunc.FullStr.AddRange(infuncstr); currFunc.FullStr.Add(ch); infuncstr=new List<char>(); } else infuncstr.Add(ch);
+                if(string.IsNullOrEmpty(currFunc.FuncName)){ currFunc.FuncName=new string(infuncstr.ToArray()); currFunc.FullStr.AddRange(infuncstr); currFunc.FullStr.Add(ch); infuncstr=[]; } else infuncstr.Add(ch);
                 openLParens++; i++; continue;
             }
             if(ch=='[' || ch==']'){ infuncstr.Add(ch); openLSquare+= ch==']'? -1:1; i++; continue; }
             if(ch=='{' || ch=='}'){ infuncstr.Add(ch); openLCurly+= ch=='}'? -1:1; i++; continue; }
             if(ch=='='){
                 if(execReturn is string er2 && er2!="") infuncstr=new List<char>(er2.ToCharArray());
-                else if(execReturn!=null && execReturn.ToString()!="") infuncstr=new List<char>(execReturn.ToString()!.ToCharArray());
-                currentKwarg=new string(infuncstr.ToArray()).Trim(); currFunc.Kwargs[currentKwarg]=""; currFunc.FullStr.AddRange(infuncstr); currFunc.FullStr.Add(ch); infuncstr=new List<char>(); i++; continue;
+                else if(execReturn is not null && execReturn.ToString()!="") infuncstr=new List<char>(execReturn.ToString()!.ToCharArray());
+                currentKwarg=new string(infuncstr.ToArray()).Trim(); currFunc.Kwargs[currentKwarg]=""; currFunc.FullStr.AddRange(infuncstr); currFunc.FullStr.Add(ch); infuncstr=[]; i++; continue;
             }
             if(ch==',' || ch==')'){
                 if(openLParens>1){ infuncstr.Add(ch); if(ch==')') openLParens--; i++; continue; }
                 if(openLCurly>0 || openLSquare>0){ infuncstr.Add(ch); i++; continue; }
                 if(execReturn is string er3 && er3!=""){
                     if(!string.IsNullOrEmpty(currentKwarg)) currFunc.Kwargs[currentKwarg]=er3; else currFunc.Args.Add(er3);
-                }else if(execReturn!=null && execReturn.ToString()!=""){
+                }else if(execReturn is not null && execReturn.ToString()!=""){
                     var sE=execReturn.ToString()!;
                     if(!string.IsNullOrEmpty(currentKwarg)) currFunc.Kwargs[currentKwarg]=sE; else currFunc.Args.Add(execReturn);
                 }else{
@@ -761,7 +761,7 @@ public class FuncParser
                 var execStr = execReturn?.ToString() ?? "";
                 if(!string.IsNullOrEmpty(execStr)) currFunc.FullStr.AddRange(execStr.ToCharArray());
                 currFunc.FullStr.AddRange(infuncstr); currFunc.FullStr.Add(ch);
-                currentKwarg=""; execReturn=""; infuncstr=new List<char>(); literalInFuncStr=false;
+                currentKwarg=""; execReturn=""; infuncstr=[]; literalInFuncStr=false;
                 if(ch==')'){
                     openLParens=0;
                     if(stripMode) execReturn="";
@@ -769,8 +769,8 @@ public class FuncParser
                     else execReturn = ExecuteWithCallables(currFunc, raiseErrors, ctxForStatic);
                     if(callstack.Count>0){
                         currFunc=callstack[callstack.Count-1]; callstack.RemoveAt(callstack.Count-1); currentKwarg=currFunc.CurrentKwarg;
-                        if(currFunc.InFuncStr.Count>0){ infuncstr=new List<char>(currFunc.InFuncStr); var es2=execReturn?.ToString() ?? ""; foreach(var c in es2) infuncstr.Add(c); execReturn=""; } else infuncstr=new List<char>();
-                        currFunc.InFuncStr=new List<char>(); quoted=currFunc.DoubleQuoted; quotedChar=currFunc.QuotedChar ?? ""; doubleQuoted=quoted; openLParens=currFunc.OpenLParens; openLSquare=currFunc.OpenLSquare; openLCurly=currFunc.OpenLCurly;
+                        if(currFunc.InFuncStr.Count>0){ infuncstr=new List<char>(currFunc.InFuncStr); var es2=execReturn?.ToString() ?? ""; foreach(var c in es2) infuncstr.Add(c); execReturn=""; } else infuncstr=[];
+                        currFunc.InFuncStr=[]; quoted=currFunc.DoubleQuoted; quotedChar=currFunc.QuotedChar ?? ""; doubleQuoted=quoted; openLParens=currFunc.OpenLParens; openLSquare=currFunc.OpenLSquare; openLCurly=currFunc.OpenLCurly;
                     }else{
                         currFunc=null;
                         if(localReturnStr){
@@ -781,48 +781,48 @@ public class FuncParser
                                 var es2=execReturn?.ToString() ?? ""; foreach(var c in es2) fullstr.Add(c); execReturn="";
                             }
                         }
-                        infuncstr=new List<char>(); literalInFuncStr=false;
+                        infuncstr=[]; literalInFuncStr=false;
                     }
                 }
                 i++; continue;
             }
             infuncstr.Add(ch); i++;
         }
-        if(currFunc!=null){
+        if(currFunc is not null){
             callstack.Add(currFunc);
-            var combined=new List<char>();
+            List<char> combined = [];
             var stackCopy=new List<ParsedFunc>(callstack); stackCopy.Reverse();
             var trailing=new string(infuncstr.ToArray());
             bool first=true;
             foreach(var pf in stackCopy){
                 var funcStr=pf.ToString();
-                if(first && funcStr.EndsWith(trailing)){ combined.AddRange(funcStr.ToCharArray()); first=false; trailing=""; }
+                if(first && funcStr.EndsWith(trailing, StringComparison.Ordinal)){ combined.AddRange(funcStr.ToCharArray()); first=false; trailing=""; }
                 else{ combined.AddRange(funcStr.ToCharArray()); if(!string.IsNullOrEmpty(trailing)) combined.AddRange(trailing.ToCharArray()); trailing=""; first=false; }
             }
             if(!string.IsNullOrEmpty(trailing)) combined.AddRange(trailing.ToCharArray());
             fullstr.AddRange(combined);
-            if(execReturn!=null && execReturn.ToString()!="") fullstr.AddRange(execReturn.ToString()!.ToCharArray());
+            if(execReturn is not null && execReturn.ToString()!="") fullstr.AddRange(execReturn.ToString()!.ToCharArray());
         }else{
             if(infuncstr.Count>0) fullstr.AddRange(infuncstr);
-            if(execReturn!=null && execReturn.ToString()!="" && execReturn.ToString()!=""){
+            if(execReturn is not null && execReturn.ToString()!="" && execReturn.ToString()!=""){
                 if(localReturnStr) fullstr.AddRange(execReturn.ToString()!.ToCharArray());
             }
         }
-        if(!localReturnStr && execReturn!=null && execReturn.ToString()!=""){
+        if(!localReturnStr && execReturn is not null && execReturn.ToString()!=""){
             // pure call: return raw execReturn if any (when returnStr false and no surrounding text)
             // execReturn may have been already added to fullstr when localReturnStr true; but here localReturnStr false => fullstr empty, execReturn holds raw
             // In our earlier branch for top-level ')', we kept execReturn when returnStr false. So check.
-            if(execReturn!=null && execReturn.ToString()!="" && fullstr.Count==0) return execReturn;
+            if(execReturn is not null && execReturn.ToString()!="" && fullstr.Count==0) return execReturn;
             // If we already added to fullstr but returnStr false, we should return raw instead of string?
             // For purity, if fullstr empty but execReturn holds, return raw; otherwise fall through to string
         }
         // Handle case where top-level execReturn kept for returnStr false but fullstr empty
-        if(!returnStr && execReturn!=null && execReturn.ToString()!="" && fullstr.Count==0){
+        if(!returnStr && execReturn is not null && execReturn.ToString()!="" && fullstr.Count==0){
             return execReturn;
         }
         // Also handle case where execReturn holds but fullstr has content due to early addition; need to reconstruct
         // If returnStr false but we have mixed content, fallback to string
-        if(!returnStr && fullstr.Count==0 && execReturn!=null && execReturn.ToString()!="" )
+        if(!returnStr && fullstr.Count==0 && execReturn is not null && execReturn.ToString()!="" )
             return execReturn;
         return new string(fullstr.ToArray());
     }

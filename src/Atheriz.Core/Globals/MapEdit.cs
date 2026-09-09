@@ -6,9 +6,6 @@
 // static MapEdit with Dictionary<string,MapEditChain> chains, ReaderWriterLockSlim Lock, MaxChains=256,
 // AddChain/GetChain/ValidateChain/ClearStale/RemoveChain/DiscardSession.
 
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Globals;
 
@@ -67,7 +64,7 @@ public sealed class MapEditChain
             CreatedAt = DateTime.UtcNow;
             CreatedMonotonic = MapEdit.GetMonotonic();
         }
-        Chain = new List<Coord>();
+        Chain = [];
     }
 }
 
@@ -157,7 +154,7 @@ public static class MapEdit
     // write lock: every purge site already does (evict, discard, remove).
     private static void CollectStalePreviousLocked()
     {
-        var stale = new List<string>();
+        List<string> stale = [];
         foreach (var kv in _previous)
             if (!_chains.ContainsKey(kv.Value)) stale.Add(kv.Key);
         foreach (var k in stale) { _previous.Remove(k); }
@@ -182,10 +179,10 @@ public static class MapEdit
                 if (c == 0) c = (kv.Value.CreatedAt - DateTime.UnixEpoch).TotalSeconds;
                 if (c < oldestCreated) { oldestCreated = c; oldest = kv.Key; }
             }
-            if (oldest == null) break;
+            if (oldest is null) break;
             var removed = _chains[oldest];
             _chains.Remove(oldest);
-            if (removed != null && !string.IsNullOrEmpty(removed.PreviousKey))
+            if (removed is not null && !string.IsNullOrEmpty(removed.PreviousKey))
                 _previous.Remove(removed.PreviousKey);
             // Port of mapedit.py:58-60 stale after eviction
             CollectStalePreviousLocked();
@@ -230,7 +227,7 @@ public static class MapEdit
     {
         PreviousKey = c.PreviousKey,
         Seq = c.Seq,
-        Validation = c.Validation == null ? null : new List<int>(c.Validation),
+        Validation = c.Validation is null ? null : new List<int>(c.Validation),
         Chain = new List<Coord>(c.Chain),
         CreatedAt = c.CreatedAt,
         CreatedMonotonic = c.CreatedMonotonic,
@@ -260,8 +257,8 @@ public static class MapEdit
     // Spec overload: AddChain(key, List<Coord> chain) — coordinate chain version
     public static void AddChain(string key, List<Coord> chain, Session? session = null)
     {
-        if (key == null) throw new ArgumentNullException(nameof(key));
-        if (chain == null) throw new ArgumentNullException(nameof(chain));
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(chain);
         Lock.EnterWriteLock();
         try
         {
@@ -314,7 +311,7 @@ public static class MapEdit
                     }
                 }
             }
-            if (chain == null)
+            if (chain is null)
                 return new MapEditResult(MapEditStatus.Reject, reason: "unknown_key");
             if (chain.Ip != ip)
                 return new MapEditResult(MapEditStatus.Reject, reason: "ip");
@@ -378,18 +375,18 @@ public static class MapEdit
     // Port of mapedit.discard_session — drop all chains owned by a closed session.
     public static void DiscardSession(Session? session)
     {
-        if (session == null) return;
+        if (session is null) return;
         Lock.EnterWriteLock();
         try
         {
-            var dead = new List<string>();
+            List<string> dead = [];
             foreach (var kv in _chains)
                 if (ReferenceEquals(kv.Value.Session, session)) dead.Add(kv.Key);
             foreach (var k in dead)
             {
                 var c = _chains[k];
                 _chains.Remove(k);
-                if (c != null && !string.IsNullOrEmpty(c.PreviousKey))
+                if (c is not null && !string.IsNullOrEmpty(c.PreviousKey))
                     _previous.Remove(c.PreviousKey);
             }
             CollectStalePreviousLocked();
@@ -402,7 +399,7 @@ public static class MapEdit
     public static bool ChainExists(string key)
     {
         var c = GetChain(key);
-        if (c == null) return false;
+        if (c is null) return false;
         return true;
     }
 
@@ -426,7 +423,7 @@ public static class MapEdit
                 }
                 else return false;
             }
-            if (chain == null) return false;
+            if (chain is null) return false;
             if (chain.Ip != ip) return false;
             if (previousHit) return seq == chain.Seq;
             if (seq == chain.Seq + 1) return true;
@@ -452,7 +449,7 @@ public static class MapEdit
             bool removed = false;
             if (_chains.Remove(key)) removed = true;
             // Remove previous mapping where value == key
-            var toRemove = new List<string>();
+            List<string> toRemove = [];
             foreach (var kv in _previous)
                 if (kv.Value == key) toRemove.Add(kv.Key);
             foreach (var k in toRemove) { _previous.Remove(k); removed = true; }
@@ -481,7 +478,7 @@ public static class MapEdit
     public static bool ValidateCoordChain(string key, List<Coord> expected)
     {
         var c = GetChain(key);
-        if (c == null) return false;
+        if (c is null) return false;
         if (c.Chain.Count != expected.Count) return false;
         for (int i = 0; i < expected.Count; i++) if (!c.Chain[i].Equals(expected[i])) return false;
         return true;

@@ -1,6 +1,3 @@
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -18,15 +15,14 @@ public sealed class MoveCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null || pa.GetList("coord").Count == 0) { go.Msg(PrintHelp()); return; }
+        if (pa is null || pa.GetList("coord").Count == 0) { go.Msg(PrintHelp()); return; }
         var raw = string.Join(" ", pa.GetList("coord")).Trim();
-        if (raw.StartsWith("(") && raw.EndsWith(")")) raw = raw[1..^1];
+        if (raw.StartsWith("(", StringComparison.Ordinal) && raw.EndsWith(")", StringComparison.Ordinal)) raw = raw[1..^1];
         List<string> parts;
         if (raw.Contains(",")) parts = raw.Split(',').Select(s => s.Trim()).ToList();
         else parts = raw.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ToList();
-        if (parts.Count != 4) { go.Msg("Usage: move <area> <x> <y> <z>  or  move (<area>,<x>,<y>,<z>)"); return; }
-        var area = parts[0];
-        if (!int.TryParse(parts[1], out var x) || !int.TryParse(parts[2], out var y) || !int.TryParse(parts[3], out var z))
+        if (parts is not [var area, var xs, var ys, var zs]) { go.Msg("Usage: move <area> <x> <y> <z>  or  move (<area>,<x>,<y>,<z>)"); return; }
+        if (!int.TryParse(xs, out var x) || !int.TryParse(ys, out var y) || !int.TryParse(zs, out var z))
         {
             go.Msg("x, y, and z must be integers.");
             return;
@@ -34,7 +30,7 @@ public sealed class MoveCommand : Command
         var coord = new Coord(area, x, y, z);
         var nh = NodeHandler.GetCurrent();
         var node = nh?.GetNode(coord);
-        if (node == null) { go.Msg($"No node found at {coord}."); return; }
+        if (node is null) { go.Msg($"No node found at {coord}."); return; }
         if (go.MoveTo(node, force: true)) go.Msg($"Moved to {coord}.");
         else go.Msg($"Could not move to {coord}.");
     }

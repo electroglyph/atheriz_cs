@@ -1,5 +1,4 @@
 // Port of atheriz/objects/base_obj.py:IsBuilder/IsSuperUser privilege helpers (faithful to Python privilege checks)
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands;
 

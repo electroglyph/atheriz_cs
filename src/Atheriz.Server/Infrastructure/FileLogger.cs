@@ -1,4 +1,3 @@
-using Atheriz.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Atheriz.Server.Infrastructure;
@@ -38,7 +37,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
             var file = Path.Combine(_savePath, "server.log");
             try { Directory.CreateDirectory(_savePath); } catch { }
             var line = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} {level.ToString().ToUpperInvariant()}: {category}: {message}";
-            if (ex != null) line += $"\n{ex}";
+            if (ex is not null) line += $"\n{ex}";
             line += Environment.NewLine;
             lock (_lock)
             {

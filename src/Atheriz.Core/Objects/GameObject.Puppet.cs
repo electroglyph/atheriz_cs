@@ -1,9 +1,5 @@
-using Atheriz.Core.Commands;
 using Atheriz.Core.Commands.LoggedIn;
-using Atheriz.Core.Globals;
 using Atheriz.Core.Persistence.Dto;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Objects;
 
@@ -17,7 +13,7 @@ public partial class GameObject
     internal Dictionary<string, object>? GetPuppetRestore()
     {
         _lock.EnterReadLock();
-        try { return _puppetRestore != null ? new Dictionary<string, object>(_puppetRestore) : null; }
+        try { return _puppetRestore is not null ? new Dictionary<string, object>(_puppetRestore) : null; }
         finally { _lock.ExitReadLock(); }
     }
 
@@ -55,7 +51,7 @@ public partial class GameObject
     /// </summary>
     public bool Puppet(Session session, GameObject npc)
     {
-        if (session == null || npc == null) return false;
+        if (session is null || npc is null) return false;
         // Port of puppet.py:84-110 checks (`target is caller` plus same-id
         // reload instances, which share identity through the registry).
         if (npc == this) return false;
@@ -65,7 +61,7 @@ public partial class GameObject
         // Fast-path peek (unlocked, advisory only): skip work when the target
         // is obviously unavailable. Authoritative checks run inside the
         // single critical section below, with the caller's session intact.
-        if ((npc.Session != null && npc.Session != session) || npc.IsDeleted) return false;
+        if ((npc.Session is not null && npc.Session != session) || npc.IsDeleted) return false;
         lock (session.Lock)
         {
             npc.SyncRoot.EnterReadLock();
@@ -73,7 +69,7 @@ public partial class GameObject
             Privilege callerPriv;
             try
             {
-                if (npc.Session != null && npc.Session != session) return false; // already puppeted
+                if (npc.Session is not null && npc.Session != session) return false; // already puppeted
                 if (npc.IsDeleted) return false;
                 if (!npc.Access(this, "puppet")) return false;
                 snapshot = new Dictionary<string, object> // Port of puppet.py:110
@@ -92,7 +88,7 @@ public partial class GameObject
             npc.SyncRoot.EnterWriteLock();
             try
             {
-                if (npc.Session != null && npc.Session != session) { ReattachCaller(session); return false; }
+                if (npc.Session is not null && npc.Session != session) { ReattachCaller(session); return false; }
                 if (npc.IsDeleted) { ReattachCaller(session); return false; }
                 session.PushPuppetEntry(this, npc);
                 npc.SetPuppetRestore(snapshot); // Port of puppet.py:138 target._puppet_restore = restore_snapshot
@@ -130,7 +126,7 @@ public partial class GameObject
     /// </summary>
     public bool Unpuppet(Session session)
     {
-        if (session == null) return false;
+        if (session is null) return false;
         GameObject prev;
         GameObject target;
         Dictionary<string, object>? restore;
@@ -158,10 +154,10 @@ public partial class GameObject
         bool stolen = true;
         lock (session.Lock)
         {
-            try { stolen = target.Session != null; }
+            try { stolen = target.Session is not null; }
             catch { stolen = true; }
         }
-        if (restore != null && !stolen)
+        if (restore is not null && !stolen)
         {
             // GetPuppetRestore returns a copy, so compare by content. Apply only if
             // the installed snapshot still matches the one read above.
@@ -171,7 +167,7 @@ public partial class GameObject
                 try
                 {
                     var current = target.GetPuppetRestore();
-                    apply = current != null
+                    apply = current is not null
                         && current.TryGetValue("is_pc", out var cv) && restore.TryGetValue("is_pc", out var rv) && Equals(cv, rv)
                         && current.TryGetValue("privilege_level", out var cp) && restore.TryGetValue("privilege_level", out var rp) && Convert.ToInt32(cp) == Convert.ToInt32(rp);
                 }
@@ -209,7 +205,7 @@ public partial class GameObject
         {
             var sess = Session;
             var conn = sess?.Connection;
-            if (conn != null)
+            if (conn is not null)
                 conn.SendCommand("logged_in");
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtPostPuppet: " + logEx.Message, "GameObject"); }
@@ -242,7 +238,7 @@ public partial class GameObject
         try
         {
             var serverChannel = GlobalServices.GetServerChannel();
-            if (serverChannel != null)
+            if (serverChannel is not null)
             {
                 var wrapped = GameUtils.WrapXterm256(Name ?? "", fg: 15, bold: true);
                 serverChannel.Msg($"{wrapped} (#{Id}) has logged in.");
@@ -276,7 +272,7 @@ public partial class GameObject
         {
             var sess = Session;
             var conn = sess?.Connection;
-            if (conn != null)
+            if (conn is not null)
             {
                 // Port of self.msg(player_commands=commands) -> connection.send_command("player_commands", commands)
                 conn.SendCommand("player_commands", new List<object?> { commands }, null);
@@ -297,7 +293,7 @@ public partial class GameObject
             _lock.EnterReadLock();
             try { locRef = _location; }
             finally { _lock.ExitReadLock(); }
-            bool hasLocation = locRef != null && !(locRef is LocationRef.NullLocation);
+            bool hasLocation = locRef is not null && !(locRef is LocationRef.NullLocation);
             if (hasLocation)
             {
                 // Port of base_obj.py:1474-1478 if settings.MAP_ENABLED: mh.add_listener(self); if self.is_mapable: mh.add_mapable(self)
@@ -326,7 +322,7 @@ public partial class GameObject
                 {
                     var destObj = ResolveLocationObject();
                     object? destArg = null;
-                    if (destObj != null)
+                    if (destObj is not null)
                         destArg = destObj;
                     else if (locRef is LocationRef.CoordLocation cl)
                         destArg = cl.Coord;
@@ -334,7 +330,7 @@ public partial class GameObject
                         destArg = locRef;
                     else
                         destArg = locRef;
-                    if (destArg != null && !(destArg is LocationRef.NullLocation))
+                    if (destArg is not null && !(destArg is LocationRef.NullLocation))
                     {
                         // announce=False to avoid "walks in" spam — test_puppet_announce expects no walk broadcast
                         MoveTo(destArg, force: true, announce: false);
@@ -353,7 +349,7 @@ public partial class GameObject
                     {
                         var sess = Session;
                         var conn = sess?.Connection;
-                        if (conn != null)
+                        if (conn is not null)
                         {
                             // Port of self.msg(map_enable="") -> connection.send_command("map_enable","")
                             conn.SendCommand("map_enable", new List<object?> { "" }, null);
@@ -374,7 +370,7 @@ public partial class GameObject
                             var locObj2 = ResolveLocationObject();
                             if (locObj2 is Node n)
                                 coord = n.Coord;
-                            else if (locObj2 != null)
+                            else if (locObj2 is not null)
                             {
                                 var inner = locObj2.Location;
                                 if (inner is LocationRef.CoordLocation icl)
@@ -385,7 +381,7 @@ public partial class GameObject
                         {
                             var mh2 = GlobalServices.GetMapHandler();
                             var mi = mh2.GetMapInfo(coord.Value.Area, coord.Value.Z);
-                            if (mi != null)
+                            if (mi is not null)
                                 mi.Render(true);
                         }
                     }

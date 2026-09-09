@@ -77,7 +77,7 @@ public abstract class Command
         // replicate Python: re.sub(r'\\(?![\"\'\\])', r'\\\\', args_string)
         var escaped = Regex.Replace(argsString, @"\\(?![\""\'\\])", @"\\");
         // simple shlex posix split respecting quotes and backslash escapes
-        var tokens = new List<string>();
+        List<string> tokens = [];
         var cur = new System.Text.StringBuilder();
         bool inSingle = false, inDouble = false, escapedNext = false;
         for (int i = 0; i < escaped.Length; i++)
@@ -128,7 +128,7 @@ public abstract class Command
         if (!UseParser)
         {
             Action<IMessageTarget, object?> raw = (c, a) => Run(c, (object?)a);
-            if (GlobalLagCheck != null)
+            if (GlobalLagCheck is not null)
             {
                 var orig = raw;
                 raw = (c, a) => { if (GlobalLagCheck(c)) return; orig(c, a); };
@@ -169,7 +169,7 @@ public abstract class Command
         }
         // wrap Run to match Python's (func, caller, eargs) triple
         Action<IMessageTarget, object?> fn = (c, a) => Run(c, a);
-        if (GlobalLagCheck != null)
+        if (GlobalLagCheck is not null)
         {
             var orig = fn;
             fn = (c, a) => { if (GlobalLagCheck(c)) return; orig(c, a); };

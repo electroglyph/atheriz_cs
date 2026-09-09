@@ -966,7 +966,7 @@ public class CommandRegressionTests
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Menu.cs");
         var region = SourceScan.Region(src, "public MenuEngine(object? caller,Func<MenuContext,(string,List<Choice>)> start)");
-        Assert.Contains("if(start!=null)_Render()", region);
+        Assert.Contains("if(start is not null)_Render()", region);
     }
 
     // one spelling for the prompt-with-timeout loop.

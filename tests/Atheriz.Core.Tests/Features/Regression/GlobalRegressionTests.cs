@@ -433,7 +433,7 @@ public class GlobalRegressionTests
         var src = SourceScan.Read("src", "Atheriz.Core", "ServerEvents.cs");
         var region = SourceScan.Region(src, "lock (_charCreateLock)");
         Assert.DoesNotContain("Out($", region);
-        var tail = src.Substring(src.IndexOf("if (doneChar != null", StringComparison.Ordinal));
+        var tail = src.Substring(src.IndexOf("if (doneChar is not null", StringComparison.Ordinal));
         Assert.Contains("catch", tail);
     }
 

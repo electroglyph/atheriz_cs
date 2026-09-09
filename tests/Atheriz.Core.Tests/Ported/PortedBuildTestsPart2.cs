@@ -43,7 +43,7 @@ public class PortedBuildTestsPart2
         caller.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(start.Coord);
         start.AddObject(caller);
         cmd.Run(caller, MakeArgs(n:true, room:true));
-        Assert.Single(start.GetLinks().Where(l=> l.Name=="north"));
+        Assert.Single(start.GetLinks(), l=> l.Name=="north");
     }
     [Fact] public void BuildCallerMovedAfterSingle()
     {

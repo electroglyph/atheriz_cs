@@ -545,6 +545,6 @@ public class PortedOpenExitMapNounSpamWanderTests
         loc.AddNoun("Rock","first");
         loc.AddNoun("rock","second");
         Assert.Equal("second", loc.GetNoun("ROCK"));
-        Assert.Single(loc.Nouns.Where(kv=>kv.Key.ToLowerInvariant()=="rock"));
+        Assert.Single(loc.Nouns, kv=>kv.Key.ToLowerInvariant()=="rock");
     }
 }

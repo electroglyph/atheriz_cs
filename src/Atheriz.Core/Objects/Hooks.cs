@@ -91,7 +91,7 @@ public partial class GameObject
             }
             // Port of base_obj.py:64-66 — an after-hook replaces the result
             // unconditionally, including with null (reference types).
-            if (invoked && (newResult is T t || (newResult == null && default(T) == null))) result = (T)newResult!;
+            if (invoked && (newResult is T t || (newResult is null && default(T) is null))) result = (T)newResult!;
         }
         // Hooks present but none marked before/after/replace: silently run original
         // (adaptation — Python raised ValueError; aborting here would break game code).

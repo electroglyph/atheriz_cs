@@ -58,7 +58,7 @@ public sealed class CommandTests
         var cmd = new EchoCommand();
         cs.Add(cmd);
         cs.Add(cmd); // re-register same instance should not throw
-        Assert.Single(cs.GetAll().Distinct().Where(c => c.Key == "echo"));
+        Assert.Single(cs.GetAll().Distinct(), c => c.Key == "echo");
     }
 
     [Fact]

@@ -1,5 +1,3 @@
-using System.Text.Json;
-using Atheriz.Core;
 
 namespace Atheriz.Server.Cli;
 
@@ -39,7 +37,7 @@ public static class CreateHandler
         // otherwise a null response falls through to the offline DB path
         // against a LIVE server.
         resp ??= await ShutdownClient.PostAdminAsync(portVal, settings.SecretPath, "/_internal/create_account", payload, !tlsOn);
-        if (resp != null)
+        if (resp is not null)
         {
             try
             {

@@ -1,4 +1,3 @@
-using Atheriz.Core.Commands;
 using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Objects;
@@ -147,7 +146,7 @@ public class Channel : GameObject
         lock (_histLock)
         {
             // Invalidate the cached command on rename (old cache ignored Name/Desc).
-            if (_command != null && _commandKey == key && _commandDesc == desc) return _command;
+            if (_command is not null && _commandKey == key && _commandDesc == desc) return _command;
             var cmd = new BaseChannelCommand();
             ((BaseChannelCommand)cmd).SetKey(key);
             ((BaseChannelCommand)cmd).SetDesc(desc);
@@ -176,7 +175,7 @@ public class Channel : GameObject
         {
             var objs = Globals.ObjectRegistry.Get(lid);
             var o = objs.FirstOrDefault();
-            if (o != null)
+            if (o is not null)
             {
                 // Typed peer detach (was GetField("_channels") reflection, now banned
                 // in prod). Unsubscribe removes this channel id from the peer and
@@ -192,7 +191,7 @@ public class Channel : GameObject
             }
         }
         Globals.ObjectRegistry.RemoveObject(this);
-        var ops = new List<object>();
+        List<object> ops = [];
         if (!this.IsTemporary)
             ops.Add(this.GetDelOps());
         return (1, ops);
@@ -242,7 +241,7 @@ public class Channel : GameObject
             entries = _history.ToList();
             if (count < entries.Count) entries = entries.Skip(entries.Count - count).ToList();
         }
-        var lines = new List<string>();
+        List<string> lines = [];
         foreach (var e in entries)
         {
             lines.Add(FormatMessage(e.Timestamp, e.Sender, e.Message) + "\n");

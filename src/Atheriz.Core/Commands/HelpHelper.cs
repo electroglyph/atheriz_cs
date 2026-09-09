@@ -8,7 +8,7 @@ public static class HelpHelper
 {
     public static string FormatFor(Command cmd)
     {
-        if (cmd.Parser != null) return cmd.PrintHelp();
+        if (cmd.Parser is not null) return cmd.PrintHelp();
         return FormatNoParser(cmd);
     }
 

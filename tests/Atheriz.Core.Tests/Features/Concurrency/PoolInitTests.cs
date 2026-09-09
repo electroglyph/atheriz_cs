@@ -50,7 +50,7 @@ public class PoolInitTests
             Assert.True(gameTime.Started);
             var slot = ticker.GetSlot(settings.TimeUpdateSeconds);
             Assert.NotNull(slot);
-            Assert.Equal(1, slot!.Coros.Count);
+            Assert.Single(slot!.Coros);
         }
         finally
         {
@@ -109,7 +109,7 @@ public class PoolInitTests
             Assert.True(Autosave.AutosaveStarted);
             var slot = ticker.GetSlot(5 * 60.0);
             Assert.NotNull(slot);
-            Assert.Equal(1, slot!.Coros.Count);
+            Assert.Single(slot!.Coros);
         }
         finally
         {

@@ -19,7 +19,7 @@ public class PortedPidExclusiveTests
         Assert.Empty(errors); Assert.True(File.Exists(pidFile));
         var txt=File.ReadAllText(pidFile).Trim();
         Assert.True(txt=="11111"||txt=="22222", $"torn {txt}");
-        Assert.Equal(2, results.Count); Assert.Single(results.Where(r=>r.StartsWith("win:"))); Assert.Single(results.Where(r=>r.StartsWith("exists:")));
+        Assert.Equal(2, results.Count); Assert.Single(results, r=>r.StartsWith("win:")); Assert.Single(results, r=>r.StartsWith("exists:"));
     }
 
     [Fact]

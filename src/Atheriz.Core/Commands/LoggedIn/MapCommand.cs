@@ -1,7 +1,4 @@
 // Port of atheriz/commands/loggedin/map.py:30
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -21,7 +18,7 @@ public sealed class MapCommand : Command
             if (AtherizSettings.Global.MapEnabled)
             {
                 var loc = go.ResolveLocationObject() as Node;
-                if (loc != null)
+                if (loc is not null)
                 {
                     try
                     {

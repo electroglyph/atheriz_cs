@@ -1,4 +1,3 @@
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -19,7 +18,7 @@ public sealed class SayCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var puppet)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { puppet.Msg(PrintHelp()); return; }
+        if (pa is null) { puppet.Msg(PrintHelp()); return; }
         var lst = pa.GetList("text");
         if (lst.Count > 0)
         {

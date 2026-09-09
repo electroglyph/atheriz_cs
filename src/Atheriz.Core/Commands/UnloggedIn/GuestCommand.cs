@@ -1,9 +1,5 @@
-using Atheriz.Core.Settings;
 // Port of atheriz/commands/unloggedin/guest.py:134
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Network;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
 
@@ -18,10 +14,10 @@ public sealed class GuestCommand : Command
         if (!CreationCooldownHelper.TryReserve(caller, "guest")) return;
         var text = args as string ?? "";
         var parts = Command.SplitStubArgs(text);
-        string name = parts.Count > 0 ? parts[0] : "";
+        string name = parts.FirstOrDefault() ?? "";
         if (string.IsNullOrWhiteSpace(name)) { CreationCooldownHelper.Clear(caller); caller.Msg("Usage: guest <name> (interactive in real server)."); return; }
         var err = Validation.ValidateCharacterName(name);
-        if (err != null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
+        if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         if (ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
         var character = GameObject.Create(name, "", isPc: true);
         character.IsTemporary = true;
@@ -38,12 +34,12 @@ public sealed class GuestCommand : Command
             return;
         }
         CreationCooldownHelper.Apply(caller, "guest");
-        if (caller is BaseConnection conn && conn.Session != null)
+        if (caller is BaseConnection conn && conn.Session is not null)
         {
             if (!SessionPuppetHelper.TryAttach(conn, character)) return;
             var nh = NodeHandler.GetCurrent();
             var home = nh?.GetNode(AtherizSettings.Global.DefaultHome);
-            if (home != null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
+            if (home is not null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
             try { character.AtPostPuppet(); } catch (Exception) { }
             caller.Msg($"Guest {name} created.");
         }
@@ -58,7 +54,7 @@ public sealed class GuestCommand : Command
         string name = await caller.Session.Prompt("Enter a name for your guest character:");
         name = name.Trim();
         var err = Validation.ValidateCharacterName(name);
-        if (err != null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+        if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
         string gender = await caller.Session.Prompt("Enter your character's gender:");
         if (string.IsNullOrWhiteSpace(gender)) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg("Gender cannot be empty."); return; }
         gender = gender.Trim();
@@ -86,7 +82,7 @@ public sealed class GuestCommand : Command
         if (!SessionPuppetHelper.TryAttach(caller, character)) return;
         var nh = NodeHandler.GetCurrent();
         var home = nh?.GetNode(settings.DefaultHome);
-        if (home != null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
+        if (home is not null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
         try { character.AtPostPuppet(); } catch (Exception) { }
         caller.Msg($"Guest {name} created.");
     }

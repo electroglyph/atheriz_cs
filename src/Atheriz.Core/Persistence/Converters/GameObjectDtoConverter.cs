@@ -1,6 +1,3 @@
-using System.Text.Json;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Persistence.Converters;
@@ -22,8 +19,8 @@ internal static class GameObjectDtoConverter
     internal static void RegisterSubtype(string fullName, Type type, Func<GameObject> factory)
     {
         if (string.IsNullOrEmpty(fullName)) throw new ArgumentException("Subtype full name required.", nameof(fullName));
-        if (type == null) throw new ArgumentNullException(nameof(type));
-        if (factory == null) throw new ArgumentNullException(nameof(factory));
+        ArgumentNullException.ThrowIfNull(type);
+        ArgumentNullException.ThrowIfNull(factory);
         lock (_subtypeLock)
         {
             _subtypeFactories[fullName] = factory;
@@ -58,7 +55,7 @@ internal static class GameObjectDtoConverter
         bool serIsPc = obj.IsPc;
         var serPriv = obj.PrivilegeLevel;
         var puppet = obj.GetPuppetRestore();
-        if (puppet != null)
+        if (puppet is not null)
         {
             if (puppet.TryGetValue("is_pc", out var v) && v is bool b) serIsPc = b;
             if (puppet.TryGetValue("privilege_level", out var p))
@@ -111,7 +108,7 @@ internal static class GameObjectDtoConverter
         {
             // Preserve concrete Script subtype only for explicitly registered types (F004).
             string? registered = RegisteredNameFor(obj.GetType());
-            if (registered != null)
+            if (registered is not null)
             {
                 dto.Extra["__script_type"] = JsonSerializer.SerializeToElement(registered, JsonOptions.Default);
             }
@@ -127,7 +124,7 @@ internal static class GameObjectDtoConverter
             if (t != typeof(GameObject) && t != typeof(Node) && t != typeof(Script) && t != typeof(Channel) && t != typeof(Account))
             {
                 string? registered = RegisteredNameFor(t);
-                if (registered != null)
+                if (registered is not null)
                 {
                     dto.Extra["__object_type"] = JsonSerializer.SerializeToElement(registered, JsonOptions.Default);
                 }
@@ -147,7 +144,7 @@ internal static class GameObjectDtoConverter
         return obj.GetLocksSnapshot().Select(kv =>
         {
             policies.TryGetValue(kv.Key, out var pols);
-            var names = pols != null && pols.Count == kv.Value.Count ? pols : Enumerable.Repeat(LockPolicies.Custom, kv.Value.Count);
+            var names = pols is not null && pols.Count == kv.Value.Count ? pols : Enumerable.Repeat(LockPolicies.Custom, kv.Value.Count);
             return new LockDefDto { Name = kv.Key, Policy = string.Join("|", names) };
         }).ToList();
     }
@@ -163,7 +160,7 @@ internal static class GameObjectDtoConverter
         bool hasObjectType = false;
         JsonElement savedScriptType = default;
         bool hasScriptType = false;
-        if (dto.Extra != null)
+        if (dto.Extra is not null)
         {
             if (dto.Extra.TryGetValue("__object_type", out var ot))
             {
@@ -184,7 +181,7 @@ internal static class GameObjectDtoConverter
         }
         finally
         {
-            if (dto.Extra != null)
+            if (dto.Extra is not null)
             {
                 if (hasObjectType) dto.Extra["__object_type"] = savedObjectType;
                 if (hasScriptType) dto.Extra["__script_type"] = savedScriptType;
@@ -202,7 +199,7 @@ internal static class GameObjectDtoConverter
             string? typeName = savedObjectType.ValueKind == JsonValueKind.String ? savedObjectType.GetString() : null;
             if (!string.IsNullOrEmpty(typeName))
             {
-                if (TryCreateSubtype(typeName!, out var inst) && inst != null)
+                if (TryCreateSubtype(typeName!, out var inst) && inst is not null)
                 {
                     if (inst is Node subNode)
                     {
@@ -230,7 +227,7 @@ internal static class GameObjectDtoConverter
                 string? typeName = savedScriptType.ValueKind == JsonValueKind.String ? savedScriptType.GetString() : null;
                 if (!string.IsNullOrEmpty(typeName))
                 {
-                    if (TryCreateSubtype(typeName!, out var scoped) && scoped != null)
+                    if (TryCreateSubtype(typeName!, out var scoped) && scoped is not null)
                     {
                         scoped.SetIdRaw(dto.Id);
                         GameObject.ApplyDtoFields(scoped, dto, null);
@@ -254,7 +251,7 @@ internal static class GameObjectDtoConverter
             GameObject.ApplyDtoFields(ch, dto, null);
             ch.IsChannel = true;
             // Restore history if present; listeners intentionally not restored (excluded per __getstate__)
-            if (dto.Extra != null && dto.Extra.TryGetValue("history", out var he))
+            if (dto.Extra is not null && dto.Extra.TryGetValue("history", out var he))
             {
                 try
                 {
@@ -295,7 +292,7 @@ internal static class GameObjectDtoConverter
     internal static Coord ExtractCoord(GameObjectDto dto)
     {
         if (dto.Location is LocationRef.CoordLocation cl) return cl.Coord;
-        if (dto.Extra != null && dto.Extra.TryGetValue("Coord", out var ce))
+        if (dto.Extra is not null && dto.Extra.TryGetValue("Coord", out var ce))
         {
             try { return JsonSerializer.Deserialize<Coord>(ce.GetRawText(), JsonOptions.Default)!; }
             catch (Exception ex) { AtherizLogger.LogError($"Bad Extra Coord for object {dto.Id}; using limbo origin.", ex); }
@@ -359,7 +356,7 @@ internal static class GameObjectDtoConverter
     // plain strings; those restore as sender-less entries (timestamp 0).
     private static List<ChannelHistoryEntry> ParseChannelHistory(JsonElement he)
     {
-        var entries = new List<ChannelHistoryEntry>();
+        List<ChannelHistoryEntry> entries = [];
         if (he.ValueKind != JsonValueKind.Array) return entries;
         foreach (var el in he.EnumerateArray())
         {

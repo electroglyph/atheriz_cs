@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Text.Json;
 
 namespace Atheriz.Server.Cli;
 
@@ -20,7 +18,7 @@ public static class ReloadHandler
         var resp = await ShutdownClient.PostAdminAsync(port, settings.SecretPath, "/_internal/hot_reload", null, tlsOn);
         resp ??= await ShutdownClient.PostAdminAsync(port, settings.SecretPath, "/_internal/hot_reload", null, !tlsOn);
         sw.Stop();
-        if (resp == null) { Console.WriteLine($"Error connecting to server at {url}"); return; }
+        if (resp is null) { Console.WriteLine($"Error connecting to server at {url}"); return; }
         var body = resp.Body;
         try
         {

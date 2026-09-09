@@ -228,7 +228,7 @@ public class PortedThreadPoolTests
         for (int i=0;i<50;i++) pool.AddTask(() => {});
         Assert.True(Wait(() => pool.QueueCount == 0, 3000));
         Assert.True(Wait(() => pool.ReliefCount == 0, 3000), $"relief {pool.ReliefCount} still alive");
-        Assert.Empty(pool.ReliefThreads.Where(t=>t.IsAlive));
+        Assert.DoesNotContain(pool.ReliefThreads, t=>t.IsAlive);
         pool.Stop();
     }
 

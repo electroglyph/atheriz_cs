@@ -1,4 +1,3 @@
-using Atheriz.Core.Globals;
 
 namespace Atheriz.Core.Objects;
 
@@ -38,7 +37,7 @@ public partial class GameObject
             if (!AtMsgReceive(parsed, fromObj, msgType)) return;
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
-        if (fromObj != null)
+        if (fromObj is not null)
         {
             try { fromObj.AtMsgSend(parsed, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
         }
@@ -56,7 +55,7 @@ public partial class GameObject
         }
         finally { _lock.ExitWriteLock(); }
         // Forward to session if puppeted — mirrors base_obj.py:904 if self.session is not None: self.session.msg(*args, **kwargs)
-        if (sess != null && sess.Connection != null)
+        if (sess is not null && sess.Connection is not null)
         {
             try { sess.Msg(parsed); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
         }
@@ -90,7 +89,7 @@ public partial class GameObject
         Hookable("at_say", () =>
         {
             var recvList = receivers?.ToList();
-            if (recvList != null && recvList.Count == 0) recvList = null;
+            if (recvList is not null && recvList.Count == 0) recvList = null;
             string type;
             object? selfText = msgSelf;
             string? locText = msgLocation;
@@ -113,14 +112,14 @@ public partial class GameObject
             }
             var custom = mapping ?? new Dictionary<string, object?>(StringComparer.Ordinal);
             var loc = ResolveLocationObject();
-            string allRecvSelf = recvList != null ? string.Join(", ", recvList.Select(r => r.GetDisplayName(this))) : null!;
+            string allRecvSelf = recvList is not null ? string.Join(", ", recvList.Select(r => r.GetDisplayName(this))) : null!;
             if (selfText is string selfStr && !string.IsNullOrEmpty(selfStr))
             {
                 var selfMapping = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["self"] = "You",
                     ["object"] = GetDisplayName(this),
-                    ["location"] = loc != null ? loc.GetDisplayName(this) : null,
+                    ["location"] = loc is not null ? loc.GetDisplayName(this) : null,
                     ["receiver"] = null,
                     ["all_receivers"] = allRecvSelf,
                     ["speech"] = message,
@@ -128,7 +127,7 @@ public partial class GameObject
                 foreach (var kv in custom) selfMapping[kv.Key] = kv.Value;
                 Msg(selfStr, this, selfMapping, false, type);
             }
-            if (recvList != null && !string.IsNullOrEmpty(recvText))
+            if (recvList is not null && !string.IsNullOrEmpty(recvText))
             {
                 foreach (var receiver in recvList)
                 {
@@ -136,7 +135,7 @@ public partial class GameObject
                     {
                         ["self"] = "You",
                         ["object"] = GetDisplayName(receiver),
-                        ["location"] = loc != null ? loc.GetDisplayName(receiver) : null,
+                        ["location"] = loc is not null ? loc.GetDisplayName(receiver) : null,
                         ["receiver"] = receiver.GetDisplayName(receiver),
                         ["all_receivers"] = string.Join(", ", recvList.Select(r => r.GetDisplayName(r))),
                         ["speech"] = message,
@@ -145,21 +144,21 @@ public partial class GameObject
                     receiver.Msg(recvText, this, rMapping, false, type);
                 }
             }
-            if (loc != null && !string.IsNullOrEmpty(locText))
+            if (loc is not null && !string.IsNullOrEmpty(locText))
             {
                 var locMapping = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["self"] = "You",
                     ["object"] = GetDisplayName(this),
                     ["location"] = loc.GetDisplayName(this),
-                    ["all_receivers"] = recvList != null ? string.Join(", ", recvList.Select(r => r.ToString())) : null,
+                    ["all_receivers"] = recvList is not null ? string.Join(", ", recvList.Select(r => r.ToString())) : null,
                     ["receiver"] = null,
                     ["speech"] = message,
                 };
                 foreach (var kv in custom) locMapping[kv.Key] = kv.Value;
-                var exclude = new List<GameObject>();
+                List<GameObject> exclude = [];
                 if (selfText is string s2 && !string.IsNullOrEmpty(s2)) exclude.Add(this);
-                if (recvList != null) exclude.AddRange(recvList);
+                if (recvList is not null) exclude.AddRange(recvList);
                 if (loc is Node node) node.MsgContents(locText, fromObj: this, mapping: locMapping, exclude: exclude, msgType: type);
                 else loc.MsgContents(locText, fromObj: this, mapping: locMapping, exclude: exclude, msgType: type);
             }
@@ -183,7 +182,7 @@ public partial class GameObject
     public virtual string GetDisplayName(GameObject? looker)
     {
         if (IsPc && !IsConnected) return $"{Name} (offline)";
-        if (looker == null) return Name;
+        if (looker is null) return Name;
         if (Access(looker, "view")) return Name;
         return IsPc || IsNpc ? "Someone" : "Something";
     }
@@ -194,12 +193,12 @@ public partial class GameObject
     /// </summary>
     public void ForContents(Action<GameObject> func, IEnumerable<GameObject>? exclude = null, Func<int, GameObject?>? resolver = null)
     {
-        var excl = exclude != null ? new HashSet<GameObject>(exclude) : null;
+        var excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
         List<GameObject> contents;
-        if (resolver != null)
+        if (resolver is not null)
         {
             var ids = ContentsSnapshot;
-            contents = ids.Select(resolver).Where(o => o != null).Cast<GameObject>().ToList();
+            contents = ids.Select(resolver).OfType<GameObject>().ToList();
         }
         else
         {
@@ -208,19 +207,19 @@ public partial class GameObject
         }
         foreach (var obj in contents)
         {
-            if (excl != null && excl.Contains(obj)) continue;
+            if (excl is not null && excl.Contains(obj)) continue;
             try { func(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ForContents: " + logEx.Message, "GameObject"); }
         }
     }
     public void ForContents(Action<GameObject, IDictionary<string, object?>> func, IDictionary<string, object?>? kwargs = null, IEnumerable<GameObject>? exclude = null, Func<int, GameObject?>? resolver = null)
     {
-        var excl = exclude != null ? new HashSet<GameObject>(exclude) : null;
+        var excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
         List<GameObject> contents;
-        if (resolver != null) contents = ContentsSnapshot.Select(resolver).Where(o=>o!=null).Cast<GameObject>().ToList();
+        if (resolver is not null) contents = ContentsSnapshot.Select(resolver).Where(o=>o is not null).Cast<GameObject>().ToList();
         else contents = Globals.ObjectRegistry.Get(ContentsSnapshot.ToList());
         foreach (var obj in contents)
         {
-            if (excl != null && excl.Contains(obj)) continue;
+            if (excl is not null && excl.Contains(obj)) continue;
             try { func(obj, kwargs ?? new Dictionary<string, object?>()); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ForContents: " + logEx.Message, "GameObject"); }
         }
     }
@@ -239,22 +238,22 @@ public partial class GameObject
     /// </summary>
     public void MsgContents(string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, IEnumerable<GameObject>? exclude = null, bool raiseErrors = false, string? msgType = null, Func<int, GameObject?>? resolver = null)
     {
-        if (text == null) text = "";
-        if (mapping != null) mapping = new Dictionary<string, object?>(mapping, StringComparer.Ordinal);
+        if (text is null) text = "";
+        if (mapping is not null) mapping = new Dictionary<string, object?>(mapping, StringComparer.Ordinal);
         mapping ??= new Dictionary<string, object?>(StringComparer.Ordinal);
         var you = fromObj ?? this;
-        if (!mapping.ContainsKey("you")) mapping["you"] = you;
+        mapping.TryAdd("you", you);
 
-        HashSet<GameObject>? exclSet = exclude != null ? new HashSet<GameObject>(exclude) : null;
+        HashSet<GameObject>? exclSet = exclude is not null ? new HashSet<GameObject>(exclude) : null;
         List<GameObject> receivers;
-        if (resolver != null)
-            receivers = ContentsSnapshot.Select(resolver).Where(o=>o!=null).Cast<GameObject>().ToList();
+        if (resolver is not null)
+            receivers = ContentsSnapshot.Select(resolver).Where(o=>o is not null).Cast<GameObject>().ToList();
         else
             receivers = Globals.ObjectRegistry.Get(ContentsSnapshot.ToList());
 
         foreach (var receiver in receivers)
         {
-            if (exclSet != null && exclSet.Contains(receiver)) continue;
+            if (exclSet is not null && exclSet.Contains(receiver)) continue;
             string outMessage;
             try
             {
@@ -277,7 +276,7 @@ public partial class GameObject
     private void AppendMessage(string text, GameObject? fromObj, string? msgType)
     {
         try { if (!AtMsgReceive(text, fromObj, msgType)) return; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AppendMessage: " + logEx.Message, "GameObject"); }
-        if (fromObj != null) try { fromObj.AtMsgSend(text, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AppendMessage: " + logEx.Message, "GameObject"); }
+        if (fromObj is not null) try { fromObj.AtMsgSend(text, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AppendMessage: " + logEx.Message, "GameObject"); }
         _lock.EnterWriteLock();
         // Bounded like Channel history (see MsgLogLimit = 200): long-lived NPCs must not
         // accumulate unbounded message logs. Oldest entries drop first.

@@ -1,7 +1,3 @@
-using Atheriz.Core.Commands;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -52,7 +48,7 @@ public sealed class BuildCommand : Command
         bool room=false, road=false, path=false;
         string? desc=null;
         bool single=false, dbl=false, round=false, none=false;
-        if (args == null)
+        if (args is null)
         {
             caller.Msg(PrintHelp());
             return;
@@ -77,7 +73,7 @@ public sealed class BuildCommand : Command
 
         Node? loc = goCaller.ResolveLocationObject() as Node;
 
-        if (loc == null)
+        if (loc is null)
         {
             caller.Msg("You must be in a valid location to build.");
             return;
@@ -87,14 +83,14 @@ public sealed class BuildCommand : Command
         if (new[] { room, road, path }.Count(b => b) > 1) { caller.Msg(PrintHelp()); return; }
         if (new[] { single, dbl, round, none }.Count(b => b) > 1) { caller.Msg(PrintHelp()); return; }
 
-        bool hasArgs = x || n || e || s || w || u || d || road || path || room || single || dbl || round || none || desc != null;
+        bool hasArgs = x || n || e || s || w || u || d || road || path || room || single || dbl || round || none || desc is not null;
         if (!hasArgs)
         {
             caller.Msg(PrintHelp());
             return;
         }
 
-        var targets = new List<string>();
+        List<string> targets = [];
         if (n) targets.Add("n");
         if (e) targets.Add("e");
         if (s) targets.Add("s");
@@ -105,7 +101,7 @@ public sealed class BuildCommand : Command
 
         if (targets.Count == 0)
         {
-            if (desc != null)
+            if (desc is not null)
             {
                 loc.Desc = desc;
                 caller.Msg("Updated current location's description.");
@@ -144,28 +140,28 @@ public sealed class BuildCommand : Command
                 node.AddLinkIfAbsent("north", () => new NodeLink("north", new Coord(node.Coord.Area, node.Coord.X, node.Coord.Y+1, node.Coord.Z), new List<string>{"n"}));
                 var toCoord = new Coord(node.Coord.Area, node.Coord.X, node.Coord.Y+1, node.Coord.Z);
                 var toNode = nh.GetNode(toCoord);
-                if (toNode != null) toNode.AddLinkIfAbsent("south", () => new NodeLink("south", node.Coord, new List<string>{"s"}));
+                if (toNode is not null) toNode.AddLinkIfAbsent("south", () => new NodeLink("south", node.Coord, new List<string>{"s"}));
             }
             if (ss)
             {
                 node.AddLinkIfAbsent("south", () => new NodeLink("south", new Coord(node.Coord.Area, node.Coord.X, node.Coord.Y-1, node.Coord.Z), new List<string>{"s"}));
                 var toCoord = new Coord(node.Coord.Area, node.Coord.X, node.Coord.Y-1, node.Coord.Z);
                 var toNode = nh.GetNode(toCoord);
-                if (toNode != null) toNode.AddLinkIfAbsent("north", () => new NodeLink("north", node.Coord, new List<string>{"n"}));
+                if (toNode is not null) toNode.AddLinkIfAbsent("north", () => new NodeLink("north", node.Coord, new List<string>{"n"}));
             }
             if (ee)
             {
                 node.AddLinkIfAbsent("east", () => new NodeLink("east", new Coord(node.Coord.Area, node.Coord.X+1, node.Coord.Y, node.Coord.Z), new List<string>{"e"}));
                 var toCoord = new Coord(node.Coord.Area, node.Coord.X+1, node.Coord.Y, node.Coord.Z);
                 var toNode = nh.GetNode(toCoord);
-                if (toNode != null) toNode.AddLinkIfAbsent("west", () => new NodeLink("west", node.Coord, new List<string>{"w"}));
+                if (toNode is not null) toNode.AddLinkIfAbsent("west", () => new NodeLink("west", node.Coord, new List<string>{"w"}));
             }
             if (ww)
             {
                 node.AddLinkIfAbsent("west", () => new NodeLink("west", new Coord(node.Coord.Area, node.Coord.X-1, node.Coord.Y, node.Coord.Z), new List<string>{"w"}));
                 var toCoord = new Coord(node.Coord.Area, node.Coord.X-1, node.Coord.Y, node.Coord.Z);
                 var toNode = nh.GetNode(toCoord);
-                if (toNode != null) toNode.AddLinkIfAbsent("east", () => new NodeLink("east", node.Coord, new List<string>{"e"}));
+                if (toNode is not null) toNode.AddLinkIfAbsent("east", () => new NodeLink("east", node.Coord, new List<string>{"e"}));
             }
         }
 
@@ -177,11 +173,11 @@ public sealed class BuildCommand : Command
             var c = loc.Coord;
             var newCoord = new Coord(c.Area, c.X+dx, c.Y+dy, c.Z+dz);
             var newNode = nh.GetNode(newCoord);
-            if (newNode == null)
+            if (newNode is null)
             {
                 string nd = desc ?? "Placeholder desc, use desc command to change";
                 var areaObj = nh.GetArea(c.Area);
-                if (areaObj == null)
+                if (areaObj is null)
                 {
                     caller.Msg("Error: Current area not found.");
                     return;
@@ -191,16 +187,16 @@ public sealed class BuildCommand : Command
                 try
                 {
                     grid = areaObj.GetGrid(newCoord.Z) ?? new NodeGrid(c.Area, newCoord.Z);
-                    if (areaObj.GetGrid(newCoord.Z) == null) areaObj.AddGrid(grid);
+                    if (areaObj.GetGrid(newCoord.Z) is null) areaObj.AddGrid(grid);
                 }
                 finally { areaObj.Lock.ExitWriteLock(); }
                 grid.Lock.EnterWriteLock();
                 try
                 {
-                    if (grid.Nodes.TryGetValue((newCoord.X, newCoord.Y), out var existing) && existing != null)
+                    if (grid.Nodes.TryGetValue((newCoord.X, newCoord.Y), out var existing) && existing is not null)
                     {
                         newNode = existing;
-                        if (desc != null) newNode.Desc = desc;
+                        if (desc is not null) newNode.Desc = desc;
                         caller.Msg($"Updating node at {newCoord}.");
                     }
                     else
@@ -221,14 +217,14 @@ public sealed class BuildCommand : Command
             else
             {
                 caller.Msg($"Updating node at {newCoord}.");
-                if (desc != null) newNode.Desc = desc;
+                if (desc is not null) newNode.Desc = desc;
             }
 
             if (dKey != "x")
             {
                 loc.AddLinkIfAbsent(linkName, () => new NodeLink(linkName, newCoord, new List<string>{dKey}));
                 string alias = GetAlias(backLinkName);
-                var aliases = string.IsNullOrEmpty(alias) ? new List<string>() : new List<string>{alias};
+                var aliases = string.IsNullOrEmpty(alias) ? [] : new List<string>{alias};
                 newNode.AddLinkIfAbsent(backLinkName, () => new NodeLink(backLinkName, loc.Coord, aliases));
             }
 
@@ -273,7 +269,7 @@ public sealed class BuildCommand : Command
             lastNewNode = newNode;
         }
 
-        if (targets.Count == 1 && lastNewNode != null)
+        if (targets.Count == 1 && lastNewNode is not null)
         {
             // Move caller to new node
             if (!goCaller.MoveTo(lastNewNode))
@@ -287,7 +283,7 @@ public sealed class BuildCommand : Command
     }
     public bool HasLink(Node node, string linkName)
     {
-        if (node.Links == null) return false;
+        if (node.Links is null) return false;
         foreach (var l in node.GetLinks()) if (l.Name == linkName) return true;
         return false;
     }

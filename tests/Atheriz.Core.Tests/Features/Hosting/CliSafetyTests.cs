@@ -44,7 +44,7 @@ public class CliSafetyTests
     public void Start_InvalidHost_ExitsNonZeroWithoutPidFile()
     {
         if (!OperatingSystem.IsLinux()) return;
-        var dll = "/home/anon/atheriz-cs/src/Atheriz.Server/bin/Debug/net8.0/Atheriz.Server.dll";
+        var dll = "/home/anon/atheriz-cs/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var dir = Path.Combine(Path.GetTempPath(), "atheriz-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);

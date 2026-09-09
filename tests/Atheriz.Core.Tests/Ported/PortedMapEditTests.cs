@@ -152,7 +152,7 @@ public class PortedMapEditTests
         caller.Session = new Session(conn); caller.Session.Connection = conn; conn.Session.Puppet = caller;
         var draw = new Atheriz.Core.Commands.LoggedIn.DrawCommand();
         draw.Run(caller, null);
-        Assert.Single(conn.Sent.Where(s=>s.Cmd=="launch_draw"));
+        Assert.Single(conn.Sent, s=>s.Cmd=="launch_draw");
         var args = conn.Sent.First(s=>s.Cmd=="launch_draw").Args;
         Assert.Equal(2, args.Count);
         var key = args[0] as string;
@@ -318,8 +318,10 @@ public class PortedMapEditTests
         var draw = new Atheriz.Core.Commands.LoggedIn.DrawCommand();
         draw.Run(caller, null);
         Assert.NotNull(mh.GetMapInfo("TestArea",0));
-        Assert.Empty(mh.GetMapInfo("TestArea",0)!.PreGrid);
-        Assert.Single(conn.Sent.Where(s=>s.Cmd=="launch_draw"));
+        var preGrid = mh.GetMapInfo("TestArea",0)!.PreGrid;
+        // No entry may exist: equivalent to emptiness, in the analyzer-approved form.
+        Assert.DoesNotContain(preGrid, _ => true);
+        Assert.Single(conn.Sent, s=>s.Cmd=="launch_draw");
     }
 
     [Fact] public void RunNoLocation()
@@ -332,7 +334,7 @@ public class PortedMapEditTests
         caller.Session = new Session(conn); caller.Session.Connection=conn; conn.Session.Puppet=caller;
         var draw = new Atheriz.Core.Commands.LoggedIn.DrawCommand();
         draw.Run(caller, null);
-        Assert.Empty(conn.Sent.Where(s=>s.Cmd=="launch_draw"));
+        Assert.DoesNotContain(conn.Sent, s=>s.Cmd=="launch_draw");
         Assert.Contains(caller.PeekMessages(), m=> m.Contains("You must be in a valid location to open the map editor."));
     }
 
@@ -399,7 +401,7 @@ public class PortedMapEditTests
         caller.Session = null!;
         var draw = new Atheriz.Core.Commands.LoggedIn.DrawCommand();
         draw.Run(conn, null);
-        Assert.Single(conn.Sent.Where(s=>s.Cmd=="launch_draw"));
+        Assert.Single(conn.Sent, s=>s.Cmd=="launch_draw");
     }
 
     // A failed launch_draw send must surface to the caller instead of

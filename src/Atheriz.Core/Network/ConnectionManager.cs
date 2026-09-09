@@ -1,11 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
-using System.Text.Json;
 using Atheriz.Core.Concurrency;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Network;
 
@@ -74,14 +69,14 @@ public class InputFuncs
         {
             if (m.DeclaringType == typeof(InputFuncs)) continue;
             var attr = m.GetCustomAttribute<InputFuncAttribute>();
-            if (attr != null)
+            if (attr is not null)
             {
                 var name = attr.Name ?? m.Name;
                 // Create delegate of signature Action<BaseConnection, List<object?>, Dictionary<string,object?>>
                 try
                 {
                     var del = Delegate.CreateDelegate(typeof(Action<BaseConnection, List<object?>, Dictionary<string, object?>>), this, m, false);
-                    if (del != null)
+                    if (del is not null)
                     {
                         handlers[name] = del;
                         if (!name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) handlers[m.Name] = del;
@@ -105,7 +100,7 @@ public class InputFuncs
     {
         try
         {
-            var text = args.Count > 0 ? args[0]?.ToString() ?? "" : "";
+            var text = args.FirstOrDefault()?.ToString() ?? "";
             // port of inputfuncs.py:258 session handling + future check
             var session = connection.Session;
             // In Python, atp is get_async_threadpool(); here we use ConnectionManager's pool via global
@@ -116,7 +111,7 @@ public class InputFuncs
             {
                 future = session.InputFuture;
                 masked = session.InputMasked;
-                if (future != null && !future.Task.IsCompleted)
+                if (future is not null && !future.Task.IsCompleted)
                 {
                     session.InputFuture = null;
                     session.InputMasked = false;
@@ -127,7 +122,7 @@ public class InputFuncs
                     masked = false;
                 }
             }
-            if (future != null)
+            if (future is not null)
             {
                 if (masked)
                 {
@@ -143,11 +138,11 @@ public class InputFuncs
             Atheriz.Core.Objects.GameObject? puppet = null;
             lock (session.Lock) puppet = session.Puppet;
 
-            if (puppet != null)
+            if (puppet is not null)
             {
                 // port of inputfuncs.py:290 dispatch_loggedin immediate
                 var job = Atheriz.Core.Commands.CommandDispatcher.DispatchLoggedIn(puppet, text, immediate: true);
-                if (job != null)
+                if (job is not null)
                 {
                     // already on game worker via connection drain — execute inline instead of queueing second task
                     // port of inputfuncs.py:295-297 atp.run(*job)
@@ -158,7 +153,7 @@ public class InputFuncs
             {
                 // port of inputfuncs.py:293 _resolve_unloggedin
                 var job = Atheriz.Core.Commands.CommandDispatcher.ResolveUnloggedIn(connection, text);
-                if (job != null)
+                if (job is not null)
                 {
                     try { job.Func(job.Caller, job.Args); } catch (Exception ex) { try { Atheriz.Core.AtherizLogger.LogError($"Exception in text handler: {ex}"); } catch { Console.Error.WriteLine(ex); } }
                 }
@@ -241,7 +236,7 @@ public class InputFuncs
         // Port of inputfuncs.py:399-401 render(connection.session) + msg + prompt
         var welcome = ConnectionScreen.Render(connection.Session); // Port of connection_screen.py:79 render
         connection.Msg(welcome);
-        connection.SendCommand("prompt", new List<object?> { ">" }, new Dictionary<string, object?>());
+        connection.SendCommand("prompt", new List<object?> { ">" }, []);
     }
 
     // Port of inputfuncs.py:18-90 helpers
@@ -290,7 +285,7 @@ public class InputFuncs
         {
             if (v is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Object)
             {
-                dict = new Dictionary<string, object?>();
+                dict = [];
                 foreach (var p in je.EnumerateObject()) dict[p.Name]= ConnectionManager.JsonElementToObject(p.Value);
             }
             else return false;
@@ -300,8 +295,8 @@ public class InputFuncs
         try { visible = GameUtils.StripAnsi(symStr); } catch { visible = symStr; }
         if (visible.Length==0 || visible.Length>2) return false;
         if (symStr.Length>64) return false;
-        if (dict.TryGetValue("desc", out var desc) && desc != null && desc is not string) return false;
-        if (dict.TryGetValue("coord", out var coord) && coord != null)
+        if (dict.TryGetValue("desc", out var desc) && desc is not null && desc is not string) return false;
+        if (dict.TryGetValue("coord", out var coord) && coord is not null)
         {
             if (coord is List<object?> lst)
             {
@@ -316,13 +311,13 @@ public class InputFuncs
             }
             else return false;
         }
-        if (dict.TryGetValue("show", out var show) && show != null)
+        if (dict.TryGetValue("show", out var show) && show is not null)
         {
             if (show is not bool) return false;
         }
         bool IsFg(object? fg)
         {
-            if (fg==null) return true;
+            if (fg is null) return true;
             if (fg is int || fg is double || fg is float) return true;
             if (fg is System.Text.Json.JsonElement je && (je.ValueKind==System.Text.Json.JsonValueKind.Number || je.ValueKind==System.Text.Json.JsonValueKind.Null)) return true;
             if (fg is List<object?> lst && lst.Count==3 && lst.All(x=> x is int)) {
@@ -334,7 +329,7 @@ public class InputFuncs
         }
         bool IsBg(object? bg)
         {
-            if (bg==null) return true;
+            if (bg is null) return true;
             if (bg is int || bg is double || bg is float) return true;
             if (bg is System.Text.Json.JsonElement je && (je.ValueKind==System.Text.Json.JsonValueKind.Number || je.ValueKind==System.Text.Json.JsonValueKind.Null)) return true;
             if (bg is List<object?> lst && lst.Count==3 && lst.All(x=> x is int)) {
@@ -365,7 +360,7 @@ public class InputFuncs
     {
         if (o is List<object?> lst) return lst;
         if (o is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Array) return je.EnumerateArray().Select(ConnectionManager.JsonElementToObject).ToList()!;
-        return new List<object?>();
+        return [];
     }
 
     // Shared seq/key consume + reject-reply cycle for the map_edit family
@@ -377,7 +372,7 @@ public class InputFuncs
         var result = Globals.MapEdit.Consume(key!, ip, seq);
         if (result.Status == Globals.MapEditStatus.Reject)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ result.Reason }, new Dictionary<string, object?>());
+            connection.SendCommand("map_edit_reject", new List<object?>{ result.Reason }, []);
             return null;
         }
         return result;
@@ -391,7 +386,7 @@ public class InputFuncs
         var key = args[0] as string;
         object? seqObj = args[1];
         var cellsObj = args[2];
-        if (key == null || cellsObj == null) return;
+        if (key is null || cellsObj is null) return;
         // seq must be int
         int seq;
         if (seqObj is int si) seq=si;
@@ -441,16 +436,16 @@ public class InputFuncs
             }
         }
         var result = ConsumeOrReply(connection, key, seq);
-        if (result == null) return;
+        if (result is null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
         {
-            connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, new Dictionary<string, object?>());
+            connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
             return;
         }
         // Process edits
         var mh = MapHandlerFactory();
         var mi = mh.GetMapInfo(result.Chain!.Area, result.Chain.Z);
-        if (mi != null)
+        if (mi is not null)
         {
             using (mi.BatchUpdate())
             {
@@ -493,7 +488,7 @@ public class InputFuncs
                 finally { mi.Lock.ExitWriteLock(); }
             }
         }
-        var roomMoves = new List<((int X,int Y) src,(int X,int Y) dst)>();
+        List<((int X,int Y) src,(int X,int Y) dst)> roomMoves = [];
         foreach (var cellObj in cells)
         {
             var cell = ToList(cellObj);
@@ -513,7 +508,7 @@ public class InputFuncs
             var nh = NodeHandlerFactory();
             var areaObj = nh.GetArea(result.Chain.Area);
             var grid = areaObj?.GetGrid(result.Chain.Z);
-            if (grid != null)
+            if (grid is not null)
             {
                 var failed = grid.ApplyMoves(roomMoves);
                 // Port of mapedit.py apply: surface refused moves (the client
@@ -524,7 +519,7 @@ public class InputFuncs
                     catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.MapEditHandler: " + logEx.Message, "ConnectionManager"); }
             }
         }
-        connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, new Dictionary<string, object?>());
+        connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
     }
 
     [InputFunc("map_validate_moves")]
@@ -534,7 +529,7 @@ public class InputFuncs
         var key = args[0] as string;
         object? seqObj = args[1];
         var movesObj = args[2];
-        if (key==null || movesObj==null) return;
+        if (key is null || movesObj is null) return;
         int seq;
         if (seqObj is int si) seq=si;
         else if (seqObj is long sl) seq=(int)sl;
@@ -557,7 +552,7 @@ public class InputFuncs
             var ctxArg = args[3];
             if (ctxArg is not List<object?> && !(ctxArg is System.Text.Json.JsonElement jeCtx && jeCtx.ValueKind==System.Text.Json.JsonValueKind.Array)) return;
             var ctxList = ToList(ctxArg);
-            context = new List<((int,int),(int,int))>();
+            context = [];
             foreach (var ctxObj in ctxList)
             {
                 var ctx = ToList(ctxObj);
@@ -571,17 +566,17 @@ public class InputFuncs
             }
         }
         var result = ConsumeOrReply(connection, key, seq);
-        if (result == null) return;
+        if (result is null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
         {
-            SendMoveVerdict(connection, seq, result.NewKey!, result.Chain!.Validation ?? new List<int>());
+            SendMoveVerdict(connection, seq, result.NewKey!, result.Chain!.Validation ?? []);
             return;
         }
         var nh2 = NodeHandlerFactory();
         var areaObj2 = nh2.GetArea(result.Chain!.Area);
         var grid2 = areaObj2?.GetGrid(result.Chain.Z);
         List<int> denied;
-        if (grid2==null) denied = Enumerable.Range(0, movesList.Count).ToList();
+        if (grid2 is null) denied = Enumerable.Range(0, movesList.Count).ToList();
         else
         {
             var moves = movesList.Select(mObj=> {
@@ -597,8 +592,8 @@ public class InputFuncs
 
     private void SendMoveVerdict(BaseConnection connection, int seq, string newKey, List<int> denied)
     {
-        if (denied.Count>0) connection.SendCommand("moves_denied", new List<object?>{ seq, newKey, denied }, new Dictionary<string, object?>());
-        else connection.SendCommand("moves_ok", new List<object?>{ seq, newKey }, new Dictionary<string, object?>());
+        if (denied.Count>0) connection.SendCommand("moves_denied", new List<object?>{ seq, newKey, denied }, []);
+        else connection.SendCommand("moves_ok", new List<object?>{ seq, newKey }, []);
     }
 
     [InputFunc("map_edit_legend")]
@@ -606,24 +601,24 @@ public class InputFuncs
     {
         if (args.Count < 3)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, new Dictionary<string, object?>());
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []);
             return;
         }
         var key = args[0] as string;
         object? seqObj = args[1];
         var legendObj = args[2];
-        if (key==null || legendObj==null)
+        if (key is null || legendObj is null)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, new Dictionary<string, object?>());
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []);
             return;
         }
         int seq;
         if (seqObj is int si) seq=si;
         else if (seqObj is long sl) seq=(int)sl;
         else if (seqObj is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var jsi)) seq=jsi;
-        else { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, new Dictionary<string, object?>()); return; }
+        else { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []); return; }
         var legend = ToList(legendObj);
-        if (legend.Count>200) { connection.SendCommand("map_edit_reject", new List<object?>{ "Too many legend entries (max 200)." }, new Dictionary<string, object?>()); return; }
+        if (legend.Count>200) { connection.SendCommand("map_edit_reject", new List<object?>{ "Too many legend entries (max 200)." }, []); return; }
         for(int idx=0; idx<legend.Count; idx++)
         {
             var entry = legend[idx];
@@ -631,50 +626,50 @@ public class InputFuncs
             object? norm = entry;
             if (entry is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Object)
             {
-                var dict = new Dictionary<string, object?>();
+                Dictionary<string, object?> dict = [];
                 foreach(var p in je.EnumerateObject()) dict[p.Name]= ConnectionManager.JsonElementToObject(p.Value);
                 norm = dict;
             }
             if (!IsLegendEntry(norm))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid legend entry at index {idx}." }, new Dictionary<string, object?>());
+                connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid legend entry at index {idx}." }, []);
                 return;
             }
         }
         var result = ConsumeOrReply(connection, key, seq);
-        if (result == null) return;
+        if (result is null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
         {
-            connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, new Dictionary<string, object?>());
+            connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
             // legacy also sends legend_ok? Python for retry only sends map_ack (no legend_ok). Check python: for retry it does connection.send_command("map_ack", seq, new_key) return (no legend_ok). So only ack.
             return;
         }
         var mh = MapHandlerFactory();
         var mi = mh.GetMapInfo(result.Chain!.Area, result.Chain.Z);
-        if (mi==null)
+        if (mi is null)
         {
             mi = new MapInfo(result.Chain.Area);
             // atomic publish — concurrent creators converge on the
             // stored winner; a locally built loser is dropped, not last-wins.
             mi = mh.GetOrAddMapInfo(result.Chain.Area, result.Chain.Z, mi);
         }
-        var newEntries = new List<LegendEntry>();
+        List<LegendEntry> newEntries = [];
         foreach (var eObj in legend)
         {
             Dictionary<string, object?> dict;
             if (eObj is Dictionary<string, object?> d) dict=d;
             else if (eObj is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Object)
             {
-                dict = new Dictionary<string, object?>();
+                dict = [];
                 foreach(var p in je.EnumerateObject()) dict[p.Name]= ConnectionManager.JsonElementToObject(p.Value);
             }
             else continue;
             var le = new LegendEntry();
             le.Symbol = dict.TryGetValue("symbol", out var sy) ? sy as string : null;
             var desc = dict.TryGetValue("desc", out var de) ? de : null;
-            if (desc == null) le.Desc = "";
+            if (desc is null) le.Desc = "";
             else le.Desc = desc as string ?? "";
-            if (dict.TryGetValue("coord", out var co) && co != null)
+            if (dict.TryGetValue("coord", out var co) && co is not null)
             {
                 if (co is List<object?> lst && lst.Count>=2) le.Coord = (ToInt(lst[0]), ToInt(lst[1]));
                 else if (co is System.Text.Json.JsonElement je2 && je2.ValueKind==System.Text.Json.JsonValueKind.Array)
@@ -685,14 +680,14 @@ public class InputFuncs
             }
             else le.Coord=null;
             le.Show = dict.TryGetValue("show", out var sh) && sh is bool sb ? sb : true;
-            if (dict.TryGetValue("fg", out var fg) && fg != null)
+            if (dict.TryGetValue("fg", out var fg) && fg is not null)
             {
                 if (fg is double dd) le.Fg=dd;
                 else if (fg is int ii) le.Fg=ii;
                 else if (fg is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number && je.TryGetDouble(out var dv)) le.Fg=dv;
                 else le.Fg=170.0;
             }
-            if (dict.TryGetValue("bg", out var bg) && bg != null)
+            if (dict.TryGetValue("bg", out var bg) && bg is not null)
             {
                 if (bg is double db) le.Bg=db;
                 else if (bg is int ib) le.Bg=ib;
@@ -705,8 +700,8 @@ public class InputFuncs
         try { mi.LegendEntries.Clear(); mi.LegendEntries.AddRange(newEntries); mi.MapChanged=true; }
         finally { mi.Lock.ExitWriteLock(); }
         mi.RenderLegend();
-        connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, new Dictionary<string, object?>());
-        connection.SendCommand("legend_ok", new List<object?>{ seq, result.NewKey }, new Dictionary<string, object?>());
+        connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
+        connection.SendCommand("legend_ok", new List<object?>{ seq, result.NewKey }, []);
     }
 }
 
@@ -716,7 +711,7 @@ public class InputFuncs
 public class ConnectionManager
 {
     // Port of manager.py:10-24 malformed throttling — now via ThrottleWindow
-    private static readonly object _malformedLock = new object();
+    private static readonly object _malformedLock = new();
     private static readonly Dictionary<string, double> _malformedLast = new();
     private const double MalformedWindow = 5.0; // port of manager.py:12
 
@@ -732,7 +727,7 @@ public class ConnectionManager
 
     // Port of websocket.py:15-27 oversize throttling (per-host 5s window),
     // for the shared HandleCommand size cap .
-    private static readonly object _oversizeLock = new object();
+    private static readonly object _oversizeLock = new();
     private static readonly Dictionary<string, double> _oversizeLast = new();
     private const double OversizeWindow = 5.0; // port of websocket.py:13
     private static bool ShouldLogOversize(string host)
@@ -843,9 +838,9 @@ public class ConnectionManager
             }
             // Total-connection admission cap (0 = unlimited). Checked after the
             // per-IP gate so the refusal reason stays specific.
-            if (refusal == null && _settings.MaxTotalConnections > 0 && _connections.Count >= _settings.MaxTotalConnections)
+            if (refusal is null && _settings.MaxTotalConnections > 0 && _connections.Count >= _settings.MaxTotalConnections)
                 refusal = $"[Network] Refusing connection from {host}: total limit ({_settings.MaxTotalConnections}) reached";
-            if (refusal == null)
+            if (refusal is null)
             {
             // Re-registering the same conn id from the same host replaces the same
             // registration, so it must not increment the per-IP counter again —
@@ -871,7 +866,7 @@ public class ConnectionManager
             }
         }
         finally { _lock.ExitWriteLock(); }
-        if (refusal != null)
+        if (refusal is not null)
         {
             RefuseConnection(connection, refusal);
             return false;
@@ -907,13 +902,13 @@ public class ConnectionManager
     public int SweepOrphanedConnections(TimeSpan maxPreLoginAge)
     {
         var cutoff = DateTime.UtcNow - maxPreLoginAge;
-        var stale = new List<BaseConnection>();
+        List<BaseConnection> stale = [];
         foreach (var c in ConnectionsSnapshot.Values)
         {
             try
             {
                 var s = c.Session;
-                if (s == null || s.Puppet != null || s.Account != null) continue;
+                if (s is null || s.Puppet is not null || s.Account is not null) continue;
                 if (c.ConnectedAtUtc > cutoff) continue;
                 stale.Add(c);
             }
@@ -959,7 +954,7 @@ public class ConnectionManager
         connection.SetDisconnected(true); // port of manager.py:139-140
         connection.ClearPendingInput(); // port of manager.py:141
         var session = connection.Session; // port of manager.py:142
-        if (session != null)
+        if (session is not null)
         {
             // port of manager.py:144-148 run session teardown on game threadpool.
             // Fire-and-forget by design: disconnect() executes on the network
@@ -1042,7 +1037,7 @@ public class ConnectionManager
         if (value is List<object?> lst) return lst.Select(StripInputValue).ToList(); // port of manager.py:34-35
         if (value is Dictionary<string, object?> dict) // port of manager.py:36-37
         {
-            var res = new Dictionary<string, object?>();
+            Dictionary<string, object?> res = [];
             foreach (var kv in dict) res[kv.Key] = StripInputValue(kv.Value);
             return res;
         }
@@ -1121,7 +1116,7 @@ public class ConnectionManager
         if (_settings.StripInputEscapeSequences) // port of manager.py:222
         {
             // args = [_strip_input_value(value) for value in args] — manager.py:223
-            var strippedArgs = new List<object?>();
+            List<object?> strippedArgs = [];
             foreach (var v in args)
             {
                 var sv = StripInputValue(v);
@@ -1137,7 +1132,7 @@ public class ConnectionManager
         _lock.EnterReadLock();
         try { _messageHandlers.TryGetValue(cmd, out handler); } // port of manager.py:225 exact .get(cmd)
         finally { _lock.ExitReadLock(); }
-        if (handler != null) // port of manager.py:226-227
+        if (handler is not null) // port of manager.py:226-227
         {
             connection.EnqueueInput(handler, args, kwargs);
         }
@@ -1167,15 +1162,15 @@ public class ConnectionManager
         static List<object?> ConvertArray(JsonElement a)
         {
             if (a.ValueKind != JsonValueKind.Array) return new List<object?> { JsonElementToObject(a) };
-            var list = new List<object?>();
+            List<object?> list = [];
             foreach (var item in a.EnumerateArray()) list.Add(JsonElementToObject(item));
             return list;
         }
 
         static Dictionary<string, object?> ConvertDict(JsonElement o)
         {
-            if (o.ValueKind != JsonValueKind.Object) return new Dictionary<string, object?>();
-            var dict = new Dictionary<string, object?>();
+            if (o.ValueKind != JsonValueKind.Object) return [];
+            Dictionary<string, object?> dict = [];
             foreach (var prop in o.EnumerateObject()) dict[prop.Name] = JsonElementToObject(prop.Value);
             return dict;
         }

@@ -1,8 +1,6 @@
-using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Dto;
 using Atheriz.Core.Persistence.Entities;
-using Atheriz.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Globals;
@@ -261,7 +259,7 @@ public static class ObjectRegistry
         // a lazy enumerable would execute arbitrary caller code under AllLock.
         var list = ids.ToList();
         AllLock.EnterReadLock();
-        try { return list.Select(id => AllObjects.TryGetValue(id, out var o) ? o : null).Where(o => o != null).Cast<GameObject>().ToList(); }
+        try { return list.Select(id => AllObjects.TryGetValue(id, out var o) ? o : null).OfType<GameObject>().ToList(); }
         finally { AllLock.ExitReadLock(); }
     }
 
@@ -365,7 +363,7 @@ public static class ObjectRegistry
 
     public static void LoadObjects(AtherizDbContext db)
     {
-        var objects = new Dictionary<int, GameObject>();
+        Dictionary<int, GameObject> objects = [];
         var maxId = -1;
         try
         {
@@ -385,7 +383,7 @@ public static class ObjectRegistry
                     try { AtherizLogger.LogWarning($"[Load] skipping corrupt object row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
                     continue;
                 }
-                if (dto == null)
+                if (dto is null)
                 {
                     try { AtherizLogger.LogWarning($"[Load] skipping null object row {row.Id}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
                     continue;
@@ -523,8 +521,8 @@ public static class ObjectRegistry
             finally { o.SyncRoot.ExitReadLock(); }
         }).ToList();
 
-        var pending = new List<(GameObject obj, string json)>();
-        var cleared = new List<GameObject>();
+        List<(GameObject obj, string json)> pending = [];
+        List<GameObject> cleared = [];
         foreach (var obj in filtered)
         {
             if (!IsStillSaveable(obj, forSave: true, force: force)) continue;

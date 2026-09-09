@@ -67,7 +67,7 @@ dotnet run --project src/Atheriz.Server -- --help
 # game-folder commands need to keep your current directory as the game folder,
 # so use the built dll:
 dotnet build src/Atheriz.Server
-dotnet src/Atheriz.Server/bin/Debug/net8.0/Atheriz.Server.dll create myaccount MyChar pass
+dotnet src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll create myaccount MyChar pass
 ```
 
 The server also supports `restart` and `test`.

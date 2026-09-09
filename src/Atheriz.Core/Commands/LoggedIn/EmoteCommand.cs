@@ -1,4 +1,3 @@
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -16,9 +15,9 @@ public sealed class EmoteCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var p)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { p.Msg(PrintHelp()); return; }
+        if (pa is null) { p.Msg(PrintHelp()); return; }
         var lst = pa.GetList("text");
-        if (lst.Count > 0 && p.ResolveLocationObject() != null)
+        if (lst.Count > 0 && p.ResolveLocationObject() is not null)
         {
             string text = $"{p.Name} {string.Join(" ", lst)}";
             // Same AtSay entry as say so game-code hooks observe emotes; the

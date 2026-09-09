@@ -1,7 +1,4 @@
 // Port of atheriz/commands/loggedin/ban.py:279
-using System.Text.Json;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -23,13 +20,13 @@ public sealed class BanCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null || pa.GetString("target") is not string targetName || string.IsNullOrWhiteSpace(targetName))
+        if (pa is null || pa.GetString("target") is not string targetName || string.IsNullOrWhiteSpace(targetName))
         { caller.Msg(PrintHelp()); return; }
         var reason = pa.GetString("reason");
         bool account = pa.GetBool("account");
         bool ip = pa.GetBool("ip");
         var target = BanHelper.ResolveTarget(go, targetName);
-        if (target == null) return;
+        if (target is null) return;
         // No self-exempt idiom on purpose: banning yourself locks your own
         // account (worse than deleting a disposable object), so self-ban
         // stays refused by the equal-or-higher rule below like any peer's.
@@ -39,11 +36,11 @@ public sealed class BanCommand : Command
         if (account)
         {
             acct = BanHelper.FindAccount(target);
-            if (acct == null) { go.Msg($"Could not find the account owning {target.Name}; banning character only."); account = false; }
+            if (acct is null) { go.Msg($"Could not find the account owning {target.Name}; banning character only."); account = false; }
             else
             {
                 var accObj = acct as Account;
-                if (accObj != null)
+                if (accObj is not null)
                     acctChars = ObjectRegistry.Get(accObj.Characters.ToList());
                 foreach (var ch in acctChars)
                     if (ch.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot ban someone of equal or higher privilege."); return; }
@@ -52,10 +49,10 @@ public sealed class BanCommand : Command
         string? host = null;
         if (ip) host = BanHelper.GetHost(target);
         List<GameObject> kickTargets;
-        if (account && acct != null)
+        if (account && acct is not null)
         {
             var acc2 = acct as Account;
-            kickTargets = acc2 != null ? ObjectRegistry.Get(acc2.Characters.ToList()) : [target];
+            kickTargets = acc2 is not null ? ObjectRegistry.Get(acc2.Characters.ToList()) : [target];
             if (acct is Account ac) { ac.IsBanned = true; if (!string.IsNullOrEmpty(reason)) ac.BanReason = reason; }
             foreach (var c in kickTargets) { c.IsBanned = true; if (!string.IsNullOrEmpty(reason)) BanReasonHelper.SetBanReason(c, reason); }
         }
@@ -68,17 +65,17 @@ public sealed class BanCommand : Command
         string? kickedIp = null;
         if (ip)
         {
-            if (host == null) go.Msg("Target is not online; cannot ban IP.");
+            if (host is null) go.Msg("Target is not online; cannot ban IP.");
             else { ObjectRegistry.BanIp(host); kickedIp = host; }
         }
-        var failed = new List<string>();
+        List<string> failed = [];
         foreach (var t in kickTargets)
         {
             try
             {
                 var sess = t.Session;
                 var conn = sess?.Connection;
-                if (conn != null)
+                if (conn is not null)
                 {
                     string msg = "You have been banned." + (string.IsNullOrEmpty(reason) ? "" : $" Reason: {reason}");
                     conn.Msg(msg);
@@ -87,9 +84,9 @@ public sealed class BanCommand : Command
             }
             catch { failed.Add(t.Name); }
         }
-        string scope = account && acct != null ? "account" : "character";
+        string scope = account && acct is not null ? "account" : "character";
         string outMsg = $"Banned {target.Name} ({scope}" + (string.IsNullOrEmpty(reason) ? "" : $", reason: {reason}") + ").";
-        if (kickedIp != null) outMsg += $" IP {kickedIp} banned until server restart.";
+        if (kickedIp is not null) outMsg += $" IP {kickedIp} banned until server restart.";
         if (failed.Count > 0) outMsg += $" Kick failed for: {string.Join(", ", failed)}.";
         go.Msg(outMsg);
     }
@@ -112,39 +109,39 @@ public sealed class UnbanCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null || pa.GetString("target") is not string targetName || string.IsNullOrWhiteSpace(targetName))
+        if (pa is null || pa.GetString("target") is not string targetName || string.IsNullOrWhiteSpace(targetName))
         { caller.Msg(PrintHelp()); return; }
         bool account = pa.GetBool("account");
         bool ip = pa.GetBool("ip");
         var target = BanHelper.ResolveTarget(go, targetName);
-        if (target == null) return;
+        if (target is null) return;
         if (target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot unban someone of equal or higher privilege."); return; }
         GameObject? acct = null;
         if (account)
         {
             acct = BanHelper.FindAccount(target);
-            if (acct == null) { go.Msg($"Could not find the account owning {target.Name}; unbanning character only."); account = false; }
+            if (acct is null) { go.Msg($"Could not find the account owning {target.Name}; unbanning character only."); account = false; }
             else
             {
-                var accChars = (acct as Account) != null ? ObjectRegistry.Get(((Account)acct).Characters.ToList()) : [];
+                var accChars = (acct as Account) is not null ? ObjectRegistry.Get(((Account)acct).Characters.ToList()) : [];
                 foreach (var ch in accChars) if (ch.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot unban someone of equal or higher privilege."); return; }
             }
         }
         string? host = null;
         if (ip) host = BanHelper.GetHost(target);
-        if (account && acct != null)
+        if (account && acct is not null)
         {
             if (acct is Account ac) { ac.IsBanned = false; ac.BanReason = ""; }
-            var chars = (acct as Account) != null ? ObjectRegistry.Get(((Account)acct).Characters.ToList()) : [];
+            var chars = (acct as Account) is not null ? ObjectRegistry.Get(((Account)acct).Characters.ToList()) : [];
             foreach (var c in chars) { c.IsBanned = false; BanReasonHelper.ClearBanReason(c); }
         }
         else { target.IsBanned = false; BanReasonHelper.ClearBanReason(target); }
         if (ip)
         {
-            if (host == null) go.Msg("Target is not online; cannot clear IP ban by reference.");
+            if (host is null) go.Msg("Target is not online; cannot clear IP ban by reference.");
             else ObjectRegistry.UnbanIp(host);
         }
-        string scope = account && acct != null ? "account" : "character";
+        string scope = account && acct is not null ? "account" : "character";
         go.Msg($"Unbanned {target.Name} ({scope}).");
     }
 }

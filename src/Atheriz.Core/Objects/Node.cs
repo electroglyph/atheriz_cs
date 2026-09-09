@@ -1,7 +1,3 @@
-using System.Text.Json;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Utils;
-using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Objects;
 
@@ -103,8 +99,8 @@ public partial class Node : GameObject
     public static void RegisterPersistedSubtype(string fullName, Type type, Func<Coord, Node> factory)
     {
         if (string.IsNullOrEmpty(fullName)) throw new ArgumentException("Subtype full name required.", nameof(fullName));
-        if (type == null) throw new ArgumentNullException(nameof(type));
-        if (factory == null) throw new ArgumentNullException(nameof(factory));
+        ArgumentNullException.ThrowIfNull(type);
+        ArgumentNullException.ThrowIfNull(factory);
         lock (_persistedSubtypeLock) { _persistedSubtypeFactories[fullName] = factory; _persistedSubtypeNames[type] = fullName; }
     }
     internal static string? RegisteredNameFor(Type t)
@@ -209,10 +205,10 @@ public partial class Node : GameObject
     public void ForContents(Action<GameObject> func, IEnumerable<GameObject>? exclude = null)
     {
         var contents = GetContents();
-        HashSet<GameObject>? excl = exclude != null ? new HashSet<GameObject>(exclude) : null;
+        HashSet<GameObject>? excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
         foreach (var obj in contents)
         {
-            if (excl != null && excl.Contains(obj)) continue;
+            if (excl is not null && excl.Contains(obj)) continue;
             try { func(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.ForContents: " + logEx.Message, "NoIdMarker"); }
         }
     }
@@ -305,7 +301,7 @@ public partial class Node : GameObject
         var nh = NodeHandler.GetCurrent();
         Dictionary<string, Door>? doors = null;
         try { doors = nh?.GetDoors(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.AtHear: " + logEx.Message, "NoIdMarker"); }
-        if (doors != null && doors.Count > 0)
+        if (doors is not null && doors.Count > 0)
         {
             foreach (var d in doors.Values) { if (!d.Closed) { open = true; break; } }
         }
@@ -356,15 +352,15 @@ public partial class Node : GameObject
     {
         (List<object> ops, int count) execDeleteRecursive(Node obj)
         {
-            var allOps = new List<object>();
+            List<object> allOps = [];
             int count = 0;
-            var seen = new HashSet<int>();
+            HashSet<int> seen = [];
             var contents = obj.GetContents();
             foreach (var content in contents.ToList())
             {
                 if (!seen.Add(content.Id)) continue;
                 var res = content.Delete(caller, true);
-                if (res == null) continue;
+                if (res is null) continue;
                 allOps.AddRange(res.Value.ops);
                 count += res.Value.count;
             }
@@ -372,7 +368,7 @@ public partial class Node : GameObject
         }
         (List<object> ops, int count) execMoveContents(Node obj)
         {
-            var allOps = new List<object>();
+            List<object> allOps = [];
             int count = 0;
             var contents = obj.GetContents().ToList();
             foreach (var content in contents)
@@ -391,19 +387,19 @@ public partial class Node : GameObject
                     homeObj = cands.FirstOrDefault();
                 }
                 GameObject? fallback = null;
-                if (caller != null)
+                if (caller is not null)
                 {
                     // collapsed single expression (the three-way
                     // if/else assigned loc in exactly one case).
                     var loc = caller.ResolveLocationObject();
-                    fallback = (loc != null && !ReferenceEquals(loc, obj)) ? loc : null;
+                    fallback = (loc is not null && !ReferenceEquals(loc, obj)) ? loc : null;
                 }
-                if (homeObj != null)
+                if (homeObj is not null)
                 {
                     if (content.MoveTo(homeObj)) moved = true;
-                    else if (fallback != null && content.MoveTo(fallback, force: true, announce: false)) moved = true;
+                    else if (fallback is not null && content.MoveTo(fallback, force: true, announce: false)) moved = true;
                 }
-                else if (fallback != null)
+                else if (fallback is not null)
                 {
                     if (content.MoveTo(fallback, force: true, announce: false)) moved = true;
                 }
@@ -415,7 +411,7 @@ public partial class Node : GameObject
                         try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
                     }
                     var res = content.Delete(caller, true);
-                    if (res != null) { allOps.AddRange(res.Value.ops); count += res.Value.count; }
+                    if (res is not null) { allOps.AddRange(res.Value.ops); count += res.Value.count; }
                 }
             }
             return (allOps, count);
@@ -428,7 +424,7 @@ public partial class Node : GameObject
             }
             try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
         }
-        if (caller != null && !AtDelete(caller)) return null;
+        if (caller is not null && !AtDelete(caller)) return null;
         SyncRoot.EnterWriteLock();
         try
         {
@@ -494,7 +490,7 @@ public sealed class ExitCommand : Command
         if (caller is GameObject go)
         {
             var dest = NodeHandler.GetCurrent()?.GetNode(Destination);
-            if (dest != null)
+            if (dest is not null)
             {
                 // Port of exit.py:95-103 via the shared helper: moving
                 // through an exit breaks following like any other move.

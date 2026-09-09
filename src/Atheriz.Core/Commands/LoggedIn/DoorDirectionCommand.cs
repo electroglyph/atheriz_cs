@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/open.py:345 (shared DoorDirection template)
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -26,7 +24,7 @@ public abstract class DoorDirectionCommand : Command
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         // single location resolve (open.py reads caller.location once).
         var loc = go.ResolveLocationObject() as Node;
-        if (loc == null)
+        if (loc is null)
         {
             CommandHelpers.MsgInvalidLocation(go);
             return;
@@ -47,7 +45,7 @@ public abstract class DoorDirectionCommand : Command
             return;
         }
         var nh = NodeHandler.GetCurrent();
-        if (nh == null)
+        if (nh is null)
         {
             // Open shows message, others silently return — we preserve Open behavior for all to avoid silent failure in tests
             go.Msg("No door handler.");
@@ -56,15 +54,15 @@ public abstract class DoorDirectionCommand : Command
         Door? GetDoor(string[] names)
         {
             var doors = nh.GetDoors(loc.Coord);
-            if (doors == null) return null;
+            if (doors is null) return null;
             foreach (var nn in names) if (doors.TryGetValue(nn, out var door)) return door;
             return null;
         }
-        if (n) { var door = GetDoor(["north","n"]); if (door != null) Act(door, go); else go.Msg("There is no door to the north."); }
-        if (s) { var door = GetDoor(["south","s"]); if (door != null) Act(door, go); else go.Msg("There is no door to the south."); }
-        if (e) { var door = GetDoor(["east","e"]); if (door != null) Act(door, go); else go.Msg("There is no door to the east."); }
-        if (w) { var door = GetDoor(["west","w"]); if (door != null) Act(door, go); else go.Msg("There is no door to the west."); }
-        if (u) { var door = GetDoor(["up","u"]); if (door != null) Act(door, go); else go.Msg("There is no door up."); }
-        if (d) { var door = GetDoor(["down","d"]); if (door != null) Act(door, go); else go.Msg("There is no door down."); }
+        if (n) { var door = GetDoor(["north","n"]); if (door is not null) Act(door, go); else go.Msg("There is no door to the north."); }
+        if (s) { var door = GetDoor(["south","s"]); if (door is not null) Act(door, go); else go.Msg("There is no door to the south."); }
+        if (e) { var door = GetDoor(["east","e"]); if (door is not null) Act(door, go); else go.Msg("There is no door to the east."); }
+        if (w) { var door = GetDoor(["west","w"]); if (door is not null) Act(door, go); else go.Msg("There is no door to the west."); }
+        if (u) { var door = GetDoor(["up","u"]); if (door is not null) Act(door, go); else go.Msg("There is no door up."); }
+        if (d) { var door = GetDoor(["down","d"]); if (door is not null) Act(door, go); else go.Msg("There is no door down."); }
     }
 }

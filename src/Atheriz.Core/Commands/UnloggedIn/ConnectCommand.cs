@@ -1,7 +1,4 @@
-using Atheriz.Core.Settings;
 // Port of atheriz/commands/unloggedin/connect.py:154
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Network;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
@@ -18,7 +15,7 @@ public sealed class ConnectCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { caller.Msg("Invalid arguments."); return; }
+        if (pa is null) { caller.Msg("Invalid arguments."); return; }
         string accountName = pa.GetString("account_name") ?? "";
         string password = pa.GetString("password") ?? "";
         // This command is normally async; in C# we provide sync stub that checks password via ObjectRegistry
@@ -61,7 +58,7 @@ public sealed class ConnectCommand : Command
         string host2 = (caller as BaseConnection)?.ClientHost ?? "?";
         if (host2 != "?") ObjectRegistry.FailedLogins.Remove(host2);
         try { if (caller is BaseConnection bc) bc.FailedLoginAttempts = 0; } catch (Exception) { }
-        if (caller is BaseConnection conn2 && conn2.Session != null)
+        if (caller is BaseConnection conn2 && conn2.Session is not null)
         {
             conn2.Session.Account = account;
             try { conn2.Session.AccountId = account.Id; } catch (Exception) { }
@@ -88,11 +85,11 @@ public sealed class ConnectCommand : Command
         {
             GameObject? puppetCheck;
             lock (caller.Session.Lock) puppetCheck = caller.Session.Puppet;
-            if (puppetCheck != null) break;
+            if (puppetCheck is not null) break;
 
-            var chars = ObjectRegistry.Get(account.Characters).Where(o => o != null).ToList()!;
+            var chars = ObjectRegistry.Get(account.Characters);
             // Filter to GameObjects that still exist (not deleted)
-            chars = chars.Where(c => c != null && !c.IsDeleted).ToList();
+            chars = chars.Where(c => !c.IsDeleted).ToList();
 
             string text = "Please select a character to play: \r\n";
             for (int x = 0; x < chars.Count; x++)
@@ -119,7 +116,7 @@ public sealed class ConnectCommand : Command
             try { choice = await caller.Session.Prompt("Enter your choice:"); }
             catch (OperationCanceledException) { return; }
             catch { return; }
-            if (choice == null) return;
+            if (choice is null) return;
             if (settings.CharCreationEnabled && choice.Trim().Equals("new", StringComparison.OrdinalIgnoreCase))
             {
                 var newCmd = new NewCharacterCommand();

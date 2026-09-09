@@ -1,8 +1,5 @@
-using System.Text.Json;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Dto;
-using Atheriz.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Globals;
@@ -83,7 +80,7 @@ public partial class NodeHandler
     {
         if (autoLoad)
         {
-            if (settings == null) Load();
+            if (settings is null) Load();
             else { using var db = new AtherizDbContext(settings); Load(db); }
         }
     }
@@ -99,7 +96,7 @@ public partial class NodeHandler
             // Lock order handler -> registry: evictions are collected under the
             // handler lock and applied after release (LoadInto holds Lock while
             // invoking this callback; RemoveObject takes the registry AllLock).
-            var loadEvict = new List<Node>();
+            List<Node> loadEvict = [];
             JsonTableLoader.LoadInto(db.Areas, Lock, json => JsonSerializer.Deserialize<NodeAreaDto>(json, JsonOptions.Default), (dto, row) =>
             {
                 // Per-row report: corrupt areas are skipped, never silent.
@@ -126,7 +123,7 @@ public partial class NodeHandler
                                         // graft under the target
                                         // grid's write scope (leaf lock;
                                         // handler Lock is already held).
-                                        if (ng != null)
+                                        if (ng is not null)
                                         {
                                             ng.Lock.EnterWriteLock();
                                             try
@@ -204,7 +201,7 @@ public partial class NodeHandler
             {
                 HashSet<string>? dbAreaNames = null;
                 try { dbAreaNames = new HashSet<string>(db.Areas.AsNoTracking().Select(r => r.Name).ToList()); } catch { dbAreaNames = null; }
-                if (dbAreaNames != null)
+                if (dbAreaNames is not null)
                 {
                     // Compute + remove under ONE write hold: the old split
                     // (collect, release, per-name remove) let a concurrent
@@ -215,9 +212,9 @@ public partial class NodeHandler
                     Lock.EnterWriteLock();
                     try
                     {
-                        evictedAreas = new List<(string, NodeArea)>();
+                        evictedAreas = [];
                         foreach (var k in _areas.Keys.Where(k => !dbAreaNames.Contains(k)).ToList())
-                            if (_areas.Remove(k, out var a) && a != null) evictedAreas.Add((k, a));
+                            if (_areas.Remove(k, out var a) && a is not null) evictedAreas.Add((k, a));
                     }
                     finally { Lock.ExitWriteLock(); }
                     foreach (var (name, removed) in evictedAreas)
@@ -230,7 +227,7 @@ public partial class NodeHandler
                 }
                 HashSet<(string FA, int FX, int FY, int FZ, string TA, int TX, int TY, int TZ)>? dbTransKeys = null;
                 try { dbTransKeys = new HashSet<(string FA, int FX, int FY, int FZ, string TA, int TX, int TY, int TZ)>(db.Transitions.AsNoTracking().Select(r => new { r.FromArea, r.FromX, r.FromY, r.FromZ, r.ToArea, r.ToX, r.ToY, r.ToZ }).ToList().Select(a => (FA: a.FromArea, FX: a.FromX, FY: a.FromY, FZ: a.FromZ, TA: a.ToArea, TX: a.ToX, TY: a.ToY, TZ: a.ToZ)).ToList()); } catch { dbTransKeys = null; }
-                if (dbTransKeys != null)
+                if (dbTransKeys is not null)
                 {
                     Lock2.EnterWriteLock();
                     try
@@ -242,7 +239,7 @@ public partial class NodeHandler
                 }
                 HashSet<(string, int, int, int)>? dbDoorKeys = null;
                 try { dbDoorKeys = new HashSet<(string, int, int, int)>(db.Doors.AsNoTracking().Select(r => new ValueTuple<string, int, int, int>(r.Area, r.X, r.Y, r.Z)).ToList()); } catch { dbDoorKeys = null; }
-                if (dbDoorKeys != null)
+                if (dbDoorKeys is not null)
                 {
                     Lock3.EnterWriteLock();
                     try
@@ -401,7 +398,7 @@ public partial class NodeHandler
         long areaGen0;
         HashSet<string> areaDeletes;
         using (ReadScope()) { areaRefs = _areas.Values.ToList(); handlerWas = _modified; areaGen0 = _areaGen; areaDeletes = new HashSet<string>(_removedAreas); areaDeletes.ExceptWith(_areas.Keys); }
-        var transRefs = new List<Transition>();
+        List<Transition> transRefs = [];
         bool transWas;
         long transGen0;
         HashSet<(Coord From, Coord To)> transDeletes;
@@ -418,7 +415,7 @@ public partial class NodeHandler
         bool saveAll = force || ObjectRegistry.AlwaysSaveAll;
         var transitionsSnap = (saveAll || transWas || transDeletes.Count > 0)
             ? transRefs.Select(t => new Transition(t.FromCoord, t.ToCoord, t.Name)).ToList()
-            : new List<Transition>();
+            : [];
         var doorsSnap = (saveAll || doorsWas || doorDeletes.Count > 0)
             ? doorsRefs.Select(kv => (kv.Item1, kv.Item2.ToDictionary(kv2 => kv2.Key, kv2 =>
         {
@@ -427,16 +424,16 @@ public partial class NodeHandler
             try { return new Door(d.FromCoord, d.ToCoord, d.FromExit, d.ToExit, d.SymbolCoord, d.ClosedSymbol, d.OpenSymbol, d.Closed, d.Locked); }
             finally { d.Lock.ExitReadLock(); }
         }))).ToList()
-            : new List<(Coord, Dictionary<string, Door>)>();
+            : [];
 
-        var clearedAreas = new List<NodeArea>();
-        var clearedGrids = new List<NodeGrid>();
-        var clearedNodes = new List<Node>();
-        var areasDto = new List<NodeAreaDto>();
+        List<NodeArea> clearedAreas = [];
+        List<NodeGrid> clearedGrids = [];
+        List<Node> clearedNodes = [];
+        List<NodeAreaDto> areasDto = [];
         // Pre-serialize outside gate to avoid holding DB lock during serialization (faithful to Python not holding db.lock during dill.dumps)
-        var areaJsons = new List<(NodeAreaDto dto, string json)>();
-        var transJsons = new List<(Transition t, string json)>();
-        var doorsJsons = new List<((Coord coord, Dictionary<string, Door> dict) item, string json)>();
+        List<(NodeAreaDto dto, string json)> areaJsons = [];
+        List<(Transition t, string json)> transJsons = [];
+        List<((Coord coord, Dictionary<string, Door> dict) item, string json)> doorsJsons = [];
         try
         {
             foreach (var a in areaRefs)
@@ -461,14 +458,14 @@ public partial class NodeHandler
                     dataCopy = new Dictionary<string, JsonElement>(a.Data);
                     name = a.Name;
                     theme = a.Theme ?? "";
-                    linked = a.LinkedAreas != null ? new HashSet<string>(a.LinkedAreas) : null;
+                    linked = a.LinkedAreas is not null ? new HashSet<string>(a.LinkedAreas) : null;
                     if (wasArea) { a.IsModified = false; clearedAreas.Add(a); }
                 }
                 finally { a.Lock.ExitWriteLock(); }
 
-                var gridsDto = new Dictionary<int, NodeGridDto>();
-                var localGrids = new List<NodeGrid>();
-                var localNodes = new List<Node>();
+                Dictionary<int, NodeGridDto> gridsDto = [];
+                List<NodeGrid> localGrids = [];
+                List<Node> localNodes = [];
                 foreach (var (z,g) in gridsSnap)
                 {
                     bool wasGrid;
@@ -484,7 +481,7 @@ public partial class NodeHandler
                     }
                     finally { g.Lock.ExitWriteLock(); }
 
-                    var nodesDto = new Dictionary<string, NodeDto>();
+                    Dictionary<string, NodeDto> nodesDto = [];
                     foreach (var (coord,n) in nodesSnap)
                     {
                         NodeDto dto;
@@ -507,7 +504,7 @@ public partial class NodeHandler
                                 if (t != typeof(Node))
                                     objType = Node.RegisteredNameFor(t) ?? t.AssemblyQualifiedName ?? t.FullName;
                             }
-                            catch { scriptsSnap = new HashSet<int>(); }
+                            catch { scriptsSnap = []; }
                             dto = new NodeDto
                             {
                                 Coord = n.Coord,
@@ -612,17 +609,17 @@ public partial class NodeHandler
                 foreach (var name in areaDeletes)
                 {
                     var row = ctx.Areas.Find(name);
-                    if (row != null) ctx.Areas.Remove(row);
+                    if (row is not null) ctx.Areas.Remove(row);
                 }
                 foreach (var key in transDeletes)
                 {
                     var row = ctx.Transitions.Find(key.From.Area, key.From.X, key.From.Y, key.From.Z, key.To.Area, key.To.X, key.To.Y, key.To.Z);
-                    if (row != null) ctx.Transitions.Remove(row);
+                    if (row is not null) ctx.Transitions.Remove(row);
                 }
                 foreach (var key in doorDeletes)
                 {
                     var row = ctx.Doors.Find(key.Area, key.X, key.Y, key.Z);
-                    if (row != null) ctx.Doors.Remove(row);
+                    if (row is not null) ctx.Doors.Remove(row);
                 }
             }, onRollback: () =>
             {

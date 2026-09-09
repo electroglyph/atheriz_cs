@@ -1,7 +1,4 @@
 using Atheriz.Core.Concurrency;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Commands;
 
@@ -162,7 +159,7 @@ public static class CommandDispatcher
         }
         var (func, caller, eargs) = cmd.Execute(puppet, cmdArgs, matchedAlias);
         if (func is null) return null;
-        if (LagCheck != null && caller != null && LagCheck(caller)) return null;
+        if (LagCheck is not null && caller is not null && LagCheck(caller)) return null;
         if (immediate) return new Job(func, caller!, eargs);
         // queue
         var pool = _pool;

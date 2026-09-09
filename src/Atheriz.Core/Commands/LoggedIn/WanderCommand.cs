@@ -1,7 +1,4 @@
 // Port of atheriz/commands/loggedin/wander.py:75
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -17,23 +14,23 @@ public sealed class WanderCommand : Command
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         int count = 10;
-        if (pa != null && pa["count"] is int iv) count = iv;
-        else if (pa != null && int.TryParse(pa.GetString("count"), out var parsed)) count = parsed;
+        if (pa is not null && pa["count"] is int iv) count = iv;
+        else if (pa is not null && int.TryParse(pa.GetString("count"), out var parsed)) count = parsed;
         if (count <= 0) { go.Msg("Count must be a positive number."); return; }
         if (count > 1000) { go.Msg("Maximum count is 1000."); return; }
         var loc = go.ResolveLocationObject() as Node;
-        if (loc == null) { go.Msg("You must be in a room to spawn wanderers."); return; }
+        if (loc is null) { go.Msg("You must be in a room to spawn wanderers."); return; }
         var nh = NodeHandler.GetCurrent();
-        if (nh == null) { go.Msg("Could not find your current area."); return; }
+        if (nh is null) { go.Msg("Could not find your current area."); return; }
         var area = nh.GetArea(loc.Coord.Area);
-        if (area == null) { go.Msg("Could not find your current area."); return; }
+        if (area is null) { go.Msg("Could not find your current area."); return; }
         var grid = area.GetGrid(loc.Coord.Z);
-        if (grid == null) { go.Msg("Could not find the grid for your current z-level."); return; }
+        if (grid is null) { go.Msg("Could not find the grid for your current z-level."); return; }
         var sw = System.Diagnostics.Stopwatch.StartNew();
         for (int i = 0; i < count; i++)
         {
             var randomNode = grid.GetRandomNode();
-            if (randomNode == null) continue;
+            if (randomNode is null) continue;
             string name = $"Wanderer {Random.Shared.Next(1000, 9999)}";
             var npc = new WandererNpc(name);
             npc.MoveTo(randomNode);
@@ -56,12 +53,12 @@ public sealed class WanderCommand : Command
         public override void AtTick()
         {
             var loc = ResolveLocationObject() as Node;
-            if (loc == null) return;
+            if (loc is null) return;
             var link = loc.GetRandomLink();
-            if (link == null) return;
+            if (link is null) return;
             var nh = NodeHandler.GetCurrent();
             var node = nh?.GetNode(link.Coord);
-            if (node == null) return;
+            if (node is null) return;
             var oldArea = loc.Coord.Area;
             var newArea = node.Coord.Area;
             if (oldArea != newArea)

@@ -200,7 +200,7 @@ public class ObjectRegressionTests
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Puppet.cs");
         var region = SourceScan.Region(src, "public bool Unpuppet(Session session)");
         Assert.Equal(1, SourceScan.Count(region, "TryPopPuppetEntry"));
-        Assert.Contains("target.Session != null", region);
+        Assert.Contains("target.Session is not null", region);
     }
 
     // AtDisconnect puppet unwind must run inside the session lock.

@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/give.py:189
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -13,9 +11,9 @@ public sealed class GiveCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { go.Msg(PrintHelp()); return; }
+        if (pa is null) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject();
-        if (loc == null) { CommandHelpers.MsgNo(go); return; }
+        if (loc is null) { CommandHelpers.MsgNo(go); return; }
         var tokens = pa.GetList("args");
         if (tokens.Count == 0) { go.Msg("Give it to whom?"); return; }
         string? objName = null, targetName = null;
@@ -49,7 +47,7 @@ public sealed class GiveCommand : Command
                     if (locMatches.Count > 0) { foundObj = candObj; foundTgt = candTgt; break; }
                 }
             }
-            if (foundObj != null) { objName = foundObj; targetName = foundTgt; }
+            if (foundObj is not null) { objName = foundObj; targetName = foundTgt; }
             else
             {
                 var lastObj = string.Join(" ", tokens.Take(tokens.Count - 1));
@@ -70,7 +68,7 @@ public sealed class GiveCommand : Command
                 }
             }
         }
-        if (objName == null || targetName == null) { go.Msg("Give it to whom?"); return; }
+        if (objName is null || targetName is null) { go.Msg("Give it to whom?"); return; }
         List<GameObject> tgtMatches = CommandHelpers.SearchIn(loc, targetName, go);
         if (tgtMatches.Count == 0) { go.Msg($"Could not find '{targetName}' here."); return; }
         if (tgtMatches.Count > 1) { CommandHelpers.MsgMultipleMatchesFound(go, targetName); return; }

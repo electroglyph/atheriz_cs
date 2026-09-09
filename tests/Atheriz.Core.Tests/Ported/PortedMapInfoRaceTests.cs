@@ -27,7 +27,7 @@ public class PortedMapInfoRaceTests
         var t1 = new Thread(RunListener); var t2 = new Thread(RunMapable);
         t1.Start(); t2.Start(); t1.Join(5000); t2.Join(5000);
         var snap = handler.Snapshot();
-        Assert.Single(snap.Where(kv => kv.Key == ("race-area",0)));
+        Assert.Single(snap, kv => kv.Key == ("race-area",0));
         var mi = snap[("race-area",0)];
         Assert.Contains(listener.Id, mi.Listeners.Keys);
         Assert.Contains(mapable.Id, mi.Objects.Keys);
@@ -46,7 +46,7 @@ public class PortedMapInfoRaceTests
         t1.Start(); t2.Start(); t1.Join(5000); t2.Join(5000);
         Assert.Equal(2, results.Count);
         Assert.Same(results[0], results[1]);
-        Assert.Single(handler.Snapshot().Where(kv => kv.Key.Item1=="slow-area"));
+        Assert.Single(handler.Snapshot(), kv => kv.Key.Item1=="slow-area");
     }
 
     [Fact]

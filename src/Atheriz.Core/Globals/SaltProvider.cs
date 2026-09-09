@@ -1,4 +1,3 @@
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Globals;
 
@@ -98,10 +97,10 @@ public static class SaltProvider
                 // disk, silently invalidating every password hash on restart.
                 // Re-read (or throw) instead of trusting the write.
                 var peer = TryReadSalt(saltFile);
-                if (peer != null) { Store(key, isDefault, peer); return peer; }
+                if (peer is not null) { Store(key, isDefault, peer); return peer; }
                 try { File.WriteAllText(saltFile, val); } catch (Exception) { }
                 var back = TryReadSalt(saltFile);
-                if (back == null || !CryptographicEquals(back, val))
+                if (back is null || !CryptographicEquals(back, val))
                     throw new InvalidOperationException($"Salt fallback write to {saltFile} could not be verified; refusing to cache an unverified salt.");
                 Store(key, isDefault, val);
                 return val;

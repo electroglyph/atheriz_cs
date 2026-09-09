@@ -1,8 +1,4 @@
-using System.Text.Json;
-using Atheriz.Core.Commands;
-using Atheriz.Core.Globals;
 using Atheriz.Core.Persistence.Dto;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Objects;
 
@@ -166,7 +162,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             try
             {
                 // Port of base_obj.py:790-801 self.msg(map={map, pos, symbol, legend, min_x, max_y, area, show_legend})
-                var payload = new Dictionary<string, object?>
+                Dictionary<string, object?> payload = new()
                 {
                     ["map"] = mapStr,
                     ["pos"] = new List<int> { pos.relX, pos.relY },
@@ -184,7 +180,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 // succeeded. Python (base_obj.py:813+) has no try/catch here,
                 // so a failed send raises before the stamp line; the C#
                 // swallow-then-stamp turned failures into success stamps.
-                if (conn != null)
+                if (conn is not null)
                 {
                     conn.SendCommand("map", new List<object?> { payload }, null);
                     sent = true;
@@ -207,7 +203,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         {
             try
             {
-                var payload = new Dictionary<string, object?>
+                Dictionary<string, object?> payload = new()
                 {
                     ["area"] = area,
                     ["legend"] = entries.Select(e => new List<object?> { e.sym, e.desc, new List<int> { e.coord.x, e.coord.y } }).ToList(),
@@ -216,7 +212,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 Session? sess = null;
                 try { sess = Session; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLegendUpdate: " + logEx.Message, "GameObject"); }
                 var conn = sess?.Connection;
-                if (conn != null)
+                if (conn is not null)
                     conn.SendCommand("legend", new List<object?> { payload }, null);
             }
             catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLegendUpdate: " + logEx.Message, "GameObject"); }
@@ -236,7 +232,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         {
             double baseVal = _secondsPlayed;
             var sess = _session;
-            if (sess != null && sess.ConnTime > 0)
+            if (sess is not null && sess.ConnTime > 0)
             {
                 double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - sess.ConnTime; // Port of base_obj.py:662 time.time() - session.conn_time
                 if (elapsed > 0) baseVal += elapsed;
@@ -263,7 +259,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     // Null-tolerant (hasattr equivalent): reflection/test teardown can force
     // a null field, mirroring Python's deleted-attr guard (test_tags.py:187).
-    public HashSet<string> TagsSnapshot => Read(() => _tags == null ? new HashSet<string>() : new HashSet<string>(_tags));
+    public HashSet<string> TagsSnapshot => Read(() => _tags is null ? [] : new HashSet<string>(_tags));
     public HashSet<int> ContentsSnapshot => Read(() => new HashSet<int>(_contents));
     public HashSet<int> ScriptsSnapshot => Read(() => new HashSet<int>(_scripts));
     public List<int> ChannelsSnapshot => Read(() => new List<int>(_channels));
@@ -337,7 +333,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         return Read(() =>
         {
             var set = new HashSet<string>(tags);
-            var cur = _tags ?? new HashSet<string>();
+            var cur = _tags ?? [];
             return all ? set.IsSubsetOf(cur) : set.Overlaps(cur);
         });
     }
@@ -349,7 +345,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // --- channel subscription (port of base_obj.subscribe / unsubscribe) ---
     public void Subscribe(Channel channel)
     {
-        if (channel == null) return;
+        if (channel is null) return;
         if (channel.IsDeleted) return;
         bool already;
         _lock.EnterReadLock();
@@ -394,10 +390,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             try
             {
                 var cmd = channel.GetCommand();
-                if (cmd != null)
+                if (cmd is not null)
                 {
                     var cs = InternalCmdSet;
-                    if (cs == null) { cs = new Commands.CmdSet(); InternalCmdSet = cs; }
+                    if (cs is null) { cs = new Commands.CmdSet(); InternalCmdSet = cs; }
                     try { cs.Add(cmd); }
                     catch (InvalidOperationException) { /* already installed */ }
                 }
@@ -419,7 +415,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         finally { _lock.ExitWriteLock(); }
     }
     public void Unsubscribe(Channel channel)
-    {        if (channel == null) return;
+    {        if (channel is null) return;
         bool had;
         _lock.EnterReadLock();
         try { had = _channels.Contains(channel.Id); }
@@ -442,7 +438,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         {
             // Port of base_obj.py:775-777: drop the channel command again.
             // Channel locks only (see Subscribe) — never under the peer lock.
-            try { var cmd = channel.GetCommand(); if (cmd != null) InternalCmdSet?.Remove(cmd); }
+            try { var cmd = channel.GetCommand(); if (cmd is not null) InternalCmdSet?.Remove(cmd); }
             catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unsubscribe: " + logEx.Message, "GameObject"); }
         }
     }
@@ -507,7 +503,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // --- script attachment (port of base_obj.add_script/remove_script/has_script_type/get_scripts_by_type) ---
     public void AddScript(Script script)
     {
-        if (script == null) return;
+        if (script is null) return;
         script.InstallHooks(this);
     }
     public void AddScript(int scriptId)
@@ -517,7 +513,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     public void RemoveScript(Script script)
     {
-        if (script == null) return;
+        if (script is null) return;
         script.RemoveHooks(this);
     }
     public void RemoveScript(int scriptId)
@@ -554,10 +550,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         HashSet<int> ids;
         using (ReadScope())
         {
-            if (_scripts.Count==0) return new List<Script>(); ids = new HashSet<int>(_scripts);
+            if (_scripts.Count==0) return []; ids = new HashSet<int>(_scripts);
         }
         string needle = scriptType.ToLowerInvariant();
-        var list = new List<Script>();
+        List<Script> list = [];
         foreach (var id in ids)
         {
             var objs = Globals.ObjectRegistry.Get(id);
@@ -650,11 +646,11 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         // with a loud log — never silently weakened, never executed from the save file.
         o._locks.Clear();
         o._lockPolicies.Clear();
-        if (dto.Locks != null)
+        if (dto.Locks is not null)
         {
             foreach (var ld in dto.Locks)
             {
-                if (ld == null || string.IsNullOrEmpty(ld.Name)) continue;
+                if (ld is null || string.IsNullOrEmpty(ld.Name)) continue;
                 foreach (var raw in (ld.Policy ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries))
                 {
                     var pol = raw.Trim();
@@ -795,10 +791,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // Callers that already hold the target write lock mutate via the raw helpers below.
     public void AddFollower(int id) => Write(() => { if (_followers.Add(id)) _flags.IsModified = true; });
     public void RemoveFollower(int id) => Write(() => { if (_followers.Remove(id)) _flags.IsModified = true; });
-    public void ClearFollowersExcept(HashSet<int>? keep = null) => Write(() => { if (_followers.RemoveWhere(id => keep == null || !keep.Contains(id)) > 0) _flags.IsModified = true; });
+    public void ClearFollowersExcept(HashSet<int>? keep = null) => Write(() => { if (_followers.RemoveWhere(id => keep is null || !keep.Contains(id)) > 0) _flags.IsModified = true; });
     internal void AddFollowerRawNoLock(int id) { if (_followers.Add(id)) _flags.IsModified = true; }
     internal void RemoveFollowerRawNoLock(int id) { if (_followers.Remove(id)) _flags.IsModified = true; }
-    internal void ClearFollowersRawNoLock(HashSet<int>? keep = null) { if (_followers.RemoveWhere(id => keep == null || !keep.Contains(id)) > 0) _flags.IsModified = true; }
+    internal void ClearFollowersRawNoLock(HashSet<int>? keep = null) { if (_followers.RemoveWhere(id => keep is null || !keep.Contains(id)) > 0) _flags.IsModified = true; }
 
     // Typed channel-id ops (F001: replaces _channels reflection in GroupExtensions).
     internal void AddChannelId(int chId) => Write(() => { if (!_channels.Contains(chId)) { _channels.Add(chId); _flags.IsModified = true; } });

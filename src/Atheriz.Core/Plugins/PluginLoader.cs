@@ -54,7 +54,7 @@ public sealed class PluginLoader : IDisposable
     /// <summary>Registered replacements: base type → replacement type.</summary>
     public Dictionary<Type, Type> Replacements { get; } = new();
 
-    public bool IsLoaded => _loaded != null;
+    public bool IsLoaded => _loaded is not null;
 
     /// <summary>
     /// Port of <c>reloader._discover_new_game_modules + _reload_game_folder_modules</c> + <c>setup_game_folder</c> injection loop.
@@ -84,7 +84,7 @@ public sealed class PluginLoader : IDisposable
         }
 
         // Unload any previous ALC first — overwriting _alc without unloading leaks it.
-        if (_loaded != null) Unload();
+        if (_loaded is not null) Unload();
 
         // Create collectible ALC — mirrors importlib.reload isolation + Python's two-pass reload.
         // The Resolving handler serves plugin-local deps from beside the plugin dll.
@@ -184,7 +184,7 @@ public sealed class PluginLoader : IDisposable
     /// </summary>
     internal static bool IsValidReplacement(Type? baseType, Type? replacementType)
     {
-        if (baseType == null || replacementType == null) return false;
+        if (baseType is null || replacementType is null) return false;
         if (baseType == replacementType) return true;
         try { return baseType.IsAssignableFrom(replacementType); }
         catch { return false; }
@@ -198,7 +198,7 @@ public sealed class PluginLoader : IDisposable
     {
         Replacements.Clear();
         _loaded = null;
-        if (_alc != null)
+        if (_alc is not null)
         {
             // keep a weak handle so the unload can be VERIFIED.
             // Anything still rooting the ALC (a live patched instance, a
@@ -216,7 +216,7 @@ public sealed class PluginLoader : IDisposable
     /// (no live roots remain). False means something still pins it — treat a
     /// persistent false as a plugin-assembly leak, not a clean unload.
     /// </summary>
-    public bool IsUnloaded => _unloadedAlcRef == null || !_unloadedAlcRef.IsAlive;
+    public bool IsUnloaded => _unloadedAlcRef is null || !_unloadedAlcRef.IsAlive;
 
     /// <summary>
     /// Unloads then pumps GC/finalizers (bounded) until the ALC dies.

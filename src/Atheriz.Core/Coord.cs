@@ -17,7 +17,7 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
         // Form "Area(X,Y,Z)" (mirrors ToString()) or "(Area,X,Y,Z)" (search form).
         // The LAST open paren starts the numeric group so area names may
         // themselves contain parens ("My (old) Area(1,2,3)").
-        if (s.EndsWith(")"))
+        if (s.EndsWith(")", StringComparison.Ordinal))
         {
             int open = s.LastIndexOf('(');
             if (open < 0) return false;

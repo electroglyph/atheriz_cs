@@ -1,7 +1,4 @@
 // Port of atheriz/commands/loggedin/channel.py:131
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -30,7 +27,7 @@ public sealed class ChannelCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa == null) { caller.Msg(PrintHelp()); return; }
+        if (pa is null) { caller.Msg(PrintHelp()); return; }
         if (pa.GetBool("list"))
         {
             var channels = ObjectRegistry.FilterBy(x => x.IsChannel);
@@ -56,7 +53,7 @@ public sealed class ChannelCommand : Command
             }
             channel = ChannelCache.TryGetValue(nameLower, out var c) ? c : null;
         }
-        if (channel == null)
+        if (channel is null)
         {
             var result = ObjectRegistry.FilterBy(x => x.IsChannel && x.Name.Equals(chName, StringComparison.OrdinalIgnoreCase));
             if (result.Count == 0) { go.Msg($"Channel {chName} not found."); return; }

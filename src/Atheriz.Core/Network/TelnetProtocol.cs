@@ -6,8 +6,6 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Globals;
 
 namespace Atheriz.Core.Network;
 
@@ -72,7 +70,7 @@ public class TelnetConnection : BaseConnection
                 foreach (var src in itw0.BufferSources)
                 {
                     var b = src.GetWriteBufferSize();
-                    if (b != null) return b;
+                    if (b is not null) return b;
                 }
             }
         }
@@ -108,7 +106,7 @@ public class TelnetConnection : BaseConnection
     private bool CheckWriteBufferExceeded(string suffix = "")
     {
         var buf = GetWriteBufferSize();
-        if (buf != null && buf > _settings.TelnetMaxPendingBytes)
+        if (buf is not null && buf > _settings.TelnetMaxPendingBytes)
         {
             Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] closing {ClientHost}: write buffer {buf} > {_settings.TelnetMaxPendingBytes}{suffix}");
             Close();
@@ -210,7 +208,7 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
 
         if (cmd == "text" || cmd == "prompt")
         {
-            var text = args != null && args.Count > 0 ? args[0]?.ToString() ?? "" : "";
+            var text = args?.FirstOrDefault()?.ToString() ?? "";
             if (string.IsNullOrEmpty(text)) return;
             var nb = Encoding.UTF8.GetByteCount(text);
             // No top buffer check here: OffloopWrite self-checks before AND after
@@ -230,7 +228,7 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
         }
         else if (cmd == "prompt_masked")
         {
-            var text = args != null && args.Count > 0 ? args[0]?.ToString() ?? "" : "";
+            var text = args?.FirstOrDefault()?.ToString() ?? "";
             var nb = !string.IsNullOrEmpty(text) ? Encoding.UTF8.GetByteCount(text) : 0;
             if (CheckWriteBufferExceeded()) return;
             if (nb != 0)
@@ -277,7 +275,7 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
         try
         {
             if (IsOnLoopThread()) WriterClose();
-            else { var _t = Task.Run((Action)WriterClose); _ = _t.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] Close fault: {t.Exception}"); }, TaskScheduler.Default); }
+            else { var _t = Task.Run((Action)WriterClose); _ = _t.ContinueWith(t => { if (t.IsFaulted && t.Exception is not null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] Close fault: {t.Exception}"); }, TaskScheduler.Default); }
         }
         catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error closing connection: {e}"); }
     }
@@ -321,7 +319,7 @@ public sealed class TelnetStreamWriter : ITelnetWriter
 {
     private readonly Stream _stream;
     private readonly TcpClient _client;
-    private readonly object _writeLock = new object();
+    private readonly object _writeLock = new();
     private int _pendingWriteBytes; // buffered-not-flushed bytes (see Write)
     private Action<int,int>? _nawsCallback;
     public TelnetStreamWriter(Stream stream, TcpClient client)
@@ -474,7 +472,7 @@ public sealed class TelnetProtocol : BaseProtocol
             var tail = buf.ToString(head, buf.Length - head);
             if (tail != "\r")
             {
-                if (tail.EndsWith("\r")) tail = tail.Substring(0, tail.Length - 1);
+                if (tail.EndsWith("\r", StringComparison.Ordinal)) tail = tail.Substring(0, tail.Length - 1);
                 if (!string.IsNullOrEmpty(tail)) yield return tail;
             }
         }
@@ -548,17 +546,17 @@ public sealed class TelnetProtocol : BaseProtocol
         {
             // Typed service resolution (covers WebApplication and IHost).
             if (app is IHost typedHost) sp = typedHost.Services;
-            if (sp != null)
+            if (sp is not null)
             {
                 try { settings = sp.GetRequiredService<AtherizSettings>(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
                 try { lifetime = sp.GetRequiredService<IHostApplicationLifetime>(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
                 try { manager = sp.GetService<ConnectionManager>(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
             }
-            if (lifetime == null && host != null) lifetime = host.Services.GetService<IHostApplicationLifetime>();
+            if (lifetime is null && host is not null) lifetime = host.Services.GetService<IHostApplicationLifetime>();
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
 
-        if (lifetime == null)
+        if (lifetime is null)
         {
             // No lifetime available — cannot start background listener; log and return
             Atheriz.Core.AtherizLogger.LogWarning("[Telnet] No IHostApplicationLifetime available — telnet server not started");
@@ -578,7 +576,7 @@ public sealed class TelnetProtocol : BaseProtocol
                 if (!IPAddress.TryParse(settings.TelnetInterface, out bindAddr!)) throw new InvalidOperationException($"Unparseable TelnetInterface '{settings.TelnetInterface}'; refusing to bind an unintended interface.");
                 listener = new TcpListener(bindAddr, settings.TelnetPort);
                 var tlsCert = settings.TelnetTlsEnabled ? BuildTelnetSslContext(settings) : null;
-                if (tlsCert != null) Atheriz.Core.AtherizLogger.LogInformation($"SSL is enabled for telnet (cert: {settings.SslCertFile}) with auto-detection for plaintext clients");
+                if (tlsCert is not null) Atheriz.Core.AtherizLogger.LogInformation($"SSL is enabled for telnet (cert: {settings.SslCertFile}) with auto-detection for plaintext clients");
                 else if (settings.TelnetTlsEnabled) Atheriz.Core.AtherizLogger.LogWarning("TELNET_TLS_ENABLED is on but no usable cert — running plaintext");
                 Atheriz.Core.AtherizLogger.LogInformation($"Starting Telnet Protocol on {settings.TelnetInterface}:{settings.TelnetPort}");
                 listener.Start();
@@ -600,7 +598,7 @@ public sealed class TelnetProtocol : BaseProtocol
                         try { client.Close(); } catch { }
                         continue;
                     }
-                    var _ht = Task.Run(() => HandleTelnetClientAsync(client, tlsCert, manager, settings, lifetime)); _ = _ht.ContinueWith(t => { if (t.IsFaulted && t.Exception != null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] HandleClient fault: {t.Exception}"); }, TaskScheduler.Default);
+                    var _ht = Task.Run(() => HandleTelnetClientAsync(client, tlsCert, manager, settings, lifetime)); _ = _ht.ContinueWith(t => { if (t.IsFaulted && t.Exception is not null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] HandleClient fault: {t.Exception}"); }, TaskScheduler.Default);
                 }
             }
             catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] server failed: {ex}"); }
@@ -613,7 +611,7 @@ public sealed class TelnetProtocol : BaseProtocol
     {
         // In Python, lifespan is an asynccontextmanager; in C# we simulate via Func<object, Task>
         // The wrapper, when invoked, will:
-        // - if previous != null, await previous as context manager (call it)
+        // - if previous is not null, await previous as context manager (call it)
         // - start telnet server (stub), yield, then stop server
         // For test purposes, we just ensure previous is invoked and wrapper is callable.
         return new TelnetLifespanComposed(previous, settings);
@@ -633,7 +631,7 @@ public sealed class TelnetProtocol : BaseProtocol
             // Simulate lifespan composition: run previous if exists, then inner, then cleanup.
             // Previous lifespans are opaque doubles; composition only preserves
             // the reference (pinned by MountingTelnetPreservesPreviousLifespan).
-            if (_previous != null)
+            if (_previous is not null)
             {
                 try { /* preserve only */ }
                 catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetLifespanComposed.Invoke: " + logEx.Message, "TelnetLifespanComposed"); }
@@ -664,7 +662,7 @@ public sealed class TelnetProtocol : BaseProtocol
         Stream netStream = client.GetStream();
         Stream stream = netStream;
         SslStream? sslStream = null;
-        if (tlsCert != null)
+        if (tlsCert is not null)
         {
             try
             {
@@ -700,7 +698,7 @@ public sealed class TelnetProtocol : BaseProtocol
         // void OnNaws(int rows, int cols) { if (rows <= 0 || cols <= 0) return; var (clampedRows, clampedCols) = ClampNaws(rows, cols); connection.Session.TermWidth = clampedCols; connection.Session.TermHeight = clampedRows; }
         // writer.SetExtCallback(31, OnNaws);
         // try { writer.Iac(253, 31); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); }
-        manager.Dispatch(connection, "client_ready", new List<object?>(), new Dictionary<string, object?>());
+        manager.Dispatch(connection, "client_ready", [], []);
         try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine)) { if (rawLine is null) { if (ThrottleWindow.ShouldLog(_overlongDropLog, _overlongDropLock, host, 5.0)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Filter stray IAC bytes (0xFF) that telnet clients may send even without DO (e.g., telnetlib pre-negotiation). When decoded as UTF8, 0xFF becomes U+FFFD.
             if (line.Length > 0 && (line[0] == '\uFFFD' || line[0] == (char)255 || line.Contains("\uFFFD"))) {
                 // Strip leading IAC sequences: find first alphabetic char of actual command
@@ -718,7 +716,7 @@ public sealed class TelnetProtocol : BaseProtocol
                 logLine = parts.Length >= 2 ? $"connect {parts[1]} ***" : "connect ***";
             }
             Atheriz.Core.AtherizLogger.LogDebug($"[Telnet] recv '{logLine}' from {connId} host={host}");
-            manager.Dispatch(connection, "text", new List<object?> { line }, new Dictionary<string, object?>()); } }
+            manager.Dispatch(connection, "text", new List<object?> { line }, []); } }
         catch (OperationCanceledException) { } catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error in shell for {connId}: {e}"); }
         finally { manager.Disconnect(connection); try { writer.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); } try { client.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); } }
     }

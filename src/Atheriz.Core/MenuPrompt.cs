@@ -1,5 +1,4 @@
 // Port of atheriz/menu.py:153-156 prompt timeout loop shared by Menu.Run and MenuRunner.RunMenuAsync
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core;
 

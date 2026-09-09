@@ -1,11 +1,7 @@
 // Port of atheriz/initial_setup.py:48 do_setup
 using Microsoft.EntityFrameworkCore;
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
-using Atheriz.Core.Commands;
 using Atheriz.Core.Commands.UnloggedIn;
 using Atheriz.Core.Persistence;
-using Atheriz.Core.Settings;
 
 namespace Atheriz.Core;
 
@@ -56,7 +52,7 @@ public static class InitialSetup
         // Port of initial_setup.py:49 logger.info — not duplicated to stdout (new.py:740 already prints)
         // Ensure savePath absolute for guard
         var absSave = Path.GetFullPath(savePath);
-        var absSecret = secretPath != null ? Path.GetFullPath(secretPath) : Path.Combine(Path.GetDirectoryName(absSave) ?? ".", "secret");
+        var absSecret = secretPath is not null ? Path.GetFullPath(secretPath) : Path.Combine(Path.GetDirectoryName(absSave) ?? ".", "secret");
         Directory.CreateDirectory(absSecret);
         Utils.FsUtil.TryChmod0700(absSecret);
 
@@ -119,7 +115,7 @@ public static class InitialSetup
         for (int z = 0; z < LIMBO_GRID; z++)
         {
             var grid = area.GetGrid(z);
-            if (grid == null) continue;
+            if (grid is null) continue;
             for (int x = 0; x < LIMBO_GRID; x++)
                 for (int y = 0; y < LIMBO_GRID; y++)
                 {
@@ -129,7 +125,7 @@ public static class InitialSetup
                         int nx = x + d.dx, ny = y + d.dy, nz = z + d.dz;
                         if (nx < 0 || nx >= LIMBO_GRID || ny < 0 || ny >= LIMBO_GRID || nz < 0 || nz >= LIMBO_GRID) continue;
                         var ng = d.dz == 0 ? grid : area.GetGrid(nz);
-                        if (ng == null) continue;
+                        if (ng is null) continue;
                         if (!ng.Nodes.TryGetValue((nx, ny), out var neighbor)) continue;
                         // add_link both directions (mirrors Python double add_link)
                         node.AddLink(new NodeLink(d.name, new Coord(LIMBO_AREA, nx, ny, nz), new List<string>{d.alias}));
@@ -172,7 +168,7 @@ public static class InitialSetup
             u = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME")?.Trim();
             if (string.IsNullOrWhiteSpace(u))
             {
-                if (promptInput != null)
+                if (promptInput is not null)
                 {
                     // Explicit Console.Out (not Logger): interactive prompts must stay
                     // on stdout interleaved with stdin reads, mirroring print()/input().
@@ -182,7 +178,7 @@ public static class InitialSetup
             }
             else u = u!.Trim();
         }
-        else if (u != null) u = u.Trim();
+        else if (u is not null) u = u.Trim();
 
         bool skipSuperuser = false;
         if (string.IsNullOrWhiteSpace(u))
@@ -199,7 +195,7 @@ public static class InitialSetup
             p = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD")?.Trim();
             if (string.IsNullOrWhiteSpace(p))
             {
-                if (promptInput != null)
+                if (promptInput is not null)
                 {
                     Console.Out.Write("Enter superuser password: ");
                     // simple no-echo fallback
@@ -230,14 +226,14 @@ public static class InitialSetup
                 skipSuperuser = true;
             }
         }
-        else if (p != null) p = p.Trim();
+        else if (p is not null) p = p.Trim();
 
         if (!skipSuperuser)
         {
             var errU = Validation.ValidateAccountName(u!);
-            if (errU != null) throw new ArgumentException($"Invalid superuser username: {errU}");
+            if (errU is not null) throw new ArgumentException($"Invalid superuser username: {errU}");
             var errP = Validation.ValidatePassword(p!);
-            if (errP != null) throw new ArgumentException($"Invalid superuser password: {errP}");
+            if (errP is not null) throw new ArgumentException($"Invalid superuser password: {errP}");
         }
 
         // Single shared context + transaction for the whole seed (atomic checkpoint):
@@ -272,7 +268,7 @@ public static class InitialSetup
         var alarmCoord = new Coord(LIMBO_AREA, 0, 0, LIMBO_GRID - 1);
         var alarmNode = nh.GetNode(alarmCoord);
         // If not found via handler, fallback to area grid directly
-        if (alarmNode == null)
+        if (alarmNode is null)
         {
             var g = area.GetGrid(LIMBO_GRID - 1);
             g?.Nodes.TryGetValue((0,0), out alarmNode);
@@ -308,12 +304,12 @@ public static class InitialSetup
         ObjectRegistry.AddObject(character);
         var homeCoord = settings.DefaultHome; // limbo 4,4,4
         var home = nh.GetNode(homeCoord);
-        if (home == null)
+        if (home is null)
         {
             var hg = area.GetGrid(homeCoord.Z);
             hg?.Nodes.TryGetValue((homeCoord.X, homeCoord.Y), out home);
         }
-        if (home != null)
+        if (home is not null)
         {
             character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord);
             character.PrivilegeLevel = Privilege.Admin;
@@ -325,10 +321,10 @@ public static class InitialSetup
         button.Desc = "A large button that glows with an ominous red light. Wonder if it does anything...";
         button.Aliases = new List<string>{"button"};
         button.AddLock("get", (GameObject x) => x.IsBuilder, LockPolicies.Builder);
-        if (button.ExternalCmdSet == null) button.ExternalCmdSet = new Commands.CmdSet();
+        if (button.ExternalCmdSet is null) button.ExternalCmdSet = new Commands.CmdSet();
         try { button.ExternalCmdSet.Add(new PushCommand()); } catch { }
         ObjectRegistry.AddObject(button);
-        if (home != null) try { button.MoveTo(home); } catch {}
+        if (home is not null) try { button.MoveTo(home); } catch {}
 
         account.AddCharacter(character);
         var chan = Channel.Create("Server");

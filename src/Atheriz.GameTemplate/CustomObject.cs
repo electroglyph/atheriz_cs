@@ -2,10 +2,8 @@
 // Dynamically generated via get_class_hooks (atheriz/utils.py:701) — mirrors test/object.py full hook list
 #nullable enable
 namespace MyGame;
-using System.Text.Json;
-using Atheriz.Core.Objects;
-using Atheriz.Core;
 using Atheriz.Core.Globals;
+using System.Text.Json;
 /// <summary>Custom Object — mirrors test/object.py. Override methods below to customize behavior.</summary>
 public class CustomObject : GameObject
 {

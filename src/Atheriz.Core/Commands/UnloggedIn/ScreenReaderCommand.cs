@@ -1,5 +1,4 @@
 // Port of atheriz/commands/unloggedin/screenreader.py:19 — also used loggedin via loggedin/cmdset.py import (faithful reuse)
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
 
@@ -16,7 +15,7 @@ public sealed class ScreenReaderCommand : Command
         // via ISessionProvider, so this branch handles every caller that has a
         // session; exotic doubles without the interface get no session.
         Session? sess = (caller as ISessionProvider)?.Session;
-        if (sess != null)
+        if (sess is not null)
         {
             sess.ScreenReader = !sess.ScreenReader;
             try { sess.Connection?.SendCommand("screenreader", sess.ScreenReader); } catch (Exception) { }

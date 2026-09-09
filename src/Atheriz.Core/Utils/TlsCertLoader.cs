@@ -41,8 +41,8 @@ public static class TlsCertLoader
                         for (int i = 1; i < certBlocks.Count; i++)
                             bundle.Add(X509Certificate2.CreateFromPem(certBlocks[i]));
                         var pfx = bundle.Export(X509ContentType.Pfx);
-                        if (pfx == null) return leaf;
-                        return new X509Certificate2(pfx, (string?)null,
+                        if (pfx is null) return leaf;
+                        return X509CertificateLoader.LoadPkcs12(pfx, null,
                             X509KeyStorageFlags.EphemeralKeySet);
                     }
                     catch { return leaf; }
@@ -61,7 +61,7 @@ public static class TlsCertLoader
         {
             try { return RequireKey(X509Certificate2.CreateFromPemFile(certFile), certFile); }
             catch (System.Security.Cryptography.CryptographicException) { throw; }
-            catch { return RequireKey(new X509Certificate2(certFile), certFile); }
+            catch { return RequireKey(X509CertificateLoader.LoadCertificateFromFile(certFile), certFile); }
         }
     }
 
@@ -83,7 +83,7 @@ public static class TlsCertLoader
     /// </summary>
     private static List<string> SplitPemBlocks(string text, string fragment)
     {
-        var blocks = new List<string>();
+        List<string> blocks = [];
         int idx = 0;
         while (true)
         {

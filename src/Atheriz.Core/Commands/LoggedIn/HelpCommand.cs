@@ -34,7 +34,7 @@ public sealed class HelpCommand : Command
             // local commands from location/inventory (single session lookup above)
             if (caller is Objects.GameObject go)
             {
-                var locals = new List<Command>();
+                List<Command> locals = [];
                 foreach (var set in CommandHelpers.LocalVerbSets(go))
                     foreach (var lc in set.GetAll())
                         if (!lc.Hide && lc.Access(go) && locals.All(l => !ReferenceEquals(l, lc)))
@@ -49,14 +49,14 @@ public sealed class HelpCommand : Command
             return;
         }
         var cmd = CommandRegistry.LoggedIn.Get(query!);
-        if (cmd != null && cmd.Access(caller) && !cmd.Hide) { caller.Msg(PrintHelpFor(cmd)); return; }
+        if (cmd is not null && cmd.Access(caller) && !cmd.Hide) { caller.Msg(PrintHelpFor(cmd)); return; }
         // search local
         if (caller is Objects.GameObject go2)
         {
             foreach (var set in CommandHelpers.LocalVerbSets(go2))
             {
                 var c = set.Get(query!);
-                if (c != null && c.Access(go2) && !c.Hide) { caller.Msg(PrintHelpFor(c)); return; }
+                if (c is not null && c.Access(go2) && !c.Hide) { caller.Msg(PrintHelpFor(c)); return; }
                 foreach (var cc in set.GetAll()) if (cc.Aliases.Any(a => a.Equals(query, StringComparison.OrdinalIgnoreCase)) && cc.Access(go2) && !cc.Hide) { caller.Msg(PrintHelpFor(cc)); return; }
             }
         }

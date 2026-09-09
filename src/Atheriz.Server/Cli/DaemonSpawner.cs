@@ -1,4 +1,3 @@
-using System.Diagnostics;
 
 namespace Atheriz.Server.Cli;
 
@@ -76,7 +75,7 @@ public static class DaemonSpawner
             try
             {
                 using var proc = Process.Start(psi);
-                if (proc != null)
+                if (proc is not null)
                 {
                     pidStr = proc.StandardOutput.ReadToEnd().Trim();
                     proc.WaitForExit(2000);

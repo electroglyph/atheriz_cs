@@ -67,7 +67,7 @@ public static class Conjugate
         static IEnumerable<string> ReadLines(StreamReader reader)
         {
             string? line;
-            while ((line = reader.ReadLine()) != null) yield return line;
+            while ((line = reader.ReadLine()) is not null) yield return line;
         }
         // The module table ships embedded in the assembly (the equivalent of
         // Python's os.path.dirname(__file__)/verbs.txt) and always wins, so
@@ -76,7 +76,7 @@ public static class Conjugate
         try
         {
             using var stream = typeof(Conjugate).Assembly.GetManifestResourceStream("Atheriz.Core.Objects.VerbConjugation.verbs.txt");
-            if (stream != null)
+            if (stream is not null)
             {
                 using var reader = new StreamReader(stream);
                 ParseLines(ReadLines(reader));
@@ -94,7 +94,7 @@ public static class Conjugate
                 Path.Combine(AppContext.BaseDirectory, "verbs.txt"),
             };
             string? found = candidatePaths.FirstOrDefault(File.Exists);
-            if (found != null)
+            if (found is not null)
             {
                 try
                 {
@@ -118,19 +118,18 @@ public static class Conjugate
             };
             string[] RegularRow(string baseVerb)
             {
-                var third = baseVerb.EndsWith("s") || baseVerb.EndsWith("x") || baseVerb.EndsWith("z") || baseVerb.EndsWith("ch") || baseVerb.EndsWith("sh") ? baseVerb + "es" : baseVerb + "s";
-                if (baseVerb.EndsWith("y") && baseVerb.Length > 1 && !"aeiou".Contains(char.ToLower(baseVerb[^2])))
+                var third = baseVerb.EndsWith("s", StringComparison.Ordinal) || baseVerb.EndsWith("x", StringComparison.Ordinal) || baseVerb.EndsWith("z", StringComparison.Ordinal) || baseVerb.EndsWith("ch", StringComparison.Ordinal) || baseVerb.EndsWith("sh", StringComparison.Ordinal) ? baseVerb + "es" : baseVerb + "s";
+                if (baseVerb.EndsWith("y", StringComparison.Ordinal) && baseVerb.Length > 1 && !"aeiou".Contains(char.ToLower(baseVerb[^2])))
                     third = baseVerb[..^1] + "ies";
-                var prog = baseVerb.EndsWith("e") ? baseVerb[..^1] + "ing" : baseVerb + "ing";
-                if (baseVerb.EndsWith("e") && baseVerb.EndsWith("ie")) prog = baseVerb[..^2] + "ying";
-                var past = baseVerb.EndsWith("e") ? baseVerb + "d" : baseVerb + "ed";
-                if (baseVerb.EndsWith("y") && !"aeiou".Contains(char.ToLower(baseVerb[^2]))) past = baseVerb[..^1] + "ied";
+                var prog = baseVerb.EndsWith("e", StringComparison.Ordinal) ? baseVerb[..^1] + "ing" : baseVerb + "ing";
+                if (baseVerb.EndsWith("e", StringComparison.Ordinal) && baseVerb.EndsWith("ie", StringComparison.Ordinal)) prog = baseVerb[..^2] + "ying";
+                var past = baseVerb.EndsWith("e", StringComparison.Ordinal) ? baseVerb + "d" : baseVerb + "ed";
+                if (baseVerb.EndsWith("y", StringComparison.Ordinal) && !"aeiou".Contains(char.ToLower(baseVerb[^2]))) past = baseVerb[..^1] + "ied";
                 return new[] { baseVerb, "", "", third, "", prog, "", "", "", "", past, past };
             }
             foreach (var v in new[] { "jump","attack","walk","look","get","put","give","take","run","eat","see","make","come","know","want","need","help","open","close","lock","unlock","smile","grin","laugh","bow","nod","wave","dance","sing","shout","whisper","ask","answer","follow","wander","drop","hold","carry","throw","catch","hit","kick","slay","kill","hug","kiss","poke","push","pull","turn","leave","enter","move","cry","try","fly","swim" })
             {
-                if (!raw.ContainsKey(v))
-                    raw[v] = RegularRow(v);
+                raw.TryAdd(v, RegularRow(v));
             }
             raw["run"] = new[] { "run","","","runs","","running","","","","","ran","run" };
             raw["eat"] = new[] { "eat","","","eats","","eating","","","","","ate","eaten" };
@@ -142,7 +141,7 @@ public static class Conjugate
             raw["give"] = new[] { "give","","","gives","","giving","","","","","gave","given" };
             raw["hit"] = new[] { "hit","","","hits","","hitting","","","","","hit","hit" };
             raw["put"] = new[] { "put","","","puts","","putting","","","","","put","put" };
-            if (!raw.ContainsKey("swim")) raw["swim"] = new[] { "swim","","","swims","","swimming","","","","","swam","swum" };
+            raw.TryAdd("swim", ["swim", "", "", "swims", "", "swimming", "", "", "", "", "swam", "swum"]);
         }
         else
         {
@@ -193,7 +192,7 @@ public static class Conjugate
     public static string VerbPresent(string verb, string person = "", bool negate = false)
     {
         person = NormalizePerson(person);
-        var mapping = new Dictionary<string,string>
+        Dictionary<string, string> mapping = new()
         {
             ["1"] = "1st singular present",
             ["2"] = "2nd singular present",
@@ -214,7 +213,7 @@ public static class Conjugate
     public static string VerbPast(string verb, string person = "", bool negate = false)
     {
         person = NormalizePerson(person);
-        var mapping = new Dictionary<string,string>
+        Dictionary<string, string> mapping = new()
         {
             ["1"] = "1st singular past",
             ["2"] = "2nd singular past",
@@ -261,7 +260,7 @@ public static class Conjugate
     public static bool VerbIsPresent(string verb, string person = "", bool negated = false)
     {
         var personNorm = NormalizePerson(person);
-        var mapping = new Dictionary<string,string>
+        Dictionary<string, string> mapping = new()
         {
             ["1"] = "1st singular present",
             ["2"] = "2nd singular present",
@@ -289,7 +288,7 @@ public static class Conjugate
     public static bool VerbIsPast(string verb, string person = "", bool negated = false)
     {
         var personNorm = NormalizePerson(person);
-        var mapping = new Dictionary<string,string>
+        Dictionary<string, string> mapping = new()
         {
             ["1"] = "1st singular past",
             ["2"] = "2nd singular past",
@@ -299,7 +298,7 @@ public static class Conjugate
         var infinitive = VerbInfinitive(verb);
         if (personNorm == "")
         {
-            foreach (var tense in mapping.Values.Concat(new[] { "past" }))
+            foreach (var tense in mapping.Values.Append("past"))
             {
                 if (verb == VerbConjugate(infinitive, tense, negate: negated)) return true;
             }
@@ -319,7 +318,7 @@ public static class Conjugate
 
     private static string NormalizePerson(string person)
     {
-        if (person == null) return "";
+        if (person is null) return "";
         var s = person.ToString()!.Replace("pl", "*").Trim();
         // strip "stndrgural" as python does: strip chars s,t,n,d,r,g,u,a,l
         // python: .strip("stndrgural") removes those chars from both ends.
@@ -340,7 +339,7 @@ public static class Conjugate
         var tense = VerbTense(verb);
         // Port of conjugate.py:399-401: unknown tense returns the verb
         // unchanged for both persons ("he florp", not "he florps").
-        if (tense == null) return (verb, verb);
+        if (tense is null) return (verb, verb);
         var them = plural ? "*" : "3";
 
         if (tense.Contains("participle") || tense.Contains("plural"))

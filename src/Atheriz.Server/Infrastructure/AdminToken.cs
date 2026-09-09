@@ -1,6 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Server.Infrastructure;
 

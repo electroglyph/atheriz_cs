@@ -1,5 +1,3 @@
-using System.Text.Json;
-using Atheriz.Core.Globals;
 
 namespace Atheriz.Core.Objects;
 
@@ -44,7 +42,7 @@ public sealed class NodeArea
             if (!o.Grids.TryGetValue(kv.Key, out var g) || !kv.Value.Equals(g)) return false;
         foreach (var kv in Data)
             if (!o.Data.TryGetValue(kv.Key, out var je) || kv.Value.GetRawText() != je.GetRawText()) return false;
-        return (LinkedAreas == null && o.LinkedAreas == null) || (LinkedAreas != null && o.LinkedAreas != null && LinkedAreas.SetEquals(o.LinkedAreas));
+        return (LinkedAreas is null && o.LinkedAreas is null) || (LinkedAreas is not null && o.LinkedAreas is not null && LinkedAreas.SetEquals(o.LinkedAreas));
     }
     public override int GetHashCode()
     {
@@ -53,14 +51,14 @@ public sealed class NodeArea
         h.Add(Theme);
         foreach (var k in Grids.Keys.OrderBy(k => k)) { h.Add(k); h.Add(Grids[k]); }
         foreach (var k in Data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(Data[k].GetRawText()); }
-        if (LinkedAreas != null) foreach (var a in LinkedAreas.OrderBy(a => a, StringComparer.Ordinal)) h.Add(a);
+        if (LinkedAreas is not null) foreach (var a in LinkedAreas.OrderBy(a => a, StringComparer.Ordinal)) h.Add(a);
         return h.ToHashCode();
     }
 
     // Port of nodes.py:1258 get_nodes
     public List<Node> GetNodes(List<(int X, int Y, int Z)> coords)
     {
-        var res = new List<Node>();
+        List<Node> res = [];
         Lock.EnterReadLock();
         try
         {
@@ -69,7 +67,7 @@ public sealed class NodeArea
                 if (Grids.TryGetValue(z, out var g))
                 {
                     var n = g.GetNode(x, y);
-                    if (n != null) res.Add(n);
+                    if (n is not null) res.Add(n);
                 }
             }
         }
@@ -90,7 +88,7 @@ public sealed class NodeArea
         var (cx, cy, cz) = center;
         var r2 = radius * radius;
         var ri = (int)radius;
-        var result = new List<Node>();
+        List<Node> result = [];
         Lock.EnterReadLock();
         try
         {
@@ -130,7 +128,7 @@ public sealed class NodeArea
     {
         var nodes = GetNodesInSphere(center, radius, ignoreCenter);
         var (cx, cy, cz) = center;
-        var rays = new Dictionary<(int, int, int), List<(int distSq, Node node)>>();
+        Dictionary<(int, int, int), List<(int distSq, Node node)>> rays = [];
         foreach (var n in nodes)
         {
             int nx = n.Coord.X, ny = n.Coord.Y, nz = n.Coord.Z;
@@ -142,7 +140,7 @@ public sealed class NodeArea
             if (!rays.TryGetValue(dir, out var bucket)) { bucket = []; rays[dir] = bucket; }
             bucket.Add((distSq, n));
         }
-        var result = new List<List<Node>>();
+        List<List<Node>> result = [];
         foreach (var bucket in rays.Values)
         {
             bucket.Sort((a, b) => a.distSq.CompareTo(b.distSq));
@@ -159,7 +157,7 @@ public sealed class NodeArea
     public List<Node> GetNeighbors((int X, int Y, int Z) coord)
     {
         var (x, y, z) = coord;
-        var neighbors = new List<Node>();
+        List<Node> neighbors = [];
         Lock.EnterReadLock();
         try
         {
@@ -168,7 +166,7 @@ public sealed class NodeArea
                 if (Grids.TryGetValue(z + dz, out var g))
                 {
                     var n = g.GetNode(x + dx, y + dy);
-                    if (n != null) neighbors.Add(n);
+                    if (n is not null) neighbors.Add(n);
                 }
             }
         }
@@ -205,7 +203,7 @@ public sealed class NodeArea
         Lock.EnterWriteLock();
         try
         {
-            if (LinkedAreas != null && LinkedAreas.Contains(area))
+            if (LinkedAreas is not null && LinkedAreas.Contains(area))
             {
                 LinkedAreas.Remove(area);
                 IsModified = true;
@@ -227,7 +225,7 @@ public sealed class NodeArea
         Lock.EnterWriteLock();
         try
         {
-            if (LinkedAreas == null) { LinkedAreas = new HashSet<string> { area }; IsModified = true; added = true; }
+            if (LinkedAreas is null) { LinkedAreas = new HashSet<string> { area }; IsModified = true; added = true; }
             else if (!LinkedAreas.Contains(area)) { LinkedAreas.Add(area); IsModified = true; added = true; }
         }
         finally { Lock.ExitWriteLock(); }

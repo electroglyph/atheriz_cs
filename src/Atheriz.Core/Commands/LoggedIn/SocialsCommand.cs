@@ -1,6 +1,4 @@
 // Port of atheriz/commands/loggedin/socials.py:131
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

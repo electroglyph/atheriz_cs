@@ -1,7 +1,5 @@
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Objects; // Port of atheriz/objects/session.py:202 — Session now in Objects.Session (standalone)
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Network;
 
@@ -22,7 +20,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     public string? SessionId { get; }
     public Session Session { get; }
     public int ThreadId { get; } // port of connection.py:31 threading.get_ident()
-    public readonly object Lock = new object(); // port of connection.py:32 RLock
+    public readonly object Lock = new(); // port of connection.py:32 RLock
     public int FailedLoginAttempts; // port of connection.py:33
     private bool _disposed;
 
@@ -150,7 +148,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         try
         {
             var mgr = ConnectionManager.GlobalInstance;
-            if (mgr?.Atp != null) return mgr.Atp;
+            if (mgr?.Atp is not null) return mgr.Atp;
         }
         catch (Exception logEx) { try { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.ResolvePool: " + logEx.Message, "BaseConnection"); } catch { } }
         return FallbackPool;
@@ -306,7 +304,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // Port of connection.py:169-171 launch_draw
     public virtual void LaunchDraw()
     {
-        SendCommand("launch_draw", new List<object?>(), new Dictionary<string, object?>());
+        SendCommand("launch_draw", [], []);
     }
 
     // Port of connection.py:173-199 msg
@@ -315,16 +313,16 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     public void Msg(string text)
     {
         // Single-arg text path — most common via broadcast
-        MsgInternal(new List<object?> { text }, new Dictionary<string, object?>());
+        MsgInternal(new List<object?> { text }, []);
     }
     // Faithful overloads for Python's flexible msg(*args, **kwargs)
-    public void Msg() => MsgInternal(new List<object?>(), new Dictionary<string, object?>());
-    public void Msg(object? arg) => MsgInternal(new List<object?>{arg}, new Dictionary<string, object?>());
-    public void Msg(object? arg1, object? arg2) => MsgInternal(new List<object?>{arg1, arg2}, new Dictionary<string, object?>());
-    public void Msg(Dictionary<string, object?> kwargs) => MsgInternal(new List<object?>(), kwargs);
+    public void Msg() => MsgInternal([], []);
+    public void Msg(object? arg) => MsgInternal(new List<object?>{arg}, []);
+    public void Msg(object? arg1, object? arg2) => MsgInternal(new List<object?>{arg1, arg2}, []);
+    public void Msg(Dictionary<string, object?> kwargs) => MsgInternal([], kwargs);
     public void Msg(List<object?> args, Dictionary<string, object?> kwargs) => MsgInternal(args, kwargs);
     // Expose internal for tests that need kwargs path like msg(text="hi") or msg(prompt=">")
-    public void MsgKw(Dictionary<string, object?> kwargs, params object?[] args) => MsgInternal(args?.ToList() ?? new List<object?>(), kwargs ?? new Dictionary<string, object?>());
+    public void MsgKw(Dictionary<string, object?> kwargs, params object?[] args) => MsgInternal(args?.ToList() ?? [], kwargs ?? []);
 
     // Full msg handling with args/kwargs — mirrors Python's msg(*args, **kwargs)
     // For C# parity, we expose MsgInternal; callers needing kwargs can use SendCommand directly.
@@ -332,14 +330,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     {
         // port of connection.py:173-199
         string cmd = "text";
-        if ((args == null || args.Count == 0) && (kwargs == null || kwargs.Count == 0))
+        if ((args is null || args.Count == 0) && (kwargs is null || kwargs.Count == 0))
             return; // port of connection.py:179-180
 
         // Copy the caller's list: the text path mutates args[0] below and the
         // kwargs path re-roots args — neither may alias caller state.
-        args = args != null ? new List<object?>(args) : new List<object?>();
+        args = args is not null ? new List<object?>(args) : [];
         // outgoing_kwargs = dict(kwargs) at connection.py:182
-        var outgoingKwargs = kwargs != null ? new Dictionary<string, object?>(kwargs) : new Dictionary<string, object?>();
+        var outgoingKwargs = kwargs is not null ? new Dictionary<string, object?>(kwargs) : [];
 
         if (outgoingKwargs.Count > 0) // port of connection.py:183
         {
@@ -367,7 +365,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             if (args[0] is not string)
                 args[0] = args[0]?.ToString() ?? "";
             var s = (string)args[0]!;
-            if (!s.EndsWith("\r\n") && !s.EndsWith("\n"))
+            if (!s.EndsWith("\r\n", StringComparison.Ordinal) && !s.EndsWith("\n", StringComparison.Ordinal))
                 s += "\r\n";
             if (Session.ScreenReader) // port of connection.py:197-198
                 s = GameUtils.StripAnsi(s);

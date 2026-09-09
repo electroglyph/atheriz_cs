@@ -1,6 +1,5 @@
 // Port of atheriz/new.py:541 create_game_folder + initial_setup.py:48
 using System.Text.RegularExpressions;
-using Atheriz.Core.Utils;
 namespace Atheriz.Server.Infrastructure;
 /// <summary>Generates game folder — C# analogue of <c>atheriz new my_game</c>. Mirrors <c>new.py:create_game_folder</c>.</summary>
 // Reflection note: GetHookMethods/BuildParamList/GenerateHooksFor use
@@ -219,7 +218,7 @@ public static class GameTemplateGenerator
         {
             var asmDir = Path.GetDirectoryName(typeof(GameTemplateGenerator).Assembly.Location) ?? "";
             var cur = new DirectoryInfo(asmDir);
-            for (int i = 0; i < 8 && cur != null; i++)
+            for (int i = 0; i < 8 && cur is not null; i++)
             {
                 var cand = Path.Combine(cur.FullName, "src", "Atheriz.Core", "Atheriz.Core.csproj");
                 if (File.Exists(cand)) { var rel = Path.GetRelativePath(folderPath, cand); coreRef = rel; if (!File.Exists(Path.Combine(folderPath, rel)) && Path.IsPathRooted(cand)) coreRef = cand; coreFound = true; break; }
@@ -236,7 +235,7 @@ public static class GameTemplateGenerator
             var coreVersion = typeof(Atheriz.Core.Globals.ObjectRegistry).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
             refXml = $"<PackageReference Include=\"Atheriz.Core\" Version=\"{coreVersion}\" />";
         }
-        var csproj = $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>\n  <ItemGroup>{refXml}</ItemGroup>\n</Project>\n";
+        var csproj = $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>\n  <ItemGroup>{refXml}</ItemGroup>\n</Project>\n";
         Console.WriteLine($"  Creating {csprojName}...");
         File.WriteAllText(csprojPath, csproj);
         var files = new Dictionary<string,string>{["GameSettings.cs"]=GS(gameName),["CustomObject.cs"]=CO(gameName),["CustomNode.cs"]=CN(gameName),["CustomAccount.cs"]=CA(gameName),["CustomChannel.cs"]=CC(gameName),["CustomScript.cs"]=CS(gameName),["AssemblyInfo.cs"]=AI(gameName),["README.md"]=RM(gameName)};
@@ -275,13 +274,13 @@ public static class GameTemplateGenerator
             if (m.DeclaringType != t && m.DeclaringType != typeof(Atheriz.Core.Objects.GameObject) && m.DeclaringType != typeof(Atheriz.Core.Objects.Node) && m.DeclaringType != typeof(Atheriz.Core.Objects.Account) && m.DeclaringType != typeof(Atheriz.Core.Objects.Channel) && m.DeclaringType != typeof(Atheriz.Core.Objects.Script)) { /* skip inherited from System */ }
             // Must be declared on t itself to keep per-file hook sets small like test/*.py (Object 35, Node 7, Channel 3, Account 4, Script 1)
             if (m.DeclaringType != t) continue;
-            if (m.DeclaringType != null && m.DeclaringType.Namespace != null && m.DeclaringType.Namespace.StartsWith("System")) continue;
+            if (m.DeclaringType is not null && m.DeclaringType.Namespace is not null && m.DeclaringType.Namespace.StartsWith("System", StringComparison.Ordinal)) continue;
             if (!m.IsVirtual || m.IsFinal) continue;
             var n = m.Name;
             var ln = n.ToLowerInvariant();
             bool isHook = IsHookStem(n, "At") || IsHookStem(n, "Access") || IsHookStem(n, "Format") || IsHookStem(n, "Pre") || IsHookStem(n, "Post") || ln == "setup_parser" || ln == "setupparser" || ln == "run";
             if (!isHook) continue;
-            if (n.StartsWith("get_") || n.StartsWith("set_") || n.StartsWith("add_") || n.StartsWith("remove_")) continue;
+            if (n.StartsWith("get_", StringComparison.Ordinal) || n.StartsWith("set_", StringComparison.Ordinal) || n.StartsWith("add_", StringComparison.Ordinal) || n.StartsWith("remove_", StringComparison.Ordinal)) continue;
             yield return m;
         }
     }
@@ -308,7 +307,7 @@ public static class GameTemplateGenerator
             if (def == typeof(List<>)) return $"List<{string.Join(", ", args)}>";
             if (def == typeof(Dictionary<,>)) return $"Dictionary<{string.Join(", ", args)}>";
             if (def == typeof(IEnumerable<>)) return $"IEnumerable<{string.Join(", ", args)}>";
-            if (name.StartsWith("ValueTuple")) return $"({string.Join(", ", args)})";
+            if (name.StartsWith("ValueTuple", StringComparison.Ordinal)) return $"({string.Join(", ", args)})";
             return $"{name}<{string.Join(", ", args)}>";
         }
         if (t.IsNested)
@@ -317,7 +316,7 @@ public static class GameTemplateGenerator
             return $"{FriendlyType(t.DeclaringType!)}.{t.Name}";
         }
         var n2 = t.Name;
-        if (t.Namespace != null && t.Namespace.StartsWith("Atheriz")) return t.Name;
+        if (t.Namespace is not null && t.Namespace.StartsWith("Atheriz", StringComparison.Ordinal)) return t.Name;
         // Common BCL that needs import
         if (t == typeof(System.Text.Json.JsonElement)) return "JsonElement";
         return n2;
@@ -330,7 +329,7 @@ public static class GameTemplateGenerator
     private static string BuildParamList(System.Reflection.MethodInfo m)
     {
         var ps = m.GetParameters();
-        var parts = new List<string>();
+        List<string> parts = [];
         // Use NullabilityInfoContext where available to preserve ? annotations (matches base virtual signatures)
         System.Reflection.NullabilityInfoContext? nic = null;
         try { nic = new System.Reflection.NullabilityInfoContext(); } catch { }
@@ -350,15 +349,15 @@ public static class GameTemplateGenerator
             var t = FriendlyType(pt);
             // If param is nullable reference (e.g., GameObject? ) but FriendlyType lost ?, restore via nullability context or default-null heuristic
             bool isNullable = false;
-            if (nic != null) { try { var ni = nic.Create(p); isNullable = ni.WriteState == System.Reflection.NullabilityState.Nullable; } catch { } }
-            if (!isNullable && p.HasDefaultValue && p.DefaultValue == null && !pt.IsValueType) isNullable = true;
+            if (nic is not null) { try { var ni = nic.Create(p); isNullable = ni.WriteState == System.Reflection.NullabilityState.Nullable; } catch { } }
+            if (!isNullable && p.HasDefaultValue && p.DefaultValue is null && !pt.IsValueType) isNullable = true;
             // Also check NullableAttribute directly
             if (!isNullable && pt.IsClass && t != "string" && t != "object")
             {
                 // Heuristic: many base hooks use nullable GameObject? — if FriendlyType is GameObject without ?, and param allows null, add ?
-                if (p.HasDefaultValue && p.DefaultValue == null) isNullable = true;
+                if (p.HasDefaultValue && p.DefaultValue is null) isNullable = true;
             }
-            if (isNullable && !t.EndsWith("?") && pt.IsClass) t += "?";
+            if (isNullable && !t.EndsWith("?", StringComparison.Ordinal) && pt.IsClass) t += "?";
             // ValueTuple nullable not needed
             var name = p.Name ?? "arg";
             string decl = $"{(isParams ? "params " : "")}{modifier}{t} {name}";
@@ -366,7 +365,7 @@ public static class GameTemplateGenerator
             {
                 var dv = p.DefaultValue;
                 string ds;
-                if (dv == null) ds = "null";
+                if (dv is null) ds = "null";
                 else if (dv is string s) ds = "\"" + EscapeCsString(s) + "\"";
                 else if (dv is bool b) ds = b ? "true" : "false";
                 else if (dv is char c) ds = "'" + EscapeCsString(c.ToString()).Replace("'", "\\'") + "'";
@@ -455,7 +454,7 @@ public static class GameTemplateGenerator
     // Port of atheriz/new.py:530 copy_web_folder
     public static void CopyWebFolder(string destination, string? webSrc = null)
     {
-        if (webSrc != null)
+        if (webSrc is not null)
         {
             if (!Directory.Exists(webSrc))
                 throw new DirectoryNotFoundException($"Web folder not found at {webSrc}");
@@ -465,34 +464,34 @@ public static class GameTemplateGenerator
         }
         string? src = TryResolveWebSrc();
         var destWeb = Path.Combine(destination, "web");
-        if (src != null && Directory.Exists(src))
+        if (src is not null && Directory.Exists(src))
             CopyDirectory(src, destWeb);
         var wwwroot = TryResolveWwwRoot();
-        if (wwwroot != null && Directory.Exists(wwwroot))
+        if (wwwroot is not null && Directory.Exists(wwwroot))
         {
             var destStatic = Path.Combine(destWeb, "static");
             CopyDirectory(wwwroot, destStatic);
         }
-        if (src == null && wwwroot == null)
+        if (src is null && wwwroot is null)
             throw new DirectoryNotFoundException("Web folder not found (checked web/ and wwwroot)");
     }
     private static string? TryResolveWebSrc()
     {
         var asmDir = Path.GetDirectoryName(typeof(GameTemplateGenerator).Assembly.Location) ?? AppContext.BaseDirectory;
         var cwd = Directory.GetCurrentDirectory();
-        var candidates = new List<string>
-        {
+        List<string> candidates =
+        [
             Path.Combine(asmDir, "web"),
             Path.Combine(AppContext.BaseDirectory, "web"),
             Path.Combine(cwd, "src", "Atheriz.Server", "web"),
             Path.Combine(cwd, "web"),
             Path.Combine(asmDir, "..", "web"),
             Path.Combine(asmDir, "..", "..", "web"),
-        };
+        ];
         var cur = new DirectoryInfo(asmDir);
-        for (int i = 0; i < 8 && cur != null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "web")); candidates.Add(Path.Combine(cur.FullName, "web")); cur = cur.Parent; }
+        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "web")); candidates.Add(Path.Combine(cur.FullName, "web")); cur = cur.Parent; }
         cur = new DirectoryInfo(cwd);
-        for (int i = 0; i < 8 && cur != null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "web")); cur = cur.Parent; }
+        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "web")); cur = cur.Parent; }
         var resolved = AssetPathResolver.ResolveCandidates(candidates.Select(Path.GetFullPath));
         return resolved;
     }
@@ -500,17 +499,17 @@ public static class GameTemplateGenerator
     {
         var asmDir = Path.GetDirectoryName(typeof(GameTemplateGenerator).Assembly.Location) ?? AppContext.BaseDirectory;
         var cwd = Directory.GetCurrentDirectory();
-        var candidates = new List<string>
-        {
+        List<string> candidates =
+        [
             Path.Combine(asmDir, "wwwroot"),
             Path.Combine(AppContext.BaseDirectory, "wwwroot"),
             Path.Combine(cwd, "src", "Atheriz.Server", "wwwroot"),
             Path.Combine(asmDir, "..", "wwwroot"),
-        };
+        ];
         var cur = new DirectoryInfo(asmDir);
-        for (int i = 0; i < 8 && cur != null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "wwwroot")); candidates.Add(Path.Combine(cur.FullName, "wwwroot")); cur = cur.Parent; }
+        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "wwwroot")); candidates.Add(Path.Combine(cur.FullName, "wwwroot")); cur = cur.Parent; }
         cur = new DirectoryInfo(cwd);
-        for (int i = 0; i < 8 && cur != null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "wwwroot")); cur = cur.Parent; }
+        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "wwwroot")); cur = cur.Parent; }
         var resolved = AssetPathResolver.ResolveCandidates(candidates.Select(Path.GetFullPath));
         return resolved;
     }

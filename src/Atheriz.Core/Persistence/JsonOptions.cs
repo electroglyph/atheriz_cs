@@ -1,5 +1,4 @@
 // Port of atheriz/globals/* JSON persistence (replaces dill) — single shared options
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Atheriz.Core.Persistence;

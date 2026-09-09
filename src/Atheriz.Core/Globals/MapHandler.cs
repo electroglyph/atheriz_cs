@@ -1,10 +1,6 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Entities;
-using Atheriz.Core.Settings;
-using Atheriz.Core.Utils;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Globals;
@@ -59,7 +55,7 @@ public sealed class TupleCoordConverter : JsonConverter<(int X, int Y)?>
     }
     public override void Write(Utf8JsonWriter writer, (int X, int Y)? value, JsonSerializerOptions options)
     {
-        if (value == null) { writer.WriteNullValue(); return; }
+        if (value is null) { writer.WriteNullValue(); return; }
         writer.WriteStartArray();
         writer.WriteNumberValue(value.Value.X);
         writer.WriteNumberValue(value.Value.Y);
@@ -137,7 +133,7 @@ public sealed class LegendEntry : IEquatable<LegendEntry>
 
     public static LegendEntry FromPayload(JsonElement el)
     {
-        var dict = new Dictionary<string, JsonElement>();
+        Dictionary<string, JsonElement> dict = [];
         foreach (var p in el.EnumerateObject()) dict[p.Name] = p.Value;
         return FromPayload(dict);
     }
@@ -191,9 +187,9 @@ public class MapInfo
     {
         Name = name;
         Settings = settings ?? AtherizSettings.Global;
-        if (preGrid != null) foreach (var kv in preGrid) PreGrid[kv.Key] = kv.Value;
-        if (postGrid != null) foreach (var kv in postGrid) PostGrid[kv.Key] = kv.Value;
-        if (legendEntries != null) LegendEntries.AddRange(legendEntries);
+        if (preGrid is not null) foreach (var kv in preGrid) PreGrid[kv.Key] = kv.Value;
+        if (postGrid is not null) foreach (var kv in postGrid) PostGrid[kv.Key] = kv.Value;
+        if (legendEntries is not null) LegendEntries.AddRange(legendEntries);
     }
 
     private bool IsOverLegendCap()
@@ -245,7 +241,7 @@ public class MapInfo
             if (k.Y < minY) minY = k.Y;
             if (k.Y > maxY) maxY = k.Y;
         }
-        var lines = new List<string>();
+        List<string> lines = [];
         for (int y = maxY; y >= minY; y--)
         {
             var row = new System.Text.StringBuilder();
@@ -326,7 +322,7 @@ public class MapInfo
         Lock.EnterWriteLock();
         try
         {
-            var placeholderStyles = new Dictionary<string, string>
+            Dictionary<string, string> placeholderStyles = new()
             {
                 [Settings.SingleWallPlaceholder] = "single",
                 [Settings.DoubleWallPlaceholder] = "double",
@@ -336,7 +332,7 @@ public class MapInfo
             };
             var allSymbols = new HashSet<string>(Settings.AllSymbols);
             var rendered = new Dictionary<(int, int), string>(PreGrid);
-            var toPlace = new Dictionary<(int, int), string>();
+            Dictionary<(int, int), string> toPlace = [];
             foreach (var kv in rendered)
             {
                 if (placeholderStyles.TryGetValue(kv.Value, out var style))
@@ -414,7 +410,7 @@ public class MapInfo
         try
         {
             var loc = obj.Location;
-            if (loc == null) return false;
+            if (loc is null) return false;
             if (loc is Persistence.Dto.LocationRef.NullLocation) return false;
             if (loc is Persistence.Dto.LocationRef.CoordLocation cl)
             {
@@ -502,13 +498,13 @@ public class MapInfo
         {
             foreach (var l in listenersSnapshot)
             {
-                CallAtLegendUpdate(l, new List<(string, string, (int, int))>(), false, Name);
+                CallAtLegendUpdate(l, [], false, Name);
             }
             return;
         }
         if (!isOver)
         {
-            var objEntries = new List<(int oid, (string sym, string desc, (int x, int y) coord) entry)>();
+            List<(int oid, (string sym, string desc, (int x, int y) coord) entry)> objEntries = [];
             foreach (var o in objectsSnapshot)
             {
                 if (TryGetLocationCoord(o, out var c))
@@ -520,10 +516,10 @@ public class MapInfo
                     objEntries.Add((o.Id, (sym, desc, c)));
                 }
             }
-            var staticEntries = staticSnapshot.Where(e => e.Coord != null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
+            var staticEntries = staticSnapshot.Where(e => e.Coord is not null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
             foreach (var l in listenersSnapshot)
             {
-                var entries = new List<(string, string, (int, int))>();
+                List<(string, string, (int, int))> entries = [];
                 foreach (var (oid, e) in objEntries) if (oid != l.Id) entries.Add(e);
                 entries.AddRange(staticEntries);
                 CallAtLegendUpdate(l, entries, true, Name);
@@ -559,7 +555,7 @@ public class MapInfo
         }
         finally { Lock.ExitReadLock(); }
 
-        var objEntries = new List<(int oid, (string sym, string desc, (int x, int y) coord) entry)>();
+        List<(int oid, (string sym, string desc, (int x, int y) coord) entry)> objEntries = [];
         foreach (var o in objectsSnapshot)
         {
             if (TryGetLocationCoord(o, out var c))
@@ -571,7 +567,7 @@ public class MapInfo
                 objEntries.Add((o.Id, (sym, desc, c)));
             }
         }
-        var staticEntries = staticSnapshot.Where(e => e.Coord != null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
+        var staticEntries = staticSnapshot.Where(e => e.Coord is not null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
 
         double fpsLimit = 0;
         try
@@ -591,7 +587,7 @@ public class MapInfo
             var last = GetLastMapTime(l);
             bool hasLast = last.HasValue && last.Value != 0;
             if (hasLast && !force && fpsLimit > 0 && (now - last!.Value) <= fpsLimit) continue;
-            var entries = new List<(string, string, (int, int))>();
+            List<(string, string, (int, int))> entries = [];
             foreach (var (oid, e) in objEntries) if (oid != l.Id) entries.Add(e);
             entries.AddRange(staticEntries);
             var gridCopy = new Dictionary<(int X, int Y), string>(gridSnapshot);
@@ -726,7 +722,7 @@ public class MapInfo
         public LegendEntry ToDomain()
         {
             (int, int)? c = null;
-            if (Coord != null && Coord.Count >= 2) c = (Coord[0], Coord[1]);
+            if (Coord is not null && Coord.Count >= 2) c = (Coord[0], Coord[1]);
             var e = new LegendEntry(Symbol, Desc, c);
             e.Show = Show;
             e.Fg = Fg;
@@ -794,7 +790,7 @@ public class MapHandler
         try
         {
             db.Database.EnsureCreated();
-            var buffer = new Dictionary<(string, int), MapInfo>();
+            Dictionary<(string, int), MapInfo> buffer = [];
             JsonTableLoader.LoadList(db.MapData, json => JsonSerializer.Deserialize<MapInfo.MapInfoPersistDto>(json, JsonOptions.Default), (dto, row) =>
             {
                 // Per-row report: corrupt chunks are skipped, never silent.
@@ -880,9 +876,9 @@ public class MapHandler
         }
         finally { Lock.ExitReadLock(); }
 
-        var snapshot = new List<((string Area, int Z) Key, MapInfo.MapInfoPersistDto Dto, MapInfo Original)>();
-        var cleared = new List<MapInfo>();
-        var jsons = new List<((string Area, int Z) Key, string json)>();
+        List<((string Area, int Z) Key, MapInfo.MapInfoPersistDto Dto, MapInfo Original)> snapshot = [];
+        List<MapInfo> cleared = [];
+        List<((string Area, int Z) Key, string json)> jsons = [];
         try
         {
             foreach (var (k, mi) in refs)
@@ -944,7 +940,7 @@ public class MapHandler
                 foreach (var key in deletes)
                 {
                     var row = ctx.MapData.Find(key.Area, key.Z);
-                    if (row != null) ctx.MapData.Remove(row);
+                    if (row is not null) ctx.MapData.Remove(row);
                 }
             }, onRollback: () =>
             {
@@ -1081,7 +1077,7 @@ public class MapHandler
     public void AddMapable(GameObject mapable, bool notify = false)
     {
         var coord = ExtractCoord(mapable);
-        if (coord == null) return;
+        if (coord is null) return;
         var mi = GetOrCreate(coord.Value.Area, coord.Value.Z);
         mi.AddMapable(mapable, notify);
     }
@@ -1089,7 +1085,7 @@ public class MapHandler
     public void AddListener(GameObject listener, bool notify = false)
     {
         var coord = ExtractCoord(listener);
-        if (coord == null) return;
+        if (coord is null) return;
         var mi = GetOrCreate(coord.Value.Area, coord.Value.Z);
         mi.AddListener(listener, notify);
     }
@@ -1097,7 +1093,7 @@ public class MapHandler
     public void RemoveListener(GameObject listener)
     {
         var coord = ExtractCoord(listener);
-        if (coord == null) return;
+        if (coord is null) return;
         MapInfo? mi;
         Lock.EnterReadLock();
         try { _data.TryGetValue((coord.Value.Area, coord.Value.Z), out mi); }
@@ -1111,10 +1107,10 @@ public class MapHandler
         // lock (never nested): handler->info nesting inverts ReplaceMapEntries'
         // info-only discipline and risks deadlock once any path locks info->handler.
         MapInfo? fromMap = null;
-        bool areaChanged = fromCoord != null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
+        bool areaChanged = fromCoord is not null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
         using (ReadScope())
         {
-            if (fromCoord != null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
+            if (fromCoord is not null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
         }
         var toMap = GetOrCreate(toCoord.Area, toCoord.Z);
         fromMap?.RemoveListener(listener);
@@ -1136,7 +1132,7 @@ public class MapHandler
 
     public void MoveMapable(GameObject mapable, Coord toCoord, Coord? fromCoord = null)
     {
-        if (fromCoord != null && fromCoord.Value.Area == toCoord.Area && fromCoord.Value.Z == toCoord.Z)
+        if (fromCoord is not null && fromCoord.Value.Area == toCoord.Area && fromCoord.Value.Z == toCoord.Z)
         {
             var cur = GetOrCreate(toCoord.Area, toCoord.Z);
             cur.AddMapable(mapable);
@@ -1146,7 +1142,7 @@ public class MapHandler
         MapInfo? fromMap = null;
         using (ReadScope())
         {
-            if (fromCoord != null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
+            if (fromCoord is not null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
         }
         var toMap = GetOrCreate(toCoord.Area, toCoord.Z);
         fromMap?.RemoveMapable(mapable);
@@ -1157,7 +1153,7 @@ public class MapHandler
 
     public void MoveListenerAndMapable(GameObject obj, Coord toCoord, Coord? fromCoord = null)
     {
-        if (fromCoord != null && fromCoord.Value.Area == toCoord.Area && fromCoord.Value.Z == toCoord.Z)
+        if (fromCoord is not null && fromCoord.Value.Area == toCoord.Area && fromCoord.Value.Z == toCoord.Z)
         {
             var cur = GetOrCreate(toCoord.Area, toCoord.Z);
             cur.Lock.EnterWriteLock();
@@ -1172,17 +1168,17 @@ public class MapHandler
             return;
         }
         MapInfo? fromMap = null;
-        bool areaChanged = fromCoord != null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
+        bool areaChanged = fromCoord is not null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
         // Snapshot under the handler lock, then mutate via each MapInfo's own
         // lock: the old code wrote fromMap/toMap.Listeners/Objects directly
         // while holding only the handler lock, racing Render/AddMapable which
         // take the info lock (lost entries / torn dictionaries).
         using (ReadScope())
         {
-            if (fromCoord != null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
+            if (fromCoord is not null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
         }
         var toMap = GetOrCreate(toCoord.Area, toCoord.Z);
-        if (fromMap != null && !ReferenceEquals(fromMap, toMap))
+        if (fromMap is not null && !ReferenceEquals(fromMap, toMap))
         {
             fromMap.RemoveListener(obj);
             fromMap.RemoveMapable(obj);
@@ -1190,7 +1186,7 @@ public class MapHandler
         toMap.AddListener(obj);
         toMap.AddMapable(obj, false);
         if (areaChanged) SendUnbackground(obj);
-        if (fromMap != null && !ReferenceEquals(fromMap, toMap))
+        if (fromMap is not null && !ReferenceEquals(fromMap, toMap))
         {
             fromMap.RenderLegend();
             fromMap.Render(false);

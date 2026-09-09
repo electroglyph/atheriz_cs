@@ -1,8 +1,5 @@
 // Port of atheriz/commands/unloggedin/create.py:67
-using Atheriz.Core.Globals;
-using Atheriz.Core.Objects;
 using Atheriz.Core.Network;
-using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
 
@@ -28,9 +25,9 @@ public sealed class CreateAccountCommand : Command
         // Passwords may contain spaces (Python prompts the whole line) — join, don't truncate.
         string password = string.Join(" ", parts.Skip(1));
         var err = Validation.ValidateAccountName(name);
-        if (err != null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
+        if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         err = Validation.ValidatePassword(password);
-        if (err != null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
+        if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         try
         {
             // check uniqueness via ObjectRegistry
@@ -39,7 +36,7 @@ public sealed class CreateAccountCommand : Command
             var account = Account.Create(name, password);
             CreationCooldownHelper.Apply(caller, "account");
             // Account.Create already does AddObjectUnique
-            if (caller is BaseConnection conn && conn.Session != null)
+            if (caller is BaseConnection conn && conn.Session is not null)
             {
                 conn.Session.Account = account;
                 conn.SendCommand("logged_in");
@@ -59,10 +56,10 @@ public sealed class CreateAccountCommand : Command
         string name = await caller.Session.Prompt("Enter an account name:");
         name = name.Trim();
         var err = Validation.ValidateAccountName(name);
-        if (err != null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+        if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
         string password = await caller.Session.Prompt("Enter a password:");
         err = Validation.ValidatePassword(password);
-        if (err != null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+        if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
         try
         {
             var account = Account.Create(name, password);
