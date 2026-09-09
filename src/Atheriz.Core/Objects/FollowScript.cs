@@ -32,11 +32,14 @@ public sealed class FollowScript : Script
     [After]
     public void at_post_move(GameObject? destination, string? toExit = null)
     {
+        // A3-O-2: pop the partner for THIS move first, on every post-move —
+        // early returns below used to skip the pop, leaking one entry per
+        // failed move and shifting the pairing of all later moves.
+        if (!_oldLocStack.TryPop(out var oldLoc)) oldLoc = null;
         if (destination == null) return;
         var child = Child;
         if (child == null) { Delete(); return; }
         if (child.FollowersSnapshot.Count == 0) { Delete(); return; }
-        if (!_oldLocStack.TryPop(out var oldLoc)) oldLoc = null;
         if (oldLoc == null) return;
         List<int> followers;
         // Snapshot followers under lock via the typed snapshot (no reflection).

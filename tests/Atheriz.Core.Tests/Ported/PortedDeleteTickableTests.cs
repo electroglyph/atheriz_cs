@@ -63,4 +63,34 @@ public class PortedDeleteTickableTests
         Assert.True(slot!.CorosSnapshot.Any(d => Equals(d.Target, survivor)), "survivor must stay registered");
         Assert.False(slot.CorosSnapshot.Any(d => Equals(d.Target, target)), "target must be removed");
     }
+
+    [Fact]
+    public void ConcurrentTickSecondsSwap_LeavesSingleRegistration()
+    {
+        // A3-O-11: the TickSeconds swap spanned separate locks, so racing swaps
+        // each removed their own stale-read old interval and added their own —
+        // stale intervals kept firing alongside the fresh one. Predicate and
+        // mutation share one write hold now.
+        using var env = GlobalTestEnv.Enter();
+        WireTicker();
+        var ticker = GlobalServices.GetAsyncTicker();
+        var node = new Node(new Coord("test_tickswap", 0, 0, 0));
+        node.IsTickable = true;
+        var tasks = Enumerable.Range(0, 32).Select(i => Task.Run(() =>
+        {
+            node.TickSeconds = (i % 2 == 0) ? 2.0 : 3.0;
+        })).ToArray();
+        Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
+        double v = node.TickSeconds;
+        Assert.True(v == 2.0 || v == 3.0);
+        var slot = ticker.GetSlot(v);
+        Assert.NotNull(slot);
+        Assert.Contains(slot!.CorosSnapshot, d => d.Method.Name == "AtTick" && Equals(d.Target, node));
+        foreach (double stale in new[] { 1.0, 2.0, 3.0 }.Where(x => x != v))
+        {
+            var s = ticker.GetSlot(stale);
+            Assert.True(s == null || !s.CorosSnapshot.Any(d => d.Method.Name == "AtTick" && Equals(d.Target, node)),
+                $"stale interval {stale} must not retain the ticker registration");
+        }
+    }
 }

@@ -50,37 +50,6 @@ public static class GameTemplateGenerator
             // hooks/alarms). Credentials are prompted below like a fresh setup.
             shouldSetup = true;
         }
-        // When overwriting an existing folder, wipe the save leaf so DoSetup
-        // starts fresh (handles `new test --overwrite` bare-name case).
-        // Containment: the wipe is confined to <folder>/save/** (asserted
-        // below — folder top-level files are never deleted). This is
-        // deliberate operator intent (`--overwrite` names the folder), not a
-        // world-membership decision, so it does NOT consult GuardWipePath
-        // (which gates `reset` on initialized-world markers): a
-        // stale save dir with no DB markers (aborted setup) still wipes, and
-        // the pre-existing integration test pins stale.txt removal for
-        // exactly that shape.
-        if (overwrite && folderExistsInitially)
-        {
-            try
-            {
-                var saveDirForWipe = Path.Combine(folderPath, "save");
-                // Confinement asserts: exactly the save leaf of the designated
-                // folder, never a root, never outside the folder.
-                Atheriz.Core.Utils.PathGuards.DenyRoot(saveDirForWipe);
-                if (!string.Equals(Path.GetFullPath(saveDirForWipe).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                        Path.Combine(Path.GetFullPath(folderPath), "save"), StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"Refusing to wipe outside the game save leaf: {saveDirForWipe}");
-                if (Directory.Exists(saveDirForWipe))
-                {
-                    foreach (var f in Directory.GetFiles(saveDirForWipe, "*", SearchOption.AllDirectories))
-                        try { File.Delete(f); } catch { }
-                }
-                var dbFile = Path.Combine(folderPath, "save", "database.sqlite3");
-                foreach (var f in new[] { dbFile, dbFile + "-wal", dbFile + "-shm", dbFile + ".journal" })
-                    try { if (File.Exists(f)) File.Delete(f); } catch { }
-            } catch { }
-        }
         string? username = null;
         string? password = null;
         if (shouldSetup)
@@ -137,6 +106,45 @@ public static class GameTemplateGenerator
                 }
             }
         }
+        // When overwriting an existing folder, wipe the save leaf so DoSetup
+        // starts fresh (handles `new test --overwrite` bare-name case).
+        // A3-S-1: this runs AFTER credential validation (a failed prompt must
+        // leave the save dir intact) and AFTER a liveness probe (wiping under
+        // a live server must be refused, not raced).
+        // Containment: the wipe is confined to <folder>/save/** (asserted
+        // below — folder top-level files are never deleted). This is
+        // deliberate operator intent (`--overwrite` names the folder), not a
+        // world-membership decision, so it does NOT consult GuardWipePath
+        // (which gates `reset` on initialized-world markers): a
+        // stale save dir with no DB markers (aborted setup) still wipes, and
+        // the pre-existing integration test pins stale.txt removal for
+        // exactly that shape.
+        if (overwrite && folderExistsInitially)
+        {
+            if (IsLiveServerFolder(folderPath))
+            {
+                Console.Error.WriteLine($"Error: a live server looks to own '{targetPath}' (verified server.pid); stop it before --overwrite.");
+                return false;
+            }
+            try
+            {
+                var saveDirForWipe = Path.Combine(folderPath, "save");
+                // Confinement asserts: exactly the save leaf of the designated
+                // folder, never a root, never outside the folder.
+                Atheriz.Core.Utils.PathGuards.DenyRoot(saveDirForWipe);
+                if (!string.Equals(Path.GetFullPath(saveDirForWipe).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                        Path.Combine(Path.GetFullPath(folderPath), "save"), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Refusing to wipe outside the game save leaf: {saveDirForWipe}");
+                if (Directory.Exists(saveDirForWipe))
+                {
+                    foreach (var f in Directory.GetFiles(saveDirForWipe, "*", SearchOption.AllDirectories))
+                        try { File.Delete(f); } catch { }
+                }
+                var dbFile = Path.Combine(folderPath, "save", "database.sqlite3");
+                foreach (var f in new[] { dbFile, dbFile + "-wal", dbFile + "-shm", dbFile + ".journal" })
+                    try { if (File.Exists(f)) File.Delete(f); } catch { }
+            } catch { }
+        }
         Console.WriteLine($"Creating game folder: {targetPath}");
         Directory.CreateDirectory(folderPath);
         try { Scaffold(folderPath, gName); } catch (Exception ex) { Console.Error.WriteLine($"Error scaffolding game folder: {ex.Message}"); return false; }
@@ -175,6 +183,23 @@ public static class GameTemplateGenerator
             Console.WriteLine($"    - Starting room at {Atheriz.Core.Settings.AtherizSettings.Global.DefaultHome}");
         }
         return true;
+    }
+
+    // A3-S-1 liveness probe: refuse --overwrite while a verified server owns
+    // the folder. Only a pid file naming a live, verified server process
+    // refuses — stale/dead/unparseable/foreign pids fall through to the wipe
+    // (aborted setups must stay re-creatable). Uses the same per-PID
+    // verification as stop (never name-prefix trust).
+    private static bool IsLiveServerFolder(string folderPath)
+    {
+        try
+        {
+            var pidFile = Path.Combine(folderPath, "save", "server.pid");
+            if (!File.Exists(pidFile)) return false;
+            if (!int.TryParse(File.ReadAllText(pidFile).Trim(), out int pid)) return false;
+            return PidFile.IsServerProcess(pid);
+        }
+        catch { return false; }
     }
     private static void Scaffold(string folderPath, string gameName)
     {

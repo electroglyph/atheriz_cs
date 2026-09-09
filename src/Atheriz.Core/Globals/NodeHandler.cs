@@ -146,6 +146,25 @@ public partial class NodeHandler
                                             }
                                             finally { ng.Lock.ExitWriteLock(); }
                                         }
+                                        else
+                                        {
+                                            // A3-G-7 residue: the fresh row has no Z grid at
+                                            // all — the same hole one level up. Materialize
+                                            // the grid on the replacement area and re-insert
+                                            // rather than evicting the live-modified node.
+                                            // `na` is still local (published below), so no
+                                            // lock beyond the fresh grid's own is needed.
+                                            var fresh = new NodeGrid(na.Name, n.Coord.Z);
+                                            na.AddGrid(fresh);
+                                            fresh.Lock.EnterWriteLock();
+                                            try
+                                            {
+                                                fresh.Nodes[(n.Coord.X, n.Coord.Y)] = n;
+                                                fresh.IsModified = true;
+                                                grafted = true;
+                                            }
+                                            finally { fresh.Lock.ExitWriteLock(); }
+                                        }
                                     }
                                 }
                                 catch { grafted = false; }

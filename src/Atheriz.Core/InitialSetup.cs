@@ -51,7 +51,7 @@ public static class InitialSetup
         }
     }
 
-    public static void DoSetup(string savePath, string? username = null, string? password = null, string? secretPath = null, bool prompt = true)
+    public static void DoSetup(string savePath, string? username = null, string? password = null, string? secretPath = null, bool prompt = true, TextReader? input = null)
     {
         // Port of initial_setup.py:49 logger.info — not duplicated to stdout (new.py:740 already prints)
         // Ensure savePath absolute for guard
@@ -147,6 +147,90 @@ public static class InitialSetup
             mh.SetMapInfo(LIMBO_AREA, z, mi);
         }
         // Persist nodes and map.
+        // A3-G-4: resolve credentials BEFORE taking the write gate or opening
+        // the seed transaction. Holding either across interactive ReadLine/
+        // ReadKey turned every slow operator into a TimeoutException (and a
+        // pinned DB) for all concurrent savers. The gate/tx span below covers
+        // EnsureCreated + saves only.
+        // Resolve username/password — mirrors initial_setup.py:98-123
+        string? u = username;
+        string? p = password;
+        // An explicitly provided reader is used as-is (test/console-redirect
+        // seams); otherwise prompts need a real console like before.
+        TextReader? promptInput = input ?? (prompt && !Console.IsInputRedirected ? Console.In : null);
+        if (string.IsNullOrWhiteSpace(u))
+        {
+            u = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME")?.Trim();
+            if (string.IsNullOrWhiteSpace(u))
+            {
+                if (promptInput != null)
+                {
+                    // Explicit Console.Out (not Logger): interactive prompts must stay
+                    // on stdout interleaved with stdin reads, mirroring print()/input().
+                    Console.Out.Write("Enter superuser username: ");
+                    u = promptInput.ReadLine()?.Trim();
+                }
+            }
+            else u = u!.Trim();
+        }
+        else if (u != null) u = u.Trim();
+
+        bool skipSuperuser = false;
+        if (string.IsNullOrWhiteSpace(u))
+        {
+            Console.Error.WriteLine("Error: Username cannot be empty.");
+            // Port of initial_setup.py: mh.save()/nh.save() precede the
+            // credential prompts — limbo is durable even with no superuser.
+            // (Committed below, after the gate/tx open.)
+            skipSuperuser = true;
+        }
+
+        if (!skipSuperuser && string.IsNullOrWhiteSpace(p))
+        {
+            p = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD")?.Trim();
+            if (string.IsNullOrWhiteSpace(p))
+            {
+                if (promptInput != null)
+                {
+                    Console.Out.Write("Enter superuser password: ");
+                    // simple no-echo fallback
+                    try
+                    {
+                        if (ReferenceEquals(promptInput, Console.In))
+                        {
+                            var sb = new System.Text.StringBuilder();
+                            ConsoleKeyInfo k;
+                            while ((k = Console.ReadKey(intercept: true)).Key != ConsoleKey.Enter)
+                            {
+                                if (k.Key == ConsoleKey.Backspace && sb.Length > 0) sb.Length--;
+                                else if (!char.IsControl(k.KeyChar)) sb.Append(k.KeyChar);
+                            }
+                            Console.Out.WriteLine();
+                            p = sb.ToString().Trim();
+                        }
+                        else p = promptInput.ReadLine()?.Trim();
+                    }
+                    catch { p = promptInput.ReadLine()?.Trim(); }
+                }
+            }
+            else p = p!.Trim();
+            if (string.IsNullOrWhiteSpace(p))
+            {
+                Console.Error.WriteLine("Error: Password cannot be empty.");
+                // Limbo commits (see username branch above).
+                skipSuperuser = true;
+            }
+        }
+        else if (p != null) p = p.Trim();
+
+        if (!skipSuperuser)
+        {
+            var errU = Validation.ValidateAccountName(u!);
+            if (errU != null) throw new ArgumentException($"Invalid superuser username: {errU}");
+            var errP = Validation.ValidatePassword(p!);
+            if (errP != null) throw new ArgumentException($"Invalid superuser password: {errP}");
+        }
+
         // Single shared context + transaction for the whole seed (atomic checkpoint):
         // previously five separate contexts committed independently, so a mid-setup
         // failure left a half-built world. Any early return / throw below disposes the
@@ -168,76 +252,12 @@ public static class InitialSetup
         mh.Save(db);
         nh.Save(db);
 
-        // Resolve username/password — mirrors initial_setup.py:98-123
-        string? u = username;
-        string? p = password;
-        if (string.IsNullOrWhiteSpace(u))
+        if (skipSuperuser)
         {
-            u = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME")?.Trim();
-            if (string.IsNullOrWhiteSpace(u))
-            {
-                if (prompt && !Console.IsInputRedirected)
-                {
-                    // Explicit Console.Out (not Logger): interactive prompts must stay
-                    // on stdout interleaved with stdin reads, mirroring print()/input().
-                    Console.Out.Write("Enter superuser username: ");
-                    u = Console.ReadLine()?.Trim();
-                }
-            }
-            else u = u!.Trim();
-            if (string.IsNullOrWhiteSpace(u))
-            {
-                Console.Error.WriteLine("Error: Username cannot be empty.");
-                // Port of initial_setup.py: mh.save()/nh.save() precede the
-                // credential prompts — limbo is durable even with no superuser
-                // . The message below is only printed on commit.
-                setupTx.Commit();
-                Console.Out.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
-                return;
-            }
+            setupTx.Commit();
+            Console.Out.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
+            return;
         }
-        else if (u != null) u = u.Trim();
-
-        if (string.IsNullOrWhiteSpace(p))
-        {
-            p = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD")?.Trim();
-            if (string.IsNullOrWhiteSpace(p))
-            {
-                if (prompt && !Console.IsInputRedirected)
-                {
-                    Console.Out.Write("Enter superuser password: ");
-                    // simple no-echo fallback
-                    try
-                    {
-                        var sb = new System.Text.StringBuilder();
-                        ConsoleKeyInfo k;
-                        while ((k = Console.ReadKey(intercept: true)).Key != ConsoleKey.Enter)
-                        {
-                            if (k.Key == ConsoleKey.Backspace && sb.Length > 0) sb.Length--;
-                            else if (!char.IsControl(k.KeyChar)) sb.Append(k.KeyChar);
-                        }
-                        Console.Out.WriteLine();
-                        p = sb.ToString().Trim();
-                    }
-                    catch { p = Console.ReadLine()?.Trim(); }
-                }
-            }
-            else p = p!.Trim();
-            if (string.IsNullOrWhiteSpace(p))
-            {
-                Console.Error.WriteLine("Error: Password cannot be empty.");
-                // Limbo commits (see username branch above).
-                setupTx.Commit();
-                Console.Out.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
-                return;
-            }
-        }
-        else if (p != null) p = p.Trim();
-
-        var errU = Validation.ValidateAccountName(u!);
-        if (errU != null) throw new ArgumentException($"Invalid superuser username: {errU}");
-        var errP = Validation.ValidatePassword(p!);
-        if (errP != null) throw new ArgumentException($"Invalid superuser password: {errP}");
 
         // Alarm object at 0,0,8
         var alarmCoord = new Coord(LIMBO_AREA, 0, 0, LIMBO_GRID - 1);

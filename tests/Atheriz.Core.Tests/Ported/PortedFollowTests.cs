@@ -162,4 +162,29 @@ public class PortedFollowTests
         new UnfollowCommand().Run(follower, null);
         Assert.Contains(follower.PeekMessages(), m => m.Contains("aren't following"));
     }
+
+    [Fact]
+    public void FollowScript_EveryPostMove_PopsItsPartner()
+    {
+        // A3-O-2: every pre-move pushes exactly one entry, so every post-move
+        // must pop exactly one — including failed moves (null destination) and
+        // follower-less moves (script teardown). Otherwise entries leak and
+        // later moves pop stale rooms.
+        using var env = GlobalTestEnv.Enter();
+        var tup = SetupTestNodes("followstack");
+        var leader = MakePc("Leader", tup.n1);
+        var fs = new FollowScript();
+        fs.InstallHooks(leader);
+        var stack = (System.Collections.Concurrent.ConcurrentStack<GameObject?>)typeof(FollowScript)
+            .GetField("_oldLocStack", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(fs)!;
+        // failed move: null destination still pops the pre-move push
+        fs.at_pre_move(null);
+        fs.at_post_move(null);
+        Assert.True(stack.IsEmpty);
+        // follower-less move: teardown path still pops the pre-move push
+        fs.at_pre_move(tup.n2);
+        fs.at_post_move(tup.n2);
+        Assert.True(stack.IsEmpty);
+    }
 }

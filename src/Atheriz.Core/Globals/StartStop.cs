@@ -468,19 +468,50 @@ public static class StartStop
         // Crash-consistency journal: see AutosaveTick.
         Persistence.CheckpointJournal.MarkDirty(settings.SavePath);
         bool ok = true;
-        // Atomic checkpoint: one shared context for all three groups — separate
-        // contexts allowed a crash between groups to tear the world. Every
-        // retry below also stays on settings.SavePath: the old per-step
-        // fallbacks used the ambient Factory path, which writes to the WRONG
-        // DB when the paths differ.
+        // A3-G-3: one transaction for all three groups. WithGateAndTransaction
+        // joins an ambient transaction instead of opening its own, so opening
+        // one here makes the checkpoint atomic: a crash (or a failing group)
+        // rolls back objects+map+node together instead of tearing between
+        // groups. The gate is held for the whole checkpoint because the inner
+        // saves skip their own gate take once the ambient transaction exists —
+        // without this a concurrent tick could interleave mid-checkpoint.
+        // Bounded take: on timeout the checkpoint still runs (old shape, journal
+        // still detects) rather than skipping the shutdown save entirely.
+        bool atomic = DbWriteGate.TryEnter(TimeSpan.FromSeconds(30));
+        if (!atomic)
+            Console.Error.WriteLine("checkpoint gate busy; saving without atomic transaction (journal still detects).");
         try
         {
             using var db = new AtherizDbContext(settings.SavePath);
             db.Database.EnsureCreated();
-            ShutdownStep("save_objects", () =>
+            if (atomic)
+            {
+                using var tx = db.Database.BeginTransaction();
+                RunCheckpointSteps(db, ref ok);
+                if (ok) tx.Commit();
+                // !ok: dispose uncommitted = rollback; the journal stays dirty.
+            }
+            else RunCheckpointSteps(db, ref ok);
+        }
+        catch (Exception ex) { ok = false; Console.Error.WriteLine($"checkpoint context failed:\n{ex}"); }
+        finally { if (atomic) DbWriteGate.Exit(); }
+        if (ok) Persistence.CheckpointJournal.MarkClean(settings.SavePath);
+    }
+
+    // The three save groups shared by the atomic and fallback shapes above.
+    // A step retry reuses the SAME context: a separate context's writes would
+    // hit SQLITE_BUSY against the open outer transaction (and break the very
+    // atomicity the checkpoint exists for). The tracker is cleared first — a
+    // failed SaveChanges may have left it poisoned (mirrors
+    // WithGateAndTransaction's own retry hygiene); the save re-fetches
+    // everything via Find. The primary path still commits once.
+    private static void RunCheckpointSteps(AtherizDbContext db, ref bool ok)
+    {
+        bool localOk = true;
+        ShutdownStep("save_objects", () =>
             {
                 try { ObjectRegistry.SaveObjects(db); }
-                catch (Exception ex) { ok = false; Console.Error.WriteLine($"save_objects failed:\n{ex}"); }
+                catch (Exception ex) { localOk = false; Console.Error.WriteLine($"save_objects failed:\n{ex}"); }
             });
             ShutdownStep("map_save", () =>
             {
@@ -494,11 +525,10 @@ public static class StartStop
                     try
                     {
                         var mh = GlobalServices.GetMapHandler();
-                        using var db2 = new AtherizDbContext(settings.SavePath);
-                        db2.Database.EnsureCreated();
-                        mh.Save(db2);
+                        db.ChangeTracker.Clear();
+                        mh.Save(db);
                     }
-                    catch { ok = false; }
+                    catch { localOk = false; }
                 }
             });
             ShutdownStep("node_save", () =>
@@ -513,16 +543,13 @@ public static class StartStop
                     try
                     {
                         var nh = GlobalServices.GetNodeHandler();
-                        using var db2 = new AtherizDbContext(settings.SavePath);
-                        db2.Database.EnsureCreated();
-                        nh.Save(db2);
+                        db.ChangeTracker.Clear();
+                        nh.Save(db);
                     }
-                    catch { ok = false; }
+                    catch { localOk = false; }
                 }
             });
-        }
-        catch (Exception ex) { ok = false; Console.Error.WriteLine($"checkpoint context failed:\n{ex}"); }
-        if (ok) Persistence.CheckpointJournal.MarkClean(settings.SavePath);
+        if (!localOk) ok = false;
     }
 
     // Helpers to avoid creating singletons unnecessarily during shutdown

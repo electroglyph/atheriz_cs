@@ -146,14 +146,17 @@ public partial class Node
     // Port of nodes.py:677
     public bool AddLinkIfAbsent(string name, Func<NodeLink> factory)
     {
+        // A3-O-5: guards fold case like HasLinkName/GetLinkByName — ordinal
+        // guards let AddLinkIfAbsent("North") + AddLinkIfAbsent("north") install
+        // a shadowed unreachable link.
         SyncRoot.EnterReadLock();
-        try { if (Links.Any(l => l.Name == name)) return false; }
+        try { if (Links.Any(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return false; }
         finally { SyncRoot.ExitReadLock(); }
         var link = factory();
         SyncRoot.EnterWriteLock();
         try
         {
-            if (Links.Any(l => l.Name == name)) return false;
+            if (Links.Any(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return false;
             // inline add_link logic but avoid double lock
             if (Links.Count > 0 && Links.Contains(link)) return false;
             if (Links.Count == 0) Links = [link];
@@ -176,7 +179,9 @@ public partial class Node
         SyncRoot.EnterWriteLock();
         try
         {
-            var idx = Links.FindIndex(l => l.Name == name);
+            // A3-O-5: RemoveLink folds case like the lookups — RemoveLink("NORTH")
+            // must find the "north" that GetLinkByName finds.
+            var idx = Links.FindIndex(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             if (idx >= 0) { found = Links[idx]; Links.RemoveAt(idx); IsModified = true; }
         }
         finally { SyncRoot.ExitWriteLock(); }

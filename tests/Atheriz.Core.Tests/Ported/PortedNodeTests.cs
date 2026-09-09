@@ -471,4 +471,44 @@ public class PortedNodeTests
         var log = sw.ToString().ToLower();
         Assert.DoesNotContain("overwrit", log);
     }
+
+    [Fact] public void LinkNameCaseDisciplineAgrees()
+    {
+        // A3-O-5: lookups folded case but add/remove guards were ordinal, so
+        // AddLinkIfAbsent("north") after "North" installed a shadowed link and
+        // RemoveLink("NORTH") missed the "north" that Get finds.
+        using var env = GlobalTestEnv.Enter();
+        var node = new Node(new Coord("casearea",0,0,0));
+        Assert.True(node.AddLinkIfAbsent("North", () => new NodeLink("North", new Coord("casearea",0,1,0))));
+        Assert.False(node.AddLinkIfAbsent("north", () => new NodeLink("north", new Coord("casearea",0,2,0))));
+        Assert.Single(node.Links);
+        Assert.NotNull(node.GetLinkByName("NORTH"));
+        node.RemoveLink("NORTH");
+        Assert.Empty(node.Links);
+    }
+
+    [Fact] public void ConcurrentAddLinkWithAddRemoveNode_DoesNotThrow()
+    {
+        // A3-O-12: AddNode read node.Links under the grid lock only and
+        // RemoveNode enumerated it with no lock at all — a concurrent AddLink
+        // tore the enumeration (InvalidOperationException). Both snapshot now.
+        using var env = GlobalTestEnv.Enter();
+        var grid = new NodeGrid("racegrid",0);
+        var node = new Node(new Coord("racegrid",0,0,0));
+        grid.AddNode(node);
+        var ex = Record.Exception(() =>
+        {
+            var tasks = Enumerable.Range(0, 8).Select(i => Task.Run(() =>
+            {
+                for (int j = 0; j < 100; j++)
+                {
+                    node.AddLink(new NodeLink($"l{i}_{j}", new Coord("racegrid",0,1,0)));
+                    grid.AddNode(node);
+                    grid.RemoveNode((0,0));
+                }
+            })).ToArray();
+            Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(60)));
+        });
+        Assert.Null(ex);
+    }
 }

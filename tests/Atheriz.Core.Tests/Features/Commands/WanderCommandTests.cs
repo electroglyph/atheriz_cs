@@ -68,4 +68,25 @@ public class WanderCommandTests
         }
         finally { Teardown(); }
     }
+
+    [Fact]
+    public void Wander_SpawnedNpcs_HaveDistinctIds()
+    {
+        // A3-C-12: the wanderer ctor peeked the counter (GetId) instead of
+        // allocating (GetUniqueId), so every wanderer shared one Id.
+        ObjectRegistry.ClearAll();
+        NodeHandler.SetCurrent(null);
+        try
+        {
+            var (_, _, builder) = SetupRoom();
+            var pa = new GameArgumentParser.ParsedArgs();
+            pa["count"] = 3;
+            new WanderCommand().Run(builder, pa);
+            var ids = ObjectRegistry.FilterBy(o => o.IsNpc).Select(o => o.Id).ToList();
+            Assert.Equal(3, ids.Count);
+            Assert.All(ids, id => Assert.NotEqual(-1, id));
+            Assert.Equal(3, ids.Distinct().Count());
+        }
+        finally { Teardown(); }
+    }
 }

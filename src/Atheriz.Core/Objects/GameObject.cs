@@ -378,6 +378,11 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             {
                 _channels.Add(channel.Id);
                 _flags.IsModified = true;
+                // A3-O-4: the InternalCmdSet itself is allocated here, under the
+                // peer write lock — allocating it outside (after release) let two
+                // racing Subscribes both see null, both allocate, and the second
+                // silently orphan the first channel's installed command.
+                InternalCmdSet ??= new Commands.CmdSet();
                 added = true;
             }
         }

@@ -61,8 +61,8 @@ public static class Autosave
 
         // Crash-consistency journal: dirty before tables, clean
         // after all commit. A crash between tables leaves dirty behind.
-        // journal + objects save honor explicit settings (the
-        // handlers below save their own singleton state via their own paths).
+        // Journal, objects, and all handler saves below honor explicit
+        // settings (each section commits independently to the same DB).
         CheckpointJournal.MarkDirty(AtherizDbContextFactory.ResolveSavePath(settings));
 
         // objects
@@ -84,7 +84,13 @@ public static class Autosave
             // volatile read — written under _lock by Start/Stop on
             // other threads; a torn read would save via a stale handler.
             var mh = mapHandler ?? Volatile.Read(ref _cachedMap) ?? GlobalServices.GetMapHandler();
-            mh.Save();
+            // A3-G-2: save into the explicit-settings DB, not the ambient one.
+            // The parameterless Save() persists singleton state via the ambient
+            // path — under explicit settings that tore the world (objects in
+            // DB-A, handlers in DB-B). Each section keeps its own commit so a
+            // single failing domain still doesn't block the others.
+            using var dbMap = AtherizDbContextFactory.CreateForSettings(settings);
+            mh.Save(dbMap);
         }
         catch (Exception ex)
         {
@@ -96,7 +102,9 @@ public static class Autosave
         try
         {
             var nh = nodeHandler ?? Volatile.Read(ref _cachedNodes) ?? GlobalServices.GetNodeHandler();
-            nh.Save();
+            // A3-G-2: explicit-settings DB (see map section above).
+            using var dbNode = AtherizDbContextFactory.CreateForSettings(settings);
+            nh.Save(dbNode);
         }
         catch (Exception ex)
         {
@@ -110,7 +118,9 @@ public static class Autosave
             try
             {
                 var gt = gameTime ?? _cachedTime ?? GlobalServices.GetGameTime();
-                gt.Save();
+                // A3-G-2: explicit-settings DB (see map section above).
+                using var dbTime = AtherizDbContextFactory.CreateForSettings(settings);
+                gt.Save(dbTime);
             }
             catch (Exception ex)
             {
@@ -126,7 +136,7 @@ public static class Autosave
         }
         else
         {
-            CheckpointJournal.MarkClean();
+            CheckpointJournal.MarkClean(AtherizDbContextFactory.ResolveSavePath(settings));
             try { AtherizLogger.LogInformation("Autosave completed."); } catch { Console.Error.WriteLine("Autosave completed."); }
             try { var ch = GlobalServices.GetServerChannel(); if (ch != null) ch.Msg("Autosave completed."); } catch (Exception) { }
         }

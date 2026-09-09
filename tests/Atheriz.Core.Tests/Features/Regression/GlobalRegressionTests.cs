@@ -365,6 +365,37 @@ public class GlobalRegressionTests
         finally { NodeHandler.SetCurrent(null); Reset(); }
     }
 
+    // load graft grid-absent hole (A3-G-7 residue): the fresh row has no Z grid
+    // at all — the same hole one level up. The live-modified node survives via
+    // a materialized grid, not eviction.
+    [Fact]
+    public void LoadGraft_MissingGridReinsertsLiveModifiedNode()
+    {
+        Reset();
+        using var env = GlobalTestEnv.Enter();
+        NodeHandler? nh = null;
+        try
+        {
+            nh = new NodeHandler(autoLoad: false);
+            NodeHandler.SetCurrent(nh);
+            var area = new NodeArea("graftgrid");
+            area.AddGrid(new NodeGrid("graftgrid", 0));
+            nh.AddArea(area);
+            nh.AddNode(new Node(new Coord("graftgrid", 0, 0, 0)));
+            nh.Save(force: true);
+            // Live-only edit on a grid the saved row never had.
+            var live = new Node(new Coord("graftgrid", 3, 3, 1));
+            nh.AddNode(live);
+            live.IsModified = true;
+            nh.Load();
+            var got = nh.GetNode(new Coord("graftgrid", 3, 3, 1));
+            Assert.NotNull(got);
+            Assert.Equal(live.Id, got!.Id);
+            Assert.NotEmpty(ObjectRegistry.Get(live.Id));
+        }
+        finally { NodeHandler.SetCurrent(null); Reset(); }
+    }
+
     // Remap collisions are first-wins and loud: a relocated dict landing on an
     // occupied destination keeps the pre-existing per-name door and logs the drop
     // (owner decision 2026-09-08 — never silently clobber on a merge).

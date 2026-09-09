@@ -50,7 +50,7 @@ public sealed class ConnectCommand : Command
             caller.Msg("Invalid password.");
             int fail2 = (caller as BaseConnection)?.FailedLoginAttempts ?? 0;
             var settings = AtherizSettings.Global;
-            if (attempts > settings.MaxLoginAttempts || fail2 > settings.MaxLoginAttempts)
+            if (attempts >= settings.MaxLoginAttempts || fail2 >= settings.MaxLoginAttempts)
             {
                 caller.Msg("Too many failed login attempts. Please try again later.");
                 if (caller is BaseConnection c2) c2.Close();

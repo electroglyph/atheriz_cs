@@ -124,11 +124,13 @@ public class Channel : GameObject
 
     public Atheriz.Core.Commands.Command? GetCommand()
     {
-        // Snapshot Name/Desc before locking: GameObject props take SyncRoot, so
+        // Snapshot Name/Desc/Id before locking: GameObject props take SyncRoot, so
         // reading them under _histLock would nest channel -> object (inversion;
-        // the fixed order everywhere is object -> channel).
+        // the fixed order everywhere is object -> channel). A3-O-3: Id used to be
+        // read inside the lock while Name/Desc were snapshotted outside.
         string key = Name.ToLowerInvariant();
         string desc = Desc;
+        int id = Id;
         lock (_histLock)
         {
             // Invalidate the cached command on rename (old cache ignored Name/Desc).
@@ -137,7 +139,7 @@ public class Channel : GameObject
             ((BaseChannelCommand)cmd).SetKey(key);
             ((BaseChannelCommand)cmd).SetDesc(desc);
             cmd.Channel = this;
-            cmd.Id = Id;
+            cmd.Id = id;
             _command = cmd;
             _commandKey = key;
             _commandDesc = desc;

@@ -10,19 +10,34 @@ namespace Atheriz.Core.Objects;
 // Partial for deletion lifecycle — split from GameObject.Puppet.cs per file-organization hygiene.
 public partial class GameObject
 {
+    // A3-O-9: atomic delete claim. The IsDeleted probe below runs under a read
+    // lock and the claiming write comes far too late, so two racing Deletes
+    // both walked, both emitted GetDelOps, both tore down. The loser of this
+    // claim returns null (already-gone) instead.
+    private int _deleteClaimed;
+
     // Port of base_obj.py:467 delete + object deletion lifecycle — caller optional for Account parity
     public virtual (int count, List<object> ops)? Delete(GameObject? caller = null, bool recursive = false)
     {
-        // Account row delete is immediate regardless of static type.
-        // (C# cannot override with a different return type, so the bool Delete
-        // hides this method; route the base dispatch to the same immediate core.)
         if (this is Account acc) return acc.DeleteImmediate(caller);
         if (caller != null && !AtDelete(caller)) return null;
         // quick check already deleted
         _lock.EnterReadLock();
         try { if (_flags.IsDeleted) return null; }
         finally { _lock.ExitReadLock(); }
+        if (System.Threading.Interlocked.Exchange(ref _deleteClaimed, 1) != 0) return null;
+        try { return DeleteCore(caller, recursive); }
+        catch
+        {
+            // A failed delete must stay deletable: release the claim so a later
+            // attempt can retry instead of meeting a claimed-but-live object.
+            System.Threading.Interlocked.Exchange(ref _deleteClaimed, 0);
+            throw;
+        }
+    }
 
+    private (int count, List<object> ops)? DeleteCore(GameObject? caller, bool recursive)
+    {
         var ops = new List<object>();
         var toDelete = new List<GameObject>();
 
@@ -128,6 +143,10 @@ public partial class GameObject
                         try { loc.RemoveContent(obj.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
                     }
                 } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                // A3-O-9: only the thread that flips the flag tears down. A sibling
+                // delete (overlapping roots) that arrives late skips the physical
+                // section instead of double-closing sessions / removing tickers.
+                bool mine = false;
                 try
                 {
                     obj._lock.EnterWriteLock();
@@ -137,6 +156,7 @@ public partial class GameObject
                         {
                             obj._flags.IsDeleted = true;
                             obj._flags.IsModified = true;
+                            mine = true;
                         }
                         // clear location
                         // keep location as Null for survivors? For deleted ones, set to null as well but they are deleted anyway
@@ -144,8 +164,11 @@ public partial class GameObject
                     }
                     finally { obj._lock.ExitWriteLock(); }
                 } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
-                ObjectRegistry.RemoveObject(obj);
-                TeardownDeleted(obj);
+                if (mine)
+                {
+                    ObjectRegistry.RemoveObject(obj);
+                    TeardownDeleted(obj);
+                }
             }
             // ops already collected; return
             return (toDelete.Count, ops);

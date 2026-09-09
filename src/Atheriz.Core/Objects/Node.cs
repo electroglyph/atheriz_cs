@@ -240,15 +240,24 @@ public partial class Node : GameObject
         get => base.TickSeconds;
         set
         {
-            double old = base.TickSeconds;
-            bool doSwap = IsTickable && value != old;
-            base.TickSeconds = value;
-            if (doSwap)
+            // A3-O-11: predicate + mutation share one write hold (SyncRoot is
+            // recursive, so the base accessors nest safely). Across separate
+            // acquisitions two racing setters both saw stale state and both
+            // AddCoro'd, double-firing the ticker.
+            SyncRoot.EnterWriteLock();
+            try
             {
-                var at = GlobalTickerHolder.Get();
-                at?.RemoveCoro(AtTick, old);
-                at?.AddCoro(AtTick, value);
+                double old = base.TickSeconds;
+                bool doSwap = IsTickable && value != old;
+                base.TickSeconds = value;
+                if (doSwap)
+                {
+                    var at = GlobalTickerHolder.Get();
+                    at?.RemoveCoro(AtTick, old);
+                    at?.AddCoro(AtTick, value);
+                }
             }
+            finally { SyncRoot.ExitWriteLock(); }
         }
     }
 
@@ -258,12 +267,18 @@ public partial class Node : GameObject
         get => base.IsTickable;
         set
         {
-            if (base.IsTickable == value) return;
-            double tick = base.TickSeconds;
-            base.IsTickable = value;
-            var at = GlobalTickerHolder.Get();
-            if (value) at?.AddCoro(AtTick, tick);
-            else at?.RemoveCoro(AtTick, tick);
+            // A3-O-11: same single-hold discipline as TickSeconds above.
+            SyncRoot.EnterWriteLock();
+            try
+            {
+                if (base.IsTickable == value) return;
+                double tick = base.TickSeconds;
+                base.IsTickable = value;
+                var at = GlobalTickerHolder.Get();
+                if (value) at?.AddCoro(AtTick, tick);
+                else at?.RemoveCoro(AtTick, tick);
+            }
+            finally { SyncRoot.ExitWriteLock(); }
         }
     }
 

@@ -349,4 +349,34 @@ public class PortedStartStopTests
         StartStop.Reset();
         ticker.Clear();
     }
+
+    private sealed class ThrowingCheckpointNodeHandler : NodeHandler
+    {
+        public ThrowingCheckpointNodeHandler() : base(autoLoad: false) { }
+        public override void Save(Atheriz.Core.Persistence.AtherizDbContext db, bool force = false)
+            => throw new InvalidOperationException("boom-checkpoint");
+    }
+
+    [Fact] public void DoShutdown_FailingGroup_RollsBackWholeCheckpoint()
+    {
+        // A3-G-3: the checkpoint was 3 independent commits — a failing group
+        // left earlier groups committed (torn world). One transaction now: a
+        // node-save failure rolls back the already-staged objects, and the
+        // journal stays dirty so the next boot detects it.
+        using var env = GlobalTestEnv.Enter();
+        StartStop.Reset();
+        try
+        {
+            var settings = new Atheriz.Core.Settings.AtherizSettings { SavePath = env.TempPath, TimeSystemEnabled = false, AutosaveMinutes = 0 };
+            var obj = Atheriz.Core.Objects.GameObject.Create("checkpointvictim");
+            Atheriz.Core.Globals.ObjectRegistry.AddObject(obj);
+            GlobalServices.SetNodeHandler(new ThrowingCheckpointNodeHandler());
+            StartStop.DoShutdown(settings: settings);
+            Atheriz.Core.Persistence.AtherizDbContextFactory.ReopenDatabase();
+            using (var db = new Atheriz.Core.Persistence.AtherizDbContext(env.TempPath))
+                Assert.False(db.Objects.Any(o => o.Data.Contains("checkpointvictim")), "staged objects must roll back with the failing group");
+            Assert.True(Atheriz.Core.Persistence.CheckpointJournal.IsDirty(env.TempPath));
+        }
+        finally { StartStop.Reset(); }
+    }
 }

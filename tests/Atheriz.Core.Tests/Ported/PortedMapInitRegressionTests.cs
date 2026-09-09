@@ -259,4 +259,60 @@ public class PortedMapInitRegressionTests
         }
         Assert.Contains(sent, x => x.Cmd == "map");
     }
+
+    private sealed class BlockingReader : TextReader
+    {
+        private readonly ManualResetEventSlim _entered = new(false);
+        private readonly ManualResetEventSlim _release = new(false);
+        public bool WaitEntered(TimeSpan t) => _entered.Wait(t);
+        public void Release() => _release.Set();
+        public override string? ReadLine() { _entered.Set(); _release.Wait(TimeSpan.FromSeconds(30)); return null; }
+    }
+
+    [Fact]
+    public void DoSetup_PromptHoldsNoWriteGate()
+    {
+        // A3-G-4: the seed held DbWriteGate (and an open sqlite transaction)
+        // across interactive credential prompts — every slow operator became
+        // a TimeoutException (and a pinned DB) for all concurrent savers.
+        // Prompts resolve before the gate/tx open now: while blocked in the
+        // username prompt, the gate must be acquirable, and the empty-username
+        // path must still commit limbo without a superuser.
+        var tmp = Path.Combine(Path.GetTempPath(), "atheriz_g4_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmp);
+        var save = Path.Combine(tmp, "save");
+        var secret = Path.Combine(tmp, "secret");
+        var oldUser = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME");
+        var oldPass = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
+        Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", null);
+        Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", null);
+        var oldOut = Console.Out;
+        var capture = new StringWriter();
+        var reader = new BlockingReader();
+        Exception? bgEx = null;
+        var task = Task.Run(() =>
+        {
+            try { InitialSetup.DoSetup(save, username: null, password: "pw-provided", secretPath: secret, prompt: true, input: reader); }
+            catch (Exception ex) { bgEx = ex; }
+        });
+        try
+        {
+            Console.SetOut(capture);
+            Assert.True(reader.WaitEntered(TimeSpan.FromSeconds(15)), "username prompt never arrived");
+            Assert.True(DbWriteGate.TryEnter(TimeSpan.FromSeconds(5)), "write gate held across interactive prompt");
+            DbWriteGate.Exit();
+            reader.Release();
+            Assert.True(task.Wait(TimeSpan.FromSeconds(60)));
+            Assert.Null(bgEx);
+            Assert.Contains("without superuser", capture.ToString());
+        }
+        finally
+        {
+            reader.Release();
+            Console.SetOut(oldOut);
+            Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", oldUser);
+            Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", oldPass);
+            try { Directory.Delete(tmp, true); } catch { }
+        }
+    }
 }

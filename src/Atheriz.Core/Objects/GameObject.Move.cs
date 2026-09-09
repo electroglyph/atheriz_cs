@@ -284,6 +284,12 @@ public partial class GameObject
             }
         }
 
+        // A3-O-7: the pre-gates above run with no location locks held and hooks
+        // can move things (see the comment above). If `this` is no longer where
+        // the gates ran, abort instead of removing from a stale room and
+        // double-inserting into the destination.
+        if (!ReferenceEquals(ResolveLocationObject(), oldLoc)) return false;
+
         // Try to acquire locks in order (deadlock avoidance)
         // For C# we use ReaderWriterLockSlim EnterWriteLock with recursion; acquire all, do move, release reverse
         // We do not have NodeGrid locks accessible, so we only lock GameObject/Node SyncRoots.

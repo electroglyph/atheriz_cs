@@ -114,7 +114,12 @@ public sealed class NodeGrid
             Nodes.TryGetValue((node.Coord.X, node.Coord.Y), out old);
             Nodes[(node.Coord.X, node.Coord.Y)] = node;
             IsModified = true;
-            if (node.Links.Count > 0) linksSnap = node.Links.ToList();
+            // A3-O-12: snapshot through the node-locked getter — reading the raw
+            // list here (grid lock only) raced a concurrent AddLink into
+            // InvalidOperationException mid-enumeration. Grid → node-read nests
+            // the same way the load graft does (handler → grid → node,
+            // NodeHandler.cs:125-147), so no new lock order is introduced.
+            linksSnap = node.GetLinks();
             coordSnap = node.Coord;
         }
         finally { Lock.ExitWriteLock(); }
@@ -140,11 +145,14 @@ public sealed class NodeGrid
         Lock.EnterWriteLock();
         try { Nodes.Remove(coord, out node); IsModified = true; }
         finally { Lock.ExitWriteLock(); }
-        if (node != null && node.Links.Count > 0)
+        // A3-O-12: enumerate a node-locked snapshot — the raw list used to be
+        // walked here with no lock at all.
+        var linksSnap = node?.GetLinks() ?? [];
+        if (linksSnap.Count > 0)
         {
             var nh = NodeHandler.GetCurrent();
             if (nh != null)
-                foreach (var l in node.Links)
+                foreach (var l in linksSnap)
                     if (Area != l.Coord.Area) nh.RemoveTransition(l.Coord);
         }
     }

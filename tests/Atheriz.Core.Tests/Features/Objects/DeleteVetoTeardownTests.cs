@@ -68,4 +68,38 @@ public class DeleteVetoTeardownTests
         }
         finally { ObjectRegistry.ClearAll(); }
     }
+
+    [Fact]
+    public void ConcurrentDelete_SingleWinner_NoDoubleTeardown()
+    {
+        // A3-O-9: two racing Deletes both walked, both emitted GetDelOps, both
+        // tore down (double session close / ticker remove). The atomic claim
+        // lets exactly one winner through; losers see already-gone.
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var owner = GameObject.Create("owner", privilege: Privilege.Admin);
+            ObjectRegistry.AddObject(owner);
+            var box = GameObject.Create("racebox", isPc: true);
+            ObjectRegistry.AddObject(box);
+            box.IsConnected = true;
+            var kid = GameObject.Create("racekid");
+            ObjectRegistry.AddObject(kid);
+            box.AddObject(kid);
+            int winners = 0, totalOps = 0;
+            var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+            {
+                var r = box.Delete(owner, recursive: true);
+                if (r != null) { System.Threading.Interlocked.Increment(ref winners); System.Threading.Interlocked.Add(ref totalOps, r.Value.ops.Count); }
+            })).ToArray();
+            Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
+            Assert.Equal(1, winners);
+            Assert.True(box.IsDeleted);
+            Assert.True(kid.IsDeleted);
+            // losers must not re-teardown: the kid's teardown ran once, so its
+            // location link is gone exactly once and stays gone.
+            Assert.DoesNotContain(kid.Id, box.ContentsSnapshot);
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
 }

@@ -116,6 +116,32 @@ public class PortedUnloggedinCommandsTestsPart3
         SaltProvider.Clear();
     }
 
+    // A3-C-27: the budget was off by one (`>` allowed Max+1 guesses). The ban
+    // must fire exactly on the Max-th failure, not one later.
+    [Fact] public void Connect_BanFiresExactlyOnMaxAttempts()
+    {
+        using var env = GlobalTestEnv.Enter();
+        SaltProvider.SetSalt("testsalt");
+        try
+        {
+            var acc = Account.Create("alice", "correct");
+            ObjectRegistry.AddObject(acc);
+            int max = new Atheriz.Core.Settings.AtherizSettings().MaxLoginAttempts;
+            var conn = new FakeConnection();
+            conn.ClientHost = "1.2.3.7";
+            conn.FailedLoginAttempts = max - 1;
+            ObjectRegistry.FailedLogins.Set(conn.ClientHost, max - 1);
+            var cmd = new ConnectCommand();
+            var parsed = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs();
+            parsed["account_name"] = "alice";
+            parsed["password"] = "wrong";
+            cmd.Run(conn, parsed);
+            Assert.True(conn.Closed || conn.Sent.Any(s=> s.Cmd=="__closed__"));
+            Assert.Contains(conn.Sent, s=> s.Args.Any(a=> a?.ToString()?.Contains("Too many")==true));
+        }
+        finally { SaltProvider.Clear(); }
+    }
+
     // Port of test_banned_account_closed
     [Fact] public void Connect_BannedAccountClosed()
     {

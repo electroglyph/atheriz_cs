@@ -30,4 +30,31 @@ public class ChannelCommandInstallTests
         }
         finally { ObjectRegistry.ClearAll(); }
     }
+
+    [Fact]
+    public void ConcurrentSubscribe_BothCommandsSurvive()
+    {
+        // A3-O-4: two racing Subscribes both saw a null InternalCmdSet, both
+        // allocated, and the second orphaned the first channel's command.
+        // The set itself is allocated under the peer write lock now.
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var chA = Channel.Create("racechana");
+            var chB = Channel.Create("racechanb");
+            var go = GameObject.Create("racefan", isPc: true);
+            ObjectRegistry.AddObject(go);
+            go.IsConnected = true;
+            var tasks = Enumerable.Range(0, 16).Select(i => Task.Run(() =>
+            {
+                go.Subscribe(i % 2 == 0 ? chA : chB);
+            })).ToArray();
+            Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
+            Assert.True(HasChannelCmd(go, "racechana"));
+            Assert.True(HasChannelCmd(go, "racechanb"));
+            Assert.Contains(chA.Id, go.ChannelsSnapshot);
+            Assert.Contains(chB.Id, go.ChannelsSnapshot);
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
 }

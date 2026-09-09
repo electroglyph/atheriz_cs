@@ -542,4 +542,28 @@ public class PortedChannelTests
         Assert.Contains("m-7", outStr);
         Assert.DoesNotContain("m-0", outStr);
     }
+
+    [Fact] public void GetCommand_SnapshotsIdOutsideChannelLock()
+    {
+        // A3-O-3: Id was read under _histLock while Name/Desc were snapshotted
+        // outside (object→channel order inversion). All three are snapshots now:
+        // the command always carries the channel's Id, even under a rename hammer.
+        using var env = GlobalTestEnv.Enter();
+        var chan = Channel.Create("o3chan");
+        var cmd = chan.GetCommand();
+        Assert.NotNull(cmd);
+        Assert.Equal(chan.Id, ((Atheriz.Core.Commands.BaseChannelCommand)cmd!).Id);
+        var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            for (int j = 0; j < 50; j++)
+            {
+                chan.Name = "o3chan" + (j % 4);
+                var c = chan.GetCommand();
+                Assert.NotNull(c);
+                Assert.Equal(chan.Id, ((Atheriz.Core.Commands.BaseChannelCommand)c!).Id);
+            }
+        })).ToArray();
+        Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
+        Assert.Equal(chan.Id, ((Atheriz.Core.Commands.BaseChannelCommand)chan.GetCommand()!).Id);
+    }
 }

@@ -1,6 +1,7 @@
 // Port of atheriz/tests/test_autosave.py:1
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Globals;
+using Atheriz.Core.Objects;
 using Atheriz.Core.Settings;
 using Atheriz.Core.Persistence;
 
@@ -504,5 +505,78 @@ public class PortedAutosaveTests
         // Failure message should contain Autosave failed (verbatim)
         Assert.Contains(channel.Msgs, m=> m.Contains("Autosave failed"));
         AtherizDbContextFactory.ReopenDatabase();
+    }
+
+    [Fact] public void ExplicitSettingsTickCleansExplicitJournalPath()
+    {
+        // A3-G-1: MarkDirty honored explicit settings but MarkClean resolved the
+        // ambient path, so the explicit DB stayed dirty forever (phantom torn
+        // checkpoint on every boot). The tick must clean the path it dirtied.
+        // NOTE: ResolveSavePath prefers ATHERIZ_SAVE_PATH over settings, so the
+        // fixture env var is cleared here — otherwise explicit and ambient can
+        // never diverge and the test would pass vacuously. CWD is parked in a
+        // temp dir so the ambient relative "save" path stays contained.
+        Reset();
+        using var env = GlobalTestEnv.Enter();
+        var prevCwd = Directory.GetCurrentDirectory();
+        var prevEnv = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
+        var ambientHome = Path.Combine(env.TempPath, "ambienthome");
+        Directory.CreateDirectory(ambientHome);
+        Directory.SetCurrentDirectory(ambientHome);
+        Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", null);
+        try
+        {
+            var explicitDir = Path.Combine(env.TempPath, "explicit");
+            Directory.CreateDirectory(explicitDir);
+            var s = new AtherizSettings { SavePath = explicitDir, TimeSystemEnabled = false };
+            // Explicit no-load handlers: the ambient singletons auto-load via
+            // the ambient path, which is exactly what this test isolates away.
+            Autosave.AutosaveTick(s, new MapHandler(autoLoad: false), new NodeHandler(autoLoad: false), null);
+            Assert.False(CheckpointJournal.IsDirty(explicitDir));
+            Assert.False(CheckpointJournal.IsDirty(Path.Combine(ambientHome, "save")));
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(prevCwd);
+            Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", prevEnv);
+        }
+    }
+
+    [Fact] public void ExplicitSettingsTickSavesHandlersToExplicitDb()
+    {
+        // A3-G-2: handler saves used the ambient singleton DB while objects
+        // used the explicit one — torn world by construction. Every section
+        // of the tick now commits to the tick's explicit DB. (Same
+        // ATHERIZ_SAVE_PATH/CWD isolation as the journal test above.)
+        Reset();
+        using var env = GlobalTestEnv.Enter();
+        var prevCwd = Directory.GetCurrentDirectory();
+        var prevEnv = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
+        var ambientHome = Path.Combine(env.TempPath, "ambienthome2");
+        Directory.CreateDirectory(ambientHome);
+        Directory.SetCurrentDirectory(ambientHome);
+        Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", null);
+        try
+        {
+            var explicitDir = Path.Combine(env.TempPath, "explicit2");
+            Directory.CreateDirectory(explicitDir);
+            var s = new AtherizSettings { SavePath = explicitDir, TimeSystemEnabled = false };
+            var nh = new NodeHandler(autoLoad: false);
+            nh.AddArea(new NodeArea("explicitarea"));
+            Autosave.AutosaveTick(s, GlobalServices.GetMapHandler(), nh, null);
+            using (var db = new AtherizDbContext(explicitDir))
+                Assert.True(db.Areas.Any(), "node areas must land in the explicit DB");
+            // The ambient DB is never created; a missing table counts as absent.
+            var ambientSave = Path.Combine(ambientHome, "save");
+            bool leaked = false;
+            try { using var dbAmb = new AtherizDbContext(ambientSave); leaked = dbAmb.Areas.Any(); }
+            catch (Microsoft.Data.Sqlite.SqliteException) { leaked = false; }
+            Assert.False(leaked, "node areas must not leak into the ambient DB");
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(prevCwd);
+            Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", prevEnv);
+        }
     }
 }

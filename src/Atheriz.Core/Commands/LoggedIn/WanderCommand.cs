@@ -50,7 +50,7 @@ public sealed class WanderCommand : Command
             IsMapable = true;
             IsTickable = true;
             TickSeconds = 1.0;
-            Id = IdGenerator.GetId();
+            Id = IdGenerator.GetUniqueId();
             ObjectRegistry.AddObject(this);
         }
         public override void AtTick()
