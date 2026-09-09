@@ -52,6 +52,27 @@ public class PortedFollowTests
     }
 
     [Fact]
+    public void Refollow_CleansOldLeaderEntry()
+    {
+        // Re-following a new target must remove the follower from the old
+        // leader (owner decision 2026-09-08 — otherwise the old leader keeps a
+        // stale id that passes group eligibility and never drains).
+        using var env = GlobalTestEnv.Enter();
+        var tup = SetupTestNodes("refollow");
+        var n1 = tup.n1;
+        var oldLeader = MakePc("OldLeader", n1);
+        var newLeader = MakePc("NewLeader", n1);
+        var follower = MakePc("Follower", n1);
+        var cmd = new FollowCommand();
+        cmd.Run(follower, cmd.Parser!.ParseArgs(new[] { "OldLeader" }));
+        Assert.Contains(follower.Id, oldLeader.FollowersSnapshot);
+        cmd.Run(follower, cmd.Parser!.ParseArgs(new[] { "NewLeader" }));
+        Assert.Equal(newLeader.Id, follower.Following);
+        Assert.Contains(follower.Id, newLeader.FollowersSnapshot);
+        Assert.DoesNotContain(follower.Id, oldLeader.FollowersSnapshot);
+    }
+
+    [Fact]
     public void FollowMultipleFollowers()
     {
         using var env = GlobalTestEnv.Enter();

@@ -17,8 +17,28 @@ public sealed class MazeCommand : Command
 
     // For tests to inject pool
     public static Func<AsyncThreadPool?> ThreadPoolFactory = () => { try { return GlobalServices.GetAsyncThreadPool(); } catch { return null; } };
-    public static Func<MapHandler> MapHandlerFactory = () => { try { return GlobalServices.GetMapHandler(); } catch { return new MapHandler(autoLoad:true); } };
-    public static Func<NodeHandler> NodeHandlerFactory = () => { try { return GlobalServices.GetNodeHandler(); } catch { return NodeHandler.GetCurrent() ?? new NodeHandler(autoLoad:true); } };
+    public static Func<MapHandler> MapHandlerFactory = () =>
+    {
+        try { return GlobalServices.GetMapHandler(); }
+        catch
+        {
+            // Same DB-discipline rule as the node fallback below: empty, never load.
+            try { Atheriz.Core.AtherizLogger.LogWarning("MazeCommand: no map handler available; using an empty one (world may be incomplete).", "MazeCommand"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed MazeCommand.MapHandlerFactory: " + logEx.Message, "MazeCommand"); }
+            return new MapHandler(autoLoad:false);
+        }
+    };
+    public static Func<NodeHandler> NodeHandlerFactory = () =>
+    {
+        try { return GlobalServices.GetNodeHandler(); }
+        catch
+        {
+            // DB-discipline rule (AGENTS.md): never load mid-game. The fallback used to
+            // autoLoad:true here (full DB load); an empty handler plus a loud warning
+            // is the honest shape when no world exists (owner decision 2026-09-08).
+            try { Atheriz.Core.AtherizLogger.LogWarning("MazeCommand: no node handler available; using an empty one (world may be incomplete).", "MazeCommand"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed MazeCommand.NodeHandlerFactory: " + logEx.Message, "MazeCommand"); }
+            return NodeHandler.GetCurrent() ?? new NodeHandler(autoLoad:false);
+        }
+    };
 
     public override void Run(IMessageTarget caller, object? args)
     {

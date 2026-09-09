@@ -386,6 +386,45 @@ public class CommandRegressionTests
         public override void Run(IMessageTarget caller, object? args) => caller.Msg("You glued-wave.");
     }
 
+    // Glued lookup is internal-first like the normal path: an internal "'"
+    // verb shadows global say on "'hello" (owner decision 2026-09-08).
+    [Fact]
+    public void GluedPath_PrefersInternalOverGlobal()
+    {
+        Reset();
+        NodeHandler? nh = null;
+        try
+        {
+            nh = new NodeHandler(autoLoad: false);
+            NodeHandler.SetCurrent(nh);
+            var node = new Node(new Coord("regglued2", 0, 0, 0));
+            nh.AddNode(node);
+            var go = GameObject.Create("gluer2", isPc: true);
+            ObjectRegistry.AddObject(go);
+            go.IsConnected = true;
+            var conn = new TestConnection();
+            var sess = new Session(conn);
+            go.Session = sess;
+            sess.Puppet = go;
+            Assert.True(go.MoveTo(node));
+            go.InternalCmdSet = new CmdSet();
+            go.InternalCmdSet.Add(new GluedQuoteCommand());
+            conn.ClearSent();
+            var job = CommandDispatcher.DispatchLoggedIn(go, "'hello", immediate: true);
+            Assert.NotNull(job);
+            job!.Func(job.Caller, job.Args);
+            Assert.Contains(conn.SentCommandsBag, t => t.Json.Contains("internal-quote"));
+        }
+        finally { NodeHandler.SetCurrent(null); Reset(); }
+    }
+
+    private sealed class GluedQuoteCommand : Command
+    {
+        public override string Key => "'";
+        public override bool UseParser => false;
+        public override void Run(IMessageTarget caller, object? args) => caller.Msg("internal-quote");
+    }
+
     // Unlogged Execute applies the lag gate at run time.
     [Fact]
     public void UnloggedExecute_AppliesLagGate()

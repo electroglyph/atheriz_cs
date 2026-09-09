@@ -179,8 +179,9 @@ public class ObjectMessagingTests
     [Fact]
     public void Door_TryOpenClose_Roundtrip_State()
     {
-        // Pin: documents the Python-faithful already_open->true /
-        // already_closed->false Try convention (base_door.py:125-138,181-188).
+        // Pin: idempotent open/close both report success — when the door state
+        // already matches what was wanted, the answer is true (owner decision
+        // 2026-09-08; previously already_closed reported false).
         var d = Door.Create(new Coord("limbo", 0, 0, 0), "east", new Coord("limbo", 2, 0, 0), "west", closed: true);
         var caller = GameObject.Create("opener");
         Assert.True(d.TryOpen(caller));
@@ -188,6 +189,6 @@ public class ObjectMessagingTests
         Assert.True(d.TryOpen(caller));
         Assert.True(d.TryClose(caller));
         Assert.True(d.Closed);
-        Assert.False(d.TryClose(caller));
+        Assert.True(d.TryClose(caller));
     }
 }

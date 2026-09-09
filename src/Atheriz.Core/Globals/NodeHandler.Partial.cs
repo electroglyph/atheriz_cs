@@ -257,7 +257,14 @@ public partial class NodeHandler
                 if (!_doors.TryGetValue(newFull, out var existing))
                     _doors[newFull] = doorsDict;
                 else
-                    foreach (var kv in doorsDict) existing[kv.Key] = kv.Value;
+                    // First-wins like RemapTransitions below: the pre-existing dict
+                    // stays, per-name newcomers are dropped loudly (owner decision
+                    // 2026-09-08 — never silently clobber on a merge).
+                    foreach (var kv in doorsDict)
+                    {
+                        if (!existing.ContainsKey(kv.Key)) existing[kv.Key] = kv.Value;
+                        else try { AtherizLogger.LogWarning($"RemapDoors: dropping relocated door '{kv.Key}' at {newFull} (destination already has one)."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemapDoors: " + logEx.Message, "NodeHandler"); }
+                    }
             }
             var seenRef = new HashSet<Door>();
             foreach (var doorsDict in relocated.Values)
@@ -333,9 +340,11 @@ public partial class NodeHandler
                     trans.Lock.EnterWriteLock();
                     try { trans.ToCoord = newFull; } finally { trans.Lock.ExitWriteLock(); }
                     var newKey = (trans.FromCoord, newFull);
-                    // Never silently clobber a pre-existing destination edge.
+                    // Never silently clobber a pre-existing destination edge:
+                    // first-wins, the dropped relocation is logged loudly.
                     if (!_transitions.ContainsKey(newKey))
                         _transitions[newKey] = trans;
+                    else try { AtherizLogger.LogWarning($"RemapTransitions: dropping relocated edge to {newFull} (destination already has one)."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemapTransitions: " + logEx.Message, "NodeHandler"); }
                     _modified2 = true;
                     _transGen++;
                     // Old-coord row must die in the DB (see RemapDoors).

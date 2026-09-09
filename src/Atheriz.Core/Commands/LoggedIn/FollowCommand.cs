@@ -38,6 +38,20 @@ public sealed class FollowCommand : Command
             Atheriz.Core.Globals.ObjectRegistry.AddObject(fresh);
         }
         Atheriz.Core.Objects.FollowScript? orphan = null;
+        // Break the previous follow BEFORE taking the target lock: every other path
+        // that clears Following removes the follower id from the old leader
+        // (ClearFollowing, Delete teardown, unfollow). Overwriting the pointer
+        // without cleanup strands a stale id on the old leader (owner decision
+        // 2026-09-08). Runs outside all object locks (registry -> object order).
+        var prevId = go.Following;
+        if (prevId != null && prevId != target.Id)
+        {
+            var prev = Atheriz.Core.Globals.ObjectRegistry.Get(prevId.Value).FirstOrDefault();
+            if (prev != null)
+            {
+                try { prev.RemoveFollower(go.Id); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed FollowCommand old-leader cleanup: " + logEx.Message, "FollowCommand"); }
+            }
+        }
         target.SyncRoot.EnterWriteLock();
         try
         {

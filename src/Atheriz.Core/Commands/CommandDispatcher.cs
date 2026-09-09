@@ -92,15 +92,15 @@ public static class CommandDispatcher
         if (cmd is null) cmd = CommandRegistry.LoggedIn.Get(rawCmdKey);
         if (cmd is null)
         {
-            // glued single-char non-alpha: mirrors intentional shadowing at inputfuncs.py:123
+            // glued single-char non-alpha: a lone leading symbol with text stuck to
+            // it retries as its first character (so `'hello` can reach `'`).
             var first = rawCmdKey.Length > 0 ? rawCmdKey[..1] : "";
             if (!string.IsNullOrEmpty(first) && !char.IsLetter(first[0]))
             {
-                cmd = CommandRegistry.LoggedIn.Get(first);
-                // deliberate extension beyond inputfuncs.py (global
-                // only): a glued single-char verb may also live on the
-                // internal cmdset or a nearby object's verb set.
-                cmd ??= puppet.InternalCmdSet?.Get(first);
+                // Glued lookup prefers internal-first, same as the normal path above:
+                // an internal single-char verb shadows the global one on glued input too.
+                cmd = puppet.InternalCmdSet?.Get(first);
+                cmd ??= CommandRegistry.LoggedIn.Get(first);
                 if (cmd is null)
                 {
                     foreach (var set in CommandHelpers.LocalVerbSets(puppet))

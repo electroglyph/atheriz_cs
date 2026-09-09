@@ -250,7 +250,9 @@ public class Door
     {
         bool opened;
         _lock.EnterWriteLock();
-        try { if (_locked) return false; if (!_closed) return true; _closed = false; opened = true; }
+        // Idempotent open is success even when locked: the state already matches.
+        // A locked *shut* door still refuses (the lock guards the transition, not the state).
+        try { if (!_closed) return true; if (_locked) return false; _closed = false; opened = true; }
         finally { _lock.ExitWriteLock(); }
         if (opened) MarkNodeDoorsModified();
         return true;
@@ -279,7 +281,8 @@ public class Door
         if (status == "already_closed")
         {
             loc?.MsgContents($"$You(target) $conj(try) to close the door, but it is already closed.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
-            return false;
+            // Idempotent close is success: the door state already matches what was wanted.
+            return true;
         }
         if (status == "no_access")
         {
@@ -298,7 +301,8 @@ public class Door
     {
         bool closed;
         _lock.EnterWriteLock();
-        try { if (_closed) return false; _closed = true; closed = true; }
+        // Idempotent close is success: the door state already matches what was wanted.
+        try { if (_closed) return true; _closed = true; closed = true; }
         finally { _lock.ExitWriteLock(); }
         if (closed) MarkNodeDoorsModified();
         return true;

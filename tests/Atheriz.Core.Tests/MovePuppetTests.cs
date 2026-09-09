@@ -90,4 +90,60 @@ public class MovePuppetTests
 
         Globals.ObjectRegistry.ClearAll();
     }
+
+    private sealed class RepuppetNpc : GameObject
+    {
+        public Session? S2;
+        public GameObject? P2;
+        public bool HookRan;
+        public override void AtUnpuppet(GameObject caller)
+        {
+            HookRan = true;
+            // Simulate the race: a second session puppets the target while the
+            // first Unpuppet is inside AtUnpuppet (target.Session is null here).
+            if (S2 != null && P2 != null) P2.Puppet(S2, this);
+        }
+    }
+
+    [Fact]
+    public void Unpuppet_MidHookRepuppet_KeepsNewPuppet()
+    {
+        // Unpuppet must not apply its stale restore over a puppet installed
+        // during AtUnpuppet (owner decision 2026-09-08): the new owner keeps
+        // IsPc/session/snapshot.
+        Globals.ObjectRegistry.ClearAll();
+        var s1 = new Session(connection: null);
+        var p1 = GameObject.Create("P1", isPc: true);
+        p1.PrivilegeLevel = Privilege.Builder;
+        Globals.ObjectRegistry.AddObject(p1);
+        var s2 = new Session(connection: null);
+        var p2 = GameObject.Create("P2", isPc: true);
+        p2.PrivilegeLevel = Privilege.Builder;
+        Globals.ObjectRegistry.AddObject(p2);
+        var npc = new RepuppetNpc();
+        npc.Id = Globals.IdGenerator.GetUniqueId();
+        npc.Name = "Npc";
+        npc.IsNpc = true;
+        npc.IsPc = false;
+        npc.PrivilegeLevel = Privilege.Guest;
+        Globals.ObjectRegistry.AddObject(npc);
+        npc.S2 = s2;
+        npc.P2 = p2;
+
+        s1.Puppet = p1;
+        p1.Session = s1;
+        Assert.True(p1.Puppet(s1, npc));
+        Assert.True(npc.IsPc);
+        s2.Puppet = p2;
+        p2.Session = s2;
+
+        Assert.True(p1.Unpuppet(s1));
+        Assert.True(npc.HookRan);
+        // New puppet owns the target: stale restore skipped.
+        Assert.Same(npc, s2.Puppet);
+        Assert.Same(s2, npc.Session);
+        Assert.True(npc.IsPc);
+
+        Globals.ObjectRegistry.ClearAll();
+    }
 }

@@ -133,6 +133,16 @@ public partial class NodeHandler
                                             {
                                                 if (ng.Nodes.ContainsKey((n.Coord.X, n.Coord.Y)))
                                                 { ng.Nodes[(n.Coord.X, n.Coord.Y)] = n; grafted = true; }
+                                                else
+                                                {
+                                                    // Hole in an existing grid: the fresh row
+                                                    // expresses no opinion about this cell, so the
+                                                    // live-modified node survives by re-insertion
+                                                    // (owner decision 2026-09-08 — evicting here
+                                                    // destroyed newer in-memory edits). It stays
+                                                    // IsModified, so the next save persists it.
+                                                    ng.Nodes[(n.Coord.X, n.Coord.Y)] = n; grafted = true;
+                                                }
                                             }
                                             finally { ng.Lock.ExitWriteLock(); }
                                         }

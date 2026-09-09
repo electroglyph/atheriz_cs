@@ -150,12 +150,48 @@ public partial class GameObject
             prev.Session = session;
         }
         try { target.AtUnpuppet(prev); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unpuppet: " + logEx.Message, "GameObject"); }
-        if (restore != null)
+        // Ownership re-check: a concurrent Puppet during AtUnpuppet owns the target
+        // now (owner decision 2026-09-08). A stolen target skips BOTH the stale
+        // restore and AtDisconnect — tearing down another session's live puppet is
+        // exactly the clobber this guards against. Hooks already observed the
+        // pre-restore target above.
+        bool stolen = true;
+        lock (session.Lock)
         {
-            target.RestorePuppetSnapshot(restore);
-            target.ClearPuppetRestore();
+            try { stolen = target.Session != null; }
+            catch { stolen = true; }
         }
-        try { target.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unpuppet: " + logEx.Message, "GameObject"); }
+        if (restore != null && !stolen)
+        {
+            // GetPuppetRestore returns a copy, so compare by content. Apply only if
+            // the installed snapshot still matches the one read above.
+            bool apply = false;
+            lock (session.Lock)
+            {
+                try
+                {
+                    var current = target.GetPuppetRestore();
+                    apply = current != null
+                        && current.TryGetValue("is_pc", out var cv) && restore.TryGetValue("is_pc", out var rv) && Equals(cv, rv)
+                        && current.TryGetValue("privilege_level", out var cp) && restore.TryGetValue("privilege_level", out var rp) && Convert.ToInt32(cp) == Convert.ToInt32(rp);
+                }
+                catch { apply = false; }
+            }
+            if (apply)
+            {
+                target.RestorePuppetSnapshot(restore);
+                target.ClearPuppetRestore();
+            }
+            else try { AtherizLogger.LogWarning($"GameObject.Unpuppet skipped stale restore for #{target.Id} (snapshot changed during AtUnpuppet).", "GameObject"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unpuppet: " + logEx.Message, "GameObject"); }
+        }
+        else if (stolen)
+        {
+            try { AtherizLogger.LogWarning($"GameObject.Unpuppet target #{target.Id} re-puppeted during AtUnpuppet; skipping restore and disconnect.", "GameObject"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unpuppet: " + logEx.Message, "GameObject"); }
+        }
+        if (!stolen)
+        {
+            try { target.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unpuppet: " + logEx.Message, "GameObject"); }
+        }
         try { prev.AtPostPuppet(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unpuppet: " + logEx.Message, "GameObject"); }
         return true;
     }

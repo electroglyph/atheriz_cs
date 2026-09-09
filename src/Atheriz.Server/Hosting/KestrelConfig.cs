@@ -10,6 +10,10 @@ public static class KestrelConfig
     public static void ConfigureKestrel(KestrelServerOptions opts, IConfiguration config)
     {
         var s = config.GetSection("Atheriz").Get<AtherizSettings>() ?? AtherizSettings.Global;
+        // Honored opt-out (owner decision 2026-09-08): no bind at all — not even
+        // loopback — so HTTP, the webclient, WebSocket and the admin routes stay
+        // dark. Telnet and game protocols run independently of Kestrel.
+        if (!s.WebserverEnabled) return;
         var host = s.WebserverInterface ?? "0.0.0.0";
         var port = s.WebserverPort;
 

@@ -52,15 +52,17 @@ public partial class GameObject
                     if (content == null) continue;
                     if (seen.Contains(content.Id)) continue;
                     if (truncated.Any(t => t.Id == content.Id)) continue;
-                    // Port of base_obj.py:320-325 — honor each child's delete
-                    // veto: a vetoed subtree is skipped, not force-deleted.
-                    // Exceptions mean "not vetoed" (mirrors Python).
+                    // Honor each child's delete veto: a vetoed subtree is skipped,
+                    // not force-deleted. A throwing AtDelete is treated as a veto
+                    // (fail-closed): a buggy hook must not force deletion.
+                    // The throw is still logged loudly (pinned by
+                    // ThrowingAtDeleteChild_IsLogged).
                     if (caller != null)
                     {
                         bool vetoed = false;
                         // a throwing AtDelete must not vanish silently —
-                        // log the swallow (still treated as "not vetoed").
-                        try { vetoed = !content.AtDelete(caller); } catch (Exception logEx) { vetoed = false; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as not vetoed): " + logEx.Message, "GameObject"); }
+                        // log the failure and treat it as "vetoed".
+                        try { vetoed = !content.AtDelete(caller); } catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
                         if (vetoed) continue;
                     }
                     if (depth + 1 >= maxDepth)

@@ -33,6 +33,30 @@ public class TlsFailClosedTests
     }
 
     [Fact]
+    public void WebserverDisabled_BindsNothing()
+    {
+        // WebserverEnabled=false must not bind any interface — not even to fail
+        // fast: an unparseable interface with the server off is a no-op, while the
+        // same interface with it on throws (owner decision 2026-09-08).
+        var pairs = new Dictionary<string, string?>
+        {
+            ["Atheriz:WebserverEnabled"] = "false",
+            ["Atheriz:WebserverInterface"] = "!!!unparseable!!!",
+        };
+        var config = new ConfigurationBuilder().AddInMemoryCollection(pairs).Build();
+        var ex = Record.Exception(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), config));
+        Assert.Null(ex);
+
+        var pairsOn = new Dictionary<string, string?>
+        {
+            ["Atheriz:WebserverEnabled"] = "true",
+            ["Atheriz:WebserverInterface"] = "!!!unparseable!!!",
+        };
+        var configOn = new ConfigurationBuilder().AddInMemoryCollection(pairsOn).Build();
+        Assert.Throws<InvalidOperationException>(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), configOn));
+    }
+
+    [Fact]
     public void Validator_RejectsMissingCertFile()
     {
         var v = new AtherizSettingsValidator();

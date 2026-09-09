@@ -190,13 +190,17 @@ public class ObjectRegressionTests
         Assert.Null(typeof(FollowScript).GetField("_oldLoc", BindingFlags.Instance | BindingFlags.NonPublic));
     }
 
-    // Unpuppet stack-pop + puppet-rewire must be one critical section.
+    // Unpuppet stack-pop + puppet-rewire must be one mutating critical section,
+    // with read-only ownership re-checks after AtUnpuppet (owner decision
+    // 2026-09-08: a concurrent Puppet during AtUnpuppet must not be clobbered;
+    // hooks run unlocked between the takes, so one take cannot cover all).
     [Fact]
     public void Unpuppet_IsSingleCriticalSection()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Puppet.cs");
         var region = SourceScan.Region(src, "public bool Unpuppet(Session session)");
-        Assert.Equal(1, SourceScan.Count(region, "lock (session.Lock)"));
+        Assert.Equal(1, SourceScan.Count(region, "TryPopPuppetEntry"));
+        Assert.Contains("target.Session != null", region);
     }
 
     // AtDisconnect puppet unwind must run inside the session lock.
@@ -570,6 +574,29 @@ public class ObjectRegressionTests
             using var cap = new CaptureAtherizLog();
             parent.Delete(caller, true);
             Assert.Contains("veto-boom", cap.Read());
+        }
+        finally { Reset(); }
+    }
+
+    // throwing AtDelete is fail-closed: the child is vetoed (survives), not force-deleted.
+    [Fact]
+    public void ThrowingAtDeleteChild_IsSkipped()
+    {
+        Reset();
+        try
+        {
+            var parent = GameObject.Create("parent", isContainer: true);
+            ObjectRegistry.AddObject(parent);
+            var bad = new BoomDelete();
+            bad.Name = "badkid";
+            ObjectRegistry.AddObject(bad);
+            parent.AddObject(bad);
+            var caller = GameObject.Create("caller");
+            ObjectRegistry.AddObject(caller);
+            parent.Delete(caller, true);
+            Assert.False(bad.IsDeleted);
+            Assert.NotEmpty(ObjectRegistry.Get(bad.Id));
+            Assert.Contains(bad.Id, parent.ContentsSnapshot);
         }
         finally { Reset(); }
     }

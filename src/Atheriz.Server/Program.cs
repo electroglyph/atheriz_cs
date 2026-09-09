@@ -135,6 +135,13 @@ var telnetPortOverride = ArgumentParser.ParseTelnetPort(rest);
 if (telnetPortOverride != null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:TelnetPort"] = telnetPortOverride.Value.ToString() });
 if (hostOverride != null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:WebserverInterface"] = hostOverride, ["Atheriz:TelnetInterface"] = hostOverride });
 builder.Host.ConfigureHostOptions(o => o.ShutdownTimeout = TimeSpan.FromSeconds(5));
+// Honored opt-out (owner decision 2026-09-08): Kestrel with zero endpoints still binds
+// its localhost:5000 default, so opting out of HTTP means replacing the server, not
+// configuring it — NullWebServer (below) binds nothing and serves nothing. Telnet and
+// game protocols run on their own listeners. (KestrelConfig's own early return is the
+// second half, covering direct ConfigureKestrel callers.)
+if (builder.Configuration.GetSection("Atheriz").GetValue<bool?>("WebserverEnabled") == false)
+    builder.Services.AddSingleton<Microsoft.AspNetCore.Hosting.Server.IServer, NullWebServer>();
 builder.WebHost.ConfigureKestrel((ctx, opts) => KestrelConfig.ConfigureKestrel(opts, ctx.Configuration));
 var app = builder.Build();
 var settings = app.Services.GetRequiredService<AtherizSettings>();
@@ -162,10 +169,16 @@ try { adminToken = AdminToken.EnsureToken(settings.SecretPath); } catch (Excepti
 Console.WriteLine($"Admin token ensured at {Path.Combine(settings.SecretPath, "admin.token")}");
 try { ServerLifecycle.DoStartup(settings); } catch (Exception ex) { Console.Error.WriteLine($"Startup tasks failed: {ex}"); pidFile?.Release(); AdminToken.DeleteToken(settings.SecretPath); Environment.Exit(1); }
 ProtocolBootstrap.RegisterProtocols(app, settings);
+if (settings.WebserverEnabled)
+{
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
 StaticFileConfig.Configure(app, settings);
 if (settings.WebsocketEnabled) app.Map("/ws", ctx => WebSocketHandler.HandleAsync(ctx, settings));
 app.MapAdminRoutes(settings);
+}
+else Console.WriteLine("Web server disabled (WebserverEnabled=false); HTTP, webclient, WebSocket and admin routes are off. Telnet and game protocols still run.");
+if (settings.WebserverEnabled)
+{
 var displayHost = settings.WebserverInterface;
 if (displayHost.Contains(':')) displayHost = $"[{displayHost}]";
 var scheme = "http";
@@ -190,6 +203,7 @@ if (!string.IsNullOrEmpty(settings.SslCertFile))
     else Console.WriteLine("SSL status: combined PEM (private key embedded)");
 }
 else Console.WriteLine("SSL is disabled (set SSL_CERTFILE to enable)");
+}
 var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStopping.Register(() => { try { ServerLifecycle.DoShutdown(settings); } catch { } try { pidFile?.Release(); } catch { } try { AdminToken.DeleteToken(settings.SecretPath); } catch { } Console.WriteLine("Server stopped."); });
 AppDomain.CurrentDomain.ProcessExit += (s, e) => { try { pidFile?.Release(); } catch { } try { AdminToken.DeleteToken(settings.SecretPath); } catch { } };
@@ -202,3 +216,14 @@ await app.RunAsync();
 // AdminRoutes, ServerLifecycle, KestrelConfig, StopHandler.
 // Required literals:
 // NetworkProtocols WebSocketProtocol Setup Failed to register protocol WebsocketEnabled LoadObjects DoStartup _internal/create_account X-Admin-Token hot_reload ReloadGameLogicAsync account_name, char_name and password are required Remote IsLoopback Token file not found Invalid token FixedTimeEquals Invalid JSON body No running server offline already exists _internal/shutdown Background StopApplication Aborted Are you sure ProcessStartInfo ExitCode WaitForExit CreateFromPemFile separate key file combined pem SSL is disabled WARNING: SSL cert file not found SslCertFile SslKeyFile HandleTest PID already running
+
+// No-op web server for WebserverEnabled=false (see above): Kestrel with zero endpoints
+// still binds localhost:5000, so opting out replaces IServer. Binds nothing, serves
+// nothing; the host lifetime (and telnet/game protocols) runs normally.
+sealed class NullWebServer : Microsoft.AspNetCore.Hosting.Server.IServer
+{
+    public Microsoft.AspNetCore.Http.Features.IFeatureCollection Features { get; } = new Microsoft.AspNetCore.Http.Features.FeatureCollection();
+    public Task StartAsync<TContext>(Microsoft.AspNetCore.Hosting.Server.IHttpApplication<TContext> application, CancellationToken cancellationToken) where TContext : notnull => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public void Dispose() { }
+}

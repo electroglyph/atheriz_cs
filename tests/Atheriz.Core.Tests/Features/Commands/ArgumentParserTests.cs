@@ -24,4 +24,33 @@ public class ArgumentParserTests
         p.AddArgument("--count").Type(typeof(int));
         Assert.Throws<CommandError>(() => p.ParseArgs(["--count", "abc"]));
     }
+
+    [Fact]
+    public void Parser_Remainder_SwallowsDashFirstToken()
+    {
+        // REMAINDER consumes everything remaining, including a leading dash
+        // token (owner decision 2026-09-08 — `say --help` must speak, not throw).
+        var p = new GameArgumentParser("say");
+        p.AddArgument("text").Nargs("REMAINDER");
+        var pa = p.ParseArgs(["--help"]);
+        Assert.Equal(["--help"], pa.GetList("text"));
+    }
+
+    [Fact]
+    public void Parser_Remainder_SwallowsLaterDashTokens()
+    {
+        var p = new GameArgumentParser("say");
+        p.AddArgument("text").Nargs("REMAINDER");
+        var pa = p.ParseArgs(["hello", "--help"]);
+        Assert.Equal(["hello", "--help"], pa.GetList("text"));
+    }
+
+    [Fact]
+    public void Parser_NoRemainder_DashStillThrows()
+    {
+        // Without a REMAINDER positional, unknown dash tokens stay errors.
+        var p = new GameArgumentParser("prog");
+        p.AddArgument("name");
+        Assert.Throws<CommandError>(() => p.ParseArgs(["--help"]));
+    }
 }

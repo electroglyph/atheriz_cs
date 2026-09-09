@@ -3,6 +3,7 @@ using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Settings;
+using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Regression;
 
@@ -330,6 +331,67 @@ public class GlobalRegressionTests
         Assert.True(start >= 0 && end > start);
         var window = src.Substring(start, end - start);
         Assert.Contains("EnterWriteLock", window);
+    }
+
+    // load graft hole: a live-modified node whose cell is absent from the fresh row
+    // must be re-inserted, not evicted (owner decision 2026-09-08 — the row expresses
+    // no opinion about the cell, so evicting destroys newer in-memory edits).
+    [Fact]
+    public void LoadGraft_HoleReinsertsLiveModifiedNode()
+    {
+        Reset();
+        using var env = GlobalTestEnv.Enter();
+        NodeHandler? nh = null;
+        try
+        {
+            nh = new NodeHandler(autoLoad: false);
+            NodeHandler.SetCurrent(nh);
+            var area = new NodeArea("grafthole");
+            area.AddGrid(new NodeGrid("grafthole", 0));
+            nh.AddArea(area);
+            nh.AddNode(new Node(new Coord("grafthole", 0, 0, 0)));
+            nh.Save(force: true);
+            // Live-only edit after the save: never persisted, so the next Load's
+            // fresh row has a hole at (3,3).
+            var live = new Node(new Coord("grafthole", 3, 3, 0));
+            nh.AddNode(live);
+            live.IsModified = true;
+            nh.Load();
+            var got = nh.GetNode(new Coord("grafthole", 3, 3, 0));
+            Assert.NotNull(got);
+            Assert.Equal(live.Id, got!.Id);
+            Assert.NotEmpty(ObjectRegistry.Get(live.Id));
+        }
+        finally { NodeHandler.SetCurrent(null); Reset(); }
+    }
+
+    // Remap collisions are first-wins and loud: a relocated dict landing on an
+    // occupied destination keeps the pre-existing per-name door and logs the drop
+    // (owner decision 2026-09-08 — never silently clobber on a merge).
+    [Fact]
+    public void RemapDoors_CollisionKeepsPreexistingAndLogs()
+    {
+        Reset();
+        using var env = GlobalTestEnv.Enter();
+        NodeHandler? nh = null;
+        try
+        {
+            nh = new NodeHandler(autoLoad: false);
+            NodeHandler.SetCurrent(nh);
+            var a = new Coord("remapcol", 0, 0, 0);
+            var d = new Coord("remapcol", 5, 5, 0);
+            var doorA = new Door(a, new Coord("remapcol", 9, 9, 0), "east", "west", closed: false, locked: false);
+            var doorD = new Door(d, new Coord("remapcol", 8, 8, 0), "east", "west", closed: false, locked: false);
+            nh.AddDoor(doorA);
+            nh.AddDoor(doorD);
+            using var cap = new CaptureAtherizLog();
+            nh.RemapDoors(new Dictionary<Coord, Coord> { [a] = d });
+            var kept = nh.GetDoors(d);
+            Assert.NotNull(kept);
+            Assert.Same(doorD, kept!["east"]);
+            Assert.Contains("RemapDoors", cap.Read());
+        }
+        finally { NodeHandler.SetCurrent(null); Reset(); }
     }
 
     // creation error paths must print outside the lock; the

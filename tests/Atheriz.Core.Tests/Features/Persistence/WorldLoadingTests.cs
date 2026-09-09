@@ -122,10 +122,12 @@ public class WorldLoadingTests
     }
 
     [Fact]
-    public void Load_SameAreaName_EvictsStaleNodes()
+    public void Load_SameAreaName_KeepsUnsavedLiveNode()
     {
-        // Overwriting _areas[name] on load also removes the old area's nodes
-        // from ObjectRegistry, avoiding leaks and duplicate ids.
+        // Overwriting _areas[name] on load must NOT remove live nodes that were
+        // never persisted: the fresh row has a hole where they live, and the row
+        // expresses no opinion about the cell (owner decision 2026-09-08 —
+        // re-insert, never evict newer in-memory state).
         using var env = GlobalTestEnv.Enter();
         var nh = new NodeHandler(autoLoad: false);
         NodeHandler.SetCurrent(nh);
@@ -137,11 +139,13 @@ public class WorldLoadingTests
             using (var db = new AtherizDbContext(env.TempPath)) { db.Database.EnsureCreated(); nh.Save(db, force: true); }
             var nh2 = new NodeHandler(autoLoad: false);
             NodeHandler.SetCurrent(nh2);
-            var stale = new Node(new Coord("limbo", 9, 9, 0));
-            if (ObjectRegistry.Get(stale.Id).Count == 0) ObjectRegistry.AddObject(stale);
-            nh2.AddNode(stale);
+            var live = new Node(new Coord("limbo", 9, 9, 0));
+            if (ObjectRegistry.Get(live.Id).Count == 0) ObjectRegistry.AddObject(live);
+            nh2.AddNode(live);
+            live.IsModified = true;
             using (var db = new AtherizDbContext(env.TempPath)) { nh2.Load(db); }
-            Assert.Empty(ObjectRegistry.Get(stale.Id));
+            Assert.NotEmpty(ObjectRegistry.Get(live.Id));
+            Assert.NotNull(nh2.GetNode(new Coord("limbo", 9, 9, 0)));
         }
         finally { NodeHandler.SetCurrent(null); }
     }

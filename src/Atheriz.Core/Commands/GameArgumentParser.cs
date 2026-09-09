@@ -290,6 +290,17 @@ public sealed class GameArgumentParser
             string tok = argList[i];
             if (optionalMap.TryGetValue(tok, out var opt))
             {
+                // A pending REMAINDER positional absorbs even help flags: free-text
+                // commands speak them (owner decision 2026-09-08). Other commands
+                // keep standard --help behavior.
+                if (opt.IsHelp && posIdx < positionalDefs.Count && positionalDefs[posIdx].Nargs == NargsKind.Remainder)
+                {
+                    var pdHelp = positionalDefs[posIdx];
+                    var helpLst = result.GetList(pdHelp.Dest);
+                    while (i < argList.Count) helpLst.Add(argList[i++]);
+                    result.Set(pdHelp.Dest, helpLst);
+                    break;
+                }
                 if (opt.IsHelp) throw new CommandError(FormatHelp());
                 // presence tracking so required flags with non-null
                 // bool defaults (store_true/store_false) are detectable.
@@ -369,7 +380,18 @@ public sealed class GameArgumentParser
                     i++;
                     continue;
                 }
-                    // unknown optional — in Python this would error; mirror by throwing CommandError
+                    // REMAINDER positional consumes everything remaining, including
+                    // dash tokens (owner decision 2026-09-08 — the parser's own
+                    // consume-all contract; `say --help` must speak, not throw).
+                    if (posIdx < positionalDefs.Count && positionalDefs[posIdx].Nargs == NargsKind.Remainder)
+                    {
+                        var pdRem = positionalDefs[posIdx];
+                        var remLst = result.GetList(pdRem.Dest);
+                        while (i < argList.Count) remLst.Add(argList[i++]);
+                        result.Set(pdRem.Dest, remLst);
+                        break;
+                    }
+                    // unknown optional — no REMAINDER to absorb it, so it is an error.
                 throw new CommandError($"unrecognized arguments: {tok}");
             }
             else

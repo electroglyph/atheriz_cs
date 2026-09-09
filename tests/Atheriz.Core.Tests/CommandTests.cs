@@ -73,14 +73,16 @@ public sealed class CommandTests
     [Fact]
     public void Command_HelpTrigger_SendsHelp()
     {
+        // Owner decision 2026-09-08: a pending REMAINDER positional absorbs even
+        // --help (free-text commands speak it). Echo's msg is REMAINDER, so
+        // "--help" parses as text instead of triggering help output.
         var puppet = new GameObject { Name = "Hero" };
         puppet.ClearMessages();
         var cmd = new EchoCommand();
-        var (func, _, _) = cmd.Execute(puppet, "--help");
-        Assert.Null(func);
-        var help = puppet.PeekMessages()[0];
-        Assert.Contains("usage:", help);
-        Assert.Contains("echo", help);
+        var (func, _, args) = cmd.Execute(puppet, "--help");
+        Assert.NotNull(func);
+        var pa = Assert.IsType<GameArgumentParser.ParsedArgs>(args);
+        Assert.Equal(["--help"], pa.GetList("msg"));
     }
 
     [Fact]
