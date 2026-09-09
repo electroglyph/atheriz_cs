@@ -6,6 +6,9 @@ namespace Atheriz.Core.Tests.Features.Commands;
 
 // message-dialect centralization — CommandHelpers message homes emit
 // the exact verbatim strings the commands previously inlined.
+// Touches process-global registry state: serialized with the Ported stream
+// (flaky under cross-collection parallelism otherwise).
+[Collection("Ported")]
 public sealed class CommandMessageDialectTests
 {
     private sealed class Recorder : Atheriz.Core.Commands.IMessageTarget

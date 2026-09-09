@@ -4,6 +4,9 @@ using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Tests;
 
+// Touches process-global ObjectRegistry: serialized with the Ported stream
+// (flaky under cross-collection parallelism otherwise).
+[Collection("Ported")]
 public class ObjectTests
 {
     // --- flags defaults ---

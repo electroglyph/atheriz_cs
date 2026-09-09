@@ -6,6 +6,9 @@ using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Tests;
 
+// Touches process-global registry/dispatcher state: serialized with the Ported
+// stream (flaky under cross-collection parallelism otherwise).
+[Collection("Ported")]
 public sealed class CommandTests
 {
     private sealed class EchoCommand : Command

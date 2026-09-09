@@ -12,6 +12,9 @@ namespace Atheriz.Core.Tests.Features.Commands;
 // direct tests for previously zero-hit files — CommandPermissions,
 // HelpFormatter, BanHelper (internal, via reflection), DoorDirectionCommand
 // (abstract path via OpenCommand), hook marker attributes, IJsonEntity.
+// Touches process-global registry/handler state: serialized with the Ported
+// stream (flaky under cross-collection parallelism otherwise).
+[Collection("Ported")]
 public sealed class ZeroHitFileCoverageTests
 {
     private static GameObject MakeCaller(string name, Privilege priv = Privilege.Player, bool isPc = false)
@@ -112,15 +115,19 @@ public sealed class ZeroHitFileCoverageTests
         var caller = MakeCaller("opener");
         var nh = new NodeHandler(autoLoad: false);
         NodeHandler.SetCurrent(nh);
-        var area = new NodeArea("ZeroHit");
-        var grid = new NodeGrid("ZeroHit", 0);
-        grid.Nodes[(0, 0)] = new Node(new Coord("ZeroHit", 0, 0, 0));
-        ObjectRegistry.AddObject((Node)grid.Nodes[(0, 0)]); // Explicit registration: the constructor does not publish.
-        area.AddGrid(grid);
-        nh.AddArea(area);
-        caller.Location = new LocationRef.CoordLocation(new Coord("ZeroHit", 0, 0, 0));
-        new OpenCommand().Run(caller, null);
-        Assert.Contains(caller.PeekMessages(), m => m.Contains("Open what?"));
+        try
+        {
+            var area = new NodeArea("ZeroHit");
+            var grid = new NodeGrid("ZeroHit", 0);
+            grid.Nodes[(0, 0)] = new Node(new Coord("ZeroHit", 0, 0, 0));
+            ObjectRegistry.AddObject((Node)grid.Nodes[(0, 0)]); // Explicit registration: the constructor does not publish.
+            area.AddGrid(grid);
+            nh.AddArea(area);
+            caller.Location = new LocationRef.CoordLocation(new Coord("ZeroHit", 0, 0, 0));
+            new OpenCommand().Run(caller, null);
+            Assert.Contains(caller.PeekMessages(), m => m.Contains("Open what?"));
+        }
+        finally { NodeHandler.SetCurrent(null); }
     }
 
     [Fact]

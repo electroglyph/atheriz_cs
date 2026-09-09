@@ -5,6 +5,9 @@ using Atheriz.Core.Objects;
 namespace Atheriz.Core.Tests.Features.Commands;
 
 // CreationCooldownHelper + SessionPuppetHelper extraction + sync-stub parity.
+// Touches process-global registry/salt/dispatcher state: serialized with the Ported
+// stream (flaky under cross-collection parallelism otherwise).
+[Collection("Ported")]
 public sealed class CreationHelperRegressionTests
 {
     [Fact]
@@ -50,15 +53,18 @@ public sealed class CreationHelperRegressionTests
     {
         using var env = GlobalTestEnv.Enter();
         SaltProvider.SetSalt("testsalt");
-        var acc = Account.Create("alice", "secret");
-        ObjectRegistry.AddObject(acc);
-        var conn = new FakeConnection();
-        conn.Session.Account = acc;
-        new NewCharacterCommand().Run(conn, "Hobbis M A tall figure");
-        var ch = ObjectRegistry.FilterBy(o => o.Name == "Hobbis").FirstOrDefault() as GameObject;
-        Assert.NotNull(ch);
-        Assert.Equal("A tall figure", ch!.Desc);
-        SaltProvider.Clear();
+        try
+        {
+            var acc = Account.Create("alice", "secret");
+            ObjectRegistry.AddObject(acc);
+            var conn = new FakeConnection();
+            conn.Session.Account = acc;
+            new NewCharacterCommand().Run(conn, "Hobbis M A tall figure");
+            var ch = ObjectRegistry.FilterBy(o => o.Name == "Hobbis").FirstOrDefault() as GameObject;
+            Assert.NotNull(ch);
+            Assert.Equal("A tall figure", ch!.Desc);
+        }
+        finally { SaltProvider.Clear(); }
     }
 
     [Fact]
