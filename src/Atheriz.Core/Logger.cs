@@ -9,11 +9,11 @@ public static class AtherizLogger
     public const string DefaultCategory = "atheriz";
     // Port of logger.py:17 FORMATTER = "%(levelname)s: %(name)s: %(message)s"
     private const string Formatter = "{Level}: {Category}: {Message}";
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
     // Dedicated file lock (F009): AppendToFile does check+rotate+append; without a lock
     // concurrent ticks interleave lines and can corrupt server.log. Kept separate from
     // _lock so file IO never blocks logger-factory access.
-    private static readonly object _fileLock = new();
+    private static readonly Lock _fileLock = new();
     private static ILoggerFactory? _factory;
     private static ILogger? _cachedDefault;
     private static LogLevel _level = LogLevel.Information; // Port of logger.py:28 default info
@@ -80,30 +80,35 @@ public static class AtherizLogger
     // Port of logger.py:31 _setup_logger
     private static void SetupLogger()
     {
-        lock (_lock)
+        lock (_lock) SetupLoggerLocked();
+    }
+
+    // Runs with _lock already held (GetLogger holds it; SetupLogger takes it
+    // via the wrapper above). Split out so GetLogger's setup path does not
+    // nest a second take of the non-reentrant lock.
+    private static void SetupLoggerLocked()
+    {
+        if (_factory is not null) return;
+        try
         {
-            if (_factory is not null) return;
-            try
+            _factory = LoggerFactory.Create(b =>
             {
-                _factory = LoggerFactory.Create(b =>
-                {
-                    b.SetMinimumLevel(_level);
-                    // Single-echo: no console provider here. Write() already echoes every
-                    // kept message to Console.Error (which CaptureAtherizLog routes) and
-                    // appends to save/server.log — a provider would print each line twice.
-                    // A sink provider is still required: with zero providers every
-                    // ILogger.IsEnabled returns false regardless of minimum level.
-                    // NullLoggerProvider honors the factory minimum level but drops all
-                    // records (Write() owns echo + file).
-                    b.AddProvider(new NullLoggerProvider(_level));
-                });
-                _cachedDefault = _factory.CreateLogger(DefaultCategory);
-            }
-            catch
-            {
-                _factory = null;
-                _cachedDefault = null;
-            }
+                b.SetMinimumLevel(_level);
+                // Single-echo: no console provider here. Write() already echoes every
+                // kept message to Console.Error (which CaptureAtherizLog routes) and
+                // appends to save/server.log — a provider would print each line twice.
+                // A sink provider is still required: with zero providers every
+                // ILogger.IsEnabled returns false regardless of minimum level.
+                // NullLoggerProvider honors the factory minimum level but drops all
+                // records (Write() owns echo + file).
+                b.AddProvider(new NullLoggerProvider(_level));
+            });
+            _cachedDefault = _factory.CreateLogger(DefaultCategory);
+        }
+        catch
+        {
+            _factory = null;
+            _cachedDefault = null;
         }
     }
 
@@ -119,7 +124,7 @@ public static class AtherizLogger
         {
             if (_factory is not null) return _factory.CreateLogger(category);
             // fallback to default factory if not configured
-            SetupLogger();
+            SetupLoggerLocked();
             if (_factory is not null) return _factory.CreateLogger(category);
             return new FallbackLogger(category);
         }
@@ -180,7 +185,7 @@ public static class AtherizLogger
                 {
                     var info = new FileInfo(file);
                     if (info.Length + System.Text.Encoding.UTF8.GetByteCount(line) > MaxFileBytes)
-                        Rotate(file);
+                        RotateLocked(file);
                 }
             }
             catch { }
@@ -193,10 +198,15 @@ public static class AtherizLogger
 
     public static void Rotate(string file)
     {
-        // F009: same file lock as AppendToFile (Monitor is re-entrant, so the
-        // Rotate call inside AppendToFile is safe) — rotation never races appends.
-        lock (_fileLock)
-        {
+        // F009: same file lock as AppendToFile — rotation never races
+        // appends. AppendToFile calls RotateLocked (no second take), so the
+        // non-reentrant lock never nests.
+        lock (_fileLock) RotateLocked(file);
+    }
+
+    // Runs with _fileLock already held (Rotate takes it via the wrapper).
+    private static void RotateLocked(string file)
+    {
         try
         {
             // 5 files: server.log -> server.log.1 .. server.log.5 (like RotatingFileHandler 5M*5)
@@ -215,7 +225,6 @@ public static class AtherizLogger
             try { if (File.Exists(file)) File.Move(file, first, overwrite: true); } catch { }
         }
         catch { }
-        }
     }
 
     private static void Write(LogLevel level, string category, string message, Exception? ex = null)

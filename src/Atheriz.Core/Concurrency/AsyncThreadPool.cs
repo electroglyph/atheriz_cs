@@ -21,7 +21,7 @@ public class AsyncThreadPool : IDisposable
 
     private readonly List<Thread> _fixedThreads = new();
     private readonly List<Thread> _reliefThreads = new();
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private int _busy;
     private int _reliefCount;
     private long _lastReliefSpawnTicks;

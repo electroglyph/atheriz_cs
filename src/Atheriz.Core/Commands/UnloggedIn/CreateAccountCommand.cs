@@ -53,11 +53,11 @@ public sealed class CreateAccountCommand : Command
         if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Account creation is not enabled."); return; }
         string rateKey = CreationCooldownHelper.RateKey(caller);
         if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
-        string name = await caller.Session.Prompt("Enter an account name:");
+        string name = await caller.Session.Prompt("Enter an account name:").ConfigureAwait(false);
         name = name.Trim();
         var err = Validation.ValidateAccountName(name);
         if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
-        string password = await caller.Session.Prompt("Enter a password:");
+        string password = await caller.Session.Prompt("Enter a password:").ConfigureAwait(false);
         err = Validation.ValidatePassword(password);
         if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
         try
@@ -69,7 +69,7 @@ public sealed class CreateAccountCommand : Command
             caller.SendCommand("logged_in");
             if (settings.CharCreationEnabled)
             {
-                try { await ConnectCommand.CharSelectionAsync(caller, account); }
+                try { await ConnectCommand.CharSelectionAsync(caller, account).ConfigureAwait(false); }
                 catch (Exception ex) { Console.Error.WriteLine($"[Create] char_selection failed: {ex}"); }
             }
             else

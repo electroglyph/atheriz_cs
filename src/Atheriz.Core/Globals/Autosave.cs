@@ -11,7 +11,7 @@ namespace Atheriz.Core.Globals;
 /// </summary>
 public static class Autosave
 {
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
     private static bool _autosaveStarted = false;
     private static double? _registeredInterval = null;
 

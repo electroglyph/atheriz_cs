@@ -48,7 +48,7 @@ public static class NewHandler
         else
         {
             Console.WriteLine("Starting server...");
-            await DaemonSpawner.SpawnDaemonAsync(a, folderAbs);
+            await DaemonSpawner.SpawnDaemonAsync(a, folderAbs).ConfigureAwait(false);
             return false;
         }
     }

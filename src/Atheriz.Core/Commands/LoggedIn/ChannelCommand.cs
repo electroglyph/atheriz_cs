@@ -10,7 +10,7 @@ public sealed class ChannelCommand : Command
     public override string Category => "Communication";
     // wontfix: lazy cache only, cleared on is_deleted/name mismatch or via filter_by scan. No eager invalidation on delete/rename.
     private static readonly Dictionary<string, Channel> ChannelCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly object CacheLock = new();
+    private static readonly Lock CacheLock = new();
     public static void ClearCache() { lock (CacheLock) ChannelCache.Clear(); }
     public static IReadOnlyDictionary<string, Channel> GetCacheSnapshot() { lock (CacheLock) return new Dictionary<string, Channel>(ChannelCache, StringComparer.OrdinalIgnoreCase); }
     public static bool TryGetCached(string name, out Channel? ch) { lock (CacheLock) return ChannelCache.TryGetValue(name, out ch); }

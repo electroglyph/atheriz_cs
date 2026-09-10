@@ -47,7 +47,7 @@ public partial class NodeHandler
     private readonly HashSet<Coord> _removedDoors = new();
 
     private static NodeHandler? _current;
-    private static readonly object _currentLock = new();
+    private static readonly Lock _currentLock = new();
     public static NodeHandler? GetCurrent() { lock (_currentLock) return _current; }
     public static void SetCurrent(NodeHandler? h) { lock (_currentLock) _current = h; }
     internal void MarkDoorsModified() { Lock3.EnterWriteLock(); try { _modified3 = true; _doorGen++; } finally { Lock3.ExitWriteLock(); } }

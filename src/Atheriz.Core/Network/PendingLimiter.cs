@@ -16,7 +16,7 @@ public sealed class PendingLimiter
     private int _pendingBytes;
     private int _pendingCount;
     private readonly Dictionary<Task, int> _byTask = new();
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private bool _closing;
 
     public PendingLimiter(int maxBytes, int? maxCount = null)

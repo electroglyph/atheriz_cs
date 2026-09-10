@@ -5,7 +5,7 @@ namespace Atheriz.Server.Hosting;
 public static class WebSocketHandler
 {
     private static readonly Dictionary<string, double> _wsOversizeLast = new();
-    private static readonly object _wsOversizeLock = new();
+    private static readonly Lock _wsOversizeLock = new();
 
     public static async Task HandleAsync(HttpContext context, AtherizSettings settings)
     {
@@ -24,7 +24,7 @@ public static class WebSocketHandler
         if (!isWsRequest) { try { context.Response.StatusCode = 400; } catch { } return; }
 
         System.Net.WebSockets.WebSocket webSocket;
-        try { webSocket = await context.WebSockets.AcceptWebSocketAsync(); } catch { return; }
+        try { webSocket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false); } catch { return; }
 
         var manager = ConnectionManager.GlobalInstance;
         if (manager is null)
@@ -33,7 +33,7 @@ public static class WebSocketHandler
             // in a private throwaway world (uncounted, no broadcasts or
             // presence). Post-startup the global is always set; null means a
             // miswired host, so refuse the socket instead of forking a world.
-            try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.InternalServerError, "Server not ready", default); } catch { }
+            try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.InternalServerError, "Server not ready", default).ConfigureAwait(false); } catch { }
             return;
         }
         var connId = manager.GenerateConnectionId();
@@ -68,7 +68,7 @@ public static class WebSocketHandler
                     do
                     {
                         // observe host shutdown (see above).
-                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), shutdownToken);
+                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), shutdownToken).ConfigureAwait(false);
                         if (result.MessageType == System.Net.WebSockets.WebSocketMessageType.Close)
                         {
                             isClose = true;
@@ -91,7 +91,7 @@ public static class WebSocketHandler
                         try { Atheriz.Core.AtherizLogger.LogWarning(msg); } catch { }
                         Console.Error.WriteLine(msg);
                     }
-                    try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.MessageTooBig, "Message too large", shutdownToken); } catch { }
+                    try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.MessageTooBig, "Message too large", shutdownToken).ConfigureAwait(false); } catch { }
                     break;
                 }
 

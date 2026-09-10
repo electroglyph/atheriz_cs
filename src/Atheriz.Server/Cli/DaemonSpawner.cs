@@ -124,7 +124,7 @@ public static class DaemonSpawner
             else Console.WriteLine("Failed to spawn server daemon.");
         }
         catch (Exception ex) { Console.Error.WriteLine($"Failed to spawn daemon: {ex.Message}"); }
-        await Task.CompletedTask;
+        await Task.CompletedTask.ConfigureAwait(false);
         return spawned;
     }
 }

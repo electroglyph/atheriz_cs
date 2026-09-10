@@ -289,8 +289,8 @@ public static class GameUtils
         {
             var parent = Path.GetDirectoryName(path) ?? ".";
             var name = Path.GetFileName(path);
-            if (string.IsNullOrEmpty(name)) return File.Exists(path) || Directory.Exists(path);
-            if (!Directory.Exists(parent)) return File.Exists(path) || Directory.Exists(path);
+            if (string.IsNullOrEmpty(name)) return Path.Exists(path);
+            if (!Directory.Exists(parent)) return Path.Exists(path);
             var entries = Directory.GetFileSystemEntries(parent);
             bool isNt = string.Equals(osName, "nt", StringComparison.OrdinalIgnoreCase);
             if (isNt)
@@ -301,7 +301,7 @@ public static class GameUtils
             // Port of utils.py:31 return path.name in os.listdir(path.parent) — case-sensitive
             return entries.Any(e => Path.GetFileName(e) == name);
         }
-        catch { return File.Exists(path) || Directory.Exists(path); }
+        catch { return Path.Exists(path); }
     }
 
     // --- Phase18: missing pure helpers ---

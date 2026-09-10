@@ -66,7 +66,7 @@ public sealed class ConnectCommand : Command
             // Port of connect.py:154 await char_selection(caller, account) — fire-and-forget async
             _ = Task.Run(async () =>
             {
-                try { await CharSelectionAsync(conn2, account); }
+                try { await CharSelectionAsync(conn2, account).ConfigureAwait(false); }
                 catch (Exception ex) { Console.Error.WriteLine($"[Connect] char_selection failed: {ex}"); }
             });
         }
@@ -113,14 +113,14 @@ public sealed class ConnectCommand : Command
             }
             caller.Msg(text);
             string choice;
-            try { choice = await caller.Session.Prompt("Enter your choice:"); }
+            try { choice = await caller.Session.Prompt("Enter your choice:").ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
             catch { return; }
             if (choice is null) return;
             if (settings.CharCreationEnabled && choice.Trim().Equals("new", StringComparison.OrdinalIgnoreCase))
             {
                 var newCmd = new NewCharacterCommand();
-                try { await newCmd.RunAsync(caller); }
+                try { await newCmd.RunAsync(caller).ConfigureAwait(false); }
                 catch (Exception ex) { Console.Error.WriteLine($"[Connect] NewCharacter failed: {ex}"); caller.Msg("Character creation failed."); }
                 continue;
             }

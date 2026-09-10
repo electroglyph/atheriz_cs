@@ -319,7 +319,7 @@ public sealed class TelnetStreamWriter : ITelnetWriter
 {
     private readonly Stream _stream;
     private readonly TcpClient _client;
-    private readonly object _writeLock = new();
+    private readonly Lock _writeLock = new();
     private int _pendingWriteBytes; // buffered-not-flushed bytes (see Write)
     private Action<int,int>? _nawsCallback;
     public TelnetStreamWriter(Stream stream, TcpClient client)
@@ -392,7 +392,7 @@ public sealed class TelnetProtocol : BaseProtocol
 {
     // Per-IP 5s throttle for the overlong-input-drop warning (WS parity via ThrottleWindow).
     private static readonly Dictionary<string, double> _overlongDropLog = new();
-    private static readonly object _overlongDropLock = new();
+    private static readonly Lock _overlongDropLock = new();
     private const int TELNET_INPUT_CHUNK = 4096; // port of telnet.py:45
 
     public static (int rows, int cols) ClampNaws(int rows, int cols)
@@ -423,7 +423,7 @@ public sealed class TelnetProtocol : BaseProtocol
         while (true)
         {
             int read = 0;
-            try { read = await reader.ReadAsync(chunkBuf, 0, TELNET_INPUT_CHUNK); }
+            try { read = await reader.ReadAsync(chunkBuf, 0, TELNET_INPUT_CHUNK).ConfigureAwait(false); }
             catch (OperationCanceledException) { read = 0; }
             catch (Exception ex)
             {
@@ -584,7 +584,7 @@ public sealed class TelnetProtocol : BaseProtocol
                 while (!lifetime.ApplicationStopping.IsCancellationRequested)
                 {
                     TcpClient client;
-                    try { client = await listener.AcceptTcpClientAsync(lifetime.ApplicationStopping); }
+                    try { client = await listener.AcceptTcpClientAsync(lifetime.ApplicationStopping).ConfigureAwait(false); }
                     catch (OperationCanceledException) { break; }
                     catch (SocketException) { if (lifetime.ApplicationStopping.IsCancellationRequested) break; continue; }
                     // admission checks precede the handler spawn — a
@@ -636,7 +636,7 @@ public sealed class TelnetProtocol : BaseProtocol
                 try { /* preserve only */ }
                 catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetLifespanComposed.Invoke: " + logEx.Message, "TelnetLifespanComposed"); }
             }
-            await inner();
+            await inner().ConfigureAwait(false);
         }
 
         // For dynamic invocation as app.router.lifespan_context(app) being awaited as async disposable
@@ -670,7 +670,7 @@ public sealed class TelnetProtocol : BaseProtocol
                 {
                     byte[] peek = new byte[2];
                     int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek);
-                    if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)); stream = sslStream; }
+                    if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); stream = sslStream; }
                 }
                 else if (client.Available == 0)
                 {
@@ -683,8 +683,8 @@ public sealed class TelnetProtocol : BaseProtocol
                     // plaintext, exactly as before.
                     var autodetectDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(250);
                     while (client.Available < 2 && DateTime.UtcNow < autodetectDeadline)
-                        await Task.Delay(10);
-                    if (client.Available >= 2) { byte[] peek = new byte[2]; int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek); if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)); stream = sslStream; } } }
+                        await Task.Delay(10).ConfigureAwait(false);
+                    if (client.Available >= 2) { byte[] peek = new byte[2]; int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek); if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); stream = sslStream; } } }
             }
             catch (Exception ex) { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] TLS autodetect failed for {host}: {ex}"); stream = netStream; }
         }
@@ -699,7 +699,7 @@ public sealed class TelnetProtocol : BaseProtocol
         // writer.SetExtCallback(31, OnNaws);
         // try { writer.Iac(253, 31); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); }
         manager.Dispatch(connection, "client_ready", [], []);
-        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine)) { if (rawLine is null) { if (ThrottleWindow.ShouldLog(_overlongDropLog, _overlongDropLock, host, 5.0)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Filter stray IAC bytes (0xFF) that telnet clients may send even without DO (e.g., telnetlib pre-negotiation). When decoded as UTF8, 0xFF becomes U+FFFD.
+        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine).ConfigureAwait(false)) { if (rawLine is null) { if (ThrottleWindow.ShouldLog(_overlongDropLog, _overlongDropLock, host, 5.0)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Filter stray IAC bytes (0xFF) that telnet clients may send even without DO (e.g., telnetlib pre-negotiation). When decoded as UTF8, 0xFF becomes U+FFFD.
             if (line.Length > 0 && (line[0] == '\uFFFD' || line[0] == (char)255 || line.Contains("\uFFFD"))) {
                 // Strip leading IAC sequences: find first alphabetic char of actual command
                 int start = 0;

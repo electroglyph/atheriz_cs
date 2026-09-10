@@ -166,6 +166,23 @@ public class PortedCrossPlatformTests
         }
         finally { try{ Directory.Delete(tmp,true);}catch{} }
     }
+    [Fact] public void ExistsExact_TrailingSlashDirectory_ReturnsTrue()
+    {
+        // Empty-name fallback: GetFileName("dir/") is "" — existence comes from Path.Exists.
+        var tmp = Path.Combine(Path.GetTempPath(), $"exists_trail_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            Assert.True(GameUtils.ExistsExact(tmp + Path.DirectorySeparatorChar));
+        }
+        finally { try { Directory.Delete(tmp, true); } catch { } }
+    }
+    [Fact] public void ExistsExact_MissingParent_ReturnsFalse()
+    {
+        // Missing-parent fallback: nothing can exist under a directory that does not exist.
+        var missing = Path.Combine(Path.GetTempPath(), $"exists_noparent_{Guid.NewGuid():N}", "file.txt");
+        Assert.False(GameUtils.ExistsExact(missing));
+    }
     [Fact] public void IsUnderWindowsCaseInsensitive()
     {
         // Port of reloader _is_under Windows case-insensitive

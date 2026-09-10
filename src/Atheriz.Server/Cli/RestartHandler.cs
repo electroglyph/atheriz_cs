@@ -11,7 +11,7 @@ public static class RestartHandler
         var host = ArgumentParser.ParseHost(a);
         var fg = ArgumentParser.HasFlag(a, "--foreground", "-f");
         var sw = Stopwatch.StartNew();
-        await StopHandler.HandleStopAsync(a);
+        await StopHandler.HandleStopAsync(a).ConfigureAwait(false);
         // The stop above ran against cached settings; re-read so the spawn
         // below (and the port waits) see post-stop configuration, not a stale cache.
         StopHandler.InvalidateEffectiveSettings();
@@ -24,7 +24,7 @@ public static class RestartHandler
             {
                 var oldPid = int.Parse(File.ReadAllText(pidPath2, System.Text.Encoding.UTF8).Trim());
                 Console.Write($"Waiting for server (PID {oldPid}) to stop...");
-                bool exited = await ProcessHelper.WaitForPidExitAsync(oldPid);
+                bool exited = await ProcessHelper.WaitForPidExitAsync(oldPid).ConfigureAwait(false);
                 if (!exited)
                 {
                     // 5s grace expired and the old server is stuck: escalate to
@@ -36,7 +36,7 @@ public static class RestartHandler
                     {
                         Console.Write(" grace expired; force killing...");
                         try { using var stuck = Process.GetProcessById(oldPid); try { stuck.Kill(entireProcessTree: false); } catch { } } catch { }
-                        exited = await ProcessHelper.WaitForPidExitAsync(oldPid);
+                        exited = await ProcessHelper.WaitForPidExitAsync(oldPid).ConfigureAwait(false);
                     }
                     if (!exited && ours)
                     {
@@ -48,14 +48,14 @@ public static class RestartHandler
             }
             catch { }
         }
-        else await Task.Delay(500);
+        else await Task.Delay(500).ConfigureAwait(false);
 
         // Wait for the old server to release the port before spawning the
         // replacement, so the new bind does not race the old listener. Abort
         // the spawn when the port never frees: the child would fail to bind
         // while the old server keeps running, after the operator was told a
         // restart happened.
-        if (!await WaitForPortFreeAsync(portVal, 100))
+        if (!await WaitForPortFreeAsync(portVal, 100).ConfigureAwait(false))
         {
             Console.WriteLine($"Error: port {portVal} still listening after stop; aborting restart (not spawning).");
             return false;
@@ -69,9 +69,9 @@ public static class RestartHandler
         // replacement silently binds the configured default instead.
         var telnetPort = ArgumentParser.ParseTelnetPort(a);
         if (telnetPort is not null) { spawnArgs.Add("--telnet-port"); spawnArgs.Add(telnetPort.ToString()!); }
-        await DaemonSpawner.SpawnDaemonAsync(spawnArgs.ToArray(), Directory.GetCurrentDirectory());
+        await DaemonSpawner.SpawnDaemonAsync(spawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
         // Wait for the new server to come up on the port (bounded).
-        if (!await WaitForPortUpAsync(portVal, 150)) Console.WriteLine($"Warning: port {portVal} not listening yet; check save/server.log.");
+        if (!await WaitForPortUpAsync(portVal, 150).ConfigureAwait(false)) Console.WriteLine($"Warning: port {portVal} not listening yet; check save/server.log.");
         Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms");
         return false;
     }
@@ -80,7 +80,7 @@ public static class RestartHandler
     internal static async Task<bool> WaitForPortFreeAsync(int port, int tenths)
     {
         for (int i = 0; i < tenths && Infrastructure.PidFile.IsPortListening(port); i++)
-            await Task.Delay(100);
+            await Task.Delay(100).ConfigureAwait(false);
         return !Infrastructure.PidFile.IsPortListening(port);
     }
 
@@ -88,7 +88,7 @@ public static class RestartHandler
     internal static async Task<bool> WaitForPortUpAsync(int port, int tenths)
     {
         for (int i = 0; i < tenths && !Infrastructure.PidFile.IsPortListening(port); i++)
-            await Task.Delay(100);
+            await Task.Delay(100).ConfigureAwait(false);
         return Infrastructure.PidFile.IsPortListening(port);
     }
 }

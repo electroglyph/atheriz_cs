@@ -47,8 +47,8 @@ public static class ShutdownClient
             var req = new HttpRequestMessage(HttpMethod.Post, url);
             req.Headers.Add("X-Admin-Token", token);
             if (jsonPayload is not null) req.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-            var resp = await client.SendAsync(req);
-            var body = await resp.Content.ReadAsStringAsync();
+            var resp = await client.SendAsync(req).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
             return new AdminResponse((int)resp.StatusCode, body);
         }
         catch { return null; }
@@ -57,7 +57,7 @@ public static class ShutdownClient
     internal static async Task<ShutdownRequestResult> TryRequestShutdownAsync(int port, string secretPath, bool tlsOn)
     {
         Console.WriteLine("Requesting graceful shutdown via internal API...");
-        var resp = await PostAdminAsync(port, secretPath, "/_internal/shutdown", null, tlsOn);
+        var resp = await PostAdminAsync(port, secretPath, "/_internal/shutdown", null, tlsOn).ConfigureAwait(false);
         if (resp is null)
         {
             Console.WriteLine("Could not contact server for graceful shutdown (server might be hung or stopped).");

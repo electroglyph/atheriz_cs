@@ -7,7 +7,7 @@ namespace Atheriz.Core.Settings;
 /// </summary>
 public sealed class AtherizSettings
 {
-    private static readonly object _globalLock = new();
+    private static readonly Lock _globalLock = new();
     private static AtherizSettings _global = new();
     public static AtherizSettings Global
     {

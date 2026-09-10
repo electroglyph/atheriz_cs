@@ -10,7 +10,7 @@ public abstract class Command
     private static readonly AsyncLocal<(Command cmd, GameArgumentParser parser)?> ParserBuilding = new();
 
     private GameArgumentParser? _parser;
-    private readonly object _parserLock = new();
+    private readonly Lock _parserLock = new();
 
     public virtual string Key => "base";
     public virtual IReadOnlyList<string> Aliases => [];

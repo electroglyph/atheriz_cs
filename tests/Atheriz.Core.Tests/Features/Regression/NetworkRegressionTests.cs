@@ -388,7 +388,7 @@ public class NetworkRegressionTests
     public void ThrottleCheck_IsPerHost()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Network", "ThrottleWindow.cs");
-        var region = SourceScan.Region(src, "public static bool ShouldLog(Dictionary<string, double> last, object syncLock, string host, double window, double now)");
+        var region = SourceScan.Region(src, "public static bool ShouldLog(Dictionary<string, double> last, Lock syncLock, string host, double window, double now)");
         Assert.DoesNotContain("foreach (var kv in last)", region);
     }
 

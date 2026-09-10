@@ -39,7 +39,7 @@ public static class AdminRoutes
                     {
                         var ticker = GlobalServices.GetAsyncTicker();
                         var pool = GlobalServices.GetAsyncThreadPool();
-                        msg = await PluginReloader.ReloadGameLogicAsync(ticker, pool, settings);
+                        msg = await PluginReloader.ReloadGameLogicAsync(ticker, pool, settings).ConfigureAwait(false);
                         try { ServerLifecycle.DoReload(settings); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] DoReload failed: {ex.Message}"); }
                     }
                     catch (Exception ex)
@@ -51,13 +51,13 @@ public static class AdminRoutes
                     return msg;
                 }
                 var work = Task.Run(DoReloadWork);
-                var done = await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(60)));
+                var done = await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(60))).ConfigureAwait(false);
                 if (done != work)
                 {
                     Console.Error.WriteLine("[HotReload] Reload exceeded 60s watchdog; continuing in background.");
                     return Results.Json(new { status = "error", message = "Reload timed out after 60s; still running in background." });
                 }
-                return Results.Json(new { status = "ok", message = await work });
+                return Results.Json(new { status = "ok", message = await work.ConfigureAwait(false) });
             }
             catch (Exception ex)
             {
@@ -107,7 +107,7 @@ public static class AdminRoutes
                 return Results.Json(new { status = "error", message = err });
 
             // Size-capped body read: reject oversized payloads without allocating them.
-            using var doc = await ReadCappedJsonBodyAsync(ctx, 64 * 1024);
+            using var doc = await ReadCappedJsonBodyAsync(ctx, 64 * 1024).ConfigureAwait(false);
             if (doc is null)
             {
                 return Results.Json(new { status = "error", message = "Invalid JSON body." });
@@ -157,14 +157,14 @@ public static class AdminRoutes
             var buf = new byte[8192];
             int n;
             long total = 0;
-            while ((n = await ctx.Request.Body.ReadAsync(buf)) > 0)
+            while ((n = await ctx.Request.Body.ReadAsync(buf).ConfigureAwait(false)) > 0)
             {
                 total += n;
                 if (total > maxBytes) return null;
                 ms.Write(buf, 0, n);
             }
             ms.Position = 0;
-            return await JsonDocument.ParseAsync(ms);
+            return await JsonDocument.ParseAsync(ms).ConfigureAwait(false);
         }
         catch { return null; }
     }

@@ -76,7 +76,7 @@ public sealed class WebSocketConnection : BaseConnection
     {
         var bytes = Encoding.UTF8.GetBytes(data);
         using var lockCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        try { await _sendLock.WaitAsync(lockCts.Token); }
+        try { await _sendLock.WaitAsync(lockCts.Token).ConfigureAwait(false); }
         catch (OperationCanceledException)
         {
             // Lock busy for 5s: drop this message quietly. Do NOT Abort — the
@@ -86,7 +86,7 @@ public sealed class WebSocketConnection : BaseConnection
         try
         {
             using var sendCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await WebSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, sendCts.Token);
+            await WebSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, sendCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -151,7 +151,7 @@ public sealed class WebSocketConnection : BaseConnection
                 // WaitAsync(CancellationToken) raises OperationCanceledException
                 // (not TimeoutException) on deadline — that is the expected path.
                 using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
-                await Task.WhenAll(pending).WaitAsync(cts.Token);
+                await Task.WhenAll(pending).WaitAsync(cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { } // deadline elapsed; pendings release via TaskDone on completion
             catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.CloseWebSocketAsync: " + logEx.Message, "WebSocket"); }
@@ -163,7 +163,7 @@ public sealed class WebSocketConnection : BaseConnection
             if (WebSocket.State == WebSocketState.Open)
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                try { await WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); }
+                try { await WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) { try { WebSocket.Abort(); } catch { } }
             }
         }
@@ -217,7 +217,7 @@ public interface IWebSocketDisconnect { }
 public sealed class WebSocketProtocol : BaseProtocol
 {
     // Oversize throttling — port of websocket.py:15-27 (now via ThrottleWindow)
-    private static readonly object _oversizeLock = new();
+    private static readonly Lock _oversizeLock = new();
     private static readonly Dictionary<string, double> _oversizeLast = new();
     private const double OversizeWindow = 5.0; // port of websocket.py:17
 
@@ -250,11 +250,11 @@ public sealed class WebSocketProtocol : BaseProtocol
             // is_ip_banned check (port of websocket.py:166)
             try {
                 if (Atheriz.Core.Globals.ObjectRegistry.IsIpBanned(clientHost)) {
-                    try { await peer.CloseAsync(0, null); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+                    try { await peer.CloseAsync(0, null).ConfigureAwait(false); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
                     return;
                 }
             } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
-            try { await peer.AcceptAsync(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+            try { await peer.AcceptAsync().ConfigureAwait(false); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
             var mgr = ConnectionManager.GlobalInstance ?? new ConnectionManager(settings: settings);
             string connId = mgr.GenerateConnectionId();
             // Peer doubles have no real socket: the fallback connection drops
@@ -266,14 +266,14 @@ public sealed class WebSocketProtocol : BaseProtocol
                         // returning to a Close() that only logs — otherwise the
                         // socket dangles to client timeout, unregistered and
                         // unswept. Nothing was registered, so nothing to sweep.
-                        try { await peer.CloseAsync(1013, "Server unavailable"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+                        try { await peer.CloseAsync(1013, "Server unavailable").ConfigureAwait(false); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
                         return;
                     }
             try
             {
                 while (true)
                 {
-                    string raw = await peer.ReceiveTextAsync();
+                    string raw = await peer.ReceiveTextAsync().ConfigureAwait(false);
                     int byteCount = System.Text.Encoding.UTF8.GetByteCount(raw);
                     if (byteCount > settings.WebsocketMaxMessageSize)
                     {
@@ -281,7 +281,7 @@ public sealed class WebSocketProtocol : BaseProtocol
                         bool shouldLog = true;
                         try { shouldLog = ShouldLogOversize(clientHost); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
                         if (shouldLog) Atheriz.Core.AtherizLogger.LogWarning($"[WebSocket] Message too large from {clientHost} ({byteCount} bytes > {settings.WebsocketMaxMessageSize} bytes)");
-                        try { await peer.CloseAsync(1009, "Message too large"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
+                        try { await peer.CloseAsync(1009, "Message too large").ConfigureAwait(false); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed WebSocketConnection.Setup: " + logEx.Message, "WebSocket"); }
                         break;
                     }
                     mgr.HandleCommand(connection!, raw);

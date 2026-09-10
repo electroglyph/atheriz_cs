@@ -94,7 +94,7 @@ public partial class Node : GameObject
     // startup. Unregistered names load as plain nodes via CreateForLoad.
     private static readonly Dictionary<string, Func<Coord, Node>> _persistedSubtypeFactories = new(StringComparer.Ordinal);
     private static readonly Dictionary<Type, string> _persistedSubtypeNames = new();
-    private static readonly object _persistedSubtypeLock = new();
+    private static readonly Lock _persistedSubtypeLock = new();
     static Node() { _persistedSubtypeFactories[typeof(Node).FullName!] = c => CreateForLoad(c); _persistedSubtypeNames[typeof(Node)] = typeof(Node).FullName!; }
     public static void RegisterPersistedSubtype(string fullName, Type type, Func<Coord, Node> factory)
     {
@@ -115,17 +115,24 @@ public partial class Node : GameObject
         string key = objectType;
         int comma = key.IndexOf(',');
         if (comma > 0) key = key.Substring(0, comma).Trim();
+        // Snapshot the factory under the lock, invoke it outside: factories are
+        // game-registered callbacks and must never run while the registry lock
+        // is held (a factory creating another persisted subtype would re-enter).
+        Func<Coord, Node>? factory = null;
         lock (_persistedSubtypeLock)
         {
-            if (_persistedSubtypeFactories.TryGetValue(key, out var f)) { node = f(coord); return true; }
-            // Short-name fallback (mirrors the old scan matching x.Name).
-            foreach (var kv in _persistedSubtypeFactories)
+            if (!_persistedSubtypeFactories.TryGetValue(key, out factory))
             {
-                var rkey = kv.Key;
-                var shortName = rkey.Substring(rkey.LastIndexOfAny(['.', '+']) + 1);
-                if (shortName == key) { node = kv.Value(coord); return true; }
+                // Short-name fallback (mirrors the old scan matching x.Name).
+                foreach (var kv in _persistedSubtypeFactories)
+                {
+                    var rkey = kv.Key;
+                    var shortName = rkey.Substring(rkey.LastIndexOfAny(['.', '+']) + 1);
+                    if (shortName == key) { factory = kv.Value; break; }
+                }
             }
         }
+        if (factory is not null) { node = factory(coord); return true; }
         // Shared GameObject subtype registry (tests and games register node
         // doubles there, e.g. DummyNode): adopt Node instances from it.
         // Hydration below overwrites the placeholder coord.
@@ -466,7 +473,7 @@ public partial class Node : GameObject
 internal static class GlobalTickerHolder
 {
     private static Atheriz.Core.Concurrency.AsyncTicker? _instance;
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
     public static Atheriz.Core.Concurrency.AsyncTicker? Get() { lock (_lock) return _instance; }
     public static void Set(Atheriz.Core.Concurrency.AsyncTicker ticker) { lock (_lock) _instance = ticker; }
 }

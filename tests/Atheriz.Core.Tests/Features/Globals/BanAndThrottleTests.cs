@@ -77,7 +77,7 @@ public class BanAndThrottleTests
         // Per-host throttle state must not grow forever: entries whose window
         // has fully elapsed are evicted on later calls.
         var last = new Dictionary<string, double>();
-        var lck = new object();
+        var lck = new System.Threading.Lock();
         Assert.True(ThrottleWindow.ShouldLog(last, lck, "h1", 5.0, now: 100.0));
         Assert.False(ThrottleWindow.ShouldLog(last, lck, "h1", 5.0, now: 102.0));
         Assert.True(ThrottleWindow.ShouldLog(last, lck, "h2", 5.0, now: 200.0));

@@ -51,15 +51,15 @@ public sealed class GuestCommand : Command
         if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Guest accounts are not enabled."); return; }
         string rateKey = CreationCooldownHelper.RateKey(caller);
         if (!CreationCooldownHelper.TryReserve(caller, "guest")) return;
-        string name = await caller.Session.Prompt("Enter a name for your guest character:");
+        string name = await caller.Session.Prompt("Enter a name for your guest character:").ConfigureAwait(false);
         name = name.Trim();
         var err = Validation.ValidateCharacterName(name);
         if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
-        string gender = await caller.Session.Prompt("Enter your character's gender:");
+        string gender = await caller.Session.Prompt("Enter your character's gender:").ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(gender)) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg("Gender cannot be empty."); return; }
         gender = gender.Trim();
         if (string.IsNullOrEmpty(gender)) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg("Gender cannot be empty."); return; }
-        string desc = await caller.Session.Prompt("Enter a short description of your character:");
+        string desc = await caller.Session.Prompt("Enter a short description of your character:").ConfigureAwait(false);
         if (ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0)
         { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg($"Character with this name ({name}) already exists."); return; }
         var character = GameObject.Create(name, desc, isPc: true);

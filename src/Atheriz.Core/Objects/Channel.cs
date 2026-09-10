@@ -9,7 +9,7 @@ namespace Atheriz.Core.Objects;
 public class Channel : GameObject
 {
     public new static bool _is_thread_safe = true;
-    private readonly object _histLock = new();
+    private readonly Lock _histLock = new();
     // Port of base_channel.py history entries: (timestamp, sender, message)
     // tuples. Listeners receive the FormatMessage form; History projects the
     // raw messages; GetHistory formats on replay — so replay matches live.

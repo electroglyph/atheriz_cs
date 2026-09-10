@@ -8,7 +8,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _savePath;
     private readonly LogLevel _minLevel;
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     // F009: no permanent _disabled latch. A single transient IO error (locked file, full
     // disk that later frees) used to silence file logging for the rest of the process.
     // Failures are counted for diagnostics and every write retries.

@@ -551,7 +551,7 @@ public partial class GameObject
 internal static class MapHandlerSingleton
 {
     private static MapHandler? _instance;
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
     public static MapHandler? Get()
     {
         lock (_lock)

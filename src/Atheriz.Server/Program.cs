@@ -84,12 +84,12 @@ try
 {
 switch (command)
 {
-    case "stop": await StopHandler.HandleStopAsync(rest); return;
-    case "reload": await ReloadHandler.HandleReloadAsync(rest); return;
-    case "restart": { bool fgRestart = await RestartHandler.HandleRestartAsync(rest); if (fgRestart) { command = "start"; break; } return; }
-    case "reset": await ResetHandler.HandleResetAsync(rest); return;
-    case "create": await CreateHandler.HandleCreateAsync(rest); return;
-    case "new": { bool fg = await NewHandler.HandleNewAsync(rest); if (fg) { command = "start"; break; } return; }
+    case "stop": await StopHandler.HandleStopAsync(rest).ConfigureAwait(false); return;
+    case "reload": await ReloadHandler.HandleReloadAsync(rest).ConfigureAwait(false); return;
+    case "restart": { bool fgRestart = await RestartHandler.HandleRestartAsync(rest).ConfigureAwait(false); if (fgRestart) { command = "start"; break; } return; }
+    case "reset": await ResetHandler.HandleResetAsync(rest).ConfigureAwait(false); return;
+    case "create": await CreateHandler.HandleCreateAsync(rest).ConfigureAwait(false); return;
+    case "new": { bool fg = await NewHandler.HandleNewAsync(rest).ConfigureAwait(false); if (fg) { command = "start"; break; } return; }
     case "test": Environment.Exit(TestHandler.HandleTest(rest)); return;
     case "--help": case "-h": PrintHelp(); return;
     case "start": break;
@@ -123,7 +123,7 @@ if (!foreground && command == "start")
     // The claim is released only when the spawn itself fails (nothing will
     // ever re-claim it) — otherwise the pid file points at a dead CLI.
     if (!PidFile.TryAcquire(effSpawn.SavePath, out var spawnClaim, out var spawnReason, spawnPort)) { Console.WriteLine(spawnReason ?? "Failed to acquire PID file."); Environment.Exit(1); return; }
-    if (!await DaemonSpawner.SpawnDaemonAsync(rest, Directory.GetCurrentDirectory())) { spawnClaim?.Release(); Environment.Exit(1); }
+    if (!await DaemonSpawner.SpawnDaemonAsync(rest, Directory.GetCurrentDirectory()).ConfigureAwait(false)) { spawnClaim?.Release(); Environment.Exit(1); }
     return;
 }
 var builder = WebApplication.CreateBuilder(args);
@@ -212,7 +212,7 @@ var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStopping.Register(() => { try { ServerLifecycle.DoShutdown(settings); } catch { } try { pidFile?.Release(); } catch { } try { AdminToken.DeleteToken(settings.SecretPath); } catch { } Console.WriteLine("Server stopped."); });
 AppDomain.CurrentDomain.ProcessExit += (s, e) => { try { pidFile?.Release(); } catch { } try { AdminToken.DeleteToken(settings.SecretPath); } catch { } };
 Console.CancelKeyPress += (s, e) => { e.Cancel = true; lifetime.StopApplication(); };
-await app.RunAsync();
+await app.RunAsync().ConfigureAwait(false);
 
 // PortedAtherizMainTests compatibility literals — keep PortedAtherizMainTests string asserts passing after refactor.
 // Program.cs was split into Cli/ArgumentParser.cs, Hosting/*, Cli/StopHandler.cs etc. Tests still read Program.cs

@@ -32,7 +32,7 @@ public static class StopHandler
         var port = ArgumentParser.ParsePort(a) ?? EffectiveSettings.WebserverPort;
         var secretPath = EffectiveSettings.SecretPath;
         var tlsOn = !string.IsNullOrEmpty(EffectiveSettings.SslCertFile);
-        switch (await ShutdownClient.TryRequestShutdownAsync(port, secretPath, tlsOn))
+        switch (await ShutdownClient.TryRequestShutdownAsync(port, secretPath, tlsOn).ConfigureAwait(false))
         {
             case ShutdownRequestResult.Accepted:
                 Console.WriteLine("Graceful shutdown request accepted; the server will stop itself.");
@@ -64,12 +64,12 @@ public static class StopHandler
                     var proc2 = Process.GetProcessById(foundPid);
                     Console.Write($"Stopping server process with PID: {foundPid}...");
                     ProcessHelper.RequestTerminate(proc2);
-                    if (!await ProcessHelper.WaitForExitDotsAsync(proc2, 30))
+                    if (!await ProcessHelper.WaitForExitDotsAsync(proc2, 30).ConfigureAwait(false))
                     {
                         Console.WriteLine();
                         Console.Write("Process did not stop in time. Killing...");
                         try { proc2.Kill(entireProcessTree: false); } catch (Exception ex) { Console.WriteLine($" Failed: {ex.Message}"); return; }
-                        await ProcessHelper.WaitForExitDotsAsync(proc2, 30);
+                        await ProcessHelper.WaitForExitDotsAsync(proc2, 30).ConfigureAwait(false);
                     }
                     Console.WriteLine(" Done.");
                     try
@@ -109,7 +109,7 @@ public static class StopHandler
                 return;
             }
             Console.Write($"Stopping server process with PID: {pid}...");
-            await ProcessHelper.KillProcessWithDots(proc);
+            await ProcessHelper.KillProcessWithDots(proc).ConfigureAwait(false);
             Console.WriteLine(" Done.");
             if (File.Exists(pidFilePath))
             {

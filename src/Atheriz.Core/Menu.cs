@@ -26,7 +26,7 @@ public sealed class MenuEngine{
  public async Task RenderAsync(){ // Port of menu.py:53
   if(CurrentNodeSync is null&&CurrentNodeAsync is null)return;
   string t;List<Choice> cl;
-  if(CurrentNodeAsync is not null)(t,cl)=await CurrentNodeAsync(Context); else (t,cl)=CurrentNodeSync!(Context); // Port of menu.py:56
+  if(CurrentNodeAsync is not null)(t,cl)=await CurrentNodeAsync(Context).ConfigureAwait(false); else (t,cl)=CurrentNodeSync!(Context); // Port of menu.py:56
   _text=t;_choices=new(StringComparer.OrdinalIgnoreCase);
   foreach(var c in cl){var k=c.Key.ToLowerInvariant().Trim();if(_choices.ContainsKey(k))throw new InvalidOperationException($"duplicate menu key: '{c.Key}'");_choices[k]=c;}
  }
@@ -45,9 +45,9 @@ public sealed class MenuEngine{
  public async Task<bool> HandleInputAsync(string input){ // Port of menu.py:102
   if(_choices.Count==0){CurrentNodeSync=null;CurrentNodeAsync=null;return false;}
   var clean=input.ToLowerInvariant().Trim(); if(!_choices.TryGetValue(clean,out var ch))return true;
-  if(ch.CallbackSync is not null||ch.CallbackAsync is not null){try{if(ch.CallbackAsync is not null)await ch.CallbackAsync(Context);else ch.CallbackSync?.Invoke(Context);}catch{try{AtherizLogger.LogError("menu callback failed");}catch{}}} // Port of menu.py:110
-  if(ch.GotoSync is not null||ch.GotoAsync is not null){CurrentNodeSync=ch.GotoSync;CurrentNodeAsync=ch.GotoAsync;await RenderAsync();return true;} // Port of menu.py:118
-  if(ch.Stay){await RenderAsync();return true;}
+  if(ch.CallbackSync is not null||ch.CallbackAsync is not null){try{if(ch.CallbackAsync is not null)await ch.CallbackAsync(Context).ConfigureAwait(false);else ch.CallbackSync?.Invoke(Context);}catch{try{AtherizLogger.LogError("menu callback failed");}catch{}}} // Port of menu.py:110
+  if(ch.GotoSync is not null||ch.GotoAsync is not null){CurrentNodeSync=ch.GotoSync;CurrentNodeAsync=ch.GotoAsync;await RenderAsync().ConfigureAwait(false);return true;} // Port of menu.py:118
+  if(ch.Stay){await RenderAsync().ConfigureAwait(false);return true;}
   CurrentNodeSync=null;CurrentNodeAsync=null;return false;
  }
  public void Close(){CurrentNodeSync=null;CurrentNodeAsync=null;_text="";_choices.Clear();Context.State.Clear();} // Port of menu.py:128
@@ -67,9 +67,9 @@ public sealed class Menu{
   string cur=string.IsNullOrEmpty(promptText)?Prompt:promptText;
   while(true){
     var display=cur; if(Options.Count>0){var lines=new List<string>{$"\n{display}"}; foreach(var kv in Options)lines.Add(OptionDescs.TryGetValue(kv.Key,out var dd)?$"  [{kv.Key}] {dd}":$"  [{kv.Key}]"); display=string.Join("\r\n",lines);}
-   var inp = await MenuPrompt.PromptWithTimeoutAsync(session, display, Timeout); if(inp is null)break; // Port of menu.py:153-156 via MenuPrompt
+   var inp = await MenuPrompt.PromptWithTimeoutAsync(session, display, Timeout).ConfigureAwait(false); if(inp is null)break; // Port of menu.py:153-156 via MenuPrompt
    var clean=inp.ToLowerInvariant().Trim(); if(!Options.TryGetValue(clean,out var h)){try{AtherizLogger.LogDebug($"menu unknown key: {clean}");}catch{} continue;} // Port of menu.py:82
-   try{var keepGoing=await h(session,inp); if(!keepGoing)return true;}catch(Exception ex){try{AtherizLogger.LogError($"menu handle_input failed: {ex}");}catch{} break;} // Port of menu.py:85; handler true = keep prompting, false = done (Run true = exited)
+   try{var keepGoing=await h(session,inp).ConfigureAwait(false); if(!keepGoing)return true;}catch(Exception ex){try{AtherizLogger.LogError($"menu handle_input failed: {ex}");}catch{} break;} // Port of menu.py:85; handler true = keep prompting, false = done (Run true = exited)
   } return false;
  }
  public static Task RunMenu(Session s,Menu m,string p)=>m.Run(s,p); // Port of menu.py:135
@@ -78,7 +78,7 @@ public sealed class Menu{
 public static class MenuRunner{ // Port of menu.py:135 top-level run_menu future-based
  static Session? GetSess(object? caller){ if(caller is Session s)return s; if(caller is Atheriz.Core.Commands.ISessionProvider p){ try{ var v=p.Session; if(v is not null)return v; }catch{} } if(caller is GameObject go)return go.Session; return null;}
  public static Task RunMenuAsync(object? caller,Func<MenuContext,(string,List<Choice>)> start){ // Port of menu.py:140-166
-  return Task.Run(async()=>{var e=new MenuEngine(caller,start); try{while(e.HasNode){var d=e.GetDisplay(); var sess=GetSess(caller); if(sess is null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to); if(inp is null)break; try{var k=e.HandleInput(inp); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}});}
+  return Task.Run(async()=>{var e=new MenuEngine(caller,start); try{while(e.HasNode){var d=e.GetDisplay(); var sess=GetSess(caller); if(sess is null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to).ConfigureAwait(false); if(inp is null)break; try{var k=e.HandleInput(inp); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}});}
  public static Task RunMenuAsync(object? caller,Func<MenuContext,Task<(string,List<Choice>)>> startA){
-  return Task.Run(async()=>{var e=new MenuEngine(caller,startA); try{await e.RenderAsync();}catch{try{AtherizLogger.LogError("menu initial render failed");}catch{} e.Close(); return;} try{while(e.HasNode){var d=e.GetDisplay(); var sess=GetSess(caller); if(sess is null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to); if(inp is null)break; try{var k=await e.HandleInputAsync(inp); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}});}
+  return Task.Run(async()=>{var e=new MenuEngine(caller,startA); try{await e.RenderAsync().ConfigureAwait(false);}catch{try{AtherizLogger.LogError("menu initial render failed");}catch{} e.Close(); return;} try{while(e.HasNode){var d=e.GetDisplay(); var sess=GetSess(caller); if(sess is null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to).ConfigureAwait(false); if(inp is null)break; try{var k=await e.HandleInputAsync(inp).ConfigureAwait(false); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}});}
 }

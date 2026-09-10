@@ -19,7 +19,7 @@ public static class ObjectRegistry
         private const int Limit = 4000;
         private readonly Dictionary<TKey, TValue> _dict = new();
         private readonly Queue<TKey> _order = new();
-        private readonly object _lock = new();
+        private readonly Lock _lock = new();
         private void EvictIfNeeded()
         {
             if (_dict.Count <= Limit) return;

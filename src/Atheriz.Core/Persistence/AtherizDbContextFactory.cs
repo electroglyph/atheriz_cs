@@ -188,7 +188,7 @@ public static class AtherizDbContextFactory
     public static async Task DoSetupAsync(string savePath, CancellationToken ct = default)
     {
         await using var ctx = Create(savePath);
-        await ctx.EnsureCreatedAsync(ct);
+        await ctx.EnsureCreatedAsync(ct).ConfigureAwait(false);
         // no unguarded WAL re-send (see sync DoSetup above).
         // No gametime row seed — parity with sync DoSetup above (and Python
         // do_setup, tables-only): GameTime.Save upserts, and a seeded "{}" row

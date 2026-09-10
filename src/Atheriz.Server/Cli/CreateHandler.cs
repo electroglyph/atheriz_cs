@@ -31,12 +31,12 @@ public static class CreateHandler
         // this world: print its message and return. The offline DB path runs
         // only when no token exists or the server cannot be reached, never
         // against a running server.
-        var resp = await ShutdownClient.PostAdminAsync(portVal, settings.SecretPath, "/_internal/create_account", payload, tlsOn);
+        var resp = await ShutdownClient.PostAdminAsync(portVal, settings.SecretPath, "/_internal/create_account", payload, tlsOn).ConfigureAwait(false);
         // On a scheme mismatch (settings say https, server speaks plaintext or
         // vice versa) retry once with the flipped scheme, mirroring reload —
         // otherwise a null response falls through to the offline DB path
         // against a LIVE server.
-        resp ??= await ShutdownClient.PostAdminAsync(portVal, settings.SecretPath, "/_internal/create_account", payload, !tlsOn);
+        resp ??= await ShutdownClient.PostAdminAsync(portVal, settings.SecretPath, "/_internal/create_account", payload, !tlsOn).ConfigureAwait(false);
         if (resp is not null)
         {
             try

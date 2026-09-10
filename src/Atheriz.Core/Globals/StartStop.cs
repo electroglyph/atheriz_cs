@@ -583,7 +583,7 @@ public static class StartStop
     // Game-side server-event handlers registered explicitly by game/plugin
     // assemblies (replaces the assembly scan for server_events/ServerEvents types).
     private static readonly Dictionary<string, List<Action>> _gameServerEventHandlers = new(StringComparer.Ordinal);
-    private static readonly object _gameServerEventLock = new();
+    private static readonly Lock _gameServerEventLock = new();
     /// <summary>Registers a game-side handler invoked after the core server event.</summary>
     public static void RegisterGameServerEvent(string methodName, Action handler)
     {

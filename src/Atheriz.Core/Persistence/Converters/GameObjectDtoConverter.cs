@@ -12,7 +12,7 @@ internal static class GameObjectDtoConverter
     // Explicit persistence-subtype registry (F004). Only registered full names are ever
     // instantiated from save data — no Type.GetType / assembly scan / Activator in prod.
     // Games register their Custom* types at startup; tests register doubles in fixtures.
-    private static readonly object _subtypeLock = new();
+    private static readonly Lock _subtypeLock = new();
     private static readonly Dictionary<string, Func<GameObject>> _subtypeFactories = new(StringComparer.Ordinal);
     private static readonly Dictionary<Type, string> _subtypeNames = new();
 
@@ -30,7 +30,12 @@ internal static class GameObjectDtoConverter
 
     internal static bool TryCreateSubtype(string fullName, out GameObject? instance)
     {
-        lock (_subtypeLock) { if (_subtypeFactories.TryGetValue(fullName, out var f)) { instance = f(); return true; } }
+        // Snapshot the factory under the lock, invoke it outside: factories are
+        // game-registered callbacks and must never run while the registry lock
+        // is held (a factory creating another subtype would re-enter).
+        Func<GameObject>? factory;
+        lock (_subtypeLock) { _subtypeFactories.TryGetValue(fullName, out factory); }
+        if (factory is not null) { instance = factory(); return true; }
         instance = null;
         return false;
     }

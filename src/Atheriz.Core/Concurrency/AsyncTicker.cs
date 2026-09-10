@@ -7,7 +7,7 @@ namespace Atheriz.Core.Concurrency;
 /// </summary>
 public sealed class AsyncTicker
 {
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private readonly Dictionary<double, TimeSlot> _slots = new();
     private readonly AsyncThreadPool _pool;
 
@@ -114,7 +114,7 @@ public sealed class AsyncTicker
 
     public class TimeSlot
     {
-        private readonly object _lock = new();
+        private readonly Lock _lock = new();
         private readonly TimeSpan _interval;
         private readonly AsyncThreadPool _pool;
         private readonly HashSet<Delegate> _coros = new();
@@ -237,7 +237,7 @@ public sealed class AsyncTicker
                     var delay = nextTick - DateTime.UtcNow;
                     if (delay > TimeSpan.Zero)
                     {
-                        try { await Task.Delay(delay, ct); } catch (OperationCanceledException) { break; } catch (ObjectDisposedException) { break; }
+                        try { await Task.Delay(delay, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; } catch (ObjectDisposedException) { break; }
                     }
                     else if (delay < -_interval)
                     {

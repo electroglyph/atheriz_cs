@@ -22,7 +22,7 @@ public static class ThrottleWindow
     /// Per-host throttling — mirrors <c>manager.py:17-24</c> and <c>websocket.py:20-27</c>.
     /// Returns true if log should be emitted (window elapsed), false if throttled.
     /// </summary>
-    public static bool ShouldLog(Dictionary<string, double> last, object syncLock, string host, double window, double now)
+    public static bool ShouldLog(Dictionary<string, double> last, Lock syncLock, string host, double window, double now)
     {
         lock (syncLock)
         {
@@ -63,7 +63,7 @@ public static class ThrottleWindow
     /// <summary>
     /// Overload computing <c>now</c> via monotonic clock.
     /// </summary>
-    public static bool ShouldLog(Dictionary<string, double> last, object syncLock, string host, double window)
+    public static bool ShouldLog(Dictionary<string, double> last, Lock syncLock, string host, double window)
     {
         var now = MonotonicNow();
         return ShouldLog(last, syncLock, host, window, now);

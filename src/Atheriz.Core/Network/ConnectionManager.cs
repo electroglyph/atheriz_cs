@@ -711,7 +711,7 @@ public class InputFuncs
 public class ConnectionManager
 {
     // Port of manager.py:10-24 malformed throttling — now via ThrottleWindow
-    private static readonly object _malformedLock = new();
+    private static readonly Lock _malformedLock = new();
     private static readonly Dictionary<string, double> _malformedLast = new();
     private const double MalformedWindow = 5.0; // port of manager.py:12
 
@@ -727,7 +727,7 @@ public class ConnectionManager
 
     // Port of websocket.py:15-27 oversize throttling (per-host 5s window),
     // for the shared HandleCommand size cap .
-    private static readonly object _oversizeLock = new();
+    private static readonly Lock _oversizeLock = new();
     private static readonly Dictionary<string, double> _oversizeLast = new();
     private const double OversizeWindow = 5.0; // port of websocket.py:13
     private static bool ShouldLogOversize(string host)
@@ -759,7 +759,7 @@ public class ConnectionManager
 
     // Global singleton — mirrors get_connection_manager() at globals/get.py:79-86
     private static ConnectionManager? _globalInstance;
-    private static readonly object _globalLock = new();
+    private static readonly Lock _globalLock = new();
     public static ConnectionManager? GlobalInstance
     {
         get { lock (_globalLock) return _globalInstance; }

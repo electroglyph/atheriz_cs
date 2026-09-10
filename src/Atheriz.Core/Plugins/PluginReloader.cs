@@ -442,7 +442,7 @@ public static class PluginReloader
             DiscoverNewPluginModules(settings,cands);
             cands=cands.Where(p=>!IsExcluded(p)&&File.Exists(p)).Distinct().ToList();
             Console.Error.WriteLine($"[HotReload] Found {cands.Count} plugin assemblies.");
-            foreach(var p in cands){ try{ if(await ReloadAsync(p,ticker,pool)) reloaded++; }catch(Exception ex){ var m=$"Failed {p}: {ex.Message}"; Console.Error.WriteLine($"[HotReload] {m}"); errors.Add(m);} }
+            foreach(var p in cands){ try{ if(await ReloadAsync(p,ticker,pool).ConfigureAwait(false)) reloaded++; }catch(Exception ex){ var m=$"Failed {p}: {ex.Message}"; Console.Error.WriteLine($"[HotReload] {m}"); errors.Add(m);} }
             // No dead second pass (load-then-immediately-unload scanned nothing) and no
             // double patch: ReloadAsync already patched each assembly's replacements.
             if(cands.Count==0) try{ lock (StartStop.WorldLock) { ReregisterTicks(ticker); } }catch(Exception ex){errors.Add($"ReregisterTicks: {ex.Message}");}

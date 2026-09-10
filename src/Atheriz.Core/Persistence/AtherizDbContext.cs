@@ -26,7 +26,7 @@ public sealed class AtherizDbContext : DbContext
 
     // Port of database_setup.py:14-15 _CLOSED and _DATABASE global
     private static bool _closed = false;
-    private static readonly object _initLock = new();
+    private static readonly Lock _initLock = new();
     public static bool IsClosed { get { lock (_initLock) return _closed; } }
 
     // Port of database_setup.py:45 reopen_database() — clears _CLOSED flag for reset command (atheriz.py:1472)
@@ -135,7 +135,7 @@ public sealed class AtherizDbContext : DbContext
     {
         using (await DbWriteGate.EnterAsync(ct).ConfigureAwait(false))
         {
-            await Database.EnsureCreatedAsync(ct);
+            await Database.EnsureCreatedAsync(ct).ConfigureAwait(false);
             try { ApplyWalPragmas(); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback: {ex.Message}"); }
         }
     }
@@ -155,7 +155,7 @@ public sealed class AtherizDbContext : DbContext
     public static async Task<AtherizDbContext> CreateAndMigrateAsync(string savePath, CancellationToken ct = default)
     {
         var ctx = new AtherizDbContext(savePath);
-        await ctx.EnsureCreatedAsync(ct);
+        await ctx.EnsureCreatedAsync(ct).ConfigureAwait(false);
         return ctx;
     }
 }

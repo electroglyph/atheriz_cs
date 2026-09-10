@@ -99,7 +99,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     private static int _outstandingRetryDrains;
     private const int MaxOutstandingRetryDrains = 1024;
     private static readonly Dictionary<string, double> _retryDrainDropLog = new();
-    private static readonly object _retryDrainDropLock = new();
+    private static readonly Lock _retryDrainDropLock = new();
 
     private static bool TryScheduleRetryDrain(BaseConnection self)
     {

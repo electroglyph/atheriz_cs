@@ -24,7 +24,7 @@ public static class ProcessHelper
         for (int i = 0; i < tenths; i++)
         {
             try { if (proc.HasExited) return true; } catch { return true; }
-            await Task.Delay(100);
+            await Task.Delay(100).ConfigureAwait(false);
             Console.Write(".");
         }
         try { return proc.HasExited; } catch { return true; }
@@ -35,11 +35,11 @@ public static class ProcessHelper
         // Terminate first (the old code only waited, then SIGKILLed); escalate
         // to SIGKILL only when the process survives SIGTERM.
         RequestTerminate(proc);
-        if (!await WaitForExitDotsAsync(proc, 30))
+        if (!await WaitForExitDotsAsync(proc, 30).ConfigureAwait(false))
         {
             Console.Write(" Timeout! Force killing...");
             try { if (!proc.HasExited) proc.Kill(entireProcessTree: false); } catch { }
-            await WaitForExitDotsAsync(proc, 30);
+            await WaitForExitDotsAsync(proc, 30).ConfigureAwait(false);
         }
     }
 
@@ -50,7 +50,7 @@ public static class ProcessHelper
             bool exists = true;
             try { using var p = Process.GetProcessById(pid); exists = !p.HasExited; } catch (ArgumentException) { exists = false; } catch { }
             if (!exists) return true;
-            await Task.Delay(100);
+            await Task.Delay(100).ConfigureAwait(false);
             Console.Write(".");
         }
         try { using var q = Process.GetProcessById(pid); return q.HasExited; } catch (ArgumentException) { return true; } catch { return false; }

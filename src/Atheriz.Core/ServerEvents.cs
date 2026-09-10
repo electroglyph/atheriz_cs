@@ -11,7 +11,7 @@ public static class ServerEvents
     // creators cannot both pass the pre-check and insert duplicate PC names. Dedicated
     // root lock (never taken elsewhere, always outermost); LostPcNameRace stays as the
     // deterministic tiebreak for non-AtCharCreate writers.
-    private static readonly object _charCreateLock = new();
+    private static readonly Lock _charCreateLock = new();
     // Port of server_events.py:8 def at_server_start()
     public static void AtServerStart() => AtServerStart(null);
     // Port of server_events.py:8 preserve hook signature at_server_start(sender).

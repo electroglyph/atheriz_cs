@@ -57,7 +57,7 @@ public static class ConnectionScreen
     """;
 
     // Port of connection_screen.py:54-56 _CACHE + _LOCK, 5 sec TTL
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
     private static double _cacheTs;
     private static int _cacheOnline;
     private static int _cacheKnown;

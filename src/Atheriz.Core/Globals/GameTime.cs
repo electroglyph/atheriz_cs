@@ -366,17 +366,21 @@ public class GameTime
     // ticks), and Stop() resolving a different ticker orphaned the coro.
     // The live-settings interval is kept verbatim (time.py start/stop both use
     // settings.TIME_UPDATE_SECONDS at call time).
-    private readonly object _startLock = new();
+    private readonly Lock _startLock = new();
     private AsyncTicker? _runningTicker;
     // Owned fallbacks: created once and reused (never per-start/per-tick),
     // stopped when this instance stops. Singletons/overrides are never owned.
     // B-THR-4 (see also B-NET-7): lock-guarded init so concurrent first starts
     // cannot build two pools/tickers and orphan one (whose threads would leak).
-    private readonly object _ownedLock = new();
+    private readonly Lock _ownedLock = new();
     private AsyncTicker? _ownedTicker;
     private AsyncThreadPool? _ownedPool;
-    private AsyncThreadPool OwnedPool() { lock (_ownedLock) return _poolOverride ?? (_ownedPool ??= new AsyncThreadPool()); }
-    private AsyncTicker OwnedTicker() { lock (_ownedLock) return _ownedTicker ??= new AsyncTicker(OwnedPool()); }
+    private AsyncThreadPool OwnedPool() { lock (_ownedLock) return OwnedPoolLocked(); }
+    // Runs with _ownedLock already held (OwnedPool takes it via the wrapper).
+    // Split out so OwnedTicker does not nest a second take of the
+    // non-reentrant lock while building the ticker from its pool.
+    private AsyncThreadPool OwnedPoolLocked() => _poolOverride ?? (_ownedPool ??= new AsyncThreadPool());
+    private AsyncTicker OwnedTicker() { lock (_ownedLock) return _ownedTicker ??= new AsyncTicker(OwnedPoolLocked()); }
 
     public void Start()
     {

@@ -16,7 +16,7 @@ public static class SaltProvider
     // hazard — it reads one global SECRET_PATH).
     private static string? _salt;
     private static readonly Dictionary<string, string> _salts = new(StringComparer.Ordinal);
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
 
     // Full-path keying for explicit arguments; the default invocation uses a
     // fixed key (single static salt is an intentional wontfix).

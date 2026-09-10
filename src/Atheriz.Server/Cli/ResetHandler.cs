@@ -52,11 +52,11 @@ public static class ResetHandler
         if (isRunning && pid is not null)
         {
             Console.WriteLine("Stopping server...");
-            await StopHandler.HandleStopAsync(a);
+            await StopHandler.HandleStopAsync(a).ConfigureAwait(false);
             Console.Write($"Waiting for server (PID {pid}) to stop...");
-            bool stopped = await ProcessHelper.WaitForPidExitAsync(pid.Value);
+            bool stopped = await ProcessHelper.WaitForPidExitAsync(pid.Value).ConfigureAwait(false);
             Console.WriteLine(" Done.");
-            await Task.Delay(500);
+            await Task.Delay(500).ConfigureAwait(false);
             // Liveness re-check before the irreversible wipe: the stop above
             // may have missed (e.g. a --port override that doesn't match the
             // running server). Never delete live data — fail closed.
@@ -121,6 +121,6 @@ public static class ResetHandler
         // replacement silently binds the configured default instead.
         var resetTelnetPort = ArgumentParser.ParseTelnetPort(a);
         if (resetTelnetPort is not null) { resetSpawnArgs.Add("--telnet-port"); resetSpawnArgs.Add(resetTelnetPort.ToString()!); }
-        await DaemonSpawner.SpawnDaemonAsync(resetSpawnArgs.ToArray(), Directory.GetCurrentDirectory());
+        await DaemonSpawner.SpawnDaemonAsync(resetSpawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
     }
 }

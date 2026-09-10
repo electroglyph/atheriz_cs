@@ -7,7 +7,7 @@ namespace Atheriz.Core.Commands;
 /// </summary>
 public static class CommandRegistry
 {
-    private static readonly object Lock = new();
+    private static readonly Lock Lock = new();
     private static CmdSet? _loggedIn;
     private static CmdSet? _unloggedIn;
 
