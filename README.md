@@ -1,10 +1,10 @@
 # AtheriZ — C# Port
 
-C# port of `atheriz` (Python MUD server, v0.9.0) on **.NET 8**. Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included.
+C# port of `atheriz` (Python MUD server, v0.9.0) on **.NET 10** (C# 14, `net10.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included.
 
 ## Prereqs
 
-- **.NET 8 SDK** (`8.0.130` or newer, see `global.json`):
+- **.NET 10 SDK** (`10.0.100` or newer, see `global.json`):
   ```bash
   dotnet --version
   ```
@@ -13,7 +13,7 @@ C# port of `atheriz` (Python MUD server, v0.9.0) on **.NET 8**. Core engine is i
   node --version
   npm --version
   ```
-  On Arch: `sudo pacman -S aspnet-runtime-8.0 nodejs npm`
+  On Arch: `sudo pacman -S dotnet-sdk nodejs npm`
 
 ## Build
 
@@ -47,6 +47,12 @@ All commands work through the launch scripts:
 
 That creates `MyGame.csproj`, `GameSettings.cs`, `CustomObject.cs`, etc., plus `save/`, `secret/` and `web/` (with the webclient).
 
+For a non-interactive `new` (scripts, CI), pass the superuser credentials via the environment instead of the prompts:
+
+```bash
+ATHERIZ_SUPERUSER_USERNAME=admin ATHERIZ_SUPERUSER_PASSWORD=admin1234 ./atheriz.sh new /tmp/MyGame --overwrite
+```
+
 From inside your game folder:
 
 ```bash
@@ -70,7 +76,7 @@ dotnet build src/Atheriz.Server
 dotnet src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll create myaccount MyChar pass
 ```
 
-The server also supports `restart` and `test`.
+The server also supports `restart` and `test` (`test [core] [args...]` forwards to the test runner).
 
 `/health` is liveness; `/ready` returns `ok` only after startup completes (503 while starting).
 
@@ -79,7 +85,7 @@ The server also supports `restart` and `test`.
 From the repo root:
 
 ```bash
-dotnet test Atheriz.sln -c Release              # full suite (required after server changes)
+dotnet test Atheriz.sln -c Release              # full suite (~3,800 tests; required after server changes)
 dotnet test tests/Atheriz.Core.Tests/Atheriz.Core.Tests.csproj -c Release --filter FullyQualifiedName~PortedAccountTests
 ```
 
@@ -89,7 +95,7 @@ During iteration, use `--filter` for focused tests; run the full suite once at t
 
 Ports and paths are in `src/Atheriz.Server/appsettings.json` (`Atheriz:` section). Defaults: `save` / `secret` in the game folder, `ServerName AtheriZ`, web `0.0.0.0:9999`, telnet `0.0.0.0:4444`.
 
-You can override with `appsettings.Development.json` or `ATHERIZ_` environment variables (e.g. `ATHERIZ_SSL_CERTFILE` for TLS).
+You can override with `appsettings.Development.json` or `ATHERIZ_` environment variables (e.g. `ATHERIZ_SSL_CERTFILE` for TLS, `ATHERIZ_SUPERUSER_USERNAME` / `ATHERIZ_SUPERUSER_PASSWORD` for the initial superuser).
 
 Game folders require `GameSettings.cs` + `*.csproj` (created by `new`). Running a game-folder command outside a game folder will fail with `Cannot determine database path` — create a game folder first.
 
