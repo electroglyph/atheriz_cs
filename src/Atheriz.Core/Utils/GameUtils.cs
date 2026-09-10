@@ -409,4 +409,20 @@ public static class GameUtils
         // Mirrors Python's _PATCH_LOCK __getattribute__ copy-on-read which is intentionally not ported.
         _ = t;
     }
+
+    // Shared no-echo secret reader (InitialSetup + GameTemplateGenerator
+    // credential prompts): ReadKey loop with backspace handling. Callers keep
+    // their own redirected-input branches and ReadLine fallbacks.
+    public static string ReadSecretLine()
+    {
+        var sb = new System.Text.StringBuilder();
+        ConsoleKeyInfo k;
+        while ((k = Console.ReadKey(intercept: true)).Key != ConsoleKey.Enter)
+        {
+            if (k.Key == ConsoleKey.Backspace && sb.Length > 0) sb.Length--;
+            else if (!char.IsControl(k.KeyChar)) sb.Append(k.KeyChar);
+        }
+        Console.Out.WriteLine();
+        return sb.ToString().Trim();
+    }
 }

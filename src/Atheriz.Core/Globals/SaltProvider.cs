@@ -142,4 +142,15 @@ public static class SaltProvider
     }
 
     public static void Clear() { lock (_lock) { _salt = null; _salts.Clear(); } }
+
+    // Re-seed the salt after a Clear(): recreate from the game's secret
+    // folder, then seed the default (no-path) slot with the same value —
+    // runtime password checks call GetSalt() with no path, which otherwise
+    // reads a CWD-relative file (or throws outside a game folder) instead
+    // of this game's salt.
+    public static void ReseedForGame(string absSecret)
+    {
+        try { GetSalt(absSecret); } catch (Exception ex) { Console.Error.WriteLine($"Salt re-seed warning: {ex.Message}"); }
+        try { SetSalt(GetSalt(absSecret)); } catch (Exception ex) { Console.Error.WriteLine($"Default salt seed warning: {ex.Message}"); }
+    }
 }

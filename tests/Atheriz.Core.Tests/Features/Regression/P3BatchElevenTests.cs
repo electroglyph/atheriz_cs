@@ -10,15 +10,17 @@ namespace Atheriz.Core.Tests.Features.Regression;
 [Collection("Ported")]
 public class P3BatchElevenTests
 {
-    // The refusal message has one owner: both PidFile refusal sites format
-    // the shared constant, and Program.cs keeps no prose copy for a
-    // grep-pin to pass on while the live literal lives elsewhere.
+    // The refusal message has one owner: a single StaleVerdict format site
+    // formats the shared constant, and both stale paths (pre-create check
+    // and FileExists retry) route through it. Program.cs keeps no prose
+    // copy for a grep-pin to pass on while the live literal lives elsewhere.
     [Fact]
     public void AlreadyRunning_MessageOwnedByPidFile()
     {
         var pid = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
         Assert.Contains("AlreadyRunningMessagePrefix", pid);
-        Assert.Equal(2, SourceScan.Count(pid, "AlreadyRunningMessagePrefix}"));
+        Assert.Equal(1, SourceScan.Count(pid, "AlreadyRunningMessagePrefix}"));
+        Assert.Equal(2, SourceScan.Count(pid, "= StaleVerdict();"));
         var prog = SourceScan.Read("src", "Atheriz.Server", "Program.cs");
         Assert.DoesNotContain("already running", prog);
     }

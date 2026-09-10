@@ -6,22 +6,22 @@ namespace Atheriz.Core;
 // Port of atheriz/connection_screen.py:11-95 faithful welcome screen
 public static class ConnectionScreen
 {
+    // Shared gate for the unlogged-in hint lines: a hint must agree with the
+    // dispatch gate (IsUnloggedInEnabled), not just the display setting.
+    private static string HintText(bool enabled, Commands.Command cmd, string text)
+    {
+        if (!enabled) return "";
+        try { if (!Commands.CommandDispatcher.IsUnloggedInEnabled(cmd)) return ""; } catch { }
+        return text;
+    }
     // Port of connection_screen.py:11 _guest_text
     // hints must agree with the dispatch gate, not just the display
     // settings — the gate also requires the dispatcher snapshot.
     private static string GuestText(AtherizSettings? s = null)
-    {
-        if (!(s ?? AtherizSettings.Global).GuestEnabled) return "";
-        try { if (!Commands.CommandDispatcher.IsUnloggedInEnabled(new Commands.UnloggedIn.GuestCommand())) return ""; } catch { }
-        return "enter 'guest' to create a temporary character";
-    }
+        => HintText((s ?? AtherizSettings.Global).GuestEnabled, new Commands.UnloggedIn.GuestCommand(), "enter 'guest' to create a temporary character");
     // Port of connection_screen.py:15 _create_text
     private static string CreateText(AtherizSettings? s = null)
-    {
-        if (!(s ?? AtherizSettings.Global).AccountCreationEnabled) return "";
-        try { if (!Commands.CommandDispatcher.IsUnloggedInEnabled(new Commands.UnloggedIn.CreateAccountCommand())) return ""; } catch { }
-        return "enter 'create' to make a new account";
-    }
+        => HintText((s ?? AtherizSettings.Global).AccountCreationEnabled, new Commands.UnloggedIn.CreateAccountCommand(), "enter 'create' to make a new account");
 
     // Port of connection_screen.py:22 SCREEN
     private const string Screen = """
@@ -104,21 +104,20 @@ public static class ConnectionScreen
 
         // Build main screen with ANSI truecolor if not screenreader — Port of connection_screen.py:81-94
         bool isScreenReader = session is not null && session.ScreenReader; // Port of connection_screen.py:81 session.screenreader
-        string raw;
+        string full;
         if (isScreenReader)
         {
             // Port of connection_screen.py:82-88 SCREEN2
-            raw = string.Format(Screen2, version, known, online, createText, guestText);
+            full = string.Format(Screen2, version, known, online, createText, guestText);
         }
         else
         {
             // Port of connection_screen.py:89-94 SCREEN
-            raw = string.Format(Screen, version, known, online, createText, guestText);
+            full = string.Format(Screen, version, known, online, createText, guestText);
         }
 
         // Byte-faithful to connection_screen.py:79-94 render — SCREEN/SCREEN2 only, no extra
         // header/footer/banner lines (removed 2026-09-04).
-        var full = raw;
 
         // Port of utils.wrap_truecolor for non-screenreader — via GameUtils.WrapTruecolor
         if (!isScreenReader)

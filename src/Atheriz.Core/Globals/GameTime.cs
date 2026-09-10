@@ -260,8 +260,6 @@ public class GameTime
     {
         ArgumentNullException.ThrowIfNull(hour);
         ArgumentNullException.ThrowIfNull(minute);
-        hour = hour.ToString();
-        minute = minute.ToString();
         // Clone elements on the way in: JsonElement borrows its source
         // JsonDocument, so storing the caller's dictionary would dangle once
         // the caller disposes its document. Clone throws here for
@@ -307,7 +305,6 @@ public class GameTime
 
     public void RemoveAlarm(string hour, string minute, int callerId)
     {
-        hour = hour.ToString(); minute = minute.ToString();
         _lock.EnterWriteLock();
         try
         {
@@ -332,7 +329,6 @@ public class GameTime
     // remove-by-id could delete the new entry — a check-then-act race).
     private void RemoveAlarmEntry(string hour, string minute, AlarmEntry entry)
     {
-        hour = hour.ToString(); minute = minute.ToString();
         _lock.EnterWriteLock();
         try
         {

@@ -64,21 +64,30 @@ public static class Autosave
         // settings (each section commits independently to the same DB).
         CheckpointJournal.MarkDirty(AtherizDbContextFactory.ResolveSavePath(settings));
 
-        // objects
-        try
+        // One funnel for the four save sections: open an explicit-settings
+        // context, run the section save, record the name + log on failure.
+        // Message shapes are byte-identical to the old per-section blocks.
+        void SaveSection(string name, Action<AtherizDbContext> save, bool ensureCreated = false)
         {
-            using var db = AtherizDbContextFactory.CreateForSettings(settings);
-            db.Database.EnsureCreated();
-            ObjectRegistry.SaveObjects(db);
-        }
-        catch (Exception ex)
-        {
-            failures.Add("objects");
-            try { AtherizLogger.LogError($"Autosave failed for objects:\n{ex}"); } catch { Console.Error.WriteLine($"Autosave failed for objects:\n{ex}"); }
+            try
+            {
+                using var db = AtherizDbContextFactory.CreateForSettings(settings);
+                if (ensureCreated) db.Database.EnsureCreated();
+                save(db);
+            }
+            catch (Exception ex)
+            {
+                failures.Add(name);
+                AtherizLogger.LogErrorRobust($"Autosave failed for {name}:\n{ex}");
+            }
         }
 
+        // objects (the only section that creates tables: every Load(db)
+        // path already calls EnsureCreated, so this single call covers saves)
+        SaveSection("objects", db => ObjectRegistry.SaveObjects(db), ensureCreated: true);
+
         // map — Port of autosave.py:26 get_map_handler().save() singleton reuse
-        try
+        SaveSection("map", db =>
         {
             // volatile read — written under _lock by Start/Stop on
             // other threads; a torn read would save via a stale handler.
@@ -88,55 +97,37 @@ public static class Autosave
             // path — under explicit settings that tore the world (objects in
             // DB-A, handlers in DB-B). Each section keeps its own commit so a
             // single failing domain still doesn't block the others.
-            using var dbMap = AtherizDbContextFactory.CreateForSettings(settings);
-            mh.Save(dbMap);
-        }
-        catch (Exception ex)
-        {
-            failures.Add("map");
-            try { AtherizLogger.LogError($"Autosave failed for map:\n{ex}"); } catch { Console.Error.WriteLine($"Autosave failed for map:\n{ex}"); }
-        }
+            mh.Save(db);
+        });
 
         // node — Port of autosave.py:27 get_node_handler().save() singleton reuse
-        try
+        SaveSection("node", db =>
         {
             var nh = nodeHandler ?? Volatile.Read(ref _cachedNodes) ?? GlobalServices.GetNodeHandler();
-                // Explicit-settings DB (see map section above).
-            using var dbNode = AtherizDbContextFactory.CreateForSettings(settings);
-            nh.Save(dbNode);
-        }
-        catch (Exception ex)
-        {
-            failures.Add("node");
-            try { AtherizLogger.LogError($"Autosave failed for node:\n{ex}"); } catch { Console.Error.WriteLine($"Autosave failed for node:\n{ex}"); }
-        }
+            // Explicit-settings DB (see map section above).
+            nh.Save(db);
+        });
 
         // time — Port of autosave.py:34-38 get_game_time().save() singleton reuse
         if (settings.TimeSystemEnabled)
         {
-            try
+            SaveSection("time", db =>
             {
                 var gt = gameTime ?? Volatile.Read(ref _cachedTime) ?? GlobalServices.GetGameTime();
-            // Explicit-settings DB (see map section above).
-                using var dbTime = AtherizDbContextFactory.CreateForSettings(settings);
-                gt.Save(dbTime);
-            }
-            catch (Exception ex)
-            {
-                failures.Add("time");
-                try { AtherizLogger.LogError($"Autosave failed for time:\n{ex}"); } catch { Console.Error.WriteLine($"Autosave failed for time:\n{ex}"); }
-            }
+                // Explicit-settings DB (see map section above).
+                gt.Save(db);
+            });
         }
 
         if (failures.Count > 0)
         {
-            try { AtherizLogger.LogError($"Autosave failed for: {string.Join(", ", failures)}"); } catch { Console.Error.WriteLine($"Autosave failed for: {string.Join(", ", failures)}"); }
+            AtherizLogger.LogErrorRobust($"Autosave failed for: {string.Join(", ", failures)}");
             try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg($"Autosave failed for: {string.Join(", ", failures)}"); } catch (Exception) { }
         }
         else
         {
             CheckpointJournal.MarkClean(AtherizDbContextFactory.ResolveSavePath(settings));
-            try { AtherizLogger.LogInformation("Autosave completed."); } catch { Console.Error.WriteLine("Autosave completed."); }
+            AtherizLogger.LogInformationRobust("Autosave completed.");
             try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg("Autosave completed."); } catch (Exception) { }
         }
     }

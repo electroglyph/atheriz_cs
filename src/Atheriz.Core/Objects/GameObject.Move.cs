@@ -185,6 +185,10 @@ public partial class GameObject
         {
             var cur = destObj;
             HashSet<int> seen = [];
+            // True when the walk positively reaches a Node: the chain from
+            // dest is then acyclic and complete, so the downward scan below
+            // (which guards only against broken/stale chains) can be skipped.
+            bool reachedNode = false;
             while (cur is not null)
             {
                 if (cur == this || cur.Id == this.Id) return false; // Port of base_obj.py:1122-1123
@@ -192,15 +196,18 @@ public partial class GameObject
                 // Get next location in chain
                 var next = cur.ResolveLocationObject();
                 if (next is null) break;
-                if (next.IsNode) break; // stop at node per Python is_node check
+                if (next.IsNode) { reachedNode = true; break; } // stop at node per Python is_node check
                 cur = next;
             }
             // Also check direct dest is self
             if (destObj.Id == this.Id) return false;
-            // Additional contents-recursion guard for flaky parallel tests (registry pollution may break location chain)
-            // No iteration cap: the visited set guarantees termination, and a
-            // cap silently allows cycles in wide containers.
-            if (IsContainer)
+            // Additional contents-recursion guard for flaky parallel tests (registry pollution may break location chain).
+            // Runs only when the upward walk did NOT reach a Node (dangling/
+            // stale chain): a clean walk to a Node already proves dest is not
+            // inside this container. No iteration cap: the visited set
+            // guarantees termination, and a cap silently allows cycles in
+            // wide containers.
+            if (IsContainer && !reachedNode)
             {
                 HashSet<int> visited = [];
                 var stack = new Stack<int>(ContentsSnapshot);
@@ -226,16 +233,13 @@ public partial class GameObject
         if (oldLoc is null && Location is LocationRef.ObjectLocation olLoc)
             oldLoc = ObjectRegistry.GetEver(olLoc.ObjectId);
 
-        // --- sort_locks helper: NodeGrid before Node before GameObject (Id/Coord ordering) ---
+        // --- lock order: NodeGrid before Node before GameObject (Id/Coord ordering) ---
         // Port of base_obj.py:1134 sort_locks helper
         // In Python: def get_key(o): if is_node: return (0, o.coord) else (1, o.id)
-        // We replicate sorting by (is_node flag, coord/id)
-        // For grid locks: would need NodeGrid.Lock before Node.Lock; we best-effort acquire Node locks in sorted order,
-        // and attempt grid locks if resolvable (omitted if handler not available).
-        List<GameObject> toLock = new();
-        if (oldLoc is not null) toLock.Add(oldLoc);
-        toLock.Add(destObj);
-        toLock.Sort((a, b) =>
+        // At most two locks are ever taken, so order the pair directly — no
+        // List/sort. (Grid locks would precede Node locks; NodeGrid locks are
+        // not resolvable here, so only GameObject/Node SyncRoots are taken.)
+        static int CompareLockOrder(GameObject a, GameObject b)
         {
             bool aNode = a.IsNode;
             bool bNode = b.IsNode;
@@ -260,7 +264,18 @@ public partial class GameObject
                 return a.Id.CompareTo(b.Id);
             }
             return a.Id.CompareTo(b.Id);
-        });
+        }
+        List<GameObject> toLock = new(2);
+        if (oldLoc is null || CompareLockOrder(destObj, oldLoc) < 0)
+        {
+            toLock.Add(destObj);
+            if (oldLoc is not null) toLock.Add(oldLoc);
+        }
+        else
+        {
+            toLock.Add(oldLoc);
+            toLock.Add(destObj);
+        }
 
         // pre-gates run with NO location locks held (user hooks can
         // move things and take other locks, so they must not run under the
@@ -269,16 +284,12 @@ public partial class GameObject
         {
             if (oldLoc.IsNode)
             {
-                bool preOk = oldLoc is Node oldNode
-                    ? oldNode.AtPreObjectLeave(destObj, toExit)
-                    : oldLoc.AtPreObjectLeave(destObj, toExit);
+                bool preOk = oldLoc.AtPreObjectLeave(destObj, toExit);
                 if (!preOk) return false;
             }
             if (destObj.IsNode)
             {
-                bool preOk2 = destObj is Node dnPre
-                    ? dnPre.AtPreObjectReceive(oldLoc, null)
-                    : destObj.AtPreObjectReceive(oldLoc, null);
+                bool preOk2 = destObj.AtPreObjectReceive(oldLoc, null);
                 if (!preOk2) return false;
             }
         }
@@ -286,9 +297,7 @@ public partial class GameObject
         {
             if (destObj.IsNode)
             {
-                bool preOk = destObj is Node dnPre
-                    ? dnPre.AtPreObjectReceive(null, null)
-                    : destObj.AtPreObjectReceive(null, null);
+                bool preOk = destObj.AtPreObjectReceive(null, null);
                 if (!preOk) return false;
             }
         }
@@ -387,21 +396,18 @@ public partial class GameObject
         {
             if (oldLoc.IsNode)
             {
-                if (oldLoc is Node on) on.AtObjectLeave(destObj, toExit);
-                else oldLoc.AtObjectLeave(destObj, toExit);
+                oldLoc.AtObjectLeave(destObj, toExit);
             }
             if (destObj.IsNode)
             {
-                if (destObj is Node dn) dn.AtObjectReceive(oldLoc, null);
-                else destObj.AtObjectReceive(oldLoc, null);
+                destObj.AtObjectReceive(oldLoc, null);
             }
         }
         else
         {
             if (destObj.IsNode)
             {
-                if (destObj is Node dn) dn.AtObjectReceive(null, null);
-                else destObj.AtObjectReceive(null, null);
+                destObj.AtObjectReceive(null, null);
             }
         }
 
@@ -417,8 +423,11 @@ public partial class GameObject
             {
                 reverseName = GetReverseLinkName(oldN, destN);
             }
-            AnnounceMoveTo(oldLoc, toExit);
-            AnnounceMoveFrom(destObj, reverseName);
+            // One exclusion list serves both announces (read-only downstream);
+            // each call still builds its own mapping (MsgContents mutates it).
+            List<GameObject> moveExclude = [this];
+            AnnounceMoveTo(oldLoc, toExit, moveExclude);
+            AnnounceMoveFrom(destObj, reverseName, moveExclude);
         }
         else if (announce && destObj.IsNode)
         {
@@ -489,15 +498,17 @@ public partial class GameObject
         return null;
     }
 
-    public void AnnounceMoveFrom(GameObject destination, string? fromExit) // Port of base_obj.py:1514 announce_move_from
+    public void AnnounceMoveFrom(GameObject destination, string? fromExit, List<GameObject>? exclude = null) // Port of base_obj.py:1514 announce_move_from
     {
         if (destination is null) return;
         // Hoisted: an inline index-initializer mapping followed by further
         // named args misparses (Roslyn reads `{ ["mover"]` as a collection
         // element); a local avoids it. Announces carry type="move"
-        // (base_obj.py:1572-1579).
+        // (base_obj.py:1572-1579). The mapping stays per-call (MsgContents
+        // TryAdds into it); the exclusion list is read-only downstream, so a
+        // caller may share one across both announces of a single move.
         var moveMapping = new Dictionary<string, object?> { ["mover"] = this };
-        var moveExclude = new List<GameObject> { this };
+        List<GameObject> moveExclude = exclude ?? [this];
         // Need destination's msg_contents
         if (destination is Node destNode)
         {
@@ -517,11 +528,11 @@ public partial class GameObject
         }
     }
 
-    public void AnnounceMoveTo(GameObject sourceLocation, string? toExit) // Port of base_obj.py:1550 announce_move_to
+    public void AnnounceMoveTo(GameObject sourceLocation, string? toExit, List<GameObject>? exclude = null) // Port of base_obj.py:1550 announce_move_to
     {
         if (sourceLocation is null) return;
         var moveMapping = new Dictionary<string, object?> { ["mover"] = this };
-        var moveExclude = new List<GameObject> { this };
+        List<GameObject> moveExclude = exclude ?? [this];
         if (sourceLocation is Node srcNode)
         {
             if (string.IsNullOrEmpty(toExit))

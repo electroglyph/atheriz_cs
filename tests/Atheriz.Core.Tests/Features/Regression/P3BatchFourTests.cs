@@ -49,8 +49,10 @@ public class P3BatchFourTests
         Assert.DoesNotContain("GetSalt(absSecret); } catch {}", region);
         Assert.DoesNotContain("SetSalt(SaltProvider.GetSalt(absSecret)); } catch {}", region);
         Assert.Contains("Singleton reset warning", region);
-        Assert.Contains("Salt re-seed warning", region);
-        Assert.Contains("Default salt seed warning", region);
+        // The salt warnings live in the ReseedForGame funnel that owns them.
+        var reseed = SourceScan.Region(SourceScan.Read("src", "Atheriz.Core", "Globals", "SaltProvider.cs"), "public static void ReseedForGame(");
+        Assert.Contains("Salt re-seed warning", reseed);
+        Assert.Contains("Default salt seed warning", reseed);
     }
 
     // The seed world is published through the singleton setters so

@@ -30,11 +30,7 @@ public static class AtherizDbContextFactory
 
     // Parameterless: same default-path resolution as ObjectRegistry.SaveObjects
     // (ATHERIZ_SAVE_PATH else configured SavePath) — never a divergent file.
-    public static AtherizDbContext Create()
-    {
-        var savePath = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? AtherizSettings.Global.SavePath;
-        return Create(savePath);
-    }
+    public static AtherizDbContext Create() => Create(ResolveSavePath(AtherizSettings.Global));
 
     // Settings-aware creation : explicit settings win over
     // the ambient Global, but the test-device env override still comes first

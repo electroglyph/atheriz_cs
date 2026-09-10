@@ -293,12 +293,8 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         // Port of session.py:164-189 if prev is not None: loop.call_soon_threadsafe(set_result(""))
         if (prev is not null)
         {
-            try
-            {
-                // Thread-safe completion with empty string (mirrors prev.set_result(""))
-                prev.TrySetResult("");
-            }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.Prompt: " + logEx.Message, "Session"); }
+            // Thread-safe completion with empty string (mirrors prev.set_result("")) — TrySetResult never throws.
+            prev.TrySetResult("");
         }
         // Port of session.py:190-194 if need_restore: connection.send_command("echo_on")
         if (needRestore)
@@ -335,8 +331,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             InputFuture = null;
             InputMasked = false;
         }
-        try { f.TrySetResult(""); }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.CancelPrompt: " + logEx.Message, "Session"); }
+        f.TrySetResult(""); // never throws.
         return true;
     }
 }

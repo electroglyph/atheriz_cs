@@ -141,12 +141,6 @@ public static class Conjugate
             raw["give"] = new[] { "give","","","gives","","giving","","","","","gave","given" };
             raw["hit"] = new[] { "hit","","","hits","","hitting","","","","","hit","hit" };
             raw["put"] = new[] { "put","","","puts","","putting","","","","","put","put" };
-            raw.TryAdd("swim", ["swim", "", "", "swims", "", "swimming", "", "", "", "", "swam", "swum"]);
-        }
-        else
-        {
-            // Ensure even when loaded, we have at least expected regular fallback for unknown test verbs if not in file?
-            // Most verbs are in file, but keep as is.
         }
 
         VerbTenses = raw;
@@ -178,28 +172,39 @@ public static class Conjugate
         verb = VerbInfinitive(verb);
         if (!VerbTensesKeys.TryGetValue(tense, out var ind)) return verb;
         if (negate) ind += VerbTensesKeys.Count;
-        try
-        {
-            if (!VerbTenses.TryGetValue(verb, out var row)) return verb;
-            if (ind >= row.Length) return verb;
-            var val = row[ind];
-            // Python returns "" for empty entry (caller checks != ""), not verb
-            return val ?? "";
-        }
-        catch { return verb; }
+        if (!VerbTenses.TryGetValue(verb, out var row)) return verb;
+        if (ind >= row.Length) return verb;
+        var val = row[ind];
+        // Python returns "" for empty entry (caller checks != ""), not verb
+        return val ?? "";
+    }
+
+    private static readonly Dictionary<string, string> PresentPersonTenses = new()
+    {
+        ["1"] = "1st singular present",
+        ["2"] = "2nd singular present",
+        ["3"] = "3rd singular present",
+        ["*"] = "present plural",
+    };
+    private static readonly Dictionary<string, string> PastPersonTenses = new()
+    {
+        ["1"] = "1st singular past",
+        ["2"] = "2nd singular past",
+        ["3"] = "3rd singular past",
+        ["*"] = "past plural",
+    };
+    private static bool MatchesAnyTense(string verb, string infinitive, IEnumerable<string> tenses, bool negated)
+    {
+        foreach (var tense in tenses)
+            if (verb == VerbConjugate(infinitive, tense, negate: negated))
+                return true;
+        return false;
     }
 
     public static string VerbPresent(string verb, string person = "", bool negate = false)
     {
         person = NormalizePerson(person);
-        Dictionary<string, string> mapping = new()
-        {
-            ["1"] = "1st singular present",
-            ["2"] = "2nd singular present",
-            ["3"] = "3rd singular present",
-            ["*"] = "present plural",
-        };
-        if (mapping.TryGetValue(person, out var tense))
+        if (PresentPersonTenses.TryGetValue(person, out var tense))
         {
             var c = VerbConjugate(verb, tense, negate);
             if (!string.IsNullOrEmpty(c)) return c;
@@ -213,14 +218,7 @@ public static class Conjugate
     public static string VerbPast(string verb, string person = "", bool negate = false)
     {
         person = NormalizePerson(person);
-        Dictionary<string, string> mapping = new()
-        {
-            ["1"] = "1st singular past",
-            ["2"] = "2nd singular past",
-            ["3"] = "3rd singular past",
-            ["*"] = "past plural",
-        };
-        if (mapping.TryGetValue(person, out var tense))
+        if (PastPersonTenses.TryGetValue(person, out var tense))
         {
             var c = VerbConjugate(verb, tense, negate);
             if (!string.IsNullOrEmpty(c)) return c;
@@ -260,23 +258,12 @@ public static class Conjugate
     public static bool VerbIsPresent(string verb, string person = "", bool negated = false)
     {
         var personNorm = NormalizePerson(person);
-        Dictionary<string, string> mapping = new()
-        {
-            ["1"] = "1st singular present",
-            ["2"] = "2nd singular present",
-            ["3"] = "3rd singular present",
-            ["*"] = "present plural",
-        };
         var infinitive = VerbInfinitive(verb);
         if (personNorm == "")
         {
-            foreach (var tense in mapping.Values)
-            {
-                if (verb == VerbConjugate(infinitive, tense, negate: negated)) return true;
-            }
-            return false;
+            return MatchesAnyTense(verb, infinitive, PresentPersonTenses.Values, negated);
         }
-        if (mapping.TryGetValue(personNorm, out var target))
+        if (PresentPersonTenses.TryGetValue(personNorm, out var target))
         {
             var expected = VerbConjugate(infinitive, target, negate: negated);
             if (string.IsNullOrEmpty(expected)) return false;
@@ -288,23 +275,12 @@ public static class Conjugate
     public static bool VerbIsPast(string verb, string person = "", bool negated = false)
     {
         var personNorm = NormalizePerson(person);
-        Dictionary<string, string> mapping = new()
-        {
-            ["1"] = "1st singular past",
-            ["2"] = "2nd singular past",
-            ["3"] = "3rd singular past",
-            ["*"] = "past plural",
-        };
         var infinitive = VerbInfinitive(verb);
         if (personNorm == "")
         {
-            foreach (var tense in mapping.Values.Append("past"))
-            {
-                if (verb == VerbConjugate(infinitive, tense, negate: negated)) return true;
-            }
-            return false;
+            return MatchesAnyTense(verb, infinitive, PastPersonTenses.Values.Append("past"), negated);
         }
-        if (mapping.TryGetValue(personNorm, out var target))
+        if (PastPersonTenses.TryGetValue(personNorm, out var target))
         {
             var expected = VerbConjugate(infinitive, target, negate: negated);
             if (!string.IsNullOrEmpty(expected)) return verb == expected;
@@ -319,7 +295,7 @@ public static class Conjugate
     private static string NormalizePerson(string person)
     {
         if (person is null) return "";
-        var s = person.ToString()!.Replace("pl", "*").Trim();
+        var s = person.Replace("pl", "*").Trim();
         // strip "stndrgural" as python does: strip chars s,t,n,d,r,g,u,a,l
         // python: .strip("stndrgural") removes those chars from both ends.
         s = s.Trim('s','t','n','d','r','g','u','a','l');
@@ -327,7 +303,6 @@ public static class Conjugate
         if (s == "*") return "*";
         // extract digit if present
         foreach (var c in s) if (char.IsDigit(c)) return c.ToString();
-        if (s == "*") return "*";
         return s;
     }
 

@@ -88,12 +88,15 @@ public class ServerRegressionTests
         Assert.DoesNotContain("TryFindPidListeningOnPort", region);
     }
 
-    // a corrupt pid file must not bypass the port guard (split-brain).
+    // a corrupt pid file must not bypass the port guard (split-brain):
+    // the guard lives in the shared StaleVerdict both stale-file paths
+    // must pass through (1 guard site + 2 routers).
     [Fact]
     public void CorruptPid_DoesNotBypassPortGuard()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
-        Assert.True(SourceScan.Count(src, "IsPortListening(webserverPort)") >= 2);
+        Assert.Equal(1, SourceScan.Count(src, "IsPortListening(webserverPort)"));
+        Assert.Equal(2, SourceScan.Count(src, "= StaleVerdict();"));
     }
 
     // rolled-back seeds must not be reported as success.

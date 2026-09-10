@@ -514,71 +514,43 @@ public static class StartStop
                 try { ObjectRegistry.SaveObjects(db); }
                 catch (Exception ex) { localOk = false; Console.Error.WriteLine($"save_objects failed:\n{ex}"); }
             });
-            ShutdownStep("map_save", () =>
+        // Twin retry for the map/node saves: fetch the handler, save, and on
+        // failure re-fetch + clear the tracker + save once more (same
+        // context, per the method comment above). save_objects is NOT
+        // wrapped: ObjectRegistry.SaveObjects retries internally, so an outer
+        // retry would only double-write — deliberate asymmetry, not omission.
+        void ShutdownSaveStep<THandler>(string name, Func<THandler> getHandler, Action<AtherizDbContext, THandler> save)
+        {
+            ShutdownStep(name, () =>
             {
-                try
-                {
-                    var mh = GlobalServices.GetMapHandler();
-                    mh.Save(db);
-                }
+                try { save(db, getHandler()); }
                 catch
                 {
                     try
                     {
-                        var mh = GlobalServices.GetMapHandler();
+                        var h = getHandler();
                         db.ChangeTracker.Clear();
-                        mh.Save(db);
+                        save(db, h);
                     }
                     catch { localOk = false; }
                 }
             });
-            ShutdownStep("node_save", () =>
-            {
-                try
-                {
-                    var nh = GlobalServices.GetNodeHandler();
-                    nh.Save(db);
-                }
-                catch
-                {
-                    try
-                    {
-                        var nh = GlobalServices.GetNodeHandler();
-                        db.ChangeTracker.Clear();
-                        nh.Save(db);
-                    }
-                    catch { localOk = false; }
-                }
-            });
+        }
+        ShutdownSaveStep("map_save", () => GlobalServices.GetMapHandler(), (ctx, mh) => mh.Save(ctx));
+        ShutdownSaveStep("node_save", () => GlobalServices.GetNodeHandler(), (ctx, nh) => nh.Save(ctx));
         if (!localOk) ok = false;
     }
 
     // Helpers to avoid creating singletons unnecessarily during shutdown
 
-    private static AsyncTicker? TryGetTicker()
-    {
-        try { return GlobalServices.TryGetTicker(); } catch { return null; }
-    }
-    private static AsyncThreadPool? TryGetPool()
-    {
-        try { return GlobalServices.TryGetPool(); } catch { return null; }
-    }
-    private static GameTime? TryGetGameTime()
-    {
-        try { return GlobalServices.TryGetGameTime(); } catch { return null; }
-    }
-    private static MapHandler? TryGetMapHandler()
-    {
-        try { return GlobalServices.TryGetMapHandler(); } catch { return null; }
-    }
-    private static NodeHandler? TryGetNodeHandler()
-    {
-        try { return GlobalServices.TryGetNodeHandler(); } catch { return null; }
-    }
-    private static ConnectionManager? TryGetConnectionManager()
-    {
-        try { return GlobalServices.TryGetConnectionManager(); } catch { return null; }
-    }
+    // Thin forwards: GlobalServices.TryGet* already swallow (they only
+    // Volatile.Read a snapshot), so no second armor layer here.
+    private static AsyncTicker? TryGetTicker() => GlobalServices.TryGetTicker();
+    private static AsyncThreadPool? TryGetPool() => GlobalServices.TryGetPool();
+    private static GameTime? TryGetGameTime() => GlobalServices.TryGetGameTime();
+    private static MapHandler? TryGetMapHandler() => GlobalServices.TryGetMapHandler();
+    private static NodeHandler? TryGetNodeHandler() => GlobalServices.TryGetNodeHandler();
+    private static ConnectionManager? TryGetConnectionManager() => GlobalServices.TryGetConnectionManager();
 
     // Game-side server-event handlers registered explicitly by game/plugin
     // assemblies (replaces the assembly scan for server_events/ServerEvents types).

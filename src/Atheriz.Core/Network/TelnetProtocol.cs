@@ -335,14 +335,17 @@ public sealed class TelnetStreamWriter : ITelnetWriter
         // the game thread forever. SendTimeout turns a wedged peer into a
         // SocketException instead of an indefinite block. Socket.SendTimeout
         // has no effect on SslStream, so TLS writes get an explicit timeout.
-        var bytes = Encoding.UTF8.GetBytes(text);
+        WriteLocked(Encoding.UTF8.GetBytes(text));
+    }
+    // Single locked stream-write body: track buffered-not-yet-flushed bytes
+    // (the asyncio get_write_buffer_size() semantic from telnet.py:138-156) so
+    // the write-buffer check is live. Never report SO_SNDBUF capacity here:
+    // SendBufferSize (~2.6MB) dwarfs TelnetMaxPendingBytes and caused
+    // false closes when it was returned by mistake.
+    private void WriteLocked(byte[] bytes)
+    {
         lock (_writeLock)
         {
-            // track buffered-not-yet-flushed bytes (the asyncio
-            // get_write_buffer_size() semantic from telnet.py:138-156) so the
-            // write-buffer check is live. Never report SO_SNDBUF capacity here:
-            // SendBufferSize (~2.6MB) dwarfs TelnetMaxPendingBytes and caused
-            // false closes when it was returned by mistake.
             _pendingWriteBytes += bytes.Length;
             try
             {
@@ -356,7 +359,7 @@ public sealed class TelnetStreamWriter : ITelnetWriter
             finally { _pendingWriteBytes -= bytes.Length; }
         }
     }
-    public void Iac(byte cmd, byte opt) { var bytes = new byte[] { 255, cmd, opt }; lock (_writeLock) { _pendingWriteBytes += bytes.Length; try { if (_stream is SslStream) { var wt = _stream.WriteAsync(bytes, 0, bytes.Length); if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out"); } else _stream.Write(bytes, 0, bytes.Length); } finally { _pendingWriteBytes -= bytes.Length; } } }
+    public void Iac(byte cmd, byte opt) => WriteLocked([255, cmd, opt]);
     // Fused IAC-then-text in one locked stream write: no other thread's bytes
     // can slip between the negotiation bytes and the prompt they govern.
     public void IacWithText(byte cmd, byte opt, string text)
@@ -365,20 +368,7 @@ public sealed class TelnetStreamWriter : ITelnetWriter
         var bytes = new byte[3 + textBytes.Length];
         bytes[0] = 255; bytes[1] = cmd; bytes[2] = opt;
         Buffer.BlockCopy(textBytes, 0, bytes, 3, textBytes.Length);
-        lock (_writeLock)
-        {
-            _pendingWriteBytes += bytes.Length;
-            try
-            {
-                if (_stream is SslStream)
-                {
-                    var wt = _stream.WriteAsync(bytes, 0, bytes.Length);
-                    if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out");
-                }
-                else _stream.Write(bytes, 0, bytes.Length);
-            }
-            finally { _pendingWriteBytes -= bytes.Length; }
-        }
+        WriteLocked(bytes);
     }
     public void Close() { try { _stream.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Close: " + logEx.Message, "TelnetStreamWriter"); } try { _client.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Close: " + logEx.Message, "TelnetStreamWriter"); } }
     // Port of telnet.py:138-156 — pending (buffered, unflushed) bytes, not capacity.
@@ -400,8 +390,6 @@ public sealed class TelnetProtocol : BaseProtocol
         var s = AtherizSettings.Global;
         return (Math.Max(s.TelnetNawsMinRows, Math.Min(rows, s.TelnetNawsMaxRows)), Math.Max(s.TelnetNawsMinCols, Math.Min(cols, s.TelnetNawsMaxCols)));
     }
-
-    private static string TelnetText(string text) => text.Replace("\r\n", "\n").Replace("\n", "\r\n");
 
     public static async IAsyncEnumerable<string?> ReadCappedLines(TextReader reader, int maxLine)
     {

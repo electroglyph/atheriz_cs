@@ -15,7 +15,7 @@ public static class CheckpointJournal
     private const int RowId = 0;
 
     private static string ResolveDefaultPath() =>
-        Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? AtherizSettings.Global.SavePath;
+        AtherizDbContextFactory.ResolveSavePath(AtherizSettings.Global);
 
     /// <summary>Dirty-mark using the same default-path resolution as parameterless factory/saves.</summary>
     public static void MarkDirty() => MarkDirty(ResolveDefaultPath());
@@ -26,7 +26,11 @@ public static class CheckpointJournal
     /// <summary>Dirty-check using the same default-path resolution as parameterless factory/saves.</summary>
     public static bool IsDirty() => IsDirty(ResolveDefaultPath());
 
-    public static void MarkDirty(string savePath)
+    public static void MarkDirty(string savePath) => Mark(savePath, "dirty");
+
+    public static void MarkClean(string savePath) => Mark(savePath, "clean");
+
+    private static void Mark(string savePath, string state)
     {
         // Gated: the mark is part of the checkpoint write it brackets, and an
         // un-gated EnsureCreated+upsert here used to race concurrent saves
@@ -36,22 +40,9 @@ public static class CheckpointJournal
         {
             using var db = AtherizDbContextFactory.Create(savePath);
             db.Database.EnsureCreated();
-            Upsert(db, "dirty");
+            Upsert(db, state);
         }
-        catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal dirty-mark failed: {ex.Message}"); } catch (Exception) { } }
-        finally { DbWriteGate.Exit(); }
-    }
-
-    public static void MarkClean(string savePath)
-    {
-        DbWriteGate.Enter();
-        try
-        {
-            using var db = AtherizDbContextFactory.Create(savePath);
-            db.Database.EnsureCreated();
-            Upsert(db, "clean");
-        }
-        catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal clean-mark failed: {ex.Message}"); } catch (Exception) { } }
+        catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal {state}-mark failed: {ex.Message}"); } catch (Exception) { } }
         finally { DbWriteGate.Exit(); }
     }
 
@@ -178,15 +169,7 @@ public static class DbTransactionHelper
     public static void UpsertJson<T>(DbSet<T> set, Func<T?> find, Func<T> create, string json)
         where T : class, IJsonEntity
     {
-        var existing = find();
-        if (existing is not null)
-            existing.Data = json;
-        else
-        {
-            var row = create();
-            row.Data = json;
-            set.Add(row);
-        }
+        UpsertJson(set, find, create, json, static _ => { });
     }
 
     /// <summary>Upsert with extra configuration (e.g., <c>Type</c> discriminator on <c>ObjectRow</c>).</summary>

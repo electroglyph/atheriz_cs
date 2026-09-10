@@ -10,28 +10,26 @@ namespace Atheriz.Core.Persistence;
 /// </summary>
 public static class JsonTableLoader
 {
-    /// <summary>Load all rows as-no-tracking. DB errors are logged (not silent): an empty world and a corrupt DB must be distinguishable.</summary>
-    public static List<TRow> LoadRows<TRow>(DbSet<TRow> set) where TRow : class
+    private static List<TRow> TryQuerySet<TRow>(DbSet<TRow> set, string op) where TRow : class
     {
         try { return set.AsNoTracking().ToList(); }
         catch (Exception ex)
         {
-            AtherizLogger.LogError($"LoadRows<{typeof(TRow).Name}> failed; loading as empty.", ex);
+            AtherizLogger.LogError($"{op}<{typeof(TRow).Name}> query failed; loading as empty.", ex);
             return [];
         }
+    }
+    /// <summary>Load all rows as-no-tracking. DB errors are logged (not silent): an empty world and a corrupt DB must be distinguishable.</summary>
+    public static List<TRow> LoadRows<TRow>(DbSet<TRow> set) where TRow : class
+    {
+        return TryQuerySet(set, nameof(LoadRows));
     }
 
     /// <summary>Deserialize every <c>Data</c> row, invoking <paramref name="add"/> for each success. Skips are counted and logged.</summary>
     public static void LoadList<TRow, TDto>(DbSet<TRow> set, Func<string, TDto?> deserialize, Action<TDto, TRow> add)
         where TRow : class, IJsonEntity
     {
-        List<TRow> rows;
-        try { rows = set.AsNoTracking().ToList(); }
-        catch (Exception ex)
-        {
-            AtherizLogger.LogError($"LoadList<{typeof(TRow).Name}> query failed; loading as empty.", ex);
-            return;
-        }
+        List<TRow> rows = TryQuerySet(set, nameof(LoadList));
         int bad = 0, failed = 0;
         foreach (var row in rows)
         {
@@ -55,13 +53,7 @@ public static class JsonTableLoader
     public static void LoadInto<TRow, TDto>(DbSet<TRow> set, ReaderWriterLockSlim lockObj, Func<string, TDto?> deserialize, Action<TDto, TRow> add)
         where TRow : class, IJsonEntity
     {
-        List<TRow> rows;
-        try { rows = set.AsNoTracking().ToList(); }
-        catch (Exception ex)
-        {
-            AtherizLogger.LogError($"LoadInto<{typeof(TRow).Name}> query failed; loading as empty.", ex);
-            return;
-        }
+        List<TRow> rows = TryQuerySet(set, nameof(LoadInto));
         List<(TDto dto, TRow row)> buffer = [];
         int bad = 0;
         foreach (var row in rows)
@@ -89,13 +81,7 @@ public static class JsonTableLoader
     public static List<TDto> LoadAll<TRow, TDto>(DbSet<TRow> set, Func<string, TDto?> deserialize)
         where TRow : class, IJsonEntity
     {
-        List<TRow> rows;
-        try { rows = set.AsNoTracking().ToList(); }
-        catch (Exception ex)
-        {
-            AtherizLogger.LogError($"LoadAll<{typeof(TRow).Name}> query failed; loading as empty.", ex);
-            return [];
-        }
+        List<TRow> rows = TryQuerySet(set, nameof(LoadAll));
         List<TDto> outList = [];
         int bad = 0;
         foreach (var row in rows)

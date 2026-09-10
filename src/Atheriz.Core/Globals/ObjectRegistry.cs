@@ -600,7 +600,7 @@ public static class ObjectRegistry
     // ATHERIZ_SAVE_PATH env override (tests point it at a temp dir, like conftest).
     public static void SaveObjects(bool force = false)
     {
-        var savePath = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? AtherizSettings.Global.SavePath;
+        var savePath = global::Atheriz.Core.Persistence.AtherizDbContextFactory.ResolveSavePath(AtherizSettings.Global);
         SaveObjects(savePath, force);
     }
 

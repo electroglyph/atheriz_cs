@@ -63,14 +63,10 @@ public static class StopHandler
                 {
                     var proc2 = Process.GetProcessById(foundPid);
                     Console.Write($"Stopping server process with PID: {foundPid}...");
-                    ProcessHelper.RequestTerminate(proc2);
-                    if (!await ProcessHelper.WaitForExitDotsAsync(proc2, 30).ConfigureAwait(false))
-                    {
-                        Console.WriteLine();
-                        Console.Write("Process did not stop in time. Killing...");
-                        try { proc2.Kill(entireProcessTree: false); } catch (Exception ex) { Console.WriteLine($" Failed: {ex.Message}"); return; }
-                        await ProcessHelper.WaitForExitDotsAsync(proc2, 30).ConfigureAwait(false);
-                    }
+                    // Same terminate→wait→kill escalation as the pid-file
+                    // path (KillProcessWithDots): timeout chatter and
+                    // Kill-failure swallowing live in the helper now.
+                    await ProcessHelper.KillProcessWithDots(proc2).ConfigureAwait(false);
                     Console.WriteLine(" Done.");
                     try
                     {
@@ -127,8 +123,4 @@ public static class StopHandler
             }
         }
     }
-
-    // Pin-compat shims: tests address create/new through StopHandler.
-    public static Task HandleCreateAsync(string[] a) => CreateHandler.HandleCreateAsync(a);
-    public static Task<bool> HandleNewAsync(string[] a) => NewHandler.HandleNewAsync(a);
 }

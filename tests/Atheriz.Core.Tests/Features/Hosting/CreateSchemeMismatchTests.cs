@@ -102,7 +102,7 @@ public class CreateSchemeMismatchTests
                 SslCertFile = "/nonexistent-cert.pem",
             });
             Console.SetOut(capture);
-            await StopHandler.HandleCreateAsync(["--port", port.ToString(), "flipacc", "flipchar", "FlipPass123"]);
+            await CreateHandler.HandleCreateAsync(["--port", port.ToString(), "flipacc", "flipchar", "FlipPass123"]);
             var text = capture.ToString();
             // The offline path must NOT run: its marker proves the flipped retry missed.
             Assert.DoesNotContain("No running server detected", text);
@@ -163,7 +163,7 @@ public class CreateSchemeMismatchTests
                 SecretPath = Path.Combine(gameFolder, "secret"),
             });
             Console.SetOut(capture);
-            await StopHandler.HandleCreateAsync(["--port", port.ToString(), "guardacc", "guardchar", "GuardPass123"]);
+            await CreateHandler.HandleCreateAsync(["--port", port.ToString(), "guardacc", "guardchar", "GuardPass123"]);
             var text = capture.ToString();
             Assert.Contains("stop it first", text);
         }

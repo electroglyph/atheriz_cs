@@ -99,6 +99,7 @@ public class P3BatchFiveTests
 
     // The connection screen never advertises a command the dispatch gate
     // demotes, under any settings spelling: passed, snapshot, or Global.
+    // The gate check lives in the shared HintText helper both hint lines use.
     [Fact]
     public void ConnectionScreen_NeverAdvertisesDemotedGuest()
     {
@@ -110,7 +111,7 @@ public class P3BatchFiveTests
             var screen = ConnectionScreen.Render(custom, session: null);
             Assert.DoesNotContain("enter 'guest'", screen.ToLowerInvariant());
             var src = SourceScan.Read("src", "Atheriz.Core", "ConnectionScreen.cs");
-            Assert.Contains("IsUnloggedInEnabled", SourceScan.Region(src, "private static string GuestText"));
+            Assert.Contains("IsUnloggedInEnabled", SourceScan.Region(src, "private static string HintText"));
         }
         finally { CommandDispatcher.SetSettings(origSnapshot); }
     }

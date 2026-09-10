@@ -64,8 +64,8 @@ public sealed class PidFile : IDisposable
                 if (fileName.Contains("dotnet") || lower.Contains("dotnet"))
                     return HasServerCmdline(pid);
             }
-            catch { }
-            return false;
+        catch { }
+        return false;
         }
         catch (ArgumentException)
         {
@@ -167,59 +167,49 @@ public sealed class PidFile : IDisposable
                 var targetInodes = GetListeningInodes(port, out _);
                 if (targetInodes.Count > 0)
                 {
-                    foreach (var dir in Directory.GetDirectories("/proc"))
-                    {
-                        var name = Path.GetFileName(dir);
-                        if (!int.TryParse(name, out var candPid)) continue;
-                        if (!IsServerProcess(candPid)) continue;
-                        try
-                        {
-                            var fdDir = Path.Combine(dir, "fd");
-                            if (!Directory.Exists(fdDir)) continue;
-                            foreach (var fd in Directory.GetFiles(fdDir))
-                            {
-                                try
-                                {
-                                    var link = File.ResolveLinkTarget(fd, true)?.ToString() ?? new FileInfo(fd).LinkTarget ?? "";
-                                    // fallback via readlink
-                                    if (string.IsNullOrEmpty(link))
-                                    {
-                                        try { link = File.ReadAllText($"/proc/{candPid}/fdinfo/{Path.GetFileName(fd)}"); } catch { }
-                                    }
-                                    foreach (var ino in targetInodes)
-                                        if (link.Contains($"socket:[{ino}]")) { pid = candPid; return true; }
-                                }
-                                catch { }
-                            }
-                        }
-                        catch { }
-                    }
-                    // second pass without IsServerProcess filter
-                    foreach (var dir in Directory.GetDirectories("/proc"))
-                    {
-                        var name = Path.GetFileName(dir);
-                        if (!int.TryParse(name, out var candPid)) continue;
-                        try
-                        {
-                            var fdDir = Path.Combine(dir, "fd");
-                            if (!Directory.Exists(fdDir)) continue;
-                            foreach (var fd in Directory.GetFiles(fdDir))
-                            {
-                                try
-                                {
-                                    var link = File.ResolveLinkTarget(fd, true)?.ToString() ?? "";
-                                    foreach (var ino in targetInodes)
-                                        if (link.Contains($"socket:[{ino}]")) { pid = candPid; return true; }
-                                }
-                                catch { }
-                            }
-                        }
-                        catch { }
-                    }
+                    // Two passes: verified servers first, then any process
+                    // holding the socket (identical link resolution).
+                    if (ScanProcForInode(targetInodes, serverOnly: true) is int verified) { pid = verified; return true; }
+                    if (ScanProcForInode(targetInodes, serverOnly: false) is int holder) { pid = holder; return true; }
                 }
             }
         }
         catch { }
+
+        // /proc fd scan shared by both passes above: verified servers first,
+        // then any socket holder. serverOnly gates the IsServerProcess
+        // pre-filter and the fdinfo fallback, preserving each pass exactly.
+        static int? ScanProcForInode(HashSet<string> inodes, bool serverOnly)
+        {
+            foreach (var dir in Directory.GetDirectories("/proc"))
+            {
+                var name = Path.GetFileName(dir);
+                if (!int.TryParse(name, out var candPid)) continue;
+                if (serverOnly && !IsServerProcess(candPid)) continue;
+                try
+                {
+                    var fdDir = Path.Combine(dir, "fd");
+                    if (!Directory.Exists(fdDir)) continue;
+                    foreach (var fd in Directory.GetFiles(fdDir))
+                    {
+                        try
+                        {
+                            var link = File.ResolveLinkTarget(fd, true)?.ToString() ?? (serverOnly ? new FileInfo(fd).LinkTarget ?? "" : "");
+                            // fallback via readlink
+                            if (serverOnly && string.IsNullOrEmpty(link))
+                            {
+                                try { link = File.ReadAllText($"/proc/{candPid}/fdinfo/{Path.GetFileName(fd)}"); } catch { }
+                            }
+                            foreach (var ino in inodes)
+                                if (link.Contains($"socket:[{ino}]")) return candPid;
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+            return null;
+        }
         return false;
     }
 
@@ -380,28 +370,37 @@ public sealed class PidFile : IDisposable
         // Atomic create attempts — atheriz.py:517-554 (3 retries). The stale
         // check runs inside the loop so a fresh live claim that goes stale
         // mid-wait is re-read instead of refused.
+        //
+        // Shared stale-file verdict for the pre-create check and the
+        // FileExists retry path below: live rival → refusal text; a fresh
+        // live claim that went stale mid-flight → retry; otherwise proceed.
+        // The port guard runs unconditionally — a corrupt/unparseable pid
+        // file must not bypass it merely because TryReadPid returned null
+        // (split-brain guard: never delete-and-retry into a bound port).
+        // The delete steps stay at the call sites — they genuinely differ
+        // (announced + terminal failure vs silent swallow + retry).
+        (string? refusal, bool staleRetry) StaleVerdict()
+        {
+            int? oldPid = TryReadPid(pidPath);
+            if (oldPid.HasValue && IsServerProcess(oldPid.Value))
+            {
+                if (FreshLiveClaimWentStale(pidPath, oldPid.Value)) return (null, true);
+                return ($"{AlreadyRunningMessagePrefix} {oldPid.Value}", false);
+            }
+            if (IsPortListening(webserverPort))
+                return ($"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.", false);
+            return (null, false);
+        }
         for (int attempt = 0; attempt < 3; attempt++)
         {
             // First stale check — atheriz.py:486-496
             if (File.Exists(pidPath))
             {
-                int? oldPid = TryReadPid(pidPath);
-                if (oldPid.HasValue && IsServerProcess(oldPid.Value))
-                {
-                    if (FreshLiveClaimWentStale(pidPath, oldPid.Value)) continue;
-                    reason = $"{AlreadyRunningMessagePrefix} {oldPid.Value}";
-                    return false;
-                }
-
-                // Stale: verify the port is actually free before deleting — deleting a stale
-                // file while something still LISTENs risks a split-brain second server.
-                // Unconditional : a corrupt/unparseable pid file must not
-                // bypass this guard merely because TryReadPid returned null.
-                if (IsPortListening(webserverPort))
-                {
-                    reason = $"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.";
-                    return false;
-                }
+                // Verdict shared with the FileExists retry path (live rival /
+                // bound port refused inside StaleVerdict).
+                var (refusal, staleRetry) = StaleVerdict();
+                if (staleRetry) continue;
+                if (refusal is not null) { reason = refusal; return false; }
 
                 // Remove stale — atheriz.py:495. (No age/starting branch: the
                 // live-PID check above already returned for a server process, so
@@ -431,22 +430,12 @@ public sealed class PidFile : IDisposable
             catch (IOException ex) when ((ex.HResult & 0xFFFF) == 80 || File.Exists(pidPath))
             {
                 // FileExists — atheriz.py:520 except FileExistsError
-                int? oldPid = TryReadPid(pidPath);
-                if (oldPid.HasValue && IsServerProcess(oldPid.Value))
-                {
-                    if (FreshLiveClaimWentStale(pidPath, oldPid.Value)) continue;
-                    reason = $"{AlreadyRunningMessagePrefix} {oldPid.Value}";
-                    return false;
-                }
-
-                // Same split-brain guard as the first stale check :
-                // never delete-and-retry into a bound port, whatever the
-                // rival file parses as.
-                if (IsPortListening(webserverPort))
-                {
-                    reason = $"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.";
-                    return false;
-                }
+                // Same verdict as the first stale check (live rival / bound
+                // port refused inside StaleVerdict); only the delete-and-
+                // retry tail below differs.
+                var (refusal, staleRetry) = StaleVerdict();
+                if (staleRetry) continue;
+                if (refusal is not null) { reason = refusal; return false; }
 
                 // No age gate: a live rival PID returned "already running"
                 // above, so anything reaching here is stale by definition —

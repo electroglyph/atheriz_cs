@@ -93,16 +93,19 @@ public class PortedPidExclusiveTests
     [Fact]
     public void TryAcquire_LiveBranches_RouteThroughFreshClaimWait()
     {
-        // Structural pin: both live-claim branches wait bounded on a fresh
-        // claim (a concurrent starter still booting) instead of refusing a
-        // server that is already starting. The wait itself is timing and is
-        // covered by the live-server lifecycle suite; no foreign stand-in
-        // process can pass the identity gate, so the wiring is pinned here.
+        // Structural pin: both live-claim branches (pre-create check and
+        // FileExists retry) route through the shared StaleVerdict, which
+        // waits bounded on a fresh claim (a concurrent starter still
+        // booting) instead of refusing a server that is already starting.
+        // The wait itself is timing and is covered by the live-server
+        // lifecycle suite; no foreign stand-in process can pass the
+        // identity gate, so the wiring is pinned here.
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/PidFile.cs");
         var start = src.IndexOf("public static bool TryAcquire(", StringComparison.Ordinal);
         var end = src.IndexOf("private static void DirSync(", StringComparison.Ordinal);
         var body = src.Substring(start, end - start);
-        Assert.Equal(2, body.Split("FreshLiveClaimWentStale(pidPath, oldPid.Value)", StringSplitOptions.None).Length - 1);
+        Assert.Equal(1, body.Split("FreshLiveClaimWentStale(pidPath, oldPid.Value)", StringSplitOptions.None).Length - 1);
+        Assert.Equal(2, body.Split("= StaleVerdict();", StringSplitOptions.None).Length - 1);
     }
 
     [Fact]

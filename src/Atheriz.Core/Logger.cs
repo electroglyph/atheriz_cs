@@ -59,10 +59,6 @@ public static class AtherizLogger
         lock (_lock)
         {
             _level = map.TryGetValue(s.LogLevel ?? "info", out var lv) ? lv : LogLevel.Information;
-            if (_cachedDefault is ILogger l && l is object)
-            {
-                // level applied on next write via IsEnabled check
-            }
             // Factory-refresh: the console provider (and minimum level) freeze at first
             // construction, so a changed level rebuilds the factory instead of silently
             // sticking. Write() also re-checks _level per call, so in-flight writers stay correct.
@@ -156,8 +152,7 @@ public static class AtherizLogger
         {
             if (!IsEnabled(logLevel)) return;
             var msg = formatter(state, exception);
-            var line = $"{logLevel.ToString().ToUpperInvariant()}: {_cat}: {msg}";
-            if (exception is not null) line += $"\n{exception}";
+            var line = FormatLine(logLevel, _cat, msg, exception);
             try { Console.Error.WriteLine(line); } catch { }
             try { AppendToFile(logLevel, _cat, msg, exception); } catch { }
         }
@@ -175,8 +170,7 @@ public static class AtherizLogger
             // mirrors save/server.log RotatingFileHandler 5M*5
             var file = Path.Combine(dir, "server.log");
             try { Directory.CreateDirectory(dir); } catch { }
-            var line = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} {level.ToString().ToUpperInvariant()}: {category}: {message}";
-            if (ex is not null) line += $"\n{ex}";
+            var line = FormatLine(level, category, message, ex, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} ");
             line += Environment.NewLine;
             // size check + rotate before append
             try
@@ -227,6 +221,13 @@ public static class AtherizLogger
         catch { }
     }
 
+    private static string FormatLine(LogLevel level, string category, string message, Exception? ex, string? timestamp = null)
+    {
+        var line = $"{timestamp}{level.ToString().ToUpperInvariant()}: {category}: {message}";
+        if (ex is not null) line += $"\n{ex}";
+        return line;
+    }
+
     private static void Write(LogLevel level, string category, string message, Exception? ex = null)
     {
         // filtered levels are dropped — operators silencing via
@@ -242,17 +243,15 @@ public static class AtherizLogger
                 logger.Log(level, 0, message, ex, (s, e) => e is not null ? $"{s}\n{e}" : s);
                 AppendToFile(level, category, message, ex);
                 // Also echo to Console.Error for CaptureAtherizLog routing (throttling tests rely on Console.Error capture)
-                var line = $"{level.ToString().ToUpperInvariant()}: {category}: {message}";
-                if (ex is not null) line += $"\n{ex}";
-                try { Console.Error.WriteLine(line); } catch { }
+                var echoLine = FormatLine(level, category, message, ex);
+                try { Console.Error.WriteLine(echoLine); } catch { }
                 return;
             }
             catch { }
         }
         // Fallback Console.Error — Port of logger.py:37 StreamHandler
-        var line2 = $"{level.ToString().ToUpperInvariant()}: {category}: {message}";
-        if (ex is not null) line2 += $"\n{ex}";
-        try { Console.Error.WriteLine(line2); } catch { }
+        var fallbackLine = FormatLine(level, category, message, ex);
+        try { Console.Error.WriteLine(fallbackLine); } catch { }
         try { AppendToFile(level, category, message, ex); } catch { }
     }
 
@@ -262,6 +261,17 @@ public static class AtherizLogger
     public static void LogError(string message, Exception ex, string category = DefaultCategory) => Write(LogLevel.Error, category, message, ex);
     public static void LogDebug(string message, string category = DefaultCategory) => Write(LogLevel.Debug, category, message);
     public static void LogCritical(string message, string category = DefaultCategory) => Write(LogLevel.Critical, category, message);
+
+    // Tree-wide fallback idiom for save/shutdown paths: logging must never
+    // throw out of these. Try the logger, fall back to Console.Error.
+    public static void LogErrorRobust(string message)
+    {
+        try { LogError(message); } catch { Console.Error.WriteLine(message); }
+    }
+    public static void LogInformationRobust(string message)
+    {
+        try { LogInformation(message); } catch { Console.Error.WriteLine(message); }
+    }
 
     // Compat overloads mirroring ILogger
     public static void Info(string msg) => LogInformation(msg);

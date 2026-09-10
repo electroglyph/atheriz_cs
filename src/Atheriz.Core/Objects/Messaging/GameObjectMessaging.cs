@@ -192,30 +192,12 @@ public partial class GameObject
     /// Runs <paramref name="func"/> on every object contained within this one.
     /// </summary>
     public void ForContents(Action<GameObject> func, IEnumerable<GameObject>? exclude = null, Func<int, GameObject?>? resolver = null)
-    {
-        var excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
-        List<GameObject> contents;
-        if (resolver is not null)
-        {
-            var ids = ContentsSnapshot;
-            contents = ids.Select(resolver).OfType<GameObject>().ToList();
-        }
-        else
-        {
-            // Fallback to ObjectRegistry
-            contents = Globals.ObjectRegistry.Get(ContentsSnapshot.ToList());
-        }
-        foreach (var obj in contents)
-        {
-            if (excl is not null && excl.Contains(obj)) continue;
-            try { func(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ForContents: " + logEx.Message, "GameObject"); }
-        }
-    }
+        => ForContents((o, _) => func(o), null, exclude, resolver);
     public void ForContents(Action<GameObject, IDictionary<string, object?>> func, IDictionary<string, object?>? kwargs = null, IEnumerable<GameObject>? exclude = null, Func<int, GameObject?>? resolver = null)
     {
         var excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
         List<GameObject> contents;
-        if (resolver is not null) contents = ContentsSnapshot.Select(resolver).Where(o=>o is not null).Cast<GameObject>().ToList();
+        if (resolver is not null) contents = ContentsSnapshot.Select(resolver).OfType<GameObject>().ToList();
         else contents = Globals.ObjectRegistry.Get(ContentsSnapshot.ToList());
         foreach (var obj in contents)
         {

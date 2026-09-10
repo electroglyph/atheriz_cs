@@ -55,9 +55,9 @@ public class Account : GameObject
         {
             try
             {
-                // Shared save-path resolution (same as ObjectRegistry.SaveObjects()):
+                // Shared save-path resolution via the factory (same as ObjectRegistry.SaveObjects()):
                 // ATHERIZ_SAVE_PATH override, else configured SavePath.
-                var savePath = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH") ?? Settings.AtherizSettings.Global.SavePath;
+                var savePath = AtherizDbContextFactory.ResolveSavePath(Settings.AtherizSettings.Global);
                 using var db = new Persistence.AtherizDbContext(savePath);
                 db.Database.EnsureCreated();
                 ObjectRegistry.DeleteObjects(db, ops.Select(o => Convert.ToInt32(o.Params[0])).ToList());
@@ -103,6 +103,7 @@ public class Account : GameObject
     private string ReadBan() { SyncRoot.EnterReadLock(); try { return _banReason; } finally { SyncRoot.ExitReadLock(); } }
     private void WriteBan(string v) { SyncRoot.EnterWriteLock(); try { _banReason = v; IsModified = true; } finally { SyncRoot.ExitWriteLock(); } }
     private bool ReadLogged() { SyncRoot.EnterReadLock(); try { return _loggedIn; } finally { SyncRoot.ExitReadLock(); } }
+    // LoggedIn is transient session state, not persisted save data — intentionally not marked modified.
     private void WriteLogged(bool v) { SyncRoot.EnterWriteLock(); try { _loggedIn = v; } finally { SyncRoot.ExitWriteLock(); } }
 
     public static string HashPassword(string password, string? saltOverride = null)

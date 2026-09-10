@@ -1041,14 +1041,15 @@ public class ConnectionManager
             foreach (var kv in dict) res[kv.Key] = StripInputValue(kv.Value);
             return res;
         }
-        if (value is JsonElement je)
-        {
-            // Should have been converted; but if raw Je, strip string case
-            if (je.ValueKind == JsonValueKind.String) return GameUtils.StripTerminalEscapes(je.GetString() ?? "");
-            return value;
-        }
         return value;
     }
+
+    internal static void NetWarn(string message)
+    { try { AtherizLogger.LogWarning(message); } catch { Console.Error.WriteLine(message); } }
+    internal static void NetError(string message)
+    { try { AtherizLogger.LogError(message); } catch { Console.Error.WriteLine(message); } }
+    private static void LogMalformed(string host, string rawMessage) // port of manager.py:196-199
+    { if (ShouldLogMalformed(host)) NetWarn($"[Network] Invalid message format from {host} ({rawMessage.Length} bytes): {SummarizeRaw(rawMessage)}"); }
 
     // Port of manager.py:185-215 handle_command
     public virtual void HandleCommand(BaseConnection connection, string rawMessage)
@@ -1066,7 +1067,7 @@ public class ConnectionManager
             {
                 var oversizeHost = connection.ClientHost ?? "?";
                 if (ShouldLogOversize(oversizeHost))
-                    try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Message too large from {oversizeHost} ({rawMessage.Length} bytes > {maxMessageSize} bytes)"); } catch { Console.Error.WriteLine($"[Network] Message too large from {oversizeHost} ({rawMessage.Length} bytes > {maxMessageSize} bytes)"); }
+                    NetWarn($"[Network] Message too large from {oversizeHost} ({rawMessage.Length} bytes > {maxMessageSize} bytes)");
                 return;
             }
             using var doc = JsonDocument.Parse(rawMessage);
@@ -1074,8 +1075,7 @@ public class ConnectionManager
             if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 1) // port of manager.py:194
             {
                 var host = connection.ClientHost ?? "?"; // port of manager.py:195
-                if (ShouldLogMalformed(host)) // port of manager.py:196
-                    try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Invalid message format from {host} ({rawMessage.Length} bytes): {SummarizeRaw(rawMessage)}"); } catch { Console.Error.WriteLine($"[Network] Invalid message format from {host} ({rawMessage.Length} bytes): {SummarizeRaw(rawMessage)}"); } // port of manager.py:197-199
+                LogMalformed(host, rawMessage); // port of manager.py:196-199
                 return;
             }
             var cmdElement = root[0];
@@ -1084,9 +1084,7 @@ public class ConnectionManager
             // error path instead of the malformed path. Reject them cleanly.
             if (cmdElement.ValueKind != JsonValueKind.String)
             {
-                var host2 = connection.ClientHost ?? "?";
-                if (ShouldLogMalformed(host2))
-                    try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Invalid message format from {host2} ({rawMessage.Length} bytes): {SummarizeRaw(rawMessage)}"); } catch { Console.Error.WriteLine($"[Network] Invalid message format from {host2} ({rawMessage.Length} bytes): {SummarizeRaw(rawMessage)}"); }
+                LogMalformed(connection.ClientHost ?? "?", rawMessage);
                 return;
             }
             var cmd = cmdElement.GetString()!;
@@ -1101,11 +1099,11 @@ public class ConnectionManager
         {
             var host = connection.ClientHost ?? "?"; // port of manager.py:209
             if (ShouldLogMalformed(host)) // port of manager.py:210
-                try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Error decoding JSON from {host} ({rawMessage.Length} bytes): {exc.Message} at position {exc.BytePositionInLine}: {SummarizeRaw(rawMessage)}"); } catch { Console.Error.WriteLine($"[Network] Error decoding JSON from {host} ({rawMessage.Length} bytes): {exc.Message} at position {exc.BytePositionInLine}: {SummarizeRaw(rawMessage)}"); } // port of manager.py:211-213
+                NetWarn($"[Network] Error decoding JSON from {host} ({rawMessage.Length} bytes): {exc.Message} at position {exc.BytePositionInLine}: {SummarizeRaw(rawMessage)}"); // port of manager.py:211-213
         }
         catch (Exception e) // port of manager.py:214-215
         {
-            try { Atheriz.Core.AtherizLogger.LogError($"[Network] Error handling message: {e}"); } catch { Console.Error.WriteLine($"[Network] Error handling message: {e}"); }
+            NetError($"[Network] Error handling message: {e}");
         }
     }
 
@@ -1115,16 +1113,7 @@ public class ConnectionManager
         // Handlers run on game threadpool via connection's serialized input queue — manager.py:218-221
         if (_settings.StripInputEscapeSequences) // port of manager.py:222
         {
-            // args = [_strip_input_value(value) for value in args] — manager.py:223
-            List<object?> strippedArgs = [];
-            foreach (var v in args)
-            {
-                var sv = StripInputValue(v);
-                // Unwrap if Strip returned List<object?> for element? For args list, element is object?; if it's List we keep as is? Actually _strip_input_value recurses but for string it returns string; for list it returns list; for args we have list of values, each may be string/list/dict.
-                // If v was string, sv is string; if v was list, sv is List<object?>
-                strippedArgs.Add(sv);
-            }
-            args = strippedArgs;
+            args = args.Select(StripInputValue).ToList(); // port of manager.py:223
             var boxed = StripInputValue(kwargs);
             if (boxed is Dictionary<string, object?> d) kwargs = d;
         }
@@ -1161,7 +1150,6 @@ public class ConnectionManager
         // Array/object recursion lives here, inside the single converter family.
         static List<object?> ConvertArray(JsonElement a)
         {
-            if (a.ValueKind != JsonValueKind.Array) return new List<object?> { JsonElementToObject(a) };
             List<object?> list = [];
             foreach (var item in a.EnumerateArray()) list.Add(JsonElementToObject(item));
             return list;
@@ -1169,7 +1157,6 @@ public class ConnectionManager
 
         static Dictionary<string, object?> ConvertDict(JsonElement o)
         {
-            if (o.ValueKind != JsonValueKind.Object) return [];
             Dictionary<string, object?> dict = [];
             foreach (var prop in o.EnumerateObject()) dict[prop.Name] = JsonElementToObject(prop.Value);
             return dict;

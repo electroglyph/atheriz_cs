@@ -72,13 +72,8 @@ public static class InitialSetup
         // Clear any existing node/map/time singletons that might cache old save path
         try { Globals.GlobalServices.Reset(); } catch (Exception ex) { Console.Error.WriteLine($"Singleton reset warning: {ex.Message}"); }
         SaltProvider.Clear();
-        // Re-seed salt after clear
-        try { SaltProvider.GetSalt(absSecret); } catch (Exception ex) { Console.Error.WriteLine($"Salt re-seed warning: {ex.Message}"); }
-        // Seed the default slot with the same value: runtime password checks
-        // call GetSalt() with no path, which otherwise reads CWD-relative
-        // "secret/salt.txt" (a different file, or a throw outside a game
-        // folder) instead of this game's salt.
-        try { SaltProvider.SetSalt(SaltProvider.GetSalt(absSecret)); } catch (Exception ex) { Console.Error.WriteLine($"Default salt seed warning: {ex.Message}"); }
+        // Re-seed salt after clear (default slot included — see ReseedForGame).
+        SaltProvider.ReseedForGame(absSecret);
 
         var settings = AtherizSettings.Global;
         // Build NodeArea 9x9x9
@@ -201,18 +196,7 @@ public static class InitialSetup
                     // simple no-echo fallback
                     try
                     {
-                        if (ReferenceEquals(promptInput, Console.In))
-                        {
-                            var sb = new System.Text.StringBuilder();
-                            ConsoleKeyInfo k;
-                            while ((k = Console.ReadKey(intercept: true)).Key != ConsoleKey.Enter)
-                            {
-                                if (k.Key == ConsoleKey.Backspace && sb.Length > 0) sb.Length--;
-                                else if (!char.IsControl(k.KeyChar)) sb.Append(k.KeyChar);
-                            }
-                            Console.Out.WriteLine();
-                            p = sb.ToString().Trim();
-                        }
+                        if (ReferenceEquals(promptInput, Console.In)) p = GameUtils.ReadSecretLine();
                         else p = promptInput.ReadLine()?.Trim();
                     }
                     catch { p = promptInput.ReadLine()?.Trim(); }
@@ -264,15 +248,22 @@ public static class InitialSetup
             return;
         }
 
+        // Seeded nodes resolve via the handler first, falling back to the area
+        // grid directly (the handler may not have the area yet during setup).
+        static Node? ResolveSeedNode(NodeHandler nh, NodeArea area, Coord coord)
+        {
+            var node = nh.GetNode(coord);
+            if (node is null)
+            {
+                var g = area.GetGrid(coord.Z);
+                g?.Nodes.TryGetValue((coord.X, coord.Y), out node);
+            }
+            return node;
+        }
+
         // Alarm object at 0,0,8
         var alarmCoord = new Coord(LIMBO_AREA, 0, 0, LIMBO_GRID - 1);
-        var alarmNode = nh.GetNode(alarmCoord);
-        // If not found via handler, fallback to area grid directly
-        if (alarmNode is null)
-        {
-            var g = area.GetGrid(LIMBO_GRID - 1);
-            g?.Nodes.TryGetValue((0,0), out alarmNode);
-        }
+        var alarmNode = ResolveSeedNode(nh, area, alarmCoord);
         var alarmObj = new AlarmObject();
         alarmObj.Id = IdGenerator.GetUniqueId();
         alarmObj.Name = "A flashing dashboard";
@@ -281,7 +272,7 @@ public static class InitialSetup
         alarmObj.Aliases = new List<string>{"dashboard"};
         alarmObj.IsModified = true;
         ObjectRegistry.AddObject(alarmObj);
-        try { alarmObj.MoveTo(alarmNode); } catch {}
+        alarmObj.MoveTo(alarmNode);
 
         // seed the clock from the operator's time settings (the same
         // AtherizSettings.Global the nodes/map above use), not defaults —
@@ -303,17 +294,12 @@ public static class InitialSetup
         // Port of Object.create add_object — faithful registry add before save
         ObjectRegistry.AddObject(character);
         var homeCoord = settings.DefaultHome; // limbo 4,4,4
-        var home = nh.GetNode(homeCoord);
-        if (home is null)
-        {
-            var hg = area.GetGrid(homeCoord.Z);
-            hg?.Nodes.TryGetValue((homeCoord.X, homeCoord.Y), out home);
-        }
+        var home = ResolveSeedNode(nh, area, homeCoord);
         if (home is not null)
         {
             character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord);
             character.PrivilegeLevel = Privilege.Admin;
-            try { character.MoveTo(home); } catch {}
+            character.MoveTo(home);
         }
         else character.PrivilegeLevel = Privilege.Admin;
 
@@ -322,9 +308,9 @@ public static class InitialSetup
         button.Aliases = new List<string>{"button"};
         button.AddLock("get", (GameObject x) => x.IsBuilder, LockPolicies.Builder);
         if (button.ExternalCmdSet is null) button.ExternalCmdSet = new Commands.CmdSet();
-        try { button.ExternalCmdSet.Add(new PushCommand()); } catch { }
+        button.ExternalCmdSet.Add(new PushCommand());
         ObjectRegistry.AddObject(button);
-        if (home is not null) try { button.MoveTo(home); } catch {}
+        if (home is not null) button.MoveTo(home);
 
         account.AddCharacter(character);
         var chan = Channel.Create("Server");

@@ -206,7 +206,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         }
         if (notifyBusy) // port of connection.py:111-116
         {
-            try { Atheriz.Core.AtherizLogger.LogWarning($"[Network] Input queue submission rejected (pool full); {pendingCount} message(s) pending retry"); } catch { Console.Error.WriteLine($"[Network] Input queue submission rejected (pool full); {pendingCount} message(s) pending retry"); }
+            ConnectionManager.NetWarn($"[Network] Input queue submission rejected (pool full); {pendingCount} message(s) pending retry");
             Msg("Server busy; input dropped.");
         }
     }
@@ -264,7 +264,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             }
             catch (Exception ex)
             {
-                var name = handler.Method.Name ?? handler.ToString();
+                var name = handler.Method.Name;
                 Atheriz.Core.AtherizLogger.LogError($"[Network] Input handler '{name}' failed: {ex}"); // port of connection.py:152-153
             }
         }

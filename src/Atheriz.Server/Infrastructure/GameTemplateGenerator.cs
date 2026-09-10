@@ -85,18 +85,7 @@ public static class GameTemplateGenerator
                     Console.Error.WriteLine("Warning: input is redirected; password will be echoed.");
                     password = Console.ReadLine()?.Trim();
                 }
-                else try
-                {
-                    var sb = new System.Text.StringBuilder();
-                    ConsoleKeyInfo k;
-                    while ((k = Console.ReadKey(intercept: true)).Key != ConsoleKey.Enter)
-                    {
-                        if (k.Key == ConsoleKey.Backspace && sb.Length > 0) sb.Length--;
-                        else if (!char.IsControl(k.KeyChar)) sb.Append(k.KeyChar);
-                    }
-                    Console.WriteLine();
-                    password = sb.ToString().Trim();
-                }
+                else try { password = GameUtils.ReadSecretLine(); }
                 catch { password = Console.ReadLine()?.Trim(); }
                 if (string.IsNullOrEmpty(password))
                 {
@@ -264,17 +253,14 @@ public static class GameTemplateGenerator
         // Only inspect methods declared on t itself (or its direct partials), mirroring new.py:ClassInspector per-class hook collection.
         // Using DeclaredOnly prevents inheriting GameObject hooks into Node/Channel/Script where Python test/* files have their own small sets.
         var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.DeclaredOnly;
-        // Also include base class virtuals that are overridden in t via Flatten? No — we want only hooks defined on t (DeclaringType==t), falling back to Flatten if t has no declared hooks (e.g., Script).
+        // Only hooks declared on t itself (DeclaringType==t); no base-class fallback.
         var all = t.GetMethods(flags);
-        if (all.Length == 0) all = t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
         foreach (var m in all)
         {
             if (m.IsSpecialName) continue;
             if (m.DeclaringType == typeof(object)) continue;
-            if (m.DeclaringType != t && m.DeclaringType != typeof(Atheriz.Core.Objects.GameObject) && m.DeclaringType != typeof(Atheriz.Core.Objects.Node) && m.DeclaringType != typeof(Atheriz.Core.Objects.Account) && m.DeclaringType != typeof(Atheriz.Core.Objects.Channel) && m.DeclaringType != typeof(Atheriz.Core.Objects.Script)) { /* skip inherited from System */ }
             // Must be declared on t itself to keep per-file hook sets small like test/*.py (Object 35, Node 7, Channel 3, Account 4, Script 1)
             if (m.DeclaringType != t) continue;
-            if (m.DeclaringType is not null && m.DeclaringType.Namespace is not null && m.DeclaringType.Namespace.StartsWith("System", StringComparison.Ordinal)) continue;
             if (!m.IsVirtual || m.IsFinal) continue;
             var n = m.Name;
             var ln = n.ToLowerInvariant();
@@ -475,45 +461,29 @@ public static class GameTemplateGenerator
         if (src is null && wwwroot is null)
             throw new DirectoryNotFoundException("Web folder not found (checked web/ and wwwroot)");
     }
+    private static List<string> BuildAssetCandidates(string leaf, bool includeCwdLeaf, bool includeGrandparentLeaf)
+    {
+        var asmDir = Path.GetDirectoryName(typeof(GameTemplateGenerator).Assembly.Location) ?? AppContext.BaseDirectory;
+        var cwd = Directory.GetCurrentDirectory();
+        List<string> candidates =
+        [
+            Path.Combine(asmDir, leaf),
+            Path.Combine(AppContext.BaseDirectory, leaf),
+            Path.Combine(cwd, "src", "Atheriz.Server", leaf),
+        ];
+        if (includeCwdLeaf) candidates.Add(Path.Combine(cwd, leaf));
+        candidates.Add(Path.Combine(asmDir, "..", leaf));
+        if (includeGrandparentLeaf) candidates.Add(Path.Combine(asmDir, "..", "..", leaf));
+        var cur = new DirectoryInfo(asmDir);
+        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", leaf)); candidates.Add(Path.Combine(cur.FullName, leaf)); cur = cur.Parent; }
+        cur = new DirectoryInfo(cwd);
+        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", leaf)); cur = cur.Parent; }
+        return candidates;
+    }
     private static string? TryResolveWebSrc()
-    {
-        var asmDir = Path.GetDirectoryName(typeof(GameTemplateGenerator).Assembly.Location) ?? AppContext.BaseDirectory;
-        var cwd = Directory.GetCurrentDirectory();
-        List<string> candidates =
-        [
-            Path.Combine(asmDir, "web"),
-            Path.Combine(AppContext.BaseDirectory, "web"),
-            Path.Combine(cwd, "src", "Atheriz.Server", "web"),
-            Path.Combine(cwd, "web"),
-            Path.Combine(asmDir, "..", "web"),
-            Path.Combine(asmDir, "..", "..", "web"),
-        ];
-        var cur = new DirectoryInfo(asmDir);
-        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "web")); candidates.Add(Path.Combine(cur.FullName, "web")); cur = cur.Parent; }
-        cur = new DirectoryInfo(cwd);
-        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "web")); cur = cur.Parent; }
-        var resolved = AssetPathResolver.ResolveCandidates(candidates.Select(Path.GetFullPath));
-        return resolved;
-    }
+        => AssetPathResolver.ResolveCandidates(BuildAssetCandidates("web", includeCwdLeaf: true, includeGrandparentLeaf: true).Select(Path.GetFullPath));
     private static string? TryResolveWwwRoot()
-    {
-        var asmDir = Path.GetDirectoryName(typeof(GameTemplateGenerator).Assembly.Location) ?? AppContext.BaseDirectory;
-        var cwd = Directory.GetCurrentDirectory();
-        List<string> candidates =
-        [
-            Path.Combine(asmDir, "wwwroot"),
-            Path.Combine(AppContext.BaseDirectory, "wwwroot"),
-            Path.Combine(cwd, "src", "Atheriz.Server", "wwwroot"),
-            Path.Combine(asmDir, "..", "wwwroot"),
-        ];
-        var cur = new DirectoryInfo(asmDir);
-        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "wwwroot")); candidates.Add(Path.Combine(cur.FullName, "wwwroot")); cur = cur.Parent; }
-        cur = new DirectoryInfo(cwd);
-        for (int i = 0; i < 8 && cur is not null; i++) { candidates.Add(Path.Combine(cur.FullName, "src", "Atheriz.Server", "wwwroot")); cur = cur.Parent; }
-        var resolved = AssetPathResolver.ResolveCandidates(candidates.Select(Path.GetFullPath));
-        return resolved;
-    }
-    public static void CopyWebFolder(string destination, string webSrcPath, bool _unused) => CopyWebFolder(destination, webSrcPath);
+        => AssetPathResolver.ResolveCandidates(BuildAssetCandidates("wwwroot", includeCwdLeaf: false, includeGrandparentLeaf: false).Select(Path.GetFullPath));
     private static void CopyDirectory(string src, string dst)
     {
         Directory.CreateDirectory(dst);

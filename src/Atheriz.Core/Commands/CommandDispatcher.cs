@@ -9,6 +9,10 @@ public static class CommandDispatcher
 {
     private static readonly string[] NoAliasCommands = ["n", "s", "e", "w", "u", "d"];
 
+    // Hot-path parse (ParseRaw runs on every dispatched command): one shared
+    // whitespace table instead of per-call ToCharArray/collection allocations.
+    private static readonly char[] WhitespaceChars = [' ', '\t', '\r', '\n'];
+
     private static AtherizSettings _settings = new();
     public static void SetSettings(AtherizSettings s) => _settings = s;
     private static AsyncThreadPool? _pool;
@@ -30,14 +34,14 @@ public static class CommandDispatcher
     internal static ParsedInput? ParseRaw(string? text)
     {
         if (string.IsNullOrEmpty(text)) return null;
-        var stripped = text.Trim(" \t\r\n".ToCharArray());
+        var stripped = text.Trim(WhitespaceChars);
         if (string.IsNullOrEmpty(stripped)) return null;
         // preserve split None logic: first token is raw_cmd_key lower
-        int firstSpace = stripped.IndexOfAny([' ', '\t', '\r', '\n']);
+        int firstSpace = stripped.IndexOfAny(WhitespaceChars);
         string rawCmdKey;
         string cmdArgs;
         if (firstSpace < 0) { rawCmdKey = stripped.ToLowerInvariant(); cmdArgs = ""; }
-        else { rawCmdKey = stripped[..firstSpace].ToLowerInvariant(); cmdArgs = stripped[(firstSpace + 1)..].TrimStart(" \t\r\n".ToCharArray()); }
+        else { rawCmdKey = stripped[..firstSpace].ToLowerInvariant(); cmdArgs = stripped[(firstSpace + 1)..].TrimStart(WhitespaceChars); }
         return new ParsedInput(stripped, rawCmdKey, cmdArgs, rawCmdKey);
     }
 
@@ -71,6 +75,22 @@ public static class CommandDispatcher
         return (null, rawCmdKey);
     }
 
+    // Tail of the resolution chain, shared by the normal path and the glued
+    // path: location/inventory verbs first, then the location's own external
+    // set. Kept tail-only on purpose — the internal-first/global-second head
+    // above differs per path and must not be reordered.
+    private static Command? TryResolveLocal(GameObject puppet, string key)
+    {
+        foreach (var set in CommandHelpers.LocalVerbSets(puppet))
+        {
+            Command? found = set.Get(key);
+            if (found is not null) return found;
+        }
+        GameObject? loc = puppet.ResolveLocationObject();
+        if (loc is not null && loc.ExternalCmdSet is not null) return loc.ExternalCmdSet.Get(key);
+        return null;
+    }
+
     /// <summary>
     /// Mirrors <c>dispatch_loggedin(puppet, text, immediate)</c> (inputfuncs.py:88).
     /// If <paramref name="immediate"/> is false, queues on threadpool and returns null.
@@ -98,40 +118,22 @@ public static class CommandDispatcher
                 // an internal single-char verb shadows the global one on glued input too.
                 cmd = puppet.InternalCmdSet?.Get(first);
                 cmd ??= CommandRegistry.LoggedIn.Get(first);
-                if (cmd is null)
-                {
-                    foreach (var set in CommandHelpers.LocalVerbSets(puppet))
-                    {
-                        if ((cmd = set.Get(first)) is not null) break;
-                    }
-                }
-                if (cmd is null)
-                {
-                    GameObject? locG = puppet.ResolveLocationObject();
-                    if (locG?.ExternalCmdSet is not null) cmd = locG.ExternalCmdSet.Get(first);
-                }
+                cmd ??= TryResolveLocal(puppet, first);
                 if (cmd is not null)
                 {
                     matchedAlias = first;
                     // glued args: parts[0][1:] + remainder
-                    int ws = stripped.IndexOfAny([' ', '\t', '\r', '\n']);
+                    int ws = stripped.IndexOfAny(WhitespaceChars);
                     string rawFirstToken = ws < 0 ? stripped : stripped[..ws];
                     string gluedRemainder = rawFirstToken.Length > 1 ? rawFirstToken[1..] : "";
                     if (!string.IsNullOrEmpty(cmdArgs)) gluedRemainder = gluedRemainder.Length > 0 ? gluedRemainder + " " + cmdArgs : cmdArgs;
-                    cmdArgs = gluedRemainder.TrimStart(" \t\r\n".ToCharArray());
+                    cmdArgs = gluedRemainder.TrimStart(WhitespaceChars);
                 }
             }
             if (cmd is null)
             {
                 // check location and inventory external cmdsets — faithful to inputfuncs.py loc.contents + puppet.contents
-                foreach (var set in CommandHelpers.LocalVerbSets(puppet))
-                {
-                    if ((cmd = set.Get(rawCmdKey)) is not null) break;
-                }
-                // also if loc itself has external (unlikely but for completeness)
-                GameObject? locObj = puppet.ResolveLocationObject();
-                if (cmd is null && locObj is not null && locObj.ExternalCmdSet is not null)
-                    cmd = locObj.ExternalCmdSet.Get(rawCmdKey);
+                cmd = TryResolveLocal(puppet, rawCmdKey);
             }
             if (cmd is null && _settings.AutoCommandAliasing)
             {
@@ -165,7 +167,7 @@ public static class CommandDispatcher
         var pool = _pool;
         if (pool is not null)
         {
-            if (!pool.AddTask(() => func(caller!, eargs))) { /* log warning */ }
+            if (!pool.AddTask(() => func(caller!, eargs))) { AtherizLogger.LogWarning($"[Dispatch] threadpool full; dropping command '{rawCmdKey}'."); }
         }
         else
         {

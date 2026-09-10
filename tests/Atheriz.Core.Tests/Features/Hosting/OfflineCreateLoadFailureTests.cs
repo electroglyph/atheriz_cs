@@ -44,7 +44,7 @@ public class OfflineCreateLoadFailureTests
         Console.SetOut(new StringWriter());
         try
         {
-            await StopHandler.HandleCreateAsync(new[] { "loadfailacc", "LoadFailChar", "supersecret123" });
+            await CreateHandler.HandleCreateAsync(new[] { "loadfailacc", "LoadFailChar", "supersecret123" });
         }
         finally
         {
