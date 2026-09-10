@@ -102,11 +102,8 @@ public static class MapEdit
     // Port of mapedit.py:38 _lock = RLock()
     public static readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.SupportsRecursion);
 
-    // Port of spec: Dictionary<string,MapEditChain> chains — snapshot copy (never the live dict).
-    // Single body with ChainsSnapshot below: two lock+copy implementations
-    // of the same snapshot would drift apart unnoticed.
-    public static Dictionary<string, MapEditChain> chains => (Dictionary<string, MapEditChain>)ChainsSnapshot;
-    // Also provide capitalized alias per spec naming
+    // Snapshot copy of the live store (never the live dict itself): callers
+    // can enumerate freely, but only Grant/AddChain may plant entries.
     public static IReadOnlyDictionary<string, MapEditChain> ChainsSnapshot
     {
         get
@@ -162,7 +159,7 @@ public static class MapEdit
 
     // Port of mapedit.py _evict — no time-based expiry (valid while session
     // open); only drops stale previous-key mappings and enforces the cap.
-    private static void EvictLocked(double nowMonotonic)
+    private static void EvictLocked()
     {
         int cap = EffectiveCap();
         // Port of mapedit.py:50 stale = [p for p,cur in _previous if cur not in _chains]
@@ -198,8 +195,7 @@ public static class MapEdit
         Lock.EnterWriteLock();
         try
         {
-            double now = GetMonotonic();
-            EvictLocked(now);
+            EvictLocked();
             int attempts = 1;
             while (_chains.ContainsKey(key) || _previous.ContainsKey(key))
             {
@@ -212,7 +208,7 @@ public static class MapEdit
             if (_chains.Count > EffectiveCap())
             {
                 // Port of mapedit.py:68 if len > cap: _evict
-                EvictLocked(GetMonotonic());
+                EvictLocked();
             }
             // Also cap via settings cap (Evict already enforces)
             return key;
@@ -262,7 +258,7 @@ public static class MapEdit
         Lock.EnterWriteLock();
         try
         {
-            EvictLocked(GetMonotonic());
+            EvictLocked();
             if (_chains.TryGetValue(key, out var existing))
             {
                 var updated = CopyOf(existing);
@@ -281,7 +277,7 @@ public static class MapEdit
                 };
                 _chains[key] = c;
             }
-            if (_chains.Count > EffectiveCap()) EvictLocked(GetMonotonic());
+            if (_chains.Count > EffectiveCap()) EvictLocked();
         }
         finally { Lock.ExitWriteLock(); }
     }
@@ -292,8 +288,7 @@ public static class MapEdit
         Lock.EnterWriteLock();
         try
         {
-            double now = GetMonotonic();
-            EvictLocked(now);
+            EvictLocked();
             MapEditChain? chain = null;
             bool previousHit = false;
             if (!_chains.TryGetValue(key, out chain))
@@ -398,9 +393,7 @@ public static class MapEdit
     // use the ValidateChain(key, ip, seq) overload when those matter).
     public static bool ChainExists(string key)
     {
-        var c = GetChain(key);
-        if (c is null) return false;
-        return true;
+        return GetChain(key) is not null;
     }
 
     [Obsolete("Use ChainExists: this only checks key presence, not ip/seq.")]
@@ -436,7 +429,7 @@ public static class MapEdit
     public static void ClearStale()
     {
         Lock.EnterWriteLock();
-        try { EvictLocked(GetMonotonic()); }
+        try { EvictLocked(); }
         finally { Lock.ExitWriteLock(); }
     }
 

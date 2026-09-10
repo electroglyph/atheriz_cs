@@ -434,37 +434,46 @@ public class MapInfo
         return false;
     }
 
-    private static bool GetMapEnabled(GameObject listener)
+    // Single suppression point for game-override calls: a throwing override
+    // degrades to the fallback instead of breaking the render for everyone
+    // else. (The old per-call wrappers duplicated this try/catch six times.)
+    internal static T Suppress<T>(Func<T> call, T fallback, string what)
     {
-        try { return listener.MapEnabled; }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.GetMapEnabled: " + logEx.Message, "BatchScope"); }
-        return true;
+        try { return call(); }
+        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed MapHandler.{what}: " + ex.Message, "MapHandler"); return fallback; }
     }
 
-    private static double? GetLastMapTime(GameObject listener)
+    internal static void Suppress(Action call, string what)
     {
-        try { return listener.LastMapTime; }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.GetLastMapTime: " + logEx.Message, "BatchScope"); }
-        return null;
+        try { call(); }
+        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed MapHandler.{what}: " + ex.Message, "MapHandler"); }
     }
 
-    private static Dictionary<(int X, int Y), string> CallAtPreMapRender(GameObject listener, Dictionary<(int X, int Y), string> grid)
+    private static (List<(int oid, (string sym, string desc, (int x, int y) coord) entry)> objEntries, List<(string, string, (int, int))> staticEntries)
+        BuildEntries(List<GameObject> objectsSnapshot, List<LegendEntry> staticSnapshot)
     {
-        try { return listener.AtPreMapRender(grid); }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.GetLastMapTime: " + logEx.Message, "BatchScope"); }
-        return grid;
+        List<(int oid, (string sym, string desc, (int x, int y) coord) entry)> objEntries = [];
+        foreach (var o in objectsSnapshot)
+        {
+            if (TryGetLocationCoord(o, out var c))
+            {
+                string sym = Suppress(() => o.Symbol ?? "", "", "Symbol");
+                string desc = Suppress(() => o.Name ?? "", "", "Name");
+                objEntries.Add((o.Id, (sym, desc, c)));
+            }
+        }
+        var staticEntries = staticSnapshot.Where(e => e.Coord is not null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
+        return (objEntries, staticEntries);
     }
 
-    private static void CallAtMapUpdate(GameObject listener, string mapStr, List<(string sym, string desc, (int x, int y) coord)> entries, int minX, int maxY, bool showLegend, string name)
+    private static List<(string, string, (int, int))> EntriesFor(
+        List<(int oid, (string sym, string desc, (int x, int y) coord) entry)> objEntries,
+        List<(string, string, (int, int))> staticEntries, int listenerId)
     {
-        try { listener.AtMapUpdate(mapStr, entries, minX, maxY, showLegend, name); }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.CallAtMapUpdate: " + logEx.Message, "BatchScope"); }
-    }
-
-    private static void CallAtLegendUpdate(GameObject listener, List<(string sym, string desc, (int x, int y) coord)> entries, bool show, string area)
-    {
-        try { listener.AtLegendUpdate(entries, show, area); }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.CallAtLegendUpdate: " + logEx.Message, "BatchScope"); }
+        List<(string, string, (int, int))> entries = [];
+        foreach (var (oid, e) in objEntries) if (oid != listenerId) entries.Add(e);
+        entries.AddRange(staticEntries);
+        return entries;
     }
 
     public virtual void RenderLegend()
@@ -498,31 +507,16 @@ public class MapInfo
         {
             foreach (var l in listenersSnapshot)
             {
-                CallAtLegendUpdate(l, [], false, Name);
+                Suppress(() => { l.AtLegendUpdate([], false, Name); }, "AtLegendUpdate");
             }
             return;
         }
         if (!isOver)
         {
-            List<(int oid, (string sym, string desc, (int x, int y) coord) entry)> objEntries = [];
-            foreach (var o in objectsSnapshot)
-            {
-                if (TryGetLocationCoord(o, out var c))
-                {
-                    string sym = "";
-                    string desc = "";
-                    try { sym = o.Symbol ?? ""; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.RenderLegend: " + logEx.Message, "BatchScope"); }
-                    try { desc = o.Name ?? ""; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.RenderLegend: " + logEx.Message, "BatchScope"); }
-                    objEntries.Add((o.Id, (sym, desc, c)));
-                }
-            }
-            var staticEntries = staticSnapshot.Where(e => e.Coord is not null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
+            var (objEntries, staticEntries) = BuildEntries(objectsSnapshot, staticSnapshot);
             foreach (var l in listenersSnapshot)
             {
-                List<(string, string, (int, int))> entries = [];
-                foreach (var (oid, e) in objEntries) if (oid != l.Id) entries.Add(e);
-                entries.AddRange(staticEntries);
-                CallAtLegendUpdate(l, entries, true, Name);
+                Suppress(() => { l.AtLegendUpdate(EntriesFor(objEntries, staticEntries, l.Id), true, Name); }, "AtLegendUpdate");
             }
         }
     }
@@ -555,45 +549,24 @@ public class MapInfo
         }
         finally { Lock.ExitReadLock(); }
 
-        List<(int oid, (string sym, string desc, (int x, int y) coord) entry)> objEntries = [];
-        foreach (var o in objectsSnapshot)
-        {
-            if (TryGetLocationCoord(o, out var c))
-            {
-                string sym = "";
-                string desc = "";
-                try { sym = o.Symbol ?? ""; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.Render: " + logEx.Message, "BatchScope"); }
-                try { desc = o.Name ?? ""; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.Render: " + logEx.Message, "BatchScope"); }
-                objEntries.Add((o.Id, (sym, desc, c)));
-            }
-        }
-        var staticEntries = staticSnapshot.Where(e => e.Coord is not null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
+        var (objEntries, staticEntries) = BuildEntries(objectsSnapshot, staticSnapshot);
 
-        double fpsLimit = 0;
-        try
-        {
-            // The handler's own settings, not the ambient global: an
-            // explicit-settings boot must throttle with its own limit.
-            int limit = Settings.MapFpsLimit;
-            if (limit > 0) fpsLimit = 1.0 / limit;
-            else fpsLimit = 0;
-        }
-        catch { fpsLimit = 0; }
+        // The handler's own settings, not the ambient global: an
+        // explicit-settings boot must throttle with its own limit.
+        double fpsLimit = Suppress(() => { int limit = Settings.MapFpsLimit; return limit > 0 ? 1.0 / limit : 0; }, 0.0, "MapFpsLimit");
         double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
 
         foreach (var l in listeners)
         {
-            if (!GetMapEnabled(l)) continue;
-            var last = GetLastMapTime(l);
+            if (!Suppress(() => l.MapEnabled, true, "MapEnabled")) continue;
+            var last = Suppress<double?>(() => l.LastMapTime, null, "LastMapTime");
             bool hasLast = last.HasValue && last.Value != 0;
             if (hasLast && !force && fpsLimit > 0 && (now - last!.Value) <= fpsLimit) continue;
-            List<(string, string, (int, int))> entries = [];
-            foreach (var (oid, e) in objEntries) if (oid != l.Id) entries.Add(e);
-            entries.AddRange(staticEntries);
+            var entries = EntriesFor(objEntries, staticEntries, l.Id);
             var gridCopy = new Dictionary<(int X, int Y), string>(gridSnapshot);
-            gridCopy = CallAtPreMapRender(l, gridCopy);
+            gridCopy = Suppress(() => l.AtPreMapRender(gridCopy), gridCopy, "AtPreMapRender");
             var (mapStr, minX, maxY) = RenderGrid(gridCopy);
-            CallAtMapUpdate(l, mapStr, entries, minX, maxY, showLegend, Name);
+            Suppress(() => { l.AtMapUpdate(mapStr, entries, minX, maxY, showLegend, Name); }, "AtMapUpdate");
         }
     }
 
@@ -879,6 +852,17 @@ public class MapHandler
         List<((string Area, int Z) Key, MapInfo.MapInfoPersistDto Dto, MapInfo Original)> snapshot = [];
         List<MapInfo> cleared = [];
         List<((string Area, int Z) Key, string json)> jsons = [];
+
+        void RestoreCleared()
+        {
+            foreach (var mi in cleared)
+            {
+                mi.Lock.EnterWriteLock();
+                try { mi.MapChanged = true; mi.IsModified = true; }
+                finally { mi.Lock.ExitWriteLock(); }
+            }
+        }
+
         try
         {
             foreach (var (k, mi) in refs)
@@ -915,12 +899,7 @@ public class MapHandler
         }
         catch
         {
-            foreach (var mi in cleared)
-            {
-                mi.Lock.EnterWriteLock();
-                try { mi.MapChanged = true; mi.IsModified = true; }
-                finally { mi.Lock.ExitWriteLock(); }
-            }
+            RestoreCleared();
             throw;
         }
 
@@ -942,40 +921,15 @@ public class MapHandler
                     var row = ctx.MapData.Find(key.Area, key.Z);
                     if (row is not null) ctx.MapData.Remove(row);
                 }
-            }, onRollback: () =>
-            {
-                foreach (var mi in cleared)
-                {
-                    mi.Lock.EnterWriteLock();
-                    try { mi.MapChanged = true; mi.IsModified = true; }
-                    finally { mi.Lock.ExitWriteLock(); }
-                }
-            });
-        }
-        catch (InvalidOperationException ex)
-        {
-            // Closed-DB guard is the IsClosed flag (no message sniffing).
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping map save: {ex.Message}");
-            foreach (var mi in cleared)
-            {
-                mi.Lock.EnterWriteLock();
-                try { mi.MapChanged = true; mi.IsModified = true; }
-                finally { mi.Lock.ExitWriteLock(); }
-            }
-            return;
+            }, onRollback: RestoreCleared);
         }
         catch (Exception ex)
         {
-            // Closed-DB races only (no message sniffing): anything else propagates.
+            // Closed-DB guard is the IsClosed flag (no message sniffing);
+            // closed-DB races only — anything else propagates.
             if (!AtherizDbContext.IsClosed) throw;
             AtherizLogger.LogWarning($"database closed; skipping map save: {ex.Message}");
-            foreach (var mi in cleared)
-            {
-                mi.Lock.EnterWriteLock();
-                try { mi.MapChanged = true; mi.IsModified = true; }
-                finally { mi.Lock.ExitWriteLock(); }
-            }
+            RestoreCleared();
             return;
         }
         // Success path only (every failure path above returns or throws):
@@ -1122,12 +1076,7 @@ public class MapHandler
 
     private static void SendUnbackground(GameObject listener)
     {
-        try
-        {
-            var conn = listener.Session?.Connection;
-            conn?.SendCommand("unbackground", new List<object?> { "" }, null);
-        }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.SendUnbackground: " + logEx.Message, "MapHandler"); }
+        MapInfo.Suppress(() => { listener.Session?.Connection?.SendCommand("unbackground", new List<object?> { "" }, null); }, "SendUnbackground");
     }
 
     public void MoveMapable(GameObject mapable, Coord toCoord, Coord? fromCoord = null)

@@ -77,16 +77,18 @@ public class GlbMutationPersistenceTests
     // --- Exposed chains mapping must be a snapshot ---
 
     [Fact]
-    public void MapEdit_ChainsSnapshot_SurvivesClearOfExposedDictionary()
+    public void MapEdit_ChainsSnapshot_ReturnsIndependentCopies()
     {
-        // The exposed chains mapping (MapEdit.cs:98-99) must be a snapshot like
-        // ChainsSnapshot (MapEdit.cs:101-109): clearing it must not evict live
-        // chains from the store.
+        // The exposed chains mapping must be a per-call copy, never the live
+        // store: two snapshots are independent objects, and the granted chain
+        // is visible through fresh snapshots.
         MapEdit.Reset();
         try
         {
             string key = MapEdit.Grant("9.9.9.9", "limbo", 0, session: null);
-            MapEdit.chains.Clear();
+            var a = MapEdit.ChainsSnapshot;
+            var b = MapEdit.ChainsSnapshot;
+            Assert.NotSame(a, b);
             Assert.NotNull(MapEdit.GetChain(key));
             Assert.Single(MapEdit.ChainsSnapshot);
         }
@@ -94,18 +96,21 @@ public class GlbMutationPersistenceTests
     }
 
     [Fact]
-    public void MapEdit_ChainsSnapshot_SurvivesInsertIntoExposedDictionary()
+    public void MapEdit_ChainsSnapshot_IsFrozenAtCallTime()
     {
-        // Writing through the exposed chains mapping (MapEdit.cs:98-99) must
-        // not plant entries in the store: only Grant/AddChain may do that.
+        // A snapshot is frozen at call time: chains granted afterwards are
+        // invisible to it but visible to fresh snapshots. Only Grant/AddChain
+        // may plant entries in the store.
         MapEdit.Reset();
         try
         {
             string key = MapEdit.Grant("9.9.9.9", "limbo", 0, session: null);
             Assert.NotNull(MapEdit.GetChain(key));
-            MapEdit.chains["injected"] = new MapEditChain("injected", "9.9.9.9", "limbo", 0);
-            Assert.False(MapEdit.ChainsSnapshot.ContainsKey("injected"));
-            Assert.Single(MapEdit.ChainsSnapshot);
+            var before = MapEdit.ChainsSnapshot;
+            string key2 = MapEdit.Grant("9.9.9.8", "limbo", 0, session: null);
+            Assert.False(before.ContainsKey(key2));
+            Assert.True(MapEdit.ChainsSnapshot.ContainsKey(key2));
+            Assert.NotSame(before, MapEdit.ChainsSnapshot);
         }
         finally { MapEdit.Reset(); }
     }

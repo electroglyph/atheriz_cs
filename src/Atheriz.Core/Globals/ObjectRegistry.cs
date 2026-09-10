@@ -521,6 +521,23 @@ public static class ObjectRegistry
             finally { o.SyncRoot.ExitReadLock(); }
         }).ToList();
 
+        // Best-effort dirty-restore shared by every failure path below:
+        // per-item suppression so one torn lock can't abort the restore
+        // of the rest (shutdown races).
+        static void Restore(IEnumerable<GameObject> objs)
+        {
+            foreach (var o in objs)
+            {
+                try
+                {
+                    o.SyncRoot.EnterWriteLock();
+                    try { o.IsModified = true; }
+                    finally { o.SyncRoot.ExitWriteLock(); }
+                }
+                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.SaveObjects: " + logEx.Message, "BoundedDictionary"); }
+            }
+        }
+
         List<(GameObject obj, string json)> pending = [];
         List<GameObject> cleared = [];
         foreach (var obj in filtered)
@@ -540,23 +557,7 @@ public static class ObjectRegistry
                 // row aborts the whole checkpoint — nothing has been written yet,
                 // so restore every cleared flag and rethrow (the transaction
                 // below never runs).
-                foreach (var c in cleared)
-                {
-                    try
-                    {
-                        c.SyncRoot.EnterWriteLock();
-                        try { c.IsModified = true; }
-                        finally { c.SyncRoot.ExitWriteLock(); }
-                    }
-                    catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.SaveObjects: " + logEx.Message, "BoundedDictionary"); }
-                }
-                try
-                {
-                    obj.SyncRoot.EnterWriteLock();
-                    try { obj.IsModified = true; }
-                    finally { obj.SyncRoot.ExitWriteLock(); }
-                }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.SaveObjects: " + logEx.Message, "BoundedDictionary"); }
+                Restore(cleared.Append(obj));
                 throw;
             }
         }
@@ -575,9 +576,7 @@ public static class ObjectRegistry
                         // phase but this row is not being written — restore dirty
                         // so the next checkpoint retries (for deleted/evicted
                         // objects the flag dies with the object; harmless).
-                        obj.SyncRoot.EnterWriteLock();
-                        try { obj.IsModified = true; }
-                        finally { obj.SyncRoot.ExitWriteLock(); }
+                        Restore([obj]);
                         continue;
                     }
                     DbTransactionHelper.UpsertJson(ctx.Objects, () => ctx.Objects.Find(obj.Id), () => new ObjectRow { Id = obj.Id, Version = 1 }, json, row =>
@@ -585,42 +584,14 @@ public static class ObjectRegistry
                         row.Type = obj.IsAccount ? "account" : obj.IsChannel ? "channel" : "object";
                     });
                 }
-            }, onRollback: () =>
-            {
-                foreach (var (obj, _) in pending)
-                {
-                    obj.SyncRoot.EnterWriteLock();
-                    try { obj.IsModified = true; }
-                    finally { obj.SyncRoot.ExitWriteLock(); }
-                }
-            });
-        }
-        catch (InvalidOperationException ex)
-        {
-            // Closed-DB guard is the IsClosed flag (no message sniffing).
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
-            AtherizLogger.LogWarning("database closed");
-            foreach (var (obj, _) in pending)
-            {
-                obj.SyncRoot.EnterWriteLock();
-                try { obj.IsModified = true; }
-                finally { obj.SyncRoot.ExitWriteLock(); }
-            }
-            return;
+            }, onRollback: () => Restore(pending.Select(p => p.obj)));
         }
         catch (Exception ex)
         {
             // Closed-DB races only (no message sniffing): anything else propagates.
             if (!AtherizDbContext.IsClosed) throw;
             AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
-            AtherizLogger.LogWarning("database closed");
-            foreach (var (obj, _) in pending)
-            {
-                obj.SyncRoot.EnterWriteLock();
-                try { obj.IsModified = true; }
-                finally { obj.SyncRoot.ExitWriteLock(); }
-            }
+            Restore(pending.Select(p => p.obj));
             return;
         }
     }
@@ -636,53 +607,29 @@ public static class ObjectRegistry
     public static void SaveObjects(string savePath, bool force = false)
     {        AtherizDbContext db;
         try { db = new AtherizDbContext(savePath); }
-        catch (InvalidOperationException ex)
+        catch (Exception ex)
         {
             // Closed-DB guard is the IsClosed flag (no message sniffing).
             if (!AtherizDbContext.IsClosed) throw;
             AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
-            AtherizLogger.LogWarning("database closed");
             // restore cleared flags? none yet, but ensure pending objects stay dirty
             // We haven't built pending yet, so nothing to restore; just log warning not exception
-            return;
-        }
-        catch (Exception ex)
-        {
-            // Closed-DB races only (no message sniffing): anything else propagates.
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
             return;
         }
         using (db)
         {
             try { db.Database.EnsureCreated(); }
-            catch (InvalidOperationException ex)
-            {
-                // Closed-DB guard is the IsClosed flag (no message sniffing).
-                if (!AtherizDbContext.IsClosed) throw;
-                AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
-                AtherizLogger.LogWarning("database closed");
-                return;
-            }
             catch (Exception ex)
             {
-                // Closed-DB races only (no message sniffing): anything else propagates.
+                // Closed-DB guard is the IsClosed flag (no message sniffing).
                 if (!AtherizDbContext.IsClosed) throw;
                 AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
                 return;
             }
             try { SaveObjects(db, force); }
-            catch (InvalidOperationException ex)
-            {
-                // Closed-DB guard is the IsClosed flag (no message sniffing).
-                if (!AtherizDbContext.IsClosed) throw;
-                AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
-                AtherizLogger.LogWarning("database closed");
-                return;
-            }
             catch (Exception ex)
             {
-                // Closed-DB races only (no message sniffing): anything else propagates.
+                // Closed-DB guard is the IsClosed flag (no message sniffing).
                 if (!AtherizDbContext.IsClosed) throw;
                 AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
                 return;

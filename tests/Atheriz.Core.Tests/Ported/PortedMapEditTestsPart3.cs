@@ -34,33 +34,33 @@ public class PortedMapEditTestsPart3
             Atheriz.Core.Settings.AtherizSettings.Global.MapeditMaxChains = 2;
             var k1 = MapEdit.Grant("1.1.1.1","A",0);
             var k2 = MapEdit.Grant("1.1.1.1","A",0);
-            Assert.Equal(2, MapEdit.chains.Count);
+            Assert.Equal(2, MapEdit.ChainsSnapshot.Count);
             // Backdating creation must NOT evict (no TTL).
             var now = ((double)System.Diagnostics.Stopwatch.GetTimestamp() / System.Diagnostics.Stopwatch.Frequency);
-            foreach(var ch in MapEdit.chains.Values.ToList()){
+            foreach(var ch in MapEdit.ChainsSnapshot.Values.ToList()){
                 ch.CreatedAt = DateTime.UtcNow.AddSeconds(-100000);
                 ch.CreatedMonotonic = now - 100000;
             }
             MapEdit.ClearStale();
-            Assert.Equal(2, MapEdit.chains.Count);
+            Assert.Equal(2, MapEdit.ChainsSnapshot.Count);
             // Cap still enforced: oldest-created evicted first.
             // Note: backdated chains are oldest, so k1 goes first.
             var k3 = MapEdit.Grant("1.1.1.1","A",0);
-            Assert.True(MapEdit.chains.Count<=2);
+            Assert.True(MapEdit.ChainsSnapshot.Count<=2);
             // Session-bound chains die with the session, others survive.
             MapEdit.Reset();
             var session = new Session(null);
             var ks = MapEdit.Grant("1.1.1.1","A",0, session);
             var ko = MapEdit.Grant("1.1.1.1","A",0);
             MapEdit.DiscardSession(session);
-            Assert.DoesNotContain(ks, MapEdit.chains.Keys);
-            Assert.Contains(ko, MapEdit.chains.Keys);
+            Assert.DoesNotContain(ks, MapEdit.ChainsSnapshot.Keys);
+            Assert.Contains(ko, MapEdit.ChainsSnapshot.Keys);
             MapEdit.DiscardSession(null);
-            Assert.Contains(ko, MapEdit.chains.Keys);
+            Assert.Contains(ko, MapEdit.ChainsSnapshot.Keys);
             // AtDisconnect discards the session's chains.
             var ks2 = MapEdit.Grant("1.1.1.1","A",0, session);
             session.AtDisconnect();
-            Assert.DoesNotContain(ks2, MapEdit.chains.Keys);
+            Assert.DoesNotContain(ks2, MapEdit.ChainsSnapshot.Keys);
         } finally{
             Atheriz.Core.Settings.AtherizSettings.Global.MapeditMaxChains = origMax;
             MapEdit.Reset();

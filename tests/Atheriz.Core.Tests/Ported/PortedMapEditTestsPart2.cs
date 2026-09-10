@@ -42,7 +42,7 @@ public class PortedMapEditTestsPart2
         Assert.Single(sent); Assert.Equal("map_ack", sent[0].Cmd);
         Assert.Equal(0, sent[0].Args[0]);
         Assert.NotEqual(key, sent[0].Args[1] as string);
-        Assert.True(MapEdit.chains.ContainsKey(sent[0].Args[1] as string ?? ""));
+        Assert.True(MapEdit.ChainsSnapshot.ContainsKey(sent[0].Args[1] as string ?? ""));
     }
 
     [Fact] public void MapEditAppliesColorCells()
@@ -188,8 +188,8 @@ public class PortedMapEditTestsPart2
         Assert.Equal("moves_ok", ((FakeConn2)conn).Sent[1].Cmd);
         var seq = (int)((FakeConn2)conn).Sent[1].Args[0]!; var newKey = ((FakeConn2)conn).Sent[1].Args[1] as string;
         Assert.Equal(1, seq); Assert.NotNull(newKey);
-        Assert.True(MapEdit.chains.ContainsKey(newKey!));
-        Assert.True(MapEdit.chains[newKey!].Validation!.Count==0);
+        Assert.True(MapEdit.ChainsSnapshot.ContainsKey(newKey!));
+        Assert.True(MapEdit.ChainsSnapshot[newKey!].Validation!.Count==0);
     }
 
     [Fact] public void MapValidateMovesDenied()
@@ -237,7 +237,7 @@ public class PortedMapEditTestsPart2
         Assert.Equal(((FakeConn2)conn).Sent[1].Args[0], ((FakeConn2)conn).Sent[2].Args[0]);
         Assert.Equal(((FakeConn2)conn).Sent[1].Args[1], ((FakeConn2)conn).Sent[2].Args[1]);
         Assert.Equal(((FakeConn2)conn).Sent[1].Args[2], ((FakeConn2)conn).Sent[2].Args[2]);
-        Assert.True(MapEdit.chains[verdictKey!].Validation!.SequenceEqual(new List<int>{0}));
+        Assert.True(MapEdit.ChainsSnapshot[verdictKey!].Validation!.SequenceEqual(new List<int>{0}));
     }
 
     [Fact] public void MapValidateMovesUnknownAreaDeniesAll()
@@ -330,6 +330,6 @@ public class PortedMapEditTestsPart2
         Assert.Equal(3, ((FakeConn2)conn).Sent.Count);
         Assert.Equal(((FakeConn2)conn).Sent[1].Cmd, ((FakeConn2)conn).Sent[2].Cmd);
         Assert.Equal(verdictKey, ((FakeConn2)conn).Sent[2].Args[1] as string);
-        Assert.Empty(MapEdit.chains[verdictKey!].Validation!);
+        Assert.Empty(MapEdit.ChainsSnapshot[verdictKey!].Validation!);
     }
 }

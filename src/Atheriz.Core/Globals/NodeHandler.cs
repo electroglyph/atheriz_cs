@@ -363,16 +363,11 @@ public partial class NodeHandler
     {
         if (!force && !ObjectRegistry.AlwaysSaveAll && !IsDirty()) return;
         try { Save(global::Atheriz.Core.Persistence.AtherizDbContextFactory.Create(), force); }
-        catch (InvalidOperationException ex)
-        {
-            // Closed-DB guard is the IsClosed flag (no message sniffing).
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
-            return;
-        }
         catch (Exception ex)
         {
-            // Closed-DB races only (no message sniffing): anything else propagates.
+            // Closed-DB guard is the IsClosed flag (no message sniffing):
+            // anything else propagates. One catch covers
+            // InvalidOperationException too (it derives from Exception).
             if (!AtherizDbContext.IsClosed) throw;
             AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
             return;
@@ -626,21 +621,15 @@ public partial class NodeHandler
                 RestoreSaveFlags(handlerWas, transWas, doorsWas, clearedAreas, clearedGrids, clearedNodes);
             });
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex)
         {
-            // Closed-DB guard is the IsClosed flag (no message sniffing).
+            // Closed-DB guard is the IsClosed flag (no message sniffing):
+            // anything else propagates. One catch covers
+            // InvalidOperationException too (it derives from Exception).
             if (!AtherizDbContext.IsClosed) throw;
             AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
             // restore already handled via onRollback for transaction failure, but for gate failure before transaction we restored via catch above
             // Ensure flags restored
-            RestoreSaveFlags(handlerWas, transWas, doorsWas, clearedAreas, clearedGrids, clearedNodes);
-            return;
-        }
-        catch (Exception ex)
-        {
-            // Closed-DB races only (no message sniffing): anything else propagates.
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping node save: {ex.Message}");
             RestoreSaveFlags(handlerWas, transWas, doorsWas, clearedAreas, clearedGrids, clearedNodes);
             return;
         }

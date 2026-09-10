@@ -37,17 +37,16 @@ public class GlobalsP3BatchThreeTests
         }
     }
 
-    // chains and ChainsSnapshot share one snapshot body: equal contents,
-    // and only one lock+copy implementation left in the file.
+    // ChainsSnapshot is the single snapshot body: exactly one lock+copy
+    // implementation left in the file.
     [Fact]
-    public void MapEdit_Chains_ShareOneSnapshotBody()
+    public void MapEdit_ChainsSnapshot_SingleCopyBody()
     {
         MapEdit.Reset();
         try
         {
             var k = MapEdit.Grant("1.1.1.1", "limbo", 0);
-            Assert.Equal(MapEdit.ChainsSnapshot.Keys.OrderBy(x => x), MapEdit.chains.Keys.OrderBy(x => x));
-            Assert.True(MapEdit.chains.ContainsKey(k));
+            Assert.True(MapEdit.ChainsSnapshot.ContainsKey(k));
             var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "MapEdit.cs");
             Assert.Equal(1, SourceScan.Count(src, "new Dictionary<string, MapEditChain>(_chains)"));
         }
@@ -64,7 +63,7 @@ public class GlobalsP3BatchThreeTests
             var k = MapEdit.Grant("2.2.2.2", "limbo", 0);
             Assert.True(MapEdit.RemoveChain(k));
             Assert.False(MapEdit.ChainsSnapshot.ContainsKey(k));
-            Assert.False(MapEdit.chains.ContainsKey(k));
+            Assert.False(MapEdit.ChainsSnapshot.ContainsKey(k));
             var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "MapEdit.cs");
             Assert.Equal(4, SourceScan.Count(src, "CollectStalePreviousLocked();"));
         }
