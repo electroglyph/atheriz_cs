@@ -32,7 +32,8 @@ public class AsyncThreadPool : IDisposable
     private readonly Dictionary<long, (string Name, double StartedSeconds)> _currentTasks = new();
     private double? _saturatedSince;
     private double _lastStarvationLog;
-    private Thread? _watchdogThread;
+    private Timer? _watchdogTimer;
+    private int _watchdogRunning; // Interlocked guard: Timer ticks must not overlap a slow tick
     private bool _disposed;
 
     private sealed record WorkItem(Func<Task> Runner, string Name);
@@ -53,8 +54,7 @@ public class AsyncThreadPool : IDisposable
 
         // Port of Python pool layout: threads[0] is the async thread and
         // threads[1:] are the fixed workers, so maxThreads counts the async
-        // slot plus (maxThreads-1) workers. The Threads property exposes the
-        // same alignment (dummy async placeholder + fixed workers).
+        // slot plus (maxThreads-1) workers.
         for (int i = 0; i < _maxThreads - 1; i++)
         {
             var t = new Thread(WorkLoop) { IsBackground = true, Name = $"AtherizWorker-{i}" };
@@ -68,8 +68,9 @@ public class AsyncThreadPool : IDisposable
             _fixedThreads.Add(t);
         }
 
-        _watchdogThread = new Thread(WatchdogLoop) { IsBackground = true, Name = "AsyncThreadPoolWatchdog" };
-        _watchdogThread.Start();
+        // Watchdog runs on a Timer, not a dedicated thread: the Timer IS the
+        // interval, so no slice-sleep loop and no extra thread per pool.
+        _watchdogTimer = new Timer(WatchdogTick, null, _watchdogInterval, _watchdogInterval);
     }
 
     public int MaxThreads => _maxThreads;
@@ -91,23 +92,6 @@ public class AsyncThreadPool : IDisposable
     public int ReliefCount { get { lock (_lock) return _reliefCount; } }
     public IReadOnlyList<Thread> FixedThreads { get { lock (_lock) return _fixedThreads.ToList(); } }
     public IReadOnlyList<Thread> ReliefThreads { get { lock (_lock) return _reliefThreads.ToList(); } }
-    public IReadOnlyList<Thread> Threads
-    {
-        get
-        {
-            lock (_lock)
-            {
-                // Mimic Python's threads[0]=AsyncThread, threads[1:]=fixed workers
-                List<Thread> list = [];
-                // dummy async placeholder thread (not started) to keep index alignment for tests that check threads[1:]
-                // We create a stub thread that is not alive; Python's AsyncThread stops on pool stop.
-                var dummy = new Thread(() => {}) { IsBackground = true, Name = "AsyncThread0" };
-                list.Add(dummy);
-                list.AddRange(_fixedThreads);
-                return list;
-            }
-        }
-    }
     public bool IsStopped { get { lock (_lock) return _stopped; } }
 
     private void WorkLoop(object? arg)
@@ -323,21 +307,13 @@ public class AsyncThreadPool : IDisposable
         }
     }
 
-    private void WatchdogLoop()
+    private void WatchdogTick(object? state)
     {
-        while (true)
+        // A slow tick (LogStarvation does file IO outside the lock) must not
+        // overlap the next interval: skip instead of stacking up.
+        if (Interlocked.Exchange(ref _watchdogRunning, 1) == 1) return;
+        try
         {
-            // Sleep in slices so Stop can exit quickly instead of blocking up to 5s in one sleep
-            // Use 50ms slice to respect small watchdog intervals in tests (e.g. 0.1s)
-            var slice = TimeSpan.FromMilliseconds(50);
-            var total = TimeSpan.Zero;
-            while (total < _watchdogInterval)
-            {
-                // Event wait instead of Thread.Sleep so Stop wakes the watchdog immediately.
-                _stopEvent.Wait(slice);
-                total += slice;
-                lock (_lock) { if (_stopped) return; }
-            }
             bool stopped;
             int busy;
             lock (_lock) { stopped = _stopped; busy = _busy; }
@@ -374,6 +350,7 @@ public class AsyncThreadPool : IDisposable
                 lock (_lock) _saturatedSince = null;
             }
         }
+        finally { Interlocked.Exchange(ref _watchdogRunning, 0); }
     }
 
     private void LogStarvation(int qsize, int busy, double duration, Dictionary<long, (string Name, double Started)> tasks)
@@ -421,16 +398,6 @@ public class AsyncThreadPool : IDisposable
             // Null arg passes through as null, matching the old DynamicInvoke behavior.
             if (del is Action<object> ao) return () => { ao(a0!); return null; };
             if (del is Func<object, Task> fo) return () => fo(a0!);
-            if (a0 is int i)
-            {
-                if (del is Action<int> ai) return () => { ai(i); return null; };
-                if (del is Func<int, Task> fi) return () => fi(i);
-            }
-            if (a0 is bool b)
-            {
-                if (del is Action<bool> ab) return () => { ab(b); return null; };
-                if (del is Func<bool, Task> fb) return () => fb(b);
-            }
             throw new ArgumentException($"Unsupported 1-arg delegate shape {del.Method.Name}; bind arguments into an Action/Func<Task> closure.", nameof(del));
         }
         throw new ArgumentException($"AddTask/Run accept at most 1 delegate argument; bind arguments into an Action/Func<Task> closure.", nameof(args));
@@ -458,7 +425,7 @@ public class AsyncThreadPool : IDisposable
     }
     public virtual void Run(Action action)
     {
-        try { action(); } catch (Exception ex) { Console.Error.WriteLine(ex.ToString()); }
+        try { action(); } catch (Exception ex) { try { AtherizLogger.LogError(ex.ToString()); } catch { Console.Error.WriteLine(ex.ToString()); } }
     }
 
     private bool AddInternal(Func<Task> runner, string name)
@@ -590,9 +557,14 @@ public class AsyncThreadPool : IDisposable
             foreach (var t in reliefSnap) t.Join(TimeSpan.FromSeconds(1));
             lock (_lock) _reliefThreads.RemoveAll(t => !t.IsAlive);
 
-            if (_watchdogThread is not null && _watchdogThread.IsAlive)
+            // Stop the watchdog first: Change-before-Dispose so no new tick
+            // starts, and an in-flight tick exits immediately on _stopped.
+            Timer? watchdog;
+            lock (_lock) { watchdog = _watchdogTimer; _watchdogTimer = null; }
+            if (watchdog is not null)
             {
-                _watchdogThread.Join(TimeSpan.FromSeconds(1));
+                try { watchdog.Change(Timeout.Infinite, Timeout.Infinite); } catch (ObjectDisposedException) { }
+                watchdog.Dispose();
             }
         }
     }

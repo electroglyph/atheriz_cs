@@ -29,7 +29,7 @@ public class PortedNetworkPureImportTests
         // Check that no AsyncThreadPool workers are running due to import
         var poolField = typeof(Atheriz.Core.Globals.GlobalServices).GetField("_asyncThreadPool", BindingFlags.NonPublic|BindingFlags.Static);
         var pool = poolField?.GetValue(null) as Atheriz.Core.Concurrency.AsyncThreadPool;
-        if (pool != null) Assert.True(pool.IsStopped || pool.Threads.Count <= 1);
+        if (pool != null) Assert.True(pool.IsStopped || pool.FixedThreads.Count <= 1);
     }
 
     // Document adaptation: original uses subprocess.run([sys.executable,"-c", CHILD]) to isolate;

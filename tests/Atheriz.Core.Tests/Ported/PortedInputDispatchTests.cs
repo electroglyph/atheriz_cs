@@ -177,7 +177,7 @@ public class PortedInputDispatchTests
         using var env = GlobalTestEnv.Enter();
         var atp = new AsyncThreadPool(maxThreads: 2, queueLimit: 10);
         var got = new List<int>();
-        atp.Run((Delegate)new Action<int>(got.Add), 1);
+        atp.Run((Delegate)new Action(() => got.Add(1)));
         Assert.Equal(new List<int>{1}, got);
         var ex = Record.Exception(() => atp.Run((Delegate)new Action(() => { throw new DivideByZeroException(); })));
         Assert.Null(ex);
