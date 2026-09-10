@@ -180,8 +180,7 @@ public class ObjectMessagingTests
     public void Door_TryOpenClose_Roundtrip_State()
     {
         // Pin: idempotent open/close both report success — when the door state
-        // already matches what was wanted, the answer is true (owner decision
-        // 2026-09-08; previously already_closed reported false).
+        // already matches what was wanted, the answer is true.
         var d = Door.Create(new Coord("limbo", 0, 0, 0), "east", new Coord("limbo", 2, 0, 0), "west", closed: true);
         var caller = GameObject.Create("opener");
         Assert.True(d.TryOpen(caller));

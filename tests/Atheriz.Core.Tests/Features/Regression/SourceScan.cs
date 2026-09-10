@@ -5,7 +5,7 @@ namespace Atheriz.Core.Tests.Features.Regression;
 // Shared source-scan helpers for regression tests.
 //
 // Behavioral tests are preferred where deterministic; source scans pin
-// races, lock-order, perf and style findings that cannot fail deterministically
+// races, lock-order, perf and style shapes that cannot fail deterministically
 // at runtime. Reflection is explicitly permitted in tests/.
 internal static class SourceScan
 {

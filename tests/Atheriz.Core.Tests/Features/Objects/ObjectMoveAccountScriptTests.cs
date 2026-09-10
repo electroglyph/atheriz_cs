@@ -6,12 +6,12 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
-// Regression pins for the Objects P3 cleanup batch: each fix is either a
+// Pins for object lifecycle/move/account/script behavior: each case is either a
 // race/perf/hygiene shape with no runtime-observable difference (pinned by
-// source scan, the accepted fallback per SourceScan) or a behavioral change
-// pinned by a test that fails on the old code.
+// source scan via SourceScan) or a behavioral change pinned by a test that
+// fails on the old code.
 [Collection("Ported")]
-public class ObjectP3BatchOneTests
+public class ObjectMoveAccountScriptTests
 {
     // The singleton caches its GlobalServices fallback so node-moves after
     // the first lookup skip the global lookup entirely.
@@ -60,8 +60,8 @@ public class ObjectP3BatchOneTests
         ObjectRegistry.ClearAll();
         try
         {
-            var node = new Node(new Coord("P3BatchOne", 0, 0, 0));
-            node.AddLink(new NodeLink("north", new Coord("P3BatchOne", 0, 1, 0), new List<string> { "n" }));
+            var node = new Node(new Coord("objmove", 0, 0, 0));
+            node.AddLink(new NodeLink("north", new Coord("objmove", 0, 1, 0), new List<string> { "n" }));
             var obj = GameObject.Create("walker");
             node.AddExits(obj);
             Assert.NotNull(obj.InternalCmdSet);
@@ -87,7 +87,7 @@ public class ObjectP3BatchOneTests
     public void AccountDelete_NullCaller_Succeeds()
     {
         using var env = GlobalTestEnv.Enter();
-        var acc = Account.Create("p3nullcaller", "pw");
+        var acc = Account.Create("nullcaller", "pw");
         if (ObjectRegistry.Get(acc.Id).Count == 0) ObjectRegistry.AddObject(acc);
         Assert.True(acc.Delete(null));
         Assert.True(acc.IsDeleted);
@@ -110,7 +110,7 @@ public class ObjectP3BatchOneTests
         ObjectRegistry.ClearAll();
         try
         {
-            var child = GameObject.Create("p3child");
+            var child = GameObject.Create("child");
             var script = new Script();
             script.InstallHooks(child);
             Assert.Same(child, script.Child);
@@ -133,7 +133,7 @@ public class ObjectP3BatchOneTests
         ObjectRegistry.ClearAll();
         try
         {
-            var child = GameObject.Create("p3hookchild");
+            var child = GameObject.Create("hookchild");
             var script = new Script();
             script.InstallHooks(child);
             script.RemoveHooks();
@@ -149,7 +149,7 @@ public class ObjectP3BatchOneTests
         ObjectRegistry.ClearAll();
         try
         {
-            var o = GameObject.Create("p3extra");
+            var o = GameObject.Create("extra");
             o.SetExtraJson("score", JsonSerializer.SerializeToElement(42));
             Assert.True(o.TryGetExtraJson("score", out var je));
             Assert.Equal(42, je.GetInt32());
@@ -174,8 +174,8 @@ public class ObjectP3BatchOneTests
         ObjectRegistry.ClearAll();
         try
         {
-            var o = GameObject.Create("p3followed");
-            var friend = GameObject.Create("p3friend");
+            var o = GameObject.Create("followed");
+            var friend = GameObject.Create("friend");
             o.AddFollower(friend.Id);
             o.IsModified = false;
             o.ClearFollowersExcept(new HashSet<int> { friend.Id });

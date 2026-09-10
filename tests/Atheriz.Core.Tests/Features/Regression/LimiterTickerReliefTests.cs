@@ -4,9 +4,9 @@ using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Features.Regression;
 
-// Regression pins for the P3 batch 7 (N-9..N-13).
+// Pins for limiter/ticker/relief-spawn behavior.
 [Collection("Ported")]
-public class P3BatchSevenTests
+public class LimiterTickerReliefTests
 {
     private static async Task<List<string?>> Collect(IEnumerable<string> chunks, int maxLine)
     {

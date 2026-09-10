@@ -7,9 +7,9 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
-// Regression pins for the Objects P3 batch 2.
+// Pins for ban/verb/login/visibility behavior.
 [Collection("Ported")]
-public class ObjectP3BatchTwoTests
+public class BanVerbLoginVisibilityTests
 {
     // Writing the canonical ban key clears the legacy spelling so no stale
     // key lingers beside it.
@@ -19,7 +19,7 @@ public class ObjectP3BatchTwoTests
         ObjectRegistry.ClearAll();
         try
         {
-            var o = GameObject.Create("p3banned");
+            var o = GameObject.Create("banned");
             o.SetExtraJson("banReason", JsonSerializer.SerializeToElement("old"));
             Assert.Equal("old", o.BanReason);
             o.BanReason = "new";
@@ -56,9 +56,9 @@ public class ObjectP3BatchTwoTests
         ObjectRegistry.ClearAll();
         try
         {
-            var node = new Node(new Coord("P3BatchTwo", 0, 0, 0));
+            var node = new Node(new Coord("banverb", 0, 0, 0));
             ObjectRegistry.AddObject(node);
-            var mover = GameObject.Create("p3stayer");
+            var mover = GameObject.Create("stayer");
             Assert.True(mover.MoveTo(node));
             Assert.Contains(mover.Id, node.ContentsSnapshot);
             node.IsModified = false;
@@ -75,10 +75,10 @@ public class ObjectP3BatchTwoTests
     public void Login_WrongName_Fails_RightCredentials_Pass()
     {
         using var env = GlobalTestEnv.Enter();
-        var acc = Account.Create("p3login", "correct-horse");
+        var acc = Account.Create("login", "correct-horse");
         Assert.False(acc.Login("someone-else", "correct-horse"));
-        Assert.True(acc.Login("p3login", "correct-horse"));
-        Assert.False(acc.Login("p3login", "wrong-horse"));
+        Assert.True(acc.Login("login", "correct-horse"));
+        Assert.False(acc.Login("login", "wrong-horse"));
     }
 
     [Fact]
@@ -110,8 +110,8 @@ public class ObjectP3BatchTwoTests
         ObjectRegistry.ClearAll();
         try
         {
-            var a = GameObject.Create("p3vara");
-            var b = GameObject.Create("p3varb");
+            var a = GameObject.Create("vara");
+            var b = GameObject.Create("varb");
             var input = new List<GameObject> { a, b };
             var result = ContentUtils.FilterVisible(input, null);
             Assert.Equal(2, result.Count);

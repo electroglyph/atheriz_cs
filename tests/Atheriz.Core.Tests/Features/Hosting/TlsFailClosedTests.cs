@@ -37,7 +37,7 @@ public class TlsFailClosedTests
     {
         // WebserverEnabled=false must not bind any interface — not even to fail
         // fast: an unparseable interface with the server off is a no-op, while the
-        // same interface with it on throws (owner decision 2026-09-08).
+        // same interface with it on throws.
         var pairs = new Dictionary<string, string?>
         {
             ["Atheriz:WebserverEnabled"] = "false",

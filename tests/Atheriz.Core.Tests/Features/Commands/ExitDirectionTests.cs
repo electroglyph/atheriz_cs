@@ -9,7 +9,6 @@ namespace Atheriz.Core.Tests.Features.Commands;
 // Both exit paths (the hidden "exit" command and room exit objects) break
 // following. NOTE: the room exit-object class is also named ExitCommand
 // (Atheriz.Core.Objects.ExitCommand) — always qualify which one is meant.
-// (C-7)
 [Collection("Ported")]
 public class ExitDirectionTests
 {

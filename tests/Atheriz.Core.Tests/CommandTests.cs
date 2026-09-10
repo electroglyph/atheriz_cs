@@ -76,9 +76,9 @@ public sealed class CommandTests
     [Fact]
     public void Command_HelpTrigger_SendsHelp()
     {
-        // Owner decision 2026-09-08: a pending REMAINDER positional absorbs even
-        // --help (free-text commands speak it). Echo's msg is REMAINDER, so
-        // "--help" parses as text instead of triggering help output.
+        // A pending REMAINDER positional absorbs even --help (free-text
+        // commands speak it). Echo's msg is REMAINDER, so "--help" parses
+        // as text instead of triggering help output.
         var puppet = new GameObject { Name = "Hero" };
         puppet.ClearMessages();
         var cmd = new EchoCommand();

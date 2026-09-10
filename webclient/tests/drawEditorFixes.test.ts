@@ -67,7 +67,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('finding 17: undoTo(checkpoint) reverts to an earlier depth', () => {
+describe('undoTo(checkpoint) reverts to an earlier depth', () => {
   it('pops back to the checkpoint depth and restores that state', () => {
     const state = new CanvasState(2, 2);
     const undo = new UndoStack();
@@ -85,7 +85,7 @@ describe('finding 17: undoTo(checkpoint) reverts to an earlier depth', () => {
   });
 });
 
-describe('finding 18: resize uses a per-layer bg default, not cell (0,0)', () => {
+describe('resize uses a per-layer bg default, not cell (0,0)', () => {
   it('grows overlays transparent and the background opaque regardless of (0,0)', () => {
     const state = new CanvasState(2, 2);
     state.addLayer(); // transparent overlay, now active
@@ -101,7 +101,7 @@ describe('finding 18: resize uses a per-layer bg default, not cell (0,0)', () =>
   });
 });
 
-describe('finding 19: cellEquals treats missing flags as false', () => {
+describe('cellEquals treats missing flags as false', () => {
   it('considers undefined flags equal to explicit false', () => {
     const noFlags = { char: '', fg: [204, 204, 204], bg: [-1, -1, -1] };
     const explicitFalse = {
@@ -121,7 +121,7 @@ describe('finding 19: cellEquals treats missing flags as false', () => {
   });
 });
 
-describe('finding 20: Add Layer is undoable', () => {
+describe('Add Layer is undoable', () => {
   it('clicking .add-layer-btn adds a layer and pushes an undo entry', () => {
     const container = document.createElement('div');
     container.id = 'layers';
@@ -138,7 +138,7 @@ describe('finding 20: Add Layer is undoable', () => {
   });
 });
 
-describe('finding 21: no-op strokes do not push undo', () => {
+describe('no-op strokes do not push undo', () => {
   it('LineTool click + Escape leaves no undo entry', () => {
     const state = new CanvasState(3, 3);
     const ctx = makeCtx(state);
@@ -173,7 +173,7 @@ describe('finding 21: no-op strokes do not push undo', () => {
   });
 });
 
-describe('finding 23: export skips hidden layers like the preview does', () => {
+describe('export skips hidden layers like the preview does', () => {
   it('omits a hidden overlay glyph from the export', () => {
     const state = new CanvasState(3, 1);
     state.addLayer();
@@ -196,7 +196,7 @@ describe('finding 23: export skips hidden layers like the preview does', () => {
   });
 });
 
-describe('finding 24: 180-degree rotate works', () => {
+describe('180-degree rotate works', () => {
   it('rotates an L-shape 180 degrees in place', () => {
     const state = new CanvasState(3, 3);
     for (const [c, r] of [[0, 0], [1, 0], [0, 1]]) {
@@ -228,7 +228,7 @@ describe('finding 24: 180-degree rotate works', () => {
   });
 });
 
-describe('finding 25: whole-layer move/rotate ignores pure-black background cells', () => {
+describe('whole-layer move/rotate ignores pure-black background cells', () => {
   it('MoveTool whole-layer drag leaves black and transparent cells behind', () => {
     const state = new CanvasState(5, 5);
     state.setCell(1, 1, { char: '', fg: [204, 204, 204], bg: [0, 0, 0] });
@@ -279,7 +279,7 @@ describe('finding 25: whole-layer move/rotate ignores pure-black background cell
   });
 });
 
-describe('finding 26: re-entrant modal open resolves the pending promise', () => {
+describe('re-entrant modal open resolves the pending promise', () => {
   beforeEach(() => {
     document.body.innerHTML = `
       <div id="type-tool-modal" class="hidden">
@@ -301,7 +301,7 @@ describe('finding 26: re-entrant modal open resolves the pending promise', () =>
   });
 });
 
-describe('finding 28: image import failure revokes the blob URL and reports', () => {
+describe('image import failure revokes the blob URL and reports', () => {
   beforeEach(() => {
     document.body.innerHTML = `
       <div id="image-import-modal" class="hidden">
@@ -348,7 +348,7 @@ describe('finding 28: image import failure revokes the blob URL and reports', ()
   });
 });
 
-describe('finding 30: SidebarResizer destroy removes window unload listeners', () => {
+describe('SidebarResizer destroy removes window unload listeners', () => {
   beforeEach(() => {
     const sidebar = document.createElement('div');
     sidebar.id = 'sidebar';
@@ -375,7 +375,7 @@ describe('finding 30: SidebarResizer destroy removes window unload listeners', (
   });
 });
 
-describe('finding 31: TextToANSI calculateGrid clamps rows on tiny canvases', () => {
+describe('TextToANSI calculateGrid clamps rows on tiny canvases', () => {
   it('returns at least one row and a sane column count for height 2', () => {
     expect(calculateGrid(10, 10, 80, 2, 0.5)).toEqual({ cols: 2, rows: 1 });
   });

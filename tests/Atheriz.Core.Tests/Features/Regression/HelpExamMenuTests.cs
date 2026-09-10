@@ -10,9 +10,9 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Regression;
 
-// Regression pins for the P3 batch 5 (Commands C-21..C-26).
+// Pins for help/exam/menu/validation behavior.
 [Collection("Ported")]
-public class P3BatchFiveTests
+public class HelpExamMenuTests
 {
     private static void RunJob(CommandDispatcher.Job? job)
     {
@@ -38,7 +38,7 @@ public class P3BatchFiveTests
         ObjectRegistry.ClearAll();
         try
         {
-            var admin = GameObject.Create("p3helped", privilege: Privilege.Admin);
+            var admin = GameObject.Create("helped", privilege: Privilege.Admin);
             ObjectRegistry.AddObject(admin);
             var job = CommandDispatcher.DispatchLoggedIn(admin, "help", immediate: true);
             RunJob(job);
@@ -67,20 +67,20 @@ public class P3BatchFiveTests
         ObjectRegistry.ClearAll();
         try
         {
-            var node = new Node(new Coord("P3Five", 0, 0, 0));
+            var node = new Node(new Coord("ExamArea", 0, 0, 0));
             ObjectRegistry.AddObject(node);
-            var admin = GameObject.Create("p3examiner", privilege: Privilege.Builder);
+            var admin = GameObject.Create("examiner", privilege: Privilege.Builder);
             ObjectRegistry.AddObject(admin);
             Assert.True(admin.MoveTo(node, announce: false));
             var jn = CommandDispatcher.DispatchLoggedIn(admin, "exam here", immediate: true);
             RunJob(jn);
-            Assert.Contains("area 'P3Five'", string.Join("\n", admin.PeekMessages()));
+            Assert.Contains("area 'ExamArea'", string.Join("\n", admin.PeekMessages()));
             admin.ClearMessages();
             var jo = CommandDispatcher.DispatchLoggedIn(admin, "exam me", immediate: true);
             RunJob(jo);
             var msgs = string.Join("\n", admin.PeekMessages());
             Assert.Contains("Examining", msgs);
-            Assert.DoesNotContain("area 'P3Five'", msgs);
+            Assert.DoesNotContain("area 'ExamArea'", msgs);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

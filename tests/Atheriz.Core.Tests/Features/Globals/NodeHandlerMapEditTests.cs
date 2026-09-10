@@ -4,9 +4,9 @@ using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Features.Globals;
 
-// Regression pins for the Globals P3 batch 3.
+// Pins for node-handler/map-edit/registry behavior.
 [Collection("Ported")]
-public class GlobalsP3BatchThreeTests
+public class NodeHandlerMapEditTests
 {
     private static FieldInfo? StaticField(Type t, string name) =>
         t.GetField(name, BindingFlags.NonPublic | BindingFlags.Static);

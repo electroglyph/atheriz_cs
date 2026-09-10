@@ -191,9 +191,9 @@ public class ObjectRegressionTests
     }
 
     // Unpuppet stack-pop + puppet-rewire must be one mutating critical section,
-    // with read-only ownership re-checks after AtUnpuppet (owner decision
-    // 2026-09-08: a concurrent Puppet during AtUnpuppet must not be clobbered;
-    // hooks run unlocked between the takes, so one take cannot cover all).
+    // with read-only ownership re-checks after AtUnpuppet (a concurrent Puppet
+    // during AtUnpuppet must not be clobbered; hooks run unlocked between the
+    // takes, so one take cannot cover all).
     [Fact]
     public void Unpuppet_IsSingleCriticalSection()
     {

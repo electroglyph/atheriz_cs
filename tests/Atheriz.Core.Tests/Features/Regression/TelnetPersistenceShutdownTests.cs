@@ -8,9 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Tests.Features.Regression;
 
-// Regression pins for the P3 batch 9 (N-19, N-21, N-22, N-23, S-17, S-18).
+// Pins for telnet/persistence/shutdown behavior.
 [Collection("Ported")]
-public class P3BatchNineTests
+public class TelnetPersistenceShutdownTests
 {
     // The reader header documents the deliberate throw contract; no comment
     // still promises read-errors-as-EOF.

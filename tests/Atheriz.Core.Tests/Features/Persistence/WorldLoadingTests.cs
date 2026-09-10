@@ -126,8 +126,8 @@ public class WorldLoadingTests
     {
         // Overwriting _areas[name] on load must NOT remove live nodes that were
         // never persisted: the fresh row has a hole where they live, and the row
-        // expresses no opinion about the cell (owner decision 2026-09-08 —
-        // re-insert, never evict newer in-memory state).
+        // expresses no opinion about the cell — re-insert, never evict newer
+        // in-memory state.
         using var env = GlobalTestEnv.Enter();
         var nh = new NodeHandler(autoLoad: false);
         NodeHandler.SetCurrent(nh);

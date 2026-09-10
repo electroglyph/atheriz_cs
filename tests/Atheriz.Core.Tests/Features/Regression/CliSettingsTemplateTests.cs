@@ -6,9 +6,9 @@ using Atheriz.Server.Infrastructure;
 
 namespace Atheriz.Core.Tests.Features.Regression;
 
-// Regression pins for the P3 batch 11 (S-24 – S-29).
+// Pins for CLI/settings/template behavior.
 [Collection("Ported")]
-public class P3BatchElevenTests
+public class CliSettingsTemplateTests
 {
     // The refusal message has one owner: a single StaleVerdict format site
     // formats the shared constant, and both stale paths (pre-create check
@@ -81,7 +81,7 @@ public class P3BatchElevenTests
     [Fact]
     public void TemplateGenerator_EscapesStringDefaults()
     {
-        var m = typeof(P3BatchElevenTests).GetMethod("NastyDefaults", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var m = typeof(CliSettingsTemplateTests).GetMethod("NastyDefaults", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var gen = typeof(GameTemplateGenerator).GetMethod("BuildParamList", BindingFlags.NonPublic | BindingFlags.Static)!;
         var decl = (string)gen.Invoke(null, new object[] { m })!;
         Assert.Contains("\\\"", decl);

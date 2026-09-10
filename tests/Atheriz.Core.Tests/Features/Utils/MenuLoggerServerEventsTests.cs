@@ -6,9 +6,9 @@ using Microsoft.Data.Sqlite;
 
 namespace Atheriz.Core.Tests.Features.Utils;
 
-// Batch M (Menu/Logger/ServerEvents/InitialSetup) regression pins.
+// Pins for menu/logger/server-events/setup behavior.
 [Collection("Ported")]
-public class BatchMRegressionTests
+public class MenuLoggerServerEventsTests
 {
     // Port of menu.py asyncio.wait_for cancelling the prompt coroutine: a timed-out
     // prompt must complete (not hang) and leave no orphaned InputFuture.

@@ -12,7 +12,7 @@ import {
   __resetLaunchThrottleForTests,
 } from '../src/webclient/launch';
 
-describe('finding: SequentialWriter keeps wire order and survives stalls', () => {
+describe('SequentialWriter keeps wire order and survives stalls', () => {
   it('writes chunks in order and drains once per cycle', () => {
     const writes: string[] = [];
     const pendingDone: Array<() => void> = [];
@@ -109,7 +109,7 @@ describe('finding: SequentialWriter keeps wire order and survives stalls', () =>
   });
 });
 
-describe('finding 7: inputHeight caps runaway input growth', () => {
+describe('inputHeight caps runaway input growth', () => {
   it('clamps to [minimum, maximum]', () => {
     expect(inputHeight(80)).toBe(80);
     expect(inputHeight(10)).toBe(30);
@@ -118,7 +118,7 @@ describe('finding 7: inputHeight caps runaway input growth', () => {
   });
 });
 
-describe('finding 8: parseBackground rejects non-integer coords and colors', () => {
+describe('parseBackground rejects non-integer coords and colors', () => {
   it('rejects float coords', () => {
     expect(parseBackground([{ color: [255, 0, 0], coords: [[1.5, 2]] }])).toBeUndefined();
   });
@@ -142,7 +142,7 @@ describe('finding 8: parseBackground rejects non-integer coords and colors', () 
   });
 });
 
-describe('finding 14: recorder event cap bounds memory', () => {
+describe('recorder event cap bounds memory', () => {
   it('drops oldest events past MAX_EVENTS', () => {
     const rec = new SessionRecorder();
     rec.start({ cols: 80, rows: 24 }, { cols: 80, rows: 24 }, 50, true);
@@ -154,7 +154,7 @@ describe('finding 14: recorder event cap bounds memory', () => {
   });
 });
 
-describe('finding 2: launchDraw stores the grant before the throttle gate', () => {
+describe('launchDraw stores the grant before the throttle gate', () => {
   beforeEach(() => {
     __resetLaunchThrottleForTests();
     window.localStorage.clear();

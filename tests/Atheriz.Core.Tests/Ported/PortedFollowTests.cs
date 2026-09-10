@@ -55,8 +55,8 @@ public class PortedFollowTests
     public void Refollow_CleansOldLeaderEntry()
     {
         // Re-following a new target must remove the follower from the old
-        // leader (owner decision 2026-09-08 — otherwise the old leader keeps a
-        // stale id that passes group eligibility and never drains).
+        // leader — otherwise the old leader keeps a stale id that passes
+        // group eligibility and never drains.
         using var env = GlobalTestEnv.Enter();
         var tup = SetupTestNodes("refollow");
         var n1 = tup.n1;

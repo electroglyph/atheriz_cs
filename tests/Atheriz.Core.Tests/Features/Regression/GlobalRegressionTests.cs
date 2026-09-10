@@ -334,8 +334,8 @@ public class GlobalRegressionTests
     }
 
     // load graft hole: a live-modified node whose cell is absent from the fresh row
-    // must be re-inserted, not evicted (owner decision 2026-09-08 — the row expresses
-    // no opinion about the cell, so evicting destroys newer in-memory edits).
+    // must be re-inserted, not evicted (the row expresses no opinion about the
+    // cell, so evicting destroys newer in-memory edits).
     [Fact]
     public void LoadGraft_HoleReinsertsLiveModifiedNode()
     {
@@ -397,8 +397,8 @@ public class GlobalRegressionTests
     }
 
     // Remap collisions are first-wins and loud: a relocated dict landing on an
-    // occupied destination keeps the pre-existing per-name door and logs the drop
-    // (owner decision 2026-09-08 — never silently clobber on a merge).
+    // occupied destination keeps the pre-existing per-name door and logs the drop;
+    // merges never silently clobber.
     [Fact]
     public void RemapDoors_CollisionKeepsPreexistingAndLogs()
     {

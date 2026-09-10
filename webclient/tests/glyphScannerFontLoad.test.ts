@@ -35,7 +35,7 @@ afterEach(() => {
   delete (document as unknown as Record<string, unknown>).fonts;
 });
 
-describe('finding 27: GlyphScanner awaits the real webfont and caches honestly', () => {
+describe('GlyphScanner awaits the real webfont and caches honestly', () => {
   it('waits for document.fonts.load and caches the result', async () => {
     const load = vi.fn().mockResolvedValue([]);
     stubFontLoad(load);

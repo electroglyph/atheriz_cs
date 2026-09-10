@@ -29,7 +29,7 @@ public class ArgumentParserTests
     public void Parser_Remainder_SwallowsDashFirstToken()
     {
         // REMAINDER consumes everything remaining, including a leading dash
-        // token (owner decision 2026-09-08 — `say --help` must speak, not throw).
+        // token (`say --help` must speak, not throw).
         var p = new GameArgumentParser("say");
         p.AddArgument("text").Nargs("REMAINDER");
         var pa = p.ParseArgs(["--help"]);

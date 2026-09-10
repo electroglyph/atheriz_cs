@@ -5,9 +5,9 @@ using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Features.Regression;
 
-// Regression pins for the P3 batch 8 (N-14..N-18).
+// Pins for connection/input/setup behavior.
 [Collection("Ported")]
-public class P3BatchEightTests
+public class ConnectionInputSetupTests
 {
     private static bool IsColor(object? v)
     {

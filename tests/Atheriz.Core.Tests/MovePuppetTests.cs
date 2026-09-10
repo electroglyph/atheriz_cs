@@ -109,8 +109,7 @@ public class MovePuppetTests
     public void Unpuppet_MidHookRepuppet_KeepsNewPuppet()
     {
         // Unpuppet must not apply its stale restore over a puppet installed
-        // during AtUnpuppet (owner decision 2026-09-08): the new owner keeps
-        // IsPc/session/snapshot.
+        // during AtUnpuppet: the current puppet keeps IsPc/session/snapshot.
         Globals.ObjectRegistry.ClearAll();
         var s1 = new Session(connection: null);
         var p1 = GameObject.Create("P1", isPc: true);

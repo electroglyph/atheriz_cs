@@ -387,7 +387,7 @@ public class CommandRegressionTests
     }
 
     // Glued lookup is internal-first like the normal path: an internal "'"
-    // verb shadows global say on "'hello" (owner decision 2026-09-08).
+    // verb shadows global say on "'hello".
     [Fact]
     public void GluedPath_PrefersInternalOverGlobal()
     {

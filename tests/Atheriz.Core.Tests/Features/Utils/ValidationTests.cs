@@ -120,7 +120,7 @@ public sealed class ValidationTests
     [Fact]
     public void Coord_TryParse_BareArea_IsOrigin()
     {
-        // Audit-over-ported: bare area names no longer parse as origin.
+        // Bare area names no longer parse as origin.
         Assert.False(Coord.TryParse("limbo", out _));
     }
 

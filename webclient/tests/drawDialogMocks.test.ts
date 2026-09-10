@@ -63,7 +63,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('finding 27: CharMapDialog scan generation guard', () => {
+describe('CharMapDialog scan generation guard', () => {
   it('a slow earlier scan does not overwrite a newer font grid', async () => {
     setupCharMapDom();
     const resolvers: Array<(glyphs: number[]) => void> = [];
@@ -86,7 +86,7 @@ describe('finding 27: CharMapDialog scan generation guard', () => {
   });
 });
 
-describe('finding 29: GoogleFontPicker preview-concurrency counter', () => {
+describe('GoogleFontPicker preview-concurrency counter', () => {
   it('close() leaves in-flight accounting intact so the counter returns to zero', async () => {
     setupGfpDom();
     const picker = new GoogleFontPicker(() => {});

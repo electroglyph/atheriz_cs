@@ -9,9 +9,9 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Regression;
 
-// Regression pins for the P3 batch 4 (Globals tail + Commands head).
+// Pins for setup/channel-alias/command-shape behavior.
 [Collection("Ported")]
-public class P3BatchFourTests
+public class SetupChannelAliasTests
 {
     // One MapInfo name going forward: EnsureMapInfo does the lookup, the old
     // name survives only as an obsolete alias.
@@ -20,8 +20,8 @@ public class P3BatchFourTests
     {
         using var env = GlobalTestEnv.Enter();
         var mh = new MapHandler(autoLoad: false);
-        var a = mh.EnsureMapInfo("P3Four", 0);
-        Assert.Same(a, mh.EnsureMapInfo("P3Four", 0));
+        var a = mh.EnsureMapInfo("setupalias", 0);
+        Assert.Same(a, mh.EnsureMapInfo("setupalias", 0));
         var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "MapHandler.cs");
         Assert.Contains("[Obsolete(\"Use EnsureMapInfo", src);
     }
@@ -77,9 +77,9 @@ public class P3BatchFourTests
         ObjectRegistry.ClearAll();
         try
         {
-            var node = new Node(new Coord("P3Four", 0, 0, 0));
+            var node = new Node(new Coord("setupalias", 0, 0, 0));
             ObjectRegistry.AddObject(node);
-            var admin = GameObject.Create("p3setter", privilege: Privilege.Admin);
+            var admin = GameObject.Create("setter", privilege: Privilege.Admin);
             ObjectRegistry.AddObject(admin);
             Assert.True(admin.MoveTo(node, announce: false));
             var j = CommandDispatcher.DispatchLoggedIn(admin, "set here Coord nonsense", immediate: true);
@@ -98,13 +98,13 @@ public class P3BatchFourTests
     {
         using var env = GlobalTestEnv.Enter();
         var origSave = AtherizSettings.Global.SavePath;
-        var tmp = Path.Combine(env.TempPath, "p3spam");
+        var tmp = Path.Combine(env.TempPath, "spam");
         Directory.CreateDirectory(tmp);
         AtherizSettings.Global.SavePath = tmp;
         ObjectRegistry.ClearAll();
         try
         {
-            var admin = GameObject.Create("p3spammer", privilege: Privilege.Admin);
+            var admin = GameObject.Create("spammer", privilege: Privilege.Admin);
             ObjectRegistry.AddObject(admin);
             var job = CommandDispatcher.DispatchLoggedIn(admin, "spam 1", immediate: true);
             RunJob(job);
@@ -133,12 +133,12 @@ public class P3BatchFourTests
     public void ChannelCommand_RenameAfterAdd_OrphansLookup()
     {
         var cmd = new BaseChannelCommand();
-        cmd.SetKey("p3chan");
+        cmd.SetKey("chan");
         var set = new CmdSet();
         set.Add(cmd);
-        Assert.Same(cmd, set.Get("p3chan"));
-        cmd.SetKey("p3chan-renamed");
-        Assert.Null(set.Get("p3chan-renamed"));
+        Assert.Same(cmd, set.Get("chan"));
+        cmd.SetKey("chan-renamed");
+        Assert.Null(set.Get("chan-renamed"));
         var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "BaseChannelCommand.cs");
         Assert.Contains("before the command is added", src);
     }

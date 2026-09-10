@@ -12,9 +12,9 @@ using Atheriz.Core.Tests.Ported;
 
 namespace Atheriz.Core.Tests.Features.Regression;
 
-// Regression pins for the P3 batch 6 (C-28, C-29, C-3 note, N-7, N-8).
+// Pins for screen-reader/shutdown/exit/coord behavior.
 [Collection("Ported")]
-public class P3BatchSixTests
+public class ScreenReaderShutdownExitTests
 {
     // Toggling screenreader confirms on the message path: telnet callers
     // with no control-channel display otherwise see nothing change.
@@ -24,7 +24,7 @@ public class P3BatchSixTests
         ObjectRegistry.ClearAll();
         try
         {
-            var o = GameObject.Create("p3sr");
+            var o = GameObject.Create("screenreader");
             o.Session = new Session { ScreenReader = false, TermWidth = 80 };
             new ScreenReaderCommand().Run(o, null);
             Assert.True(o.Session.ScreenReader);
@@ -94,10 +94,10 @@ public class P3BatchSixTests
     public void ExtractCoord_CamelCase_Parses()
     {
         var dto = new GameObjectDto { Id = 1 };
-        using var doc = JsonDocument.Parse("{\"area\":\"p3six\",\"x\":1,\"y\":2,\"z\":3}");
+        using var doc = JsonDocument.Parse("{\"area\":\"coordarea\",\"x\":1,\"y\":2,\"z\":3}");
         dto.Extra["Coord"] = doc.RootElement.Clone();
         var coord = GameObjectDtoConverter.ExtractCoord(dto);
-        Assert.Equal("p3six", coord.Area);
+        Assert.Equal("coordarea", coord.Area);
         Assert.Equal((1, 2, 3), (coord.X, coord.Y, coord.Z));
     }
 }
