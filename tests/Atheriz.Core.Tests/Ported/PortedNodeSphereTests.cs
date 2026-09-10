@@ -139,11 +139,11 @@ public class PortedNodeSphereTests
     {
         var ex1 = Assert.Throws<InvalidOperationException>(()=> FuncParserHelpers._safe_pow(-2, 0.5));
         Assert.Contains("complex", ex1.Message.ToLowerInvariant());
-        var ex2 = Assert.Throws<InvalidOperationException>(()=> FuncParserHelpers._safe_arith_eval("(-2)**0.5"));
+        var ex2 = Assert.Throws<InvalidOperationException>(()=> FuncParserHelpers.SafeArithEval("(-2)**0.5"));
         Assert.Contains("complex", ex2.Message.ToLowerInvariant());
-        Assert.Throws<InvalidOperationException>(()=> FuncParserHelpers._safe_arith_eval("(-4)**0.5"));
+        Assert.Throws<InvalidOperationException>(()=> FuncParserHelpers.SafeArithEval("(-4)**0.5"));
         Assert.Equal(8, FuncParserHelpers._safe_pow(2,3));
-        Assert.Equal(8, FuncParserHelpers._safe_arith_eval("2**3"));
-        Assert.Equal(3.0, FuncParserHelpers._safe_arith_eval("9**0.5"));
+        Assert.Equal(8, FuncParserHelpers.SafeArithEval("2**3"));
+        Assert.Equal(3.0, FuncParserHelpers.SafeArithEval("9**0.5"));
     }
 }

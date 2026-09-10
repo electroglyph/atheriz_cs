@@ -25,7 +25,7 @@ public class PortedJustifyIndentTests
         // faithful to funcparser_callable_justify("hi", indent=1e9) with default width 78, align f
         var outStr = FuncParserHelpers.Justify("hi", width:78, align:"f", indent:1000000000);
         Assert.True(outStr.Split("\n").All(l=> l.Length <= 80), $"found line >80: {outStr}");
-        var viaParser = new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES).Parse("$just(hi, indent=1000000000)")?.ToString() ?? "";
+        var viaParser = new FuncParser(FuncParser.ActorStanceCallables).Parse("$just(hi, indent=1000000000)")?.ToString() ?? "";
         Assert.True(viaParser.Length < 500);
         // also direct via callable helper (align f)
         var viaHelper = FuncParserHelpers.Justify("hi", indent:1000000000, align:"f");
@@ -64,7 +64,7 @@ public class PortedJustifyIndentTests
     public void ParserPathBounded()
     {
         using var env=GlobalTestEnv.Enter();
-        var parser = new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var parser = new FuncParser(FuncParser.ActorStanceCallables);
         var outStr = parser.Parse("$just(hi, indent=100000000)")?.ToString() ?? "";
         Assert.IsType<string>(outStr);
         Assert.True(outStr.Length < 200, $"len {outStr.Length} should be <200");

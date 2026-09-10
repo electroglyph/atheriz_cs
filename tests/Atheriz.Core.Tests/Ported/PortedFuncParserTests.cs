@@ -45,14 +45,14 @@ public class PortedFuncParserTests
         Assert.Equal("", pf.FuncName);
         Assert.Empty(pf.Args);
         Assert.Empty(pf.Kwargs);
-        Assert.Equal("", new string(pf.FullStr.ToArray()));
-        Assert.Equal("", new string(pf.InFuncStr.ToArray()));
+        Assert.Equal("", pf.FullStr.ToString());
+        Assert.Equal("", pf.InFuncStr.ToString());
         Assert.Equal(-1, pf.DoubleQuoted);
         Assert.Equal("", pf.CurrentKwarg);
         Assert.Equal(0, pf.OpenLParens);
         Assert.Equal(0, pf.OpenLSquare);
         Assert.Equal(0, pf.OpenLCurly);
-        Assert.Equal(0, pf.OpenLsquate);
+        Assert.Equal(0, pf.OpenLSquare);
         Assert.Equal("", pf.ExecReturn?.ToString());
     }
     [Fact] public void ParsedFunc_GetReturnsTuple()
@@ -65,7 +65,7 @@ public class PortedFuncParserTests
     [Fact] public void ParsedFunc_StrIncludesFullstrInfuncstr()
     {
         using var env=GlobalTestEnv.Enter();
-        var pf=new FuncParser.ParsedFunc('$'); pf.FullStr.Clear(); pf.FullStr.AddRange("$foo(".ToCharArray()); pf.InFuncStr.AddRange("bar".ToCharArray());
+        var pf=new FuncParser.ParsedFunc('$'); pf.FullStr.Clear(); pf.FullStr.Append("$foo("); pf.InFuncStr.Append("bar");
         Assert.Equal("$foo(bar", pf.ToString());
     }
     [Fact] public void ParsedFunc_ArgsKwargsNotShared()
@@ -94,28 +94,28 @@ public class PortedFuncParserTests
     {
         using var env=GlobalTestEnv.Enter();
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>());
-        Assert.Equal('$', p.start_char); Assert.Equal('\\', p.escape_char);
-        Assert.Equal(20, p.max_nesting);
+        Assert.Equal('$', p.StartCharProp); Assert.Equal('\\', p.EscapeCharProp);
+        Assert.Equal(20, p.MaxNestingProp);
     }
     [Fact] public void InitEscapeCharDefault()
     {
         using var env=GlobalTestEnv.Enter();
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>());
-        Assert.Equal('\\', p.escape_char);
-        Assert.Equal("\\", p.escape_char.ToString());
+        Assert.Equal('\\', p.EscapeCharProp);
+        Assert.Equal("\\", p.EscapeCharProp.ToString());
     }
     [Fact] public void InitMaxNestingKwarg()
     {
         using var env=GlobalTestEnv.Enter();
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>(), maxNesting:5);
-        Assert.Equal(5, p.max_nesting);
+        Assert.Equal(5, p.MaxNestingProp);
     }
     [Fact] public void MaxNestingDefault()
     {
         using var env=GlobalTestEnv.Enter();
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>());
-        Assert.Equal(FuncParser._MAX_NESTING, p.max_nesting);
-        Assert.Equal(20, p.max_nesting);
+        Assert.Equal(FuncParser.MaxNesting, p.MaxNestingProp);
+        Assert.Equal(20, p.MaxNestingProp);
     }
     [Fact] public void CustomStartChar()
     {
@@ -169,14 +169,14 @@ public class PortedFuncParserTests
     {
         using var env=GlobalTestEnv.Enter();
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>());
-        var pf=new FuncParser.ParsedFunc('$'); pf.FuncName="missing"; pf.FullStr.Clear(); pf.FullStr.AddRange("$missing()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc('$'); pf.FuncName="missing"; pf.FullStr.Clear(); pf.FullStr.Append("$missing()");
         Assert.Equal("$missing()", p.Execute(pf)?.ToString());
     }
     [Fact] public void ExecuteUnknownRaisesWhenRequested()
     {
         using var env=GlobalTestEnv.Enter();
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>());
-        var pf=new FuncParser.ParsedFunc('$'); pf.FuncName="missing"; pf.FullStr.Clear(); pf.FullStr.AddRange("$missing()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc('$'); pf.FuncName="missing"; pf.FullStr.Clear(); pf.FullStr.Append("$missing()");
         var ex = Assert.Throws<FuncParser.ParsingError>(()=> p.Execute(pf, true));
         Assert.Contains("missing", ex.Message);
     }
@@ -185,7 +185,7 @@ public class PortedFuncParserTests
         using var env=GlobalTestEnv.Enter();
         var tr=new Tracking{ReturnValue="RESULT"};
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["foo"]=tr.AsCallable()});
-        var pf=new FuncParser.ParsedFunc('$'); pf.FuncName="foo"; pf.Args.Add("x"); pf.FullStr.AddRange("$foo(x)".ToCharArray());
+        var pf=new FuncParser.ParsedFunc('$'); pf.FuncName="foo"; pf.Args.Add("x"); pf.FullStr.Append("$foo(x)");
         var res=p.Execute(pf); Assert.Equal("RESULT", res?.ToString()); Assert.Equal(1, tr.Calls);
     }
     [Fact] public void ExecuteKwargsPriority()
@@ -194,7 +194,7 @@ public class PortedFuncParserTests
         var cap=new Dictionary<string,object?>();
         FuncParser.ParserCallable fn=(a,k,ctx,raw)=>{ foreach(var kv in k) cap[kv.Key]=kv.Value; cap["funcparser"]="yes"; cap["raise_errors"]=ctx.RaiseErrors; return ""; };
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["myfn"]=fn}, defaultKwargs: new Dictionary<string, object?>{["greeting"]="default", ["fromdefault"]="yes"});
-        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.Kwargs["fromstring"]="yes"; pf.FullStr.AddRange("$myfn()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.Kwargs["fromstring"]="yes"; pf.FullStr.Append("$myfn()");
         p.Execute(pf, false, new Dictionary<string, object?>{["override"]="yes", ["reserved"]="yes"});
         Assert.Equal("yes", cap["fromdefault"]); Assert.Equal("yes", cap["fromstring"]); Assert.Equal("yes", cap["reserved"]);
         Assert.True(cap.ContainsKey("funcparser"));
@@ -206,7 +206,7 @@ public class PortedFuncParserTests
         var cap=new Dictionary<string,object?>();
         FuncParser.ParserCallable fn=(a,k,ctx,raw)=>{ foreach(var kv in k) cap[kv.Key]=kv.Value; return ""; };
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["myfn"]=fn}, defaultKwargs: new Dictionary<string, object?>{["x"]="default"});
-        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.Kwargs["x"]="string"; pf.FullStr.AddRange("$myfn()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.Kwargs["x"]="string"; pf.FullStr.Append("$myfn()");
         p.Execute(pf, false, new Dictionary<string, object?>{["x"]="reserved"});
         Assert.Equal("reserved", cap["x"]?.ToString());
     }
@@ -216,7 +216,7 @@ public class PortedFuncParserTests
         var cap=new Dictionary<string,object?>();
         FuncParser.ParserCallable fn=(a,k,ctx,raw)=>{ foreach(var kv in k) cap[kv.Key]=kv.Value; return "";};
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["myfn"]=fn}, defaultKwargs: new Dictionary<string, object?>{["x"]="default"});
-        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.Kwargs["x"]="string"; pf.FullStr.AddRange("$myfn()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.Kwargs["x"]="string"; pf.FullStr.Append("$myfn()");
         p.Execute(pf);
         Assert.Equal("string", cap["x"]?.ToString());
     }
@@ -226,7 +226,7 @@ public class PortedFuncParserTests
         var cap=new Dictionary<string,object?>();
         FuncParser.ParserCallable fn=(a,k,ctx,raw)=>{ foreach(var kv in k) cap[kv.Key]=kv.Value; cap["funcparser_obj"]=ctx; return "";};
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["myfn"]=fn});
-        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.FullStr.AddRange("$myfn()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.FullStr.Append("$myfn()");
         p.Execute(pf);
         // The funcparser kwarg should be injected and be the parser instance
         // In our implementation, we inject via context and merged dict; check that call received funcparser via context or via merged
@@ -245,7 +245,7 @@ public class PortedFuncParserTests
         FuncParser.ParserCallable fnExec=(a,k,ctx,raw)=>{ execVal = k.TryGetValue("funcparser", out var v) ? v : "<missing>"; return ""; };
         FuncParser.ParserCallable fnParse=(a,k,ctx,raw)=>{ parseVal = k.TryGetValue("funcparser", out var v) ? v : "<missing>"; return ""; };
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["exfn"]=fnExec, ["pafn"]=fnParse});
-        var pf=new FuncParser.ParsedFunc(); pf.FuncName="exfn"; pf.FullStr.AddRange("$exfn()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc(); pf.FuncName="exfn"; pf.FullStr.Append("$exfn()");
         p.Execute(pf);
         p.Parse("$pafn()");
         Assert.NotEqual("", execVal);
@@ -257,7 +257,7 @@ public class PortedFuncParserTests
         var cap=new Dictionary<string,object?>();
         FuncParser.ParserCallable fn=(a,k,ctx,raw)=>{ cap["raise_errors"]=ctx.RaiseErrors; foreach(var kv in k) if(kv.Key=="raise_errors") cap["kw_raise"]=kv.Value; return "";};
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["myfn"]=fn});
-        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.FullStr.AddRange("$myfn()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.FullStr.Append("$myfn()");
         p.Execute(pf, true);
         Assert.Equal(true, cap["raise_errors"]);
     }
@@ -266,7 +266,7 @@ public class PortedFuncParserTests
         using var env=GlobalTestEnv.Enter();
         FuncParser.ParserCallable fn=(a,k,ctx,raw)=> throw new FuncParser.ParsingError("boom");
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["myfn"]=fn});
-        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.FullStr.AddRange("$myfn()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.FullStr.Append("$myfn()");
         var res=p.Execute(pf); Assert.Equal("$myfn()", res?.ToString());
         Assert.Throws<FuncParser.ParsingError>(()=> p.Execute(pf, true));
     }
@@ -275,7 +275,7 @@ public class PortedFuncParserTests
         using var env=GlobalTestEnv.Enter();
         FuncParser.ParserCallable fn=(a,k,ctx,raw)=> throw new InvalidOperationException("oops");
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["myfn"]=fn});
-        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.FullStr.AddRange("$myfn()".ToCharArray());
+        var pf=new FuncParser.ParsedFunc(); pf.FuncName="myfn"; pf.FullStr.Append("$myfn()");
         var res=p.Execute(pf); Assert.Equal("$myfn()", res?.ToString());
         Assert.Throws<InvalidOperationException>(()=> p.Execute(pf, true));
     }
@@ -377,7 +377,7 @@ public class PortedFuncParserTests
         ObjectRegistry.AddObject(a); ObjectRegistry.AddObject(b);
         room.AddObject(a); room.AddObject(b);
         // Register spy callable via static ActorStanceCallables reflection to observe kwargs
-        var field=typeof(FuncParser).GetField("ActorStanceCallables", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        var field=typeof(FuncParser).GetField("ActorStanceCallables", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
         var dict = field?.GetValue(null) as Dictionary<string, FuncParser.ParserCallable>;
         bool added=false;
         Dictionary<string,string>? seen=null;
@@ -411,7 +411,7 @@ public class PortedFuncParserTests
         o.Location=new LocationRef.CoordLocation(coord);
         ObjectRegistry.AddObject(o);
         node.AddObject(o);
-        var field=typeof(FuncParser).GetField("ActorStanceCallables", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        var field=typeof(FuncParser).GetField("ActorStanceCallables", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
         var dict = field?.GetValue(null) as Dictionary<string, FuncParser.ParserCallable>;
         bool added=false;
         Dictionary<string,string>? seen=null;
@@ -443,13 +443,13 @@ public class PortedFuncParserTests
     public void Int2StrSmallNumbers(string input, string expected)
     {
         using var env=GlobalTestEnv.Enter();
-        var p=new FuncParser(FuncParser.FUNCPARSER_CALLABLES);
+        var p=new FuncParser(FuncParser.FuncParserCallables);
         Assert.Equal(expected, p.Parse($"$int2str({input})")?.ToString());
     }
     [Fact] public void AnVowelConsonant()
     {
         using var env=GlobalTestEnv.Enter();
-        var p=new FuncParser(FuncParser.FUNCPARSER_CALLABLES);
+        var p=new FuncParser(FuncParser.FuncParserCallables);
         Assert.Equal("an apple", p.Parse("$an(apple)")?.ToString());
         Assert.Equal("an elephant", p.Parse("$an(elephant)")?.ToString());
         Assert.Equal("a banana", p.Parse("$an(banana)")?.ToString());
@@ -458,13 +458,13 @@ public class PortedFuncParserTests
     [Fact] public void AnYIsVowel()
     {
         using var env=GlobalTestEnv.Enter();
-        var p=new FuncParser(FuncParser.FUNCPARSER_CALLABLES);
+        var p=new FuncParser(FuncParser.FuncParserCallables);
         Assert.Equal("an yellow", p.Parse("$an(yellow)")?.ToString());
     }
     [Fact] public void PadInvalidAlignDefaultsToCenter()
     {
         using var env=GlobalTestEnv.Enter();
-        var p=new FuncParser(FuncParser.FUNCPARSER_CALLABLES);
+        var p=new FuncParser(FuncParser.FuncParserCallables);
         var result=p.Parse("$pad(hi,10,x)")?.ToString();
         Assert.NotNull(result);
         Assert.Equal(10, result!.Length);
@@ -474,7 +474,7 @@ public class PortedFuncParserTests
     [Fact] public void YouNoCallerOrReceiverRaises()
     {
         using var env=GlobalTestEnv.Enter();
-        var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
         // No caller/receiver should throw ParsingError with "No caller"
         var ex=Assert.Throws<FuncParser.ParsingError>(()=> p.Parse("$you()", raiseErrors:true));
         Assert.Contains("No caller", ex.Message);
@@ -483,7 +483,7 @@ public class PortedFuncParserTests
     {
         using var env=GlobalTestEnv.Enter();
         var alice=GameObject.Create("Alice");
-        var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
         Assert.Equal("you", p.Parse("$you()", alice, alice, null)?.ToString());
         Assert.Equal("You", p.Parse("$You()", alice, alice, null)?.ToString());
         // also direct capitalize kw
@@ -496,7 +496,7 @@ public class PortedFuncParserTests
     {
         using var env=GlobalTestEnv.Enter();
         var alice=GameObject.Create("Alice");
-        var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
         Assert.Equal("Your", p.Parse("$Your()", alice, alice, null)?.ToString());
         Assert.Equal("your", p.Parse("$your()", alice, alice, null)?.ToString());
     }
@@ -505,7 +505,7 @@ public class PortedFuncParserTests
         using var env=GlobalTestEnv.Enter();
         var alice=GameObject.Create("Alice"); var bob=GameObject.Create("Bob");
         var mapping=new Dictionary<string,object?>{["tommy"]=alice};
-        var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
         // caller alice, mapping tommy -> alice, receiver alice => should be second person "jump"
         var result=p.Parse("$conj(jump, tommy)", alice, alice, mapping)?.ToString();
         Assert.Equal("jump", result);
@@ -516,7 +516,7 @@ public class PortedFuncParserTests
         // Test PConj other plural: caller gender plural, receiver other => verb should stay "jump" (plural) not "jumps"
         var pluralObj=GameObject.Create("Plural"); pluralObj.Gender="plural";
         var other=GameObject.Create("Other");
-        var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
         var result=p.Parse("$pconj(jump)", pluralObj, other, null)?.ToString();
         Assert.Contains("jump", result!);
         // also test that non-plural other singular gives "jumps"
@@ -532,7 +532,7 @@ public class PortedFuncParserTests
         // We test via GameObject with Gender set to "male" via property, and via delegate in mapping
         var male=GameObject.Create("Bob"); male.Gender="male";
         var other=GameObject.Create("Other");
-        var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
         Assert.Equal("he", p.Parse("$pron(I)", male, other, null)?.ToString());
         // Test with callable gender via custom object that has Gender property returning delegate? Simulate by using object with Gender prop as delegate via reflection?
         // We'll test via direct Pronouns helper with custom object having callable
@@ -545,7 +545,7 @@ public class PortedFuncParserTests
     [Fact] public void ConjugateNoCallerRaises()
     {
         using var env=GlobalTestEnv.Enter();
-        var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
         var ex=Assert.Throws<FuncParser.ParsingError>(()=> p.Parse("$conj(jump)", raiseErrors:true));
         Assert.Contains("No caller", ex.Message);
     }
@@ -553,20 +553,20 @@ public class PortedFuncParserTests
     {
         using var env=GlobalTestEnv.Enter();
         var alice=GameObject.Create("Alice");
-        var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
         Assert.Equal("", p.Parse("$conj()", alice, alice, null)?.ToString());
     }
     [Fact] public void PronounNoArgs()
     {
         using var env=GlobalTestEnv.Enter();
         var alice=GameObject.Create("Alice");
-        var p=new FuncParser(FuncParser.ACTOR_STANCE_CALLABLES);
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
         Assert.Equal("", p.Parse("$pron()", alice, alice, null)?.ToString());
     }
     [Fact] public void PluralizeNonNumericFloatAndBool()
     {
         using var env=GlobalTestEnv.Enter();
-        var p=new FuncParser(FuncParser.FUNCPARSER_CALLABLES);
+        var p=new FuncParser(FuncParser.FuncParserCallables);
         // non-numeric fallback singular
         Assert.Equal("cat", p.Parse("$pluralize(cat, abc)")?.ToString());
         // float string fallback

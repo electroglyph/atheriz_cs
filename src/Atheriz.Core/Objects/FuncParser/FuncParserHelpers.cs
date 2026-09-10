@@ -1,6 +1,7 @@
 // Port of atheriz/objects/funcparser_helpers.py:1
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Atheriz.Core.Objects;
@@ -190,7 +191,6 @@ public static class FuncParserHelpers
         return parser.Parse();
     }
     // Alias for Python name
-    public static double _safe_arith_eval(string inp) => SafeArithEval(inp);
     public static double _safe_pow(double b, double e)
     {
         if (e > _MAX_POW_EXPONENT) throw new InvalidOperationException($"exponent {e} exceeds safe limit {_MAX_POW_EXPONENT}");
@@ -275,36 +275,12 @@ public static class FuncParserHelpers
     }
 
     // --- SafeConvertToTypes port (funcparser_helpers.py:404) ---
-    public static (object?[] args, Dictionary<string,object?> kwargs) SafeConvertToTypes(object? converters, object?[] args, Dictionary<string,object?> kwargs, bool raiseErrors = true)
+    // Single canonical shape: a ValueTuple of (arg converters, kwarg converters).
+    // All call sites pass this shape, so no runtime shape-sniffing is needed.
+    public static (object?[] args, Dictionary<string,object?> kwargs) SafeConvertToTypes((object?[] argConvs, Dictionary<string,object?> kwConvs) converters, object?[] args, Dictionary<string,object?> kwargs, bool raiseErrors = true)
     {
-        if (converters is null) return (args, kwargs);
-        IEnumerable<object>? argConvs = null;
-        IDictionary<string, object>? kwConvs = null;
-        // Try to extract ValueTuple Item1/Item2 via ITuple
-        try{
-            if(converters is System.Runtime.CompilerServices.ITuple tup && tup.Length>=1){
-                var p1 = tup[0];
-                var p2 = tup.Length>=2 ? tup[1] : null;
-                if(p1 is IEnumerable<object> e) argConvs = e;
-                else if(p1 is System.Collections.IEnumerable en) argConvs = en.Cast<object>();
-                else if(p1 is not null) argConvs = new[]{p1};
-                if(p2 is IDictionary<string, object> d) kwConvs = d;
-                else if(p2 is System.Collections.IDictionary id) { Dictionary<string,object> nd = []; foreach(System.Collections.DictionaryEntry kv in id) nd[kv.Key.ToString()!] = kv.Value!; kwConvs=nd; }
-                else if(p2 is IDictionary<string, object?> d2b) kwConvs = d2b.ToDictionary(kv=>kv.Key, kv=>(object)kv.Value!);
-            }else{
-                if(converters is object[] arr && arr.Length==2){
-                    if(arr[0] is IEnumerable<object> e2) argConvs=e2; else if(arr[0] is System.Collections.IEnumerable en2) argConvs=en2.Cast<object>(); else if(arr[0] is not null) argConvs=new[]{arr[0]};
-                    if(arr[1] is IDictionary<string, object> d2) kwConvs=d2;
-                }
-            }
-        }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser.SafeConvertToTypes: " + logEx.Message, "SafeArithParser"); }
-        if(argConvs is null && kwConvs is null){
-            // converters is single arg converters?
-            if(converters is IEnumerable<object> e3) argConvs=e3;
-            else argConvs = new[]{converters};
-        }
-        var argList = argConvs?.ToList() ?? [];
-        var kwDict = kwConvs ?? new Dictionary<string, object>();
+        var argList = converters.argConvs?.ToList() ?? [];
+        var kwDict = converters.kwConvs ?? [];
         // Convert args
         if(args is not null && argList.Count>0){
             var argsCopy = args.ToList();
@@ -352,10 +328,6 @@ public static class FuncParserHelpers
         return (args ?? Array.Empty<object?>(), kwargs ?? []);
     }
 
-    // Overload for python-like call: (converters, *args, **kwargs) with raiseErrors kw
-    public static (object?[] args, Dictionary<string,object?> kwargs) SafeConvertToTypes(object? converters, object? arg1, bool raiseErrors = true)
-        => SafeConvertToTypes(converters, new object?[]{arg1}, [], raiseErrors);
-
     private static object? _SafeEval(object? inp)
     {
         if(inp is null) return "";
@@ -368,7 +340,7 @@ public static class FuncParserHelpers
         }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser._SafeEval: " + logEx.Message, "SafeArithParser"); }
         // try arith
         try{
-            return _safe_arith_eval(s);
+            return SafeArithEval(s);
         }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser._SafeEval: " + logEx.Message, "SafeArithParser"); }
         // manual containers
         var parts = _ManualParseContainers(s);
@@ -448,49 +420,48 @@ public static class FuncParserHelpers
         if(!containerEnd.ContainsKey(inp[0]) || inp[^1]!=containerEnd[inp[0]]) return null;
         var inner = inp.Substring(1, inp.Length-2);
         List<string> parts = [];
-        List<char> cur = [];
+        var cur = new StringBuilder();
         bool inSingle=false, inDouble=false, escaped=false;
         for(int i=0;i<inner.Length;i++){
             char ch=inner[i];
-            if(escaped){ cur.Add(ch); escaped=false; continue; }
-            if(ch=='\\'){ escaped=true; cur.Add(ch); continue; }
-            if(ch=='\'' && !inDouble){ inSingle=!inSingle; cur.Add(ch); continue; }
-            if(ch=='"' && !inSingle){ inDouble=!inDouble; cur.Add(ch); continue; }
-            if(inSingle||inDouble){ cur.Add(ch); continue; }
+            if(escaped){ cur.Append(ch); escaped=false; continue; }
+            if(ch=='\\'){ escaped=true; cur.Append(ch); continue; }
+            if(ch=='\'' && !inDouble){ inSingle=!inSingle; cur.Append(ch); continue; }
+            if(ch=='"' && !inSingle){ inDouble=!inDouble; cur.Append(ch); continue; }
+            if(inSingle||inDouble){ cur.Append(ch); continue; }
             if(ch=='('||ch=='['||ch=='{') return null;
-            if(ch==','){ parts.Add(new string(cur.ToArray()).Trim()); cur.Clear(); continue; }
-            cur.Add(ch);
+            if(ch==','){ parts.Add(cur.ToString().Trim()); cur.Clear(); continue; }
+            cur.Append(ch);
         }
-        parts.Add(new string(cur.ToArray()).Trim());
+        parts.Add(cur.ToString().Trim());
         return parts.Select(p=>p.Trim()).ToList();
     }
 
     private static List<string>? SplitTopLevel(string inner)
     {
         List<string> parts = [];
-        List<char> cur = [];
+        var cur = new StringBuilder();
         int depthParen=0, depthBracket=0, depthBrace=0;
         bool inSingle=false,inDouble=false, escaped=false;
         for(int i=0;i<inner.Length;i++){
             char ch=inner[i];
-            if(escaped){ cur.Add(ch); escaped=false; continue; }
-            if(ch=='\\'){ escaped=true; cur.Add(ch); continue; }
-            if(ch=='\'' && !inDouble){ inSingle=!inSingle; cur.Add(ch); continue; }
-            if(ch=='"' && !inSingle){ inDouble=!inDouble; cur.Add(ch); continue; }
-            if(inSingle||inDouble){ cur.Add(ch); continue; }
+            if(escaped){ cur.Append(ch); escaped=false; continue; }
+            if(ch=='\\'){ escaped=true; cur.Append(ch); continue; }
+            if(ch=='\'' && !inDouble){ inSingle=!inSingle; cur.Append(ch); continue; }
+            if(ch=='"' && !inSingle){ inDouble=!inDouble; cur.Append(ch); continue; }
+            if(inSingle||inDouble){ cur.Append(ch); continue; }
             if(ch=='(') depthParen++;
             if(ch==')') depthParen--;
             if(ch=='[') depthBracket++;
             if(ch==']') depthBracket--;
             if(ch=='{') depthBrace++;
             if(ch=='}') depthBrace--;
-            if(ch==',' && depthParen==0 && depthBracket==0 && depthBrace==0){ parts.Add(new string(cur.ToArray())); cur.Clear(); continue; }
-            cur.Add(ch);
+            if(ch==',' && depthParen==0 && depthBracket==0 && depthBrace==0){ parts.Add(cur.ToString()); cur.Clear(); continue; }
+            cur.Append(ch);
         }
-        parts.Add(new string(cur.ToArray()));
+        parts.Add(cur.ToString());
         if(depthParen!=0||depthBracket!=0||depthBrace!=0) return null;
         return parts.Select(p=>p.Trim()).ToList();
     }
 
-    public static List<string>? _manual_parse_containers(string inp) => _ManualParseContainers(inp);
 }
