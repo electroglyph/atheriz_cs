@@ -117,14 +117,17 @@ public class HelpExamMenuTests
     }
 
     // Self-ban stays refused by the equal-or-higher rule, on purpose: the
-    // refusal is the guardrail, not a missing exemption.
+    // refusal is the guardrail, not a missing exemption. The gate now lives
+    // in the shared BanHelper preamble (both verbs), not inline in BanCommand.
     [Fact]
     public void Ban_SelfBan_RefusedByPrivilegeRule()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "BanCommand.cs");
-        var region = SourceScan.Region(src, "public override void Run(");
-        Assert.Contains("No self-exempt idiom on purpose", region);
-        Assert.Contains("target.PrivilegeLevel >= go.PrivilegeLevel", region);
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "BanHelper.cs");
+        var region = SourceScan.Region(src, "internal static bool CheckPrivilege(");
+        Assert.Contains("No self-exempt idiom on purpose", src);
+        Assert.Contains("candidate.PrivilegeLevel >= go.PrivilegeLevel", region);
+        var ban = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "BanCommand.cs");
+        Assert.Contains("TryResolveBanPreamble", SourceScan.Region(ban, "public override void Run("));
     }
 
     // Unknown menu keys are logged, not silently swallowed; the handler

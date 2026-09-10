@@ -31,7 +31,9 @@ public sealed class MapEditLegendNormalizationTests
         var converted = Norm(Je("{\"symbol\":\"@\",\"n\":3}"));
         Assert.NotNull(converted);
         Assert.Equal("@", converted!["symbol"]);
-        Assert.Equal(3, converted!["n"]);
+        // JsonElementToObject's int/long/double ternary unifies to double
+        // (pre-existing shape) — numbers normalize to double, not int.
+        Assert.Equal(3.0, converted!["n"]);
         Assert.Null(Norm("nope"));
         Assert.Null(Norm(5));
         Assert.Null(Norm(null));

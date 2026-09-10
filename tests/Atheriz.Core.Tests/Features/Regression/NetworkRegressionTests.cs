@@ -440,12 +440,13 @@ public class NetworkRegressionTests
     }
 
     // save JSON encoding must run after the object lock releases (via the
-    // EncodeSaveJson helper, which also restores the flag on failure).
+    // EncodeSaveJson helper, which also restores the flag on failure). The
+    // core is the 3-arg BuildSaveJson overload shared with Channel/Account.
     [Fact]
     public void SaveJson_EncodesAfterLockRelease()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Persistence", "Converters", "GameObjectDtoConverter.cs");
-        var region = SourceScan.Region(src, "private static string BuildSaveJson(");
+        var region = SourceScan.Region(src, "public static string BuildSaveJson(GameObject obj, Func<GameObjectDto> snapshotUnderLock, bool clearing)");
         Assert.True(region.IndexOf("ExitWriteLock", StringComparison.Ordinal) < region.IndexOf("EncodeSaveJson(obj, dto, had)", StringComparison.Ordinal));
         var enc = SourceScan.Region(src, "private static string EncodeSaveJson(");
         Assert.Contains("ToJson(dto)", enc);

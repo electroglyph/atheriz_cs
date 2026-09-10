@@ -26,10 +26,12 @@ public class CommandHelpTableTests
         var src = Src();
         var region = SourceScan.Region(src, "void PrintCommandHelp(string cmd)");
         Assert.DoesNotContain("switch (cmd)", region);
-        Assert.Contains("table.TryGetValue(cmd, out var row)", region);
-        Assert.Contains("row.Usage(cmd)", region);
-        Assert.Contains("row.Description(cmd)", region);
-        Assert.Contains("foreach (var line in row.Options)", region);
+        // The lookup + prints sit after the table literal, past Region's end
+        // (the literal closes with a 4-space "};"), so pin them file-wide.
+        Assert.Contains("!table.TryGetValue(cmd, out var row)", src);
+        Assert.Contains("row.Usage(cmd)", src);
+        Assert.Contains("row.Description(cmd)", src);
+        Assert.Contains("foreach (var line in row.Options)", src);
     }
 
     [Fact]

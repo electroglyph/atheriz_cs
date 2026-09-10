@@ -32,6 +32,7 @@ public sealed class FollowScriptGetSingleTests
         {
             var o = GameObject.Create(name, isPc: true);
             ObjectRegistry.AddObject(o);
+            o.IsConnected = true;
             o.Location = LocationRef.FromCoord(n1.Coord);
             n1.AddObject(o);
             o.ClearMessages();

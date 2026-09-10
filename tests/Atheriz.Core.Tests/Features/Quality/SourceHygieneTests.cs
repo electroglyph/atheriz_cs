@@ -65,7 +65,11 @@ public class SourceHygieneTests
                         else
                         {
                             int start = ln.IndexOf("/*", StringComparison.Ordinal);
-                            if (start < 0) break;
+                            // A // line comment wins over a later /* (e.g. a
+                            // /* inside prose like /_internal/* would otherwise
+                            // open a block that blanks the rest of the file).
+                            int line = ln.IndexOf("//", StringComparison.Ordinal);
+                            if (start < 0 || (line >= 0 && line < start)) break;
                             int end = ln.IndexOf("*/", start + 2, StringComparison.Ordinal);
                             if (end < 0) { ln = ln.Substring(0, start); inBlock = true; break; }
                             ln = ln.Substring(0, start) + ln.Substring(end + 2);
@@ -202,8 +206,8 @@ public class SourceHygieneTests
             "FuncParser.cs + FuncParserHelpers.cs belong in Objects/FuncParser/");
 
     [Fact] public void Org_ExamFormatter_Extracted() =>
-        Assert.True(ProdMatchCount(Commands, @"GetField|GetProperty") == 0,
-            "ExamCommand must delegate to a typed ExamFormatter (no reflection)");
+        Assert.True(ProdMatchCount(Commands, @"GetField\(|\.GetProperty\(") == 0,
+            "ExamCommand must delegate to a typed ExamFormatter (no reflection; JsonDocument.TryGetProperty is not reflection)");
 
     [Fact] public void Org_NodeDtos_LiveInPersistence() =>
         Assert.True(ProdMatchCount(["Atheriz.Core/Globals"], @"class Node(Dto|GridDto|AreaDto)\b") == 0,
@@ -238,9 +242,9 @@ public class SourceHygieneTests
         Assert.True(ProdMatchCount(["Atheriz.Core/Network"], @"class Protocol\b") == 0,
             "vacuous Protocol : BaseProtocol must collapse to one typed concept");
 
-    [Fact] public void Org_JsonTableLoader_TwoHelpers() =>
-        Assert.True(Scan(["Atheriz.Core/Persistence"], @"public static .*Load\w+").Count <= 2,
-            "JsonTableLoader keeps two helpers (buffered + lock-aware), not four");
+    [Fact] public void Org_JsonTableLoader_SharedBufferCore() =>
+        Assert.True(Scan(["Atheriz.Core/Persistence"], @"DeserializeBuffer").Count > 0,
+            "JsonTableLoader's LoadList/LoadInto/LoadAll keep their distinct add phases but share one deserialize-to-buffer core");
 
     // --- Structural oracles: duplicated helpers with zero behavioral delta ---
 

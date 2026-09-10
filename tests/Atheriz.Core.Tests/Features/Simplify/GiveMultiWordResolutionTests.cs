@@ -22,6 +22,8 @@ public sealed class GiveMultiWordResolutionTests
         var receiver = GameObject.Create("Bob Green", isPc: true);
         ObjectRegistry.AddObject(giver);
         ObjectRegistry.AddObject(receiver);
+        giver.IsConnected = true;
+        receiver.IsConnected = true;
         var loc = new LocationRef.CoordLocation(node.Coord);
         giver.Location = loc;
         receiver.Location = loc;

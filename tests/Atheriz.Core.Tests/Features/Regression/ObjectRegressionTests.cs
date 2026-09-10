@@ -341,16 +341,22 @@ public class ObjectRegressionTests
         Assert.DoesNotContain("// log warning", region);
     }
 
-    // JSON serialization must happen after the write lock releases.
+    // JSON serialization must happen after the write lock releases. The
+    // flag-dance + post-release encode now live in the shared converter
+    // core (GameObjectDtoConverter.BuildSaveJson); Channel/Account only
+    // pass their snapshot bodies, so the pin follows the behavior there.
     [Fact]
     public void SaveSerializes_AfterLockRelease()
     {
         var channel = SourceScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
         var buildOps = SourceScan.Region(channel, "private (string Sql, object[] Params) BuildSaveOps");
-        Assert.True(buildOps.IndexOf("ExitWriteLock", StringComparison.Ordinal) < buildOps.IndexOf("ToJson", StringComparison.Ordinal));
+        Assert.Contains("GameObjectDtoConverter.BuildSaveJson", buildOps);
         var account = SourceScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
         var getOps = SourceScan.Region(account, "public override (string Sql, object[] Params) GetSaveOps()");
-        Assert.True(getOps.IndexOf("ExitWriteLock", StringComparison.Ordinal) < getOps.IndexOf("ToJson", StringComparison.Ordinal));
+        Assert.Contains("GameObjectDtoConverter.BuildSaveJson", getOps);
+        var conv = SourceScan.Read("src", "Atheriz.Core", "Persistence", "Converters", "GameObjectDtoConverter.cs");
+        var core = SourceScan.Region(conv, "public static string BuildSaveJson(GameObject obj, Func<GameObjectDto> snapshotUnderLock, bool clearing)");
+        Assert.True(core.IndexOf("ExitWriteLock", StringComparison.Ordinal) < core.IndexOf("EncodeSaveJson(obj, dto, had)", StringComparison.Ordinal));
     }
 
     // AtPostPuppet ignores the MoveTo result and always enables the map

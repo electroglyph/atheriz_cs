@@ -27,6 +27,7 @@ public sealed class FollowerDrainHelperTests
         {
             var o = GameObject.Create(name, isPc: true);
             ObjectRegistry.AddObject(o);
+            o.IsConnected = true;
             o.Location = new LocationRef.CoordLocation(room.Coord);
             room.AddObject(o);
             o.ClearMessages();
@@ -63,9 +64,14 @@ public sealed class FollowerDrainHelperTests
     public void Nofollow_WithRemainingBuilderFollower_KeepsFollowScript()
     {
         using var env = GlobalTestEnv.Enter();
-        var (_, leader, follower) = Setup("drain3");
+        var (room, leader, follower) = Setup("drain3");
         var builder = GameObject.Create("Arch", isPc: true, privilege: Atheriz.Core.Privilege.Builder);
         ObjectRegistry.AddObject(builder);
+        // Colocated + connected like the established nofollow fixtures:
+        // search runs from the caller's location under the view lock.
+        builder.IsConnected = true;
+        builder.Location = new LocationRef.CoordLocation(room.Coord);
+        room.AddObject(builder);
         new FollowCommand().Run(follower, new FollowCommand().Parser!.ParseArgs(["Leader"]));
         new FollowCommand().Run(builder, new FollowCommand().Parser!.ParseArgs(["Leader"]));
         Assert.Equal(2, leader.FollowersSnapshot.Count);

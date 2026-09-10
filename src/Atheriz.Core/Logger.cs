@@ -284,6 +284,7 @@ public static class AtherizLogger
         try
         {
             if (level == LogLevel.Error) LogError(message);
+            else if (level == LogLevel.Warning) LogWarning(message);
             else LogInformation(message);
         }
         catch { try { Console.Error.WriteLine(message); } catch { } }

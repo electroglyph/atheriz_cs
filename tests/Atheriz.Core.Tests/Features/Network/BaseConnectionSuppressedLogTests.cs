@@ -23,8 +23,10 @@ public sealed class BaseConnectionSuppressedLogTests
         {
             Action<BaseConnection, List<object?>, Dictionary<string, object?>> handler = (_, _, _) => { };
             conn.EnqueueInput(handler, [], []);
+            // Msg appends \r\n (pre-existing connection.py:192-198 tail), so
+            // match by containment, not equality.
             Assert.True(PortedHelpers.WaitFor(
-                () => conn.Sent.Exists(s => s.Args.Exists(a => a?.ToString() == "Server busy; input dropped.")), 5000),
+                () => conn.Sent.Exists(s => s.Args.Exists(a => (a?.ToString() ?? "").Contains("Server busy; input dropped."))), 5000),
                 "busy notification was not sent on pool failure");
         }
         finally

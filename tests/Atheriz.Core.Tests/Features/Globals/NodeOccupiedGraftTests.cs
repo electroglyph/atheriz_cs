@@ -33,15 +33,17 @@ public class NodeOccupiedGraftTests
             var node = new Node(new Coord("graftoccupied", 0, 0, 0));
             nh.AddNode(node);
             nh.Save(force: true);
-            // Live-only rename after the save: the next Load's fresh row still
-            // carries the old name at the same occupied cell.
-            node.Name = "live-renamed";
+            // Live-only edit after the save: the next Load's fresh row still
+            // carries the old desc at the same occupied cell. (Node.Name is
+            // coord-derived with a no-op setter, so the edit goes through
+            // Desc, which marks IsModified.)
+            node.Desc = "live-edited";
             Assert.True(node.IsModified);
             nh.Load();
             var got = nh.GetNode(new Coord("graftoccupied", 0, 0, 0));
             Assert.NotNull(got);
             Assert.Same(node, got);
-            Assert.Equal("live-renamed", got!.Name);
+            Assert.Equal("live-edited", got!.Desc);
             Assert.NotEmpty(ObjectRegistry.Get(node.Id));
         }
         finally { NodeHandler.SetCurrent(null); Reset(); }

@@ -5,9 +5,11 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
-// Deduped node hydration with centralized null backfill: the subtype branch
-// keeps its coord-string Name (assignName is load-bearing) while the plain
-// branch assigns nd.Name, and null collections backfill instead of throwing.
+// Deduped node hydration with centralized null backfill: Node.Name is
+// coord-derived with a no-op setter (pre-existing Node.Links.cs override),
+// so the plain branch's Name write is unobservable — both branches yield
+// the coord-string Name. The pin covers what hydration guarantees: the
+// other fields assign and null collections backfill instead of throwing.
 [Collection("Ported")]
 public class NodeHydrationTests
 {
@@ -39,15 +41,18 @@ public class NodeHydrationTests
     }
 
     [Fact]
-    public void ToDomain_PlainAssignsName_SubtypeKeepsCoordName()
+    public void ToDomain_BothBranchesYieldCoordName_OtherFieldsAssign()
     {
         using var env = GlobalTestEnv.Enter();
         var plain = new NodeDto { Coord = new Coord("hydration", 0, 0, 0), Name = "PlainName", Id = 9101 };
         var sub = new NodeDto { Coord = new Coord("hydration", 1, 0, 0), Name = "SubName", Id = 9102, ObjectType = "SimplifyHydrationProbe" };
         var area = MakeArea(plain, sub).ToDomain();
         var grid = area.Grids[0];
-        Assert.Equal("PlainName", grid.Nodes[(0, 0)].Name);
+        Assert.Equal("hydration(0,0,0)", grid.Nodes[(0, 0)].Name);
+        Assert.Equal(9101, grid.Nodes[(0, 0)].Id);
         var subNode = Assert.IsType<HydrationProbeNode>(grid.Nodes[(1, 0)]);
+        Assert.Equal("hydration(1,0,0)", subNode.Name);
+        Assert.Equal(9102, subNode.Id);
         Assert.NotEqual("SubName", subNode.Name);
     }
 

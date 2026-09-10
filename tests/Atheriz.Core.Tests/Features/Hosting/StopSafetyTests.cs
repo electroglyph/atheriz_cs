@@ -248,10 +248,11 @@ public class StopSafetyTests
     {
         // Structural pin: the no-pidfile fallback must hold a verified per-PID
         // check (identity + port hold) before signalling, and a refused
-        // graceful request must abort rather than escalate.
+        // graceful request must abort rather than escalate. (The verified-kill
+        // funnel renamed the local from foundPid to pid; the gates are the same.)
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/StopHandler.cs");
-        Assert.Contains("IsServerProcess(foundPid)", src);
-        Assert.Contains("IsProcessListeningOnPort(foundPid", src);
+        Assert.Contains("IsServerProcess(pid)", src);
+        Assert.Contains("IsProcessListeningOnPort(pid", src);
         Assert.Contains("AuthRejected", src);
     }
 

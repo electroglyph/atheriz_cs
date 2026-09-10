@@ -32,7 +32,10 @@ public sealed class SetCommandGateReprTests
         using var env = GlobalTestEnv.Enter();
         var root = MakeSuperuser();
         var target = MakeBuilder("Target");
-        new SetCommand().Run(root, new SetCommand().Parser!.ParseArgs(["Target", "location", "x"]));
+        // #id refs (established SetTargetById pattern): name search needs a
+        // shared connected location, which would only add view-gate noise to
+        // these gate/repr pins.
+        new SetCommand().Run(root, new SetCommand().Parser!.ParseArgs(["#" + target.Id, "location", "x"]));
         Assert.Contains(root.PeekMessages(), m => m == "'location' cannot be set directly; use move/teleport instead.");
     }
 
@@ -44,7 +47,7 @@ public sealed class SetCommandGateReprTests
         var target = MakeBuilder("Target");
         // The gate is Ordinal: "LOCATION" is not gated (and not a known
         // property either), so it lands in extras like any junk attribute.
-        new SetCommand().Run(root, new SetCommand().Parser!.ParseArgs(["Target", "LOCATION", "x"]));
+        new SetCommand().Run(root, new SetCommand().Parser!.ParseArgs(["#" + target.Id, "LOCATION", "x"]));
         Assert.Contains(root.PeekMessages(), m => m.Contains("Warning: 'LOCATION' is a new attribute"));
         Assert.True(target.HasExtra("LOCATION"));
     }
@@ -56,7 +59,7 @@ public sealed class SetCommandGateReprTests
         var bob = MakeBuilder();
         var target = MakeBuilder("Target");
         target.PrivilegeLevel = Atheriz.Core.Privilege.Player;
-        new SetCommand().Run(bob, new SetCommand().Parser!.ParseArgs(["Target", "location", "x"]));
+        new SetCommand().Run(bob, new SetCommand().Parser!.ParseArgs(["#" + target.Id, "location", "x"]));
         Assert.Contains(bob.PeekMessages(), m => m == "'location' is protected and cannot be set.");
     }
 
@@ -67,13 +70,14 @@ public sealed class SetCommandGateReprTests
         var root = MakeSuperuser();
         var target = MakeBuilder("Target");
         var cmd = new SetCommand();
-        cmd.Run(root, cmd.Parser!.ParseArgs(["Target", "desc", "None"]));
+        var idRef = "#" + target.Id;
+        cmd.Run(root, cmd.Parser!.ParseArgs([idRef, "desc", "None"]));
         Assert.Contains(root.PeekMessages(), m => m == "Set Target.desc = None");
         root.ClearMessages();
-        cmd.Run(root, cmd.Parser!.ParseArgs(["Target", "desc", "hello"]));
+        cmd.Run(root, cmd.Parser!.ParseArgs([idRef, "desc", "hello"]));
         Assert.Contains(root.PeekMessages(), m => m == "Set Target.desc = 'hello'");
         root.ClearMessages();
-        cmd.Run(root, cmd.Parser!.ParseArgs(["Target", "desc", "True"]));
+        cmd.Run(root, cmd.Parser!.ParseArgs([idRef, "desc", "True"]));
         Assert.Contains(root.PeekMessages(), m => m == "Set Target.desc = True");
     }
 

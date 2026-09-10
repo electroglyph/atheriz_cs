@@ -33,6 +33,11 @@ public sealed class SingleFetchHelperTests
         caller.ClearMessages();
         var prop = GameObject.Create("Rock", isItem: true);
         ObjectRegistry.AddObject(prop);
+        // Session first: puppet without one reports "no active session"
+        // (established PuppetWithoutSessionMessages behavior).
+        var sess = new Session();
+        caller.Session = sess;
+        sess.Puppet = caller;
         // Malformed id keeps the puppet-specific format message...
         new PuppetCommand().Run(caller, new PuppetCommand().Parser!.ParseArgs(["#x"]));
         Assert.Contains(caller.PeekMessages(), m => m == "Invalid ID format. Use #<number>.");
@@ -43,9 +48,6 @@ public sealed class SingleFetchHelperTests
         caller.ClearMessages();
         // ...and a non-PC #id is NOT refused with ban wording (puppet
         // accepts any object; the IsPc gate lives in BanHelper only).
-        var sess = new Session(null);
-        caller.Session = sess;
-        sess.Puppet = caller;
         new PuppetCommand().Run(caller, new PuppetCommand().Parser!.ParseArgs(["#" + prop.Id]));
         Assert.DoesNotContain(caller.PeekMessages(), m => m.Contains("ban"));
     }

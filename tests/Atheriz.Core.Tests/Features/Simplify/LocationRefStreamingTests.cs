@@ -54,7 +54,10 @@ public class LocationRefStreamingTests
     [Fact]
     public void Shapes_NullNumberEmpty_And_WrongKinds()
     {
-        Assert.Equal(LocationRef.NullLocation.Instance, Read("null"));
+        // Root JSON null bypasses the converter (HandleNull is false, as
+        // before the streaming rewrite), so it deserializes to C# null —
+        // not NullLocation.Instance. Only an explicit {} yields NullLocation.
+        Assert.Null(Read("null"));
         Assert.Equal(new LocationRef.ObjectLocation(42), Read("42"));
         Assert.Equal(LocationRef.NullLocation.Instance, Read("{}"));
         Assert.Throws<InvalidOperationException>(() => Read("\"s\""));

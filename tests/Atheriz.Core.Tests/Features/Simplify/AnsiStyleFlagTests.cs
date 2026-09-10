@@ -14,9 +14,12 @@ public class AnsiStyleFlagTests
     }
 
     [Fact]
-    public void WrapXterm256_AllFlags_ColorFirstThenFlagsThenReset()
+    public void WrapXterm256_AllFlags_BgPrependedLastThenFlagsThenReset()
     {
-        Assert.Equal("\x1b[9m\x1b[7m\x1b[4m\x1b[3m\x1b[1m\x1b[38;5;1m\x1b[48;5;2mx\x1b[0m",
+        // WrapXterm256 prepends fg first, then bg — so bg lands before fg in
+        // the output (unlike WrapRgb, which prepends in the opposite order).
+        // That caller-side color order predates the shared flag applier.
+        Assert.Equal("\x1b[9m\x1b[7m\x1b[4m\x1b[3m\x1b[1m\x1b[48;5;2m\x1b[38;5;1mx\x1b[0m",
             GameUtils.WrapXterm256("x", fg: 1, bg: 2,
                 bold: true, italic: true, underline: true, inverse: true, strikethru: true));
     }
