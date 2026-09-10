@@ -23,8 +23,9 @@ public static class AtherizDbContextFactory
     // Tests needing memory use CreateForTests() explicitly.
     public static AtherizDbContext Create(string savePath)
     {
-        // Guard mirrors get_database raising if _CLOSED
-        if (IsClosed) throw new InvalidOperationException("database is closed; refusing to reopen");
+        // No _closed re-check here: the AtherizDbContext ctor enforces the same
+        // guard with the identical type + message, so a duplicate check only
+        // drifted (two sources for one invariant).
         return new AtherizDbContext(savePath);
     }
 
@@ -121,6 +122,22 @@ public static class AtherizDbContextFactory
                 mk.Transaction = txn;
                 mk.CommandText = "CREATE TABLE \"transitions_new\" (\"FromArea\" TEXT NOT NULL, \"FromX\" INTEGER NOT NULL, \"FromY\" INTEGER NOT NULL, \"FromZ\" INTEGER NOT NULL, \"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"FromArea\",\"FromX\",\"FromY\",\"FromZ\",\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))";
                 mk.ExecuteNonQuery();
+                // One INSERT command for the whole loop, rebound per row: minting a
+                // command + eight parameters per row dominated large migrations.
+                // Every parameter is rebound for EVERY row below — a stale binding
+                // would silently write the previous row's values.
+                using var ins = conn.CreateCommand();
+                ins.Transaction = txn;
+                ins.CommandText = "INSERT OR IGNORE INTO \"transitions_new\" VALUES (@fa,@fx,@fy,@fz,@ta,@tx,@ty,@tz,@d)";
+                var pFa = AddParam(ins, "@fa", DBNull.Value);
+                var pFx = AddParam(ins, "@fx", DBNull.Value);
+                var pFy = AddParam(ins, "@fy", DBNull.Value);
+                var pFz = AddParam(ins, "@fz", DBNull.Value);
+                var pTa = AddParam(ins, "@ta", DBNull.Value);
+                var pTx = AddParam(ins, "@tx", DBNull.Value);
+                var pTy = AddParam(ins, "@ty", DBNull.Value);
+                var pTz = AddParam(ins, "@tz", DBNull.Value);
+                var pD = AddParam(ins, "@d", DBNull.Value);
                 foreach (var row in rows)
                 {
                     Objects.Transition? t = null;
@@ -131,18 +148,15 @@ public static class AtherizDbContextFactory
                     }
                     catch { t = null; }
                     if (t is null) { dropped++; continue; }
-                    using var ins = conn.CreateCommand();
-                    ins.Transaction = txn;
-                    ins.CommandText = "INSERT OR IGNORE INTO \"transitions_new\" VALUES (@fa,@fx,@fy,@fz,@ta,@tx,@ty,@tz,@d)";
-                    AddParam(ins, "@fa", t.FromCoord.Area);
-                    AddParam(ins, "@fx", t.FromCoord.X);
-                    AddParam(ins, "@fy", t.FromCoord.Y);
-                    AddParam(ins, "@fz", t.FromCoord.Z);
-                    AddParam(ins, "@ta", row.ToArea);
-                    AddParam(ins, "@tx", row.ToX);
-                    AddParam(ins, "@ty", row.ToY);
-                    AddParam(ins, "@tz", row.ToZ);
-                    AddParam(ins, "@d", (object?)row.Data ?? DBNull.Value);
+                    pFa.Value = (object?)t.FromCoord.Area ?? DBNull.Value;
+                    pFx.Value = t.FromCoord.X;
+                    pFy.Value = t.FromCoord.Y;
+                    pFz.Value = t.FromCoord.Z;
+                    pTa.Value = (object?)row.ToArea ?? DBNull.Value;
+                    pTx.Value = row.ToX;
+                    pTy.Value = row.ToY;
+                    pTz.Value = row.ToZ;
+                    pD.Value = (object?)row.Data ?? DBNull.Value;
                     ins.ExecuteNonQuery();
                 }
                 using var drop = conn.CreateCommand();
@@ -173,12 +187,13 @@ public static class AtherizDbContextFactory
     private static int GetInt(System.Data.Common.DbDataReader r, System.Collections.Generic.Dictionary<string, int> ord, string col)
         => r.IsDBNull(ord[col]) ? 0 : Convert.ToInt32(r.GetValue(ord[col]));
 
-    private static void AddParam(System.Data.Common.DbCommand cmd, string name, object? value)
+    private static System.Data.Common.DbParameter AddParam(System.Data.Common.DbCommand cmd, string name, object? value)
     {
         var p = cmd.CreateParameter();
         p.ParameterName = name;
         p.Value = value ?? DBNull.Value;
         cmd.Parameters.Add(p);
+        return p;
     }
 
     public static async Task DoSetupAsync(string savePath, CancellationToken ct = default)

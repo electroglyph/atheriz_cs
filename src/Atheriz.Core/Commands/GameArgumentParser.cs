@@ -82,19 +82,22 @@ public sealed class GameArgumentParser
         };
     }
 
+    // Dest derivation shared by both AddArgument overloads: like argparse,
+    // prefer the long (--) option for optional args, then strip dashes
+    // (inner dashes become underscores).
+    private static string DeriveDest(IEnumerable<string> names)
+    {
+        string raw = names.FirstOrDefault(n => n.StartsWith("--", StringComparison.Ordinal)) ?? names.First();
+        if (raw.StartsWith("-", StringComparison.Ordinal)) raw = raw.TrimStart('-').Replace("-", "_");
+        return raw;
+    }
+
     // Python-compatible AddArgument overloads
     public Builder AddArgument(params string[] names)
     {
         var def = new ArgumentDef { Names = names.ToList() };
         // dest: like argparse, prefer long option (--) for optional args
-        string raw = names[0];
-        if (names.Length > 1)
-        {
-            var longOpt = names.FirstOrDefault(n => n.StartsWith("--", StringComparison.Ordinal));
-            if (longOpt is not null) raw = longOpt;
-        }
-        if (raw.StartsWith("-", StringComparison.Ordinal)) raw = raw.TrimStart('-').Replace("-", "_");
-        def.Dest = raw;
+        def.Dest = DeriveDest(names);
         _defs.Add(def);
         return new Builder(def);
     }
@@ -107,14 +110,8 @@ public sealed class GameArgumentParser
         // starting with '-' on a positional is never misread as an alias.
         if (name.StartsWith("-", StringComparison.Ordinal) && IsOptionLike(help) && string.IsNullOrEmpty(nargs) && string.IsNullOrEmpty(action) && type is null && defaultValue is null && choices is null && required != true)
         {
-            // treat as AddArgument(params ["-f","--flag"])
-            var names = new List<string> { name, help };
-            var def2 = new ArgumentDef { Names = names };
-            string raw2 = names.FirstOrDefault(n => n.StartsWith("--", StringComparison.Ordinal)) ?? names[0];
-            if (raw2.StartsWith("-", StringComparison.Ordinal)) raw2 = raw2.TrimStart('-').Replace("-", "_");
-            def2.Dest = raw2;
-            _defs.Add(def2);
-            return new Builder(def2);
+            // treat as AddArgument(params ["-f","--flag"]) — same Dest derivation.
+            return AddArgument([name, help]);
         }
         var def = new ArgumentDef
         {
@@ -129,9 +126,7 @@ public sealed class GameArgumentParser
         if (!string.IsNullOrEmpty(nargs)) def.Nargs = nargs switch { "?" => NargsKind.Optional, "*" => NargsKind.ZeroOrMore, "+" => NargsKind.OneOrMore, "REMAINDER" => NargsKind.Remainder, _ => NargsKind.None };
         if (!string.IsNullOrEmpty(action)) def.Action = action switch { "store_true" => ArgAction.StoreTrue, "store_false" => ArgAction.StoreFalse, "append" => ArgAction.Append, _ => ArgAction.Store };
         // dest
-        string raw = name;
-        if (raw.StartsWith("-", StringComparison.Ordinal)) raw = raw.TrimStart('-').Replace("-", "_");
-        def.Dest = raw;
+        def.Dest = DeriveDest(def.Names);
         if (type is not null) def.Type = type;
         _defs.Add(def);
         return new Builder(def);
@@ -237,13 +232,28 @@ public sealed class GameArgumentParser
             throw new CommandError($"argument {display}: invalid choice: '{val}' (choose from {string.Join(", ", choices)})");
     }
 
-    // argparse's negative-number matcher (also the C# negative fast path).
+    // argparse's negative-number matcher (also the C# negative fast path):
+    // '-' then digits with one optional dot. A dot must be followed by a
+    // digit ("-5.5", "-.5"); a trailing dot is allowed after digits ("-5.").
+    // (The trailing-dot form is a DELIBERATE extension beyond argparse's
+    // _negative_number_matcher (^-\d+$|^-\d*\.\d+$), which rejects it: with
+    // no digit-options defined the token is unambiguous, and float("-5.")
+    // is valid.)
     private static bool IsNegativeNumber(string tok)
-        // trailing-dot forms ("-5.") also parse as values. DELIBERATE
-        // extension beyond argparse's _negative_number_matcher
-        // (^-\d+$|^-\d*\.\d+$), which rejects them: with no digit-options
-        // defined the token is unambiguous, and float("-5.") is valid.
-        => System.Text.RegularExpressions.Regex.IsMatch(tok, @"^-\d+\.?$|^-\d*\.\d+$");
+    {
+        ArgumentNullException.ThrowIfNull(tok);
+        if (tok.Length < 2 || tok[0] != '-') return false;
+        int i = 1;
+        int intDigits = 0;
+        while (i < tok.Length && char.IsDigit(tok[i])) { i++; intDigits++; }
+        if (i == tok.Length) return intDigits > 0;
+        if (tok[i] != '.') return false;
+        i++;
+        if (i == tok.Length) return intDigits > 0;
+        int fracDigits = 0;
+        while (i < tok.Length && char.IsDigit(tok[i])) { i++; fracDigits++; }
+        return i == tok.Length && fracDigits > 0;
+    }
 
     // An unknown -flag: starts with '-' but is not a bare '-' or a negative
     // number. List consumers must stop at these (argparse treats them as
@@ -285,20 +295,33 @@ public sealed class GameArgumentParser
 
         int posIdx = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        // A token is consumable as a list value while it is neither a known
+        // optional nor an unknown -flag (argparse treats those as
+        // unrecognized optionals, not values). One truth for the optional
+        // list consumer and both positional list consumers below.
+        bool IsValueToken(string tok) => !optionalMap.ContainsKey(tok) && !LooksLikeUnknownOption(tok);
+
+        // REMAINDER drain shared by the help-absorb, dash-absorb and
+        // positional tails: consume everything remaining into dest.
+        void DrainRemainder(string dest, ref int idx)
+        {
+            var lst = result.GetList(dest);
+            while (idx < argList.Count) lst.Add(argList[idx++]);
+            result.Set(dest, lst);
+        }
+
         for (int i = 0; i < argList.Count; )
         {
             string tok = argList[i];
             if (optionalMap.TryGetValue(tok, out var opt))
             {
                 // A pending REMAINDER positional absorbs even help flags: free-text
-                // commands speak them (owner decision 2026-09-08). Other commands
+                // commands speak them. Other commands
                 // keep standard --help behavior.
                 if (opt.IsHelp && posIdx < positionalDefs.Count && positionalDefs[posIdx].Nargs == NargsKind.Remainder)
                 {
-                    var pdHelp = positionalDefs[posIdx];
-                    var helpLst = result.GetList(pdHelp.Dest);
-                    while (i < argList.Count) helpLst.Add(argList[i++]);
-                    result.Set(pdHelp.Dest, helpLst);
+                    DrainRemainder(positionalDefs[posIdx].Dest, ref i);
                     break;
                 }
                 if (opt.IsHelp) throw new CommandError(FormatHelp());
@@ -316,7 +339,7 @@ public sealed class GameArgumentParser
                     {
                         List<string> lst = [];
                         i++;
-                        while (i < argList.Count && !optionalMap.ContainsKey(argList[i]) && !LooksLikeUnknownOption(argList[i]))
+                        while (i < argList.Count && IsValueToken(argList[i]))
                         {
                             lst.Add(argList[i++]);
                         }
@@ -381,14 +404,11 @@ public sealed class GameArgumentParser
                     continue;
                 }
                     // REMAINDER positional consumes everything remaining, including
-                    // dash tokens (owner decision 2026-09-08 — the parser's own
+                    // dash tokens (the parser's own
                     // consume-all contract; `say --help` must speak, not throw).
                     if (posIdx < positionalDefs.Count && positionalDefs[posIdx].Nargs == NargsKind.Remainder)
                     {
-                        var pdRem = positionalDefs[posIdx];
-                        var remLst = result.GetList(pdRem.Dest);
-                        while (i < argList.Count) remLst.Add(argList[i++]);
-                        result.Set(pdRem.Dest, remLst);
+                        DrainRemainder(positionalDefs[posIdx].Dest, ref i);
                         break;
                     }
                     // unknown optional — no REMAINDER to absorb it, so it is an error.
@@ -402,22 +422,20 @@ public sealed class GameArgumentParser
                 var pd = positionalDefs[posIdx];
                 if (pd.Nargs == NargsKind.Remainder)
                 {
-                    var lst = result.GetList(pd.Dest);
-                    while (i < argList.Count) lst.Add(argList[i++]);
-                    result.Set(pd.Dest, lst);
+                    DrainRemainder(pd.Dest, ref i);
                     break;
                 }
                 else if (pd.Nargs == NargsKind.ZeroOrMore)
                 {
                     var lst = result.GetList(pd.Dest);
-                    while (i < argList.Count && !optionalMap.ContainsKey(argList[i]) && !LooksLikeUnknownOption(argList[i])) lst.Add(argList[i++]);
+                    while (i < argList.Count && IsValueToken(argList[i])) lst.Add(argList[i++]);
                     result.Set(pd.Dest, lst);
                     posIdx++;
                 }
                 else if (pd.Nargs == NargsKind.OneOrMore)
                 {
                     var lst = result.GetList(pd.Dest);
-                    while (i < argList.Count && !optionalMap.ContainsKey(argList[i]) && !LooksLikeUnknownOption(argList[i])) lst.Add(argList[i++]);
+                    while (i < argList.Count && IsValueToken(argList[i])) lst.Add(argList[i++]);
                     if (lst.Count == 0) throw new CommandError($"the following arguments are required: {pd.Dest}");
                     result.Set(pd.Dest, lst);
                     posIdx++;

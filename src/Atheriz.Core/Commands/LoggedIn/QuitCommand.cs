@@ -1,5 +1,4 @@
 // Port of atheriz/commands/loggedin/quit.py:20
-using Atheriz.Core.Network;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -16,18 +15,6 @@ public sealed class QuitCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         caller.Msg("Goodbye!");
-        if (caller is GameObject go)
-        {
-            try { go.Session?.Connection?.Close(); } catch (Exception) { }
-        }
-        else if (caller is Session sess)
-        {
-            try { sess.Connection?.Close(); } catch (Exception) { }
-        }
-        // close raw connections like the unlogged-in twin does.
-        else if (caller is BaseConnection bc)
-        {
-            try { bc.Close(); } catch (Exception) { }
-        }
+        ConnectionHelper.CloseQuietly(caller);
     }
 }

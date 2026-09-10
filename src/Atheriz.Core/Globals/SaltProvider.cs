@@ -22,6 +22,19 @@ public static class SaltProvider
     // fixed key (single static salt is an intentional wontfix).
     private const string DefaultSaltKey = "secret";
 
+    // Cache probe shared by both GetSalt lookups. Takes no lock itself —
+    // call only with _lock held. Contains no RNG, so the RNG-stays-outside
+    // the lock shape is unchanged.
+    private static bool TryGetCachedLocked(string key, bool isDefault, out string? val)
+    {
+        if (isDefault)
+        {
+            val = _salt;
+            return val is not null;
+        }
+        return _salts.TryGetValue(key, out val);
+    }
+
     public static string GetSalt(string secretPath = DefaultSaltKey)
     {
         // Equality with the default identifies the default invocation (the
@@ -30,22 +43,14 @@ public static class SaltProvider
         string key = isDefault ? DefaultSaltKey : Path.GetFullPath(secretPath);
         lock (_lock)
         {
-            if (isDefault)
-            {
-                if (_salt is not null) return _salt;
-            }
-            else if (_salts.TryGetValue(key, out var cached)) return cached;
+            if (TryGetCachedLocked(key, isDefault, out var cached)) return cached;
         }
         // RNG runs outside the global lock (RNG is thread-safe;
         // holding _lock over it serializes all salt callers for no reason).
         var preVal = CryptoRandom.UInt64String();
         lock (_lock)
         {
-            if (isDefault)
-            {
-                if (_salt is not null) return _salt;
-            }
-            else if (_salts.TryGetValue(key, out var cached)) return cached;
+            if (TryGetCachedLocked(key, isDefault, out var cached)) return cached;
             var isAbs = Path.IsPathRooted(secretPath);
             if (!isAbs && !GameUtils.IsInGameFolder())
                 throw new InvalidOperationException(

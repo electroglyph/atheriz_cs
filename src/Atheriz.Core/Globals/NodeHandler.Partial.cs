@@ -211,8 +211,23 @@ public partial class NodeHandler
     }
     public List<Node> GetNodes(List<Coord> coords)
     {
-        List<Node> res = [];
-        foreach(var c in coords){ var n=GetNode(c); if(n is not null) res.Add(n); }
+        ArgumentNullException.ThrowIfNull(coords);
+        // Single-hold batch lookup: one handler read scope for every coord
+        // instead of one acquisition per coord. Same nesting as GetNode
+        // (handler → area → grid, all recursion-capable), same order,
+        // same null-skip — the snapshot is only more consistent.
+        List<Node> res = new(coords.Count);
+        Lock.EnterReadLock();
+        try
+        {
+            foreach (var c in coords)
+            {
+                if (!_areas.TryGetValue(c.Area, out var area)) continue;
+                var n = area.GetGrid(c.Z)?.GetNode(c.X, c.Y);
+                if (n is not null) res.Add(n);
+            }
+        }
+        finally { Lock.ExitReadLock(); }
         return res;
     }
     public void AddTransition(Transition t)
@@ -262,6 +277,16 @@ public partial class NodeHandler
         return res;
     }
 
+    // One choke point for the RemapDoors/RemapTransitions first-wins merges:
+    // a relocated entry landing on an occupied destination is dropped loudly,
+    // never silently clobbered. Plain generics, no reflection; the warning
+    // text and log scope stay per-caller so both messages are byte-identical.
+    private static void TryInsertFirstWins<TKey, TVal>(Dictionary<TKey, TVal> dst, TKey key, TVal value, string warnMsg, string logScope)
+        where TKey : notnull
+    {
+        if (!dst.TryAdd(key, value))
+            try { AtherizLogger.LogWarning(warnMsg); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler." + logScope + ": " + logEx.Message, "NodeHandler"); }
+    }
     // Port of nodes.py:1147 door re-key for ApplyMoves
     public void RemapDoors(Dictionary<Coord, Coord> oldToNewFull, Dictionary<(int,int),(int,int)> remap)
     {
@@ -286,13 +311,12 @@ public partial class NodeHandler
                     _doors[newFull] = doorsDict;
                 else
                     // First-wins like RemapTransitions below: the pre-existing dict
-                    // stays, per-name newcomers are dropped loudly (owner decision
-                    // 2026-09-08 — never silently clobber on a merge).
+                    // stays, per-name newcomers are dropped loudly —
+                    // never silently clobber on a merge.
                     foreach (var kv in doorsDict)
-                    {
-                        if (!existing.TryAdd(kv.Key, kv.Value))
-                            try { AtherizLogger.LogWarning($"RemapDoors: dropping relocated door '{kv.Key}' at {newFull} (destination already has one)."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemapDoors: " + logEx.Message, "NodeHandler"); }
-                    }
+                        TryInsertFirstWins(existing, kv.Key, kv.Value,
+                            $"RemapDoors: dropping relocated door '{kv.Key}' at {newFull} (destination already has one).",
+                            "RemapDoors");
             }
             HashSet<Door> seenRef = [];
             foreach (var doorsDict in relocated.Values)
@@ -376,9 +400,9 @@ public partial class NodeHandler
                     var newKey = (trans.FromCoord, newFull);
                     // Never silently clobber a pre-existing destination edge:
                     // first-wins, the dropped relocation is logged loudly.
-                    if (!_transitions.ContainsKey(newKey))
-                        _transitions[newKey] = trans;
-                    else try { AtherizLogger.LogWarning($"RemapTransitions: dropping relocated edge to {newFull} (destination already has one)."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemapTransitions: " + logEx.Message, "NodeHandler"); }
+                    TryInsertFirstWins(_transitions, newKey, trans,
+                        $"RemapTransitions: dropping relocated edge to {newFull} (destination already has one).",
+                        "RemapTransitions");
                     _modified2 = true;
                     _transGen++;
                     // Old-coord row must die in the DB (see RemapDoors).

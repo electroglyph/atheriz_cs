@@ -33,31 +33,32 @@ public static class ThrottleWindow
             // expired entries among a bounded probe prefix (O(1)), so small
             // dicts still drain promptly while the common path stays flat.
             if (last.Count > MaxHostsBeforeSweep)
-            {
-                List<string>? expired = null;
-                foreach (var entry in last)
-                    if (now - entry.Value >= window)
-                        (expired ??= []).Add(entry.Key);
-                if (expired is not null)
-                    foreach (var k in expired) last.Remove(k);
-            }
+                EvictExpiredLocked(last, window, now, int.MaxValue);
             else if (last.Count > 0)
-            {
-                List<string>? expiredFew = null;
-                int probed = 0;
-                foreach (var entry in last)
-                {
-                    if (probed++ >= MaxEvictProbePerCall) break;
-                    if (now - entry.Value >= window)
-                        (expiredFew ??= []).Add(entry.Key);
-                }
-                if (expiredFew is not null)
-                    foreach (var k in expiredFew) last.Remove(k);
-            }
+                EvictExpiredLocked(last, window, now, MaxEvictProbePerCall);
             if (last.TryGetValue(host, out var prev) && now - prev < window) return false;
             last[host] = now;
             return true;
         }
+    }
+
+    // Shared expired-eviction body for the full sweep (maxProbe MaxValue) and
+    // the bounded probe (maxProbe 16). Call with syncLock held — locks
+    // nothing itself. Keeps the >=window predicate, enumeration order,
+    // lazy-alloc, and deferred-remove (no inline remove during enumerate);
+    // the Count>0 guard at the caller avoids the enumerator on the hot path.
+    private static void EvictExpiredLocked(Dictionary<string, double> last, double window, double now, int maxProbe)
+    {
+        List<string>? expired = null;
+        int probed = 0;
+        foreach (var entry in last)
+        {
+            if (probed++ >= maxProbe) break;
+            if (now - entry.Value >= window)
+                (expired ??= []).Add(entry.Key);
+        }
+        if (expired is not null)
+            foreach (var k in expired) last.Remove(k);
     }
 
     /// <summary>

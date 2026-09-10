@@ -289,18 +289,26 @@ public static class StartStop
     // Port of startstop.py:85-122 _reregister_ticks
     private static void ReregisterTicks(AsyncTicker ticker)
     {
+        // One choke point for the registry and node-grid sweeps below:
+        // same try-get → fallback seconds → clamp → AddCoro → per-target
+        // LogError. The two enumerations stay as-is; only the per-target
+        // body is shared. Error text stays byte-identical via the label.
+        void RegisterTick(GameObject go, string label)
+        {
+            var atTick = TryGetAtTick(go);
+            if (atTick is null) return;
+            double seconds = 1.0;
+            try { seconds = go.TickSeconds; } catch { seconds = 1.0; }
+            if (seconds <= 0) seconds = 1.0;
+            try { ticker.AddCoro(atTick, seconds); }
+            catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Failed to re-register tick for {label} {go.Id}:\n{ex}"); }
+        }
         // Port of startstop.py:94-102 for obj in filter_by(_is_tickable): ticker.add_coro(at_tick, _tick_seconds)
         try
         {
             foreach (var obj in ObjectRegistry.FilterBy(o => o.IsTickable))
             {
-                var atTick = TryGetAtTick(obj);
-                if (atTick is null) continue;
-                double seconds = 1.0;
-                try { seconds = obj.TickSeconds; } catch { seconds = 1.0; }
-                if (seconds <= 0) seconds = 1.0;
-                try { ticker.AddCoro(atTick, seconds); }
-                catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Failed to re-register tick for object {obj.Id}:\n{ex}"); }
+                RegisterTick(obj, "object");
             }
         }
         catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Tick re-registration failed (objects):\n{ex}"); }
@@ -328,13 +336,7 @@ public static class StartStop
                     finally { grid.Lock.ExitReadLock(); }
                     foreach (var node in nodes)
                     {
-                        var atTick = TryGetAtTick(node);
-                        if (atTick is null) continue;
-                        double seconds = 1.0;
-                        try { seconds = node.TickSeconds; } catch { seconds = 1.0; }
-                        if (seconds <= 0) seconds = 1.0;
-                        try { ticker.AddCoro(atTick, seconds); }
-                        catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Failed to re-register tick for node {node.Id}:\n{ex}"); }
+                        RegisterTick(node, "node");
                     }
                 }
             }

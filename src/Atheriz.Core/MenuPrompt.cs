@@ -18,7 +18,10 @@ public static class MenuPrompt
     {
         try
         {
-            using var cts = new CancellationTokenSource(timeout);
+            // Single timer: the delay below is the only armed clock (the old
+            // CancellationTokenSource(timeout) armed a second one). The
+            // source is cancelled on the success path to release the delay.
+            using var cts = new CancellationTokenSource();
             var promptTask = session.Prompt(display);
             // Capture the live future so the timeout path can cancel it (no orphaned
             // InputFuture). Prompt's synchronous prefix runs to completion on call, so the
@@ -27,14 +30,15 @@ public static class MenuPrompt
             var delayTask = Task.Delay(timeout, cts.Token);
             var done = await Task.WhenAny(promptTask, delayTask).ConfigureAwait(false);
             if (done != promptTask) { try { session.CancelPrompt(pending); } catch { } return null; }
-            try { cts.Cancel(); } catch { }
+            try { await cts.CancelAsync().ConfigureAwait(false); } catch { }
             return await promptTask.ConfigureAwait(false);
         }
         catch (OperationCanceledException) { return null; }
         catch { return null; }
     }
 
-    /// <summary>Sync alias for <c>PromptWithTimeoutAsync</c>.</summary>
+    /// <summary>Sync alias for <c>PromptWithTimeoutAsync</c>. Kept: external
+    /// game code and the parity suite call this spelling.</summary>
     public static Task<string?> PromptWithTimeout(Session session, string display, TimeSpan timeout)
         => PromptWithTimeoutAsync(session, display, timeout);
 }

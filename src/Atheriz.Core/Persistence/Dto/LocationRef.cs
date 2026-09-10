@@ -16,6 +16,13 @@ public abstract record LocationRef
     {
         public static readonly NullLocation Instance = new();
     }
+
+    /// <summary>
+    /// Single construction point for coord-backed locations. Builds the same
+    /// record as the constructor — same values, same coordinate order, same
+    /// serialized JSON — so all call sites share one spelling.
+    /// </summary>
+    public static CoordLocation FromCoord(Coord coord) => new CoordLocation(coord);
 }
 
 public sealed class LocationRefConverter : JsonConverter<LocationRef>
@@ -26,23 +33,78 @@ public sealed class LocationRefConverter : JsonConverter<LocationRef>
         if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var id))
             return new LocationRef.ObjectLocation(id);
 
-        // Expect object { "Area": "...", "X":..}
-        using var doc = JsonDocument.ParseValue(ref reader);
-        var root = doc.RootElement;
-        if (root.TryGetProperty("Area", out var areaProp))
+        // Streaming object scan (no JsonDocument DOM per Coord-location read
+        // on the hot load path). Order-independent like the TryGetProperty
+        // lookups it replaces: all properties are collected first, then the
+        // same branch order decides (Area-object, ObjectId-object,
+        // NullLocation) with the identical JsonException messages.
+        // Non-object JSON mirrors the DOM throw (InvalidOperationException
+        // from TryGetProperty on a non-object), never silent NullLocation.
+        if (reader.TokenType != JsonTokenType.StartObject)
+            throw new InvalidOperationException(
+                $"The requested operation requires an element of type 'Object', but the target element has type '{reader.TokenType}'.");
+        string area = "";
+        bool hasArea = false;
+        bool hasObjectId = false;
+        int objectId = 0;
+        bool objectIdOk = false;
+        int x = 0, y = 0, z = 0;
+        bool xOk = false, yOk = false, zOk = false;
+        bool complete = false;
+        while (reader.Read())
         {
-            var area = areaProp.GetString() ?? "";
-            if (!root.TryGetProperty("X", out var xp) || !root.TryGetProperty("Y", out var yp) || !root.TryGetProperty("Z", out var zp)
-                || xp.ValueKind != JsonValueKind.Number || yp.ValueKind != JsonValueKind.Number || zp.ValueKind != JsonValueKind.Number)
-                throw new JsonException("Coord location requires numeric X/Y/Z.");
-            return new LocationRef.CoordLocation(new Coord(area, xp.GetInt32(), yp.GetInt32(), zp.GetInt32()));
+            if (reader.TokenType == JsonTokenType.EndObject) { complete = true; break; }
+            if (reader.TokenType != JsonTokenType.PropertyName) continue;
+            string? name = reader.GetString();
+            if (!reader.Read()) break;
+            switch (name)
+            {
+                case "Area":
+                    hasArea = true;
+                    if (reader.TokenType == JsonTokenType.String) area = reader.GetString() ?? "";
+                    else if (reader.TokenType == JsonTokenType.Null) area = "";
+                    else throw new InvalidOperationException(
+                        $"The requested operation requires an element of type 'String', but the target element has type '{reader.TokenType}'.");
+                    break;
+                case "X":
+                    if (reader.TokenType != JsonTokenType.Number) throw new JsonException("Coord location requires numeric X/Y/Z.");
+                    x = reader.GetInt32();
+                    xOk = true;
+                    break;
+                case "Y":
+                    if (reader.TokenType != JsonTokenType.Number) throw new JsonException("Coord location requires numeric X/Y/Z.");
+                    y = reader.GetInt32();
+                    yOk = true;
+                    break;
+                case "Z":
+                    if (reader.TokenType != JsonTokenType.Number) throw new JsonException("Coord location requires numeric X/Y/Z.");
+                    z = reader.GetInt32();
+                    zOk = true;
+                    break;
+                case "ObjectId":
+                    hasObjectId = true;
+                    objectIdOk = reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out objectId);
+                    break;
+                default:
+                    reader.Skip();
+                    break;
+            }
         }
-        if (root.TryGetProperty("ObjectId", out var oid))
+        // Truncated JSON never degrades to a silent NullLocation: the DOM
+        // parse threw JsonException here too (fail-closed, same type).
+        if (!complete) throw new JsonException("Unexpected end of location object.");
+        if (hasArea)
+        {
+            if (!xOk || !yOk || !zOk)
+                throw new JsonException("Coord location requires numeric X/Y/Z.");
+            return LocationRef.FromCoord(new Coord(area, x, y, z));
+        }
+        if (hasObjectId)
         {
             // Loud contract: a non-numeric ObjectId is corrupt data, reported as
             // JsonException like the X/Y/Z branch above (not InvalidOperationException).
-            if (oid.ValueKind == JsonValueKind.Number && oid.TryGetInt32(out var oidNum))
-                return new LocationRef.ObjectLocation(oidNum);
+            if (objectIdOk)
+                return new LocationRef.ObjectLocation(objectId);
             throw new JsonException("ObjectId location requires a numeric id.");
         }
         return LocationRef.NullLocation.Instance;

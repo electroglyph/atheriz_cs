@@ -12,40 +12,37 @@ public static class PathGuards
     /// Mirrors <c>atheriz/database_setup.py:66-71</c>:
     /// <c>save_path = Path(settings.SAVE_PATH); if not (save_path.is_absolute() or is_in_game_folder()): raise RuntimeError(...)</c>
     /// </summary>
-    public static void GuardSavePath(string savePath)
-    {
-        if (!Path.IsPathRooted(savePath) && !GameUtils.IsInGameFolder())
-            throw new InvalidOperationException(
-                $"Cannot determine database path: SAVE_PATH ({savePath}) is not absolute and we're not in a game folder. Run 'atheriz new' or set SAVE_PATH.");
-    }
+    public static void GuardSavePath(string savePath) => GuardPath(savePath, "database", "SAVE_PATH");
 
     /// <summary>
     /// Mirrors <c>atheriz/atheriz.py:559-563</c> secret guard.
     /// </summary>
-    public static void GuardSecretPath(string secretPath)
+    public static void GuardSecretPath(string secretPath) => GuardPath(secretPath, "secret", "SECRET_PATH");
+
+    // Shared rooted/game-folder check core: the kind label and setting name are
+    // the only differences between the guards (messages preserved verbatim).
+    private static void GuardPath(string path, string kind, string settingName)
     {
-        if (!Path.IsPathRooted(secretPath) && !GameUtils.IsInGameFolder())
+        if (!Path.IsPathRooted(path) && !GameUtils.IsInGameFolder())
             throw new InvalidOperationException(
-                $"Cannot determine secret path: SECRET_PATH ({secretPath}) is not absolute and we're not in a game folder. Run 'atheriz new' or set SECRET_PATH.");
+                $"Cannot determine {kind} path: {settingName} ({path}) is not absolute and we're not in a game folder. Run 'atheriz new' or set {settingName}.");
     }
 
     /// <summary>
     /// Guard + ensure directory exists with POSIX 0o700 where supported — mirrors <c>atheriz.py:514 + 564-568</c>.
     /// </summary>
-    public static void EnsureSaveDirectory(string savePath)
-    {
-        GuardSavePath(savePath);
-        Directory.CreateDirectory(savePath);
-        FsUtil.TryChmod0700(savePath);
-        ProbeWritable(savePath, "save");
-    }
+    public static void EnsureSaveDirectory(string savePath) => EnsureDirectory(savePath, GuardSavePath, "save");
 
-    public static void EnsureSecretDirectory(string secretPath)
+    public static void EnsureSecretDirectory(string secretPath) => EnsureDirectory(secretPath, GuardSecretPath, "secret");
+
+    // Shared guard + create + chmod + probe core: the guard and kind label are
+    // the only differences between the directory wrappers.
+    private static void EnsureDirectory(string path, Action<string> guard, string kind)
     {
-        GuardSecretPath(secretPath);
-        Directory.CreateDirectory(secretPath);
-        FsUtil.TryChmod0700(secretPath);
-        ProbeWritable(secretPath, "secret");
+        guard(path);
+        Directory.CreateDirectory(path);
+        FsUtil.TryChmod0700(path);
+        ProbeWritable(path, kind);
     }
 
     /// <summary>
@@ -72,12 +69,7 @@ public static class PathGuards
     /// Backwards-compatible wrapper for legacy <c>PathHelpers.EnsureSavePathValid</c> — mirrors same guard with kind param.
     /// </summary>
     public static void EnsureSavePathValid(string savePath, string kind = "database")
-    {
-        var isAbs = Path.IsPathRooted(savePath);
-        if (!isAbs && !GameUtils.IsInGameFolder())
-            throw new InvalidOperationException(
-                $"Cannot determine {kind} path: SAVE_PATH ({savePath}) is not absolute and we're not in a game folder. Run 'atheriz new' or set SAVE_PATH.");
-    }
+        => GuardPath(savePath, kind, "SAVE_PATH");
 
     public static void EnsureSecretPathValid(string secretPath) => GuardSecretPath(secretPath);
 
@@ -104,6 +96,10 @@ public static class PathGuards
     /// performs its own confined save-leaf wipe with explicit operator intent
     /// instead of consulting this world-membership gate.
     /// </summary>
+    // Wipe-marker file names shared by GuardWipePath: hoisted so every call does
+    // not allocate a fresh array (contents are fixed; callers only enumerate).
+    private static readonly string[] WipeMarkers = ["database.sqlite3", "database.sqlite3-wal", "database.sqlite3-shm", "database.sqlite3.journal"];
+
     public static void GuardWipePath(string path, bool force)
     {
         DenyRoot(path);
@@ -111,7 +107,7 @@ public static class PathGuards
         if (Directory.Exists(full))
         {
             if (File.Exists(Path.Combine(full, "server.pid"))) return;
-            foreach (var marker in new[] { "database.sqlite3", "database.sqlite3-wal", "database.sqlite3-shm", "database.sqlite3.journal" })
+            foreach (var marker in WipeMarkers)
                 if (File.Exists(Path.Combine(full, marker))) return;
         }
         if (force && GameUtils.IsInGameFolder()) return;

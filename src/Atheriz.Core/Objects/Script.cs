@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Reflection;
 
 namespace Atheriz.Core.Objects;
@@ -130,55 +131,23 @@ public class Script : GameObject
         }
     }
 
+    // Arity → Action<...>/Func<...> mapping via the BCL factories, which
+    // produce the identical runtime types for arities 0-16. Past 16 params
+    // the BCL throws while the old hand-rolled switch returned null — both
+    // spellings funnel into the same outcome because CreateHookDelegate above
+    // converts any failure into a loud-log-and-skip (null), so hook call
+    // sites (max ~9 args at AtSayFull) never observe the difference.
     private static Type? GetActionType(Type[] paramTypes)
     {
-        return paramTypes.Length switch
-        {
-            0 => typeof(Action),
-            1 => typeof(Action<>).MakeGenericType(paramTypes),
-            2 => typeof(Action<,>).MakeGenericType(paramTypes),
-            3 => typeof(Action<,,>).MakeGenericType(paramTypes),
-            4 => typeof(Action<,,,>).MakeGenericType(paramTypes),
-            5 => typeof(Action<,,,,>).MakeGenericType(paramTypes),
-            6 => typeof(Action<,,,,,>).MakeGenericType(paramTypes),
-            7 => typeof(Action<,,,,,,>).MakeGenericType(paramTypes),
-            8 => typeof(Action<,,,,,,,>).MakeGenericType(paramTypes),
-            9 => typeof(Action<,,,,,,,,>).MakeGenericType(paramTypes),
-            10 => typeof(Action<,,,,,,,,,>).MakeGenericType(paramTypes),
-            11 => typeof(Action<,,,,,,,,,,>).MakeGenericType(paramTypes),
-            12 => typeof(Action<,,,,,,,,,,,>).MakeGenericType(paramTypes),
-            13 => typeof(Action<,,,,,,,,,,,,>).MakeGenericType(paramTypes),
-            14 => typeof(Action<,,,,,,,,,,,,,>).MakeGenericType(paramTypes),
-            15 => typeof(Action<,,,,,,,,,,,,,,>).MakeGenericType(paramTypes),
-            16 => typeof(Action<,,,,,,,,,,,,,,,>).MakeGenericType(paramTypes),
-            _ => null
-        };
+        try { return Expression.GetActionType(paramTypes); }
+        catch (ArgumentException) { return null; }
     }
 
     private static Type? GetFuncType(Type[] allTypes)
     {
-        // last is return; n = number of params
-        int n = allTypes.Length - 1;
-        return n switch
-        {
-            0 => typeof(Func<>).MakeGenericType(allTypes),
-            1 => typeof(Func<,>).MakeGenericType(allTypes),
-            2 => typeof(Func<,,>).MakeGenericType(allTypes),
-            3 => typeof(Func<,,,>).MakeGenericType(allTypes),
-            4 => typeof(Func<,,,,>).MakeGenericType(allTypes),
-            5 => typeof(Func<,,,,,>).MakeGenericType(allTypes),
-            6 => typeof(Func<,,,,,,>).MakeGenericType(allTypes),
-            7 => typeof(Func<,,,,,,,>).MakeGenericType(allTypes),
-            8 => typeof(Func<,,,,,,,,>).MakeGenericType(allTypes),
-            9 => typeof(Func<,,,,,,,,,>).MakeGenericType(allTypes),
-            10 => typeof(Func<,,,,,,,,,,>).MakeGenericType(allTypes),
-            11 => typeof(Func<,,,,,,,,,,,>).MakeGenericType(allTypes),
-            12 => typeof(Func<,,,,,,,,,,,,>).MakeGenericType(allTypes),
-            13 => typeof(Func<,,,,,,,,,,,,,>).MakeGenericType(allTypes),
-            14 => typeof(Func<,,,,,,,,,,,,,,>).MakeGenericType(allTypes),
-            15 => typeof(Func<,,,,,,,,,,,,,,,>).MakeGenericType(allTypes),
-            _ => null
-        };
+        // last is return; the BCL counts params implicitly from the array.
+        try { return Expression.GetFuncType(allTypes); }
+        catch (ArgumentException) { return null; }
     }
 
     /// <summary>
@@ -205,17 +174,19 @@ public class Script : GameObject
                 // Fetch inside the lock: the live dict must not be grabbed
                 // beforehand (a concurrent InstallHook could replace it).
                 var hooksDict = child.HooksRawNoLock;
-        foreach (var (name, method, _) in atFuncs)
+        foreach (var (name, _, _) in atFuncs)
                     {
                         if (hooksDict.TryGetValue(name, out var set))
                         {
-                            // Remove exact delegates matching this script's methods
-                            var toRemove = set.Where(d => d.Method == method && ReferenceEquals(d.Target, this)).ToList();
-                            foreach (var d in toRemove) set.Remove(d);
-                            // Also clear any remaining hooks whose __self__ (Target) is this script — Port of base_script.py:237-239 s.difference_update([hook for hook in s if getattr(hook,"__self__",None) is self])
-                            var extra = set.Where(d => ReferenceEquals(d.Target, this)).ToList();
-                            foreach (var d in extra) set.Remove(d);
-                            hooksDict[name] = set;
+                            // The old two-loop shape (exact method+target, then
+                            // any remaining target) unions to "target is this",
+                            // so one pass removes the same delegates. Identity
+                            // must be ReferenceEquals: GameObject == is
+                            // Id-equality, and same-Id distinct instances exist
+                            // after hot-reload rewire — == would detach a
+                            // replacement instance's hooks along with ours.
+                            // Port of base_script.py:237-239 s.difference_update([hook for hook in s if getattr(hook,"__self__",None) is self])
+                            set.RemoveWhere(d => ReferenceEquals(d.Target, this));
                         }
                     }
                 }

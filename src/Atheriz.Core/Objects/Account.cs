@@ -81,12 +81,13 @@ public class Account : GameObject
 
     public string PasswordHash
     {
-        get => ReadHash();
-        private set => WriteHash(value);
+        get => Read(() => _passwordHash);
+        private set => Write(() => { _passwordHash = value; IsModified = true; });
     }
-    public IReadOnlyList<int> Characters => ReadChars();
-    public override string BanReason { get => ReadBan(); set => WriteBan(value); }
-    public bool LoggedIn { get => ReadLogged(); private set => WriteLogged(value); }
+    public IReadOnlyList<int> Characters => Read(() => (IReadOnlyList<int>)new List<int>(_characters));
+    public override string BanReason { get => Read(() => _banReason); set => Write(() => { _banReason = value; IsModified = true; }); }
+    // LoggedIn is transient session state, not persisted save data — intentionally not marked modified.
+    public bool LoggedIn { get => Read(() => _loggedIn); private set => Write(() => _loggedIn = value); }
 
     public override IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
     {
@@ -96,15 +97,6 @@ public class Account : GameObject
         yield return ("BanReason", Safe(() => (object?)BanReason), true);
         yield return ("LoggedIn", Safe(() => (object?)LoggedIn), true);
     }
-
-    private string ReadHash() { SyncRoot.EnterReadLock(); try { return _passwordHash; } finally { SyncRoot.ExitReadLock(); } }
-    private void WriteHash(string v) { SyncRoot.EnterWriteLock(); try { _passwordHash = v; IsModified = true; } finally { SyncRoot.ExitWriteLock(); } }
-    private IReadOnlyList<int> ReadChars() { SyncRoot.EnterReadLock(); try { return new List<int>(_characters); } finally { SyncRoot.ExitReadLock(); } }
-    private string ReadBan() { SyncRoot.EnterReadLock(); try { return _banReason; } finally { SyncRoot.ExitReadLock(); } }
-    private void WriteBan(string v) { SyncRoot.EnterWriteLock(); try { _banReason = v; IsModified = true; } finally { SyncRoot.ExitWriteLock(); } }
-    private bool ReadLogged() { SyncRoot.EnterReadLock(); try { return _loggedIn; } finally { SyncRoot.ExitReadLock(); } }
-    // LoggedIn is transient session state, not persisted save data — intentionally not marked modified.
-    private void WriteLogged(bool v) { SyncRoot.EnterWriteLock(); try { _loggedIn = v; } finally { SyncRoot.ExitWriteLock(); } }
 
     public static string HashPassword(string password, string? saltOverride = null)
     {
@@ -211,60 +203,14 @@ public class Account : GameObject
 
     public override (string Sql, object[] Params) GetSaveOps()
     {
-        bool had;
-        GameObjectDto dto;
-        SyncRoot.EnterWriteLock();
-        try
-        {
-            had = IsModified;
-            IsModified = false;
-            // snapshot the DTO under the lock; JSON serialization
-            // runs after release so checkpoints don't stall readers.
-            // (GetSaveOps is a peek — the flag is restored.)
-            dto = ToDto();
-            IsModified = had;
-        }
-        finally { SyncRoot.ExitWriteLock(); }
-        string json;
-        try { json = GameObjectDtoSerializer.ToJson(dto); }
-        catch
-        {
-            SyncRoot.EnterWriteLock();
-            try { IsModified = had; }
-            finally { SyncRoot.ExitWriteLock(); }
-            throw;
-        }
+        // Flag dance + post-release encode live in the shared converter core;
+        // only the account DTO snapshot stays here.
+        string json = Persistence.Converters.GameObjectDtoConverter.BuildSaveJson(this, ToDto, clearing: false);
         return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [Id, json]);
     }
     public override (string Sql, object[] Params) GetSaveOpsClearing()
     {
-        GameObjectDto dto;
-        SyncRoot.EnterWriteLock();
-        bool had = IsModified;
-        try
-        {
-            dto = ToDto();
-            dto.IsModified = false;
-            IsModified = false;
-        }
-        catch
-        {
-            // Failed snapshot must not leave the object clean
-            // (Channel.BuildSaveOps parity) — the next checkpoint retries.
-            IsModified = had;
-            throw;
-        }
-        finally { SyncRoot.ExitWriteLock(); }
-        // serialize after the lock releases.
-        string json;
-        try { json = GameObjectDtoSerializer.ToJson(dto); }
-        catch
-        {
-            SyncRoot.EnterWriteLock();
-            try { IsModified = had; }
-            finally { SyncRoot.ExitWriteLock(); }
-            throw;
-        }
+        string json = Persistence.Converters.GameObjectDtoConverter.BuildSaveJson(this, ToDto, clearing: true);
         return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [Id, json]);
     }
 
@@ -281,12 +227,12 @@ public class Account : GameObject
         SyncRoot.EnterReadLock();
         try
         {
-            dto.Extra["password"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_passwordHash)).RootElement.Clone();
-            dto.Extra["characters"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_characters)).RootElement.Clone();
-            dto.Extra["banReason"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(_banReason)).RootElement.Clone();
+            dto.Extra["password"] = Persistence.JsonOptions.ToElement(_passwordHash);
+            dto.Extra["characters"] = Persistence.JsonOptions.ToElement(_characters);
+            dto.Extra["banReason"] = Persistence.JsonOptions.ToElement(_banReason);
         }
         finally { SyncRoot.ExitReadLock(); }
-        dto.Extra["loggedIn"] = System.Text.Json.JsonDocument.Parse("false").RootElement.Clone();
+        dto.Extra["loggedIn"] = Persistence.JsonOptions.ToElement(false);
         return dto;
     }
 

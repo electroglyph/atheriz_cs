@@ -8,6 +8,11 @@ public sealed class DoorCommand : Command
     public override string Desc => "Manage doors.";
     public override string Category => "Building";
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
+    // Removal rows (long, short) in established removal order; opposites live
+    // in the creation table below (n<->s, e<->w, u<->d — verify both tables
+    // agree when editing either).
+    private static readonly (string Long, string Short)[] RemoveDirs =
+        [("north", "n"), ("south", "s"), ("east", "e"), ("west", "w"), ("up", "u"), ("down", "d")];
     protected override void SetupParser(GameArgumentParser parser)
     {
         parser.AddArgument("-n", "--north").Action(GameArgumentParser.ArgAction.StoreTrue).Help("North");
@@ -54,23 +59,29 @@ public sealed class DoorCommand : Command
                 if (d is not null) { nh.RemoveDoor(d); go.Msg($"Removed {d}"); }
                 else go.Msg($"There is no door {longName}.");
             }
-            if (north) TryRemove("north","n");
-            if (south) TryRemove("south","s");
-            if (east) TryRemove("east","e");
-            if (west) TryRemove("west","w");
-            if (up) TryRemove("up","u");
-            if (down) TryRemove("down","d");
+            // Row order is the established removal order (n, s, e, w, u, d).
+            var removeFlags = new Dictionary<string, bool>(StringComparer.Ordinal)
+            {
+                ["north"] = north, ["south"] = south, ["east"] = east,
+                ["west"] = west, ["up"] = up, ["down"] = down,
+            };
+            foreach (var (longName, shortName) in RemoveDirs)
+                if (removeFlags[longName])
+                    TryRemove(longName, shortName);
             return;
         }
         var settings = AtherizSettings.Global;
-        var defs = new (string flag, string longName, string shortName, int dx,int dy,int dz, string closed, string open)[]
+        // One row per direction: flag state rides in the tuple (no per-loop
+        // flag switch) and opposites are table data (no oppLong/oppShort
+        // switches). Opposite pairs: n<->s, e<->w, u<->d.
+        var defs = new (string longName, string shortName, int dx, int dy, int dz, string closed, string open, bool active, string oppLong, string oppShort)[]
         {
-            ("north","north","n",0,1,0, settings.NsClosedDoor, settings.NsOpenDoor1),
-            ("south","south","s",0,-1,0, settings.NsClosedDoor, settings.NsOpenDoor2),
-            ("east","east","e",1,0,0, settings.EwClosedDoor, settings.EwOpenDoor1),
-            ("west","west","w",-1,0,0, settings.EwClosedDoor, settings.EwOpenDoor2),
-            ("up","up","u",0,0,1, settings.UdClosedDoor, settings.UdOpenDoor),
-            ("down","down","d",0,0,-1, settings.UdClosedDoor, settings.UdOpenDoor),
+            ("north","n",0,1,0, settings.NsClosedDoor, settings.NsOpenDoor1, north, "south","s"),
+            ("south","s",0,-1,0, settings.NsClosedDoor, settings.NsOpenDoor2, south, "north","n"),
+            ("east","e",1,0,0, settings.EwClosedDoor, settings.EwOpenDoor1, east, "west","w"),
+            ("west","w",-1,0,0, settings.EwClosedDoor, settings.EwOpenDoor2, west, "east","e"),
+            ("up","u",0,0,1, settings.UdClosedDoor, settings.UdOpenDoor, up, "down","d"),
+            ("down","d",0,0,-1, settings.UdClosedDoor, settings.UdOpenDoor, down, "up","u"),
         };
         // Atomicity pre-check (deliberate improvement over Python's sequential
         // apply): without -a, a missing destination for a LATER direction must
@@ -80,8 +91,7 @@ public sealed class DoorCommand : Command
         {
             foreach (var def in defs)
             {
-                bool active = def.flag switch { "north"=>north, "south"=>south, "east"=>east, "west"=>west, "up"=>up, "down"=>down, _=>false };
-                if (!active) continue;
+                if (!def.active) continue;
                 var preCoord = new Coord(loc.Coord.Area, loc.Coord.X + def.dx*2, loc.Coord.Y + def.dy*2, loc.Coord.Z + def.dz*2);
                 if (nh.GetNode(preCoord) is null)
                 { go.Msg($"There is no node at the destination coord {preCoord}, use -a to auto-create it."); return; }
@@ -89,8 +99,7 @@ public sealed class DoorCommand : Command
         }
         foreach (var def in defs)
         {
-            bool active = def.flag switch { "north"=>north, "south"=>south, "east"=>east, "west"=>west, "up"=>up, "down"=>down, _=>false };
-            if (!active) continue;
+            if (!def.active) continue;
             var toCoord = new Coord(loc.Coord.Area, loc.Coord.X + def.dx*2, loc.Coord.Y + def.dy*2, loc.Coord.Z + def.dz*2);
             var doorCoord = new Coord(loc.Coord.Area, loc.Coord.X + def.dx, loc.Coord.Y + def.dy, loc.Coord.Z + def.dz);
             var toNode = nh.GetNode(toCoord);
@@ -100,8 +109,8 @@ public sealed class DoorCommand : Command
                 else { go.Msg($"There is no node at the destination coord {toCoord}, use -a to auto-create it."); return; }
             }
             ReplaceNodeWithDoor(nh, doorCoord, go, loc);
-            string oppLong = def.longName switch { "north"=>"south", "south"=>"north", "east"=>"west", "west"=>"east", "up"=>"down", "down"=>"up", _=>"" };
-            string oppShort = oppLong switch { "north"=>"n", "south"=>"s", "east"=>"e", "west"=>"w", "up"=>"u", "down"=>"d", _=>"" };
+            string oppLong = def.oppLong;
+            string oppShort = def.oppShort;
             // Port of door.py: to_node link handling (verbatim messages)
             var toLinks = toNode.GetLinks();
             bool needDestLink = true;

@@ -26,15 +26,17 @@ public static class ContentUtils
     // Port of settings.MAX_SEARCH_DEPTH — mutable for testing (mirrors monkeypatch in test_contents_search.py:340)
     public static int MaxSearchDepth = 100;
 
-    private static bool TermMatches(GameObject obj, string term)
+    // Lowered word set backing search matching, computed once per object per
+    // search (never cached across searches — names change). Membership here
+    // reproduces the old per-term TermMatches exactly: single-word terms can
+    // only match whole words, and a single-word name/alias is itself one word,
+    // so the old full-string equality arms add nothing beyond word lookup.
+    private static HashSet<string> LoweredSearchTerms(GameObject obj)
     {
-        if (term is null) return false;
-        string termL;
-        try { termL = term.ToLowerInvariant(); } catch { return false; }
+        HashSet<string> terms = new(StringComparer.Ordinal);
         string nameL;
         try { nameL = (obj.Name ?? "").ToLowerInvariant(); } catch { nameL = ""; }
-        if (termL == nameL || nameL.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(termL))
-            return true;
+        foreach (var w in nameL.Split(' ', StringSplitOptions.RemoveEmptyEntries)) terms.Add(w);
         List<string> aliases;
         try { aliases = obj.Aliases; } catch { aliases = []; }
         foreach (var alias in aliases)
@@ -42,10 +44,9 @@ public static class ContentUtils
             if (alias is null) continue;
             string aliasL;
             try { aliasL = alias.ToLowerInvariant(); } catch { continue; }
-            if (termL == aliasL || aliasL.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(termL))
-                return true;
+            foreach (var w in aliasL.Split(' ', StringSplitOptions.RemoveEmptyEntries)) terms.Add(w);
         }
-        return false;
+        return terms;
     }
 
     public static List<GameObject> FilterVisible(List<GameObject> objs, GameObject? looker)
@@ -133,14 +134,14 @@ public static class ContentUtils
             return [];
         }
 
-        var split = q.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-        if (split.Count == 0) return [];
+        var split = q.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (split.Length == 0) return [];
         List<string> optional = [];
         List<string> required = [];
         var count = 1;
         var index = 0;
         var start = 0;
-        var end = split.Count;
+        var end = split.Length;
         if (split[0] == "all")
         {
             count = 0;
@@ -192,28 +193,36 @@ public static class ContentUtils
         }
 
         List<GameObject> matches = [];
+        // Membership acceleration for the duplicate guard below: GameObject
+        // equality is Id-based, so HashSet membership decides exactly what the
+        // old List.Contains decided. Insertion order still comes from the
+        // matches list iteration, keeping first-match-wins and indexed picks.
+        HashSet<GameObject> seenMatches = [];
+        List<GameObject>? RecordMatch(GameObject o)
+        {
+            if (count == 1 && index == 0) return [o];
+            if (seenMatches.Add(o)) matches.Add(o);
+            if (matches.Count == count && index == 0) return matches;
+            return null;
+        }
         for (var i = 0; i < objs.Count; i++)
         {
-            bool found = false;
-            foreach (var s in required)
-            {
-                if (TermMatches(objs[i], s)) found = true;
-                else { found = false; break; }
-            }
+            var terms = LoweredSearchTerms(objs[i]);
+            // An empty required set matches nothing (found stays false), as
+            // before — All() alone would be vacuously true.
+            bool found = required.Count > 0 && required.All(terms.Contains);
             if (found)
             {
-                if (count == 1 && index == 0) return [objs[i]];
-                if (!matches.Contains(objs[i])) matches.Add(objs[i]);
-                if (matches.Count == count && index == 0) return matches;
+                var done = RecordMatch(objs[i]);
+                if (done is not null) return done;
                 continue;
             }
             foreach (var s in optional)
             {
-                if (TermMatches(objs[i], s))
+                if (terms.Contains(s))
                 {
-                    if (count == 1 && index == 0) return [objs[i]];
-                    if (!matches.Contains(objs[i])) matches.Add(objs[i]);
-                    if (matches.Count == count && index == 0) return matches;
+                    var done = RecordMatch(objs[i]);
+                    if (done is not null) return done;
                     break;
                 }
             }
@@ -228,5 +237,71 @@ public static class ContentUtils
         if (index != 0 && index <= matches.Count) return [matches[index - 1]];
         if (index != 0 && index > matches.Count) return [];
         return matches;
+    }
+
+    /// <summary>
+    /// Location-announce dispatch preserving the Node/base MsgContents split:
+    /// node locations use the live-contents overload (catch-all parser
+    /// fallback), other locations use the registry-snapshot overload
+    /// (ParsingError-only fallback). The branch is load-bearing — routing a
+    /// node through the base overload would change delivery and error
+    /// semantics — so this helper keeps dynamic dispatch behind one call.
+    /// </summary>
+    public static void EmitToLocation(GameObject loc, string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, IEnumerable<GameObject>? exclude = null, string? msgType = null)
+    {
+        ArgumentNullException.ThrowIfNull(loc);
+        if (loc is Node node)
+            node.MsgContents(text, exclude: exclude as List<GameObject> ?? exclude?.ToList(), fromObj: fromObj, mapping: mapping as Dictionary<string, object?> ?? (mapping is null ? null : new Dictionary<string, object?>(mapping, StringComparer.Ordinal)), msgType: msgType);
+        else
+            loc.MsgContents(text, fromObj: fromObj, mapping: mapping, exclude: exclude, msgType: msgType);
+    }
+
+    /// <summary>
+    /// Shared broadcast core behind <see cref="GameObject.MsgContents"/> and
+    /// <see cref="Node.MsgContents"/>. Receivers stay caller-resolved (live
+    /// contents vs registry snapshot differ per overload); the mapping copy,
+    /// "you" default, exclude set, per-receiver parse, and delivery merge
+    /// here. <paramref name="nodeSemantics"/> selects the preserved contract:
+    /// node delivery falls back to the raw text on any parser failure and
+    /// never throws (ignoring <paramref name="raiseErrors"/>), while object
+    /// delivery falls back only on <see cref="FuncParser.ParsingError"/>,
+    /// rethrows it when <paramref name="raiseErrors"/> is set, and lets any
+    /// other parser exception propagate. Empty text delivers "" in both
+    /// contracts (node delivery sends it outside the suppression guard, as
+    /// before).
+    /// </summary>
+    public static void EmitToContents(IReadOnlyList<GameObject> receivers, GameObject host, string? text, GameObject? fromObj, IDictionary<string, object?>? mapping, IEnumerable<GameObject>? exclude, string? msgType, bool raiseErrors, bool nodeSemantics)
+    {
+        ArgumentNullException.ThrowIfNull(receivers);
+        ArgumentNullException.ThrowIfNull(host);
+        text ??= "";
+        Dictionary<string, object?> map = mapping is not null
+            ? new Dictionary<string, object?>(mapping, StringComparer.Ordinal)
+            : new Dictionary<string, object?>(StringComparer.Ordinal);
+        var you = fromObj ?? host;
+        map.TryAdd("you", you);
+        HashSet<GameObject>? excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
+        string logContext = nodeSemantics ? "Node" : "GameObject";
+        foreach (var receiver in receivers)
+        {
+            if (excl is not null && excl.Contains(receiver)) continue;
+            string outMessage;
+            try
+            {
+                outMessage = FuncParser.Parse(text, you, receiver, map, raiseErrors);
+            }
+            catch (Exception ex) when (ex is FuncParser.ParsingError || nodeSemantics)
+            {
+                if (raiseErrors && !nodeSemantics) throw;
+                outMessage = text;
+            }
+            if (string.IsNullOrEmpty(outMessage) && nodeSemantics)
+                receiver.Msg("", fromObj, null, false, msgType);
+            else
+            {
+                try { receiver.Msg(outMessage, fromObj, null, false, msgType); }
+                catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {logContext}.MsgContents: " + logEx.Message, logContext); }
+            }
+        }
     }
 }

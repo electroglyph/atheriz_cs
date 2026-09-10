@@ -19,13 +19,30 @@ public static class ObjectRegistry
         private const int Limit = 4000;
         private readonly Dictionary<TKey, TValue> _dict = new();
         private readonly Queue<TKey> _order = new();
+        // Retired queue-entry counts for lazy FIFO deletes: each successful
+        // Remove retires exactly one queued entry, consumed positionally at
+        // eviction/compaction time. Keeps Remove O(1) instead of rebuilding
+        // the whole queue per remove. Guarded by _lock like everything else.
+        private readonly Dictionary<TKey, int> _dead = new();
         private readonly Lock _lock = new();
         private void EvictIfNeeded()
         {
+            if (_order.Count > Limit * 2) CompactLocked();
             if (_dict.Count <= Limit) return;
             // Only newly-enqueued keys call this, and they land at the tail,
-            // so the head can never be the just-set key — plain dequeue.
-            _dict.Remove(_order.Dequeue());
+            // so the head can never be the just-set key — dequeue (skipping
+            // retired heads) until one live head is evicted.
+            while (_dict.Count > Limit && _order.Count > 0)
+            {
+                var head = _order.Dequeue();
+                if (_dead.TryGetValue(head, out var n) && n > 0)
+                {
+                    if (n == 1) _dead.Remove(head);
+                    else _dead[head] = n - 1;
+                    continue;
+                }
+                _dict.Remove(head);
+            }
         }
         public void Set(TKey key, TValue value)
         {
@@ -83,8 +100,9 @@ public static class ObjectRegistry
         {
             lock (_lock)
             {
-                _dict.Remove(key);
-                PurgeLocked(key);
+                // Retire exactly one queued entry, and only when a live entry
+                // actually died: an absent key has no queue entry to retire.
+                if (_dict.Remove(key)) NoteDeadLocked(key);
             }
         }
         /// <summary>
@@ -98,22 +116,36 @@ public static class ObjectRegistry
                 if (!_dict.TryGetValue(key, out var cur)) return false;
                 if (!EqualityComparer<TValue>.Default.Equals(cur, expected)) return false;
                 _dict.Remove(key);
-                PurgeLocked(key);
+                NoteDeadLocked(key);
                 return true;
             }
         }
-        private void PurgeLocked(TKey key)
+        // Caller holds _lock and just removed a live entry: retire its queue
+        // slot lazily (consumed positionally by EvictIfNeeded/CompactLocked).
+        private void NoteDeadLocked(TKey key)
         {
-            // Purge the FIFO queue too — otherwise eviction later removes the wrong live key (F005).
-            if (_order.Count > 0)
-            {
-                var kept = new Queue<TKey>(_order.Count);
-                foreach (var k in _order) if (!EqualityComparer<TKey>.Default.Equals(k, key)) kept.Enqueue(k);
-                _order.Clear();
-                foreach (var k in kept) _order.Enqueue(k);
-            }
+            _dead[key] = _dead.TryGetValue(key, out var n) ? n + 1 : 1;
         }
-        public void Clear() { lock (_lock) { _dict.Clear(); _order.Clear(); } }
+        // Amortized rebuild for churn without eviction pressure: retired heads
+        // are otherwise only consumed by EvictIfNeeded, so a remove-heavy
+        // workload under the limit would grow the queue without bound.
+        private void CompactLocked()
+        {
+            if (_dead.Count == 0) return;
+            var kept = new Queue<TKey>(_order.Count);
+            foreach (var k in _order)
+            {
+                if (_dead.TryGetValue(k, out var n) && n > 0)
+                {
+                    if (n == 1) _dead.Remove(k);
+                    else _dead[k] = n - 1;
+                }
+                else kept.Enqueue(k);
+            }
+            _order.Clear();
+            foreach (var k in kept) _order.Enqueue(k);
+        }
+        public void Clear() { lock (_lock) { _dict.Clear(); _order.Clear(); _dead.Clear(); } }
         public Dictionary<TKey, TValue> Snapshot() { lock (_lock) return new Dictionary<TKey, TValue>(_dict); }
         public int Count { get { lock (_lock) return _dict.Count; } }
     }
@@ -262,6 +294,27 @@ public static class ObjectRegistry
         try { return list.Select(id => AllObjects.TryGetValue(id, out var o) ? o : null).OfType<GameObject>().ToList(); }
         finally { AllLock.ExitReadLock(); }
     }
+
+    /// <summary>
+    /// Single-id fetch core shared by the per-command <c>Get(id).FirstOrDefault()</c>
+    /// sites. Returns the object or null — the same "not found" outcome each site
+    /// already expects — with one dictionary lookup and no list allocation.
+    /// Deliberately command-agnostic (id in, object-or-null out) so script and
+    /// tick paths can share it too.
+    /// Keep <see cref="Get(int)"/> for list-shaped callers.
+    /// </summary>
+    public static bool TryGetSingle(int id, out GameObject? obj)
+    {
+        AllLock.EnterReadLock();
+        try { return AllObjects.TryGetValue(id, out obj); }
+        finally { AllLock.ExitReadLock(); }
+    }
+
+    /// <summary>
+    /// Single-id fetch returning the object or null (no list alloc).
+    /// </summary>
+    public static GameObject? GetSingle(int id)
+        => TryGetSingle(id, out var o) ? o : null;
 
     public static void AddObject(GameObject obj)
     {

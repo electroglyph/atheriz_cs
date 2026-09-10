@@ -174,14 +174,9 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         if (future is not null)
         {
             // C# equivalent of Python's asyncio loop.call_soon_threadsafe(_do_cancel)
-            // Use TrySetCanceled thread-safe; if Task already completed, no-op (mirrors InvalidStateError pass)
-            try
-            {
-                // If future was created on a threadpool scheduler, TrySetCanceled is already thread-safe.
-                // We attempt TrySetCanceled directly; if it fails because already completed, ignore.
-                future.TrySetCanceled();
-            }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+            // TrySetCanceled is thread-safe and never throws by .NET contract
+            // (a completed future simply returns false), so no try/catch armor.
+            future.TrySetCanceled();
             // If we had a captured SynchronizationContext/TaskScheduler, we could post, but TrySetCanceled is safe.
         }
         // Port of session.py:81-86 unwind any in-progress puppet chain before autosave
@@ -213,19 +208,31 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                             objs[0].RemoveObject(puppet);
                         }
                     }
-                    else if (locRef is Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation)
+                    else if (locRef is Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation cl)
                     {
-                        // Node case: we lack global NodeHandler singleton here; best effort clear location.
-                        // The node’s _contents will be cleaned via RemoveObject fallback if Node is also GameObject.
-                        try
-                        {
-                            var nodeObjs = Globals.ObjectRegistry.FilterBy(o => o.IsNode);
-                            foreach (var n in nodeObjs)
-                            {
-                                try { n.RemoveContent(puppet.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
-                            }
-                        }
+                        // Node case: fast path resolves the primary node by coord
+                        // index; the full scan runs only when the lookup misses
+                        // (ungridded node or stray contents scattered), preserving
+                        // the old multi-node cleanup semantics for that case.
+                        GameObject? primary = null;
+                        try { primary = Globals.ObjectRegistry.FindNodeByCoord(cl.Coord); }
                         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                        if (primary is not null)
+                        {
+                            try { primary.RemoveContent(puppet.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                        }
+                        else
+                        {
+                            try
+                            {
+                                var nodeObjs = Globals.ObjectRegistry.FilterBy(o => o.IsNode);
+                                foreach (var n in nodeObjs)
+                                {
+                                    try { n.RemoveContent(puppet.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                                }
+                            }
+                            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                        }
                     }
                     try { puppet.Location = Atheriz.Core.Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
                 }
@@ -278,15 +285,10 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             // Port of session.py:131-156 try create_future via running loop else fallback to connection loop or threadpool loop
             // In C# we always use TaskCompletionSource with RunContinuationsAsynchronously (thread-safe)
             future = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (prev is not null && !prev.Task.IsCompleted) // Port of session.py:157 if prev is not None and not prev.done():
-            {
-                if (prevMasked && !mask) // Port of session.py:158 if prev_masked and not mask:
-                    needRestore = true; // Port of session.py:159 need_restore = True
-            }
-            else
-            {
-                prev = null; // Port of session.py:161 prev = None
-            }
+            if (prev?.Task.IsCompleted != false)
+                prev = null; // Port of session.py:161 prev = None (null or already done)
+            else if (prevMasked && !mask) // Port of session.py:158 if prev_masked and not mask:
+                needRestore = true; // Port of session.py:159 need_restore = True
             InputFuture = future; // Port of session.py:162 self.input_future = future
             InputMasked = mask; // Port of session.py:163 self._input_masked = mask
         }

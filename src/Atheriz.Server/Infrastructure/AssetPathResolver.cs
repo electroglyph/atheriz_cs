@@ -13,41 +13,37 @@ public static class AssetPathResolver
         return null;
     }
 
-    private static string? ResolveEngineWwwRoot()
+    // Shared assembly-dir probe for the engine resolvers below: verified
+    // shape-identical except sub-path (wwwroot vs web/templates) and the
+    // appBase fallback (wwwroot only — Templates has none), so the helper
+    // takes (subPath, fallbackBase?).
+    private static string? ResolveEngineDir(string subPath, string? fallbackBase)
     {
         try
         {
             var asmDir = Path.GetDirectoryName(typeof(PidFile).Assembly.Location);
             if (!string.IsNullOrEmpty(asmDir))
             {
-                var cand = Path.Combine(asmDir, "wwwroot");
+                var cand = Path.Combine(asmDir, subPath);
                 if (Directory.Exists(cand)) return cand;
-                var cand2 = Path.GetFullPath(Path.Combine(asmDir, "..", "wwwroot"));
+                var cand2 = Path.GetFullPath(Path.Combine(asmDir, "..", subPath));
                 if (Directory.Exists(cand2)) return cand2;
             }
         }
         catch { }
-        var baseWww = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-        if (Directory.Exists(baseWww)) return baseWww;
+        if (fallbackBase is not null)
+        {
+            var fb = Path.Combine(fallbackBase, subPath);
+            if (Directory.Exists(fb)) return fb;
+        }
         return null;
     }
 
+    private static string? ResolveEngineWwwRoot()
+        => ResolveEngineDir("wwwroot", AppContext.BaseDirectory);
+
     private static string? ResolveEngineTemplates()
-    {
-        try
-        {
-            var asmDir = Path.GetDirectoryName(typeof(PidFile).Assembly.Location);
-            if (!string.IsNullOrEmpty(asmDir))
-            {
-                var cand = Path.Combine(asmDir, "web", "templates");
-                if (Directory.Exists(cand)) return cand;
-                var cand2 = Path.GetFullPath(Path.Combine(asmDir, "..", "web", "templates"));
-                if (Directory.Exists(cand2)) return cand2;
-            }
-        }
-        catch { }
-        return null;
-    }
+        => ResolveEngineDir(Path.Combine("web", "templates"), null);
 
     // Single ordered resolution table: each row is (base selector, sub-path).
     // Bases resolve lazily per call (CWD can move); rows keep game-before-install order
@@ -77,9 +73,10 @@ public static class AssetPathResolver
     public static string? ResolveTemplates(string contentRoot, string appBaseDir)
     {
         var engineTemplates = ResolveEngineTemplates();
-        var result = ResolveCandidates(ResolveTable(contentRoot, appBaseDir, engineTemplates, Path.Combine("web", "templates"), "templates"));
-        if (result is null && engineTemplates is not null && Directory.Exists(engineTemplates))
-            return engineTemplates;
-        return result;
+        // No post-check re-probe of the engine dir here: row 5 of the table
+        // above already yields it, so a null result means it was absent at
+        // probe time (only a concurrent directory-create in between could
+        // change that, and the next call resolves it).
+        return ResolveCandidates(ResolveTable(contentRoot, appBaseDir, engineTemplates, Path.Combine("web", "templates"), "templates"));
     }
 }

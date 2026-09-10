@@ -148,8 +148,9 @@ public class Channel : GameObject
             // Invalidate the cached command on rename (old cache ignored Name/Desc).
             if (_command is not null && _commandKey == key && _commandDesc == desc) return _command;
             var cmd = new BaseChannelCommand();
-            ((BaseChannelCommand)cmd).SetKey(key);
-            ((BaseChannelCommand)cmd).SetDesc(desc);
+            var channelCmd = (BaseChannelCommand)cmd;
+            channelCmd.SetKey(key);
+            channelCmd.SetDesc(desc);
             cmd.Channel = this;
             cmd.Id = id;
             _command = cmd;
@@ -173,8 +174,7 @@ public class Channel : GameObject
         try { SetIsDeletedRaw(true); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Delete: " + logEx.Message, "Channel"); }
         foreach (var lid in toDetach)
         {
-            var objs = Globals.ObjectRegistry.Get(lid);
-            var o = objs.FirstOrDefault();
+            var o = Globals.ObjectRegistry.GetSingle(lid);
             if (o is not null)
             {
                 // Typed peer detach (was GetField("_channels") reflection, now banned
@@ -226,8 +226,10 @@ public class Channel : GameObject
 
     public virtual string FormatMessage(long timestamp, string sender, string message)
     {
-        if (!string.IsNullOrEmpty(sender)) return $"({Name}) [{DateTimeOffset.FromUnixTimeSeconds(timestamp):dd MMMM, yyyy HH:mm:ss}] {sender}: {message}";
-        return $"({Name}) [{DateTimeOffset.FromUnixTimeSeconds(timestamp):dd MMMM, yyyy HH:mm:ss}] {message}";
+        var ts = DateTimeOffset.FromUnixTimeSeconds(timestamp).ToString("dd MMMM, yyyy HH:mm:ss");
+        var prefix = $"({Name}) [{ts}] ";
+        if (!string.IsNullOrEmpty(sender)) return $"{prefix}{sender}: {message}";
+        return $"{prefix}{message}";
     }
 
     public string GetHistory(int count)
@@ -238,15 +240,15 @@ public class Channel : GameObject
         lock (_histLock)
         {
             if (count == 0) return "";
-            entries = _history.ToList();
-            if (count < entries.Count) entries = entries.Skip(entries.Count - count).ToList();
+            entries = count < _history.Count ? _history.TakeLast(count).ToList() : _history.ToList();
         }
-        List<string> lines = [];
+        var sb = new System.Text.StringBuilder();
         foreach (var e in entries)
         {
-            lines.Add(FormatMessage(e.Timestamp, e.Sender, e.Message) + "\n");
+            sb.Append(FormatMessage(e.Timestamp, e.Sender, e.Message));
+            sb.Append('\n');
         }
-        return string.Join("", lines);
+        return sb.ToString();
     }
 
     public string GetHistory() => GetHistory(Settings.AtherizSettings.Global.ChannelHistoryLimit);
@@ -273,33 +275,9 @@ public class Channel : GameObject
     {
         List<ChannelHistoryEntry> histSnap;
         lock (_histLock) { histSnap = _history.ToList(); }
-        bool had = false;
-        GameObjectDto dto;
-        SyncRoot.EnterWriteLock();
-        try
-        {
-            had = GetIsModifiedRawNoLock();
-            SetIsModifiedRawNoLock(false);
-            // snapshot the DTO under the lock; JSON serialization
-            // runs after release so checkpoints don't stall readers.
-            dto = BuildDto(histSnap);
-            if (clearing) dto.IsModified = false;
-            // Non-clearing restores the flag (GetSaveOps is a peek); clearing
-            // leaves it cleared.
-            SetIsModifiedRawNoLock(clearing ? false : had);
-        }
-        finally { SyncRoot.ExitWriteLock(); }
-        string json;
-        try { json = Persistence.Dto.GameObjectDtoSerializer.ToJson(dto); }
-        catch
-        {
-            // Failed serialization must not leave the object clean — the
-            // next checkpoint retries.
-            SyncRoot.EnterWriteLock();
-            try { SetIsModifiedRawNoLock(had); }
-            finally { SyncRoot.ExitWriteLock(); }
-            throw;
-        }
+        // Flag dance + post-release encode live in the shared converter core;
+        // only the history-snapshot DTO body stays here.
+        string json = Persistence.Converters.GameObjectDtoConverter.BuildSaveJson(this, () => BuildDto(histSnap), clearing);
         return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", new object[] { Id, json });
     }
 
@@ -317,7 +295,7 @@ public class Channel : GameObject
         // Persisted as [timestamp, sender, message] triples mirroring the
         // Python (timestamp, sender, message) history tuples.
         var triples = history.Select(e => new object[] { e.Timestamp, e.Sender, e.Message }).ToList();
-        dto.Extra["history"] = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(triples)).RootElement.Clone();
+        dto.Extra["history"] = Persistence.JsonOptions.ToElement(triples);
         // listeners intentionally excluded per __getstate__ (pop listeners)
         // lock also excluded (not in DTO)
         dto.Extra.Remove("listeners");

@@ -131,15 +131,18 @@ public sealed class AtherizSettings
     public string RoadPlaceholder { get; set; } = "᭤";
     public string[] AllSymbols => [SingleWallPlaceholder, DoubleWallPlaceholder, RoundedWallPlaceholder, PathPlaceholder, RoadPlaceholder];
 
-    // Door glyphs (ANSI) — exact defaults from settings.py
-    public string NsClosedDoor { get; set; } = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m━\x1b[0m";
-    public string NsOpenDoor1 { get; set; } = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m┚\x1b[0m";
-    public string NsOpenDoor2 { get; set; } = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m┒\x1b[0m";
-    public string EwClosedDoor { get; set; } = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m┃\x1b[0m";
-    public string EwOpenDoor1 { get; set; } = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m┙\x1b[0m";
-    public string EwOpenDoor2 { get; set; } = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m┕\x1b[0m";
-    public string UdClosedDoor { get; set; } = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m╳\x1b[0m";
-    public string UdOpenDoor { get; set; } = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m▽\x1b[0m";
+    // Door glyphs (ANSI) — exact defaults from settings.py.
+    // Shared color prefix for all eight glyphs: compile-time concat keeps the
+    // default strings byte-identical while the color lives in one place.
+    private const string DoorGlyphPrefix = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m";
+    public string NsClosedDoor { get; set; } = DoorGlyphPrefix + "━\x1b[0m";
+    public string NsOpenDoor1 { get; set; } = DoorGlyphPrefix + "┚\x1b[0m";
+    public string NsOpenDoor2 { get; set; } = DoorGlyphPrefix + "┒\x1b[0m";
+    public string EwClosedDoor { get; set; } = DoorGlyphPrefix + "┃\x1b[0m";
+    public string EwOpenDoor1 { get; set; } = DoorGlyphPrefix + "┙\x1b[0m";
+    public string EwOpenDoor2 { get; set; } = DoorGlyphPrefix + "┕\x1b[0m";
+    public string UdClosedDoor { get; set; } = DoorGlyphPrefix + "╳\x1b[0m";
+    public string UdOpenDoor { get; set; } = DoorGlyphPrefix + "▽\x1b[0m";
 
     // Time
     public bool TimeSystemEnabled { get; set; } = true;

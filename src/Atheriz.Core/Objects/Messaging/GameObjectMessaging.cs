@@ -15,7 +15,7 @@ public partial class GameObject
     public virtual void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null)
     {
         // Resolve parsed text if funcparser tokens present
-        string parsed = text ?? "";
+        string parsed = text;
         if (!string.IsNullOrEmpty(parsed) && (parsed.Contains('$') || parsed.Contains('{')))
         {
             try
@@ -47,7 +47,7 @@ public partial class GameObject
         // socket send stays outside the lock (never do I/O under SyncRoot).
         Session? sess;
         _lock.EnterWriteLock();
-        // Bounded like Channel history (see MsgLogLimit = 200) — see AppendMessage below.
+        // Bounded like Channel history (see MsgLogLimit = 200).
         try
         {
             _msgLog.Add(parsed); while (_msgLog.Count > MsgLogLimit) _msgLog.RemoveAt(0);
@@ -115,55 +115,46 @@ public partial class GameObject
             string allRecvSelf = recvList is not null ? string.Join(", ", recvList.Select(r => r.GetDisplayName(this))) : null!;
             if (selfText is string selfStr && !string.IsNullOrEmpty(selfStr))
             {
-                var selfMapping = new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["self"] = "You",
-                    ["object"] = GetDisplayName(this),
-                    ["location"] = loc is not null ? loc.GetDisplayName(this) : null,
-                    ["receiver"] = null,
-                    ["all_receivers"] = allRecvSelf,
-                    ["speech"] = message,
-                };
-                foreach (var kv in custom) selfMapping[kv.Key] = kv.Value;
+                var selfMapping = BuildSayMapping(GetDisplayName(this), loc is not null ? loc.GetDisplayName(this) : null, null, allRecvSelf, message, custom);
                 Msg(selfStr, this, selfMapping, false, type);
             }
             if (recvList is not null && !string.IsNullOrEmpty(recvText))
             {
                 foreach (var receiver in recvList)
                 {
-                    var rMapping = new Dictionary<string, object?>(StringComparer.Ordinal)
-                    {
-                        ["self"] = "You",
-                        ["object"] = GetDisplayName(receiver),
-                        ["location"] = loc is not null ? loc.GetDisplayName(receiver) : null,
-                        ["receiver"] = receiver.GetDisplayName(receiver),
-                        ["all_receivers"] = string.Join(", ", recvList.Select(r => r.GetDisplayName(r))),
-                        ["speech"] = message,
-                    };
-                    foreach (var kv in custom) rMapping[kv.Key] = kv.Value;
+                    var rMapping = BuildSayMapping(GetDisplayName(receiver), loc is not null ? loc.GetDisplayName(receiver) : null, receiver.GetDisplayName(receiver), string.Join(", ", recvList.Select(r => r.GetDisplayName(r))), message, custom);
                     receiver.Msg(recvText, this, rMapping, false, type);
                 }
             }
             if (loc is not null && !string.IsNullOrEmpty(locText))
             {
-                var locMapping = new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["self"] = "You",
-                    ["object"] = GetDisplayName(this),
-                    ["location"] = loc.GetDisplayName(this),
-                    ["all_receivers"] = recvList is not null ? string.Join(", ", recvList.Select(r => r.ToString())) : null,
-                    ["receiver"] = null,
-                    ["speech"] = message,
-                };
-                foreach (var kv in custom) locMapping[kv.Key] = kv.Value;
+                var locMapping = BuildSayMapping(GetDisplayName(this), loc.GetDisplayName(this), null, recvList is not null ? string.Join(", ", recvList.Select(r => r.ToString())) : null, message, custom);
                 List<GameObject> exclude = [];
                 if (selfText is string s2 && !string.IsNullOrEmpty(s2)) exclude.Add(this);
                 if (recvList is not null) exclude.AddRange(recvList);
-                if (loc is Node node) node.MsgContents(locText, fromObj: this, mapping: locMapping, exclude: exclude, msgType: type);
-                else loc.MsgContents(locText, fromObj: this, mapping: locMapping, exclude: exclude, msgType: type);
+                ContentUtils.EmitToLocation(loc, locText, fromObj: this, mapping: locMapping, exclude: exclude, msgType: type);
             }
             return 0;
         }, message, msgSelf, msgLocation, receivers, msgReceivers, msgType, whisper, mapping);
+    }
+
+    // Shared builder for the three AtSayFull per-audience mappings. The key
+    // sets are identical (self/object/location/receiver/all_receivers/speech)
+    // — verified element-wise — only the values vary per audience, plus the
+    // caller's custom entries merged over the top in each.
+    private Dictionary<string, object?> BuildSayMapping(string objectName, string? locationName, string? receiverName, string? allReceivers, string speech, IDictionary<string, object?> custom)
+    {
+        var built = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["self"] = "You",
+            ["object"] = objectName,
+            ["location"] = locationName,
+            ["receiver"] = receiverName,
+            ["all_receivers"] = allReceivers,
+            ["speech"] = speech,
+        };
+        foreach (var kv in custom) built[kv.Key] = kv.Value;
+        return built;
     }
 
     public IReadOnlyList<string> PeekMessages()
@@ -196,13 +187,15 @@ public partial class GameObject
     public void ForContents(Action<GameObject, IDictionary<string, object?>> func, IDictionary<string, object?>? kwargs = null, IEnumerable<GameObject>? exclude = null, Func<int, GameObject?>? resolver = null)
     {
         var excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
-        List<GameObject> contents;
-        if (resolver is not null) contents = ContentsSnapshot.Select(resolver).OfType<GameObject>().ToList();
-        else contents = Globals.ObjectRegistry.Get(ContentsSnapshot.ToList());
+        List<GameObject> contents = ResolveContents(resolver);
+        // Hoisted out of the loop: the fallback is only ever read downstream
+        // (callers passing an explicit dict already share one instance across
+        // iterations), so one shared empty instance behaves the same.
+        IDictionary<string, object?> kw = kwargs ?? new Dictionary<string, object?>();
         foreach (var obj in contents)
         {
             if (excl is not null && excl.Contains(obj)) continue;
-            try { func(obj, kwargs ?? new Dictionary<string, object?>()); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ForContents: " + logEx.Message, "GameObject"); }
+            try { func(obj, kw); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ForContents: " + logEx.Message, "GameObject"); }
         }
     }
 
@@ -213,6 +206,18 @@ public partial class GameObject
     private const int MsgLogLimit = 200;
 
     /// <summary>
+    /// Shared resolver-vs-registry contents resolution for
+    /// <see cref="ForContents"/> and <see cref="MsgContents"/>. A caller
+    /// resolver filters nulls (OfType); otherwise the registry resolves the
+    /// snapshot (its Get already snapshots internally, so no caller ToList).
+    /// </summary>
+    private List<GameObject> ResolveContents(Func<int, GameObject?>? resolver)
+    {
+        if (resolver is not null) return ContentsSnapshot.Select(resolver).OfType<GameObject>().ToList();
+        return Globals.ObjectRegistry.Get(ContentsSnapshot);
+    }
+
+    /// <summary>
     /// Port of <c>atheriz/objects/base_obj.py:934</c> <c>msg_contents</c>.
     /// Emits <paramref name="text"/> to all objects inside this, handling both actor-stance
     /// <c>$You/$you/$conj/$pron</c> via <see cref="FuncParser"/> and director <c>{key}</c> via
@@ -220,49 +225,9 @@ public partial class GameObject
     /// </summary>
     public void MsgContents(string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, IEnumerable<GameObject>? exclude = null, bool raiseErrors = false, string? msgType = null, Func<int, GameObject?>? resolver = null)
     {
-        if (text is null) text = "";
-        if (mapping is not null) mapping = new Dictionary<string, object?>(mapping, StringComparer.Ordinal);
-        mapping ??= new Dictionary<string, object?>(StringComparer.Ordinal);
-        var you = fromObj ?? this;
-        mapping.TryAdd("you", you);
-
-        HashSet<GameObject>? exclSet = exclude is not null ? new HashSet<GameObject>(exclude) : null;
-        List<GameObject> receivers;
-        if (resolver is not null)
-            receivers = ContentsSnapshot.Select(resolver).Where(o=>o is not null).Cast<GameObject>().ToList();
-        else
-            receivers = Globals.ObjectRegistry.Get(ContentsSnapshot.ToList());
-
-        foreach (var receiver in receivers)
-        {
-            if (exclSet is not null && exclSet.Contains(receiver)) continue;
-            string outMessage;
-            try
-            {
-                // Actor-stance via FuncParser (caller=you, receiver=each listener)
-                outMessage = FuncParser.Parse(text, you, receiver, mapping, raiseErrors);
-            }
-            catch (FuncParser.ParsingError)
-            {
-                if (raiseErrors) throw;
-                outMessage = text;
-            }
-            // Port of base_obj.py msg_contents tail: receiver.msg(...) — a full
-            // send (session delivery), not a log-only append . Null
-            // mapping avoids double-parsing the already-parsed message.
-            try { receiver.Msg(outMessage, fromObj, null, false, msgType); }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MsgContents: " + logEx.Message, "GameObject"); }
-        }
-    }
-
-    private void AppendMessage(string text, GameObject? fromObj, string? msgType)
-    {
-        try { if (!AtMsgReceive(text, fromObj, msgType)) return; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AppendMessage: " + logEx.Message, "GameObject"); }
-        if (fromObj is not null) try { fromObj.AtMsgSend(text, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AppendMessage: " + logEx.Message, "GameObject"); }
-        _lock.EnterWriteLock();
-        // Bounded like Channel history (see MsgLogLimit = 200): long-lived NPCs must not
-        // accumulate unbounded message logs. Oldest entries drop first.
-        try { _msgLog.Add(text); while (_msgLog.Count > MsgLogLimit) _msgLog.RemoveAt(0); }
-        finally { _lock.ExitWriteLock(); }
+        // Broadcast loop lives in ContentUtils.EmitToContents (shared with the
+        // Node overload); only the receiver source stays here. Object delivery
+        // keeps ParsingError-only fallback semantics (nodeSemantics: false).
+        ContentUtils.EmitToContents(ResolveContents(resolver), this, text, fromObj, mapping, exclude, msgType, raiseErrors, nodeSemantics: false);
     }
 }

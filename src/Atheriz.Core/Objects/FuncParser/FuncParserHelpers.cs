@@ -40,12 +40,15 @@ public static class FuncParserHelpers
     {
         public SafeFormatMap() : base(StringComparer.Ordinal) { }
         public SafeFormatMap(IDictionary<string, object?> src) : base(src, StringComparer.Ordinal) { }
+        // Single compiled instance: the old inline pattern re-parsed the same
+        // expression per message per receiver. Identical pattern and matches.
+        private static readonly Regex FormatKeyRegex = new(@"\{(\w+)\}", RegexOptions.Compiled);
         // For director stance: map object -> displayName, keep {key} for missing
         public string Format(string template)
         {
             if (string.IsNullOrEmpty(template)) return template;
             // Simple replace {key} via regex, leaving unknown untouched (handled by TryGet)
-            return Regex.Replace(template, @"\{(\w+)\}", m =>
+            return FormatKeyRegex.Replace(template, m =>
             {
                 var key = m.Groups[1].Value;
                 return TryGetValue(key, out var v) && v is not null ? v.ToString()! : m.Value;

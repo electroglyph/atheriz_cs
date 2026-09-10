@@ -44,6 +44,17 @@ public sealed class Flags
     public bool CanHear { get => _canHear; set => _canHear = value; }
 
     /// <summary>
+    /// Guard-set-return core for <see cref="TrySet"/>: assigns only when the
+    /// value actually changes, reporting whether a change happened.
+    /// </summary>
+    private static bool SetIfChanged(ref bool field, bool value)
+    {
+        if (field == value) return false;
+        field = value;
+        return true;
+    }
+
+    /// <summary>
     /// Tries to set a flag by name (Python <c>__setattr__</c> / FLAG_DEFAULTS key).
     /// Returns true if value changed. Mirrors dynamic flag loop in <c>base_flags.Flags.__init__</c>.
     /// </summary>
@@ -51,22 +62,22 @@ public sealed class Flags
     {
         switch (name)
         {
-            case nameof(IsPc): case "is_pc": case "_isPc": if (_isPc == value) return false; _isPc = value; return true;
-            case nameof(IsNpc): case "is_npc": case "_isNpc": if (_isNpc == value) return false; _isNpc = value; return true;
-            case nameof(IsItem): case "is_item": case "_isItem": if (_isItem == value) return false; _isItem = value; return true;
-            case nameof(IsMapable): case "is_mapable": case "_isMapable": if (_isMapable == value) return false; _isMapable = value; return true;
-            case nameof(IsContainer): case "is_container": case "_isContainer": if (_isContainer == value) return false; _isContainer = value; return true;
-            case nameof(IsScript): case "is_script": case "_isScript": if (_isScript == value) return false; _isScript = value; return true;
-            case nameof(IsTickable): case "is_tickable": case "_is_tickable": case "_isTickable": if (_isTickable == value) return false; _isTickable = value; return true;
-            case nameof(IsAccount): case "is_account": case "_isAccount": if (_isAccount == value) return false; _isAccount = value; return true;
-            case nameof(IsChannel): case "is_channel": case "_isChannel": if (_isChannel == value) return false; _isChannel = value; return true;
-            case nameof(IsNode): case "is_node": case "_isNode": if (_isNode == value) return false; _isNode = value; return true;
-            case nameof(IsModified): case "is_modified": case "_isModified": if (_isModified == value) return false; _isModified = value; return true;
-            case nameof(IsDeleted): case "is_deleted": case "_isDeleted": if (_isDeleted == value) return false; _isDeleted = value; return true;
-            case nameof(IsConnected): case "is_connected": case "_isConnected": if (_isConnected == value) return false; _isConnected = value; return true;
-            case nameof(IsTemporary): case "is_temporary": case "_isTemporary": if (_isTemporary == value) return false; _isTemporary = value; return true;
-            case nameof(IsBanned): case "is_banned": case "_isBanned": if (_isBanned == value) return false; _isBanned = value; return true;
-            case nameof(CanHear): case "can_hear": case "_canHear": if (_canHear == value) return false; _canHear = value; return true;
+            case nameof(IsPc): case "is_pc": case "_isPc": return SetIfChanged(ref _isPc, value);
+            case nameof(IsNpc): case "is_npc": case "_isNpc": return SetIfChanged(ref _isNpc, value);
+            case nameof(IsItem): case "is_item": case "_isItem": return SetIfChanged(ref _isItem, value);
+            case nameof(IsMapable): case "is_mapable": case "_isMapable": return SetIfChanged(ref _isMapable, value);
+            case nameof(IsContainer): case "is_container": case "_isContainer": return SetIfChanged(ref _isContainer, value);
+            case nameof(IsScript): case "is_script": case "_isScript": return SetIfChanged(ref _isScript, value);
+            case nameof(IsTickable): case "is_tickable": case "_is_tickable": case "_isTickable": return SetIfChanged(ref _isTickable, value);
+            case nameof(IsAccount): case "is_account": case "_isAccount": return SetIfChanged(ref _isAccount, value);
+            case nameof(IsChannel): case "is_channel": case "_isChannel": return SetIfChanged(ref _isChannel, value);
+            case nameof(IsNode): case "is_node": case "_isNode": return SetIfChanged(ref _isNode, value);
+            case nameof(IsModified): case "is_modified": case "_isModified": return SetIfChanged(ref _isModified, value);
+            case nameof(IsDeleted): case "is_deleted": case "_isDeleted": return SetIfChanged(ref _isDeleted, value);
+            case nameof(IsConnected): case "is_connected": case "_isConnected": return SetIfChanged(ref _isConnected, value);
+            case nameof(IsTemporary): case "is_temporary": case "_isTemporary": return SetIfChanged(ref _isTemporary, value);
+            case nameof(IsBanned): case "is_banned": case "_isBanned": return SetIfChanged(ref _isBanned, value);
+            case nameof(CanHear): case "can_hear": case "_canHear": return SetIfChanged(ref _canHear, value);
             default: return false;
         }
     }

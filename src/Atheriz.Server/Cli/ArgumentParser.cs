@@ -32,33 +32,38 @@ public static class ArgumentParser
     }
 
     public static int? ParsePort(string[] a)
-    {
-        var v = GetOptionValue(a, "--port", "-p", PortPrefix);
-        if (v is not null && int.TryParse(v, out var p)) return p;
-        return null;
-    }
+        => ParseIntOption(a, "--port", "-p", PortPrefix);
 
     // Port of argparse type=int failure for --port (exit 2): raw value present but not an int.
     public static string? InvalidPortValue(string[] a)
-    {
-        var v = GetOptionValue(a, "--port", "-p", PortPrefix);
-        if (v is not null && !int.TryParse(v, out _)) return v;
-        return null;
-    }
+        => InvalidIntOption(a, "--port", "-p", PortPrefix);
 
     public static string? InvalidTelnetPortValue(string[] a)
-    {
-        var v = GetOptionValue(a, "--telnet-port", null, TelnetPortPrefix);
-        if (v is not null && !int.TryParse(v, out _)) return v;
-        return null;
-    }
+        => InvalidIntOption(a, "--telnet-port", null, TelnetPortPrefix);
 
     public static int? ParseTelnetPort(string[] a)
     {
-        var v = GetOptionValue(a, "--telnet-port", null, TelnetPortPrefix);
-        if (v is not null && int.TryParse(v, out var p)) return p;
+        var p = ParseIntOption(a, "--telnet-port", null, TelnetPortPrefix);
+        if (p is not null) return p;
         var env = Environment.GetEnvironmentVariable("ATHERIZ_TELNET_PORT") ?? Environment.GetEnvironmentVariable("Atheriz__TelnetPort");
         if (int.TryParse(env, out var ep)) return ep;
+        return null;
+    }
+
+    // Shared int-option core for the Parse*/Invalid* port pairs, which differ
+    // only in option name (+ the telnet env fallback, kept at its call site).
+    // Public methods keep their names and messages byte-identical.
+    private static int? ParseIntOption(string[] a, string longFlag, string? shortFlag, string prefix)
+    {
+        var v = GetOptionValue(a, longFlag, shortFlag, prefix);
+        if (v is not null && int.TryParse(v, out var p)) return p;
+        return null;
+    }
+
+    private static string? InvalidIntOption(string[] a, string longFlag, string? shortFlag, string prefix)
+    {
+        var v = GetOptionValue(a, longFlag, shortFlag, prefix);
+        if (v is not null && !int.TryParse(v, out _)) return v;
         return null;
     }
 
@@ -81,8 +86,61 @@ public static class ArgumentParser
     public static bool HasFlag(string[] a, string longFlag, string? shortFlag = null)
         => a.Contains(longFlag, StringComparer.Ordinal) || (shortFlag is not null && a.Contains(shortFlag, StringComparer.Ordinal));
 
+    // Pure OR over HasFlag — identical short-circuit in flag order. Collapses
+    // the force-like flag sets (new --overwrite/--force, reset
+    // --force/-f/--yes/-y) to one call each.
+    public static bool HasAnyFlag(string[] a, params string[] flags)
+    {
+        foreach (var f in flags)
+            if (a.Contains(f, StringComparer.Ordinal)) return true;
+        return false;
+    }
+
     // Glued short-port form (-p1234 / -p=1234), for stripping port flags out of
     // positional filters in the create/new handlers.
     internal static bool IsGluedShortPort(string v)
         => v.Length > 2 && v[0] == '-' && v[1] == 'p' && (v[2] == '=' || char.IsDigit(v[2]));
+
+    // Shared positional filter for the create/new handlers: strips bare,
+    // consumed-value, --opt=value prefix and glued (-p1234) shapes of the
+    // value-taking options. The create path strips the port family only;
+    // new additionally strips --telnet-port/--host/--overwrite/--force/
+    // --foreground — one core so a new glued shape cannot be learned by one
+    // site and missed by the other. The filter produces no output; only
+    // positional passthrough equality is pinned.
+    internal static string[] StripPortOptions(string[] a) => StripOptions(a, full: false);
+    internal static string[] StripKnownOptions(string[] a) => StripOptions(a, full: true);
+
+    private static string[] StripOptions(string[] a, bool full)
+    {
+        return a.Where((v, i) =>
+        {
+            bool prevIsPort = i > 0 && a[i - 1] == "--port";
+            bool prevIsShortPort = i > 0 && a[i - 1] == "-p";
+            bool isPortValue = v == "--port" || prevIsPort || v.StartsWith(PortPrefix, StringComparison.Ordinal)
+                || v == "-p" || prevIsShortPort || IsGluedShortPort(v);
+            // A trailing bare flag carries no value — keep it (minus
+            // consumed-value/prefix/glued shapes, which cannot dangle) so
+            // the missing-value path reports it instead of a neighbor.
+            bool trailing = i + 1 >= a.Length;
+            if (!full)
+            {
+                if (trailing)
+                    return !prevIsPort && !prevIsShortPort && !v.StartsWith(PortPrefix, StringComparison.Ordinal) && !IsGluedShortPort(v);
+                return !isPortValue;
+            }
+            bool prevIsTelnet = i > 0 && a[i - 1] == "--telnet-port";
+            bool prevIsHost = i > 0 && a[i - 1] == "--host";
+            bool isTelnetValue = (v == "--telnet-port" && !trailing) || prevIsTelnet || v.StartsWith(TelnetPortPrefix, StringComparison.Ordinal);
+            bool isShortPortValue = (v == "-p" && !trailing) || prevIsShortPort || IsGluedShortPort(v);
+            bool isPortLongValue = (v == "--port" && !trailing) || prevIsPort || v.StartsWith(PortPrefix, StringComparison.Ordinal);
+            bool isHostValue = v == "--host" || prevIsHost || v.StartsWith(HostPrefix, StringComparison.Ordinal);
+            if (trailing)
+                return !prevIsPort && !prevIsTelnet && !prevIsShortPort && !prevIsHost
+                    && !v.StartsWith(PortPrefix, StringComparison.Ordinal) && !v.StartsWith(TelnetPortPrefix, StringComparison.Ordinal) && !IsGluedShortPort(v)
+                    && v != "--overwrite" && v != "--force" && v != "--foreground" && v != "-f";
+            return !isPortLongValue && !isTelnetValue && !isShortPortValue && !isHostValue
+                && v != "--foreground" && v != "-f" && v != "--overwrite" && v != "--force";
+        }).ToArray();
+    }
 }

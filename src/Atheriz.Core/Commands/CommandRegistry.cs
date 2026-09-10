@@ -11,36 +11,30 @@ public static class CommandRegistry
     private static CmdSet? _loggedIn;
     private static CmdSet? _unloggedIn;
 
+    // One home for the double-checked lazy init: first check is the fast
+    // path, the lock re-checks before building so concurrent first touches
+    // still register exactly once.
+    private static CmdSet GetOrCreate(ref CmdSet? field, Action<CmdSet> register)
+    {
+        if (field is not null) return field;
+        lock (Lock)
+        {
+            if (field is not null) return field;
+            var cs = new CmdSet();
+            register(cs);
+            field = cs;
+            return field;
+        }
+    }
+
     public static CmdSet LoggedIn
     {
-        get
-        {
-            if (_loggedIn is not null) return _loggedIn;
-            lock (Lock)
-            {
-                if (_loggedIn is not null) return _loggedIn;
-                var cs = new CmdSet();
-                RegisterLoggedIn(cs);
-                _loggedIn = cs;
-                return _loggedIn;
-            }
-        }
+        get => GetOrCreate(ref _loggedIn, RegisterLoggedIn);
     }
 
     public static CmdSet UnloggedIn
     {
-        get
-        {
-            if (_unloggedIn is not null) return _unloggedIn;
-            lock (Lock)
-            {
-                if (_unloggedIn is not null) return _unloggedIn;
-                var cs = new CmdSet();
-                RegisterUnloggedIn(cs);
-                _unloggedIn = cs;
-                return _unloggedIn;
-            }
-        }
+        get => GetOrCreate(ref _unloggedIn, RegisterUnloggedIn);
     }
 
     public static void Reset()
@@ -110,13 +104,16 @@ public static class CommandRegistry
         // except all four verbs are ALWAYS registered: the dispatch gate
         // (CommandDispatcher.IsUnloggedInEnabled) demotes disabled verbs to
         // "none", so runtime re-enabling works without a registry reset.
-        cs.Add(new UnloggedIn.ConnectCommand());
-        cs.Add(new UnloggedIn.CreateAccountCommand());
-        cs.Add(new UnloggedIn.NewCharacterCommand());
-        cs.Add(new UnloggedIn.GuestCommand());
-        cs.Add(new UnloggedIn.NoneCommand());
-        cs.Add(new UnloggedIn.ScreenReaderCommand());
-        cs.Add(new UnloggedIn.HelpCommand());
-        cs.Add(new UnloggedIn.QuitCommand());
+        // One Adds takes the write lock once instead of once per verb.
+        cs.Adds([
+            new UnloggedIn.ConnectCommand(),
+            new UnloggedIn.CreateAccountCommand(),
+            new UnloggedIn.NewCharacterCommand(),
+            new UnloggedIn.GuestCommand(),
+            new UnloggedIn.NoneCommand(),
+            new UnloggedIn.ScreenReaderCommand(),
+            new UnloggedIn.HelpCommand(),
+            new UnloggedIn.QuitCommand(),
+        ]);
     }
 }

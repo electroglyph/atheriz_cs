@@ -17,18 +17,29 @@ public static class CheckpointJournal
     private static string ResolveDefaultPath() =>
         AtherizDbContextFactory.ResolveSavePath(AtherizSettings.Global);
 
-    /// <summary>Dirty-mark using the same default-path resolution as parameterless factory/saves.</summary>
-    public static void MarkDirty() => MarkDirty(ResolveDefaultPath());
+    /// <summary>Dirty-mark; a null path uses the default-path resolution (same as parameterless factory/saves).</summary>
+    public static void MarkDirty(string? savePath = null) => Mark(savePath ?? ResolveDefaultPath(), "dirty");
 
-    /// <summary>Clean-mark using the same default-path resolution as parameterless factory/saves.</summary>
-    public static void MarkClean() => MarkClean(ResolveDefaultPath());
+    /// <summary>Clean-mark; a null path uses the default-path resolution (same as parameterless factory/saves).</summary>
+    public static void MarkClean(string? savePath = null) => Mark(savePath ?? ResolveDefaultPath(), "clean");
 
-    /// <summary>Dirty-check using the same default-path resolution as parameterless factory/saves.</summary>
-    public static bool IsDirty() => IsDirty(ResolveDefaultPath());
-
-    public static void MarkDirty(string savePath) => Mark(savePath, "dirty");
-
-    public static void MarkClean(string savePath) => Mark(savePath, "clean");
+    /// <summary>Dirty-check; a null path uses the default-path resolution (same as parameterless factory/saves).
+    /// True when a previous checkpoint died mid-way. Missing row (first boot) counts as clean.
+    /// errors fail loud (the StartStop caller logs them); a full disk,
+    /// read-only file, or torn table must never read back as "clean".</summary>
+    public static bool IsDirty(string? savePath = null)
+    {
+        savePath ??= ResolveDefaultPath();
+        DbWriteGate.Enter();
+        try
+        {
+            using var db = AtherizDbContextFactory.Create(savePath);
+            db.Database.EnsureCreated();
+            var row = db.Checkpoints.Find(RowId);
+            return row is not null && row.State == "dirty";
+        }
+        finally { DbWriteGate.Exit(); }
+    }
 
     private static void Mark(string savePath, string state)
     {
@@ -43,22 +54,6 @@ public static class CheckpointJournal
             Upsert(db, state);
         }
         catch (Exception ex) { try { Console.Error.WriteLine($"checkpoint journal {state}-mark failed: {ex.Message}"); } catch (Exception) { } }
-        finally { DbWriteGate.Exit(); }
-    }
-
-    /// <summary>True when a previous checkpoint died mid-way. Missing row (first boot) counts as clean.
-    /// errors fail loud (the StartStop caller logs them); a full disk,
-    /// read-only file, or torn table must never read back as "clean".</summary>
-    public static bool IsDirty(string savePath)
-    {
-        DbWriteGate.Enter();
-        try
-        {
-            using var db = AtherizDbContextFactory.Create(savePath);
-            db.Database.EnsureCreated();
-            var row = db.Checkpoints.Find(RowId);
-            return row is not null && row.State == "dirty";
-        }
         finally { DbWriteGate.Exit(); }
     }
 
@@ -165,28 +160,22 @@ public static class DbTransactionHelper
         return false;
     }
 
-    /// <summary>Generic upsert for any <see cref="IJsonEntity"/> row: Find → update Data else Add.</summary>
-    public static void UpsertJson<T>(DbSet<T> set, Func<T?> find, Func<T> create, string json)
-        where T : class, IJsonEntity
-    {
-        UpsertJson(set, find, create, json, static _ => { });
-    }
-
-    /// <summary>Upsert with extra configuration (e.g., <c>Type</c> discriminator on <c>ObjectRow</c>).</summary>
-    public static void UpsertJson<T>(DbSet<T> set, Func<T?> find, Func<T> create, string json, Action<T> configure)
+    /// <summary>Generic upsert for any <see cref="IJsonEntity"/> row: Find → update Data else Add,
+    /// with optional extra configuration (e.g., <c>Type</c> discriminator on <c>ObjectRow</c>).</summary>
+    public static void UpsertJson<T>(DbSet<T> set, Func<T?> find, Func<T> create, string json, Action<T>? configure = null)
         where T : class, IJsonEntity
     {
         var existing = find();
         if (existing is not null)
         {
             existing.Data = json;
-            configure(existing);
+            configure?.Invoke(existing);
         }
         else
         {
             var row = create();
             row.Data = json;
-            configure(row);
+            configure?.Invoke(row);
             set.Add(row);
         }
     }

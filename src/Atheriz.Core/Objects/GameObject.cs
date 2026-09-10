@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Objects;
@@ -68,19 +70,21 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
 
     // --- helpers for lock scope ---
-    private T Read<T>(Func<T> fn)
+    // Protected so derived holders (Account) reuse the same lock discipline
+    // instead of duplicating tiny Enter/Exit wrappers per field.
+    protected T Read<T>(Func<T> fn)
     {
         _lock.EnterReadLock();
         try { return fn(); }
         finally { _lock.ExitReadLock(); }
     }
-    private void Write(Action action)
+    protected void Write(Action action)
     {
         _lock.EnterWriteLock();
         try { action(); }
         finally { _lock.ExitWriteLock(); }
     }
-    private T Write<T>(Func<T> fn)
+    protected T Write<T>(Func<T> fn)
     {
         _lock.EnterWriteLock();
         try { return fn(); }
@@ -137,6 +141,17 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     {
         return Hookable("at_pre_map_render", () => grid, grid);
     }
+    // Legend projection shared by AtMapUpdate/AtLegendUpdate: the two Select
+    // bodies were verified element-wise identical, so one helper emits both.
+    internal static List<List<object?>> ProjectLegendEntries(List<(string sym, string desc, (int x, int y) coord)> entries)
+        => entries.Select(e => new List<object?> { e.sym, e.desc, new List<int> { e.coord.x, e.coord.y } }).ToList();
+    // Session fetch shared by AtMapUpdate/AtLegendUpdate: preserves each
+    // caller's exact fallback (null session) and log context.
+    private Session? GetSessionQuiet(string hook)
+    {
+        try { return Session; }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.{hook}: " + logEx.Message, "GameObject"); return null; }
+    }
     public virtual void AtMapUpdate(string mapStr, List<(string sym, string desc, (int x, int y) coord)> entries, int minX, int maxY, bool showLegend, string name)
     {
         Hookable("at_map_update", () =>
@@ -167,14 +182,13 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     ["map"] = mapStr,
                     ["pos"] = new List<int> { pos.relX, pos.relY },
                     ["symbol"] = Symbol,
-                    ["legend"] = entries.Select(e => new List<object?> { e.sym, e.desc, new List<int> { e.coord.x, e.coord.y } }).ToList(),
+                    ["legend"] = ProjectLegendEntries(entries),
                     ["min_x"] = minX,
                     ["max_y"] = maxY,
                     ["area"] = name,
                     ["show_legend"] = showLegend,
                 };
-                Session? sess = null;
-                try { sess = Session; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
+                Session? sess = GetSessionQuiet(nameof(AtMapUpdate));
                 var conn = sess?.Connection;
                 // stamp LastMapTime only when delivery
                 // succeeded. Python (base_obj.py:813+) has no try/catch here,
@@ -206,11 +220,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 Dictionary<string, object?> payload = new()
                 {
                     ["area"] = area,
-                    ["legend"] = entries.Select(e => new List<object?> { e.sym, e.desc, new List<int> { e.coord.x, e.coord.y } }).ToList(),
+                    ["legend"] = ProjectLegendEntries(entries),
                     ["show_legend"] = show,
                 };
-                Session? sess = null;
-                try { sess = Session; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLegendUpdate: " + logEx.Message, "GameObject"); }
+                Session? sess = GetSessionQuiet(nameof(AtLegendUpdate));
                 var conn = sess?.Connection;
                 if (conn is not null)
                     conn.SendCommand("legend", new List<object?> { payload }, null);
@@ -444,23 +457,28 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
 
     // --- locks ---
+    // Lock-table insert core shared by the concurrent AddLock path and the
+    // single-threaded load restore path (ApplyDtoFields). AddLock itself does
+    // nothing but this insert (no logging, no events), so restoring through
+    // the same core produces identical lock state without re-taking the lock.
+    private void AddLockRestored(string lockName, Func<GameObject, bool> predicate, string policy)
+    {
+        if (!_locks.TryGetValue(lockName, out var lst))
+        {
+            lst = [];
+            _locks[lockName] = lst;
+        }
+        lst.Add(predicate);
+        if (!_lockPolicies.TryGetValue(lockName, out var pols))
+        {
+            pols = [];
+            _lockPolicies[lockName] = pols;
+        }
+        pols.Add(policy);
+    }
     public void AddLock(string lockName, Func<GameObject, bool> predicate, string policy = LockPolicies.Custom)
     {
-        Write(() =>
-        {
-            if (!_locks.TryGetValue(lockName, out var lst))
-            {
-                lst = [];
-                _locks[lockName] = lst;
-            }
-            lst.Add(predicate);
-            if (!_lockPolicies.TryGetValue(lockName, out var pols))
-            {
-                pols = [];
-                _lockPolicies[lockName] = pols;
-            }
-            pols.Add(policy);
-        });
+        Write(() => AddLockRestored(lockName, predicate, policy));
     }
     public void ClearLocksByName(string lockName) => Write(() => { _locks.Remove(lockName); _lockPolicies.Remove(lockName); });
 
@@ -501,6 +519,26 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public bool HasHook(string funcName) => Read(() => _hooks.TryGetValue(funcName, out var s) && s.Count > 0);
 
     // --- script attachment (port of base_obj.add_script/remove_script/has_script_type/get_scripts_by_type) ---
+    // Single-id fetch core for the Get + [0] is Script shape repeated across
+    // ResolveRelations/AddScript/RemoveScript/GetScriptsByType. A missing id
+    // and a wrong-typed id both mean "absent" at every one of those sites
+    // (verified: each skips identically), so one helper covers them.
+    internal static bool TryGetScript(int id, [NotNullWhen(true)] out Script? script)
+    {
+        var objs = Globals.ObjectRegistry.Get(id);
+        if (objs.Count > 0 && objs[0] is Script s) { script = s; return true; }
+        script = null;
+        return false;
+    }
+    // Type-name match core for HasScriptType/GetScriptsByType: lowered
+    // substring on the CLR type name (ordinal Contains on both lowered
+    // sides — the ordinality is load-bearing, do not "fix" the casing).
+    private static bool ScriptTypeMatches(GameObject obj, string needle)
+        => obj.GetType().Name.ToLowerInvariant().Contains(needle);
+    private HashSet<int> SnapshotScriptIds()
+    {
+        using (ReadScope()) return new HashSet<int>(_scripts);
+    }
     public void AddScript(Script script)
     {
         if (script is null) return;
@@ -508,8 +546,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     public void AddScript(int scriptId)
     {
-        var objs = Globals.ObjectRegistry.Get(scriptId);
-        if (objs.Count>0 && objs[0] is Script s) s.InstallHooks(this);
+        if (TryGetScript(scriptId, out var s)) s.InstallHooks(this);
     }
     public void RemoveScript(Script script)
     {
@@ -518,8 +555,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     public void RemoveScript(int scriptId)
     {
-        var objs = Globals.ObjectRegistry.Get(scriptId);
-        if (objs.Count>0 && objs[0] is Script s) s.RemoveHooks(this);
+        if (TryGetScript(scriptId, out var s)) s.RemoveHooks(this);
     }
     // Typed _scripts-set writers (single SyncRoot; replaces _scripts reflection in Script/NodeHandler).
     internal void AddScriptId(int id) => Write(() => { if (_scripts.Add(id)) _flags.IsModified = true; });
@@ -528,40 +564,28 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     internal void RestoreScriptIds(IEnumerable<int> ids) => Write(() => { _scripts.Clear(); foreach (var id in ids) _scripts.Add(id); });
     public bool HasScriptType(string scriptType)
     {
-        HashSet<int> ids;
-        using (ReadScope())
-        {
-            if (_scripts.Count==0) return false; ids = new HashSet<int>(_scripts);
-        }
+        // Keeps the direct Get fetch (not TryGetScript): a non-Script object
+        // whose type name contains the needle still counts here, as before.
+        // Only the snapshot and the name comparison are shared.
+        HashSet<int> ids = SnapshotScriptIds();
+        if (ids.Count == 0) return false;
         string needle = scriptType.ToLowerInvariant();
         foreach (var id in ids)
         {
             var objs = Globals.ObjectRegistry.Get(id);
-            if (objs.Count>0)
-            {
-                string cname = objs[0].GetType().Name.ToLowerInvariant();
-                if (cname.Contains(needle)) return true;
-            }
+            if (objs.Count > 0 && ScriptTypeMatches(objs[0], needle)) return true;
         }
         return false;
     }
     public List<Script> GetScriptsByType(string scriptType)
     {
-        HashSet<int> ids;
-        using (ReadScope())
-        {
-            if (_scripts.Count==0) return []; ids = new HashSet<int>(_scripts);
-        }
+        HashSet<int> ids = SnapshotScriptIds();
+        if (ids.Count == 0) return [];
         string needle = scriptType.ToLowerInvariant();
         List<Script> list = [];
         foreach (var id in ids)
         {
-            var objs = Globals.ObjectRegistry.Get(id);
-            if (objs.Count>0 && objs[0] is Script s)
-            {
-                string cname = s.GetType().Name.ToLowerInvariant();
-                if (cname.Contains(needle)) list.Add(s);
-            }
+            if (TryGetScript(id, out var s) && ScriptTypeMatches(s, needle)) list.Add(s);
         }
         return list;
     }
@@ -588,8 +612,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         finally { _lock.ExitReadLock(); }
         foreach (var id in scripts)
         {
-            var lst = Globals.ObjectRegistry.Get(id);
-            if (lst.Count > 0 && lst[0] is Script s)
+            if (TryGetScript(id, out var s))
             {
                 try { s.InstallHooks(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ResolveRelations: " + logEx.Message, "GameObject"); }
             }
@@ -657,10 +680,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     if (string.IsNullOrEmpty(pol)) continue;
                     if (LockPolicies.TryResolve(pol, o, out var pred))
                     {
-                        if (!o._locks.TryGetValue(ld.Name, out var lst)) { lst = []; o._locks[ld.Name] = lst; }
-                        lst.Add(pred);
-                        if (!o._lockPolicies.TryGetValue(ld.Name, out var pols)) { pols = []; o._lockPolicies[ld.Name] = pols; }
-                        pols.Add(pol);
+                        o.AddLockRestored(ld.Name, pred, pol);
                     }
                     else AtherizLogger.LogError($"Unknown lock policy '{pol}' on lock '{ld.Name}' for object {dto.Id}; lock dropped.");
                 }
@@ -728,15 +748,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             obj.AddLock("get", accessing => accessing.IsBuilder, LockPolicies.Builder);
 
         obj.AddLock("delete", accessing => accessing.Id != obj.Id, LockPolicies.NotSelf);
-        // puppet lock faithful to base_obj.py:185-193 — is_npc or superuser or owned character via session.account
-        obj.AddLock("puppet", accessing =>
-        {
-            if (obj.IsNpc) return true;
-            if (accessing.IsSuperUser) return true;
-            var sess = accessing.Session;
-            if (sess?.Account is Account acc && acc.Characters.Contains(obj.Id)) return true;
-            return false;
-        }, LockPolicies.PuppetOwner);
+        // puppet lock faithful to base_obj.py:185-193 — resolved from the
+        // PuppetOwner policy (single spelling): the old inline lambda was
+        // verified line-for-line identical to the policy body (obj ↔ target),
+        // capturing no extra context, so the policy predicate replaces it.
+        _ = LockPolicies.TryResolve(LockPolicies.PuppetOwner, obj, out var puppetPred);
+        obj.AddLock("puppet", puppetPred, LockPolicies.PuppetOwner);
 
         // Port of base_obj.py:181-186 create tail: per-instance cmdsets and the
         // at_create hook. Registration stays explicit (AddObject/AddObjectUnique
@@ -772,12 +789,13 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // Typed extra helpers for GrottoObject (replaces reflection on _extra)
     public bool TryGetExtraJson(string key, out System.Text.Json.JsonElement value)
     {
-        // Direct locked read via the typed Read helper: the old shape wrapped
-        // the lookup in a dummy Func<int> and smuggled the result through an
-        // out-param temporary, which read as lock-borrowing instead of a lookup.
-        var hit = Read(() => _extra.TryGetValue(key, out var v) ? (true, v) : (false, v));
-        value = hit.Item2;
-        return hit.Item1;
+        // Nullable smuggle instead of the old (bool, JsonElement) tuple: a
+        // missing key reads as null (absent) while a stored JSON null reads as
+        // a present Null-kind element — the distinction is preserved.
+        System.Text.Json.JsonElement? hit = Read(() => _extra.TryGetValue(key, out var v) ? v : (System.Text.Json.JsonElement?)null);
+        if (hit is null) { value = default; return false; }
+        value = hit.Value;
+        return true;
     }
     public void SetExtraJson(string key, System.Text.Json.JsonElement value) => Write(() => { _extra[key] = value; _flags.IsModified = true; });
     public bool TryRemoveExtraJson(string key) => Write(() => { var r = _extra.Remove(key); if (r) _flags.IsModified = true; return r; });

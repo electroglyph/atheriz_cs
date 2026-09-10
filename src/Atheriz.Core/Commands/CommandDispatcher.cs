@@ -52,7 +52,7 @@ public static class CommandDispatcher
     {
         Command? socialFallback = null;
         string socialFallbackKey = "";
-        foreach (var key in cmdset.GetKeys().OrderBy(k => k, StringComparer.Ordinal))
+        foreach (var key in cmdset.GetSortedKeys())
         {
             if (_settings.AutoAliasIgnoredKeys.Contains(key)) continue;
             // case-insensitive prefix. Input is lowercased but
@@ -74,6 +74,14 @@ public static class CommandDispatcher
         if (socialsFallback && socialFallback is not null) return (socialFallback, socialFallbackKey);
         return (null, rawCmdKey);
     }
+
+    // Shared internal-first/global-second head for the normal vs glued
+    // lookups inside DispatchLoggedIn: an internal single-char verb shadows
+    // the global one on glued input exactly as on the normal path. Scoped to
+    // these two lookups only — the dispatch tails differ (Job-always vs
+    // LagCheck+queue) and stay separate.
+    private static Command? TryResolveGlobal(GameObject puppet, string key)
+        => puppet.InternalCmdSet?.Get(key) ?? CommandRegistry.LoggedIn.Get(key);
 
     // Tail of the resolution chain, shared by the normal path and the glued
     // path: location/inventory verbs first, then the location's own external
@@ -104,9 +112,7 @@ public static class CommandDispatcher
         var cmdArgs = parsed.CmdArgs;
         string matchedAlias = parsed.MatchedAlias;
 
-        Command? cmd = null;
-        if (puppet.InternalCmdSet is not null) cmd = puppet.InternalCmdSet.Get(rawCmdKey);
-        if (cmd is null) cmd = CommandRegistry.LoggedIn.Get(rawCmdKey);
+        Command? cmd = TryResolveGlobal(puppet, rawCmdKey);
         if (cmd is null)
         {
             // glued single-char non-alpha: a lone leading symbol with text stuck to
@@ -116,8 +122,7 @@ public static class CommandDispatcher
             {
                 // Glued lookup prefers internal-first, same as the normal path above:
                 // an internal single-char verb shadows the global one on glued input too.
-                cmd = puppet.InternalCmdSet?.Get(first);
-                cmd ??= CommandRegistry.LoggedIn.Get(first);
+                cmd = TryResolveGlobal(puppet, first);
                 cmd ??= TryResolveLocal(puppet, first);
                 if (cmd is not null)
                 {
@@ -188,10 +193,13 @@ public static class CommandDispatcher
     internal static bool IsUnloggedInEnabled(Command cmd)
     {
         var g = AtherizSettings.Global;
-        if (cmd is UnloggedIn.CreateAccountCommand) return _settings.AccountCreationEnabled && g.AccountCreationEnabled;
-        if (cmd is UnloggedIn.NewCharacterCommand) return _settings.CharCreationEnabled && g.CharCreationEnabled;
-        if (cmd is UnloggedIn.GuestCommand) return _settings.GuestEnabled && g.GuestEnabled;
-        return true;
+        return cmd switch
+        {
+            UnloggedIn.CreateAccountCommand => _settings.AccountCreationEnabled && g.AccountCreationEnabled,
+            UnloggedIn.NewCharacterCommand => _settings.CharCreationEnabled && g.CharCreationEnabled,
+            UnloggedIn.GuestCommand => _settings.GuestEnabled && g.GuestEnabled,
+            _ => true,
+        };
     }
 
     public static Job? ResolveUnloggedIn(IMessageTarget connection, string text)

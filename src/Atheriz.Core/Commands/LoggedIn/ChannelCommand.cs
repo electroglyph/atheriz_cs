@@ -10,8 +10,13 @@ public sealed class ChannelCommand : Command
     public override string Category => "Communication";
     // wontfix: lazy cache only, cleared on is_deleted/name mismatch or via filter_by scan. No eager invalidation on delete/rename.
     private static readonly Dictionary<string, Channel> ChannelCache = new(StringComparer.OrdinalIgnoreCase);
+    // Reverse index for the alias-eviction below: the full-cache ToList scan
+    // removed every non-matching key holding the same channel id, but the
+    // cache holds at most one key per id (every insert evicts the previous
+    // one), so evicting the indexed key removes exactly the same entry.
+    private static readonly Dictionary<int, string> ChannelIdToKey = [];
     private static readonly Lock CacheLock = new();
-    public static void ClearCache() { lock (CacheLock) ChannelCache.Clear(); }
+    public static void ClearCache() { lock (CacheLock) { ChannelCache.Clear(); ChannelIdToKey.Clear(); } }
     public static IReadOnlyDictionary<string, Channel> GetCacheSnapshot() { lock (CacheLock) return new Dictionary<string, Channel>(ChannelCache, StringComparer.OrdinalIgnoreCase); }
     public static bool TryGetCached(string name, out Channel? ch) { lock (CacheLock) return ChannelCache.TryGetValue(name, out ch); }
     protected override void SetupParser(GameArgumentParser p)
@@ -49,6 +54,7 @@ public sealed class ChannelCommand : Command
             if (ChannelCache.TryGetValue(nameLower, out var cached) && (cached.IsDeleted || !cached.Name.Equals(chName, StringComparison.OrdinalIgnoreCase)))
             {
                 ChannelCache.Remove(nameLower);
+                if (ChannelIdToKey.TryGetValue(cached.Id, out var staleKey) && staleKey == nameLower) ChannelIdToKey.Remove(cached.Id);
                 cached = null;
             }
             channel = ChannelCache.TryGetValue(nameLower, out var c) ? c : null;
@@ -66,8 +72,15 @@ public sealed class ChannelCommand : Command
                     channel = existing;
                 else
                 {
+                    // Direct stale-key removal via the reverse index instead of
+                    // the old full-cache ToList scan: same surviving entry.
+                    if (ChannelIdToKey.TryGetValue(channel.Id, out var oldKey) && oldKey != nameLower)
+                    {
+                        ChannelCache.Remove(oldKey);
+                        ChannelIdToKey.Remove(channel.Id);
+                    }
                     ChannelCache[nameLower] = channel;
-                    foreach (var kv in ChannelCache.ToList()) if (kv.Key != nameLower && kv.Value.Id == channel.Id) ChannelCache.Remove(kv.Key);
+                    ChannelIdToKey[channel.Id] = nameLower;
                 }
             }
         }

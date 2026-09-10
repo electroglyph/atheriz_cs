@@ -32,7 +32,7 @@ public sealed class PendingLimiter
 
     public void MarkClosing()
     {
-        lock (_lock) { _closing = true; }
+        _ = TryMarkClosing();
     }
 
     public bool TryMarkClosing()
@@ -53,6 +53,18 @@ public sealed class PendingLimiter
         return true;
     }
 
+    // Shared reserve core (call with _lock held). The sync-only zero-guard
+    // stays OUTSIDE in TryReserve: an async zero reserve must take a slot
+    // since Release(Task) decrements.
+    private bool TryReserveCoreLocked(Task? task, int nb)
+    {
+        if (!CanReserveLocked(nb)) return false;
+        _pendingBytes += nb;
+        _pendingCount++;
+        if (task is not null) _byTask[task] = nb;
+        return true;
+    }
+
     /// <summary>
     /// Reserve <paramref name="nb"/> bytes (and one count) without Task tracking.
     /// Mirrors sync reserve in <c>telnet.py:205,232</c> / <c>websocket.py:90</c> before sync write.
@@ -63,13 +75,7 @@ public sealed class PendingLimiter
         // Zero reserves nothing: taking a count slot here would leak, since
         // the release side is (correctly) a no-op for zero.
         if (nb == 0) return true;
-        lock (_lock)
-        {
-            if (!CanReserveLocked(nb)) return false;
-            _pendingBytes += nb;
-            _pendingCount++;
-            return true;
-        }
+        lock (_lock) return TryReserveCoreLocked(null, nb);
     }
 
     /// <summary>
@@ -78,14 +84,7 @@ public sealed class PendingLimiter
     /// </summary>
     public bool TryReserve(Task task, int nb)
     {
-        lock (_lock)
-        {
-            if (!CanReserveLocked(nb)) return false;
-            _pendingBytes += nb;
-            _pendingCount++;
-            _byTask[task] = nb;
-            return true;
-        }
+        lock (_lock) return TryReserveCoreLocked(task, nb);
     }
 
     /// <summary>
@@ -95,9 +94,8 @@ public sealed class PendingLimiter
     {
         lock (_lock)
         {
-            if (_byTask.TryGetValue(task, out var nb))
+            if (_byTask.Remove(task, out var nb))
             {
-                _byTask.Remove(task);
                 _pendingBytes = Math.Max(0, _pendingBytes - nb);
                 _pendingCount = Math.Max(0, _pendingCount - 1);
             }

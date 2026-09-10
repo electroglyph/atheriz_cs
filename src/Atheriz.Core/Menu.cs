@@ -17,34 +17,40 @@ public sealed class MenuEngine{
  string _text="";Dictionary<string,Choice> _choices=new(StringComparer.OrdinalIgnoreCase); // Port of menu.py:34-35
  public MenuEngine(object? caller,Func<MenuContext,(string,List<Choice>)> start){Context=new(caller);CurrentNodeSync=start;if(start is not null)_Render();} // Port of menu.py:36
  public MenuEngine(object? caller,Func<MenuContext,Task<(string,List<Choice>)>> startA){Context=new(caller);CurrentNodeAsync=startA;}
- void _Render(){ // Port of menu.py:39
-  if(CurrentNodeSync is null&&CurrentNodeAsync is null)return;
-  if(CurrentNodeAsync is not null)throw new InvalidOperationException("async menu node requires async render"); // Port of menu.py:42-43
-  var (t,cl)=CurrentNodeSync!(Context);_text=t;_choices=new(StringComparer.OrdinalIgnoreCase); // Port of menu.py:44
-  foreach(var c in cl){var k=c.Key.ToLowerInvariant().Trim();if(_choices.ContainsKey(k))throw new InvalidOperationException($"duplicate menu key: '{c.Key}'");_choices[k]=c;} // Port of menu.py:47-51
- }
- public async Task RenderAsync(){ // Port of menu.py:53
-  if(CurrentNodeSync is null&&CurrentNodeAsync is null)return;
-  string t;List<Choice> cl;
-  if(CurrentNodeAsync is not null)(t,cl)=await CurrentNodeAsync(Context).ConfigureAwait(false); else (t,cl)=CurrentNodeSync!(Context); // Port of menu.py:56
-  _text=t;_choices=new(StringComparer.OrdinalIgnoreCase);
-  foreach(var c in cl){var k=c.Key.ToLowerInvariant().Trim();if(_choices.ContainsKey(k))throw new InvalidOperationException($"duplicate menu key: '{c.Key}'");_choices[k]=c;}
- }
- public string GetDisplay(){ // Port of menu.py:68
-  if(CurrentNodeSync is null&&CurrentNodeAsync is null)return "";
-  var lines=new List<string>{$"\n{_text}"}; foreach(var c in _choices.Values)lines.Add($"  [{c.Key}] {c.Desc}"); return string.Join("\r\n",lines); // Port of menu.py:71
- }
- public bool HandleInput(string input){ // Port of menu.py:76
-  if(_choices.Count==0){CurrentNodeSync=null;CurrentNodeAsync=null;return false;} // Port of menu.py:77
-  var clean=input.ToLowerInvariant().Trim(); if(!_choices.TryGetValue(clean,out var ch))return true; // Port of menu.py:81-82
+  void _Render(){ // Port of menu.py:39
+   if(CurrentNodeSync is null&&CurrentNodeAsync is null)return;
+   if(CurrentNodeAsync is not null)throw new InvalidOperationException("async menu node requires async render"); // Port of menu.py:42-43
+   var (t,cl)=CurrentNodeSync!(Context);_text=t;_choices=BuildChoices(cl); // Port of menu.py:44
+  }
+  // Shared choice-dict build for the sync/async render paths: case-insensitive
+  // map + identical ToLowerInvariant().Trim() duplicate-key throw (menu.py:47-51).
+  static Dictionary<string,Choice> BuildChoices(List<Choice> cl){var d=new Dictionary<string,Choice>(StringComparer.OrdinalIgnoreCase);foreach(var c in cl){var k=c.Key.ToLowerInvariant().Trim();if(d.ContainsKey(k))throw new InvalidOperationException($"duplicate menu key: '{c.Key}'");d[k]=c;}return d;}
+  public async Task RenderAsync(){ // Port of menu.py:53
+   if(CurrentNodeSync is null&&CurrentNodeAsync is null)return;
+   string t;List<Choice> cl;
+   if(CurrentNodeAsync is not null)(t,cl)=await CurrentNodeAsync(Context).ConfigureAwait(false); else (t,cl)=CurrentNodeSync!(Context); // Port of menu.py:56
+   _text=t;_choices=BuildChoices(cl);
+  }
+  public string GetDisplay(){ // Port of menu.py:68
+   if(CurrentNodeSync is null&&CurrentNodeAsync is null)return "";
+   var lines=new List<string>{$"\n{_text}"}; foreach(var c in _choices.Values)lines.Add($"  [{c.Key}] {c.Desc}"); return string.Join("\r\n",lines); // Port of menu.py:71
+  }
+  // Shared input prefix for the sync/async handlers: normalization and lookup
+  // (menu.py:81-82). Null means "no such key" (stay); the callback/goto/Stay
+  // dispatch below stays per-handler (sync throws inline, async faults).
+  static string NormalizeKey(string s)=>s.ToLowerInvariant().Trim();
+  Choice? TryGetChoice(string clean)=>_choices.TryGetValue(clean,out var ch)?ch:null;
+  public bool HandleInput(string input){ // Port of menu.py:76
+   if(_choices.Count==0){CurrentNodeSync=null;CurrentNodeAsync=null;return false;} // Port of menu.py:77
+   var ch=TryGetChoice(NormalizeKey(input)); if(ch is null)return true; // Port of menu.py:81-82
   if(ch.CallbackSync is not null||ch.CallbackAsync is not null){try{if(ch.CallbackAsync is not null)throw new InvalidOperationException("async callback requires async handle_input");ch.CallbackSync?.Invoke(Context);}catch{try{AtherizLogger.LogError("menu callback failed");}catch{}}} // Port of menu.py:85-91
   if(ch.GotoSync is not null||ch.GotoAsync is not null){if(ch.GotoAsync is not null)throw new InvalidOperationException("async goto requires async handle_input");CurrentNodeSync=ch.GotoSync;CurrentNodeAsync=null;_Render();return true;} // Port of menu.py:92
   if(ch.Stay){_Render();return true;} // Port of menu.py:96
   CurrentNodeSync=null;CurrentNodeAsync=null;return false; // Port of menu.py:99
  }
- public async Task<bool> HandleInputAsync(string input){ // Port of menu.py:102
-  if(_choices.Count==0){CurrentNodeSync=null;CurrentNodeAsync=null;return false;}
-  var clean=input.ToLowerInvariant().Trim(); if(!_choices.TryGetValue(clean,out var ch))return true;
+  public async Task<bool> HandleInputAsync(string input){ // Port of menu.py:102
+   if(_choices.Count==0){CurrentNodeSync=null;CurrentNodeAsync=null;return false;}
+   var ch=TryGetChoice(NormalizeKey(input)); if(ch is null)return true;
   if(ch.CallbackSync is not null||ch.CallbackAsync is not null){try{if(ch.CallbackAsync is not null)await ch.CallbackAsync(Context).ConfigureAwait(false);else ch.CallbackSync?.Invoke(Context);}catch{try{AtherizLogger.LogError("menu callback failed");}catch{}}} // Port of menu.py:110
   if(ch.GotoSync is not null||ch.GotoAsync is not null){CurrentNodeSync=ch.GotoSync;CurrentNodeAsync=ch.GotoAsync;await RenderAsync().ConfigureAwait(false);return true;} // Port of menu.py:118
   if(ch.Stay){await RenderAsync().ConfigureAwait(false);return true;}
@@ -77,8 +83,13 @@ public sealed class Menu{
 }
 public static class MenuRunner{ // Port of menu.py:135 top-level run_menu future-based
  static Session? GetSess(object? caller){ if(caller is Session s)return s; if(caller is Atheriz.Core.Commands.ISessionProvider p){ try{ var v=p.Session; if(v is not null)return v; }catch{} } if(caller is GameObject go)return go.Session; return null;}
+ // Shared prompt loop for the sync/async overloads below: display, timeout
+ // prompt, handle, log-and-break, close. Render/handle ride as delegates —
+ // the sync overload's ctor already rendered and its handler is sync.
+ static async Task RunLoopAsync(MenuEngine e,object? caller,Func<string,Task<bool>> handle){
+  try{while(e.HasNode){var d=e.GetDisplay(); var sess=GetSess(caller); if(sess is null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to).ConfigureAwait(false); if(inp is null)break; try{var k=await handle(inp).ConfigureAwait(false); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}}
  public static Task RunMenuAsync(object? caller,Func<MenuContext,(string,List<Choice>)> start){ // Port of menu.py:140-166
-  return Task.Run(async()=>{var e=new MenuEngine(caller,start); try{while(e.HasNode){var d=e.GetDisplay(); var sess=GetSess(caller); if(sess is null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to).ConfigureAwait(false); if(inp is null)break; try{var k=e.HandleInput(inp); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}});}
+  return Task.Run(async()=>{var e=new MenuEngine(caller,start); await RunLoopAsync(e,caller,s=>Task.FromResult(e.HandleInput(s))).ConfigureAwait(false);});}
  public static Task RunMenuAsync(object? caller,Func<MenuContext,Task<(string,List<Choice>)>> startA){
-  return Task.Run(async()=>{var e=new MenuEngine(caller,startA); try{await e.RenderAsync().ConfigureAwait(false);}catch{try{AtherizLogger.LogError("menu initial render failed");}catch{} e.Close(); return;} try{while(e.HasNode){var d=e.GetDisplay(); var sess=GetSess(caller); if(sess is null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to).ConfigureAwait(false); if(inp is null)break; try{var k=await e.HandleInputAsync(inp).ConfigureAwait(false); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}});}
+  return Task.Run(async()=>{var e=new MenuEngine(caller,startA); try{await e.RenderAsync().ConfigureAwait(false);}catch{try{AtherizLogger.LogError("menu initial render failed");}catch{} e.Close(); return;} await RunLoopAsync(e,caller,e.HandleInputAsync).ConfigureAwait(false);});}
 }

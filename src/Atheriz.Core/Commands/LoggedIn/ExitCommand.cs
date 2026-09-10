@@ -46,9 +46,7 @@ public sealed class LoggedInExitCommand : Command
     {
         var nh = NodeHandler.GetCurrent();
         if (nh is null) return;
-        var lst = ObjectRegistry.Get(CallerId);
-        GameObject? c = null;
-        if (lst.Count > 0) c = lst[0];
+        GameObject? c = ObjectRegistry.GetSingle(CallerId);
         if (c is null)
         {
             try { Console.Error.WriteLine($"Exit command with invalid caller. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}"); } catch (Exception) { }

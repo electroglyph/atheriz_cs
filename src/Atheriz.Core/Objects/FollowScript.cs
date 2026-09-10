@@ -40,14 +40,14 @@ public sealed class FollowScript : Script
         if (child is null) { Delete(); return; }
         if (child.FollowersSnapshot.Count == 0) { Delete(); return; }
         if (oldLoc is null) return;
-        List<int> followers;
-        // Snapshot followers under lock via the typed snapshot (no reflection).
-        followers = child.FollowersSnapshot.ToList();
-        foreach (var id in followers)
+        // FollowersSnapshot is already a fresh snapshot collection, so iterate
+        // it directly instead of copying it again with ToList().
+        foreach (var id in child.FollowersSnapshot)
         {
-            var followerList = ObjectRegistry.Get(id);
-            if (followerList.Count == 0) continue;
-            var follower = followerList[0];
+            // Single lookup with no list alloc: a missing id is a gone
+            // follower, skipped exactly like the old empty-list branch.
+            var follower = ObjectRegistry.GetSingle(id);
+            if (follower is null) continue;
             if (follower.ResolveLocationObject() != oldLoc) continue;
             bool success = follower.MoveTo(destination, toExit: toExit);
             if (!success)

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.RegularExpressions;
 
@@ -33,12 +34,7 @@ public static class GameUtils
         if (clear) input = StripAnsi(input);
         if (fg is not null) input = $"\x1b[38;5;{fg}m{input}";
         if (bg is not null) input = $"\x1b[48;5;{bg}m{input}";
-        if (bold) input = $"\x1b[1m{input}";
-        if (italic) input = $"\x1b[3m{input}";
-        if (underline) input = $"\x1b[4m{input}";
-        if (inverse) input = $"\x1b[7m{input}";
-        if (strikethru) input = $"\x1b[9m{input}";
-        return $"{input}\x1b[0m";
+        return ApplyStyleFlags(input, bold, italic, underline, inverse, strikethru);
     }
 
     public static string WrapRgb(string input, (byte R, byte G, byte B)? fg = null, (byte R, byte G, byte B)? bg = null,
@@ -46,10 +42,7 @@ public static class GameUtils
     {
         input = bg is not null ? $"\x1b[48;2;{bg.Value.R};{bg.Value.G};{bg.Value.B}m{input}" : $"\x1b[48;2;0;0;0m{input}";
         input = fg is not null ? $"\x1b[38;2;{fg.Value.R};{fg.Value.G};{fg.Value.B}m{input}" : $"\x1b[38;2;204;204;204m{input}";
-        if (bold) input = $"\x1b[1m{input}";
-        if (italic) input = $"\x1b[3m{input}";
-        if (underline) input = $"\x1b[4m{input}";
-        return $"{input}\x1b[0m";
+        return ApplyStyleFlags(input, bold, italic, underline);
     }
 
     public static string WrapTruecolor(string input, double? fg = null, double? bg = 0.0,
@@ -75,6 +68,15 @@ public static class GameUtils
             var (r, g, b) = HsvToRgb(1.0, 0.0, 1.0);
             input = $"\x1b[38;2;{r};{g};{b}m{input}";
         }
+        return ApplyStyleFlags(input, bold, italic, underline, inverse, strikethru);
+    }
+
+    // Shared style-flag applier for the Wrap* helpers above: the flag order
+    // (bold, italic, underline, inverse, strikethru) plus the trailing reset is
+    // identical at every site, so one helper keeps the bytes identical. It runs
+    // after the color codes, leaving each caller's color order untouched.
+    private static string ApplyStyleFlags(string input, bool bold, bool italic, bool underline, bool inverse = false, bool strikethru = false)
+    {
         if (bold) input = $"\x1b[1m{input}";
         if (italic) input = $"\x1b[3m{input}";
         if (underline) input = $"\x1b[4m{input}";
@@ -148,10 +150,7 @@ public static class GameUtils
                 dX = Convert.ToInt32(dest[0]); dY = Convert.ToInt32(dest[1]);
             }
             var ew = dX - oX; var ns = dY - oY;
-            var dir = "";
-            if (ns > 0) dir = "north"; else if (ns < 0) dir = "south";
-            if (ew > 0) dir += "east"; else if (ew < 0) dir += "west";
-            return dir;
+            return DirFromDeltas(ew, ns);
         }
         catch { return ""; }
     }
@@ -159,27 +158,37 @@ public static class GameUtils
     public static string GetDir(Coord origin, Coord dest)
     {
         if (origin.Area != dest.Area) return "";
-        var ns = dest.Y - origin.Y; var ew = dest.X - origin.X;
+        return DirFromDeltas(dest.X - origin.X, dest.Y - origin.Y);
+    }
+
+    // Shared ns/ew-to-compass composition for both GetDir overloads.
+    private static string DirFromDeltas(int ew, int ns)
+    {
         var dir = "";
         if (ns > 0) dir = "north"; else if (ns < 0) dir = "south";
         if (ew > 0) dir += "east"; else if (ew < 0) dir += "west";
         return dir;
     }
 
+    // Shared Euclidean core for the Dist3d overloads. Keeps the Math.Pow
+    // formulation (not dx*dx) so float results cannot drift between overloads.
+    private static double DistCore(double dx, double dy, double dz)
+        => Math.Sqrt(Math.Pow(dx, 2) + Math.Pow(dy, 2) + Math.Pow(dz, 2));
+
     public static double Dist3d(Coord origin, Coord dest)
-        => Math.Sqrt(Math.Pow(origin.X - dest.X, 2) + Math.Pow(origin.Y - dest.Y, 2) + Math.Pow(origin.Z - dest.Z, 2));
+        => DistCore(origin.X - dest.X, origin.Y - dest.Y, origin.Z - dest.Z);
 
     public static double Dist3d((int X, int Y, int Z) a, (int X, int Y, int Z) b)
-        => Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2) + Math.Pow(a.Z - b.Z, 2));
+        => DistCore(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
 
     public static double Dist3d(IReadOnlyList<object?> origin, IReadOnlyList<object?> dest)
     {
         try
         {
             if (origin.Count == 3 && dest.Count == 3)
-                return Math.Sqrt(Math.Pow(Convert.ToDouble(origin[0]) - Convert.ToDouble(dest[0]),2) + Math.Pow(Convert.ToDouble(origin[1]) - Convert.ToDouble(dest[1]),2) + Math.Pow(Convert.ToDouble(origin[2]) - Convert.ToDouble(dest[2]),2));
+                return DistCore(Convert.ToDouble(origin[0]) - Convert.ToDouble(dest[0]), Convert.ToDouble(origin[1]) - Convert.ToDouble(dest[1]), Convert.ToDouble(origin[2]) - Convert.ToDouble(dest[2]));
             // area,x,y,z,... use indices 1,2,3
-            return Math.Sqrt(Math.Pow(Convert.ToDouble(origin[1]) - Convert.ToDouble(dest[1]),2) + Math.Pow(Convert.ToDouble(origin[2]) - Convert.ToDouble(dest[2]),2) + Math.Pow(Convert.ToDouble(origin[3]) - Convert.ToDouble(dest[3]),2));
+            return DistCore(Convert.ToDouble(origin[1]) - Convert.ToDouble(dest[1]), Convert.ToDouble(origin[2]) - Convert.ToDouble(dest[2]), Convert.ToDouble(origin[3]) - Convert.ToDouble(dest[3]));
         } catch { return 0; }
     }
     public static double Dist3d(Coord origin, IReadOnlyList<object?> dest)
@@ -307,13 +316,26 @@ public static class GameUtils
     // --- Phase18: missing pure helpers ---
 
     // Port of atheriz/utils.py:434 compress_whitespace
+    //
+    // Compiled-pattern cache keyed by (maxLinebreaks, maxSpacing): the key space
+    // is tiny (small int pairs) and the method runs on broadcast paths, so sharing
+    // one ConcurrentDictionary beats constructing two Regex per call. Same inputs
+    // still produce the same outputs — only the parse cost is amortized.
+    private static readonly ConcurrentDictionary<(int MaxLinebreaks, int MaxSpacing), (Regex Spacing, Regex Linebreaks)> CompressPatternCache = new();
+
+    private static (Regex Spacing, Regex Linebreaks) GetCompressPatterns(int maxLinebreaks, int maxSpacing)
+        => CompressPatternCache.GetOrAdd((maxLinebreaks, maxSpacing), static key =>
+            (new Regex($@"(?<=\S) {{{key.MaxSpacing},}}", RegexOptions.Compiled),
+             new Regex($@"\n{{{key.MaxLinebreaks},}}", RegexOptions.Compiled)));
+
     public static string CompressWhitespace(string text, int maxLinebreaks = 1, int maxSpacing = 2)
     {
         if (text is null) return "";
         text = text.TrimEnd();
         text = ReEmpty.Replace(text, "\n\n");
-        text = Regex.Replace(text, $@"(?<=\S) {{{maxSpacing},}}", new string(' ', maxSpacing));
-        text = Regex.Replace(text, $@"\n{{{maxLinebreaks},}}", new string('\n', maxLinebreaks));
+        var (spacing, linebreaks) = GetCompressPatterns(maxLinebreaks, maxSpacing);
+        text = spacing.Replace(text, new string(' ', maxSpacing));
+        text = linebreaks.Replace(text, new string('\n', maxLinebreaks));
         return text;
     }
 
@@ -341,8 +363,10 @@ public static class GameUtils
         if (obj is IEnumerable<T> seq && obj is not string) return seq;
         if (obj is T t) return new[] { t };
         if (obj is null) return new T[] { default! };
-        // fallback: try cast
-        try { return new[] { (T)obj }; } catch { return Array.Empty<T>(); }
+        // No fallback cast: reachable only with non-null obj where `is T` failed,
+        // and a direct cast from static type `object` uses only unbox/castclass
+        // (never user operators), so it would provably throw.
+        return Array.Empty<T>();
     }
 
     // Port of atheriz/utils.py:498 copy_word_case
@@ -368,10 +392,13 @@ public static class GameUtils
     public static string IterToString(IEnumerable<object?>? iterable, string sep = ",", string endsep = ", and", bool addQuote = false)
     {
         if (iterable is null) return "";
-        // mimic make_iter then list
-        var list = iterable.ToList();
-        if (list.Count == 0) return "";
-        List<string> strs = addQuote ? list.Select(v => $"\"{v}\"").ToList() : list.Select(v => v?.ToString() ?? "").ToList();
+        // Single-pass stringify: the old code materialized the enumerable plus a
+        // projected snapshot before joining. Converting inline yields the same
+        // list; the Take/join truncation below is untouched.
+        List<string> strs = [];
+        foreach (var v in iterable)
+            strs.Add(addQuote ? $"\"{v}\"" : v?.ToString() ?? "");
+        if (strs.Count == 0) return "";
         var normSep = sep?.Trim() ?? ",";
         var normEnd = endsep is not null ? endsep.Trim() : "";
         // handle empty endsep case like Python: if endsep falsy, keep as is (null/empty)

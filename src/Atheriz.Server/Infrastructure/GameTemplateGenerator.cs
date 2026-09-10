@@ -193,8 +193,12 @@ public static class GameTemplateGenerator
         {
             var pidFile = Path.Combine(folderPath, "save", "server.pid");
             if (!File.Exists(pidFile)) return false;
-            if (!int.TryParse(File.ReadAllText(pidFile).Trim(), out int pid)) return false;
-            return PidFile.IsServerProcess(pid);
+            // Same pid-file read as the CLI liveness probes (create/reset/
+            // restart/stop): TryParse failure is a dead claim, exactly like
+            // the hand-rolled parse this replaced.
+            var pid = PidFile.TryReadPid(pidFile);
+            if (pid is null) return false;
+            return PidFile.IsServerProcess(pid.Value);
         }
         catch { return false; }
     }
@@ -227,7 +231,12 @@ public static class GameTemplateGenerator
         var csproj = $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>\n  <ItemGroup>{refXml}</ItemGroup>\n</Project>\n";
         Console.WriteLine($"  Creating {csprojName}...");
         File.WriteAllText(csprojPath, csproj);
-        var files = new Dictionary<string,string>{["GameSettings.cs"]=GS(gameName),["CustomObject.cs"]=CO(gameName),["CustomNode.cs"]=CN(gameName),["CustomAccount.cs"]=CA(gameName),["CustomChannel.cs"]=CC(gameName),["CustomScript.cs"]=CS(gameName),["AssemblyInfo.cs"]=AI(gameName),["README.md"]=RM(gameName)};
+        // Custom files ride the kind table (same order as before: object,
+        // node, account, channel, script) so scaffold output order is stable.
+        var files = new Dictionary<string, string> { ["GameSettings.cs"] = GS(gameName) };
+        foreach (var kind in CustomKinds) files[kind.File] = kind.Emit(gameName);
+        files["AssemblyInfo.cs"] = AI(gameName);
+        files["README.md"] = RM(gameName);
         foreach (var kv in files)
         {
             Console.WriteLine($"  Creating {kv.Key}...");
@@ -312,6 +321,16 @@ public static class GameTemplateGenerator
     private static string EscapeCsString(string s) => s
         .Replace("\\", "\\\\").Replace("\0", "\\0").Replace("\r", "\\r")
         .Replace("\n", "\\n").Replace("\t", "\\t").Replace("\"", "\\\"");
+    // Single ref/out/in/params rule shared by the declaration builder
+    // (BuildParamList) and the call-site builder (BuildArgList) below: a
+    // dropped modifier emits an override that does not match the base
+    // signature (compile break in the generated game) or silently changes
+    // semantics.
+    private static string ModifierPrefix(System.Reflection.ParameterInfo p)
+    {
+        if (!p.ParameterType.IsByRef) return "";
+        return p.IsOut ? "out " : (p.IsIn ? "in " : "ref ");
+    }
     private static string BuildParamList(System.Reflection.MethodInfo m)
     {
         var ps = m.GetParameters();
@@ -329,7 +348,7 @@ public static class GameTemplateGenerator
             if (pt.IsByRef)
             {
                 pt = pt.GetElementType() ?? pt;
-                modifier = p.IsOut ? "out " : (p.IsIn ? "in " : "ref ");
+                modifier = ModifierPrefix(p);
             }
             bool isParams = p.GetCustomAttributes(typeof(ParamArrayAttribute), false).Length > 0;
             var t = FriendlyType(pt);
@@ -369,13 +388,7 @@ public static class GameTemplateGenerator
     {
         var ps = m.GetParameters();
         // Call-site mirrors of the modifiers (ref/out/in/params pass-through).
-        return string.Join(", ", ps.Select(p =>
-        {
-            string modifier = "";
-            var pt = p.ParameterType;
-            if (pt.IsByRef) modifier = p.IsOut ? "out " : (p.IsIn ? "in " : "ref ");
-            return modifier + (p.Name ?? "arg");
-        }));
+        return string.Join(", ", ps.Select(p => ModifierPrefix(p) + (p.Name ?? "arg")));
     }
     private static string GenerateHooksFor(Type t)
     {
@@ -399,40 +412,51 @@ public static class GameTemplateGenerator
         }
         return sb.ToString().TrimEnd() + "\n";
     }
+    // Shared custom-file shape for the five emitters below: every file is
+    // header + constructor + generated hooks + closing brace. One method so
+    // a shape change cannot land in four emitters and miss the fifth.
+    private static string GenCustom(string ns, Type type, string header, string ctor)
+        => header + ctor + GenerateHooksFor(type) + "}\n";
+    // Kind table driving the five custom-file emitters: (file, emitter).
+    // Scaffold walks this so a new custom kind cannot be added to the
+    // emitters but missed from the scaffold (or vice versa).
+    private static readonly (string File, Func<string, string> Emit)[] CustomKinds =
+    [
+        ("CustomObject.cs", CO),
+        ("CustomNode.cs", CN),
+        ("CustomAccount.cs", CA),
+        ("CustomChannel.cs", CC),
+        ("CustomScript.cs", CS),
+    ];
     private static string CO(string ns)
     {
         var header = $"// Port of atheriz/new.py:522 TEMPLATE_CONFIGS (\"object\",\"Object\",\"atheriz.objects.base_obj\")\n// Dynamically generated via get_class_hooks (atheriz/utils.py:701) — mirrors test/object.py full hook list\n#nullable enable\nnamespace {ns};\nusing System.Text.Json;\nusing Atheriz.Core.Objects;\nusing Atheriz.Core;\nusing Atheriz.Core.Globals;\n/// <summary>Custom Object — mirrors test/object.py. Override methods below to customize behavior.</summary>\npublic class CustomObject : GameObject\n{{\n";
         var ctor = "    public CustomObject() : base() { }\n    public CustomObject(string name, bool isPc = false) : base() { Name = name; IsPc = isPc; }\n\n";
-        var hooks = GenerateHooksFor(typeof(Atheriz.Core.Objects.GameObject));
-        return header + ctor + hooks + "}\n";
+        return GenCustom(ns, typeof(Atheriz.Core.Objects.GameObject), header, ctor);
     }
     private static string CN(string ns)
     {
         var header = $"// Port of atheriz/new.py:522 (\"node\",\"Node\",\"atheriz.objects.nodes\")\n// Dynamically generated via get_class_hooks\n#nullable enable\nnamespace {ns};\nusing Atheriz.Core;\nusing Atheriz.Core.Objects;\n/// <summary>Custom Node — mirrors test/node.py</summary>\npublic class CustomNode : Node\n{{\n";
         var ctor = "    public CustomNode() : base() { }\n    public CustomNode(Coord coord, string name = \"room\", string desc = \"\") : base(coord, name, desc) { }\n\n";
-        var hooks = GenerateHooksFor(typeof(Atheriz.Core.Objects.Node));
-        return header + ctor + hooks + "}\n";
+        return GenCustom(ns, typeof(Atheriz.Core.Objects.Node), header, ctor);
     }
     private static string CA(string ns)
     {
         var header = $"// Port of atheriz/new.py:522 (\"account\",\"Account\",\"atheriz.objects.base_account\")\n#nullable enable\nnamespace {ns};\nusing Atheriz.Core.Objects;\n/// <summary>Custom Account — mirrors test/account.py</summary>\npublic class CustomAccount : Account\n{{\n";
         var ctor = "    public CustomAccount() : base() { }\n";
-        var hooks = GenerateHooksFor(typeof(Atheriz.Core.Objects.Account));
-        return header + ctor + hooks + "}\n";
+        return GenCustom(ns, typeof(Atheriz.Core.Objects.Account), header, ctor);
     }
     private static string CC(string ns)
     {
         var header = $"// Port of atheriz/new.py:522 (\"channel\",\"Channel\",\"atheriz.objects.base_channel\")\n#nullable enable\nnamespace {ns};\nusing Atheriz.Core.Objects;\n/// <summary>Custom Channel — mirrors test/channel.py</summary>\npublic class CustomChannel : Channel\n{{\n";
         var ctor = "    public CustomChannel(int historyLimit = 50) : base(historyLimit) { }\n";
-        var hooks = GenerateHooksFor(typeof(Atheriz.Core.Objects.Channel));
-        return header + ctor + hooks + "}\n";
+        return GenCustom(ns, typeof(Atheriz.Core.Objects.Channel), header, ctor);
     }
     private static string CS(string ns)
     {
         var header = $"// Port of atheriz/new.py:522 (\"script\",\"Script\",\"atheriz.objects.base_script\")\n#nullable enable\nnamespace {ns};\nusing Atheriz.Core.Objects;\n/// <summary>Custom Script — mirrors test/script.py</summary>\npublic class CustomScript : Script\n{{\n";
         var ctor = "    public CustomScript() : base() { }\n";
-        var hooks = GenerateHooksFor(typeof(Atheriz.Core.Objects.Script));
-        return header + ctor + hooks + "}\n";
+        return GenCustom(ns, typeof(Atheriz.Core.Objects.Script), header, ctor);
     }
     private static string RM(string ns) => $"# {ns} — Atheriz Game Folder\nGenerated via `atheriz-cs new {ns}` (ports `atheriz/new.py:784`).\n## Run\n```\n# Game code is a class library loaded by the server (no Program.cs needed).\n# From this folder:\ndotnet run --project ../src/Atheriz.Server -- start\n```\n";
     // Assembly attributes for scaffolded games (checked-in template carries AssemblyInfo.cs with the same shape).

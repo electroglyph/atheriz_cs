@@ -22,9 +22,8 @@ public partial class GameObject
         {
             if (target is null) return "You see nothing here."; // Port of base_obj.py:2085
             if (!target.Access(this, "view")) return $"You can't look at '{target.GetDisplayName(this)}'."; // Port of base_obj.py:2087
-            string desc;
-            if (target is Node node) desc = node.ReturnAppearance(this);
-            else desc = target.ReturnAppearance(this);
+            // Virtual dispatch already reaches the Node override — no type test needed.
+            string desc = target.ReturnAppearance(this);
             try { target.AtDesc(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLook: " + logEx.Message, "GameObject"); } // Port of base_obj.py:2090 target.at_desc
             return desc;
         }, target);
@@ -46,7 +45,9 @@ public partial class GameObject
 
     public virtual string GetDisplayThings(GameObject? looker)
     {
-        var contents = ObjectRegistry.Get(ContentsSnapshot.ToList());
+        // ContentsSnapshot is already a fresh set and Get snapshots internally,
+        // so no caller-side ToList is needed; the loop below never mutates it.
+        var contents = ObjectRegistry.Get(ContentsSnapshot);
         var visible = contents.Where(c => c.Access(looker, "view")).ToList();
         if (IsContainer && visible.Count > 0)
         {

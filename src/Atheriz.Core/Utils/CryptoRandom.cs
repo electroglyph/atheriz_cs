@@ -29,9 +29,7 @@ public static class CryptoRandom
     /// </summary>
     public static string UrlSafeToken(int bytes = 32)
     {
-        if (bytes <= 0) throw new ArgumentOutOfRangeException(nameof(bytes));
-        var arr = new byte[bytes];
-        RandomNumberGenerator.Fill(arr);
+        var arr = FillBytes(bytes);
         string b64 = Convert.ToBase64String(arr);
         return b64.Replace('+', '-').Replace('/', '_').TrimEnd('=');
     }
@@ -42,9 +40,16 @@ public static class CryptoRandom
     /// </summary>
     public static string HexToken(int bytes = 32)
     {
+        var arr = FillBytes(bytes);
+        return Convert.ToHexString(arr).ToLowerInvariant();
+    }
+
+    // Shared guard + alloc + fill core for the token helpers above.
+    private static byte[] FillBytes(int bytes)
+    {
         if (bytes <= 0) throw new ArgumentOutOfRangeException(nameof(bytes));
         var arr = new byte[bytes];
         RandomNumberGenerator.Fill(arr);
-        return Convert.ToHexString(arr).ToLowerInvariant();
+        return arr;
     }
 }

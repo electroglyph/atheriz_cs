@@ -43,10 +43,12 @@ public sealed class PuppetCommand : Command
     {
         if (query.StartsWith("#", StringComparison.Ordinal))
         {
-            if (!int.TryParse(query[1..], out var id)) return (null, "Invalid ID format. Use #<number>.");
-            var res = ObjectRegistry.Get(id);
-            if (res.Count == 0) return (null, $"No object found with ID {id}.");
-            return (res[0], null);
+            // Own messages (not BanHelper.ResolveTarget: that enforces IsPc
+            // with ban wording which must not leak into puppet errors).
+            if (!CommandHelpers.TryParseIdRef(query, out var id)) return (null, "Invalid ID format. Use #<number>.");
+            var found = ObjectRegistry.GetSingle(id);
+            if (found is null) return (null, $"No object found with ID {id}.");
+            return (found, null);
         }
         var matches = CommandHelpers.SearchWithFallback(caller, query);
         if (matches.Count == 0) return (null, CommandHelpers.FormatNoMatchFound(query));

@@ -284,9 +284,14 @@ public static class InitialSetup
         gt.Save(db);
 
         // Account + character
-        // Ensure salt with explicit secret path
-        string saltVal;
-        try { saltVal = SaltProvider.GetSalt(absSecret); } catch { saltVal = SaltProvider.GetSalt(absSecret); }
+        // Ensure salt with explicit secret path. Single call: the old
+        // catch-retry invoked the identical read with no backoff, no state
+        // change and no logging between attempts, so a second call could only
+        // succeed on a transient self-healing fault inside one synchronous
+        // window (practically nil for a local file read). Failure throws
+        // identically either way; the warn above and reseed below own the
+        // failure story.
+        string saltVal = SaltProvider.GetSalt(absSecret);
         var account = Account.Create(u!, p!, saltOverride: saltVal);
         Console.Out.WriteLine($"Creating character '{u!}'...");
         var character = GameObject.Create(u!, isPc: true);
@@ -297,7 +302,7 @@ public static class InitialSetup
         var home = ResolveSeedNode(nh, area, homeCoord);
         if (home is not null)
         {
-            character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord);
+            character.Home = Persistence.Dto.LocationRef.FromCoord(home.Coord);
             character.PrivilegeLevel = Privilege.Admin;
             character.MoveTo(home);
         }

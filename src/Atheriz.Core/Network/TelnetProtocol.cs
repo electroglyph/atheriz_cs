@@ -78,8 +78,31 @@ public class TelnetConnection : BaseConnection
         return null;
     }
 
-    // Port of telnet.py:48-49 _telnet_text
-    private static string TelnetText(string text) => text.Replace("\r\n", "\n").Replace("\n", "\r\n");
+    // Port of telnet.py:48-49 _telnet_text — single-pass span normalizer.
+    // Net effect matches the old double-Replace (lone \n → \r\n, existing
+    // \r\n untouched, bare \r stays bare) with one scan and no intermediate.
+    private static string TelnetText(string text)
+    {
+        int extra = 0;
+        for (int i = 0; i < text.Length; i++)
+            if (text[i] == '\n' && (i == 0 || text[i - 1] != '\r'))
+                extra++;
+        if (extra == 0) return text;
+        return string.Create(text.Length + extra, text, static (span, src) =>
+        {
+            int j = 0;
+            for (int i = 0; i < src.Length; i++)
+            {
+                char c = src[i];
+                if (c == '\n' && (i == 0 || src[i - 1] != '\r'))
+                {
+                    span[j++] = '\r';
+                    span[j++] = '\n';
+                }
+                else span[j++] = c;
+            }
+        });
+    }
 
     private void WriterWrite(string text)
     {
@@ -138,14 +161,16 @@ public class TelnetConnection : BaseConnection
         }
     }
 
-    // Port of telnet.py:158-175 _offloop_write — now uses PendingLimiter with finally ReleaseSync (fix leak)
-    public void OffloopWrite(string text, int nb)
+    // Shared before/after buffer-check + catch + single-release cycle for
+    // the buffered off-loop writes. The write runs exactly once via the
+    // lambda (which never touches the limiter), and ReleaseSync(nb) runs
+    // exactly once per path in the finally.
+    private void ExecuteBufferedWrite(int nb, Action write)
     {
-        text = TelnetText(text);
         try
         {
             if (CheckWriteBufferExceeded()) return;
-            WriterWrite(text);
+            write();
             CheckWriteBufferExceeded(" after write");
         }
         catch (ObjectDisposedException) { } // post-dispose write race: writer already gone
@@ -158,6 +183,13 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
         {
             _limiter.ReleaseSync(nb);
         }
+    }
+
+    // Port of telnet.py:158-175 _offloop_write — now uses PendingLimiter with finally ReleaseSync (fix leak)
+    public void OffloopWrite(string text, int nb)
+    {
+        text = TelnetText(text);
+        ExecuteBufferedWrite(nb, () => WriterWrite(text));
     }
 
     public void OffloopIac(byte teloptCmd, byte teloptOpt, int nb = 0)
@@ -177,22 +209,7 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
     public void OffloopIacText(byte teloptCmd, byte teloptOpt, string text, int nb)
     {
         text = TelnetText(text);
-        try
-        {
-            if (CheckWriteBufferExceeded()) return;
-            WriterIacText(teloptCmd, teloptOpt, text);
-            CheckWriteBufferExceeded(" after write");
-        }
-        catch (ObjectDisposedException) { } // post-dispose write race: writer already gone
-        catch (Exception e)
-        {
-Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e}");
-            Close();
-        }
-        finally
-        {
-            _limiter.ReleaseSync(nb);
-        }
+        ExecuteBufferedWrite(nb, () => WriterIacText(teloptCmd, teloptOpt, text));
     }
 
     public int PendingBytes => _limiter.PendingBytes;

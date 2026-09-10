@@ -134,31 +134,16 @@ public sealed class PluginLoader : IDisposable
                 // (handled below)
                 foreach (var attr in attrs)
                 {
-                    if (!IsValidReplacement(attr.BaseType, attr.ReplacementType))
-                    {
-                        Console.Error.WriteLine($"[PluginLoader] Skipping {attr.ReplacementType.FullName} → {attr.BaseType.FullName} (from {type.Name}): replacement is not assignable to base and would never match live objects (e.g. plugin vendored its own Atheriz.Core copy).");
-                        continue;
-                    }
-                    Replacements[attr.BaseType] = attr.ReplacementType;
-                    found++;
-                    Console.Error.WriteLine($"[PluginLoader] Injected {attr.ReplacementType.Name} → {attr.BaseType.Name} (from {type.Name})");
+                    if (TryRegister(attr.BaseType, attr.ReplacementType, $"from {type.Name}", " (e.g. plugin vendored its own Atheriz.Core copy)")) found++;
                 }
             }
             // Assembly-level attributes
             foreach (var a in _loaded.GetCustomAttributes<EntityReplacementAttribute>())
             {
-                if (!IsValidReplacement(a.BaseType, a.ReplacementType))
-                {
-                    Console.Error.WriteLine($"[PluginLoader] Skipping {a.ReplacementType.FullName} → {a.BaseType.FullName} (assembly): replacement is not assignable to base and would never match live objects.");
-                    continue;
-                }
-                // Avoid double-count if already registered via class scan
-                if (!Replacements.ContainsKey(a.BaseType))
-                {
-                    Replacements[a.BaseType] = a.ReplacementType;
-                    found++;
-                    Console.Error.WriteLine($"[PluginLoader] Injected {a.ReplacementType.Name} → {a.BaseType.Name} (assembly)");
-                }
+                // Double-count guard stays at this call site (not in the helper):
+                // an attribute seen in both scans registers and counts once.
+                if (Replacements.ContainsKey(a.BaseType)) continue;
+                if (TryRegister(a.BaseType, a.ReplacementType, "assembly", "")) found++;
             }
         }
         catch (ReflectionTypeLoadException ex)
@@ -188,6 +173,22 @@ public sealed class PluginLoader : IDisposable
         if (baseType == replacementType) return true;
         try { return baseType.IsAssignableFrom(replacementType); }
         catch { return false; }
+    }
+
+    // Shared validate → skip-log → register core for the class-level and
+    // assembly-level scans above (discovery itself is untouched). The source
+    // label and the skip-detail suffix ride along so both messages keep their
+    // exact wording. Returns true when the replacement registered (count it).
+    private bool TryRegister(Type baseType, Type replacementType, string source, string skipDetail)
+    {
+        if (!IsValidReplacement(baseType, replacementType))
+        {
+            Console.Error.WriteLine($"[PluginLoader] Skipping {replacementType.FullName} → {baseType.FullName} ({source}): replacement is not assignable to base and would never match live objects{skipDetail}.");
+            return false;
+        }
+        Replacements[baseType] = replacementType;
+        Console.Error.WriteLine($"[PluginLoader] Injected {replacementType.Name} → {baseType.Name} ({source})");
+        return true;
     }
 
     /// <summary>

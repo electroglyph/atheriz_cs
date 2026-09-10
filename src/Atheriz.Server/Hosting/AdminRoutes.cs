@@ -8,7 +8,7 @@ public static class AdminRoutes
 {
     public static void MapAdminRoutes(this WebApplication app, AtherizSettings settings)
     {
-        bool CheckAdmin(HttpContext ctx, string action, out string? error)
+        bool RequireAdmin(HttpContext ctx, string action, out string? error)
         {
             var remoteIp = ctx.Connection.RemoteIpAddress?.ToString();
             var provided = ctx.Request.Headers["X-Admin-Token"].FirstOrDefault() ?? string.Empty;
@@ -17,12 +17,17 @@ public static class AdminRoutes
             return err is null;
         }
 
+        // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
+        // {status: error} so the CLI reads data.status (IsSuccess path).
+        // Single guard-result shape shared by the three admin endpoints;
+        // endpoints keep their own response shapes otherwise.
+        static IResult AdminError(string? message) => Results.Json(new { status = "error", message });
+        static IResult AdminOk(string? message) => Results.Json(new { status = "ok", message });
+
         app.MapPost("/_internal/hot_reload", async (HttpContext ctx) =>
         {
-            if (!CheckAdmin(ctx, "reload", out var err))
-                // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
-                // {status: error} so the CLI reads data.status (IsSuccess path).
-                return Results.Json(new { status = "error", message = err });
+            if (!RequireAdmin(ctx, "reload", out var err))
+                return AdminError(err);
             if (ctx.Request.ContentLength > 4096)
                 return Results.Json(new { status = "error", message = "Request body too large." });
             try
@@ -55,9 +60,9 @@ public static class AdminRoutes
                 if (done != work)
                 {
                     Console.Error.WriteLine("[HotReload] Reload exceeded 60s watchdog; continuing in background.");
-                    return Results.Json(new { status = "error", message = "Reload timed out after 60s; still running in background." });
+                    return AdminError("Reload timed out after 60s; still running in background.");
                 }
-                return Results.Json(new { status = "ok", message = await work.ConfigureAwait(false) });
+                return AdminOk(await work.ConfigureAwait(false));
             }
             catch (Exception ex)
             {
@@ -67,10 +72,8 @@ public static class AdminRoutes
 
         app.MapPost("/_internal/shutdown", (HttpContext ctx, IHostApplicationLifetime lifetime) =>
         {
-            if (!CheckAdmin(ctx, "shutdown", out var err))
-                // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
-                // {status: error} so the CLI reads data.status (IsSuccess path).
-                return Results.Json(new { status = "error", message = err });
+            if (!RequireAdmin(ctx, "shutdown", out var err))
+                return AdminError(err);
             if (ctx.Request.ContentLength > 4096)
                 return Results.Json(new { status = "error", message = "Request body too large." });
 
@@ -96,15 +99,13 @@ public static class AdminRoutes
                 }
             });
 
-            return Results.Json(new { status = "ok", message = "Shutdown tasks queued." });
+            return AdminOk("Shutdown tasks queued.");
         });
 
         app.MapPost("/_internal/create_account", async (HttpContext ctx) =>
         {
-            if (!CheckAdmin(ctx, "account creation", out var err))
-                // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
-                // {status: error} so the CLI reads data.status (IsSuccess path).
-                return Results.Json(new { status = "error", message = err });
+            if (!RequireAdmin(ctx, "account creation", out var err))
+                return AdminError(err);
 
             // Size-capped body read: reject oversized payloads without allocating them.
             using var doc = await ReadCappedJsonBodyAsync(ctx, 64 * 1024).ConfigureAwait(false);
@@ -119,7 +120,9 @@ public static class AdminRoutes
             if (string.IsNullOrWhiteSpace(accountName) || string.IsNullOrWhiteSpace(charName) || string.IsNullOrWhiteSpace(password))
                 return Results.Json(new { status = "error", message = "account_name, char_name and password are required." });
 
-            string? vErr = ValidateAccountName(accountName, settings) ?? ValidateCharacterName(charName, settings) ?? ValidatePassword(password, settings);
+            string? vErr = Atheriz.Core.Commands.UnloggedIn.Validation.ValidateAccountName(accountName, settings)
+                ?? Atheriz.Core.Commands.UnloggedIn.Validation.ValidateCharacterName(charName, settings)
+                ?? Atheriz.Core.Commands.UnloggedIn.Validation.ValidatePassword(password, settings);
             if (vErr is not null) return Results.Json(new { status = "error", message = vErr });
 
             try
@@ -131,7 +134,7 @@ public static class AdminRoutes
                 ServerEvents.AtCharCreate(accountName, charName, password, sw);
                 var message = sb.ToString().Trim();
                 if (string.IsNullOrEmpty(message)) message = "Account created.";
-                return Results.Json(new { status = "ok", message });
+                return AdminOk(message);
             }
             catch (Exception ex)
             {
@@ -168,13 +171,4 @@ public static class AdminRoutes
         }
         catch { return null; }
     }
-
-    private static string? ValidateAccountName(string name, AtherizSettings s)
-        => Atheriz.Core.Commands.UnloggedIn.Validation.ValidateAccountName(name, s);
-
-    private static string? ValidateCharacterName(string name, AtherizSettings s)
-        => Atheriz.Core.Commands.UnloggedIn.Validation.ValidateCharacterName(name, s);
-
-    private static string? ValidatePassword(string pw, AtherizSettings s)
-        => Atheriz.Core.Commands.UnloggedIn.Validation.ValidatePassword(pw, s);
 }

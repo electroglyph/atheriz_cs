@@ -53,15 +53,18 @@ public sealed class GetCommand : Command
                 source = loc;
             }
             List<GameObject> srcContents = source is Node ns ? ns.GetContents() : ObjectRegistry.Get(source.ContentsSnapshot.ToList());
-            foreach (var obj in srcContents.ToList())
+            // Hoisted out of the loop: the announce path only reads the
+            // exclude set (it builds its own per-receiver state), so one
+            // shared instance behaves the same as a fresh list per item.
+            List<GameObject> excludeSelf = [go];
+            foreach (var obj in srcContents)
             {
                 // Parity with the named path (view-filtered search): a hidden
                 // item must not be swept up by `get all` (get.py:112-117).
                 if (!obj.AtPreGet(go) || obj.Id == go.Id || !obj.Access(go, "view")) continue;
                 if (!obj.MoveTo(go)) { go.Msg($"You can't get {obj.GetDisplayName(go)}."); continue; }
                 var takeMapping = new Dictionary<string, object?> { ["giver"] = go, ["item"] = obj };
-                if (loc is Node ln) ln.MsgContents("$You(giver) $conj(take) $obj(item).", fromObj: go, mapping: takeMapping, exclude: new List<GameObject> { go }, msgType: "get");
-                else loc.MsgContents("$You(giver) $conj(take) $obj(item).", fromObj: go, mapping: takeMapping, exclude: new List<GameObject> { go }, msgType: "get");
+                ContentUtils.EmitToLocation(loc, "$You(giver) $conj(take) $obj(item).", fromObj: go, mapping: takeMapping, exclude: excludeSelf, msgType: "get");
                 go.Msg($"You picked up: {obj.GetDisplayName(go)}");
                 obj.AtGet(go);
             }
@@ -76,12 +79,12 @@ public sealed class GetCommand : Command
             if (!source.Access(go, "get")) { go.Msg("You can't take anything from there."); return; }
             var found = CommandHelpers.SearchIn(source, objName, go);
             if (found.Count == 0) { go.Msg($"'{objName}' not found in {source.Name}."); return; }
+            List<GameObject> excludeSelf = [go];
             foreach (var f in found)
             {
                 if (!f.AtPreGet(go)) { go.Msg($"You can't get {f.Name}."); continue; }
                 if (!f.MoveTo(go)) { go.Msg($"You can't get {f.Name}."); continue; }
-                if (loc is Node ln) ln.MsgContents($"{go.Name} picked up {f.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
-                else loc.MsgContents($"{go.Name} picked up {f.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
+                ContentUtils.EmitToLocation(loc, $"{go.Name} picked up {f.Name}.", fromObj: go, exclude: excludeSelf);
                 go.Msg($"You picked up: {f.Name}");
                 f.AtGet(go);
             }
@@ -91,12 +94,12 @@ public sealed class GetCommand : Command
             if (!loc.Access(go, "get")) { go.Msg("You can't get something from here!"); return; }
             var found = CommandHelpers.SearchIn(loc, objName, go);
             if (found.Count == 0) { CommandHelpers.MsgObjectNotFound(go); return; }
+            List<GameObject> excludeSelf = [go];
             foreach (var f in found)
             {
                 if (!f.AtPreGet(go)) { go.Msg($"You can't get {f.Name}."); continue; }
                 if (!f.MoveTo(go)) { go.Msg($"You can't get {f.Name}."); continue; }
-                if (loc is Node ln) ln.MsgContents($"{go.Name} picked up {f.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
-                else loc.MsgContents($"{go.Name} picked up {f.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
+                ContentUtils.EmitToLocation(loc, $"{go.Name} picked up {f.Name}.", fromObj: go, exclude: excludeSelf);
                 go.Msg($"You picked up: {f.Name}");
                 f.AtGet(go);
             }
@@ -158,7 +161,7 @@ public sealed class PutCommand : Command
         if (objName == "all")
         {
             var contents = goCaller.ContentsSnapshot.Select(id => ObjectRegistry.Get(id).FirstOrDefault()).Where(o=>o is not null).Cast<GameObject>().ToList();
-            foreach (var obj in contents.ToList())
+            foreach (var obj in contents)
             {
                 if (obj.Id == destObj.Id) { caller.Msg($"You can't put {obj.Name} in {destObj.Name} - it would create a containment loop."); continue; }
                 if (IsLoop(obj, destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name} - it would create a containment loop."); continue; }
@@ -219,12 +222,12 @@ public sealed class DropCommand : Command
         if (dropName == "all")
         {
             var contents = ObjectRegistry.Get(go.ContentsSnapshot.ToList()).ToList();
-            foreach (var obj in contents.ToList())
+            List<GameObject> excludeSelf = [go];
+            foreach (var obj in contents)
             {
                 if (!obj.AtPreDrop(go)) continue;
                 if (!obj.MoveTo(loc)) { go.Msg($"You can't drop {obj.Name}."); continue; }
-                if (loc is Node ln) ln.MsgContents($"{go.Name} dropped {obj.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
-                else loc.MsgContents($"{go.Name} dropped {obj.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
+                ContentUtils.EmitToLocation(loc, $"{go.Name} dropped {obj.Name}.", fromObj: go, exclude: excludeSelf);
                 go.Msg($"You dropped: {obj.Name}");
                 obj.AtDrop(go);
             }
@@ -232,12 +235,12 @@ public sealed class DropCommand : Command
         }
         var found = go.Search(dropName, true, go);
         if (found.Count == 0) { CommandHelpers.MsgObjectNotFound(go); return; }
+        List<GameObject> excludeSelf = [go];
         foreach (var f in found)
         {
             if (!f.AtPreDrop(go)) continue;
             if (!f.MoveTo(loc)) { go.Msg($"You can't drop {f.Name}."); continue; }
-            if (loc is Node ln) ln.MsgContents($"{go.Name} dropped {f.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
-            else loc.MsgContents($"{go.Name} dropped {f.Name}.", exclude: new List<GameObject>{go}, fromObj: go);
+            ContentUtils.EmitToLocation(loc, $"{go.Name} dropped {f.Name}.", fromObj: go, exclude: excludeSelf);
             go.Msg($"You dropped: {f.Name}");
             f.AtDrop(go);
         }

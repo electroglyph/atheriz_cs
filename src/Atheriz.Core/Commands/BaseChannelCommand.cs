@@ -43,30 +43,44 @@ public class BaseChannelCommand : Command
     {
         get
         {
-            if (_channel is not null && _channel.IsDeleted)
-            {
-                _channel = null;
-                throw new InvalidOperationException($"Channel {id} not found.");
-            }
-            if (_channel is null)
-            {
-                var c = ObjectRegistry.Get(id);
-                if (c.Count > 0)
-                {
-                    var chan = c[0];
-                    if (chan.IsDeleted) throw new InvalidOperationException($"Channel {id} not found.");
-                    if (chan is Channel ch) { _channel = ch; return ch; }
-                    throw new InvalidOperationException($"Channel {id} not found.");
-                }
-                throw new InvalidOperationException($"Channel {id} not found.");
-            }
-            return _channel;
+            if (TryGetChannel(out var ch) && ch is not null) return ch;
+            ThrowChannelNotFound();
+            return null!;
         }
         set
         {
             _channel = value;
             if (value is not null) id = value.Id;
         }
+    }
+
+    // Single throw site for every channel-not-found outcome below (exceptions
+    // are compared by type+message, so the observable behavior is identical).
+    private void ThrowChannelNotFound() => throw new InvalidOperationException($"Channel {id} not found.");
+
+    /// <summary>
+    /// Non-throwing channel resolution: false when the cached channel was
+    /// deleted, the id resolves to a non-channel/missing object, or nothing
+    /// resolves at all. A deleted cached reference is dropped, matching the
+    /// throwing getter it backs.
+    /// </summary>
+    public bool TryGetChannel(out Channel? ch)
+    {
+        ch = null;
+        if (_channel is not null)
+        {
+            if (_channel.IsDeleted) { _channel = null; return false; }
+            ch = _channel;
+            return true;
+        }
+        var c = ObjectRegistry.Get(id);
+        if (c.Count == 0) return false;
+        var obj = c[0];
+        if (obj.IsDeleted) return false;
+        if (obj is not Channel found) return false;
+        _channel = found;
+        ch = found;
+        return true;
     }
 
     // Alias for C# property Channel (capital) used by some code, but test uses dynamic channel (lower)
@@ -87,14 +101,9 @@ public class BaseChannelCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
-        Channel ch;
-        try { ch = channel; }
-        catch (InvalidOperationException)
-        {
-            caller.Msg("That channel no longer exists.");
-            return;
-        }
-        if (ch.IsDeleted)
+        // The single getter below only hands out live channels, so the
+        // deleted re-check it replaces is subsumed (same user message).
+        if (!TryGetChannel(out var ch) || ch is null)
         {
             caller.Msg("That channel no longer exists.");
             return;

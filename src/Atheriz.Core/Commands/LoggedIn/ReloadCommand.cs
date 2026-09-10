@@ -29,34 +29,42 @@ public sealed class ReloadCommand : Command
         var capturedChannel = channel;
         try
         {
-            // Port of reloader.reload_game_logic() — use PluginReloader async API or ServerLifecycle
-            Atheriz.Core.Plugins.PluginReloader.ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(), AtherizSettings.Global)
-                .ContinueWith(t =>
-                {
-                    string result;
-                    try
-                    {
-                        if (t.IsCanceled) result = "Reload canceled.";
-                        else if (t.IsFaulted)
-                        {
-                            // fallback to ServerLifecycle.DoReload which handles ticker/map save
-                            try { Atheriz.Core.Globals.StartStop.DoReload(AtherizSettings.Global); result = "Reload completed."; }
-                            catch (Exception ex2) { result = $"Reload failed: {ex2.Message}"; }
-                        }
-                        else result = t.Result;
-                    }
-                    catch (Exception ex) { result = $"Reload failed: {ex.Message}"; }
-                    if (capturedChannel is not null)
-                    {
-                        try { capturedChannel.Msg(result); } catch (Exception) { }
-                        try { capturedGo.Msg(result); } catch (Exception) { }
-                    }
-                    else
-                    {
-                        try { capturedGo.Msg(result); } catch (Exception) { }
-                    }
-                }, TaskScheduler.Default);
+            // Port of reloader.reload_game_logic() — use PluginReloader async API or ServerLifecycle.
+            // Arguments evaluate here (not inside the async method) so a
+            // throwing ticker fetch lands in this catch, as before.
+            _ = FinishReloadAsync(
+                Atheriz.Core.Plugins.PluginReloader.ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(), AtherizSettings.Global),
+                capturedGo, capturedChannel);
         }
         catch (Exception ex) { try { go.Msg($"Reload failed: {ex.Message}"); } catch (Exception) { } }
+    }
+
+    // Async form of the old ContinueWith chain: canceled reports "canceled",
+    // a fault falls back to ServerLifecycle.DoReload (completed/failed), and
+    // success reports the reloader's own result. Same outcome strings.
+    private static async Task FinishReloadAsync(Task<string> reloadTask, Atheriz.Core.Objects.GameObject go, Atheriz.Core.Objects.GameObject? channel)
+    {
+        ArgumentNullException.ThrowIfNull(reloadTask);
+        string result;
+        try
+        {
+            result = await reloadTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { result = "Reload canceled."; }
+        catch (Exception)
+        {
+            // fallback to ServerLifecycle.DoReload which handles ticker/map save
+            try { Atheriz.Core.Globals.StartStop.DoReload(AtherizSettings.Global); result = "Reload completed."; }
+            catch (Exception ex2) { result = $"Reload failed: {ex2.Message}"; }
+        }
+        if (channel is not null)
+        {
+            try { channel.Msg(result); } catch (Exception) { }
+            try { go.Msg(result); } catch (Exception) { }
+        }
+        else
+        {
+            try { go.Msg(result); } catch (Exception) { }
+        }
     }
 }

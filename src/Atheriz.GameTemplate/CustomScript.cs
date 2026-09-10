@@ -5,8 +5,4 @@ namespace MyGame;
 public class CustomScript : Script
 {
     public CustomScript() : base() { }
-    public override void AtInstall()
-    {
-        base.AtInstall();
-    }
 }

@@ -17,26 +17,38 @@ public static class PluginReloader
     public static readonly HashSet<string> ExcludedAssemblies = new(StringComparer.OrdinalIgnoreCase)
     { "Microsoft.*", "System.*", "Atheriz.Core", "netstandard", "xunit.*" };
     // Port of atheriz/reloader.py:326 _reload_lock = _SHARED_WORLD_LOCK.
-    // _reloadGate serializes concurrent *reloads* only (TryEnter = skip when busy,
+    // _gate serializes concurrent *reloads* only (TryEnter = skip when busy,
     // pinned by Reloads_AreSerialized_MaxOverlapOne — NOT a bounded wait, so a stuck
     // reload can never wedge admin threads). It does NOT exclude world mutation:
     // that exclusion is StartStop.WorldLock, held around the patch phase below
     // (same outermost direction as DoShutdown: WorldLock → object/handler locks).
-    private static readonly SemaphoreSlim _reloadGate = new(1,1);
-    private static readonly System.Threading.AsyncLocal<int> _gateRecursion = new();
-    private static bool TryEnterGate()
+    //
+    // Re-entrant skip-when-busy gate core. This is a DEDICATED reload instance —
+    // never the shared DB write gate, which would serialize reloads against saves.
+    private sealed class ReentrantSkipGate
     {
-        if ((_gateRecursion.Value) > 0) { _gateRecursion.Value++; return true; }
-        if (!_reloadGate.Wait(0)) return false;
-        _gateRecursion.Value = 1;
-        return true;
+        private readonly SemaphoreSlim _sem = new(1, 1);
+        private readonly System.Threading.AsyncLocal<int> _recursion = new();
+
+        public bool TryEnter()
+        {
+            if (_recursion.Value > 0) { _recursion.Value++; return true; }
+            if (!_sem.Wait(0)) return false;
+            _recursion.Value = 1;
+            return true;
+        }
+
+        public void Exit()
+        {
+            if (_recursion.Value > 1) { _recursion.Value--; return; }
+            _recursion.Value = 0;
+            try { _sem.Release(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ExitGate: " + logEx.Message, "PluginReloader"); }
+        }
     }
-    private static void ExitGate()
-    {
-        if ((_gateRecursion.Value) > 1) { _gateRecursion.Value--; return; }
-        _gateRecursion.Value = 0;
-        try { _reloadGate.Release(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ExitGate: " + logEx.Message, "PluginReloader"); }
-    }
+
+    private static readonly ReentrantSkipGate _gate = new();
+    private static bool TryEnterGate() => _gate.TryEnter();
+    private static void ExitGate() => _gate.Exit();
     private static PluginLoader? _loader;
     // Port of reloader.py:249 _apply_patch transient preserves. Bare
     // spellings (session/listeners/command) never matched a field — the port
@@ -120,17 +132,7 @@ public static class PluginReloader
         {
             try
             {
-                var nh = GlobalServices.GetNodeHandler();
-                List<NodeArea> areas;
-                nh.Lock.EnterReadLock();
-                try { areas = nh.GetAreas(); } finally { nh.Lock.ExitReadLock(); }
-                foreach (var area in areas)
-                {
-                    List<NodeGrid> grids;
-                    area.Lock.EnterReadLock();
-                    try { grids = area.Grids.Values.ToList(); } finally { area.Lock.ExitReadLock(); }
-                    foreach (var g in grids) try { g.ReplaceNodeValue(nn); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RewireReferences: " + logEx.Message, "PluginReloader"); }
-                }
+                foreach (var g in SnapshotGrids(GlobalServices.GetNodeHandler())) try { g.ReplaceNodeValue(nn); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RewireReferences: " + logEx.Message, "PluginReloader"); }
             }
             catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RewireReferences: " + logEx.Message, "PluginReloader"); }
         }
@@ -138,6 +140,25 @@ public static class PluginReloader
         // Cross-session puppet-stack Prev refs are out of contract (no session registry).
         try { newObj.Session?.ReplacePuppetRefs(newObj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RewireReferences: " + logEx.Message, "PluginReloader"); }
     }
+    // Shared handler→areas→grids read-lock snapshot walk for RewireReferences
+    // above and ReregisterTicks below. Per-site extras stay at their sites:
+    // RewireReferences' node-type guard and ReplaceNodeValue calls,
+    // ReregisterTicks' grid→nodes level.
+    private static List<NodeGrid> SnapshotGrids(NodeHandler? handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        List<NodeArea> areas;
+        handler.Lock.EnterReadLock();
+        try { areas = handler.GetAreas(); } finally { handler.Lock.ExitReadLock(); }
+        List<NodeGrid> grids = [];
+        foreach (var area in areas)
+        {
+            area.Lock.EnterReadLock();
+            try { grids.AddRange(area.Grids.Values); } finally { area.Lock.ExitReadLock(); }
+        }
+        return grids;
+    }
+
     /// <summary>
     /// Builds the replacement WITHOUT running any constructor, by design (mirrors
     /// Python <c>_apply_patch</c> skipping <c>__init__</c> side effects): field
@@ -210,19 +231,10 @@ public static class PluginReloader
         ArgumentNullException.ThrowIfNull(ticker);
         var tickables=ObjectRegistry.FilterBy(o=>o.IsTickable);
         try{
-            var nh=GlobalServices.GetNodeHandler();
-            if(nh is not null){
-                nh.Lock.EnterReadLock(); List<NodeArea> areas;
-                try{areas=nh.GetAreas();}finally{nh.Lock.ExitReadLock();}
-                foreach(var area in areas){
-                    area.Lock.EnterReadLock(); List<NodeGrid> grids;
-                    try{grids=area.Grids.Values.ToList();}finally{area.Lock.ExitReadLock();}
-                    foreach(var grid in grids){
-                        grid.Lock.EnterReadLock(); List<Node> nodes;
-                        try{nodes=grid.Nodes.Values.Where(n=>n.IsTickable).ToList();}finally{grid.Lock.ExitReadLock();}
-                        foreach(var n in nodes) if(!tickables.Contains(n)) tickables.Add(n);
-                    }
-                }
+            foreach(var grid in SnapshotGrids(GlobalServices.GetNodeHandler())){
+                grid.Lock.EnterReadLock(); List<Node> nodes;
+                try{nodes=grid.Nodes.Values.Where(n=>n.IsTickable).ToList();}finally{grid.Lock.ExitReadLock();}
+                foreach(var n in nodes) if(!tickables.Contains(n)) tickables.Add(n);
             }
         }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ReregisterTicks: " + logEx.Message, "PluginReloader"); }
         RemoveTickDelegatesFor(ticker,tickables);
@@ -241,14 +253,15 @@ public static class PluginReloader
         IReadOnlyDictionary<double, AsyncTicker.TimeSlot> slots;
         try { slots = ticker.Slots; }
         catch (Exception ex) { Console.Error.WriteLine($"[HotReload] RemoveTickDelegates: {ex.Message}"); return; }
+        // One id set per sweep, not per slot: the set is slot-invariant, so
+        // rebuilding it inside the per-slot loop was O(slots x tickables).
+        // (Explicit construction: the sweep-once pin scans for this spelling.)
+        HashSet<int> tickableIds = new HashSet<int>();
+        foreach (var obj in tickables) tickableIds.Add(obj.Id);
         foreach (var kv in slots.ToList())
         {
             IReadOnlySet<Delegate> coros;
             try { coros = kv.Value.Coros; } catch { continue; }
-            // One id set per sweep, not per delegate: rebuilding it inside
-            // the per-delegate walk is O(tickables x delegates).
-            HashSet<int> tickableIds = [];
-            foreach (var obj in tickables) tickableIds.Add(obj.Id);
             foreach (var d in coros.ToList())
             {
                 if (!TargetsTickable(d.Target, tickableIds)) continue;

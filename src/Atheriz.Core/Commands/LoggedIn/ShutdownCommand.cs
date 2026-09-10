@@ -41,14 +41,14 @@ public sealed class ShutdownCommand : Command
             // without a per-invocation OS thread. Replies go through Msg,
             // whose log append + session read hold as one critical section
             // with the socket send outside the lock — safe cross-thread.
-            _ = Task.Run(() =>
+            _ = Task.Run(async () =>
             {
                 try
                 {
                     var client = SharedShutdownClient;
                     var req = new HttpRequestMessage(HttpMethod.Post, capturedUrl);
                     req.Headers.Add("X-Admin-Token", capturedToken);
-                    var resp = client.SendAsync(req).GetAwaiter().GetResult();
+                    var resp = await client.SendAsync(req).ConfigureAwait(false);
                     if (resp.IsSuccessStatusCode)
                     {
                         // fire the stop hooks only once the shutdown
@@ -56,18 +56,23 @@ public sealed class ShutdownCommand : Command
                         // (shutdown.py:53, before the request); if the request
                         // then fails, hooks already ran for a live server.
                         try { Atheriz.Core.ServerEvents.AtServerStop(); } catch (Exception) { }
-                        var body = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                        var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
                         try
                         {
                             using var doc = System.Text.Json.JsonDocument.Parse(body);
                             string? status = null, msg = null;
-                            foreach (var prop in doc.RootElement.EnumerateObject())
+                            // Non-object roots threw in the old EnumerateObject
+                            // loop (landing on the success message below) —
+                            // keep the same outcome.
+                            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                                throw new InvalidOperationException("Unexpected shutdown response.");
+                            if (doc.RootElement.TryGetProperty("status", out var statusProp)) status = statusProp.GetString();
+                            if (doc.RootElement.TryGetProperty("message", out var messageProp)) msg = messageProp.GetString();
+                            switch (status)
                             {
-                                if (prop.NameEquals("status")) status = prop.Value.GetString();
-                                else if (prop.NameEquals("message")) msg = prop.Value.GetString();
+                                case "ok": capturedGo.Msg("Server shutdown initiated successfully."); break;
+                                default: capturedGo.Msg($"Shutdown failed: {msg}"); break;
                             }
-                            if (status == "ok") capturedGo.Msg("Server shutdown initiated successfully.");
-                            else capturedGo.Msg($"Shutdown failed: {msg}");
                         }
                         catch { capturedGo.Msg("Server shutdown initiated successfully."); }
                     }

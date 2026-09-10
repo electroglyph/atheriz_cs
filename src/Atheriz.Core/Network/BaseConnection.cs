@@ -32,12 +32,31 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         GC.SuppressFinalize(this);
     }
 
+    // Suppressed-log wrappers: each preserves its call site's outer
+    // catch(Exception) + inner catch{} shape, with message strings kept
+    // byte-for-byte at the callers. The helpers take no lock — all call
+    // sites log outside Lock today.
+    private static void LogDebugSuppressed(string message, string category)
+    {
+        try { Atheriz.Core.AtherizLogger.LogDebug(message, category); } catch { }
+    }
+
+    private static void LogWarningSuppressed(string message)
+    {
+        try { Atheriz.Core.AtherizLogger.LogWarning(message); } catch { }
+    }
+
+    private static void LogErrorSuppressed(string message)
+    {
+        try { Atheriz.Core.AtherizLogger.LogError(message); } catch { }
+    }
+
     protected virtual void Dispose(bool disposing)
     {
         if (disposing)
         {
             _disposed = true;
-            try { ClearPendingInput(); } catch (Exception logEx) { try { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.Dispose: " + logEx.Message, "BaseConnection"); } catch { } }
+            try { ClearPendingInput(); } catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.Dispose: " + logEx.Message, "BaseConnection"); }
         }
     }
 
@@ -83,14 +102,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // background anyway; this is belt-and-braces for hosted test runners).
     static BaseConnection()
     {
-        try { AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { ShutdownFallbackPool(); } catch (Exception logEx) { try { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.ProcessExit: " + logEx.Message, "BaseConnection"); } catch { } } }; }
-        catch (Exception logEx) { try { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.cctor: " + logEx.Message, "BaseConnection"); } catch { } }
+        try { AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { ShutdownFallbackPool(); } catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.ProcessExit: " + logEx.Message, "BaseConnection"); } }; }
+        catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.cctor: " + logEx.Message, "BaseConnection"); }
     }
 
     public static void ShutdownFallbackPool()
     {
         try { if (_fallbackPool.IsValueCreated) _fallbackPool.Value.Stop(false); }
-        catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] fallback pool shutdown failed: {e}"); } catch { } }
+        catch (Exception e) { LogErrorSuppressed($"[Network] fallback pool shutdown failed: {e}"); }
     }
 
     // Aggregate cap on RetryDrain chains. One chain per connection is
@@ -98,6 +117,12 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // stuck pool + connection churn would pile Task.Delay continuations forever.
     private static int _outstandingRetryDrains;
     private const int MaxOutstandingRetryDrains = 1024;
+    // Named retry-drain windows/delays (values identical to the old literals;
+    // each keeps its own semantic — no conflation).
+    private const double RetryDrainDropWindowSeconds = 5.0;
+    private static readonly TimeSpan RetryDrainDelay = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan RetryDrainRearmDelay = TimeSpan.FromMilliseconds(250);
+    private const double InputBusyWindowSeconds = 1.0;
     private static readonly Dictionary<string, double> _retryDrainDropLog = new();
     private static readonly Lock _retryDrainDropLock = new();
 
@@ -106,19 +131,19 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         if (Interlocked.Increment(ref _outstandingRetryDrains) > MaxOutstandingRetryDrains)
         {
             Interlocked.Decrement(ref _outstandingRetryDrains);
-            if (ThrottleWindow.ShouldLog(_retryDrainDropLog, _retryDrainDropLock, "retry-drain", 5.0))
-                try { Atheriz.Core.AtherizLogger.LogWarning("[Network] retry-drain backlog full; dropping retry"); } catch (Exception logEx) { try { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.TryScheduleRetryDrain: " + logEx.Message, "BaseConnection"); } catch { } }
+            if (ThrottleWindow.ShouldLog(_retryDrainDropLog, _retryDrainDropLock, "retry-drain", RetryDrainDropWindowSeconds))
+                try { Atheriz.Core.AtherizLogger.LogWarning("[Network] retry-drain backlog full; dropping retry"); } catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.TryScheduleRetryDrain: " + logEx.Message, "BaseConnection"); }
             return false;
         }
         try
         {
-            _ = Task.Delay(TimeSpan.FromMilliseconds(50)).ContinueWith(_ => { try { self.RetryDrain(); } finally { Interlocked.Decrement(ref _outstandingRetryDrains); } });
+            _ = Task.Delay(RetryDrainDelay).ContinueWith(_ => { try { self.RetryDrain(); } finally { Interlocked.Decrement(ref _outstandingRetryDrains); } });
             return true;
         }
         catch (Exception logEx)
         {
             Interlocked.Decrement(ref _outstandingRetryDrains);
-            try { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.TryScheduleRetryDrain: " + logEx.Message, "BaseConnection"); } catch { }
+            LogDebugSuppressed("Suppressed BaseConnection.TryScheduleRetryDrain: " + logEx.Message, "BaseConnection");
             return false;
         }
     }
@@ -135,7 +160,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         {
             if (self._disposed || self._disconnected || self._inputQueue.Count == 0) return;
         }
-        _ = Task.Delay(TimeSpan.FromMilliseconds(250)).ContinueWith(_ =>
+        _ = Task.Delay(RetryDrainRearmDelay).ContinueWith(_ =>
         {
             try { ScheduleRetryDrain(self); } catch { }
         });
@@ -150,7 +175,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             var mgr = ConnectionManager.GlobalInstance;
             if (mgr?.Atp is not null) return mgr.Atp;
         }
-        catch (Exception logEx) { try { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.ResolvePool: " + logEx.Message, "BaseConnection"); } catch { } }
+        catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.ResolvePool: " + logEx.Message, "BaseConnection"); }
         return FallbackPool;
     }
 
@@ -170,7 +195,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             if (_inputQueue.Count >= ConnectionInputQueueLimit) // port of connection.py:86
             {
                 var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds(); // port of connection.py:87
-                if (!ThrottleWindow.ShouldLog(ref _lastInputBusy, 1.0, now)) return; // port of connection.py:88-90 via ThrottleWindow
+                if (!ThrottleWindow.ShouldLog(ref _lastInputBusy, InputBusyWindowSeconds, now)) return; // port of connection.py:88-90 via ThrottleWindow
                 // The busy log below reports this count: capture the full
                 // queue size here, not just on the pool-failure path.
                 pendingCount = _inputQueue.Count;
@@ -192,7 +217,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
                 _inputRunning = false;
                 pendingCount = _inputQueue.Count;
                 var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
-                if (ThrottleWindow.ShouldLog(ref _lastInputBusy, 1.0, now))
+                if (ThrottleWindow.ShouldLog(ref _lastInputBusy, InputBusyWindowSeconds, now))
                 {
                     notifyBusy = true;
                 }
@@ -202,7 +227,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
                 // port of connection.py:108 threading.Timer(0.05, self._retry_drain).start()
                 ScheduleRetryDrain(this);
             }
-            catch (Exception logEx) { try { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.EnqueueInput: " + logEx.Message, "BaseConnection"); } catch { } }
+            catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.EnqueueInput: " + logEx.Message, "BaseConnection"); }
         }
         if (notifyBusy) // port of connection.py:111-116
         {
@@ -246,7 +271,6 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
                 if (_inputQueue.Count == 0) { _inputRunning = false; return; } // port of connection.py:139-141
                 if (_disconnected) { _inputQueue.Clear(); _inputRunning = false; return; } // port of connection.py:142-145
                 var item = _inputQueue.Dequeue(); // port of connection.py:146
-                if (_disconnected) continue; // port of connection.py:147-148
                 handler = item.Handler;
                 args = item.Args;
                 kwargs = item.Kwargs;
@@ -356,7 +380,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
                 var lastVal = outgoingKwargs[lastKey];
                 outgoingKwargs.Remove(lastKey);
                 cmd = lastKey;
-                args = new List<object?> { lastVal }.Concat(args).ToList();
+                args.Insert(0, lastVal);
             }
         }
 

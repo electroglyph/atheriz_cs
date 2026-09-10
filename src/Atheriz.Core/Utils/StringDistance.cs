@@ -24,13 +24,21 @@ public static class StringDistance
         // Capped upper bound (true distance is always <= max length), no table.
         if (a.Length > MaxInputLength || b.Length > MaxInputLength)
             return Math.Max(a.Length, b.Length);
-        var d = new int[a.Length + 1, b.Length + 1];
-        for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
-        for (int j = 0; j <= b.Length; j++) d[0, j] = j;
+        // Two-row DP: computes identical distances to the full table (standard
+        // result) at O(min(n,m)) memory. The distance is symmetric in a/b, so
+        // sizing the rows by the shorter input changes nothing observable.
+        if (b.Length > a.Length) (a, b) = (b, a);
+        var prev = new int[b.Length + 1];
+        var curr = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) prev[j] = j;
         for (int i = 1; i <= a.Length; i++)
+        {
+            curr[0] = i;
             for (int j = 1; j <= b.Length; j++)
-                d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
-        return d[a.Length, b.Length];
+                curr[j] = Math.Min(Math.Min(prev[j] + 1, curr[j - 1] + 1), prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+            (prev, curr) = (curr, prev);
+        }
+        return prev[b.Length];
     }
 
     /// <summary>
@@ -39,9 +47,11 @@ public static class StringDistance
     /// </summary>
     public static string? BestMatch(string query, IEnumerable<string> candidates)
     {
-        // Spec: candidates.OrderBy(k=>Levenshtein(query,k)).FirstOrDefault() or null if empty.
+        // MinBy returns the FIRST minimum exactly like the old stable
+        // OrderBy+FirstOrDefault, without the O(C log C) sort — and yields
+        // default (null) on empty input just like FirstOrDefault did.
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(candidates);
-        return candidates.OrderBy(k => Levenshtein(query, k)).FirstOrDefault();
+        return candidates.MinBy(k => Levenshtein(query, k));
     }
 }

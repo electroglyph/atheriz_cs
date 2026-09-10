@@ -13,10 +13,7 @@ public sealed class WanderCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        int count = 10;
-        if (pa is not null && pa["count"] is int iv) count = iv;
-        else if (pa is not null && int.TryParse(pa.GetString("count"), out var parsed)) count = parsed;
-        if (count <= 0) { go.Msg("Count must be a positive number."); return; }
+        if (!CommandHelpers.TryGetCount(pa, "count", 10, 1, out int count)) { go.Msg("Count must be a positive number."); return; }
         if (count > 1000) { go.Msg("Maximum count is 1000."); return; }
         var loc = go.ResolveLocationObject() as Node;
         if (loc is null) { go.Msg("You must be in a room to spawn wanderers."); return; }

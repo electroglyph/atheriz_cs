@@ -20,11 +20,9 @@ public sealed class GroupCommand : Command
         {
             var gc = GetGroupChannelId(go);
             if (gc is null) { go.Msg("You are not in a group."); return; }
-            var chObjs = ObjectRegistry.Get(gc.Value);
-            if (chObjs.Count == 0) { go.Msg("Error: Group channel not found."); return; }
-            var channel = chObjs[0] as Channel;
+            var channel = ObjectRegistry.GetSingle(gc.Value) as Channel;
             if (channel is null) { go.Msg("Error: Group channel not found."); return; }
-            var names = channel.Listeners.Select(id => ObjectRegistry.Get(id).FirstOrDefault()?.GetDisplayName(go) ?? id.ToString()).ToList();
+            var names = channel.Listeners.Select(id => ObjectRegistry.GetSingle(id)?.GetDisplayName(go) ?? id.ToString()).ToList();
             go.Msg($"Group members: {string.Join(", ", names)}");
             return;
         }
@@ -33,7 +31,7 @@ public sealed class GroupCommand : Command
             if (list.Count < 2) { go.Msg("Usage: group kick <name>"); return; }
             var gc = GetGroupChannelId(go);
             if (gc is null) { go.Msg("You are not in a group."); return; }
-            var channel = ObjectRegistry.Get(gc.Value).FirstOrDefault() as Channel;
+            var channel = ObjectRegistry.GetSingle(gc.Value) as Channel;
             if (channel is null) { go.Msg("Error: Group channel not found."); return; }
             // check leader (typed: Channel.CreatedBy, F001)
             int createdBy = channel.CreatedBy;
@@ -50,7 +48,7 @@ public sealed class GroupCommand : Command
         {
             var gc = GetGroupChannelId(go);
             if (gc is null) { go.Msg("You are not in a group."); return; }
-            var channel = ObjectRegistry.Get(gc.Value).FirstOrDefault() as Channel;
+            var channel = ObjectRegistry.GetSingle(gc.Value) as Channel;
             if (channel is null) { ClearGroupChannel(go); go.Msg("Error: Group channel not found."); return; }
             bool wasLeader = channel.CreatedBy == go.Id;
             channel.Msg($"{go.GetDisplayName(null)} left the group.");
@@ -86,10 +84,10 @@ public sealed class GroupCommand : Command
                 if (afterGc is not null)
                 {
                     var leaked = channel;
-                    var existing = ObjectRegistry.Get(afterGc.Value);
-                    if (existing.Count > 0)
+                    var existing = ObjectRegistry.GetSingle(afterGc.Value);
+                    if (existing is not null)
                     {
-                        channel = existing[0] as Channel ?? leaked;
+                        channel = existing as Channel ?? leaked;
                         try { leaked.Delete(); } catch (Exception) { }
                     }
                     else
@@ -106,7 +104,7 @@ public sealed class GroupCommand : Command
             }
             else
             {
-                channel = ObjectRegistry.Get(gc.Value).FirstOrDefault() as Channel;
+                channel = ObjectRegistry.GetSingle(gc.Value) as Channel;
                 if (channel is null) { go.Msg("Error: Group channel not found."); return; }
                 if (channel.CreatedBy != go.Id) { go.Msg("You are not the leader of this group."); return; }
             }
@@ -119,7 +117,7 @@ public sealed class GroupCommand : Command
         string message = string.Join(" ", list);
         var gc2 = GetGroupChannelId(go);
         if (gc2 is null) { go.Msg("You are not in a group."); return; }
-        var ch2 = ObjectRegistry.Get(gc2.Value).FirstOrDefault() as Channel;
+        var ch2 = ObjectRegistry.GetSingle(gc2.Value) as Channel;
         if (ch2 is null) { go.Msg("Error: Group channel not found."); return; }
         ch2.Msg(message, go);
     }

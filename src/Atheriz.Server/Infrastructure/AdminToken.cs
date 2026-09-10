@@ -15,6 +15,17 @@ public static class AdminToken
 {
     private const string TokenFileName = "admin.token";
 
+    // Shared token-file read for the five admin-token sites. Returns the raw
+    // trimmed content, or null when missing/unreadable. Empty is NOT mapped
+    // to null here — each site keeps its own empty semantics (EnsureToken
+    // treats empty as missing, ReadToken/CheckAdmin let it flow into the
+    // comparison, the CLI posts it as a bearer value).
+    internal static string? TryReadTokenFile(string tokenFile)
+    {
+        try { return File.ReadAllText(tokenFile, Encoding.UTF8).Trim(); }
+        catch { return null; }
+    }
+
     /// <summary>
     /// Ensures the secret directory exists (guard + 0o700) and returns the admin token.
     /// If token file exists, reads it; otherwise atomically creates it with 0o600.
@@ -31,15 +42,11 @@ public static class AdminToken
         // If exists, read — similar to reading after creation
         if (File.Exists(tokenFile))
         {
-            try
+            var existing = TryReadTokenFile(tokenFile);
+            if (!string.IsNullOrEmpty(existing))
             {
-                var existing = File.ReadAllText(tokenFile, Encoding.UTF8).Trim();
-                if (!string.IsNullOrEmpty(existing))
-                {
-                    return existing;
-                }
+                return existing;
             }
-            catch { }
         }
 
         // Generate token — mirrors secrets.token_hex(32) at atheriz.py:557
@@ -60,12 +67,8 @@ public static class AdminToken
         {
             // Race: another process created it — read back the winner, never truncate
             // a valid token (truncating here would DoS the running server's token).
-            try
-            {
-                var existing = File.ReadAllText(tokenFile, Encoding.UTF8).Trim();
-                if (!string.IsNullOrEmpty(existing)) return existing;
-            }
-            catch { }
+            var raced = TryReadTokenFile(tokenFile);
+            if (!string.IsNullOrEmpty(raced)) return raced;
             throw new InvalidOperationException($"Admin token file already exists at {tokenFile} but could not be read.");
         }
     }
@@ -102,12 +105,8 @@ public static class AdminToken
     public static string? ReadToken(string secretPath)
     {
         var tokenFile = Path.Combine(secretPath, TokenFileName);
-        try
-        {
-            if (!File.Exists(tokenFile)) return null;
-            return File.ReadAllText(tokenFile, Encoding.UTF8).Trim();
-        }
-        catch { return null; }
+        if (!File.Exists(tokenFile)) return null;
+        return TryReadTokenFile(tokenFile);
     }
 
     /// <summary>
@@ -136,12 +135,9 @@ public static class AdminToken
         var tokenFile = Path.Combine(secretPath, TokenFileName);
         if (!File.Exists(tokenFile))
             return "Token file not found.";
-        string expected;
-        try
-        {
-            expected = File.ReadAllText(tokenFile, Encoding.UTF8).Trim();
-        }
-        catch { return "Token file not found."; }
+        var expected = TryReadTokenFile(tokenFile);
+        if (expected is null)
+            return "Token file not found.";
 
         if (!ValidateToken(providedToken, expected))
             return "Invalid token.";

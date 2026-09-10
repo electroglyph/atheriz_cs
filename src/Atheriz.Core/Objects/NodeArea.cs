@@ -153,6 +153,11 @@ public sealed class NodeArea
 
     private static int Gcd(int a, int b) { while (b != 0) { int t = b; b = a % b; a = t; } return a == 0 ? 1 : a; }
 
+    // Six face-neighbor offsets shared by every GetNeighbors call. Private and
+    // never exposed: the method builds a fresh result list from it per call,
+    // so no caller can observe or mutate the table.
+    private static readonly (int Dx, int Dy, int Dz)[] NeighborOffsets = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
+
     // Port of nodes.py:1333 get_neighbors
     public List<Node> GetNeighbors((int X, int Y, int Z) coord)
     {
@@ -161,7 +166,7 @@ public sealed class NodeArea
         Lock.EnterReadLock();
         try
         {
-            foreach (var (dx, dy, dz) in new[] { (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1) })
+            foreach (var (dx, dy, dz) in NeighborOffsets)
             {
                 if (Grids.TryGetValue(z + dz, out var g))
                 {

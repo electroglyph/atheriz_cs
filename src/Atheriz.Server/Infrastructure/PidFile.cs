@@ -1,4 +1,5 @@
 using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
 
 namespace Atheriz.Server.Infrastructure;
 
@@ -305,9 +306,20 @@ public sealed class PidFile : IDisposable
     /// (nested checkouts, attacker-planted files) and signal the wrong world.
     /// Callers wanting discovery must do it explicitly, never implicitly here.
     /// </summary>
-    public static string LocateServerPidFile(int port, string savePath)
+    public static string LocateServerPidFile(string savePath)
     {
         return Path.Combine(savePath, "server.pid");
+    }
+
+    /// <summary>
+    /// Compatibility forwarder: <paramref name="port"/> was never read (the
+    /// file is always <c>{savePath}/server.pid</c>). Kept so existing callers
+    /// compile with zero behavior delta.
+    /// </summary>
+    public static string LocateServerPidFile(int port, string savePath)
+    {
+        _ = port;
+        return LocateServerPidFile(savePath);
     }
 
     /// <summary>
@@ -463,21 +475,37 @@ public sealed class PidFile : IDisposable
     // Best-effort POSIX dirsync: fsync the directory fd so a newly created
     // pid-file entry is durable across a crash. No-op on non-POSIX
     // platforms; never throws.
+    // Directory-sync P/Invokes live beside their only caller (DirSync):
+    // kill stays in Cli.ProcessHelper beside RequestTerminate.
+    private static class NativeMethods
+    {
+        [DllImport("libc", SetLastError = true, CharSet = CharSet.Ansi)]
+        internal static extern int open(string pathname, int flags);
+        [DllImport("libc", SetLastError = true)]
+        internal static extern int fsync(int fd);
+        [DllImport("libc", SetLastError = true)]
+        internal static extern int close(int fd);
+    }
+
     private static void DirSync(string? dir)
     {
         if (string.IsNullOrEmpty(dir)) return;
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
         try
         {
-            int fd = Cli.ProcessHelper.NativeMethods.open(dir, 0); // O_RDONLY
+            int fd = NativeMethods.open(dir, 0); // O_RDONLY
             if (fd < 0) return;
-            try { Cli.ProcessHelper.NativeMethods.fsync(fd); }
-            finally { Cli.ProcessHelper.NativeMethods.close(fd); }
+            try { NativeMethods.fsync(fd); }
+            finally { NativeMethods.close(fd); }
         }
         catch { }
     }
 
-    private static int? TryReadPid(string pidPath)
+    // Shared pid-file read for the CLI liveness probes (create/reset/
+    // restart/stop + the game-folder guard): ReadAllText + Trim + TryParse in
+    // one place. A TryParse failure is a dead claim (the old Parse sites
+    // threw into a swallow-catch with the same outcome).
+    internal static int? TryReadPid(string pidPath)
     {
         try
         {
@@ -486,6 +514,16 @@ public sealed class PidFile : IDisposable
             return null;
         }
         catch { return null; }
+    }
+
+    // Live-claim probe: the file parses AND names a verified server process.
+    // Stale/dead/unparseable/foreign pids report false (never throw).
+    internal static bool IsLiveClaim(string pidPath, out int pid)
+    {
+        var read = TryReadPid(pidPath);
+        if (read is int p && IsServerProcess(p)) { pid = p; return true; }
+        pid = read ?? -1;
+        return false;
     }
 
     /// <summary>
@@ -498,12 +536,8 @@ public sealed class PidFile : IDisposable
     {
         if (_disposed) return;
         if (!_acquired) return;
-        try
-        {
-            if (File.Exists(PidPath) && TryReadPid(PidPath) == _ownPid)
-                File.Delete(PidPath);
-        }
-        catch { }
+        // Same exists-and-equals-owner delete check as ReleaseIfOwner below.
+        ReleaseIfOwner(PidPath, _ownPid);
         _acquired = false;
     }
 

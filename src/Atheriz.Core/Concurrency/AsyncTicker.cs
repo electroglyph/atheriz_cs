@@ -37,58 +37,51 @@ public sealed class AsyncTicker
     public void AddCoro(Func<Task> coro, double interval) => AddCoro(coro, TimeSpan.FromSeconds(interval));
     public void AddCoro(Action coro, double interval) => AddCoro(coro, TimeSpan.FromSeconds(interval));
 
-    public void AddCoro(Func<Task> coro, TimeSpan interval)
+    // Slot lookup-or-create core (call with _lock held).
+    private TimeSlot GetOrCreateSlot(TimeSpan interval)
     {
         double key = interval.TotalSeconds;
+        if (!_slots.TryGetValue(key, out var slot))
+        {
+            slot = new TimeSlot(interval, _pool);
+            _slots[key] = slot;
+        }
+        return slot;
+    }
+
+    // Add/remove cores over Delegate (a parameter type here, not reflection):
+    // the typed overloads below forward in one line, preserving overload
+    // resolution and running semantics.
+    private void AddCore(Delegate coro, TimeSpan interval)
+    {
         lock (_lock)
         {
-            if (!_slots.TryGetValue(key, out var slot))
-            {
-                slot = new TimeSlot(interval, _pool);
-                _slots[key] = slot;
-            }
+            var slot = GetOrCreateSlot(interval);
             slot.AddCoro(coro);
             slot.Start();
         }
     }
 
-    public void AddCoro(Action coro, TimeSpan interval)
+    private void RemoveCore(Delegate coro, TimeSpan interval)
     {
         double key = interval.TotalSeconds;
         lock (_lock)
         {
-            if (!_slots.TryGetValue(key, out var slot))
-            {
-                slot = new TimeSlot(interval, _pool);
-                _slots[key] = slot;
-            }
-            slot.AddCoro(coro);
-            slot.Start();
+            if (_slots.TryGetValue(key, out var slot))
+                slot.RemoveCoro(coro);
         }
     }
+
+    public void AddCoro(Func<Task> coro, TimeSpan interval) => AddCore(coro, interval);
+
+    public void AddCoro(Action coro, TimeSpan interval) => AddCore(coro, interval);
 
     public void RemoveCoro(Func<Task> coro, double interval) => RemoveCoro(coro, TimeSpan.FromSeconds(interval));
     public void RemoveCoro(Action coro, double interval) => RemoveCoro(coro, TimeSpan.FromSeconds(interval));
 
-    public void RemoveCoro(Func<Task> coro, TimeSpan interval)
-    {
-        double key = interval.TotalSeconds;
-        lock (_lock)
-        {
-            if (_slots.TryGetValue(key, out var slot))
-                slot.RemoveCoro(coro);
-        }
-    }
+    public void RemoveCoro(Func<Task> coro, TimeSpan interval) => RemoveCore(coro, interval);
 
-    public void RemoveCoro(Action coro, TimeSpan interval)
-    {
-        double key = interval.TotalSeconds;
-        lock (_lock)
-        {
-            if (_slots.TryGetValue(key, out var slot))
-                slot.RemoveCoro(coro);
-        }
-    }
+    public void RemoveCoro(Action coro, TimeSpan interval) => RemoveCore(coro, interval);
 
     public void Clear()
     {
@@ -136,30 +129,14 @@ public sealed class AsyncTicker
 
         public TimeSpan Interval => _interval;
 
-        public void AddCoro(Func<Task> coro) { lock (_lock) _coros.Add(coro); }
-        public void AddCoro(Action coro) { lock (_lock) _coros.Add(coro); }
+        public void AddCoro(Func<Task> coro) => AddCoro((Delegate)coro);
+        public void AddCoro(Action coro) => AddCoro((Delegate)coro);
         public void AddCoro(Delegate coro) { lock (_lock) _coros.Add(coro); }
         public bool ContainsCoro(Delegate coro) { lock (_lock) return _coros.Contains(coro); }
 
-        public void RemoveCoro(Func<Task> coro)
-        {
-            lock (_lock)
-            {
-                _coros.Remove(coro);
-                _pending.Remove(coro);
-                if (_coros.Count == 0) StopInternal();
-            }
-        }
+        public void RemoveCoro(Func<Task> coro) => RemoveCoro((Delegate)coro);
 
-        public void RemoveCoro(Action coro)
-        {
-            lock (_lock)
-            {
-                _coros.Remove(coro);
-                _pending.Remove(coro);
-                if (_coros.Count == 0) StopInternal();
-            }
-        }
+        public void RemoveCoro(Action coro) => RemoveCoro((Delegate)coro);
         public void RemoveCoro(Delegate coro)
         {
             lock (_lock)
@@ -189,6 +166,12 @@ public sealed class AsyncTicker
 
         private void Release(Delegate coro) { lock (_lock) _pending.Remove(coro); }
 
+        // Single fault-write for TickOnce. The deferred async release is
+        // load-bearing for pending-dedup (no overlapping ticks), so it stays:
+        // still-running coros release only in their continuation, never in a
+        // shared try/finally.
+        private static void WriteFault(Exception? ex) => Console.Error.WriteLine(ex?.ToString());
+
         private void TickOnce(Delegate coro)
         {
             try
@@ -201,13 +184,13 @@ public sealed class AsyncTicker
                         _ = task.ContinueWith(t =>
                         {
                             Release(coro);
-                            if (t.IsFaulted) Console.Error.WriteLine(t.Exception?.ToString());
+                            if (t.IsFaulted) WriteFault(t.Exception);
                         }, TaskScheduler.Default);
                     }
                     else
                     {
                         Release(coro);
-                        if (task.IsFaulted) Console.Error.WriteLine(task.Exception?.ToString());
+                        if (task.IsFaulted) WriteFault(task.Exception);
                     }
                 }
                 else if (coro is Action action)
@@ -221,7 +204,7 @@ public sealed class AsyncTicker
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine(ex.ToString());
+                WriteFault(ex);
                 Release(coro);
             }
         }

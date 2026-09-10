@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace Atheriz.Core.Commands;
 
 /// <summary>
@@ -74,8 +72,9 @@ public abstract class Command
     // Shlex helper — mirrors Python's shlex.split( posix=True ) with escaping for Windows backslashes
     internal static List<string> SplitArgs(string argsString)
     {
+        ArgumentNullException.ThrowIfNull(argsString);
         // replicate Python: re.sub(r'\\(?![\"\'\\])', r'\\\\', args_string)
-        var escaped = Regex.Replace(argsString, @"\\(?![\""\'\\])", @"\\");
+        var escaped = EscapeBareBackslashes(argsString);
         // simple shlex posix split respecting quotes and backslash escapes
         List<string> tokens = [];
         var cur = new System.Text.StringBuilder();
@@ -105,6 +104,27 @@ public abstract class Command
         return tokens;
     }
 
+    // Single-pass equivalent of Regex.Replace(s, @"\\(?![\""\'\\])", @"\\"):
+    // a backslash NOT followed by '"', '\'' or '\\' is doubled so the shlex
+    // loop below reads it as a literal backslash. A trailing backslash has
+    // no follower, so the lookahead succeeds and it doubles as well.
+    private static string EscapeBareBackslashes(string s)
+    {
+        int first = s.IndexOf('\\');
+        if (first < 0) return s;
+        var sb = new System.Text.StringBuilder(s.Length + 8);
+        sb.Append(s, 0, first);
+        for (int i = first; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c != '\\') { sb.Append(c); continue; }
+            char next = i + 1 < s.Length ? s[i + 1] : '\0';
+            sb.Append('\\');
+            if (next is not ('"' or '\'' or '\\')) sb.Append('\\');
+        }
+        return sb.ToString();
+    }
+
     // Sync-stub splitter for the creation stubs (create/guest/new-character):
     // honors quotes/tabs like the parser path; on unbalanced quotes falls
     // back to a plain whitespace split so weird input still reaches validation.
@@ -118,6 +138,15 @@ public abstract class Command
     // Install sets this via typed delegate, no reflection. Execute wraps returned func with gate check.
     public static Func<IMessageTarget, bool>? GlobalLagCheck { get; set; }
 
+    // One home for the lag-gate wrapper applied to both Execute paths: with
+    // no gate installed the action runs as-is, otherwise a lagged caller
+    // returns early without running the wrapped action.
+    private static Action<IMessageTarget, object?> WrapWithLagCheck(Action<IMessageTarget, object?> orig)
+    {
+        if (GlobalLagCheck is null) return orig;
+        return (c, a) => { if (GlobalLagCheck(c)) return; orig(c, a); };
+    }
+
     /// <summary>
     /// Parses <paramref name="argsString"/> and returns the job tuple (mirrors Python return).
     /// Returns (runAction, caller, parsedArgs) or (null,null,null) on help/error.
@@ -128,11 +157,7 @@ public abstract class Command
         if (!UseParser)
         {
             Action<IMessageTarget, object?> raw = (c, a) => Run(c, (object?)a);
-            if (GlobalLagCheck is not null)
-            {
-                var orig = raw;
-                raw = (c, a) => { if (GlobalLagCheck(c)) return; orig(c, a); };
-            }
+            raw = WrapWithLagCheck(raw);
             return (raw, caller, (object?)argsString);
         }
         List<string> argList;
@@ -169,11 +194,7 @@ public abstract class Command
         }
         // wrap Run to match Python's (func, caller, eargs) triple
         Action<IMessageTarget, object?> fn = (c, a) => Run(c, a);
-        if (GlobalLagCheck is not null)
-        {
-            var orig = fn;
-            fn = (c, a) => { if (GlobalLagCheck(c)) return; orig(c, a); };
-        }
+        fn = WrapWithLagCheck(fn);
         return (fn, caller, parsed);
     }
 }

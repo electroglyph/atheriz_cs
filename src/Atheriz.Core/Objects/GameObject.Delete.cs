@@ -47,6 +47,11 @@ public partial class GameObject
             stack.Push((this, 0));
             List<GameObject> order = [];
             List<GameObject> truncated = [];
+            // Companion set for the depth-capped list below: `truncated` is NOT
+            // subsumed by `seen` (capped children are recorded without ever being
+            // popped), so the membership test is load-bearing — only the linear
+            // scan is replaced.
+            HashSet<int> truncatedIds = [];
             while (stack.Count > 0)
             {
                 var (obj, depth) = stack.Pop();
@@ -59,11 +64,10 @@ public partial class GameObject
                 finally { obj._lock.ExitReadLock(); }
                 foreach (var cid in contentIds)
                 {
-                    var cObjs = ObjectRegistry.Get(cid);
-                    var content = cObjs.FirstOrDefault();
+                    var content = ObjectRegistry.GetSingle(cid);
                     if (content is null) continue;
                     if (seen.Contains(content.Id)) continue;
-                    if (truncated.Any(t => t.Id == content.Id)) continue;
+                    if (truncatedIds.Contains(content.Id)) continue;
                     // Honor each child's delete veto: a vetoed subtree is skipped,
                     // not force-deleted. A throwing AtDelete is treated as a veto
                     // (fail-closed): a buggy hook must not force deletion.
@@ -80,6 +84,7 @@ public partial class GameObject
                     if (depth + 1 >= maxDepth)
                     {
                         truncated.Add(content);
+                        truncatedIds.Add(content.Id);
                         continue;
                     }
                     stack.Push((content, depth + 1));

@@ -42,6 +42,27 @@ public static class ServerEvents
         else InvokeHooks("at_server_reload");
     }
 
+    // Early-exit existence/single lookups over the registry. Same shape as
+    // ObjectRegistry.FilterBy: snapshot under the read lock, predicates run
+    // OUTSIDE the lock (re-entrant predicates cannot deadlock), first match
+    // in snapshot (= registry) order wins. An Exists holding the lock across
+    // the scan would differ in both deadlock risk and visibility — never that.
+    private static bool RegistryExists(Func<GameObject, bool> predicate)
+    {
+        var snapshot = ObjectRegistry.FilterBy(_ => true);
+        foreach (var o in snapshot)
+            if (predicate(o)) return true;
+        return false;
+    }
+
+    private static GameObject? RegistryFindFirst(Func<GameObject, bool> predicate)
+    {
+        var snapshot = ObjectRegistry.FilterBy(_ => true);
+        foreach (var o in snapshot)
+            if (predicate(o)) return o;
+        return null;
+    }
+
     // Port of server_events.py:19 def at_char_create(account_name, char_name, password) CLI helper.
     // The optional output mirrors Python's redirect_stdout capture in the
     // /_internal/create_account endpoint: null keeps Console output (CLI/tests).
@@ -86,43 +107,44 @@ public static class ServerEvents
         {
         lock (_charCreateLock)
         {
-        if (ObjectRegistry.FilterBy(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == existsLc).Count > 0)
+        if (RegistryExists(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == existsLc))
         {
             failMsg = $"Character name '{charName}' already exists.";
             return;
         }
-        var results = ObjectRegistry.FilterBy(o => o.IsAccount && (o.Name ?? "").ToLowerInvariant() == accountName.ToLowerInvariant());
-        if (results.Count > 0)
+        // Single lookup for the account object (password check, MaxCharacters,
+        // AddCharacter below need the object, not just existence). The `is
+        // Account` clause preserves the old foreach-skip: a non-Account match
+        // never wins, and with no Account match creation falls through below.
+        var existing = RegistryFindFirst(o => o.IsAccount && (o.Name ?? "").ToLowerInvariant() == accountName.ToLowerInvariant() && o is Account);
+        if (existing is Account acc)
         {
-            foreach (var r in results)
+            if (!acc.CheckPassword(password))
             {
-                if (r is not Account acc) continue;
-                if (!acc.CheckPassword(password))
-                {
-                    failMsg = $"Account '{accountName}' already exists with a different password...";
-                    return;
-                }
-                if (acc.Characters.Count >= settings.MaxCharacters)
-                {
-                    failMsg = $"Account '{accountName}' already has {settings.MaxCharacters} characters...";
-                    return;
-                }
-                var character = GameObject.Create(charName, isPc: true);
-                // Port of create() auto-add: add-then-move (matches InitialSetup order).
-                ObjectRegistry.AddObject(character);
-                character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord);
-                acc.AddCharacter(character);
-                if (LostPcNameRace(existsLc, character.Id))
-                {
-                    acc.RemoveCharacter(character);
-                    ObjectRegistry.RemoveObject(character);
-                    failMsg = $"Character name '{charName}' already exists.";
-                    return;
-                }
-                // Success-path I/O runs after the lock releases (see doneChar below).
-                doneChar = character; doneAcc = acc; doneHome = home; doneNewAccount = false;
+                failMsg = $"Account '{accountName}' already exists with a different password...";
                 return;
             }
+            if (acc.Characters.Count >= settings.MaxCharacters)
+            {
+                failMsg = $"Account '{accountName}' already has {settings.MaxCharacters} characters...";
+                return;
+            }
+            var character = GameObject.Create(charName, isPc: true);
+            // Port of create() auto-add: add-then-move (matches InitialSetup order).
+            ObjectRegistry.AddObject(character);
+            character.Home = Persistence.Dto.LocationRef.FromCoord(home.Coord);
+            acc.AddCharacter(character);
+            if (LostPcNameRace(existsLc, character.Id))
+            {
+                acc.RemoveCharacter(character);
+                ObjectRegistry.RemoveObject(character);
+                failMsg = $"Character name '{charName}' already exists.";
+                return;
+            }
+            // Success-path I/O runs after the lock releases (see doneChar below).
+            doneChar = character; doneAcc = acc; doneHome = home; doneNewAccount = false;
+            return;
+        }
         }
         err = Commands.UnloggedIn.Validation.ValidateAccountName(accountName);
         if (err is not null) { failMsg = err; return; }
@@ -141,7 +163,7 @@ public static class ServerEvents
             failMsg = $"Character name '{charName}' already exists.";
             return;
         }
-        ch2.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord);
+        ch2.Home = Persistence.Dto.LocationRef.FromCoord(home.Coord);
         account.AddCharacter(ch2);
         // Success-path I/O runs after the lock releases (see doneChar below).
         doneChar = ch2; doneAcc = account; doneHome = home; doneNewAccount = true;
@@ -169,10 +191,7 @@ public static class ServerEvents
     // Port of server_events.py:19 _lost_pc_name_race — lowest id wins so concurrent
     // creators converge deterministically no matter how the re-checks interleave.
     private static bool LostPcNameRace(string charNameLower, int myId)
-    {
-        var dupes = ObjectRegistry.FilterBy(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == charNameLower && o.Id != myId);
-        return dupes.Any(d => d.Id < myId);
-    }
+        => RegistryExists(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == charNameLower && o.Id != myId && o.Id < myId);
 
     // Spec overload: AtCharCreate(GameObject character, Account account)
     // Port of server_events.py:96 — Python only prints (the caller already

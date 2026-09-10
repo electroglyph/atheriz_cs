@@ -83,6 +83,17 @@ public sealed class SetCommand : Command
         s = ReplaceWordOutsideQuotes(s, "None", "null");
         return s;
     }
+    private static string ReprJson(object? value)
+    {
+        string repr;
+        try { repr = JsonSerializer.Serialize(value); }
+        catch { repr = value?.ToString() ?? "None"; }
+        // Json gives lower-case true/false/null, map to Python
+        if (repr == "true") repr = "True";
+        else if (repr == "false") repr = "False";
+        else if (repr == "null") repr = "None";
+        return repr;
+    }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
@@ -95,9 +106,10 @@ public sealed class SetCommand : Command
         if (target is null) return;
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }
         object? value;
+        string trimmed = raw.Trim();
+        string trimStart = raw.TrimStart();
         try
         {
-            string trimmed = raw.Trim();
             // tuple handling: Python ast.literal_eval supports tuples '(1,2)' -> treat as array
             if (trimmed.StartsWith("(", StringComparison.Ordinal) && trimmed.EndsWith(")", StringComparison.Ordinal))
             {
@@ -115,12 +127,12 @@ public sealed class SetCommand : Command
             // Port of set.py:141-143 unconditional literal_eval: a leading
             // sign or dot still denotes a number (JSON parses "-5" natively;
             // "+5"/".5" are normalized first since JSON rejects them).
-            else if (raw.TrimStart().StartsWith("\"", StringComparison.Ordinal) || raw.TrimStart().StartsWith("'", StringComparison.Ordinal) || trimmed == "True" || trimmed == "False" || trimmed == "None" || (trimmed.Length > 0 && (char.IsDigit(trimmed[0]) || trimmed[0] == '-' || trimmed[0] == '+' || trimmed[0] == '.')) || trimmed.StartsWith("[", StringComparison.Ordinal) || trimmed.StartsWith("{", StringComparison.Ordinal))
+            else if (trimStart.StartsWith("\"", StringComparison.Ordinal) || trimStart.StartsWith("'", StringComparison.Ordinal) || trimmed == "True" || trimmed == "False" || trimmed == "None" || (trimmed.Length > 0 && (char.IsDigit(trimmed[0]) || trimmed[0] == '-' || trimmed[0] == '+' || trimmed[0] == '.')) || trimmed.StartsWith("[", StringComparison.Ordinal) || trimmed.StartsWith("{", StringComparison.Ordinal))
             {
                 string candidate = raw;
                 string candTrim = candidate.TrimStart();
                 if (candTrim.StartsWith("+", StringComparison.Ordinal)) candidate = candTrim.Substring(1);
-                else if (candTrim.StartsWith(".", StringComparison.Ordinal)) candidate = "0" + candidate.TrimStart();
+                else if (candTrim.StartsWith(".", StringComparison.Ordinal)) candidate = "0" + trimStart;
                 try { value = JsonSerializer.Deserialize<JsonElement>(candidate); }
                 catch { value = null; }
                 if (value is null)
@@ -143,12 +155,12 @@ public sealed class SetCommand : Command
             else value = raw;
         }
         catch { value = raw; }
-        if (value is null && raw.Trim() != "None" && raw.Trim() != "null") value = raw;
+        if (value is null && trimmed != "None" && trimmed != "null") value = raw;
         if (SetHelper.IsProtected(attr))
         {
             if (!go.IsSuperUser) { go.Msg($"'{attr}' is protected and cannot be set."); return; }
         }
-        if (new[] { "location","home","_contents","group_channel","contents" }.Contains(attr)) { go.Msg($"'{attr}' cannot be set directly; use move/teleport instead."); return; }
+        if (SetHelper.MoveGate.Contains(attr)) { go.Msg($"'{attr}' cannot be set directly; use move/teleport instead."); return; }
         bool had = SetHelper.HasAttr(target, attr);
         if (!had) go.Msg($"Warning: '{attr}' is a new attribute on {target.Name}.");
         try
@@ -164,19 +176,15 @@ public sealed class SetCommand : Command
         // through to the conversion message below.
         catch (InvalidCastException) { go.Msg($"'{attr}' cannot be set from text."); return; }
         catch (Exception ex) { go.Msg($"Could not set '{attr}': {ex.Message}"); return; }
-        string repr;
-        if (value is null) repr = "None";
-        else if (value is string s) repr = $"'{s}'";
-        else if (value is bool b) repr = b ? "True" : "False";
-        else
+        // First-match order mirrors the old if/else chain (null, string,
+        // bool, then JSON with Python True/False/None spellings).
+        string repr = value switch
         {
-            try { repr = JsonSerializer.Serialize(value); }
-            catch { repr = value.ToString() ?? "None"; }
-            // Json gives lower-case true/false/null, map to Python
-            if (repr == "true") repr = "True";
-            else if (repr == "false") repr = "False";
-            else if (repr == "null") repr = "None";
-        }
+            null => "None",
+            string s => $"'{s}'",
+            bool b => b ? "True" : "False",
+            _ => ReprJson(value),
+        };
         go.Msg($"Set {target.Name}.{attr} = {repr}");
     }
 }
@@ -207,7 +215,7 @@ public sealed class UnsetCommand : Command
         {
             if (!go.IsSuperUser) { go.Msg($"'{attr}' is protected and cannot be removed."); return; }
         }
-        if (new[] { "location","home","_contents","group_channel","contents" }.Contains(attr)) { go.Msg($"'{attr}' cannot be removed directly."); return; }
+        if (SetHelper.MoveGate.Contains(attr)) { go.Msg($"'{attr}' cannot be removed directly."); return; }
         try
         {
             if (SetHelper.HasKnownProp(target, attr)) throw new InvalidOperationException();

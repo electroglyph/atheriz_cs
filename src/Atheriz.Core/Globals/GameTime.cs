@@ -47,6 +47,13 @@ public class GameTime
 
     // ----- persistence -----
 
+    // Single choke point for the three load-reset paths below (missing row,
+    // corrupt row, null payload): same lock, same zeroing, one definition.
+    private void ResetLocked()
+    {
+        using (WriteScope()) { _ticks = 0; _alarms.Clear(); }
+    }
+
     public virtual void Save() => Save(AtherizDbContextFactory.Create());
     public virtual void Save(AtherizDbContext db)
     {
@@ -87,9 +94,7 @@ public class GameTime
             if (row is null)
             {
                 if (TryLoadLegacyFile(db)) return;
-                _lock.EnterWriteLock();
-                try { _ticks = 0; _alarms.Clear(); }
-                finally { _lock.ExitWriteLock(); }
+                ResetLocked();
                 return;
             }
             GameTimePersistDto? dto;
@@ -98,16 +103,12 @@ public class GameTime
             {
                 // Per-row report: corrupt ticks zero out loudly, not silently.
                 try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.Load: " + logEx.Message, "GameTime"); }
-                _lock.EnterWriteLock();
-                try { _ticks = 0; _alarms.Clear(); }
-                finally { _lock.ExitWriteLock(); }
+                ResetLocked();
                 return;
             }
             if (dto is null)
             {
-                _lock.EnterWriteLock();
-                try { _ticks = 0; _alarms.Clear(); }
-                finally { _lock.ExitWriteLock(); }
+                ResetLocked();
                 return;
             }
             _lock.EnterWriteLock();
@@ -484,13 +485,12 @@ public class GameTime
             foreach (var (key, entry) in callers)
             {
                 if (!entry.Repeat) RemoveAlarmEntry(key.Hour, key.Minute, entry);
-                var objs = ObjectRegistry.Get(entry.CallerId);
-                if (objs.Count > 0)
+                var target = ObjectRegistry.GetSingle(entry.CallerId);
+                if (target is not null)
                 {
-                    var target = objs[0];
                     var capturedData = entry.Data;
                     var capturedAfter = after;
-                    // Direct virtual dispatch (port of getattr(objs[0], "at_alarm")):
+                    // Direct virtual dispatch (single-lookup target, port of getattr(objs[0], "at_alarm")):
                     // every GameObject exposes AtAlarm, so no reflection is needed.
                     Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, "GameTimePersistDto"); } };
                     if (!pool.AddTask(act, $"alarm:{entry.CallerId}"))
@@ -514,22 +514,27 @@ public class GameTime
 
         string afterPhase = after.MoonPhase;
         bool afterSun = SunUp(after.Hour);
+        // One choke point for the lunar/solar fan-out below: same receiver
+        // fallback, same filter predicate, same per-target suppression — only
+        // the picker and the message differ per caller.
+        void Broadcast(Func<GameObject, bool> recv, Action<GameObject> send)
+        {
+            foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
+            {
+                try { send(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, "GameTimePersistDto"); }
+            }
+        }
         if (beforePhase != afterPhase)
         {
             var recv = _settings.LunarReceiverLambda ?? (o => o.IsPc && o.IsConnected);
-            foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
-            {
-                try { obj.AtLunarEvent($"A {afterPhase.ToLower()} moon rises."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, "GameTimePersistDto"); }
-            }
+            string lunarMsg = $"A {afterPhase.ToLower()} moon rises.";
+            Broadcast(recv, o => o.AtLunarEvent(lunarMsg));
         }
         if (beforeSun != afterSun)
         {
             string msg = afterSun ? _settings.SunriseMessage : _settings.SunsetMessage;
             var recv = _settings.SolarReceiverLambda ?? (o => o.IsPc && o.IsConnected);
-            foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
-            {
-                try { obj.AtSolarEvent(msg); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, "GameTimePersistDto"); }
-            }
+            Broadcast(recv, o => o.AtSolarEvent(msg));
         }
     }
 
@@ -704,40 +709,23 @@ public class GameTime
         string formatted = "";
         int y = 0, m = 0, w = 0, d = 0, h = 0;
 
-        if (dleftover >= tpy)
+        // One choke point for the five unit blocks below: same decimal
+        // division/modulo, same ", " join, same singular/plural suffix.
+        void AppendUnit(decimal unit, ref int slot, string one, string many)
         {
-            y = (int)(dleftover / tpy);
-            formatted = y > 1 ? $"{y} years" : "1 year";
-            dleftover %= y * tpy;
+            if (dleftover >= unit)
+            {
+                if (formatted != "") formatted += ", ";
+                slot = (int)(dleftover / unit);
+                formatted += slot > 1 ? $"{slot} {many}" : one;
+                dleftover %= slot * unit;
+            }
         }
-        if (dleftover >= tpmo)
-        {
-            if (formatted != "") formatted += ", ";
-            m = (int)(dleftover / tpmo);
-            formatted += m > 1 ? $"{m} months" : "1 month";
-            dleftover %= m * tpmo;
-        }
-        if (dleftover >= tpw)
-        {
-            if (formatted != "") formatted += ", ";
-            w = (int)(dleftover / tpw);
-            formatted += w > 1 ? $"{w} weeks" : "1 week";
-            dleftover %= w * tpw;
-        }
-        if (dleftover >= tpd)
-        {
-            if (formatted != "") formatted += ", ";
-            d = (int)(dleftover / tpd);
-            formatted += d > 1 ? $"{d} days" : "1 day";
-            dleftover %= d * tpd;
-        }
-        if (dleftover >= tph)
-        {
-            if (formatted != "") formatted += ", ";
-            h = (int)(dleftover / tph);
-            formatted += h > 1 ? $"{h} hours" : "1 hour";
-            dleftover %= h * tph;
-        }
+        AppendUnit(tpy, ref y, "1 year", "years");
+        AppendUnit(tpmo, ref m, "1 month", "months");
+        AppendUnit(tpw, ref w, "1 week", "weeks");
+        AppendUnit(tpd, ref d, "1 day", "days");
+        AppendUnit(tph, ref h, "1 hour", "hours");
         if (dleftover > 0)
         {
             if (formatted != "") formatted += ", ";

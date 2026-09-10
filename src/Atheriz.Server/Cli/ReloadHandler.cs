@@ -15,16 +15,14 @@ public static class ReloadHandler
         // locates admin.token itself, so no separate pre-lookup exists to go
         // stale. On a scheme mismatch (settings say https, server speaks
         // plaintext or vice versa) retry once with the flipped scheme.
-        var resp = await ShutdownClient.PostAdminAsync(port, settings.SecretPath, "/_internal/hot_reload", null, tlsOn).ConfigureAwait(false);
-        resp ??= await ShutdownClient.PostAdminAsync(port, settings.SecretPath, "/_internal/hot_reload", null, !tlsOn).ConfigureAwait(false);
+        var resp = await ShutdownClient.PostAdminWithTlsFallbackAsync(port, settings.SecretPath, "/_internal/hot_reload", null, tlsOn).ConfigureAwait(false);
         sw.Stop();
         if (resp is null) { Console.WriteLine($"Error connecting to server at {url}"); return; }
         var body = resp.Body;
         try
         {
-            using var doc = JsonDocument.Parse(body);
-            var status = doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : "ok";
-            var msg = doc.RootElement.TryGetProperty("message", out var m) ? m.GetString() : body;
+            var status = resp.GetStatus("ok");
+            var msg = resp.GetMessage();
             if (status == "ok") { Console.WriteLine($"Success! {msg}"); Console.WriteLine($"Reload took {sw.Elapsed.TotalMilliseconds:F2}ms"); }
             else Console.WriteLine($"Failed: {msg}");
         }

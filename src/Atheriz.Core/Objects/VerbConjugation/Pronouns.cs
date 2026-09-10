@@ -25,6 +25,13 @@ public static class Pronouns
     public static readonly string[] Viewpoints = ["1st person", "2nd person", "3rd person"];
     public static readonly string[] Genders = ["male", "female", "neutral", "plural"];
 
+    // O(1) membership matching today's linear scans: the array Contains calls
+    // below use default (ordinal, case-sensitive) equality, so these sets must
+    // use Ordinal too — any other comparer would silently change matches.
+    private static readonly HashSet<string> PronounTypeSet = new(PronounTypes, StringComparer.Ordinal);
+    private static readonly HashSet<string> ViewpointSet = new(Viewpoints, StringComparer.Ordinal);
+    private static readonly HashSet<string> GenderSet = new(Genders, StringComparer.Ordinal);
+
     // PRONOUN_MAPPING
     public static readonly Dictionary<string, Dictionary<string, Dictionary<string, string>>> PronounMapping =
         new(StringComparer.Ordinal)
@@ -55,41 +62,43 @@ public static class Pronouns
             },
         };
 
-    // PRONOUN_TABLE: pronoun lower -> (viewpoint, gender(s), pronoun_type(s))
-    public static readonly Dictionary<string, (string viewpoint, object gender, object pronType)> PronounTable =
+    // PRONOUN_TABLE: pronoun lower -> (viewpoint, gender(s), pronoun_type(s)).
+    // Typed string arrays (no boxing, no IsIter flag): single-attribute
+    // pronouns hold one-element arrays.
+    public static readonly Dictionary<string, (string Viewpoint, string[] Genders, string[] Types)> PronounTable =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["I"] = ("1st person", (object)new[] { "neutral","male","female","plural" }, (object)"subject pronoun"),
-            ["me"] = ("1st person", (object)new[] { "neutral","male","female","plural" }, (object)"object pronoun"),
-            ["my"] = ("1st person", (object)new[] { "neutral","male","female","plural" }, (object)"possessive adjective"),
-            ["mine"] = ("1st person", (object)new[] { "neutral","male","female","plural" }, (object)"possessive pronoun"),
-            ["myself"] = ("1st person", (object)new[] { "neutral","male","female","plural" }, (object)"reflexive pronoun"),
-            ["we"] = ("1st person", (object)"plural", (object)"subject pronoun"),
-            ["us"] = ("1st person", (object)"plural", (object)"object pronoun"),
-            ["our"] = ("1st person", (object)"plural", (object)"possessive adjective"),
-            ["ours"] = ("1st person", (object)"plural", (object)"possessive pronoun"),
-            ["ourselves"] = ("1st person", (object)"plural", (object)"reflexive pronoun"),
-            ["you"] = ("2nd person", (object)new[] { "neutral","male","female","plural" }, (object)new[] { "subject pronoun","object pronoun" }),
-            ["your"] = ("2nd person", (object)new[] { "neutral","male","female","plural" }, (object)"possessive adjective"),
-            ["yours"] = ("2nd person", (object)new[] { "neutral","male","female","plural" }, (object)"possessive pronoun"),
-            ["yourself"] = ("2nd person", (object)new[] { "neutral","male","female" }, (object)"reflexive pronoun"),
-            ["yourselves"] = ("2nd person", (object)"plural", (object)"reflexive pronoun"),
-            ["he"] = ("3rd person", (object)"male", (object)"subject pronoun"),
-            ["him"] = ("3rd person", (object)"male", (object)"object pronoun"),
-            ["his"] = ("3rd person", (object)"male", (object)new[] { "possessive pronoun","possessive adjective" }),
-            ["himself"] = ("3rd person", (object)"male", (object)"reflexive pronoun"),
-            ["she"] = ("3rd person", (object)"female", (object)"subject pronoun"),
-            ["her"] = ("3rd person", (object)"female", (object)new[] { "object pronoun","possessive adjective" }),
-            ["hers"] = ("3rd person", (object)"female", (object)"possessive pronoun"),
-            ["herself"] = ("3rd person", (object)"female", (object)"reflexive pronoun"),
-            ["it"] = ("3rd person", (object)"neutral", (object)new[] { "subject pronoun","object pronoun" }),
-            ["its"] = ("3rd person", (object)"neutral", (object)new[] { "possessive pronoun","possessive adjective" }),
-            ["itself"] = ("3rd person", (object)"neutral", (object)"reflexive pronoun"),
-            ["they"] = ("3rd person", (object)"plural", (object)"subject pronoun"),
-            ["them"] = ("3rd person", (object)"plural", (object)"object pronoun"),
-            ["their"] = ("3rd person", (object)"plural", (object)"possessive adjective"),
-            ["theirs"] = ("3rd person", (object)"plural", (object)"possessive pronoun"),
-            ["themselves"] = ("3rd person", (object)"plural", (object)"reflexive pronoun"),
+            ["I"] = ("1st person", ["neutral", "male", "female", "plural"], ["subject pronoun"]),
+            ["me"] = ("1st person", ["neutral", "male", "female", "plural"], ["object pronoun"]),
+            ["my"] = ("1st person", ["neutral", "male", "female", "plural"], ["possessive adjective"]),
+            ["mine"] = ("1st person", ["neutral", "male", "female", "plural"], ["possessive pronoun"]),
+            ["myself"] = ("1st person", ["neutral", "male", "female", "plural"], ["reflexive pronoun"]),
+            ["we"] = ("1st person", ["plural"], ["subject pronoun"]),
+            ["us"] = ("1st person", ["plural"], ["object pronoun"]),
+            ["our"] = ("1st person", ["plural"], ["possessive adjective"]),
+            ["ours"] = ("1st person", ["plural"], ["possessive pronoun"]),
+            ["ourselves"] = ("1st person", ["plural"], ["reflexive pronoun"]),
+            ["you"] = ("2nd person", ["neutral", "male", "female", "plural"], ["subject pronoun", "object pronoun"]),
+            ["your"] = ("2nd person", ["neutral", "male", "female", "plural"], ["possessive adjective"]),
+            ["yours"] = ("2nd person", ["neutral", "male", "female", "plural"], ["possessive pronoun"]),
+            ["yourself"] = ("2nd person", ["neutral", "male", "female"], ["reflexive pronoun"]),
+            ["yourselves"] = ("2nd person", ["plural"], ["reflexive pronoun"]),
+            ["he"] = ("3rd person", ["male"], ["subject pronoun"]),
+            ["him"] = ("3rd person", ["male"], ["object pronoun"]),
+            ["his"] = ("3rd person", ["male"], ["possessive pronoun", "possessive adjective"]),
+            ["himself"] = ("3rd person", ["male"], ["reflexive pronoun"]),
+            ["she"] = ("3rd person", ["female"], ["subject pronoun"]),
+            ["her"] = ("3rd person", ["female"], ["object pronoun", "possessive adjective"]),
+            ["hers"] = ("3rd person", ["female"], ["possessive pronoun"]),
+            ["herself"] = ("3rd person", ["female"], ["reflexive pronoun"]),
+            ["it"] = ("3rd person", ["neutral"], ["subject pronoun", "object pronoun"]),
+            ["its"] = ("3rd person", ["neutral"], ["possessive pronoun", "possessive adjective"]),
+            ["itself"] = ("3rd person", ["neutral"], ["reflexive pronoun"]),
+            ["they"] = ("3rd person", ["plural"], ["subject pronoun"]),
+            ["them"] = ("3rd person", ["plural"], ["object pronoun"]),
+            ["their"] = ("3rd person", ["plural"], ["possessive adjective"]),
+            ["theirs"] = ("3rd person", ["plural"], ["possessive pronoun"]),
+            ["themselves"] = ("3rd person", ["plural"], ["reflexive pronoun"]),
         };
 
     public static readonly Dictionary<string, object> ViewpointConversion = new(StringComparer.Ordinal)
@@ -110,8 +119,6 @@ public static class Pronouns
         ["adjective"]="possessive adjective", ["pronoun"]="possessive pronoun",
     };
 
-    private static bool IsIter(object o) => o is System.Collections.IEnumerable && o is not string;
-
     /// <summary>
     /// Port of <c>pronoun_to_viewpoints</c>. Returns (1st/2nd, 3rd) tuple.
     /// </summary>
@@ -130,49 +137,51 @@ public static class Pronouns
         var (sourceViewpoint, sourceGender, sourceType) = entry;
 
         // defaults from source pronoun's attributes
-        if (!PronounTypes.Contains(pronounType ?? ""))
+        if (!PronounTypeSet.Contains(pronounType ?? ""))
         {
-            if (sourceType is string s) pronounType = s;
-            else if (sourceType is string[] arr) pronounType = arr[0];
-            else pronounType = DefaultPronounType;
+            pronounType = sourceType.Length > 0 ? sourceType[0] : DefaultPronounType;
         }
-        if (!Viewpoints.Contains(viewpoint ?? ""))
+        if (!ViewpointSet.Contains(viewpoint ?? ""))
         {
             viewpoint = sourceViewpoint;
         }
-        if (!Genders.Contains(gender ?? ""))
+        if (!GenderSet.Contains(gender ?? ""))
         {
-            if (sourceGender is string sg) gender = sg;
-            else if (sourceGender is string[] sga) gender = sga[0];
-            else gender = DefaultGender;
+            gender = sourceGender.Length > 0 ? sourceGender[0] : DefaultGender;
         }
 
         if (options is not null)
         {
-            List<string> opts;
+            // Single pass: normalize (trim, lower, alias) and classify each
+            // option immediately, in order — same decisions as the old
+            // collect-then-normalize-then-classify chain.
+            IEnumerable<string> raw;
             if (options is string sopt)
-                opts = sopt.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+                raw = sopt.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
             else if (options is IEnumerable<string> es)
-                opts = es.ToList();
+                raw = es;
             else if (options is IEnumerable<object> eo)
-                opts = eo.Select(o => o?.ToString() ?? "").ToList();
+                raw = eo.Select(o => o?.ToString() ?? "");
             else
-                opts = new List<string> { options.ToString() ?? "" };
+                raw = [options.ToString() ?? ""];
 
-            opts = opts.Select(p => p.Trim().ToLowerInvariant()).Select(o => Aliases.TryGetValue(o, out var a) ? a : o).ToList();
-            foreach (var opt in opts)
+            foreach (var item in raw)
             {
-                if (PronounTypes.Contains(opt)) pronounType = opt;
-                else if (Viewpoints.Contains(opt)) viewpoint = opt;
-                else if (Genders.Contains(opt)) gender = opt;
+                var opt = item.Trim().ToLowerInvariant();
+                if (Aliases.TryGetValue(opt, out var a)) opt = a;
+                if (PronounTypeSet.Contains(opt)) pronounType = opt;
+                else if (ViewpointSet.Contains(opt)) viewpoint = opt;
+                else if (GenderSet.Contains(opt)) gender = opt;
             }
         }
 
-        // validate sourceType handling: if multiple options, narrow
-        if (IsIter(sourceType))
+        // validate sourceType handling: multi-attribute sources narrow to the
+        // requested attribute when it is one of theirs, else fall back to the
+        // first. (Length > 1 reproduces the old IsIter split: every
+        // multi-element table entry was an array, every single was a string.)
+        if (sourceType.Length > 1)
         {
-            var arr = sourceType is string[] sa ? sa : ((object[])sourceType).Cast<string>().ToArray();
-            if (!arr.Contains(pronounType!)) pronounType = arr[0];
+            if (!sourceType.Contains(pronounType!)) pronounType = sourceType[0];
         }
         else
         {
@@ -180,8 +189,8 @@ public static class Pronouns
             // requested a different valid type (parameter or options): defaulting
             // above can only reproduce the source type here, so any other valid
             // value is an explicit request and must survive.
-            var single = (string)sourceType;
-            if (!PronounTypes.Contains(pronounType ?? "") || pronounType == single)
+            var single = sourceType.Length > 0 ? sourceType[0] : DefaultPronounType;
+            if (!PronounTypeSet.Contains(pronounType ?? "") || pronounType == single)
                 pronounType = single;
         }
 

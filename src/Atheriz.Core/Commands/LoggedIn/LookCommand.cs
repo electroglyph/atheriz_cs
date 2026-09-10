@@ -42,15 +42,8 @@ public sealed class LookCommand : Command
                 // noun/link fallback (not part of SearchWithFallback)
                 if (loc is Node node)
                 {
-                    var noun = node.GetNoun(targetName.ToLowerInvariant());
-                    if (noun is not null) { puppet.Msg(noun); return; }
-                    var link = node.GetLinks().FirstOrDefault(l => l.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase) || l.Aliases.Any(a => a.Equals(targetName, StringComparison.OrdinalIgnoreCase)));
-                    if (link is not null)
-                    {
-                        var nh = Globals.NodeHandler.GetCurrent();
-                        var ln = nh?.GetNode(link.Coord);
-                        if (ln is not null) { puppet.Msg(ln.ReturnAppearance(puppet)); return; }
-                    }
+                    var resolved = node.TryResolveLookTarget(targetName, puppet);
+                    if (resolved is not null) { puppet.Msg(resolved); return; }
                 }
                 CommandHelpers.MsgNoMatchFound(puppet, targetName);
                 return;
@@ -77,17 +70,12 @@ public sealed class LookCommand : Command
             else CommandHelpers.MsgNowhere(puppet);
             return;
         }
-        if (loc is not Node)
-        {
-            // show the location's own appearance as-is. The old code
-            // substituted the VIEWER's desc when the appearance was a bare
-            // "name:" (empty desc) — echoing self. Python just shows
-            // caller.at_look(loc) (look.py:20-30,66-72).
-            // Gated like the sibling paths: a denied container never reaches hooks/rendering.
-            if (!loc.Access(puppet, "view")) { puppet.Msg("You can't see anything."); return; }
-            puppet.Msg(puppet.AtLook(loc));
-            return;
-        }
+        // Single shared gate + render for Node and non-Node locations alike.
+        // The old non-Node branch substituted the VIEWER's desc when the
+        // appearance was a bare "name:" (empty desc) — echoing self; the port
+        // shows caller.at_look(loc) in both tails (look.py:20-30,66-72), so
+        // the two gated tails were already identical. Gated like the other
+        // paths: a denied container never reaches hooks/rendering.
         if (!loc.Access(puppet, "view")) { puppet.Msg("You can't see anything."); return; }
         puppet.Msg(puppet.AtLook(loc));
     }

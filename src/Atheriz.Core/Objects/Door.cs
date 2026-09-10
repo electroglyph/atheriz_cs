@@ -101,6 +101,13 @@ public class Door
     // persisted in DoorDto and rebuilt via LockPolicies.TryResolve. Bare-lambda
     // "custom" entries are kept in memory but dropped on save with a loud log.
 
+    // Magic mapping key for door announces + per-call construction helper. Each
+    // call site still gets its own dict instance (MsgContents copies-then-mutates
+    // per call, so sharing one instance would alias); only construction is shared.
+    private const string TargetKey = "target";
+    private static Dictionary<string, object?> TargetMapping(GameObject caller)
+        => new() { [TargetKey] = caller };
+
     // Port of atheriz/objects/base_door.py:17
     public Door() { }
     // Port of base_door.py:28
@@ -239,18 +246,18 @@ public class Door
         }
         if (status == "already_open")
         {
-            fromNode?.MsgContents($"$You(target) $conj(open) the already open door just to be sure.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
-            toNode?.MsgContents($"$You(target) $conj(open) the already open door just to be sure.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            fromNode?.MsgContents($"$You(target) $conj(open) the already open door just to be sure.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
+            toNode?.MsgContents($"$You(target) $conj(open) the already open door just to be sure.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return true;
         }
         if (status == "locked")
         {
-            loc?.MsgContents($"$You(target) $conj(try) to open the door, but it won't budge.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            loc?.MsgContents($"$You(target) $conj(try) to open the door, but it won't budge.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
         if (status == "no_access")
         {
-            loc?.MsgContents($"$You(target) $conj(try) to open the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            loc?.MsgContents($"$You(target) $conj(try) to open the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
         // The flip above already fired the dirty mark, so a throw in the map
@@ -258,7 +265,7 @@ public class Door
         try
         {
             MapOpen();
-            loc?.MsgContents($"$You(target) $conj(open) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            loc?.MsgContents($"$You(target) $conj(open) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             AtOpen(caller);
         }
         catch (Exception ex) { AtherizLogger.LogDebug("Suppressed Door.TryOpen post-open: " + ex.Message, "Door"); }
@@ -302,14 +309,14 @@ public class Door
         }
         if (status == "already_closed")
         {
-            loc?.MsgContents($"$You(target) $conj(try) to close the door, but it is already closed.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            loc?.MsgContents($"$You(target) $conj(try) to close the door, but it is already closed.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             // Idempotent close is success: the door state already matches what was wanted.
             return true;
         }
         if (status == "no_access")
         {
-            fromNode?.MsgContents($"$You(target) $conj(try) to close the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
-            toNode?.MsgContents($"$You(target) $conj(try) to close the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            fromNode?.MsgContents($"$You(target) $conj(try) to close the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
+            toNode?.MsgContents($"$You(target) $conj(try) to close the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
         // Same containment as the open path: the flip and dirty mark already
@@ -317,8 +324,8 @@ public class Door
         try
         {
             MapClose();
-            fromNode?.MsgContents($"$You(target) $conj(close) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
-            toNode?.MsgContents($"$You(target) $conj(close) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            fromNode?.MsgContents($"$You(target) $conj(close) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
+            toNode?.MsgContents($"$You(target) $conj(close) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             AtClose(caller);
         }
         catch (Exception ex) { AtherizLogger.LogDebug("Suppressed Door.TryClose post-close: " + ex.Message, "Door"); }
@@ -358,20 +365,20 @@ public class Door
         }
         if (status == "no_access")
         {
-            loc?.MsgContents($"$You(target) $conj(try) to lock the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            loc?.MsgContents($"$You(target) $conj(try) to lock the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
         if (status == "not_closed")
         {
-            loc?.MsgContents($"$You(target) $conj(try) to lock the door, but You can't lock an open door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            loc?.MsgContents($"$You(target) $conj(try) to lock the door, but You can't lock an open door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
         if (status == "already_locked")
         {
-            loc?.MsgContents($"$You(target) $conj(try) to lock the door, but it is already locked.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            loc?.MsgContents($"$You(target) $conj(try) to lock the door, but it is already locked.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
-        loc?.MsgContents($"$You(target) $conj(lock) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+        loc?.MsgContents($"$You(target) $conj(lock) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
         return true;
     }
     public bool LockDoor(GameObject? caller = null) => caller is not null ? TryLock(caller) : false;
@@ -398,23 +405,29 @@ public class Door
         }
         if (status == "no_access")
         {
-            loc?.MsgContents($"$You(target) $conj(try) to unlock the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            loc?.MsgContents($"$You(target) $conj(try) to unlock the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
         if (status == "unlocked")
         {
-            loc?.MsgContents($"$You(target) $conj(unlock) the door.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+            loc?.MsgContents($"$You(target) $conj(unlock) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return true;
         }
-        loc?.MsgContents($"$You(target) $conj(try) to unlock the door, but it is already unlocked.", exclude: null, fromObj: caller, mapping: new Dictionary<string, object?> { ["target"] = caller });
+        loc?.MsgContents($"$You(target) $conj(try) to unlock the door, but it is already unlocked.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
         return false;
     }
     public bool Unlock(GameObject? caller = null) => caller is not null ? TryUnlock(caller) : false;
 
     // Port of base_door.py:313 map_close
-    public virtual void MapClose()
+    public virtual void MapClose() => MapPaint(ClosedSymbol, closed: true);
+    // Port of base_door.py:331 map_open
+    public virtual void MapOpen() => MapPaint(OpenSymbol, closed: false);
+
+    // Shared paint body for MapClose/MapOpen: the blocks differ only in the
+    // preset symbol + closed flag under the same gate/seen/render shape.
+    private void MapPaint(string preset, bool closed)
     {
-        // Port of base_door.py map_close gate: settings.MAP_ENABLED only.
+        // Port of base_door.py map_close/map_open gate: settings.MAP_ENABLED only.
         // (The old Default fallback + second Global check made the fallback dead.)
         var settings = AtherizSettings.Global;
         if (!settings.MapEnabled || SymbolCoord is null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
@@ -431,35 +444,8 @@ public class Door
                 mi.Lock.EnterWriteLock();
                 try
                 {
-                    mi.PostGrid[SymbolCoord.Value] = SelectGlyph(ClosedSymbol, settings, true);
-                    if (mi.PreGrid.Count > 0) { mi.PreGrid[SymbolCoord.Value] = SelectGlyph(ClosedSymbol, settings, true); mi.MapChanged = true; }
-                }
-                finally { mi.Lock.ExitWriteLock(); }
-                mi.Render(true);
-            }
-        }
-    }
-    // Port of base_door.py:331 map_open
-    public virtual void MapOpen()
-    {
-        // Port of base_door.py map_open gate: settings.MAP_ENABLED only (see MapClose).
-        var settings = AtherizSettings.Global;
-        if (!settings.MapEnabled || SymbolCoord is null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
-        var mh = MapHandlerSingleton.Get();
-        if (mh is null) return;
-        HashSet<(string, int)> seen = [];
-        foreach (var coord in new[] { FromCoord, ToCoord })
-        {
-            var key = (coord.Area, coord.Z);
-            if (!seen.Add(key)) continue;
-            var mi = mh.GetMapInfo(coord.Area, coord.Z);
-            if (mi is not null)
-            {
-                mi.Lock.EnterWriteLock();
-                try
-                {
-                    mi.PostGrid[SymbolCoord.Value] = SelectGlyph(OpenSymbol, settings, false);
-                    if (mi.PreGrid.Count > 0) { mi.PreGrid[SymbolCoord.Value] = SelectGlyph(OpenSymbol, settings, false); mi.MapChanged = true; }
+                    mi.PostGrid[SymbolCoord.Value] = SelectGlyph(preset, settings, closed);
+                    if (mi.PreGrid.Count > 0) { mi.PreGrid[SymbolCoord.Value] = SelectGlyph(preset, settings, closed); mi.MapChanged = true; }
                 }
                 finally { mi.Lock.ExitWriteLock(); }
                 mi.Render(true);

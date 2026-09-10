@@ -331,13 +331,17 @@ public class MapInfo
                 [Settings.RoadPlaceholder] = "double",
             };
             var allSymbols = new HashSet<string>(Settings.AllSymbols);
-            var rendered = new Dictionary<(int, int), string>(PreGrid);
+            // No working copy of the grid: the resolve pass reads PreGrid
+            // (stable under the held write lock, identical to the old copy)
+            // and the publish pass writes PostGrid, so in-progress glyphs
+            // never pollute neighbor reads. The style table stays per-call:
+            // placeholders and symbols are per-Settings-instance.
             Dictionary<(int, int), string> toPlace = [];
-            foreach (var kv in rendered)
+            foreach (var kv in PreGrid)
             {
                 if (placeholderStyles.TryGetValue(kv.Value, out var style))
                 {
-                    var (n, s, e, w) = GetDirs(rendered, kv.Key, allSymbols);
+                    var (n, s, e, w) = GetDirs(PreGrid, kv.Key, allSymbols);
                     toPlace[kv.Key] = ResolveChar(n, s, e, w, style);
                 }
                 else if (kv.Value == Settings.RoomPlaceholder)
@@ -345,9 +349,9 @@ public class MapInfo
                     toPlace[kv.Key] = " ";
                 }
             }
-            foreach (var kv in toPlace) rendered[kv.Key] = kv.Value;
             PostGrid.Clear();
-            foreach (var kv in rendered) PostGrid[kv.Key] = kv.Value;
+            PostGrid.EnsureCapacity(PreGrid.Count);
+            foreach (var kv in PreGrid) PostGrid[kv.Key] = toPlace.TryGetValue(kv.Key, out var resolved) ? resolved : kv.Value;
         }
         finally { Lock.ExitWriteLock(); }
     }
@@ -476,6 +480,23 @@ public class MapInfo
         return entries;
     }
 
+    // Shared-list variant of EntriesFor for the Render fan-out: listeners
+    // absent from objEntries all filter to the same list, so one instance is
+    // built once and reused. The shared list is read-only downstream
+    // (AtMapUpdate consumes it; only AtPreMapRender transforms, and that
+    // keeps its per-listener grid copy) — a listener present in objEntries
+    // still gets a private filtered copy.
+    private static List<(string, string, (int, int))> EntriesForShared(
+        List<(int oid, (string sym, string desc, (int x, int y) coord) entry)> objEntries,
+        List<(string, string, (int, int))> staticEntries, int listenerId,
+        ref List<(string, string, (int, int))>? shared)
+    {
+        foreach (var (oid, _) in objEntries)
+            if (oid == listenerId) return EntriesFor(objEntries, staticEntries, listenerId);
+        shared ??= EntriesFor(objEntries, staticEntries, listenerId);
+        return shared;
+    }
+
     public virtual void RenderLegend()
     {
         List<GameObject> listenersSnapshot;
@@ -550,6 +571,7 @@ public class MapInfo
         finally { Lock.ExitReadLock(); }
 
         var (objEntries, staticEntries) = BuildEntries(objectsSnapshot, staticSnapshot);
+        List<(string, string, (int, int))>? sharedEntries = null;
 
         // The handler's own settings, not the ambient global: an
         // explicit-settings boot must throttle with its own limit.
@@ -562,7 +584,10 @@ public class MapInfo
             var last = Suppress<double?>(() => l.LastMapTime, null, "LastMapTime");
             bool hasLast = last.HasValue && last.Value != 0;
             if (hasLast && !force && fpsLimit > 0 && (now - last!.Value) <= fpsLimit) continue;
-            var entries = EntriesFor(objEntries, staticEntries, l.Id);
+            // Listeners absent from the object entries share one filtered
+            // list (read-only downstream); the per-listener grid copy stays:
+            // AtPreMapRender mutations must not leak across listeners.
+            var entries = EntriesForShared(objEntries, staticEntries, l.Id, ref sharedEntries);
             var gridCopy = new Dictionary<(int X, int Y), string>(gridSnapshot);
             gridCopy = Suppress(() => l.AtPreMapRender(gridCopy), gridCopy, "AtPreMapRender");
             var (mapStr, minX, maxY) = RenderGrid(gridCopy);

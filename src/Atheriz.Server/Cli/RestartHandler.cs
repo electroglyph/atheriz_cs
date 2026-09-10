@@ -18,11 +18,10 @@ public static class RestartHandler
         int portVal = port ?? StopHandler.EffectiveSettingsValue.WebserverPort;
         var savePath2 = StopHandler.EffectiveSettingsValue.SavePath;
         var pidPath2 = Path.Combine(savePath2, "server.pid");
-        if (File.Exists(pidPath2))
+        if (Infrastructure.PidFile.TryReadPid(pidPath2) is int oldPid)
         {
             try
             {
-                var oldPid = int.Parse(File.ReadAllText(pidPath2, System.Text.Encoding.UTF8).Trim());
                 Console.Write($"Waiting for server (PID {oldPid}) to stop...");
                 bool exited = await ProcessHelper.WaitForPidExitAsync(oldPid).ConfigureAwait(false);
                 if (!exited)
@@ -31,7 +30,7 @@ public static class RestartHandler
                     // SIGKILL, but only after re-verifying the pid still names
                     // our server — it may have been recycled mid-wait.
                     bool ours = false;
-                    try { ours = File.Exists(pidPath2) && int.Parse(File.ReadAllText(pidPath2, System.Text.Encoding.UTF8).Trim()) == oldPid && Infrastructure.PidFile.IsServerProcess(oldPid); } catch { }
+                    try { ours = Infrastructure.PidFile.TryReadPid(pidPath2) == oldPid && Infrastructure.PidFile.IsServerProcess(oldPid); } catch { }
                     if (ours)
                     {
                         Console.Write(" grace expired; force killing...");
@@ -62,13 +61,10 @@ public static class RestartHandler
         }
 
         if (fg) { Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms"); return true; }
-        List<string> spawnArgs = [];
-        if (port is not null) { spawnArgs.Add("--port"); spawnArgs.Add(port.ToString()!); }
-        if (host is not null) { spawnArgs.Add("--host"); spawnArgs.Add(host); }
         // respawn preserves the CLI telnet-port override, else the
         // replacement silently binds the configured default instead.
         var telnetPort = ArgumentParser.ParseTelnetPort(a);
-        if (telnetPort is not null) { spawnArgs.Add("--telnet-port"); spawnArgs.Add(telnetPort.ToString()!); }
+        var spawnArgs = DaemonSpawner.BuildSpawnArgs(port, host, telnetPort);
         await DaemonSpawner.SpawnDaemonAsync(spawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
         // Wait for the new server to come up on the port (bounded).
         if (!await WaitForPortUpAsync(portVal, 150).ConfigureAwait(false)) Console.WriteLine($"Warning: port {portVal} not listening yet; check save/server.log.");
@@ -76,19 +72,21 @@ public static class RestartHandler
         return false;
     }
 
+    // Shared bounded tenth-second poll for a port to reach a listening state:
+    // same socket-probe count, same 100 ms cadence, same bounds in both
+    // polarities — only the desired state differs.
+    internal static async Task<bool> WaitForPortStateAsync(int port, int tenths, bool wantUp)
+    {
+        for (int i = 0; i < tenths && Infrastructure.PidFile.IsPortListening(port) != wantUp; i++)
+            await Task.Delay(100).ConfigureAwait(false);
+        return Infrastructure.PidFile.IsPortListening(port) == wantUp;
+    }
+
     // Bounded poll for a port to become free (old listener released).
     internal static async Task<bool> WaitForPortFreeAsync(int port, int tenths)
-    {
-        for (int i = 0; i < tenths && Infrastructure.PidFile.IsPortListening(port); i++)
-            await Task.Delay(100).ConfigureAwait(false);
-        return !Infrastructure.PidFile.IsPortListening(port);
-    }
+        => await WaitForPortStateAsync(port, tenths, wantUp: false).ConfigureAwait(false);
 
     // Bounded poll for a port to come up (new server bound).
     internal static async Task<bool> WaitForPortUpAsync(int port, int tenths)
-    {
-        for (int i = 0; i < tenths && !Infrastructure.PidFile.IsPortListening(port); i++)
-            await Task.Delay(100).ConfigureAwait(false);
-        return Infrastructure.PidFile.IsPortListening(port);
-    }
+        => await WaitForPortStateAsync(port, tenths, wantUp: true).ConfigureAwait(false);
 }

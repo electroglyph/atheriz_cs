@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Microsoft.Extensions.Logging;
 
 namespace Atheriz.Core;
@@ -17,6 +18,21 @@ public static class AtherizLogger
     private static ILoggerFactory? _factory;
     private static ILogger? _cachedDefault;
     private static LogLevel _level = LogLevel.Information; // Port of logger.py:28 default info
+    // Port of logger.py:21 level_map debug/info/warning/error/critical.
+    // Built once (frozen, case-insensitive): ApplySettings runs on settings
+    // change, but there is no reason to allocate the 5-entry map per call.
+    // The lock takes in ApplySettings stay split (four separate holds):
+    // coalescing them around SetupLogger would self-deadlock on the
+    // non-reentrant lock.
+    private static readonly FrozenDictionary<string, LogLevel> LevelMap =
+        new Dictionary<string, LogLevel>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["debug"] = LogLevel.Debug,
+            ["info"] = LogLevel.Information,
+            ["warning"] = LogLevel.Warning,
+            ["error"] = LogLevel.Error,
+            ["critical"] = LogLevel.Critical,
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     private static LogLevel _appliedLevel = LogLevel.Information; // minimum level the live factory was built with
     // Volatile: published under _lock in ApplySettings but read under the
     // separate _fileLock in AppendToFile, so the lock alone gives readers
@@ -48,17 +64,9 @@ public static class AtherizLogger
         // concurrent ApplySettings cannot interleave path and level.
         lock (_lock) { _savePath = s.SavePath ?? "save"; }
         // Port of logger.py:21 level_map debug/info/warning/error/critical
-        var map = new Dictionary<string, LogLevel>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["debug"] = LogLevel.Debug,
-            ["info"] = LogLevel.Information,
-            ["warning"] = LogLevel.Warning,
-            ["error"] = LogLevel.Error,
-            ["critical"] = LogLevel.Critical,
-        };
         lock (_lock)
         {
-            _level = map.TryGetValue(s.LogLevel ?? "info", out var lv) ? lv : LogLevel.Information;
+            _level = LevelMap.TryGetValue(s.LogLevel ?? "info", out var lv) ? lv : LogLevel.Information;
             // Factory-refresh: the console provider (and minimum level) freeze at first
             // construction, so a changed level rebuilds the factory instead of silently
             // sticking. Write() also re-checks _level per call, so in-flight writers stay correct.
@@ -241,17 +249,23 @@ public static class AtherizLogger
             try
             {
                 logger.Log(level, 0, message, ex, (s, e) => e is not null ? $"{s}\n{e}" : s);
-                AppendToFile(level, category, message, ex);
                 // Also echo to Console.Error for CaptureAtherizLog routing (throttling tests rely on Console.Error capture)
-                var echoLine = FormatLine(level, category, message, ex);
-                try { Console.Error.WriteLine(echoLine); } catch { }
+                EchoAndAppend(level, category, message, ex);
                 return;
             }
             catch { }
         }
         // Fallback Console.Error — Port of logger.py:37 StreamHandler
-        var fallbackLine = FormatLine(level, category, message, ex);
-        try { Console.Error.WriteLine(fallbackLine); } catch { }
+        EchoAndAppend(level, category, message, ex);
+    }
+
+    // Shared echo-and-append tail for both Write branches above: format once,
+    // echo to Console.Error, append to the file. Per-sink bytes are identical
+    // in both branches (the logger branch additionally records via ILogger).
+    private static void EchoAndAppend(LogLevel level, string category, string message, Exception? ex)
+    {
+        var line = FormatLine(level, category, message, ex);
+        try { Console.Error.WriteLine(line); } catch { }
         try { AppendToFile(level, category, message, ex); } catch { }
     }
 
@@ -263,14 +277,24 @@ public static class AtherizLogger
     public static void LogCritical(string message, string category = DefaultCategory) => Write(LogLevel.Critical, category, message);
 
     // Tree-wide fallback idiom for save/shutdown paths: logging must never
-    // throw out of these. Try the logger, fall back to Console.Error.
+    // throw out of these. One body (LogRobust); the two historical names stay
+    // as one-line forwards — external game code calls them.
+    public static void LogRobust(LogLevel level, string message)
+    {
+        try
+        {
+            if (level == LogLevel.Error) LogError(message);
+            else LogInformation(message);
+        }
+        catch { try { Console.Error.WriteLine(message); } catch { } }
+    }
     public static void LogErrorRobust(string message)
     {
-        try { LogError(message); } catch { Console.Error.WriteLine(message); }
+        try { LogRobust(LogLevel.Error, message); } catch { Console.Error.WriteLine(message); }
     }
     public static void LogInformationRobust(string message)
     {
-        try { LogInformation(message); } catch { Console.Error.WriteLine(message); }
+        try { LogRobust(LogLevel.Information, message); } catch { Console.Error.WriteLine(message); }
     }
 
     // Compat overloads mirroring ILogger

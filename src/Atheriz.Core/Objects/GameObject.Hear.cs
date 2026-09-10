@@ -25,17 +25,24 @@ public partial class GameObject
         (50, 10.0),
     };
 
+    // Shared pre-hook core for the identical AtPreHear/AtPreEmitSound shape:
+    // both pass the same tuple through the same Hookable/catch-fallback, differing
+    // only in the hook name.
+    private (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) RunPreHook(string hook, GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
+    {
+        try { return Hookable<(bool, GameObject, string, string, double, bool)>(hook, () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay); }
+        catch { return (true, emitter, soundDesc, soundMsg, loudness, isSay); }
+    }
+
     public virtual (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) AtPreHear(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
         // hookable wrapper simplified: just call Hookable if hooks exist
-        try { return Hookable<(bool, GameObject, string, string, double, bool)>("at_pre_hear", () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay); }
-        catch { return (true, emitter, soundDesc, soundMsg, loudness, isSay); }
+        return RunPreHook("at_pre_hear", emitter, soundDesc, soundMsg, loudness, isSay);
     }
 
     public virtual (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) AtPreEmitSound(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
-        try { return Hookable<(bool, GameObject, string, string, double, bool)>("at_pre_emit_sound", () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay); }
-        catch { return (true, emitter, soundDesc, soundMsg, loudness, isSay); }
+        return RunPreHook("at_pre_emit_sound", emitter, soundDesc, soundMsg, loudness, isSay);
     }
 
     // Port of base_obj.py:1776 at_hear — base returns void in Python, but for uniformity return double like Node
@@ -98,15 +105,18 @@ public partial class GameObject
             soundDesc = allow1.desc; soundMsg = allow1.msg; loudness = allow1.loudness; isSay = allow1.isSay;
             if (loc is not null)
             {
+                // Single type test: the node location (when present) serves the
+                // pre-emit gate, the contents broadcast, and the BFS below.
+                var nodeLoc = loc as Node;
                 // loc pre emit
-                if (loc is Node nodeLoc)
+                if (nodeLoc is not null)
                 {
                     var allow2 = nodeLoc.AtPreEmitSound(allow1.emitter, soundDesc, soundMsg, loudness, isSay);
                     if (!allow2.ok) return 0;
                     soundDesc = allow2.desc; soundMsg = allow2.msg; loudness = allow2.loudness; isSay = allow2.isSay;
                 }
                 // broadcast to contents that can hear in source room
-                var contents = loc is Node n ? n.GetContents() : Globals.ObjectRegistry.Get(loc.ContentsSnapshot.ToList());
+                var contents = nodeLoc is not null ? nodeLoc.GetContents() : Globals.ObjectRegistry.Get(loc.ContentsSnapshot);
                 foreach (var o in contents)
                 {
                     if (!o.CanHear) continue;
@@ -115,25 +125,22 @@ public partial class GameObject
                     o.AtHear(pre.emitter, pre.desc, pre.msg, pre.loudness, pre.isSay);
                 }
                 // BFS propagation to neighboring nodes faithful to base_obj.py:1869-1913
-                if (loc is Node srcNode)
+                if (nodeLoc is not null)
                 {
+                    var srcNode = nodeLoc;
                     var nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();
                     var c = srcNode.Coord;
                     var area = nh.GetArea(c.Area);
                     if (area is not null)
                     {
                         // Determine attenuation at source
-                        bool open = false;
                         var doors = nh.GetDoors(c);
-                        if (doors is not null && doors.Count>0)
-                        {
-                            foreach (var d in doors.Values) if (!d.Closed) { open=true; break; }
-                        }
-                        else open = true;
+                        bool open = doors is null || doors.Count == 0 || doors.Values.Any(d => !d.Closed);
                         double attenuation = open ? srcNode.OpenAttenuation : srcNode.EnclosedAttenuation;
                         double nextLoud = loudness - attenuation;
                         var sourceLocal = (c.X, c.Y, c.Z);
-                        var visited = new HashSet<(int,int,int)>{ sourceLocal };
+                        // `seen` guards every enqueue including the seeds, so each
+                        // node dequeues at most once — no separate visited set needed.
                         var seen = new HashSet<(int,int,int)>{ sourceLocal };
                         var queue = new Queue<(Node node, double loud)>();
                         foreach (var neighbor in area.GetNeighbors(sourceLocal))
@@ -149,8 +156,6 @@ public partial class GameObject
                         {
                             var (node, nodeLoud) = queue.Dequeue();
                             var ncoord = (node.Coord.X, node.Coord.Y, node.Coord.Z);
-                            if (visited.Contains(ncoord)) continue;
-                            visited.Add(ncoord);
                             double ret = node.AtHear(allow1.emitter, soundDesc, soundMsg, nodeLoud, isSay);
                             if (ret > 0)
                             {

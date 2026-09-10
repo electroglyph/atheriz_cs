@@ -16,6 +16,12 @@ public static class LockPolicies
     public const string PuppetOwner = "puppet-owner";
     public const string Custom = "custom";
 
+    // Shared target-independent leaf for the Builder arms of both overloads:
+    // both read only lock-guarded accessing.IsBuilder. Do NOT fold the 1-arg
+    // overload into the 2-arg one with a dummy target — the 2-arg overload
+    // binds PcView/NotSelf/PuppetOwner predicates to the dummy.
+    private static bool IsBuilder(GameObject accessing) => accessing.IsBuilder;
+
     /// <summary>
     /// Target-independent subset (for holders like <c>Door</c> that are not
     /// <c>GameObject</c>s): only policies that don't bind the target resolve.
@@ -24,7 +30,7 @@ public static class LockPolicies
     {
         if (policy == Builder)
         {
-            predicate = accessing => accessing.IsBuilder;
+            predicate = IsBuilder;
             return true;
         }
         predicate = _ => false;
@@ -39,7 +45,7 @@ public static class LockPolicies
         switch (policy)
         {
             case Builder:
-                predicate = accessing => accessing.IsBuilder;
+                predicate = IsBuilder;
                 return true;
             case PcView:
                 // Port of base_obj.py:164 — tests only the *target's* connection.

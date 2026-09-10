@@ -30,7 +30,7 @@ public sealed class MazeCommand : Command
         {
             // DB-discipline rule (AGENTS.md): never load mid-game. The fallback used to
             // autoLoad:true here (full DB load); an empty handler plus a loud warning
-            // is the honest shape when no world exists (owner decision 2026-09-08).
+            // is the honest shape when no world exists.
             try { Atheriz.Core.AtherizLogger.LogWarning("MazeCommand: no node handler available; using an empty one (world may be incomplete).", "MazeCommand"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed MazeCommand.NodeHandlerFactory: " + logEx.Message, "MazeCommand"); }
             return NodeHandler.GetCurrent() ?? new NodeHandler(autoLoad:false);
         }
@@ -53,15 +53,12 @@ public sealed class MazeCommand : Command
         try
         {
             var globalNh = GlobalServices.GetNodeHandler();
-            NodeHandler? factoryNh = null;
-            try { factoryNh = NodeHandlerFactory(); } catch (Exception) { }
-            if (factoryNh is not null && !ReferenceEquals(factoryNh, globalNh))
+            nh = ResolveHandler(globalNh, NodeHandlerFactory);
+            if (!ReferenceEquals(nh, globalNh))
             {
                 // Test injected custom handler via factory – honour it (keeps MazeMapsStoredInPreGrid passing)
-                nh = factoryNh;
                 GlobalServices.SetNodeHandler(nh);
             }
-            else nh = globalNh;
         }
         catch { nh = NodeHandler.GetCurrent() ?? NodeHandlerFactory(); }
         // Ensure singleton set without losing existing areas
@@ -82,16 +79,12 @@ public sealed class MazeCommand : Command
         try
         {
             var globalMh = GlobalServices.GetMapHandler();
-            MapHandler? factoryMh = null;
-            try { factoryMh = MapHandlerFactory(); } catch (Exception) { }
-            if (factoryMh is not null && !ReferenceEquals(factoryMh, globalMh))
-            {
-                // Test injected custom MapHandler – honour it to keep PortedMaze tests passing,
-                // but if global already has limbo maps and factory is empty, prefer global to preserve limbo
-                if (globalMh.Snapshot().Count > 0 && factoryMh.Snapshot().Count == 0) mh = globalMh;
-                else mh = factoryMh;
-            }
-            else mh = globalMh;
+            var picked = ResolveHandler(globalMh, MapHandlerFactory);
+            // Test injected custom MapHandler – honour it to keep PortedMaze tests passing,
+            // but if global already has limbo maps and factory is empty, prefer global to preserve limbo.
+            mh = (!ReferenceEquals(picked, globalMh) && globalMh.Snapshot().Count > 0 && picked.Snapshot().Count == 0)
+                ? globalMh
+                : picked;
         }
         catch { mh = MapHandlerFactory(); }
         try { Atheriz.Core.Objects.MapHandlerSingleton.Set(mh); } catch (Exception) { }
@@ -136,22 +129,12 @@ public sealed class MazeCommand : Command
                             if (found)
                             {
                                 go.Msg($"path found in: {sw2.Elapsed.TotalMilliseconds:F2} milliseconds");
-                                try
-                                {
-                                    var bgPayload = new Dictionary<string, object?> { ["color"] = new List<int> { 83, 128, 56 }, ["coords"] = path.Select(n => (object)new List<int> { n.Coord.X, n.Coord.Y }).ToList() };
-                                    try { capturedConn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
-                                    if (capturedConn is null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
-                                } catch (Exception) { }
+                                try { SendBackground(capturedConn, go, [83, 128, 56], path.Select(n => (object)new List<int> { n.Coord.X, n.Coord.Y }).ToList()); } catch (Exception) { }
                             }
                             else
                             {
                                 go.Msg($"path not found in: {sw2.Elapsed.TotalMilliseconds:F2} milliseconds");
-                                try
-                                {
-                                    var bgPayload = new Dictionary<string, object?> { ["color"] = new List<int> { 90, 0, 0 }, ["coords"] = dead.Select(c => (object)new List<int> { c.X, c.Y }).ToList() };
-                                    try { capturedConn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
-                                    if (capturedConn is null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
-                                } catch (Exception) { }
+                                try { SendBackground(capturedConn, go, [90, 0, 0], dead.Select(c => (object)new List<int> { c.X, c.Y }).ToList()); } catch (Exception) { }
                             }
                         }
                         catch (Exception ex) { try { go.Msg($"pathfind error: {ex.Message}"); } catch (Exception) { } }
@@ -170,6 +153,25 @@ public sealed class MazeCommand : Command
         {
             // No node at origin skip move (test expects not called)
         }
+    }
+
+    // Shared global-vs-factory reconcile: a factory handler that differs from
+    // the global singleton wins (test-injected world); otherwise the global
+    // stays. Pure selection — registration side-effects stay at the call sites.
+    private static T ResolveHandler<T>(T global, Func<T?> factory) where T : class
+    {
+        T? injected = null;
+        try { injected = factory(); } catch (Exception) { }
+        return injected is not null && !ReferenceEquals(injected, global) ? injected : global;
+    }
+
+    // Shared pathfind-result background: one payload shape plus the same
+    // captured-connection-then-session fallback for both outcomes.
+    private static void SendBackground(Atheriz.Core.Network.BaseConnection? conn, GameObject go, List<int> color, List<object> coords)
+    {
+        var bgPayload = new Dictionary<string, object?> { ["color"] = color, ["coords"] = coords };
+        try { conn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
+        if (conn is null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
     }
 
     public static (Dictionary<(int,int), string> map, NodeGrid grid) GenMapAndGrid(int w, int h, string area)
@@ -198,7 +200,7 @@ public sealed class MazeCommand : Command
         bool done = false;
         while (!done)
         {
-            if (valid.Count == 0) { path = path.Take(path.Count - 1).ToList(); if (path.Count == 0) { done = true; break; } current = path.Last(); nodes = maze.GetValueOrDefault(current, []); valid = GetValid(current); continue; }
+            if (valid.Count == 0) { if (path.Count == 0) { done = true; break; } path.RemoveAt(path.Count - 1); if (path.Count == 0) { done = true; break; } current = path.Last(); nodes = maze.GetValueOrDefault(current, []); valid = GetValid(current); continue; }
             var c = valid[Random.Shared.Next(valid.Count)];
             visited[c] = true;
             path.Add(c);
@@ -208,7 +210,7 @@ public sealed class MazeCommand : Command
             valid = GetValid(current);
             while (valid.Count == 0)
             {
-                path = path.Take(path.Count - 1).ToList();
+                path.RemoveAt(path.Count - 1);
                 if (path.Count == 0) { done = true; break; }
                 current = path.Last();
                 nodes = maze.GetValueOrDefault(current, []);

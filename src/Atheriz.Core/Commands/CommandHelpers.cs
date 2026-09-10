@@ -46,6 +46,74 @@ public static class CommandHelpers
         }
     }
     /// <summary>
+    /// ORDER-PRESERVING dedup for suggestion/choice lists: a
+    /// <see cref="HashSet{T}"/> for membership plus the <see cref="List{T}"/>
+    /// for order. Never a bare set — insertion order feeds
+    /// <c>BestMatch</c>'s stable tie-breaks (user-visible suggestions).
+    /// </summary>
+    internal static bool TryAddChoice(List<string> ordered, HashSet<string> seen, string key)
+    {
+        if (!seen.Add(key)) return false;
+        ordered.Add(key);
+        return true;
+    }
+    /// <summary>
+    /// Narrow comma-form coord parse: the exact shape SearchWithFallback has
+    /// always accepted — optional outer parens, then four comma-separated
+    /// parts with the last three ints. Deliberately NOT the wider
+    /// <see cref="Coord.TryParse"/> accept set: space-separated
+    /// <c>Area 1 2 3</c> (no comma) must keep falling through to the name
+    /// search below instead of becoming a coord lookup.
+    /// </summary>
+    internal static bool TryParseCommaCoord(string raw, out Coord coord)
+    {
+        coord = new Coord(string.Empty, 0, 0, 0);
+        string inner = raw;
+        if (inner.StartsWith("(", StringComparison.Ordinal) && inner.EndsWith(")", StringComparison.Ordinal)) inner = inner[1..^1];
+        if (!inner.Contains(",")) return false;
+        var parts = inner.Split(',').Select(p => p.Trim()).ToList();
+        if (parts is not [var areaName, var xs, var ys, var zs]) return false;
+        if (!int.TryParse(xs, out var x) || !int.TryParse(ys, out var y) || !int.TryParse(zs, out var z)) return false;
+        coord = new Coord(areaName, x, y, z);
+        return true;
+    }
+
+    /// <summary>
+    /// Single truth for <c>#&lt;id&gt;</c> references: true with <paramref name="id"/>
+    /// set when <paramref name="query"/> is a well-formed <c>#</c>-reference,
+    /// false for anything else (including malformed <c>#</c>, <c>#x</c>).
+    /// Both id consumers below use it so two parses can never disagree on
+    /// edge inputs.
+    /// </summary>
+    internal static bool TryParseIdRef(string query, out int id)
+    {
+        id = 0;
+        if (!query.StartsWith("#", StringComparison.Ordinal)) return false;
+        return int.TryParse(query[1..], out id);
+    }
+
+    /// <summary>
+    /// Shared count parse for bulk commands: int-typed parser values pass
+    /// through, strings parse, anything else falls back to
+    /// <paramref name="defaultValue"/>. The floor is PER-CALLER — spam has
+    /// none (a 0 count runs an empty loop with "Creating 0.../Created 0..."
+    /// messages; adding a refusal would be a new user-visible message), while
+    /// wander requires 1. A below-floor value returns false and the caller
+    /// sends its own refusal.
+    /// </summary>
+    internal static bool TryGetCount(GameArgumentParser.ParsedArgs? pa, string key, int defaultValue, int? min, out int count)
+    {
+        count = defaultValue;
+        if (pa is not null)
+        {
+            var raw = pa[key];
+            if (raw is int i) count = i;
+            else if (raw is not null && int.TryParse(raw.ToString(), out var parsed)) count = parsed;
+        }
+        if (min.HasValue && count < min.Value) return false;
+        return true;
+    }
+    /// <summary>
     /// Port of <c>atheriz/objects/contents.py:search</c> fallback + <c>delete.py:47-65</c> coord handling.
     /// Handles #id (global), "me", "here", coord "(area,x,y,z)", then caller search + loc fallback if view allowed.
     /// </summary>
@@ -53,20 +121,12 @@ public static class CommandHelpers
     {
         if (string.IsNullOrWhiteSpace(name)) return [];
         string raw = name.Trim();
-        // Handle parenthesized coord like "(area,0,0,0)" -> strip parens for detection
-        string inner = raw;
-        if (inner.StartsWith("(", StringComparison.Ordinal) && inner.EndsWith(")", StringComparison.Ordinal)) inner = inner[1..^1];
-        // Coord detection: 4 parts with last 3 ints
-        if (inner.Contains(","))
+        // Handle parenthesized coord like "(area,0,0,0)" (comma form only).
+        if (TryParseCommaCoord(raw, out var coord))
         {
-            var parts = inner.Split(',').Select(p => p.Trim()).ToList();
-            if (parts is [var areaName, var xs, var ys, var zs] && int.TryParse(xs, out var x) && int.TryParse(ys, out var y) && int.TryParse(zs, out var z))
-            {
-                var coord = new Coord(areaName, x, y, z);
-                var node = ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(coord)).FirstOrDefault() as GameObject;
-                if (node is not null) return [node];
-                return [];
-            }
+            var node = ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(coord)).FirstOrDefault() as GameObject;
+            if (node is not null) return [node];
+            return [];
         }
         if (raw.Equals("me", StringComparison.OrdinalIgnoreCase)) return [caller];
         if (raw.Equals("here", StringComparison.OrdinalIgnoreCase))
@@ -76,7 +136,7 @@ public static class CommandHelpers
         }
         if (raw.StartsWith("#", StringComparison.Ordinal))
         {
-            if (!int.TryParse(raw[1..], out var id)) return [];
+            if (!TryParseIdRef(raw, out var id)) return [];
             var objs = ObjectRegistry.Get(id);
             if (objs.Count == 0) return [];
             return [objs[0]];
@@ -116,7 +176,7 @@ public static class CommandHelpers
         {
             if (query.StartsWith("#", StringComparison.Ordinal))
             {
-                if (!int.TryParse(query[1..], out var id))
+                if (!TryParseIdRef(query, out var id))
                 {
                     caller.Msg("Invalid ID format. Use #<number>.");
                     return null;

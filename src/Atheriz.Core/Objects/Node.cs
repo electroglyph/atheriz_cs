@@ -204,8 +204,9 @@ public partial class Node : GameObject
     public List<GameObject> GetContents()
     {
         // ContentsSnapshot already snapshots under SyncRoot; resolve outside the lock.
-        // Node uses base contents; delegate to ObjectRegistry
-        return ObjectRegistry.Get(ContentsSnapshot.ToList());
+        // Node uses base contents; delegate to ObjectRegistry (its Get snapshots
+        // internally, so no caller-side ToList; the snapshot is never mutated here).
+        return ObjectRegistry.Get(ContentsSnapshot);
     }
 
     // Port of nodes.py:113
@@ -233,8 +234,7 @@ public partial class Node : GameObject
         HashSet<int> scripts = ScriptsSnapshot;
         foreach (var id in scripts)
         {
-            var objs = ObjectRegistry.Get(id);
-            if (objs.Count > 0 && objs[0] is Script s)
+            if (GameObject.TryGetScript(id, out var s))
             {
                 try { s.InstallHooks(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
             }
@@ -390,8 +390,8 @@ public partial class Node : GameObject
                 }
                 else if (homeRef is Persistence.Dto.LocationRef.CoordLocation cl)
                 {
-                    var cands = ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(cl.Coord));
-                    homeObj = cands.FirstOrDefault();
+                    // Index-first with scan fallback (same node by construction).
+                    homeObj = ObjectRegistry.FindNodeByCoord(cl.Coord);
                 }
                 GameObject? fallback = null;
                 if (caller is not null)

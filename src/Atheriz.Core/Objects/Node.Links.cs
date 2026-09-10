@@ -8,9 +8,9 @@ public partial class Node
         SyncRoot.EnterWriteLock();
         try
         {
-            var low = key.ToLowerInvariant();
-            foreach (var k in Nouns.Keys.ToList()) if (k.ToLowerInvariant() == low && k != low) Nouns.Remove(k);
-            Nouns[low] = desc;
+            // No case-variant hunt: the OrdinalIgnoreCase dict cannot hold two
+            // keys differing only by case, and the indexer overwrites anyway.
+            Nouns[key.ToLowerInvariant()] = desc;
             IsModified = true;
         }
         finally { SyncRoot.ExitWriteLock(); }
@@ -22,7 +22,6 @@ public partial class Node
         try
         {
             Nouns.Remove(key.ToLowerInvariant());
-            foreach (var k in Nouns.Keys.ToList()) if (k.ToLowerInvariant() == key.ToLowerInvariant()) Nouns.Remove(k);
             IsModified = true;
         }
         finally { SyncRoot.ExitWriteLock(); }
@@ -55,22 +54,37 @@ public partial class Node
     }
     // Port of nodes.py:579. Case-insensitive like GetLinkByName :
     // existence guards must agree with lookups.
-    public bool HasLinkName(string name)
-    {
-        var low = name.ToLowerInvariant();
-        SyncRoot.EnterReadLock();
-        try { return Links.Any(l => l.Name.ToLowerInvariant() == low || l.Aliases.Any(a => a.Equals(low, StringComparison.OrdinalIgnoreCase))); }
-        finally { SyncRoot.ExitReadLock(); }
-    }
+    public bool HasLinkName(string name) => FindLink(name) is not null;
     // Port of nodes.py:590
-    public NodeLink? GetLinkByName(string name)
+    public NodeLink? GetLinkByName(string name) => FindLink(name);
+    // Shared alias-including lookup for HasLinkName/GetLinkByName only.
+    // AddLinkIfAbsent guards stay name-only (alias collisions must NOT block
+    // link creation), so they must not route through this.
+    private NodeLink? FindLink(string name)
     {
-        var low = name.ToLowerInvariant();
         SyncRoot.EnterReadLock();
-        try { return Links.FirstOrDefault(l => l.Name.ToLowerInvariant() == low || l.Aliases.Any(a => a.Equals(low, StringComparison.OrdinalIgnoreCase))); }
+        try { return Links.FirstOrDefault(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || l.Aliases.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase))); }
         finally { SyncRoot.ExitReadLock(); }
     }
+    // Name-only guard shared by the two AddLinkIfAbsent checks (same lock-held
+    // shape, no alias matching).
+    private bool HasLinkNameNoLock(string name)
+        => Links.Any(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
     public NodeLink? GetLink(string name) => GetLinkByName(name);
+    // Look-command noun/link fallback (moved out of LookCommand.Run intact):
+    // noun text first, then the linked node's appearance. Null when neither
+    // matches (a found link with no node falls through to "no match" at the
+    // call site, as before). The view gate stays at the call site — gate
+    // before resolve, never after.
+    internal string? TryResolveLookTarget(string name, GameObject looker)
+    {
+        var noun = GetNoun(name.ToLowerInvariant());
+        if (noun is not null) return noun;
+        var link = GetLinks().FirstOrDefault(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || l.Aliases.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase)));
+        if (link is null) return null;
+        var ln = NodeHandler.GetCurrent()?.GetNode(link.Coord);
+        return ln?.ReturnAppearance(looker);
+    }
     // Port of nodes.py:598
     public NodeArea? Area => NodeHandler.GetCurrent()?.GetArea(Coord.Area);
     // Port of nodes.py:604
@@ -146,13 +160,13 @@ public partial class Node
         // AddLinkIfAbsent("North") + AddLinkIfAbsent("north") install a shadowed
         // unreachable link.
         SyncRoot.EnterReadLock();
-        try { if (Links.Any(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return false; }
+        try { if (HasLinkNameNoLock(name)) return false; }
         finally { SyncRoot.ExitReadLock(); }
         var link = factory();
         SyncRoot.EnterWriteLock();
         try
         {
-            if (Links.Any(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return false;
+            if (HasLinkNameNoLock(name)) return false;
             // inline add_link logic but avoid double lock
             if (Links.Count > 0 && Links.Contains(link)) return false;
             if (Links.Count == 0) Links = [link];
@@ -230,7 +244,7 @@ public partial class Node
             foreach (var o in objs) { o.IsModified = true; }
         }
         finally { SyncRoot.ExitWriteLock(); }
-        foreach (var o in objs) try { o.Location = new Persistence.Dto.LocationRef.CoordLocation(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObjects: " + logEx.Message, "Node"); }
+        foreach (var o in objs) try { o.Location = Persistence.Dto.LocationRef.FromCoord(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObjects: " + logEx.Message, "Node"); }
         foreach (var o in objs) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObjects: " + logEx.Message, "Node"); }
     }
     // Port of nodes.py:747 add_object
@@ -246,7 +260,7 @@ public partial class Node
         }
         finally { SyncRoot.ExitWriteLock(); }
         // Like MoveTo into a node, membership implies the node's coord.
-        try { obj.Location = new Persistence.Dto.LocationRef.CoordLocation(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }
+        try { obj.Location = Persistence.Dto.LocationRef.FromCoord(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }
         try { AddExits(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }
     }
     // Port of nodes.py:759 remove_object
@@ -265,32 +279,14 @@ public partial class Node
     }
 
     // Port of nodes.py:770 msg_contents
+    // Broadcast loop shared with the base overload via
+    // ContentUtils.EmitToContents; only the receiver source (live contents)
+    // stays here. Node delivery keeps catch-all fallback semantics
+    // (nodeSemantics: true): any parser failure falls back to raw text and
+    // raiseErrors never throws — unlike the base overload.
     public void MsgContents(string? text, List<GameObject>? exclude = null, GameObject? fromObj = null, Dictionary<string, object?>? mapping = null, bool raiseErrors = false, string? msgType = null)
     {
-        if (text is null) text = "";
-        if (mapping is not null) mapping = new Dictionary<string, object?>(mapping, StringComparer.Ordinal);
-        mapping ??= [];
-        var you = fromObj ?? this;
-        mapping.TryAdd("you", you);
-        var contents = GetContents();
-        HashSet<GameObject>? excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
-        foreach (var receiver in contents)
-        {
-            if (excl is not null && excl.Contains(receiver)) continue;
-            string outMsg;
-            try { outMsg = FuncParser.Parse(text, you, receiver, mapping, raiseErrors); } catch { outMsg = text; }
-            if (!string.IsNullOrEmpty(outMsg))
-            {
-                try
-                {
-                    var formatted = outMsg;
-                    // safe format map handled inside Parse already for {you}
-                    receiver.Msg(formatted, fromObj, null, false, msgType);
-                }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.MsgContents: " + logEx.Message, "Node"); }
-            }
-            else receiver.Msg("", fromObj, null, false, msgType);
-        }
+        ContentUtils.EmitToContents(GetContents(), this, text, fromObj, mapping, exclude, msgType, raiseErrors, nodeSemantics: true);
     }
 
     // Port of nodes.py:828 get_display_things

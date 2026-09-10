@@ -56,8 +56,12 @@ public sealed class NodeGrid
         Lock.EnterWriteLock();
         try
         {
+            // The Keys snapshot stays: assigning an existing key still bumps
+            // the dictionary version, so enumerating Keys directly would throw
+            // InvalidOperationException. Only the double lookup collapses via
+            // TryGetValue.
             foreach (var k in Nodes.Keys.ToList())
-                if (Nodes[k] is Node cur && cur.Id == replacement.Id && !ReferenceEquals(cur, replacement))
+                if (Nodes.TryGetValue(k, out var cur) && cur is not null && cur.Id == replacement.Id && !ReferenceEquals(cur, replacement))
                     Nodes[k] = replacement;
         }
         finally { Lock.ExitWriteLock(); }
@@ -127,14 +131,7 @@ public sealed class NodeGrid
             old.IsDeleted = true;
             ObjectRegistry.RemoveObject(old);
         }
-        if (linksSnap.Count > 0)
-        {
-            var nh = NodeHandler.GetCurrent();
-            if (nh is not null)
-                foreach (var l in linksSnap)
-                    if (Area != l.Coord.Area)
-                        nh.AddTransition(new Transition(coordSnap, l.Coord, l.Name));
-        }
+        SyncCrossAreaTransitions(linksSnap, coordSnap, isAdd: true);
     }
     // Port of nodes.py:1044
     public void RemoveNode((int X, int Y) coord)
@@ -146,13 +143,24 @@ public sealed class NodeGrid
         // Enumerate a node-locked snapshot — the raw list used to be walked here
         // with no lock at all.
         var linksSnap = node?.GetLinks() ?? [];
-        if (linksSnap.Count > 0)
-        {
-            var nh = NodeHandler.GetCurrent();
-            if (nh is not null)
-                foreach (var l in linksSnap)
-                    if (Area != l.Coord.Area) nh.RemoveTransition(l.Coord);
-        }
+        SyncCrossAreaTransitions(linksSnap, default, isAdd: false);
+    }
+    // Cross-area transition sync shared by AddNode/RemoveNode, parametrized by
+    // direction because the loops differ: adds publish a transition from the
+    // node's own coord snapshot, removes withdraw by link coord. Both callers
+    // invoke it after releasing the grid write lock, so lock order is
+    // identical to the inlined loops it replaces.
+    private void SyncCrossAreaTransitions(List<NodeLink> linksSnap, Coord coordSnap, bool isAdd)
+    {
+        if (linksSnap.Count == 0) return;
+        var nh = NodeHandler.GetCurrent();
+        if (nh is null) return;
+        foreach (var l in linksSnap)
+            if (Area != l.Coord.Area)
+            {
+                if (isAdd) nh.AddTransition(new Transition(coordSnap, l.Coord, l.Name));
+                else nh.RemoveTransition(l.Coord);
+            }
     }
     // Port of nodes.py:1055
     public Node? GetNode((int X, int Y) coord)
@@ -172,15 +180,18 @@ public sealed class NodeGrid
         HashSet<(int, int)> occupied)
     {
         HashSet<int> failed = [];
-        var sources = moves.Select(m => m.src).ToList();
+        // Counts built straight from moves: the old sources.Take(i) arm could
+        // only fire when a duplicate source existed, which already implies
+        // sourceCounts[src] > 1, so it never decided anything on its own.
+        // sourceSet stays: it backs the dst-occupied check below.
         Dictionary<(int, int), int> sourceCounts = [];
-        foreach (var s in sources)
-            sourceCounts[s] = sourceCounts.TryGetValue(s, out var n) ? n + 1 : 1;
-        var sourceSet = new HashSet<(int, int)>(sources);
+        foreach (var m in moves)
+            sourceCounts[m.src] = sourceCounts.TryGetValue(m.src, out var n) ? n + 1 : 1;
+        var sourceSet = new HashSet<(int, int)>(moves.Select(m => m.src));
         for (int i = 0; i < moves.Count; i++)
         {
             var (src, dst) = moves[i];
-            if (sources.Take(i).Contains(src) || sourceCounts[src] > 1) { failed.Add(i); continue; }
+            if (sourceCounts[src] > 1) { failed.Add(i); continue; }
             if (!occupied.Contains(src)) { failed.Add(i); continue; }
             if (occupied.Contains(dst) && !sourceSet.Contains(dst)) failed.Add(i);
         }
@@ -234,7 +245,9 @@ public sealed class NodeGrid
             }
             // rewrite links inside this grid
             affected = moved.ToDictionary(m => m.node.Id, m => m.node);
-            foreach (var other in Nodes.Values.ToList())
+            // Direct enumeration: the loop rewrites node internals under node
+            // locks and never mutates the grid dict, so no snapshot is needed.
+            foreach (var other in Nodes.Values)
             {
                 bool rewritten = false;
                 other.NodeLock.EnterWriteLock();

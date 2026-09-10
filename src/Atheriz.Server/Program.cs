@@ -28,48 +28,51 @@ void PrintHelp()
 void PrintCommandHelp(string cmd)
 {
     var defPort = new AtherizSettings().WebserverPort;
-    switch (cmd)
+    // Command-to-row table: the start/restart and stop/reload pairs share
+    // one row INSTANCE each (not copies), with the per-command word picked
+    // by the row funcs. Dictionary order matches the --help listing order.
+    // Every string is verbatim from the switch this replaced.
+    var startRow = new CommandHelpRow(
+        c => $"Usage: Atheriz.Server {c} [--port N] [--host HOST] [--foreground|-f]",
+        c => c == "start" ? "  Start the AtheriZ server" : "  Restart the AtheriZ server",
+        [$"  --port N            Override the webserver port (default: {defPort})",
+         "  --host HOST         Override the host interface to bind to",
+         "  --foreground, -f    Run the server in the foreground"]);
+    var stopRow = new CommandHelpRow(
+        c => $"Usage: Atheriz.Server {c} [--port N]",
+        c => c == "stop" ? "  Stop the AtheriZ server" : "  Hot reload game logic",
+        [$"  --port N            Override default port (default: {defPort})"]);
+    var table = new Dictionary<string, CommandHelpRow>(StringComparer.Ordinal)
     {
-        case "start":
-        case "restart":
-            Console.WriteLine($"Usage: Atheriz.Server {cmd} [--port N] [--host HOST] [--foreground|-f]");
-            Console.WriteLine(cmd == "start" ? "  Start the AtheriZ server" : "  Restart the AtheriZ server");
-            Console.WriteLine($"  --port N            Override the webserver port (default: {defPort})");
-            Console.WriteLine("  --host HOST         Override the host interface to bind to");
-            Console.WriteLine("  --foreground, -f    Run the server in the foreground");
-            break;
-        case "stop":
-        case "reload":
-            Console.WriteLine($"Usage: Atheriz.Server {cmd} [--port N]");
-            Console.WriteLine(cmd == "stop" ? "  Stop the AtheriZ server" : "  Hot reload game logic");
-            Console.WriteLine($"  --port N            Override default port (default: {defPort})");
-            break;
-        case "reset":
-            Console.WriteLine($"Usage: Atheriz.Server reset [-f|--force|--yes|-y] [--port N] [--host HOST]");
-            Console.WriteLine("  Delete all game data and start fresh");
-            Console.WriteLine("  -f, --force         Skip confirmation prompt");
-            Console.WriteLine($"  --port N            Override default port (default: {defPort})");
-            Console.WriteLine("  --host HOST         Override the host interface to bind to");
-            break;
-        case "create":
-            Console.WriteLine($"Usage: Atheriz.Server create <accountname> <charactername> <password> [--port N]");
-            Console.WriteLine("  Create a new account and character");
-            Console.WriteLine($"  --port N            Override the webserver port of the running server (default: {defPort})");
-            break;
-        case "new":
-            Console.WriteLine($"Usage: Atheriz.Server new <foldername> [--port N] [--host HOST] [--foreground|-f] [--overwrite|--force]");
-            Console.WriteLine("  Create a new game folder with template classes, then start the server");
-            Console.WriteLine($"  --port N            Override the webserver port (default: {defPort})");
-            Console.WriteLine("  --host HOST         Override the host interface to bind to");
-            Console.WriteLine("  --foreground, -f    Run the server in the foreground");
-            break;
-        case "test":
-            Console.WriteLine("Usage: Atheriz.Server test [core] [args...]");
-            Console.WriteLine("  Run tests. Runs game tests by default, or core tests with 'test core'.");
-            Console.WriteLine("  Use 'core' as the first argument to run core AtheriZ tests. Any other arguments are passed to dotnet test.");
-            break;
-        default: PrintHelp(); break;
-    }
+        ["start"] = startRow,
+        ["restart"] = startRow,
+        ["stop"] = stopRow,
+        ["reload"] = stopRow,
+        ["reset"] = new CommandHelpRow(
+            _ => "Usage: Atheriz.Server reset [-f|--force|--yes|-y] [--port N] [--host HOST]",
+            _ => "  Delete all game data and start fresh",
+            ["  -f, --force         Skip confirmation prompt",
+             $"  --port N            Override default port (default: {defPort})",
+             "  --host HOST         Override the host interface to bind to"]),
+        ["create"] = new CommandHelpRow(
+            _ => "Usage: Atheriz.Server create <accountname> <charactername> <password> [--port N]",
+            _ => "  Create a new account and character",
+            [$"  --port N            Override the webserver port of the running server (default: {defPort})"]),
+        ["new"] = new CommandHelpRow(
+            _ => "Usage: Atheriz.Server new <foldername> [--port N] [--host HOST] [--foreground|-f] [--overwrite|--force]",
+            _ => "  Create a new game folder with template classes, then start the server",
+            [$"  --port N            Override the webserver port (default: {defPort})",
+             "  --host HOST         Override the host interface to bind to",
+             "  --foreground, -f    Run the server in the foreground"]),
+        ["test"] = new CommandHelpRow(
+            _ => "Usage: Atheriz.Server test [core] [args...]",
+            _ => "  Run tests. Runs game tests by default, or core tests with 'test core'.",
+            ["  Use 'core' as the first argument to run core AtheriZ tests. Any other arguments are passed to dotnet test."]),
+    };
+    if (!table.TryGetValue(cmd, out var row)) { PrintHelp(); return; }
+    Console.WriteLine(row.Usage(cmd));
+    Console.WriteLine(row.Description(cmd));
+    foreach (var line in row.Options) Console.WriteLine(line);
 }
 if (rest.Contains("--help", StringComparer.Ordinal) || rest.Contains("-h", StringComparer.Ordinal)) { PrintCommandHelp(command); return; }
 // Port of argparse type=int for --port: non-int port is a usage error (exit 2).
@@ -138,7 +141,7 @@ var telnetPortOverride = ArgumentParser.ParseTelnetPort(rest);
 if (telnetPortOverride is not null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:TelnetPort"] = telnetPortOverride.Value.ToString() });
 if (hostOverride is not null) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:WebserverInterface"] = hostOverride, ["Atheriz:TelnetInterface"] = hostOverride });
 builder.Host.ConfigureHostOptions(o => o.ShutdownTimeout = TimeSpan.FromSeconds(5));
-// Honored opt-out (owner decision 2026-09-08): Kestrel with zero endpoints still binds
+// Honored opt-out: Kestrel with zero endpoints still binds
 // its localhost:5000 default, so opting out of HTTP means replacing the server, not
 // configuring it — NullWebServer (below) binds nothing and serves nothing. Telnet and
 // game protocols run on their own listeners. (KestrelConfig's own early return is the
@@ -220,6 +223,11 @@ await app.RunAsync().ConfigureAwait(false);
 // AdminRoutes, ServerLifecycle, KestrelConfig, StopHandler.
 // Required literals:
 // NetworkProtocols WebSocketProtocol Setup Failed to register protocol WebsocketEnabled LoadObjects DoStartup _internal/create_account X-Admin-Token hot_reload ReloadGameLogicAsync account_name, char_name and password are required Remote IsLoopback Token file not found Invalid token FixedTimeEquals Invalid JSON body No running server offline already exists _internal/shutdown Background StopApplication Aborted Are you sure ProcessStartInfo ExitCode WaitForExit CreateFromPemFile separate key file combined pem SSL is disabled WARNING: SSL cert file not found SslCertFile SslKeyFile HandleTest
+
+// One help row: usage/description take the command (shared start/restart
+// and stop/reload instances pick their per-command word), options are the
+// verbatim trailing lines.
+sealed record CommandHelpRow(Func<string, string> Usage, Func<string, string> Description, string[] Options);
 
 // No-op web server for WebserverEnabled=false (see above): Kestrel with zero endpoints
 // still binds localhost:5000, so opting out replaces IServer. Binds nothing, serves

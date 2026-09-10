@@ -16,13 +16,19 @@ public sealed class SpamCommand : Command
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
         if (pa is null) { go.Msg("Usage: spam <count>"); return; }
-        var countObj = pa["count"];
-        int count = countObj is int i ? i : int.TryParse(countObj?.ToString(), out var parsed) ? parsed : 0;
+        // No floor: count 0/negative runs an empty loop with the count
+        // messages below (established behavior, not a refusal).
+        _ = CommandHelpers.TryGetCount(pa, "count", 0, null, out int count);
         if (count > 1000) { go.Msg("Maximum count is 1000."); return; }
         go.Msg($"Creating {count} accounts and characters...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var settings = AtherizSettings.Global;
         var home = go.ResolveLocationObject();
+        // Hoisted once: per-index names cannot self-collide within one run,
+        // so the old per-iteration FilterBy saw the same answer every time.
+        var existingNames = new HashSet<string>(
+            ObjectRegistry.FilterBy(o => o.IsAccount).Select(o => o.Name),
+            StringComparer.OrdinalIgnoreCase);
         List<(string a, string p, string c)> created = [];
         for (int idx = 1; idx <= count; idx++)
         {
@@ -31,13 +37,12 @@ public sealed class SpamCommand : Command
             string cn = $"char{idx}";
             try
             {
-                var existing = ObjectRegistry.FilterBy(o => o.IsAccount && o.Name.Equals(an, StringComparison.OrdinalIgnoreCase));
-                if (existing.Count > 0) { go.Msg($"Account '{an}' already exists, skipping..."); continue; }
+                if (existingNames.Contains(an)) { go.Msg($"Account '{an}' already exists, skipping..."); continue; }
                 var account = Account.Create(an, pw);
                 if (account is null) { go.Msg($"Account '{an}' already exists, skipping..."); continue; }
                 var character = GameObject.Create(cn, "", isPc: true, isMapable: true);
                 character.Symbol = "A";
-                character.Home = new Persistence.Dto.LocationRef.CoordLocation(settings.DefaultHome);
+                character.Home = Persistence.Dto.LocationRef.FromCoord(settings.DefaultHome);
                 if (home is Node node) character.MoveTo(node);
                 else if (home is not null) character.MoveTo(home);
                 account.AddCharacter(character);

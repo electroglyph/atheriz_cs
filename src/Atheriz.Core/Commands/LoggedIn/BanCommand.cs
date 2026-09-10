@@ -20,39 +20,20 @@ public sealed class BanCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null || pa.GetString("target") is not string targetName || string.IsNullOrWhiteSpace(targetName))
-        { caller.Msg(PrintHelp()); return; }
+        if (pa is null) { caller.Msg(PrintHelp()); return; }
+        var targetName = pa.GetString("target");
+        if (string.IsNullOrWhiteSpace(targetName)) { caller.Msg(PrintHelp()); return; }
         var reason = pa.GetString("reason");
-        bool account = pa.GetBool("account");
+        bool wantAccount = pa.GetBool("account");
         bool ip = pa.GetBool("ip");
-        var target = BanHelper.ResolveTarget(go, targetName);
-        if (target is null) return;
-        // No self-exempt idiom on purpose: banning yourself locks your own
-        // account (worse than deleting a disposable object), so self-ban
-        // stays refused by the equal-or-higher rule below like any peer's.
-        if (target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot ban someone of equal or higher privilege."); return; }
-        GameObject? acct = null;
-        List<GameObject> acctChars = [];
-        if (account)
-        {
-            acct = BanHelper.FindAccount(target);
-            if (acct is null) { go.Msg($"Could not find the account owning {target.Name}; banning character only."); account = false; }
-            else
-            {
-                var accObj = acct as Account;
-                if (accObj is not null)
-                    acctChars = ObjectRegistry.Get(accObj.Characters.ToList());
-                foreach (var ch in acctChars)
-                    if (ch.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot ban someone of equal or higher privilege."); return; }
-            }
-        }
-        string? host = null;
-        if (ip) host = BanHelper.GetHost(target);
+        if (!BanHelper.TryResolveBanPreamble(go, targetName, wantAccount, ip, "ban", "banning",
+            out var target, out var acct, out var acctChars, out var host, out bool account)
+            || target is null)
+            return;
         List<GameObject> kickTargets;
         if (account && acct is not null)
         {
-            var acc2 = acct as Account;
-            kickTargets = acc2 is not null ? ObjectRegistry.Get(acc2.Characters.ToList()) : [target];
+            kickTargets = acct is Account ? acctChars : [target];
             if (acct is Account ac) { ac.IsBanned = true; if (!string.IsNullOrEmpty(reason)) ac.BanReason = reason; }
             foreach (var c in kickTargets) { c.IsBanned = true; if (!string.IsNullOrEmpty(reason)) BanReasonHelper.SetBanReason(c, reason); }
         }
@@ -109,31 +90,19 @@ public sealed class UnbanCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null || pa.GetString("target") is not string targetName || string.IsNullOrWhiteSpace(targetName))
-        { caller.Msg(PrintHelp()); return; }
-        bool account = pa.GetBool("account");
+        if (pa is null) { caller.Msg(PrintHelp()); return; }
+        var targetName = pa.GetString("target");
+        if (string.IsNullOrWhiteSpace(targetName)) { caller.Msg(PrintHelp()); return; }
+        bool wantAccount = pa.GetBool("account");
         bool ip = pa.GetBool("ip");
-        var target = BanHelper.ResolveTarget(go, targetName);
-        if (target is null) return;
-        if (target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot unban someone of equal or higher privilege."); return; }
-        GameObject? acct = null;
-        if (account)
-        {
-            acct = BanHelper.FindAccount(target);
-            if (acct is null) { go.Msg($"Could not find the account owning {target.Name}; unbanning character only."); account = false; }
-            else
-            {
-                var accChars = (acct as Account) is not null ? ObjectRegistry.Get(((Account)acct).Characters.ToList()) : [];
-                foreach (var ch in accChars) if (ch.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot unban someone of equal or higher privilege."); return; }
-            }
-        }
-        string? host = null;
-        if (ip) host = BanHelper.GetHost(target);
+        if (!BanHelper.TryResolveBanPreamble(go, targetName, wantAccount, ip, "unban", "unbanning",
+            out var target, out var acct, out var acctChars, out var host, out bool account)
+            || target is null)
+            return;
         if (account && acct is not null)
         {
             if (acct is Account ac) { ac.IsBanned = false; ac.BanReason = ""; }
-            var chars = (acct as Account) is not null ? ObjectRegistry.Get(((Account)acct).Characters.ToList()) : [];
-            foreach (var c in chars) { c.IsBanned = false; BanReasonHelper.ClearBanReason(c); }
+            foreach (var c in acctChars) { c.IsBanned = false; BanReasonHelper.ClearBanReason(c); }
         }
         else { target.IsBanned = false; BanReasonHelper.ClearBanReason(target); }
         if (ip)

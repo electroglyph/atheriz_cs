@@ -12,54 +12,66 @@ public static class ExamFormatter
     /// Base member list for any GameObject. Names double as FormatValue hints
     /// (snake_case keys like "locks"/"followers"/"session" drive the special
     /// renderers below); isProperty mirrors the old "[property]" marker.
+    /// One static table of accessors, wrapped once: values are still read per
+    /// object on every call (never cached across objects).
     /// </summary>
+    private static readonly (string name, Func<GameObject, object?> get, bool isProperty)[] BaseMemberTable =
+    [
+        ("Id", o => o.Id, true),
+        ("Name", o => o.Name, true),
+        ("Desc", o => o.Desc, true),
+        ("Symbol", o => o.Symbol, true),
+        ("MoveVerb", o => o.MoveVerb, true),
+        ("PrivilegeLevel", o => o.PrivilegeLevel, true),
+        ("IsPc", o => o.IsPc, true),
+        ("IsNpc", o => o.IsNpc, true),
+        ("IsItem", o => o.IsItem, true),
+        ("IsMapable", o => o.IsMapable, true),
+        ("IsContainer", o => o.IsContainer, true),
+        ("IsScript", o => o.IsScript, true),
+        ("IsTickable", o => o.IsTickable, true),
+        ("IsAccount", o => o.IsAccount, true),
+        ("IsChannel", o => o.IsChannel, true),
+        ("IsNode", o => o.IsNode, true),
+        ("IsModified", o => o.IsModified, true),
+        ("IsDeleted", o => o.IsDeleted, true),
+        ("IsConnected", o => o.IsConnected, true),
+        ("IsTemporary", o => o.IsTemporary, true),
+        ("IsBanned", o => o.IsBanned, true),
+        ("CanHear", o => o.CanHear, true),
+        ("Quelled", o => o.Quelled, true),
+        ("MapEnabled", o => o.MapEnabled, true),
+        ("LastMapTime", o => o.LastMapTime, true),
+        ("Gender", o => o.Gender, true),
+        ("TickSeconds", o => o.TickSeconds, true),
+        ("Location", o => o.Location, true),
+        ("Home", o => o.Home, true),
+        ("session", o => o.Session, true),
+        ("NoFollow", o => o.NoFollow, true),
+        ("Following", o => o.Following, true),
+        ("GroupChannel", o => o.GroupChannel, true),
+        ("external_cmdset", o => o.ExternalCmdSet, true),
+        ("internal_cmdset", o => o.InternalCmdSet, true),
+        ("last_touched_by", o => o.LastTouchedBy, true),
+        ("Tags", o => o.TagsSnapshot, false),
+        ("Aliases", o => o.Aliases, true),
+        ("_contents", o => o.ContentsSnapshot, false),
+        ("followers", o => o.FollowersSnapshot, false),
+        ("scripts", o => o.ScriptsSnapshot, false),
+        ("Channels", o => o.ChannelsSnapshot, false),
+        ("locks", o => o.GetLockPoliciesSnapshot(), false),
+        ("extra", o => o.GetExtraSnapshot(), false),
+    ];
+
     public static IEnumerable<(string name, object? value, bool isProperty)> BaseMembers(GameObject o)
     {
-        object? Safe(Func<object?> f) { try { return f(); } catch { return "<error>"; } }
-        yield return ("Id", Safe(() => (object?)o.Id), true);
-        yield return ("Name", Safe(() => (object?)o.Name), true);
-        yield return ("Desc", Safe(() => (object?)o.Desc), true);
-        yield return ("Symbol", Safe(() => (object?)o.Symbol), true);
-        yield return ("MoveVerb", Safe(() => (object?)o.MoveVerb), true);
-        yield return ("PrivilegeLevel", Safe(() => (object?)o.PrivilegeLevel), true);
-        yield return ("IsPc", Safe(() => (object?)o.IsPc), true);
-        yield return ("IsNpc", Safe(() => (object?)o.IsNpc), true);
-        yield return ("IsItem", Safe(() => (object?)o.IsItem), true);
-        yield return ("IsMapable", Safe(() => (object?)o.IsMapable), true);
-        yield return ("IsContainer", Safe(() => (object?)o.IsContainer), true);
-        yield return ("IsScript", Safe(() => (object?)o.IsScript), true);
-        yield return ("IsTickable", Safe(() => (object?)o.IsTickable), true);
-        yield return ("IsAccount", Safe(() => (object?)o.IsAccount), true);
-        yield return ("IsChannel", Safe(() => (object?)o.IsChannel), true);
-        yield return ("IsNode", Safe(() => (object?)o.IsNode), true);
-        yield return ("IsModified", Safe(() => (object?)o.IsModified), true);
-        yield return ("IsDeleted", Safe(() => (object?)o.IsDeleted), true);
-        yield return ("IsConnected", Safe(() => (object?)o.IsConnected), true);
-        yield return ("IsTemporary", Safe(() => (object?)o.IsTemporary), true);
-        yield return ("IsBanned", Safe(() => (object?)o.IsBanned), true);
-        yield return ("CanHear", Safe(() => (object?)o.CanHear), true);
-        yield return ("Quelled", Safe(() => (object?)o.Quelled), true);
-        yield return ("MapEnabled", Safe(() => (object?)o.MapEnabled), true);
-        yield return ("LastMapTime", Safe(() => (object?)o.LastMapTime), true);
-        yield return ("Gender", Safe(() => (object?)o.Gender), true);
-        yield return ("TickSeconds", Safe(() => (object?)o.TickSeconds), true);
-        yield return ("Location", Safe(() => (object?)o.Location), true);
-        yield return ("Home", Safe(() => (object?)o.Home), true);
-        yield return ("session", Safe(() => (object?)o.Session), true);
-        yield return ("NoFollow", Safe(() => (object?)o.NoFollow), true);
-        yield return ("Following", Safe(() => (object?)o.Following), true);
-        yield return ("GroupChannel", Safe(() => (object?)o.GroupChannel), true);
-        yield return ("external_cmdset", Safe(() => (object?)o.ExternalCmdSet), true);
-        yield return ("internal_cmdset", Safe(() => (object?)o.InternalCmdSet), true);
-        yield return ("last_touched_by", Safe(() => (object?)o.LastTouchedBy), true);
-        yield return ("Tags", Safe(() => (object?)o.TagsSnapshot), false);
-        yield return ("Aliases", Safe(() => (object?)o.Aliases), true);
-        yield return ("_contents", Safe(() => (object?)o.ContentsSnapshot), false);
-        yield return ("followers", Safe(() => (object?)o.FollowersSnapshot), false);
-        yield return ("scripts", Safe(() => (object?)o.ScriptsSnapshot), false);
-        yield return ("Channels", Safe(() => (object?)o.ChannelsSnapshot), false);
-        yield return ("locks", Safe(() => (object?)o.GetLockPoliciesSnapshot()), false);
-        yield return ("extra", Safe(() => (object?)o.GetExtraSnapshot()), false);
+        foreach (var (name, get, isProperty) in BaseMemberTable)
+        {
+            object? value;
+            try { value = get(o); }
+            catch { value = "<error>"; }
+            yield return (name, value, isProperty);
+        }
     }
 
     private static readonly HashSet<string> Ignore = new(StringComparer.OrdinalIgnoreCase)
@@ -90,6 +102,44 @@ public static class ExamFormatter
         }
         catch (Exception) { }
         return $"#{id}";
+    }
+
+    // Shared collect-and-join core for the followers/scripts/_contents hints:
+    // gathers int ids (plus int-parseable strings, as the followers hint
+    // always has), skipping anything else. False when nothing renderable was
+    // found (non-enumerable or empty); with strictInts, also false on the
+    // first non-int so scripts/_contents can fall through to the generic
+    // renderer exactly as before instead of rendering a partial set.
+    internal static bool TryCollectIds(object? value, out List<int> ids)
+        => TryCollectIds(value, strictInts: false, out ids);
+
+    internal static bool TryCollectIds(object? value, bool strictInts, out List<int> ids)
+    {
+        ids = [];
+        if (value is not System.Collections.IEnumerable en) return false;
+        foreach (var e in en)
+        {
+            if (e is int i) { ids.Add(i); continue; }
+            if (strictInts) return false;
+            if (int.TryParse(e?.ToString(), out var pi)) ids.Add(pi);
+        }
+        return ids.Count > 0;
+    }
+
+    internal static string FormatIdSet(List<int> ids)
+        => "{" + string.Join(", ", ids.Select(ExpandId)) + "}";
+
+    // Empty-enumerable check for the strict id-set hints: a throwing
+    // enumerable counts as non-empty (the old single-pass loop's exception
+    // fell through to the generic renderer, never to "set()").
+    private static bool IsEmpty(System.Collections.IEnumerable en)
+    {
+        try
+        {
+            using var it = en.GetEnumerator();
+            return !it.MoveNext();
+        }
+        catch { return false; }
     }
 
     private static string LambdaSource(Delegate fn)
@@ -123,14 +173,8 @@ public static class ExamFormatter
             if (val is null) return "set()";
             try
             {
-                if (val is System.Collections.IEnumerable en)
-                {
-                    List<int> ids = [];
-                    foreach (var e in en) if (e is int i) ids.Add(i);
-                    else if (int.TryParse(e?.ToString(), out var pi)) ids.Add(pi);
-                    if (ids.Count == 0) return "set()";
-                    return "{" + string.Join(", ", ids.Select(ExpandId)) + "}";
-                }
+                if (val is System.Collections.IEnumerable)
+                    return TryCollectIds(val, out var followerIds) ? FormatIdSet(followerIds) : "set()";
             }
             catch (Exception) { }
             return "set()";
@@ -155,40 +199,22 @@ public static class ExamFormatter
             catch (Exception) { }
             return val?.ToString() ?? "None";
         }
-        if (hint == "scripts")
+        // The scripts and _contents blocks were identical (strict ints-only
+        // collect; empty renders "set()"; non-int members fall through to the
+        // generic renderer below instead of rendering a partial set).
+        if (hint is "scripts" or "_contents")
         {
             if (val is null) return "set()";
             try
             {
                 if (val is System.Collections.IEnumerable en)
                 {
-                    List<int> ids = [];
-                    bool allInts = true;
-                    int count = 0;
-                    foreach (var e in en) { count++; if (e is int i) ids.Add(i); else { allInts = false; break; } }
-                    if (count == 0) return "set()";
-                    if (allInts) return "{" + string.Join(", ", ids.Select(ExpandId)) + "}";
+                    if (TryCollectIds(en, strictInts: true, out var memberIds)) return FormatIdSet(memberIds);
+                    if (IsEmpty(en)) return "set()";
                 }
             }
             catch (Exception) { }
             // fallback
-        }
-        if (hint == "_contents")
-        {
-            if (val is null) return "set()";
-            try
-            {
-                if (val is System.Collections.IEnumerable en)
-                {
-                    List<int> ids = [];
-                    bool allInts = true;
-                    int count = 0;
-                    foreach (var e in en) { count++; if (e is int i) ids.Add(i); else { allInts = false; break; } }
-                    if (count == 0) return "set()";
-                    if (allInts) return "{" + string.Join(", ", ids.Select(ExpandId)) + "}";
-                }
-            }
-            catch (Exception) { }
         }
         if (hint == "locks")
         {

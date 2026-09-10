@@ -159,6 +159,10 @@ public static class MapEdit
 
     // Port of mapedit.py _evict — no time-based expiry (valid while session
     // open); only drops stale previous-key mappings and enforces the cap.
+    // Bulk shape: one stale purge, one victim snapshot ordered oldest-first,
+    // one removal pass — instead of rescanning all chains and re-purging
+    // after every single eviction. OrderBy is stable, so ties keep insertion
+    // order exactly like the old repeated min-scan.
     private static void EvictLocked()
     {
         int cap = EffectiveCap();
@@ -166,24 +170,24 @@ public static class MapEdit
         CollectStalePreviousLocked();
 
         // Port of mapedit.py:53-60 while len(_chains) > cap: oldest = min by created
-        while (_chains.Count > cap)
+        int overflow = _chains.Count - cap;
+        if (overflow <= 0) return;
+        var victims = _chains
+            .Select(kv => (Key: kv.Key, Created: kv.Value.CreatedMonotonic == 0
+                ? (kv.Value.CreatedAt - DateTime.UnixEpoch).TotalSeconds
+                : kv.Value.CreatedMonotonic))
+            .OrderBy(v => v.Created)
+            .Take(overflow)
+            .Select(v => v.Key)
+            .ToList();
+        foreach (var key in victims)
         {
-            string? oldest = null;
-            double oldestCreated = double.MaxValue;
-            foreach (var kv in _chains)
-            {
-                double c = kv.Value.CreatedMonotonic;
-                if (c == 0) c = (kv.Value.CreatedAt - DateTime.UnixEpoch).TotalSeconds;
-                if (c < oldestCreated) { oldestCreated = c; oldest = kv.Key; }
-            }
-            if (oldest is null) break;
-            var removed = _chains[oldest];
-            _chains.Remove(oldest);
+            if (!_chains.Remove(key, out var removed)) continue;
             if (removed is not null && !string.IsNullOrEmpty(removed.PreviousKey))
                 _previous.Remove(removed.PreviousKey);
-            // Port of mapedit.py:58-60 stale after eviction
-            CollectStalePreviousLocked();
         }
+        // Port of mapedit.py:58-60 stale after eviction
+        CollectStalePreviousLocked();
     }
 
     // Port of mapedit.py:63-70 grant(ip,area,z) -> key
@@ -214,6 +218,26 @@ public static class MapEdit
             return key;
         }
         finally { Lock.ExitWriteLock(); }
+    }
+
+    // One choke point for the _chains/_previous fallback dance in
+    // Consume/GetChain/ValidateChain below. The caller holds Lock (read or
+    // write); this helper takes none. removeStale drops a dangling
+    // previous-key mapping and is for write-held paths only — read-held
+    // paths pass false and leave the mapping for the next write path.
+    private static bool TryResolveLocked(string key, out MapEditChain? chain, out bool previousHit, bool removeStale)
+    {
+        previousHit = false;
+        if (_chains.TryGetValue(key, out chain)) return true;
+        chain = null;
+        if (_previous.TryGetValue(key, out var cur) && _chains.TryGetValue(cur, out var c2))
+        {
+            chain = c2;
+            previousHit = true;
+            return true;
+        }
+        if (removeStale) _previous.Remove(key);
+        return false;
     }
 
     // Copy-on-write snapshot: readers (incl. GetChain/Consume holders) never
@@ -289,24 +313,8 @@ public static class MapEdit
         try
         {
             EvictLocked();
-            MapEditChain? chain = null;
-            bool previousHit = false;
-            if (!_chains.TryGetValue(key, out chain))
-            {
-                if (_previous.TryGetValue(key, out var cur))
-                {
-                    if (_chains.TryGetValue(cur, out var c2))
-                    {
-                        chain = c2;
-                        previousHit = true;
-                    }
-                    else
-                    {
-                        _previous.Remove(key);
-                    }
-                }
-            }
-            if (chain is null)
+            bool resolved = TryResolveLocked(key, out MapEditChain? chain, out bool previousHit, removeStale: true);
+            if (!resolved || chain is null)
                 return new MapEditResult(MapEditStatus.Reject, reason: "unknown_key");
             if (chain.Ip != ip)
                 return new MapEditResult(MapEditStatus.Reject, reason: "ip");
@@ -360,8 +368,7 @@ public static class MapEdit
         Lock.EnterReadLock();
         try
         {
-            if (_chains.TryGetValue(key, out var c)) return CopyOf(c);
-            if (_previous.TryGetValue(key, out var cur) && _chains.TryGetValue(cur, out var c2)) return CopyOf(c2);
+            if (TryResolveLocked(key, out var c, out _, removeStale: false) && c is not null) return CopyOf(c);
             return null;
         }
         finally { Lock.ExitReadLock(); }
@@ -405,18 +412,7 @@ public static class MapEdit
         Lock.EnterReadLock();
         try
         {
-            MapEditChain? chain = null;
-            bool previousHit = false;
-            if (!_chains.TryGetValue(key, out chain))
-            {
-                if (_previous.TryGetValue(key, out var cur) && _chains.TryGetValue(cur, out var c2))
-                {
-                    chain = c2;
-                    previousHit = true;
-                }
-                else return false;
-            }
-            if (chain is null) return false;
+            if (!TryResolveLocked(key, out var chain, out var previousHit, removeStale: false) || chain is null) return false;
             if (chain.Ip != ip) return false;
             if (previousHit) return seq == chain.Seq;
             if (seq == chain.Seq + 1) return true;

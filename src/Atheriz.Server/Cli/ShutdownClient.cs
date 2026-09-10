@@ -10,7 +10,25 @@ internal enum ShutdownRequestResult { Accepted, Unreachable, AuthRejected }
 // One HTTP answer from a /_internal/* admin endpoint. Auth failures are
 // HTTP 200 with {status:"error"} (AdminRoutes), so callers must inspect the
 // body, not just reachability.
-internal sealed record AdminResponse(int StatusCode, string Body);
+internal sealed record AdminResponse(int StatusCode, string Body)
+{
+    // Shared status/message extraction for the three admin callers. Each
+    // caller passes its own missing-property default ("error" for create,
+    // "ok" for reload, "" for shutdown) — unifying the default would change
+    // behavior. Invalid JSON throws so each caller keeps its own catch path
+    // (Body+return vs "Response:"+fallthrough vs Unreachable).
+    internal string? GetStatus(string defaultValue)
+    {
+        using var doc = JsonDocument.Parse(Body);
+        return doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : defaultValue;
+    }
+
+    internal string? GetMessage()
+    {
+        using var doc = JsonDocument.Parse(Body);
+        return doc.RootElement.TryGetProperty("message", out var m) ? m.GetString() : Body;
+    }
+}
 
 public static class ShutdownClient
 {
@@ -23,8 +41,10 @@ public static class ShutdownClient
     {
         var tokenFile = FindTokenFile(secretPath, port);
         if (tokenFile is null || !File.Exists(tokenFile)) return null;
-        string token;
-        try { token = File.ReadAllText(tokenFile, Encoding.UTF8).Trim(); } catch { return null; }
+        // Shared token-file read (empty flows through as a bearer value here;
+        // each caller owns its empty semantics — see AdminToken).
+        var token = Infrastructure.AdminToken.TryReadTokenFile(tokenFile);
+        if (token is null) return null;
         var url = $"{(tlsOn ? "https" : "http")}://localhost:{port}{path}";
         try
         {
@@ -35,7 +55,7 @@ public static class ShutdownClient
             // instead of returning true unchecked.)
             using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (req, cert, chain, errors) =>
             {
-                if (req is not System.Net.Http.HttpRequestMessage m || m.RequestUri is not Uri u) return false;
+                if (req.RequestUri is not Uri u) return false;
                 bool loopback = u.Host == "localhost" || u.Host == "127.0.0.1" || u.Host == "::1";
                 if (errors == SslPolicyErrors.None) return true;
                 if (!loopback || cert is null) return false;
@@ -54,10 +74,24 @@ public static class ShutdownClient
         catch { return null; }
     }
 
+    // Shared TLS-flipped retry for the create/reload/shutdown admin paths: on
+    // a scheme mismatch (settings say https, server speaks plaintext or vice
+    // versa) retry once with the flipped scheme, so a null response never
+    // falls through against a LIVE server.
+    internal static async Task<AdminResponse?> PostAdminWithTlsFallbackAsync(int port, string secretPath, string path, string? jsonPayload, bool tlsOn)
+    {
+        var resp = await PostAdminAsync(port, secretPath, path, jsonPayload, tlsOn).ConfigureAwait(false);
+        resp ??= await PostAdminAsync(port, secretPath, path, jsonPayload, !tlsOn).ConfigureAwait(false);
+        return resp;
+    }
+
     internal static async Task<ShutdownRequestResult> TryRequestShutdownAsync(int port, string secretPath, bool tlsOn)
     {
         Console.WriteLine("Requesting graceful shutdown via internal API...");
-        var resp = await PostAdminAsync(port, secretPath, "/_internal/shutdown", null, tlsOn).ConfigureAwait(false);
+        // Third caller of the TLS-flipped retry shape (status-only, default
+        // ""): on a scheme mismatch retry once flipped, so a null response
+        // never falls through against a LIVE server into signals.
+        var resp = await PostAdminWithTlsFallbackAsync(port, secretPath, "/_internal/shutdown", null, tlsOn).ConfigureAwait(false);
         if (resp is null)
         {
             Console.WriteLine("Could not contact server for graceful shutdown (server might be hung or stopped).");
@@ -67,8 +101,7 @@ public static class ShutdownClient
         // design (AdminRoutes), never as 401/403 — read the body below.
         try
         {
-            using var doc = JsonDocument.Parse(resp.Body);
-            var status = doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : "";
+            var status = resp.GetStatus("");
             Console.WriteLine($"Internal shutdown response: {resp.Body}");
             if (status == "ok") { Console.WriteLine("Server has completed shutdown tasks."); return ShutdownRequestResult.Accepted; }
             // status == "error": a live server refused (bad token / non-loopback).

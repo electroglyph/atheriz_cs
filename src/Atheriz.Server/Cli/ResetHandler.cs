@@ -6,7 +6,7 @@ public static class ResetHandler
 {
     public static async Task HandleResetAsync(string[] a)
     {
-        bool force = ArgumentParser.HasFlag(a, "--force", "-f") || ArgumentParser.HasFlag(a, "--yes", null) || ArgumentParser.HasFlag(a, "-y", null);
+        bool force = ArgumentParser.HasAnyFlag(a, "--force", "-f", "--yes", "-y");
         var settings = StopHandler.EffectiveSettingsValue;
         var port = ArgumentParser.ParsePort(a) ?? settings.WebserverPort;
         var host = ArgumentParser.ParseHost(a);
@@ -14,9 +14,10 @@ public static class ResetHandler
         var pidPath = Path.Combine(savePath, "server.pid");
         bool isRunning = false;
         int? pid = null;
-        if (File.Exists(pidPath))
+        if (Infrastructure.PidFile.TryReadPid(pidPath) is int readPid)
         {
-            try { pid = int.Parse(File.ReadAllText(pidPath, System.Text.Encoding.UTF8).Trim()); isRunning = pid is not null && Infrastructure.PidFile.IsServerProcess(pid.Value); } catch { }
+            pid = readPid;
+            isRunning = Infrastructure.PidFile.IsServerProcess(readPid);
         }
         if (!force)
         {
@@ -115,12 +116,10 @@ public static class ResetHandler
         catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); return; }
 
         // Port of atheriz.py:1629 reset always daemonizes after setup.
-        var resetSpawnArgs = new List<string> { "--port", port.ToString() };
-        if (host is not null) { resetSpawnArgs.Add("--host"); resetSpawnArgs.Add(host); }
         // respawn preserves the CLI telnet-port override, else the
         // replacement silently binds the configured default instead.
         var resetTelnetPort = ArgumentParser.ParseTelnetPort(a);
-        if (resetTelnetPort is not null) { resetSpawnArgs.Add("--telnet-port"); resetSpawnArgs.Add(resetTelnetPort.ToString()!); }
+        var resetSpawnArgs = DaemonSpawner.BuildSpawnArgs(port, host, resetTelnetPort);
         await DaemonSpawner.SpawnDaemonAsync(resetSpawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
     }
 }

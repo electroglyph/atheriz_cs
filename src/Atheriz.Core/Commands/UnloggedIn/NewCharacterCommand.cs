@@ -8,6 +8,16 @@ public sealed class NewCharacterCommand : Command
     public override string Key => "new";
     public override string Desc => "Create a new character for your account.";
     public override bool UseParser => false;
+
+    // Per-verb core shared by Run + RunAsync: atomic unique registration of
+    // the new character. Throws InvalidOperationException on a duplicate
+    // exactly like the inline call it replaces; cooldown release and
+    // messaging stay at the call sites (they pair differently per path).
+    // (Kept per-verb: the guest verb's twin looks identical but must stay
+    // scoped to its own verb.)
+    private static void RegisterNewCharacter(GameObject character, string name)
+        => ObjectRegistry.AddObjectUnique(character, o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase), $"Character with this name ({name}) already exists.");
+
     public override void Run(IMessageTarget caller, object? args)
     {
         var settings = Settings.AtherizSettings.Global;
@@ -23,15 +33,14 @@ public sealed class NewCharacterCommand : Command
         if (caller is BaseConnection conn && conn.Session?.Account is Account acc)
         {
             if (acc.Characters.Count >= settings.MaxCharacters) { CreationCooldownHelper.Clear(caller); caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
-            var exists = ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0;
-            if (exists) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
+            if (CreationValidation.PcNameExists(name)) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
             // Desc is the remainder after name+gender (was dropped as "" before).
             string desc = parts.Count > 2 ? string.Join(" ", parts.Skip(2)) : "";
             var character = GameObject.Create(name, desc, isPc: true);
             character.Gender = parts.Count > 1 ? parts[1] : "neutral";
             try
             {
-                ObjectRegistry.AddObjectUnique(character, o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase), $"Character with this name ({name}) already exists.");
+                RegisterNewCharacter(character, name);
             }
             catch (InvalidOperationException ex)
             {
@@ -42,11 +51,7 @@ public sealed class NewCharacterCommand : Command
             }
             CreationCooldownHelper.Apply(caller, "character");
             acc.AddCharacter(character);
-            if (!SessionPuppetHelper.TryAttach(conn, character)) return;
-            var nh = NodeHandler.GetCurrent();
-            var home = nh?.GetNode(settings.DefaultHome);
-            if (home is not null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
-            try { character.AtPostPuppet(); } catch (Exception) { }
+            if (!CharacterPuppetSetup.AttachAndHome(conn, character)) return;
             caller.Msg($"Character {name} created.");
         }
         else
@@ -55,8 +60,7 @@ public sealed class NewCharacterCommand : Command
             // Nothing is created on this path, so release the entry reservation:
             // otherwise the next `new` from the same caller is rate-limited.
             CreationCooldownHelper.Clear(caller);
-            var exists = ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0;
-            if (exists) caller.Msg($"Character with this name ({name}) already exists.");
+            if (CreationValidation.PcNameExists(name)) caller.Msg($"Character with this name ({name}) already exists.");
             else caller.Msg($"Would create character {name} (no account session).");
         }
     }
@@ -77,13 +81,13 @@ public sealed class NewCharacterCommand : Command
         gender = gender.Trim();
         if (string.IsNullOrEmpty(gender)) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg("Gender cannot be empty."); return; }
         string desc = await caller.Session.Prompt("Enter a short description of your character:").ConfigureAwait(false);
-        if (ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0)
+        if (CreationValidation.PcNameExists(name))
         { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg($"Character with this name ({name}) already exists."); return; }
         var character = GameObject.Create(name, desc, isPc: true);
         character.Gender = gender;
         try
         {
-            ObjectRegistry.AddObjectUnique(character, o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase), $"Character with this name ({name}) already exists.");
+            RegisterNewCharacter(character, name);
         }
         catch (InvalidOperationException ex)
         {
@@ -95,11 +99,7 @@ public sealed class NewCharacterCommand : Command
         double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
         ObjectRegistry.ApplyCreationCooldown("character", rateKey, now2, settings.CreationCooldown);
         account.AddCharacter(character);
-        if (!SessionPuppetHelper.TryAttach(caller, character)) return;
-        var nh = NodeHandler.GetCurrent();
-        var home = nh?.GetNode(settings.DefaultHome);
-        if (home is not null) { character.Home = new Persistence.Dto.LocationRef.CoordLocation(home.Coord); character.MoveTo(home); }
-        try { character.AtPostPuppet(); } catch (Exception) { }
+        if (!CharacterPuppetSetup.AttachAndHome(caller, character)) return;
         caller.Msg($"Character {name} created and puppeted.");
     }
 }

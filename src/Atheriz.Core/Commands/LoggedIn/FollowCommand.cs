@@ -39,12 +39,12 @@ public sealed class FollowCommand : Command
         // Break the previous follow BEFORE taking the target lock: every other path
         // that clears Following removes the follower id from the old leader
         // (ClearFollowing, Delete teardown, unfollow). Overwriting the pointer
-        // without cleanup strands a stale id on the old leader (owner decision
-        // 2026-09-08). Runs outside all object locks (registry -> object order).
+        // without cleanup strands a stale id on the old leader.
+        // Runs outside all object locks (registry -> object order).
         var prevId = go.Following;
         if (prevId is not null && prevId != target.Id)
         {
-            var prev = Atheriz.Core.Globals.ObjectRegistry.Get(prevId.Value).FirstOrDefault();
+            var prev = Atheriz.Core.Globals.ObjectRegistry.GetSingle(prevId.Value);
             if (prev is not null)
             {
                 try { prev.RemoveFollower(go.Id); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed FollowCommand old-leader cleanup: " + logEx.Message, "FollowCommand"); }
@@ -78,7 +78,7 @@ public sealed class UnfollowCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         if (go.Following is null) { go.Msg("You aren't following anyone."); return; }
-        var leader = ObjectRegistry.Get(go.Following.Value).FirstOrDefault();
+        var leader = ObjectRegistry.GetSingle(go.Following.Value);
         if (leader is not null)
         {
             leader.RemoveFollower(go.Id);
@@ -87,13 +87,7 @@ public sealed class UnfollowCommand : Command
             // Python leaves this to the leader's next move (follow.py:170-192
             // has no script cleanup); without a move the script lingers, so
             // remove it eagerly once the follower set drains.
-            if (leader.FollowersSnapshot.Count == 0)
-            {
-                foreach (var script in leader.GetScriptsByType("FollowScript").ToList())
-                {
-                    try { script.IsDeleted = true; ObjectRegistry.RemoveObject(script); leader.RemoveScript(script); } catch (Exception) { }
-                }
-            }
+            FollowHelper.RemoveScriptsIfDrained(leader);
         }
         go.Following = null;
         go.Msg("You stop following.");
@@ -118,7 +112,7 @@ public sealed class NofollowCommand : Command
             HashSet<int> keep = [];
             foreach (var id in followers)
             {
-                var follower = ObjectRegistry.Get(id).FirstOrDefault();
+                var follower = ObjectRegistry.GetSingle(id);
                 if (follower is not null && follower.IsBuilder) { keep.Add(id); continue; }
                 if (follower is not null)
                 {
@@ -128,13 +122,7 @@ public sealed class NofollowCommand : Command
                 }
             }
             go.ClearFollowersExcept(keep);
-            if (go.FollowersSnapshot.Count == 0)
-            {
-                foreach (var script in go.GetScriptsByType("FollowScript").ToList())
-                {
-                    try { script.IsDeleted = true; ObjectRegistry.RemoveObject(script); go.RemoveScript(script); } catch (Exception) { }
-                }
-            }
+            FollowHelper.RemoveScriptsIfDrained(go);
         }
         else go.Msg("You will now allow others to follow you.");
     }

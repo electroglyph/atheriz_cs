@@ -39,8 +39,21 @@ public partial class GameObject
         if (!hasHooks) return original();
 
         // marker classification cached per delegate (HookMarkerCache),
-        // not reflected per dispatch.
-        var replaceHooks = hooksSnapshot!.Where(d => (HookMarkerCache.KindOf(d) & HookKind.Replace) != 0).ToList();
+        // not reflected per dispatch. Single partition pass: each delegate is
+        // classified once and appended to every kind-list it belongs to, which
+        // preserves each kind's snapshot order while dropping two iterations.
+        // (Only the kind filters merge — the per-hook after-args allocation
+        // below stays per hook because result is reassigned per hook.)
+        var replaceHooks = new List<Delegate>();
+        var beforeHooks = new List<Delegate>();
+        var afterHooks = new List<Delegate>();
+        foreach (var d in hooksSnapshot!)
+        {
+            var kind = HookMarkerCache.KindOf(d);
+            if ((kind & HookKind.Replace) != 0) replaceHooks.Add(d);
+            if ((kind & HookKind.Before) != 0) beforeHooks.Add(d);
+            if ((kind & HookKind.After) != 0) afterHooks.Add(d);
+        }
         if (replaceHooks.Count > 0)
         {
             try
@@ -53,7 +66,6 @@ public partial class GameObject
             }
         }
 
-        var beforeHooks = hooksSnapshot!.Where(d => (HookMarkerCache.KindOf(d) & HookKind.Before) != 0).ToList();
         foreach (var h in beforeHooks)
         {
             // Advisory: return ignored. Hook errors propagate raw (previously
@@ -68,7 +80,6 @@ public partial class GameObject
 
         var result = original();
 
-        var afterHooks = hooksSnapshot!.Where(d => (HookMarkerCache.KindOf(d) & HookKind.After) != 0).ToList();
         foreach (var h in afterHooks)
         {
             // after hooks: try args+result then args only (faithful to Python where after hook receives same args, not extra result)

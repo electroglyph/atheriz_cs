@@ -73,6 +73,9 @@ public class AsyncThreadPool : IDisposable
         _watchdogTimer = new Timer(WatchdogTick, null, _watchdogInterval, _watchdogInterval);
     }
 
+    // Relief idle bound: a relief worker with no work exits after this long.
+    private static readonly TimeSpan ReliefIdleTimeout = TimeSpan.FromMilliseconds(500);
+
     public int MaxThreads => _maxThreads;
     public int Busy { get { lock (_lock) return _busy; } }
     public int QueueCount
@@ -94,6 +97,31 @@ public class AsyncThreadPool : IDisposable
     public IReadOnlyList<Thread> ReliefThreads { get { lock (_lock) return _reliefThreads.ToList(); } }
     public bool IsStopped { get { lock (_lock) return _stopped; } }
 
+    // Relief dequeue: single-acquisition fast-check + bounded wait + recheck.
+    // Monitor.Wait releases _queueLock while waiting, so the wait-then-recheck
+    // shape and the 500ms relief-exit timing are preserved; only the three
+    // separate acquisitions + double Count snapshots collapse into one cycle.
+    // Sentinel requeue/expand behavior below is untouched.
+    private bool TryDequeueRelief(out WorkItem? item)
+    {
+        lock (_queueLock)
+        {
+            if (_queue.Count > 0)
+            {
+                item = _queue.Dequeue();
+                return true;
+            }
+            Monitor.Wait(_queueLock, ReliefIdleTimeout);
+            if (_queue.Count > 0)
+            {
+                item = _queue.Dequeue();
+                return true;
+            }
+            item = null;
+            return false;
+        }
+    }
+
     private void WorkLoop(object? arg)
     {
         bool relief = arg is bool b && b;
@@ -114,36 +142,15 @@ public class AsyncThreadPool : IDisposable
                         }
                     }
                 }
-                bool got = false;
-                lock (_queueLock)
-                {
-                    if (_queue.Count > 0) { item = _queue.Dequeue(); got = true; }
-                }
+                bool got = TryDequeueRelief(out item);
                 if (!got)
                 {
-                    lock (_queueLock)
+                    lock (_lock)
                     {
-                        if (_queue.Count == 0)
-                        {
-                            Monitor.Wait(_queueLock, 500);
-                        }
-                        if (_queue.Count > 0) { item = _queue.Dequeue(); got = true; }
+                        _reliefCount--;
+                        try { _reliefThreads.Remove(Thread.CurrentThread); } catch { }
                     }
-                    if (!got)
-                    {
-                        int cnt;
-                        lock (_queueLock) cnt = _queue.Count;
-                        if (cnt == 0)
-                        {
-                            lock (_lock)
-                            {
-                                _reliefCount--;
-                                try { _reliefThreads.Remove(Thread.CurrentThread); } catch { }
-                            }
-                            return;
-                        }
-                        continue;
-                    }
+                    return;
                 }
             }
             else

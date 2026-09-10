@@ -8,6 +8,15 @@ public sealed class CreateAccountCommand : Command
     public override string Key => "create";
     public override string Desc => "Create a new account.";
     public override bool UseParser => false;
+
+    // Per-verb core shared by Run + RunAsync: account-name then password
+    // validation, first error wins. Scoped to validation + creation only —
+    // this verb never puppets. RunAsync calls it once per prompt (name, then
+    // name+password) so prompts stay interleaved with validation exactly as
+    // before; the name re-check is pure and always passes the second time.
+    private static string? ValidateInputs(string name, string? password = null)
+        => Validation.ValidateAccountName(name) ?? (password is null ? null : Validation.ValidatePassword(password));
+
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Account creation is not enabled."); return; }
@@ -24,9 +33,7 @@ public sealed class CreateAccountCommand : Command
         string name = parts[0];
         // Passwords may contain spaces (Python prompts the whole line) — join, don't truncate.
         string password = string.Join(" ", parts.Skip(1));
-        var err = Validation.ValidateAccountName(name);
-        if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
-        err = Validation.ValidatePassword(password);
+        var err = ValidateInputs(name, password);
         if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         try
         {
@@ -55,10 +62,10 @@ public sealed class CreateAccountCommand : Command
         if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
         string name = await caller.Session.Prompt("Enter an account name:").ConfigureAwait(false);
         name = name.Trim();
-        var err = Validation.ValidateAccountName(name);
+        var err = ValidateInputs(name);
         if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
         string password = await caller.Session.Prompt("Enter a password:").ConfigureAwait(false);
-        err = Validation.ValidatePassword(password);
+        err = ValidateInputs(name, password);
         if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
         try
         {

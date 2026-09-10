@@ -75,3 +75,34 @@ public static class SessionPuppetHelper
         return true;
     }
 }
+
+// Single truth for the "character name taken" pre-check shared by the
+// guest/new verbs. (The create verb checks account names instead, so it
+// keeps its own inline check.)
+public static class CreationValidation
+{
+    public static bool PcNameExists(string name)
+        => ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0;
+}
+
+// Shared puppet tail for the guest/new verbs (sync + async): atomic attach,
+// default-home placement, post-puppet hook. One home so the four call sites
+// cannot drift; the create verb has no puppet tail and stays out.
+public static class CharacterPuppetSetup
+{
+    public static bool AttachAndHome(BaseConnection conn, GameObject character)
+    {
+        ArgumentNullException.ThrowIfNull(conn);
+        ArgumentNullException.ThrowIfNull(character);
+        if (!SessionPuppetHelper.TryAttach(conn, character)) return false;
+        var nh = NodeHandler.GetCurrent();
+        var home = nh?.GetNode(AtherizSettings.Global.DefaultHome);
+        if (home is not null)
+        {
+            character.Home = Persistence.Dto.LocationRef.FromCoord(home.Coord);
+            character.MoveTo(home);
+        }
+        try { character.AtPostPuppet(); } catch (Exception) { }
+        return true;
+    }
+}

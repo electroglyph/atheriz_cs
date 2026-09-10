@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Reflection;
 using Atheriz.Core.Concurrency;
@@ -169,47 +170,53 @@ public class InputFuncs
     [InputFunc("term_size")]
     public void TermSize(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
-        if (args.Count >= 2)
-        {
-            // Handle JsonElement before int check (faithful to handle both types)
-            object? a0 = args[0], a1 = args[1];
-            int w, h;
-            if (a0 is JsonElement je0 && je0.ValueKind == JsonValueKind.Number && je0.TryGetInt32(out var jw)) w = jw;
-            else if (a0 is int iv0) w = iv0;
-            else if (a0 is long lv0) w = (int)lv0;
-            else return;
-            if (a1 is JsonElement je1 && je1.ValueKind == JsonValueKind.Number && je1.TryGetInt32(out var jh)) h = jh;
-            else if (a1 is int iv1) h = iv1;
-            else if (a1 is long lv1) h = (int)lv1;
-            else return;
-            var settings = AtherizSettings.Global;
-            if (!(0 < w && w <= settings.TermSizeMaxWidth && 0 < h && h <= settings.TermSizeMaxHeight)) return;
-            connection.Session.TermWidth = w;
-            connection.Session.TermHeight = h;
-        }
+        var settings = AtherizSettings.Global;
+        if (!TryCoerceSize(args, settings.TermSizeMaxWidth, settings.TermSizeMaxHeight, out var w, out var h)) return;
+        connection.Session.TermWidth = w;
+        connection.Session.TermHeight = h;
     }
 
     // Port of inputfuncs.py:322-340 map_size
     [InputFunc("map_size")]
     public void MapSize(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
-        if (args.Count >= 2)
+        var settings = AtherizSettings.Global;
+        if (!TryCoerceSize(args, settings.MapSizeMaxWidth, settings.MapSizeMaxHeight, out var w, out var h)) return;
+        connection.Session.MapWidth = w;
+        connection.Session.MapHeight = h;
+    }
+
+    // Shared int coercion for the size handlers: JsonElement numbers arrive
+    // from parsed JSON, int/long from in-process callers. Order matches the
+    // old per-handler chains (JsonElement, then int, then long).
+    private static bool TryCoerceInt(object? o, out int v)
+    {
+        switch (o)
         {
-            object? a0 = args[0], a1 = args[1];
-            int w, h;
-            if (a0 is JsonElement je0 && je0.ValueKind == JsonValueKind.Number && je0.TryGetInt32(out var jw)) w = jw;
-            else if (a0 is int iv0) w = iv0;
-            else if (a0 is long lv0) w = (int)lv0;
-            else return;
-            if (a1 is JsonElement je1 && je1.ValueKind == JsonValueKind.Number && je1.TryGetInt32(out var jh)) h = jh;
-            else if (a1 is int iv1) h = iv1;
-            else if (a1 is long lv1) h = (int)lv1;
-            else return;
-            var settings = AtherizSettings.Global;
-            if (!(0 < w && w <= settings.MapSizeMaxWidth && 0 < h && h <= settings.MapSizeMaxHeight)) return;
-            connection.Session.MapWidth = w;
-            connection.Session.MapHeight = h;
+            case int iv:
+                v = iv;
+                return true;
+            case long lv:
+                v = (int)lv;
+                return true;
+            case JsonElement je when je.ValueKind == JsonValueKind.Number:
+                return je.TryGetInt32(out v);
+            default:
+                v = 0;
+                return false;
         }
+    }
+
+    // Shared size coercion + bound check for TermSize/MapSize (differ only in
+    // limits/targets). False preserves each caller's silent-return reject.
+    private static bool TryCoerceSize(List<object?> args, int maxW, int maxH, out int w, out int h)
+    {
+        w = 0;
+        h = 0;
+        if (args.Count < 2) return false;
+        if (!TryCoerceInt(args[0], out w)) return false;
+        if (!TryCoerceInt(args[1], out h)) return false;
+        return 0 < w && w <= maxW && 0 < h && h <= maxH;
     }
 
     // Port of inputfuncs.py:342-360 screenreader
@@ -264,32 +271,64 @@ public class InputFuncs
         }
         return false;
     }
+    // Single source of truth for the allowed text-attribute set. Membership
+    // tests below go through this set; duplicate detection uses three bool
+    // flags (duplicates reject, matching the old HashSet.Count/Distinct checks).
+    private static readonly FrozenSet<string> AllowedAttrs = FrozenSet.ToFrozenSet<string>(["bold", "italic", "underline"]);
+
     private static bool IsAttrs(object? v)
     {
         if (v is List<object?> lst) {
-            foreach (var e in lst) if (e is not string s || (s!="bold" && s!="italic" && s!="underline")) return false;
-            var set = new HashSet<string>(lst.Cast<string>());
-            return set.Count==lst.Count && set.IsSubsetOf(new[]{"bold","italic","underline"});
+            bool bold = false, italic = false, underline = false;
+            foreach (var e in lst)
+            {
+                if (e is not string s || !AllowedAttrs.Contains(s)) return false;
+                switch (s)
+                {
+                    case "bold": if (bold) return false; bold = true; break;
+                    case "italic": if (italic) return false; italic = true; break;
+                    case "underline": if (underline) return false; underline = true; break;
+                    default: return false;
+                }
+            }
+            return true;
         }
         if (v is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Array)
         {
-            var arr = je.EnumerateArray().Select(e=> e.GetString()).ToList();
-            if (arr.Any(s=> s!="bold" && s!="italic" && s!="underline")) return false;
-            return arr.Distinct().Count()==arr.Count;
+            bool bold = false, italic = false, underline = false;
+            foreach (var e in je.EnumerateArray())
+            {
+                // Same conversion as the old Select(GetString) path: null for
+                // JSON null, throw for non-string numbers.
+                var s = e.GetString();
+                if (s is null || !AllowedAttrs.Contains(s)) return false;
+                switch (s)
+                {
+                    case "bold": if (bold) return false; bold = true; break;
+                    case "italic": if (italic) return false; italic = true; break;
+                    case "underline": if (underline) return false; underline = true; break;
+                    default: return false;
+                }
+            }
+            return true;
         }
         return false;
     }
+    private static Dictionary<string, object?>? NormalizeDict(object? v)
+    {
+        if (v is Dictionary<string, object?> d) return d;
+        if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            Dictionary<string, object?> dict = [];
+            foreach (var p in je.EnumerateObject()) dict[p.Name] = ConnectionManager.JsonElementToObject(p.Value);
+            return dict;
+        }
+        return null;
+    }
+
     private static bool IsLegendEntry(object? v)
     {
-        if (v is not Dictionary<string, object?> dict)
-        {
-            if (v is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Object)
-            {
-                dict = [];
-                foreach (var p in je.EnumerateObject()) dict[p.Name]= ConnectionManager.JsonElementToObject(p.Value);
-            }
-            else return false;
-        }
+        if (NormalizeDict(v) is not { } dict) return false;
         if (!dict.TryGetValue("symbol", out var sym) || sym is not string symStr) return false;
         string visible;
         try { visible = GameUtils.StripAnsi(symStr); } catch { visible = symStr; }
@@ -315,35 +354,56 @@ public class InputFuncs
         {
             if (show is not bool) return false;
         }
-        bool IsFg(object? fg)
-        {
-            if (fg is null) return true;
-            if (fg is int || fg is double || fg is float) return true;
-            if (fg is System.Text.Json.JsonElement je && (je.ValueKind==System.Text.Json.JsonValueKind.Number || je.ValueKind==System.Text.Json.JsonValueKind.Null)) return true;
-            if (fg is List<object?> lst && lst.Count==3 && lst.All(x=> x is int)) {
-                int a=(int)lst[0]!; int b=(int)lst[1]!; int c=(int)lst[2]!;
-                if (a==-1 && b==-1 && c==-1) return true;
-                return a>=0&&a<=255&&b>=0&&b<=255&&c>=0&&c<=255;
-            }
-            return false;
-        }
-        bool IsBg(object? bg)
-        {
-            if (bg is null) return true;
-            if (bg is int || bg is double || bg is float) return true;
-            if (bg is System.Text.Json.JsonElement je && (je.ValueKind==System.Text.Json.JsonValueKind.Number || je.ValueKind==System.Text.Json.JsonValueKind.Null)) return true;
-            if (bg is List<object?> lst && lst.Count==3 && lst.All(x=> x is int)) {
-                int a=(int)lst[0]!; int b=(int)lst[1]!; int c=(int)lst[2]!;
-                if (a==-1 && b==-1 && c==-1) return true;
-                return a>=-1&&a<=255&&b>=-1&&b<=255&&c>=-1&&c<=255;
-            }
-            return false;
-        }
+        bool IsFg(object? fg) => IsRgb(fg, allowPartialTransparent: false);
+        bool IsBg(object? bg) => IsRgb(bg, allowPartialTransparent: true);
         dict.TryGetValue("fg", out var fgVal);
         dict.TryGetValue("bg", out var bgVal);
         if (!IsFg(fgVal)) return false;
         if (!IsBg(bgVal)) return false;
         return true;
+    }
+
+    // Shared list-triple RGB check for the IsFg/IsBg legend validators. The
+    // only difference is the -1 allowance (fg needs the full -1,-1,-1
+    // transparent triple; bg allows -1 per component). The null/scalar/
+    // JsonElement-number preamble is identical in both, so it merges too —
+    // but IsColor stays separate: it rejects null/scalars and handles
+    // JsonElement arrays, a different accept table.
+    private static bool IsRgb(object? v, bool allowPartialTransparent)
+    {
+        if (v is null) return true;
+        if (v is int || v is double || v is float) return true;
+        if (v is System.Text.Json.JsonElement je && (je.ValueKind == System.Text.Json.JsonValueKind.Number || je.ValueKind == System.Text.Json.JsonValueKind.Null)) return true;
+        if (v is List<object?> lst && lst.Count == 3 && lst.All(x => x is int))
+        {
+            int a = (int)lst[0]!; int b = (int)lst[1]!; int c = (int)lst[2]!;
+            if (a == -1 && b == -1 && c == -1) return true;
+            int lo = allowPartialTransparent ? -1 : 0;
+            return a >= lo && a <= 255 && b >= lo && b <= 255 && c >= lo && c <= 255;
+        }
+        return false;
+    }
+
+    // Shared seq coercion for the map_edit family (map_edit,
+    // map_validate_moves, map_edit_legend). Returns false on bad input; each
+    // caller keeps its own failure path (silent return vs map_edit_reject).
+    private static bool TryGetSeq(object? o, out int seq)
+    {
+        switch (o)
+        {
+            case int si:
+                seq = si;
+                return true;
+            case long sl:
+                seq = (int)sl;
+                return true;
+            case System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var jsi):
+                seq = jsi;
+                return true;
+            default:
+                seq = 0;
+                return false;
+        }
     }
 
     private static int ToInt(object? o)
@@ -378,6 +438,73 @@ public class InputFuncs
         return result;
     }
 
+    // Single-parse MapEdit cell: draw vs room discriminated, so the validate/
+    // apply/roomMoves phases iterate this typed list instead of re-running
+    // ToList (JsonElementToObject + int/string re-tests) per cell per phase.
+    // Fg/Bg/Attrs stay raw for draw cells with style — the apply phase
+    // decodes them exactly as before.
+    private readonly record struct MapEditCell(
+        bool IsRoom,
+        int X,
+        int Y,
+        int Tx,
+        int Ty,
+        string Symbol,
+        object? Fg,
+        object? Bg,
+        object? Attrs,
+        bool HasStyle);
+
+    // Validating parse pass: runs the exact validation sequence of the old
+    // first traversal (same order, same first-failure silent-return) and
+    // materializes each passing cell. Room cells skip drawing exactly as
+    // before (IsRoom; apply continues past them, roomMoves collects them).
+    private static bool TryParseMapEditCells(List<object?> cells, out List<MapEditCell> parsed)
+    {
+        parsed = new List<MapEditCell>(cells.Count);
+        foreach (var cellObj in cells)
+        {
+            var cell = ToList(cellObj);
+            if (cell.Count == 0) return false;
+            // Convert possible JsonElement string first element
+            object? first = cell[0];
+            if (first is System.Text.Json.JsonElement jef && jef.ValueKind == System.Text.Json.JsonValueKind.String) first = jef.GetString();
+            if (first is string fs && fs == "room")
+            {
+                if (cell.Count != 5) return false;
+                for (int i = 1; i < 5; i++)
+                {
+                    var v = cell[i];
+                    if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) return false; }
+                    else if (v is not int && v is not long) return false;
+                }
+                parsed.Add(new MapEditCell(true, ToInt(cell[1]), ToInt(cell[2]), ToInt(cell[3]), ToInt(cell[4]), "", null, null, null, false));
+                continue;
+            }
+            if (cell.Count != 3 && cell.Count != 6) return false;
+            // first two must be int
+            for (int i = 0; i < 2; i++)
+            {
+                var v = cell[i];
+                if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) return false; }
+                else if (v is not int && v is not long) return false;
+            }
+            if (cell[2] is not string)
+            {
+                if (cell[2] is System.Text.Json.JsonElement je3 && je3.ValueKind == System.Text.Json.JsonValueKind.String) { } else return false;
+            }
+            if (cell.Count == 6)
+            {
+                if (!IsColor(cell[3]) || !IsColor(cell[4]) || !IsAttrs(cell[5])) return false;
+            }
+            string sym = cell[2] is string ss ? ss : (cell[2] is System.Text.Json.JsonElement je4 && je4.ValueKind == System.Text.Json.JsonValueKind.String ? je4.GetString() ?? "" : "");
+            parsed.Add(cell.Count == 3
+                ? new MapEditCell(false, ToInt(cell[0]), ToInt(cell[1]), 0, 0, sym, null, null, null, false)
+                : new MapEditCell(false, ToInt(cell[0]), ToInt(cell[1]), 0, 0, sym, cell[3], cell[4], cell[5], true));
+        }
+        return true;
+    }
+
     // Port of inputfuncs.py:376-489 map_edit
     [InputFunc("map_edit")]
     public void MapEditHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
@@ -388,11 +515,7 @@ public class InputFuncs
         var cellsObj = args[2];
         if (key is null || cellsObj is null) return;
         // seq must be int
-        int seq;
-        if (seqObj is int si) seq=si;
-        else if (seqObj is long sl) seq=(int)sl;
-        else if (seqObj is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var jsi)) seq=jsi;
-        else return;
+        if (!TryGetSeq(seqObj, out var seq)) return;
         // key is a string here (null returned above), so only the cells shape
         // still needs checking.
         if (cellsObj is not List<object?> && cellsObj is not System.Text.Json.JsonElement) {
@@ -401,40 +524,9 @@ public class InputFuncs
             else return;
         }
         var cells = ToList(cellsObj);
-        // Validate cells
-        foreach (var cellObj in cells)
-        {
-            var cell = ToList(cellObj);
-            if (cell.Count==0) return;
-            // Convert possible JsonElement string first element
-            object? first = cell[0];
-            if (first is System.Text.Json.JsonElement jef && jef.ValueKind==System.Text.Json.JsonValueKind.String) first = jef.GetString();
-            if (first is string fs && fs=="room")
-            {
-                if (cell.Count!=5) return;
-                for(int i=1;i<5;i++) {
-                    var v = cell[i];
-                    if (v is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) return; }
-                    else if (v is not int && v is not long) return;
-                }
-                continue;
-            }
-            if (cell.Count!=3 && cell.Count!=6) return;
-            // first two must be int
-            for(int i=0;i<2;i++) {
-                var v=cell[i];
-                if (v is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) return; }
-                else if (v is not int && v is not long) return;
-            }
-            if (cell[2] is not string)
-            {
-                if (cell[2] is System.Text.Json.JsonElement je3 && je3.ValueKind==System.Text.Json.JsonValueKind.String) { } else return;
-            }
-            if (cell.Count==6)
-            {
-                if (!IsColor(cell[3]) || !IsColor(cell[4]) || !IsAttrs(cell[5])) return;
-            }
-        }
+        // Single validating parse (replaces the old validate traversal); the
+        // apply and roomMoves phases below iterate the typed list.
+        if (!TryParseMapEditCells(cells, out var parsed)) return;
         var result = ConsumeOrReply(connection, key, seq);
         if (result is null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
@@ -452,22 +544,16 @@ public class InputFuncs
                 mi.Lock.EnterWriteLock();
                 try
                 {
-                    foreach (var cellObj in cells)
+                    foreach (var cell in parsed)
                     {
-                        var cell = ToList(cellObj);
-                        if (cell.Count>0)
-                        {
-                            object? f0 = cell[0];
-                            if (f0 is System.Text.Json.JsonElement je0 && je0.ValueKind==System.Text.Json.JsonValueKind.String) f0 = je0.GetString();
-                            if (f0 is string s0 && s0=="room") continue;
-                        }
-                        int x = ToInt(cell[0]); int y = ToInt(cell[1]);
-                        string sym = cell[2] is string ss ? ss : (cell[2] is System.Text.Json.JsonElement je4 && je4.ValueKind==System.Text.Json.JsonValueKind.String ? je4.GetString()??"" : "");
+                        if (cell.IsRoom) continue;
+                        int x = cell.X; int y = cell.Y;
+                        string sym = cell.Symbol;
                         if (sym=="") mi.PreGrid.Remove((x,y));
-                        else if (cell.Count==3) mi.PreGrid[(x,y)] = sym;
+                        else if (!cell.HasStyle) mi.PreGrid[(x,y)] = sym;
                         else
                         {
-                            var fg = cell[3]; var bg = cell[4]; var attrs = cell[5];
+                            var fg = cell.Fg; var bg = cell.Bg; var attrs = cell.Attrs;
                             // decode fg/bg
                             (byte R,byte G,byte B)? fgT=null; (byte R,byte G,byte B)? bgT=null;
                             List<object?> fgList = ToList(fg); List<object?> bgList = ToList(bg);
@@ -489,18 +575,11 @@ public class InputFuncs
             }
         }
         List<((int X,int Y) src,(int X,int Y) dst)> roomMoves = [];
-        foreach (var cellObj in cells)
+        foreach (var cell in parsed)
         {
-            var cell = ToList(cellObj);
-            if (cell.Count>0)
+            if (cell.IsRoom)
             {
-                object? f0 = cell[0];
-                if (f0 is System.Text.Json.JsonElement je0 && je0.ValueKind==System.Text.Json.JsonValueKind.String) f0 = je0.GetString();
-                if (f0 is string s0 && s0=="room")
-                {
-                    int fx=ToInt(cell[1]), fy=ToInt(cell[2]), tx=ToInt(cell[3]), ty=ToInt(cell[4]);
-                    roomMoves.Add(((fx,fy),(tx,ty)));
-                }
+                roomMoves.Add(((cell.X, cell.Y), (cell.Tx, cell.Ty)));
             }
         }
         if (roomMoves.Count>0)
@@ -530,11 +609,7 @@ public class InputFuncs
         object? seqObj = args[1];
         var movesObj = args[2];
         if (key is null || movesObj is null) return;
-        int seq;
-        if (seqObj is int si) seq=si;
-        else if (seqObj is long sl) seq=(int)sl;
-        else if (seqObj is System.Text.Json.JsonElement jeSeq && jeSeq.ValueKind==System.Text.Json.JsonValueKind.Number && jeSeq.TryGetInt32(out var jsi)) seq=jsi;
-        else return;
+        if (!TryGetSeq(seqObj, out var seq)) return;
         var movesList = ToList(movesObj);
         foreach (var mObj in movesList)
         {
@@ -612,24 +687,14 @@ public class InputFuncs
             connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []);
             return;
         }
-        int seq;
-        if (seqObj is int si) seq=si;
-        else if (seqObj is long sl) seq=(int)sl;
-        else if (seqObj is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var jsi)) seq=jsi;
-        else { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []); return; }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []); return; }
         var legend = ToList(legendObj);
         if (legend.Count>200) { connection.SendCommand("map_edit_reject", new List<object?>{ "Too many legend entries (max 200)." }, []); return; }
         for(int idx=0; idx<legend.Count; idx++)
         {
             var entry = legend[idx];
             // Normalize JsonElement to dict if needed
-            object? norm = entry;
-            if (entry is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Object)
-            {
-                Dictionary<string, object?> dict = [];
-                foreach(var p in je.EnumerateObject()) dict[p.Name]= ConnectionManager.JsonElementToObject(p.Value);
-                norm = dict;
-            }
+            object? norm = NormalizeDict(entry) ?? entry;
             if (!IsLegendEntry(norm))
             {
                 connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid legend entry at index {idx}." }, []);
@@ -656,14 +721,7 @@ public class InputFuncs
         List<LegendEntry> newEntries = [];
         foreach (var eObj in legend)
         {
-            Dictionary<string, object?> dict;
-            if (eObj is Dictionary<string, object?> d) dict=d;
-            else if (eObj is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Object)
-            {
-                dict = [];
-                foreach(var p in je.EnumerateObject()) dict[p.Name]= ConnectionManager.JsonElementToObject(p.Value);
-            }
-            else continue;
+            if (NormalizeDict(eObj) is not { } dict) continue;
             var le = new LegendEntry();
             le.Symbol = dict.TryGetValue("symbol", out var sy) ? sy as string : null;
             var desc = dict.TryGetValue("desc", out var de) ? de : null;

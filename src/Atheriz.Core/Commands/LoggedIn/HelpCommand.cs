@@ -34,10 +34,14 @@ public sealed class HelpCommand : Command
             // local commands from location/inventory (single session lookup above)
             if (caller is Objects.GameObject go)
             {
+                // Order-preserving dedup (set for membership, list for order):
+                // the default comparer is reference equality here, matching
+                // the old ReferenceEquals scan exactly.
                 List<Command> locals = [];
+                HashSet<Command> seenLocals = [];
                 foreach (var set in CommandHelpers.LocalVerbSets(go))
                     foreach (var lc in set.GetAll())
-                        if (!lc.Hide && lc.Access(go) && locals.All(l => !ReferenceEquals(l, lc)))
+                        if (!lc.Hide && lc.Access(go) && seenLocals.Add(lc))
                             locals.Add(lc);
                 if (locals.Count > 0)
                 {

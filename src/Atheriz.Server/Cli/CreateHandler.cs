@@ -7,16 +7,7 @@ public static class CreateHandler
     {
         var settings = StopHandler.EffectiveSettingsValue;
         var port = ArgumentParser.ParsePort(a);
-        var filtered = a.Where((v, i) =>
-        {
-            // a trailing bare flag (i + 1 >= a.Length) carries no
-            // value — keep it (minus consumed-value/prefix/glued shapes) so
-            // the missing-value path reports it instead of a neighbor (or
-            // thin air) being consumed as its value.
-            if (i + 1 >= a.Length)
-                return !(i > 0 && a[i - 1] == "--port") && !(i > 0 && a[i - 1] == "-p") && !v.StartsWith("--port=", StringComparison.Ordinal) && !ArgumentParser.IsGluedShortPort(v);
-            return !(v == "--port") && !(i > 0 && a[i - 1] == "--port") && !v.StartsWith("--port=", StringComparison.Ordinal) && !(v == "-p") && !(i > 0 && a[i - 1] == "-p") && !ArgumentParser.IsGluedShortPort(v);
-        }).ToArray();
+        var filtered = ArgumentParser.StripPortOptions(a);
         if (filtered.Length < 3)
         {
             Console.Error.WriteLine("Usage: atheriz create <accountname> <charactername> <password> [--port N]");
@@ -31,19 +22,13 @@ public static class CreateHandler
         // this world: print its message and return. The offline DB path runs
         // only when no token exists or the server cannot be reached, never
         // against a running server.
-        var resp = await ShutdownClient.PostAdminAsync(portVal, settings.SecretPath, "/_internal/create_account", payload, tlsOn).ConfigureAwait(false);
-        // On a scheme mismatch (settings say https, server speaks plaintext or
-        // vice versa) retry once with the flipped scheme, mirroring reload —
-        // otherwise a null response falls through to the offline DB path
-        // against a LIVE server.
-        resp ??= await ShutdownClient.PostAdminAsync(portVal, settings.SecretPath, "/_internal/create_account", payload, !tlsOn).ConfigureAwait(false);
+        var resp = await ShutdownClient.PostAdminWithTlsFallbackAsync(portVal, settings.SecretPath, "/_internal/create_account", payload, tlsOn).ConfigureAwait(false);
         if (resp is not null)
         {
             try
             {
-                using var doc = JsonDocument.Parse(resp.Body);
-                var status = doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : "error";
-                var msg = doc.RootElement.TryGetProperty("message", out var m) ? m.GetString() : resp.Body;
+                var status = resp.GetStatus("error");
+                var msg = resp.GetMessage();
                 Console.WriteLine(msg);
                 if (status == "ok" || status == "error") return;
             }
@@ -58,8 +43,7 @@ public static class CreateHandler
         try
         {
             var pidFile = Path.Combine(savePath, "server.pid");
-            if (File.Exists(pidFile) && int.TryParse(File.ReadAllText(pidFile).Trim(), out int ownerPid)
-                && Infrastructure.PidFile.IsServerProcess(ownerPid))
+            if (Infrastructure.PidFile.IsLiveClaim(pidFile, out int ownerPid))
             {
                 Console.WriteLine($"A live server owns this world (verified server.pid {ownerPid}); stop it first instead of offline create.");
                 return;

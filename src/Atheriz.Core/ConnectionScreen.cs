@@ -14,14 +14,20 @@ public static class ConnectionScreen
         try { if (!Commands.CommandDispatcher.IsUnloggedInEnabled(cmd)) return ""; } catch { }
         return text;
     }
+    // Static gate probes: the commands are stateless (Key/Desc get-only,
+    // IsUnloggedInEnabled does type tests only, Run is never invoked), so one
+    // shared instance per Render is exact — no per-Render allocation to test
+    // the gate.
+    private static readonly Commands.UnloggedIn.GuestCommand GuestProbe = new();
+    private static readonly Commands.UnloggedIn.CreateAccountCommand CreateProbe = new();
     // Port of connection_screen.py:11 _guest_text
     // hints must agree with the dispatch gate, not just the display
     // settings — the gate also requires the dispatcher snapshot.
     private static string GuestText(AtherizSettings? s = null)
-        => HintText((s ?? AtherizSettings.Global).GuestEnabled, new Commands.UnloggedIn.GuestCommand(), "enter 'guest' to create a temporary character");
+        => HintText((s ?? AtherizSettings.Global).GuestEnabled, GuestProbe, "enter 'guest' to create a temporary character");
     // Port of connection_screen.py:15 _create_text
     private static string CreateText(AtherizSettings? s = null)
-        => HintText((s ?? AtherizSettings.Global).AccountCreationEnabled, new Commands.UnloggedIn.CreateAccountCommand(), "enter 'create' to make a new account");
+        => HintText((s ?? AtherizSettings.Global).AccountCreationEnabled, CreateProbe, "enter 'create' to make a new account");
 
     // Port of connection_screen.py:22 SCREEN
     private const string Screen = """
@@ -63,6 +69,9 @@ public static class ConnectionScreen
     private static int _cacheKnown;
 
     // Port of connection_screen.py:58 get_online
+    // Static predicate (no per-call closure alloc); the 5 s render cache above
+    // is untouched.
+    private static readonly Func<Objects.GameObject, bool> IsPcFilter = static o => o.IsPc;
     public static (int online, int known) GetOnline()
     {
         var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds(); // Port of time.monotonic — now via TimeProvider
@@ -71,9 +80,17 @@ public static class ConnectionScreen
             if (now - _cacheTs < 5) return (_cacheOnline, _cacheKnown);
         }
         // Port of connection_screen.py:64 filter_by lambda x.is_pc
-        var results = ObjectRegistry.FilterBy(o => o.IsPc);
-        var online = results.Count(o => o.IsConnected);
-        var known = results.Count;
+        var results = ObjectRegistry.FilterBy(IsPcFilter);
+        // Single pass over the one snapshot: both counts derive from the same
+        // already-materialized list, so one loop is arithmetically identical
+        // to the old Count(predicate) + Count (no double-enumeration drift).
+        int online = 0;
+        int known = 0;
+        foreach (var o in results)
+        {
+            known++;
+            if (o.IsConnected) online++;
+        }
         lock (_lock) { _cacheTs = now; _cacheOnline = online; _cacheKnown = known; }
         return (online, known);
     }

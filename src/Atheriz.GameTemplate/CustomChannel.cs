@@ -5,13 +5,4 @@ namespace MyGame;
 public class CustomChannel : Channel
 {
     public CustomChannel(int historyLimit = 50) : base(historyLimit) { }
-    public override void AtCreate()
-    {
-        base.AtCreate();
-    }
-
-    public override bool AtDelete(GameObject? caller)
-    {
-        return base.AtDelete(caller);
-    }
 }

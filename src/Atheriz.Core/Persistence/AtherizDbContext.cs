@@ -99,6 +99,16 @@ public sealed class AtherizDbContext : DbContext
         b.Entity<CheckpointRow>().Property(x => x.Id).ValueGeneratedNever();
     }
 
+    // Shared PRAGMA core for the WAL attempt + DELETE fallback: the journal_mode
+    // is the only per-path variation (verified: synchronous + busy_timeout are
+    // identical on all paths), so one helper emits identical SQL in identical order.
+    private void ApplyPragmas(string journalMode)
+    {
+        Database.ExecuteSqlRaw($"PRAGMA journal_mode={journalMode};");
+        Database.ExecuteSqlRaw("PRAGMA synchronous=NORMAL;");
+        Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;");
+    }
+
     private void ApplyWalPragmas()
     {
         // one statement per ExecuteSqlRaw. A multi-statement batch
@@ -107,16 +117,14 @@ public sealed class AtherizDbContext : DbContext
         // (Python database_setup.py:76 uses executescript for the same three.)
         try
         {
-            Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
-            Database.ExecuteSqlRaw("PRAGMA synchronous=NORMAL;");
-            Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;");
+            ApplyPragmas("WAL");
         }
         catch (Exception ex)
         {
             // Loud: falling back to DELETE journaling on a multi-context workload
             // risks SQLITE_BUSY surfacing to saves; the fallback stays (port) but must be visible.
             AtherizLogger.LogError($"WAL pragmas failed ({ex.Message}); falling back to DELETE journal.", ex);
-            try { Database.ExecuteSqlRaw("PRAGMA journal_mode=DELETE;"); Database.ExecuteSqlRaw("PRAGMA synchronous=NORMAL;"); Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;"); }
+            try { ApplyPragmas("DELETE"); }
             catch (Exception ex2) { AtherizLogger.LogError($"WAL fallback pragmas failed: {ex2.Message}", ex2); }
         }
     }

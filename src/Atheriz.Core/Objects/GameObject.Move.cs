@@ -199,8 +199,10 @@ public partial class GameObject
                 if (next.IsNode) { reachedNode = true; break; } // stop at node per Python is_node check
                 cur = next;
             }
-            // Also check direct dest is self
-            if (destObj.Id == this.Id) return false;
+            // Also check direct dest is self (the :183 guard above already rejects
+            // both self-forms before the walk, and :194 re-checks during it,
+            // so this repeat is unreachable for self-moves — kept as a comment
+            // rather than a third test).
             // Additional contents-recursion guard for flaky parallel tests (registry pollution may break location chain).
             // Runs only when the upward walk did NOT reach a Node (dangling/
             // stale chain): a clean walk to a Node already proves dest is not
@@ -354,7 +356,7 @@ public partial class GameObject
             // Update our location and last_touched_by — Port of base_obj.py:1249-1252 / 1313-1315
             LocationRef newLocRef;
             if (destObj.IsNode && destObj is Node destNode2)
-                newLocRef = new LocationRef.CoordLocation(destNode2.Coord);
+                newLocRef = LocationRef.FromCoord(destNode2.Coord);
             else
                 newLocRef = new LocationRef.ObjectLocation(destObj.Id);
 
@@ -431,8 +433,10 @@ public partial class GameObject
         }
         else if (announce && destObj.IsNode)
         {
+            // Reverse-link lookup is dead here: this branch runs only when NOT
+            // (oldLoc is Node && destObj is Node), so with destObj.IsNode true
+            // oldLoc is never a Node and the pattern test cannot match.
             string? reverseName = null;
-            if (oldLoc is Node oldN && destObj is Node destN) reverseName = GetReverseLinkName(oldN, destN);
             AnnounceMoveFrom(destObj, reverseName);
         }
 

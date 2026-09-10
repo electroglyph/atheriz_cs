@@ -13,6 +13,20 @@ public static class DaemonSpawner
     internal static bool IsSafeHost(string h) =>
         h.Length > 0 && h.Length <= 255 && h.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_' or ':' or '[' or ']' or '%');
 
+    // Shared spawn-arg builder for the daemon/reset/restart spawn paths:
+    // --port/--host/--telnet-port in one order. The child parses
+    // order-independently (GetOptionValue scans all argv), so the unified
+    // order is exact. Pure list builder — host validation stays in
+    // SpawnDaemonAsync (reset/restart pass through to it).
+    internal static List<string> BuildSpawnArgs(int? port, string? host, int? telnetPort)
+    {
+        var argList = new List<string>();
+        if (port.HasValue) { argList.Add("--port"); argList.Add(port.Value.ToString()); }
+        if (!string.IsNullOrEmpty(host)) { argList.Add("--host"); argList.Add(host!); }
+        if (telnetPort.HasValue) { argList.Add("--telnet-port"); argList.Add(telnetPort.Value.ToString()); }
+        return argList;
+    }
+
     // Port of atheriz.py:1285 spawn_daemon: Popen start --foreground with stdout/stderr to save/server.log.
     // Returns false when nothing was spawned (invalid args, spawn failure):
     // the caller holds the pid claim and must release it on false, or the
@@ -27,13 +41,8 @@ public static class DaemonSpawner
             var host = ArgumentParser.ParseHost(origArgs);
             var telnetPort = ArgumentParser.ParseTelnetPort(origArgs);
             var argList = new List<string> { "start", "--foreground" };
-            if (port.HasValue) { argList.Add("--port"); argList.Add(port.Value.ToString()); }
-            if (telnetPort.HasValue) { argList.Add("--telnet-port"); argList.Add(telnetPort.Value.ToString()); }
-            if (!string.IsNullOrEmpty(host))
-            {
-                if (!IsSafeHost(host!)) { Console.Error.WriteLine($"Invalid --host value: {host}"); return false; }
-                argList.Add("--host"); argList.Add(host!);
-            }
+            if (!string.IsNullOrEmpty(host) && !IsSafeHost(host!)) { Console.Error.WriteLine($"Invalid --host value: {host}"); return false; }
+            argList.AddRange(BuildSpawnArgs(port, host, telnetPort));
             var saveLog = Path.Combine(Path.GetFullPath(folder), "save", "server.log");
             Directory.CreateDirectory(Path.GetDirectoryName(saveLog)!);
             try

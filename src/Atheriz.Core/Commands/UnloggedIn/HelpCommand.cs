@@ -8,6 +8,11 @@ public sealed class HelpCommand : Command
     public override string Category => "General";
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("command", nargs: "?", help: "Command to get help on"); }
     private static string PrintHelpFor(Command cmd) => HelpHelper.FormatFor(cmd);
+
+    // Help-table width clamp shared by every caller shape below: the table
+    // reserves two columns, and widths below 20 collapse.
+    private static int ClampTermWidth(int tw) => tw < 20 ? 20 : tw;
+
     public override void Run(IMessageTarget caller, object? args)
     {
         var pa = args as GameArgumentParser.ParsedArgs;
@@ -20,17 +25,15 @@ public sealed class HelpCommand : Command
             int tw = 80;
             try
             {
-                if (caller is Objects.GameObject goc)
+                // GameObject and BaseConnection both carry ISessionProvider,
+                // so one branch covers every caller shape. The null-conditional
+                // defaults reproduce each branch's arithmetic exactly: a
+                // session-less caller reads (null ?? 80) - 2 = 78, never 80.
+                if (caller is ISessionProvider sp)
                 {
-                    sr = goc.Session?.ScreenReader ?? false;
-                    tw = (goc.Session?.TermWidth ?? 80) - 2; if (tw < 20) tw = 20;
+                    sr = sp.Session?.ScreenReader ?? false;
+                    tw = ClampTermWidth((sp.Session?.TermWidth ?? 80) - 2);
                 }
-                else if (caller is Network.BaseConnection bc)
-                {
-                    sr = bc.Session.ScreenReader;
-                    tw = bc.Session.TermWidth - 2; if (tw < 20) tw = 20;
-                }
-                else if (caller is ISessionProvider sp && sp.Session is Objects.Session s2) { sr = s2.ScreenReader; tw = s2.TermWidth - 2; if (tw < 20) tw = 20; }
                 // No dynamic fallback: GameObject/BaseConnection/ISessionProvider cover
                 // all production callers and test doubles (MockCaller has no Session).
             }

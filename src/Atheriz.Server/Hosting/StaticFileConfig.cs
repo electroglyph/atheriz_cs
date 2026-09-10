@@ -8,6 +8,21 @@ public static class StaticFileConfig
     // Content-hashed bundle filename (e.g. app.ab12cd34.js): compiled once,
     // matched per static-file response for the immutable cache header.
     private static readonly Regex HashedBundlePattern = new(@"\.[0-9a-fA-F]{8,}\.[a-z0-9]+$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Shared no-cache trio for the three entry-HTML shapes (byte-identical).
+    private static void SetNoCache(HttpResponse response)
+    {
+        response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+        response.Headers.Pragma = "no-cache";
+    }
+
+    // First existing file candidate (static-vs-template fallbacks below).
+    private static string? FirstExisting(params string?[] candidates)
+    {
+        foreach (var c in candidates)
+            if (c is not null && File.Exists(c)) return c;
+        return null;
+    }
     public static (string? staticCandidate, string? templatesCandidate) Configure(WebApplication app, AtherizSettings settings)
     {
         var staticCandidate = AssetPathResolver.ResolveWwwRoot(app.Environment.ContentRootPath, AppContext.BaseDirectory);
@@ -25,14 +40,18 @@ public static class StaticFileConfig
                 OnPrepareResponse = ctx =>
                 {
                     var path = ctx.Context.Request.Path.Value ?? string.Empty;
-                    if (path.StartsWith("/static/assets/", StringComparison.OrdinalIgnoreCase))
+                    // Merged immutable branches: the assets-prefix and hashed-
+                    // bundle arms assigned the identical value. The wasm guard
+                    // on the hash arm is load-bearing, not redundant — the old
+                    // chain tested wasm BEFORE the hash, so a hashed .wasm
+                    // outside assets/ served 86400, not immutable. Keeping the
+                    // guard preserves header bytes for that overlap exactly.
+                    bool immutable = path.StartsWith("/static/assets/", StringComparison.OrdinalIgnoreCase)
+                        || (!path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase) && HashedBundlePattern.IsMatch(path));
+                    if (immutable)
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
                     else if (path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase))
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=86400";
-                    else if (HashedBundlePattern.IsMatch(path))
-                        // Content-hashed bundle filename (e.g. app.ab12cd34.js):
-                        // immutable regardless of directory prefix.
-                        ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
                 }
             });
             var drawEntrypoint = Path.Combine(staticCandidate, "atheriz_draw", "index.html");
@@ -57,43 +76,28 @@ public static class StaticFileConfig
 
         app.MapGet("/", (HttpContext ctx) =>
         {
-            ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
-            ctx.Response.Headers.Pragma = "no-cache";
-            if (templatesCandidate is not null)
-            {
-                var tpl = Path.Combine(templatesCandidate, "index.html");
-                if (File.Exists(tpl)) return Results.File(tpl, contentType: "text/html");
-            }
-            if (staticCandidate is not null)
-            {
-                var idx = Path.Combine(staticCandidate, "index.html");
-                if (File.Exists(idx)) return Results.File(idx, contentType: "text/html");
-            }
+            SetNoCache(ctx.Response);
+            var tpl = templatesCandidate is not null ? Path.Combine(templatesCandidate, "index.html") : null;
+            var idx = staticCandidate is not null ? Path.Combine(staticCandidate, "index.html") : null;
+            var hit = FirstExisting(tpl, idx);
+            if (hit is not null) return Results.File(hit, contentType: "text/html");
             return Results.Content($"<h1>{settings.ServerName}</h1><p><a href=\"/webclient/index.html\">Play</a></p>", "text/html");
         });
         app.MapGet("/webclient/index.html", (HttpContext ctx) =>
         {
-            ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
-            ctx.Response.Headers.Pragma = "no-cache";
-            if (staticCandidate is not null)
-            {
-                var compiled = Path.Combine(staticCandidate, "webclient", "index.html");
-                if (File.Exists(compiled)) return Results.File(compiled, contentType: "text/html");
-            }
-            if (templatesCandidate is not null)
-            {
-                var tpl = Path.Combine(templatesCandidate, "webclient", "index.html");
-                if (File.Exists(tpl)) return Results.File(tpl, contentType: "text/html");
-            }
+            SetNoCache(ctx.Response);
+            var compiled = staticCandidate is not null ? Path.Combine(staticCandidate, "webclient", "index.html") : null;
+            var tpl = templatesCandidate is not null ? Path.Combine(templatesCandidate, "webclient", "index.html") : null;
+            var hit = FirstExisting(compiled, tpl);
+            if (hit is not null) return Results.File(hit, contentType: "text/html");
             return Results.NotFound("Webclient not built — run webclient build and deploy.");
         });
-        app.MapGet("/webclient", () => Results.Redirect("/webclient/index.html"));
-        app.MapGet("/webclient/", () => Results.Redirect("/webclient/index.html"));
+        foreach (var route in new[] { "/webclient", "/webclient/" })
+            app.MapGet(route, () => Results.Redirect("/webclient/index.html"));
         IResult ServeDraw(HttpContext ctx)
         {
             // Entry HTML is never cached (hashed bundles underneath are immutable).
-            ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
-            ctx.Response.Headers.Pragma = "no-cache";
+            SetNoCache(ctx.Response);
             if (staticCandidate is not null)
             {
                 var compiledDraw = Path.Combine(staticCandidate, "atheriz_draw", "index.html");
@@ -101,9 +105,10 @@ public static class StaticFileConfig
             }
             return Results.Content("AtheriZ Draw not built — run `npm run build` in webclient/ and deploy.", "text/html", statusCode: 404);
         }
-        app.MapGet("/atheriz_draw", ServeDraw);
-        app.MapGet("/atheriz_draw/", ServeDraw);
-        app.MapGet("/atheriz_draw/index.html", ServeDraw);
+        // Route-table loop for the draw aliases: registration ORDER is
+        // preserved (first-match wins in static-file middleware).
+        foreach (var route in new[] { "/atheriz_draw", "/atheriz_draw/", "/atheriz_draw/index.html" })
+            app.MapGet(route, ServeDraw);
         app.MapGet("/health", () => Results.Json(new { status = "ok", server = settings.ServerName }));
         // Readiness probe: /health stays unconditional liveness (webclient relies on it);
         // /ready reports whether DoStartup ran to completion.

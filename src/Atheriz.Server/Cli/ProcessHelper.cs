@@ -21,12 +21,9 @@ public static class ProcessHelper
 
     public static async Task<bool> WaitForExitDotsAsync(Process proc, int tenths)
     {
-        for (int i = 0; i < tenths; i++)
-        {
-            try { if (proc.HasExited) return true; } catch { return true; }
-            await Task.Delay(100).ConfigureAwait(false);
-            Console.Write(".");
-        }
+        // Shared dot-wait cadence below; the exit probe keeps its own
+        // catch semantics (probe failure = exited) and tail.
+        await WaitUntilAsync(() => { try { return proc.HasExited; } catch { return true; } }, tenths).ConfigureAwait(false);
         try { return proc.HasExited; } catch { return true; }
     }
 
@@ -43,16 +40,28 @@ public static class ProcessHelper
         }
     }
 
-    public static async Task<bool> WaitForPidExitAsync(int pid)
+    // Shared dot-wait core: bounded Delay(100) + Write(".") cadence only.
+    // Per-caller exit predicates (with their own catch semantics) and tails
+    // stay at the call sites — ExitDots treats probe failure as exited while
+    // PidExit treats it as alive (except ArgumentException), and the bounds
+    // differ (tenths param vs hardcoded 50).
+    internal static async Task WaitUntilAsync(Func<bool> isDone, int tenths)
     {
-        for (int i = 0; i < 50; i++)
+        for (int i = 0; i < tenths && !isDone(); i++)
         {
-            bool exists = true;
-            try { using var p = Process.GetProcessById(pid); exists = !p.HasExited; } catch (ArgumentException) { exists = false; } catch { }
-            if (!exists) return true;
             await Task.Delay(100).ConfigureAwait(false);
             Console.Write(".");
         }
+    }
+
+    public static async Task<bool> WaitForPidExitAsync(int pid)
+    {
+        await WaitUntilAsync(() =>
+        {
+            bool exists = true;
+            try { using var p = Process.GetProcessById(pid); exists = !p.HasExited; } catch (ArgumentException) { exists = false; } catch { }
+            return !exists;
+        }, 50).ConfigureAwait(false);
         try { using var q = Process.GetProcessById(pid); return q.HasExited; } catch (ArgumentException) { return true; } catch { return false; }
     }
 
@@ -60,11 +69,5 @@ public static class ProcessHelper
     {
         [DllImport("libc", SetLastError = true)]
         internal static extern int kill(int pid, int sig);
-        [DllImport("libc", SetLastError = true, CharSet = CharSet.Ansi)]
-        internal static extern int open(string pathname, int flags);
-        [DllImport("libc", SetLastError = true)]
-        internal static extern int fsync(int fd);
-        [DllImport("libc", SetLastError = true)]
-        internal static extern int close(int fd);
     }
 }

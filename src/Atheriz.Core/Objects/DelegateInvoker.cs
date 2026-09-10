@@ -14,24 +14,24 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public static class DelegateInvoker
 {
-    private static readonly ConditionalWeakTable<Delegate, Func<object?[], object?>> _cache = new();
+    // First-use metadata snapshot per delegate instance (delegates are immutable,
+    // so the snapshot never goes stale): parameter types + defaults + required
+    // count + compiled invoker. Replaces the per-invoke Method.GetParameters()
+    // reflection on the hook hot path; the arity/type checks below reproduce the
+    // exact same TargetParameterCountException behavior as before.
+    private sealed record DelegateMetadata(Type[] Types, object?[] Defaults, int RequiredCount, Func<object?[], object?> Invoker);
+    private static readonly ConditionalWeakTable<Delegate, DelegateMetadata> _cache = new();
 
     public static object? Invoke(Delegate d, object?[] args)
     {
-        var ps = d.Method.GetParameters();
-        int required = 0;
-        foreach (var p in ps)
-        {
-            if (p.IsOptional || p.HasDefaultValue) break;
-            required++;
-        }
-        if (args.Length < required || args.Length > ps.Length) throw new TargetParameterCountException();
+        var meta = _cache.GetValue(d, static del => Create(del));
+        if (args.Length < meta.RequiredCount || args.Length > meta.Types.Length) throw new TargetParameterCountException();
         // surface type failures as arity failures. Without this the
         // compiled Convert throws NullReference/InvalidCast at invoke time.
         // Only caller-supplied args are checked; filled defaults are trusted.
         for (int i = 0; i < args.Length; i++)
         {
-            var t = ps[i].ParameterType;
+            var t = meta.Types[i];
             var a = args[i];
             if (a is null)
             {
@@ -41,24 +41,37 @@ public static class DelegateInvoker
             else if (!t.IsInstanceOfType(a))
                 throw new TargetParameterCountException();
         }
-        var inv = _cache.GetValue(d, static del => Compile(del));
-        if (args.Length < ps.Length)
+        if (args.Length < meta.Types.Length)
         {
-            var filled = new object?[ps.Length];
+            var filled = new object?[meta.Types.Length];
             Array.Copy(args, filled, args.Length);
-            for (int i = args.Length; i < ps.Length; i++) filled[i] = ps[i].DefaultValue;
-            return inv(filled);
+            for (int i = args.Length; i < meta.Types.Length; i++) filled[i] = meta.Defaults[i];
+            return meta.Invoker(filled);
         }
-        return inv(args);
+        return meta.Invoker(args);
     }
 
-    private static Func<object?[], object?> Compile(Delegate del)
+    private static DelegateMetadata Create(Delegate del)
     {
-        var q = del.Method.GetParameters();
+        var ps = del.Method.GetParameters();
+        int required = 0;
+        foreach (var p in ps)
+        {
+            if (p.IsOptional || p.HasDefaultValue) break;
+            required++;
+        }
+        var types = new Type[ps.Length];
+        var defaults = new object?[ps.Length];
+        for (int i = 0; i < ps.Length; i++) { types[i] = ps[i].ParameterType; defaults[i] = ps[i].DefaultValue; }
+        return new DelegateMetadata(types, defaults, required, Compile(del, ps));
+    }
+
+    private static Func<object?[], object?> Compile(Delegate del, ParameterInfo[] ps)
+    {
         var argv = Expression.Parameter(typeof(object?[]), "args");
-        var callArgs = new Expression[q.Length];
-        for (int i = 0; i < q.Length; i++)
-            callArgs[i] = Expression.Convert(Expression.ArrayIndex(argv, Expression.Constant(i)), q[i].ParameterType);
+        var callArgs = new Expression[ps.Length];
+        for (int i = 0; i < ps.Length; i++)
+            callArgs[i] = Expression.Convert(Expression.ArrayIndex(argv, Expression.Constant(i)), ps[i].ParameterType);
         Expression body = Expression.Invoke(Expression.Constant(del), callArgs);
         body = del.Method.ReturnType == typeof(void)
             ? Expression.Block(body, Expression.Constant(null, typeof(object)))

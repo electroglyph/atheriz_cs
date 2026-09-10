@@ -7,7 +7,9 @@ namespace Atheriz.Core.Globals;
 public static class IdGenerator
 {
     internal static readonly object LockObj = new();
-    private static int _id = -1;
+    // Unassigned-counter sentinel, shared by the initializer and Reset.
+    private const int InitialId = -1;
+    private static int _id = InitialId;
 
     public static int GetId()
     {
@@ -19,7 +21,7 @@ public static class IdGenerator
         lock (LockObj) _id = id;
     }
 
-    public static void Reset() => SetId(-1);
+    public static void Reset() => SetId(InitialId);
 
     /// <summary>
     /// Port of <c>node.py:load</c> tail (<c>_ID = max(_ID, max_node_id)</c> under

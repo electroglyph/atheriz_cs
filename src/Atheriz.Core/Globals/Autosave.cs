@@ -62,7 +62,11 @@ public static class Autosave
         // after all commit. A crash between tables leaves dirty behind.
         // Journal, objects, and all handler saves below honor explicit
         // settings (each section commits independently to the same DB).
-        CheckpointJournal.MarkDirty(AtherizDbContextFactory.ResolveSavePath(settings));
+        // ResolveSavePath is pure (env override else settings path), so one
+        // resolution serves the whole tick; each section still opens its own
+        // commit so one failing domain does not poison the others.
+        string savePath = AtherizDbContextFactory.ResolveSavePath(settings);
+        CheckpointJournal.MarkDirty(savePath);
 
         // One funnel for the four save sections: open an explicit-settings
         // context, run the section save, record the name + log on failure.
@@ -126,7 +130,7 @@ public static class Autosave
         }
         else
         {
-            CheckpointJournal.MarkClean(AtherizDbContextFactory.ResolveSavePath(settings));
+            CheckpointJournal.MarkClean(savePath);
             AtherizLogger.LogInformationRobust("Autosave completed.");
             try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg("Autosave completed."); } catch (Exception) { }
         }

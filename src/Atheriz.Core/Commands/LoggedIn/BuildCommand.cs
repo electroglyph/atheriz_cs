@@ -16,6 +16,9 @@ public sealed class BuildCommand : Command
         };
     // Python alias DIRECTIONS
     public static readonly IReadOnlyDictionary<string, (int dx, int dy, int dz, string link, string back)> DIRECTIONS = Directions;
+    // Canonical flag order behind the direction if-chain (n, e, s, w, u, d, x):
+    // the targets list below must keep this exact order.
+    private static readonly string[] DirectionOrder = ["n", "e", "s", "w", "u", "d", "x"];
 
     public override string Key => "build";
     public override string Desc => "Build rooms, roads, and paths.";
@@ -91,13 +94,13 @@ public sealed class BuildCommand : Command
         }
 
         List<string> targets = [];
-        if (n) targets.Add("n");
-        if (e) targets.Add("e");
-        if (s) targets.Add("s");
-        if (w) targets.Add("w");
-        if (u) targets.Add("u");
-        if (d) targets.Add("d");
-        if (x) targets.Add("x");
+        var dirFlags = new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            ["n"] = n, ["e"] = e, ["s"] = s, ["w"] = w, ["u"] = u, ["d"] = d, ["x"] = x,
+        };
+        foreach (var key in DirectionOrder)
+            if (dirFlags[key])
+                targets.Add(key);
 
         if (targets.Count == 0)
         {
@@ -233,18 +236,24 @@ public sealed class BuildCommand : Command
             {
                 if (room)
                 {
-                    string ch = "";
                     var sset = AtherizSettings.Global;
-                    if (single) ch = sset.SingleWallPlaceholder;
-                    else if (dbl) ch = sset.DoubleWallPlaceholder;
-                    else if (round) ch = sset.RoundedWallPlaceholder;
-                    else if (none) { }
-                    else
+                    // Precedence matches the old if-chain (single > double >
+                    // rounded > none > default outline); mutual exclusion is
+                    // enforced above, so at most one arm can fire either way.
+                    string ch = (single, dbl, round, none) switch
                     {
-                        if (sset.DefaultRoomOutline == "single") ch = sset.SingleWallPlaceholder;
-                        else if (sset.DefaultRoomOutline == "double") ch = sset.DoubleWallPlaceholder;
-                        else if (sset.DefaultRoomOutline == "rounded") ch = sset.RoundedWallPlaceholder;
-                    }
+                        (true, _, _, _) => sset.SingleWallPlaceholder,
+                        (_, true, _, _) => sset.DoubleWallPlaceholder,
+                        (_, _, true, _) => sset.RoundedWallPlaceholder,
+                        (_, _, _, true) => "",
+                        _ => sset.DefaultRoomOutline switch
+                        {
+                            "single" => sset.SingleWallPlaceholder,
+                            "double" => sset.DoubleWallPlaceholder,
+                            "rounded" => sset.RoundedWallPlaceholder,
+                            _ => "",
+                        },
+                    };
                     if (!string.IsNullOrEmpty(ch))
                     {
                         var roomPH = AtherizSettings.Global.RoomPlaceholder;

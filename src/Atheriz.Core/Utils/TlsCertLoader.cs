@@ -52,17 +52,34 @@ public static class TlsCertLoader
         }
         // Keyless public-only file: fail HERE, not at handshake time
         // (Kestrel would otherwise die on first connection).
-        try
+        // Fallback chain as an attempt loop — in-memory PEM text, PEM file, then
+        // the platform loader — the same order as the nested try/catch before it.
+        // RequireKey applies once per attempt; a CryptographicException is always
+        // fatal (rethrow), any other failure falls through to the next attempt,
+        // and the final attempt's failure propagates to the caller.
+        Func<X509Certificate2>[] attempts =
+        [
+            () => X509Certificate2.CreateFromPem(pemText),
+            () => X509Certificate2.CreateFromPemFile(certFile),
+            () => X509CertificateLoader.LoadCertificateFromFile(certFile),
+        ];
+        Exception? lastFailure = null;
+        foreach (var attempt in attempts)
         {
-            return RequireKey(X509Certificate2.CreateFromPem(pemText), certFile);
+            try
+            {
+                return RequireKey(attempt(), certFile);
+            }
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lastFailure = ex;
+            }
         }
-        catch (System.Security.Cryptography.CryptographicException) { throw; }
-        catch
-        {
-            try { return RequireKey(X509Certificate2.CreateFromPemFile(certFile), certFile); }
-            catch (System.Security.Cryptography.CryptographicException) { throw; }
-            catch { return RequireKey(X509CertificateLoader.LoadCertificateFromFile(certFile), certFile); }
-        }
+        throw lastFailure ?? new System.Security.Cryptography.CryptographicException($"SSL certificate could not be loaded: {certFile}");
     }
 
     private static X509Certificate2 RequireKey(X509Certificate2 cert, string certFile)

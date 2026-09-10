@@ -58,11 +58,24 @@ public abstract class DoorDirectionCommand : Command
             foreach (var nn in names) if (doors.TryGetValue(nn, out var door)) return door;
             return null;
         }
-        if (n) { var door = GetDoor(["north","n"]); if (door is not null) Act(door, go); else go.Msg("There is no door to the north."); }
-        if (s) { var door = GetDoor(["south","s"]); if (door is not null) Act(door, go); else go.Msg("There is no door to the south."); }
-        if (e) { var door = GetDoor(["east","e"]); if (door is not null) Act(door, go); else go.Msg("There is no door to the east."); }
-        if (w) { var door = GetDoor(["west","w"]); if (door is not null) Act(door, go); else go.Msg("There is no door to the west."); }
-        if (u) { var door = GetDoor(["up","u"]); if (door is not null) Act(door, go); else go.Msg("There is no door up."); }
-        if (d) { var door = GetDoor(["down","d"]); if (door is not null) Act(door, go); else go.Msg("There is no door down."); }
+        // Row order is the established act order (n, s, e, w, u, d). The up/down
+        // rows carry their own wording ("no door up", no "to the") — keep the
+        // per-row message, never a shared template.
+        var dirs = new (string longName, string shortName, bool active, string missing)[]
+        {
+            ("north", "n", n, "There is no door to the north."),
+            ("south", "s", s, "There is no door to the south."),
+            ("east", "e", e, "There is no door to the east."),
+            ("west", "w", w, "There is no door to the west."),
+            ("up", "u", u, "There is no door up."),
+            ("down", "d", d, "There is no door down."),
+        };
+        foreach (var (longName, shortName, active, missing) in dirs)
+        {
+            if (!active) continue;
+            var door = GetDoor([longName, shortName]);
+            if (door is not null) Act(door, go);
+            else go.Msg(missing);
+        }
     }
 }

@@ -102,6 +102,21 @@ public static class GlobalServices
         return new GameTime(settings, autoLoad: true);
     });
 
+    // One choke point for the fast-path and post-upgrade server-channel
+    // validation below: same IsDeleted + name checks with the same nested
+    // try/catch (a throwing getter fails closed, never live).
+    private static bool IsLiveServerChannel(GameObject? c)
+    {
+        if (c is null) return false;
+        bool isDel = false;
+        string name = "";
+        try { isDel = c.IsDeleted; } catch { isDel = true; }
+        try { name = c.Name ?? ""; } catch { name = ""; }
+        bool nameOk;
+        try { nameOk = name.ToLowerInvariant() == "server"; } catch { nameOk = false; }
+        return !isDel && nameOk;
+    }
+
     // Port of get.py:99-126 get_server_channel filtering is_channel && name=="server" && !is_deleted
     public static GameObject? GetServerChannel()
     {
@@ -110,13 +125,7 @@ public static class GlobalServices
         {
             if (_serverChannel is not null)
             {
-                bool isDel = false;
-                string name = "";
-                try { isDel = _serverChannel.IsDeleted; } catch { isDel = true; }
-                try { name = _serverChannel.Name ?? ""; } catch { name = ""; }
-                bool nameOk;
-                try { nameOk = name.ToLowerInvariant() == "server"; } catch { nameOk = false; }
-                if (isDel || !nameOk)
+                if (!IsLiveServerChannel(_serverChannel))
                 {
                     _singletonLock.EnterWriteLock();
                     try { _serverChannel = null; }
@@ -133,13 +142,7 @@ public static class GlobalServices
                 // Re-check after upgrade
                 if (_serverChannel is not null)
                 {
-                    bool isDel = false;
-                    string name = "";
-                    try { isDel = _serverChannel.IsDeleted; } catch { isDel = true; }
-                    try { name = _serverChannel.Name ?? ""; } catch { name = ""; }
-                    bool nameOk = false;
-                    try { nameOk = name.ToLowerInvariant() == "server"; } catch (Exception) { }
-                    if (!isDel && nameOk) return _serverChannel;
+                    if (IsLiveServerChannel(_serverChannel)) return _serverChannel;
                     _serverChannel = null;
                 }
                 // Port of get.py:117-126 filter_by lambda is_channel && name=="server" && not is_deleted

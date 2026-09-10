@@ -22,6 +22,15 @@ public sealed class WebSocketConnection : BaseConnection
 
     private readonly AtherizSettings _settings;
 
+    // Named send/close deadlines (values identical to the old literals).
+    private static readonly TimeSpan SendLockTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan CloseDrainTimeout = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan CloseHandshakeTimeout = TimeSpan.FromSeconds(2);
+    // Hoisted serializer options (default settings, matching the previous
+    // per-send implicit defaults) so the hot path allocates no options.
+    private static readonly JsonSerializerOptions SendJsonOptions = JsonSerializerOptions.Default;
+
     public WebSocketConnection(System.Net.WebSockets.WebSocket websocket, string? sessionId = null, AtherizSettings? settings = null, string? clientHost = null) : base(sessionId)
     {
         WebSocket = websocket;
@@ -72,20 +81,18 @@ public sealed class WebSocketConnection : BaseConnection
     // pin _sendLock (and stall all later sends) forever. Lock-wait and send
     // use separate deadlines: a lock timeout only skips this message (the
     // holder still owns a live send), while a send timeout Aborts.
-    private async Task LockedSendAsync(string data)
+    private async Task LockedSendAsync(byte[] bytes)
     {
-        var bytes = Encoding.UTF8.GetBytes(data);
-        using var lockCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        try { await _sendLock.WaitAsync(lockCts.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException)
-        {
-            // Lock busy for 5s: drop this message quietly. Do NOT Abort — the
-            // lock holder's send may still complete.
-            throw;
-        }
+        // Lock-wait uses WaitAsync(TimeSpan): no CTS alloc for this phase.
+        // A lock timeout only skips this message (the holder still owns a
+        // live send), while a send timeout Aborts — the two failure modes
+        // stay distinct. The OCE throw keeps the old lock-timeout silence
+        // (TaskDone swallows OperationCanceledException).
+        if (!await _sendLock.WaitAsync(SendLockTimeout).ConfigureAwait(false))
+            throw new OperationCanceledException("WebSocket send lock wait timed out.");
         try
         {
-            using var sendCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var sendCts = new CancellationTokenSource(SendTimeout);
             await WebSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, sendCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -107,8 +114,11 @@ public sealed class WebSocketConnection : BaseConnection
         if (cmd == "prompt_masked") cmd = "prompt"; // port of websocket.py:75-76
         args ??= [];
         kwargs ??= [];
-        var data = JsonSerializer.Serialize(new object[] { cmd, args, kwargs }); // port of websocket.py:81
-        var nb = Encoding.UTF8.GetByteCount(data); // port of websocket.py:82
+        // Single UTF8 pass: serialize straight to bytes and reuse the length
+        // for the reservation (was GetByteCount + GetBytes). Wire bytes are
+        // identical — same payload shape, same options.
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(new object[] { cmd, args, kwargs }, SendJsonOptions); // port of websocket.py:81
+        var nb = bytes.Length; // port of websocket.py:82
         if (IsClosing) return;
         // TryReserve handles both bytes and count limits via PendingLimiter
         if (!_limiter.TryReserve(nb))
@@ -123,7 +133,7 @@ public sealed class WebSocketConnection : BaseConnection
             // port of websocket.py:93-97 — reserve -> schedule -> Track in one
             // guarded span: if Track itself throws, the reservation is released
             // and the task observed (the old split leaked the limiter slot).
-            task = Task.Run(() => LockedSendAsync(data));
+            task = Task.Run(() => LockedSendAsync(bytes));
             _limiter.Track(task, nb);
             // the completion callback rides the owning try — if the
             // attach itself throws, the catch below releases the reservation
@@ -150,7 +160,7 @@ public sealed class WebSocketConnection : BaseConnection
                 // port of websocket.py:120-130 wait_for gather with 0.25 timeout.
                 // WaitAsync(CancellationToken) raises OperationCanceledException
                 // (not TimeoutException) on deadline — that is the expected path.
-                using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+                using var cts = new CancellationTokenSource(CloseDrainTimeout);
                 await Task.WhenAll(pending).WaitAsync(cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { } // deadline elapsed; pendings release via TaskDone on completion
@@ -162,7 +172,7 @@ public sealed class WebSocketConnection : BaseConnection
             // must not hang Close forever. Abort past the deadline.
             if (WebSocket.State == WebSocketState.Open)
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                using var cts = new CancellationTokenSource(CloseHandshakeTimeout);
                 try { await WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) { try { WebSocket.Abort(); } catch { } }
             }

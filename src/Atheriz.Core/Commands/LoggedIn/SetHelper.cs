@@ -10,6 +10,12 @@ public static class SetHelper
         "id","session","lock","locks","access","internal_cmdset","external_cmdset","scripts","hooks","channels","followers","following","is_pc","is_npc","is_item","is_container","is_mapable","is_account","is_channel","is_node","is_script","is_connected","is_deleted","is_modified","is_temporary","is_tickable","_is_tickable","password","logged_in","characters","privilege_level","quelled","is_banned","ban_reason","location","home","_contents","group_channel","contents","tags","name"
     };
 
+    // Case-sensitive move/teleport gate behind the set/unset guards (matches
+    // the old per-call arrays' Ordinal Contains exactly — not the
+    // OrdinalIgnoreCase Protected set above).
+    internal static readonly HashSet<string> MoveGate =
+        new(StringComparer.Ordinal) { "location", "home", "_contents", "group_channel", "contents" };
+
     public static GameObject? ResolveTarget(GameObject caller, string s)
     {
         // Delegate to CommandHelpers for faithful dedup (handles #id/me/here/contents + loc fallback)
@@ -151,14 +157,19 @@ public static class SetHelper
     private static readonly HashSet<string> ProtectedCanonical =
         new(StringComparer.OrdinalIgnoreCase) { "is_builder", "is_superuser" };
 
+    // Case-insensitive lookup over the same entries: IsProtected compares
+    // OrdinalIgnoreCase while the public set stays Ordinal (resolution
+    // elsewhere is case-sensitive) — the comparers are not unified.
+    private static readonly HashSet<string> ProtectedIgnoreCase =
+        new(Protected.Concat(ProtectedCanonical), StringComparer.OrdinalIgnoreCase);
+
     // Port of set.py:75-76 _is_protected, hardened: the guard itself is
     // case-insensitive (frozen set is Ordinal like Python's frozenset, so
     // compare explicitly). Resolution stays case-sensitive (FindEntry): unknown
     // spellings fall through to extras like Python's setattr junk attribute.
     public static bool IsProtected(string attr) =>
         attr.StartsWith("_", StringComparison.Ordinal) ||
-        Protected.Any(p => p.Equals(attr, StringComparison.OrdinalIgnoreCase)) ||
-        ProtectedCanonical.Contains(attr);
+        ProtectedIgnoreCase.Contains(attr);
 
     public static bool HasAttr(GameObject o, string attr)
     {

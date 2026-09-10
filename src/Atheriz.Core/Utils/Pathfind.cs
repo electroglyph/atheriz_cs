@@ -45,13 +45,28 @@ public static class Pathfind
         return path;
     }
 
+    // Shared NodeLock snapshot + resolve core for both GetLinkNodes variants.
+    // Door filtering stays on the caller path — the two variants filter
+    // differently, so only the snapshot + resolve is shared.
+    private static List<NodeLink> SnapshotLinks(Node node)
+    {
+        node.NodeLock.EnterReadLock();
+        try { return node.Links is not null ? new List<NodeLink>(node.Links) : []; }
+        finally { node.NodeLock.ExitReadLock(); }
+    }
+
+    // Shared override-or-global-or-50000 cap resolution for AStar + FindPath.
+    private static int ResolveMaxIterations(int? maxIterationsOverride)
+    {
+        if (maxIterationsOverride.HasValue) return maxIterationsOverride.Value;
+        try { return AtherizSettings.Global.MaxAstarIterations; }
+        catch { return 50000; }
+    }
+
     // Port of pathfind.py:58-66 get_link_nodes (door-blind, no caller).
     private static List<Node> GetLinkNodes(Node node, NodeHandler handler)
     {
-        List<NodeLink> links;
-        node.NodeLock.EnterReadLock();
-        try { links = node.Links is not null ? new List<NodeLink>(node.Links) : []; }
-        finally { node.NodeLock.ExitReadLock(); }
+        var links = SnapshotLinks(node);
         List<Node> result = [];
         foreach (var l in links)
         {
@@ -64,10 +79,7 @@ public static class Pathfind
     // Port of pathfind.py:68+ get_link_nodes_caller (door-aware).
     private static List<Node> GetLinkNodesCaller(Node node, NodeHandler handler, GameObject? caller)
     {
-        List<NodeLink> links;
-        node.NodeLock.EnterReadLock();
-        try { links = node.Links is not null ? new List<NodeLink>(node.Links) : []; }
-        finally { node.NodeLock.ExitReadLock(); }
+        var links = SnapshotLinks(node);
         if (links.Count == 0) return [];
         var doors = handler.GetDoors(node.Coord); // Port of pathfind.py:73 doors = nh.get_doors(node.coord)
         List<Node> result = [];
@@ -121,13 +133,7 @@ public static class Pathfind
         var grid = start.Grid;
         if (grid is null) return (false, [], []);
         // Port of pathfind.py:109 max_iterations = settings.MAX_ASTAR_ITERATIONS.
-        int maxIterations;
-        if (maxIterationsOverride.HasValue) maxIterations = maxIterationsOverride.Value;
-        else
-        {
-            try { maxIterations = AtherizSettings.Global.MaxAstarIterations; }
-            catch { maxIterations = 50000; }
-        }
+        int maxIterations = ResolveMaxIterations(maxIterationsOverride);
         // Port of pathfind.py:110 heapify + heappush start
         openQueue.Enqueue(startNode, startNode);
         openByPos[start.Coord] = startNode;
@@ -149,18 +155,15 @@ public static class Pathfind
             // Port of pathfind.py:121-126: blind expansion for caller=None,
             // door-aware expansion otherwise — AStar and GetNeighbors share
             // this dispatch so neighbor lists agree with pathfinding.
-            List<PathNode> children = [];
+            // Children are scored inline in expansion order (no intermediate
+            // list): A* correctness depends on visiting neighbors in link order.
             var nodes = caller is null
                 ? GetLinkNodes(currentNode.Position, nh)
                 : GetLinkNodesCaller(currentNode.Position, nh, caller);
+            // Port of pathfind.py:130 for child in children:
             foreach (var n in nodes)
             {
-                var node = new PathNode(currentNode, n);
-                children.Add(node);
-            }
-            // Port of pathfind.py:130 for child in children:
-            foreach (var child in children)
-            {
+                var child = new PathNode(currentNode, n);
                 // Port of pathfind.py:131 if child.coord in closed_set: continue
                 if (closedSet.Contains(child.Position.Coord)) continue;
                 // Port of pathfind.py:133 child.g = current.g +1
@@ -225,13 +228,7 @@ public static class Pathfind
         // Port of pathfind.py:109 — an explicit cap wins; otherwise the
         // configured value (null marks "no explicit cap", so any configured
         // value, including the default, is honored as-is).
-        int effective;
-        if (maxIterations.HasValue) effective = maxIterations.Value;
-        else
-        {
-            try { effective = AtherizSettings.Global.MaxAstarIterations; }
-            catch { effective = 50000; }
-        }
+        int effective = ResolveMaxIterations(maxIterations);
         var (found, path, _) = AStar(s, e, caller, handler, effective);
         if (!found) return null;
         return path.Select(n => n.Coord).ToList();
