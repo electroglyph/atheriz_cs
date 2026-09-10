@@ -49,6 +49,10 @@ public static class StartStop
             _shutdownCompleted = false;
             _shuttingDown = false;
             _started = true;
+            // Engine-owned world subtypes (seeded dashboard, wanderers) must
+            // be registered before rows convert, or they reload as their base
+            // kind without their overrides.
+            InitialSetup.RegisterPersistedSubtypes();
             // Port of startstop.py:34 load_objects()
             try
             {

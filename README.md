@@ -1,3 +1,5 @@
+> **⚠️ WORK IN PROGRESS — EXPERIMENT: this project is still a work in progress and an experiment, and everything here is 100% clanker generated.**
+
 # AtheriZ — C# Port
 
 C# port of `atheriz` (Python MUD server, v0.9.0) on **.NET 10** (C# 14, `net10.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included.
@@ -85,7 +87,7 @@ The server also supports `restart` and `test` (`test [core] [args...]` forwards 
 From the repo root:
 
 ```bash
-dotnet test Atheriz.sln -c Release              # full suite (~3,800 tests; required after server changes)
+dotnet test Atheriz.sln -c Release              # full suite (~4,300 tests; required after server changes)
 dotnet test tests/Atheriz.Core.Tests/Atheriz.Core.Tests.csproj -c Release --filter FullyQualifiedName~PortedAccountTests
 ```
 

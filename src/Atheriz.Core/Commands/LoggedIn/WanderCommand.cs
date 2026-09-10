@@ -35,15 +35,21 @@ public sealed class WanderCommand : Command
         sw.Stop();
         go.Msg($"Spawned {count} NPCs across area '{loc.Coord.Area}' in {sw.Elapsed.TotalMilliseconds:F2} milliseconds");
     }
-    private sealed class WandererNpc : GameObject
+    internal sealed class WandererNpc : GameObject
     {
-        public WandererNpc(string name)
+        // Load-path factory: ApplyDtoFields restores name/flags from the row,
+        // so this takes no id and touches neither the generator nor the registry
+        // (LoadObjects publishes converted rows itself).
+        internal WandererNpc()
         {
-            Name = name;
             IsNpc = true;
             IsMapable = true;
             IsTickable = true;
             TickSeconds = 1.0;
+        }
+        public WandererNpc(string name) : this()
+        {
+            Name = name;
             Id = IdGenerator.GetUniqueId();
             ObjectRegistry.AddObject(this);
         }

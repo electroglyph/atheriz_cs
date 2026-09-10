@@ -47,6 +47,23 @@ public static class InitialSetup
         }
     }
 
+    /// <summary>
+    /// Registers the engine-owned <see cref="GameObject"/> subtypes that live
+    /// in the world for persistence round-trips. Unregistered they save as
+    /// their base kind with a loud log and reload without their overrides
+    /// (dead dashboard klaxon, frozen wanderers). Idempotent: call on both
+    /// the world-writing (DoSetup) and world-loading (DoStartup) paths —
+    /// setup and daemon are separate processes with per-process registries.
+    /// FollowScript is save-exempt today via IsTemporary, but registered so
+    /// direct serializations stay quiet if that ever changes.
+    /// </summary>
+    internal static void RegisterPersistedSubtypes()
+    {
+        GameObject.RegisterPersistedSubtype(typeof(AlarmObject).FullName!, typeof(AlarmObject), () => new AlarmObject());
+        GameObject.RegisterPersistedSubtype(typeof(Objects.FollowScript).FullName!, typeof(Objects.FollowScript), () => new Objects.FollowScript());
+        GameObject.RegisterPersistedSubtype(typeof(Commands.LoggedIn.WanderCommand.WandererNpc).FullName!, typeof(Commands.LoggedIn.WanderCommand.WandererNpc), () => new Commands.LoggedIn.WanderCommand.WandererNpc());
+    }
+
     public static void DoSetup(string savePath, string? username = null, string? password = null, string? secretPath = null, bool prompt = true, TextReader? input = null)
     {
         // Port of initial_setup.py:49 logger.info — not duplicated to stdout (new.py:740 already prints)
@@ -327,7 +344,9 @@ public static class InitialSetup
             character.Subscribe(chan);
 
         // Port of initial_setup.py:171 save_objects() — default force=False:
-        // persist only modified objects.
+        // persist only modified objects. Engine subtypes must be registered
+        // first or they save as their base kind with a loud log.
+        RegisterPersistedSubtypes();
         ObjectRegistry.SaveObjects(db, force: false);
         nh.Save(db);
         setupTx.Commit();
