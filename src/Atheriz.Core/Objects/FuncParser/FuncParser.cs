@@ -1,4 +1,5 @@
-// Port of atheriz/objects/funcparser.py:1
+// Expression parser for `$func(arg, kwarg=val)` substitutions in game text,
+// plus director-stance `{key}` formatting (see FuncParserHelpers.SafeFormatMap).
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -6,13 +7,15 @@ using Atheriz.Core;
 using Atheriz.Core.Objects.VerbConjugation;namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Port of <c>atheriz/objects/funcparser.py</c> (1723 LOC) compressed to ~500 C#.
-/// Faithful: `$` is FUNCPARSER_START_CHAR, `\` escapes, `$$` → literal `$`,
-/// `MAX_NESTING=20` guard, quoted args, nesting, inside-out execution, error handling.
-/// Supports actor-stance callables `$You/$you/$obj/$Obj/$conj/$pconj/$pron/$Pron`
-/// + director <c>{key}</c> via <see cref="FuncParserHelpers.SafeFormatMap"/>.
-/// Public API: instance <c>FuncParser</c> with <c>Parse</c>/<c>ParseToAny</c>/<c>Execute</c>
-/// plus legacy static <c>Parse</c> for <c>GameObject.Msg</c>.
+/// Parses and executes `$`-expressions in message text: `$` opens a call,
+/// `\` escapes the next char, `$$` is a literal `$`, and calls nested deeper
+/// than <see cref="MaxNesting"/> are left unparsed. Calls run inside-out
+/// (innermost first) with quoted args; unknown functions and errors echo the
+/// raw text unless raising is requested.
+/// Ships with actor-stance callables (`$you/$You/$obj/$conj/$pconj/$pron/$Pron`
+/// etc.) plus director-stance `{key}` substitution. Each instance carries its
+/// own callable table; the static <c>Parse</c> is the shared entry used by
+/// <c>GameObject.Msg</c>.
 /// </summary>
 public class FuncParser
 {
@@ -59,13 +62,14 @@ public class FuncParser
     }
 
     public delegate object? ParserCallable(string[] args, Dictionary<string, string> kwargs, ParserContext ctx, ParsedFunc raw);
-    // Generic fallback for instance callables that accept merged dict
+    // Declared callable shape for instance callables taking merged kwargs.
+    // Currently unused: plain Delegates are adapted by BuildGenericWrapper.
     private delegate object? GenericCallable(string[] args, Dictionary<string, object?> kwargs, ParsedFunc raw);
 
     public static readonly Dictionary<string, ParserCallable> FuncParserCallables;
     public static readonly Dictionary<string, ParserCallable> ActorStanceCallables;
 
-    // Instance fields
+    // Per-instance configuration and callable tables.
     private readonly Dictionary<string, ParserCallable> _callables;
     private readonly Dictionary<string, Delegate> _genericCallables;
     private readonly bool _hasGeneric;
@@ -93,10 +97,10 @@ public class FuncParser
                 if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[", StringComparison.Ordinal)&&single.EndsWith("]", StringComparison.Ordinal)){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.GenericCallable: " + logEx.Message, "ParsedFunc"); } } try{
                         var conv = FuncParserHelpers.SafeConvertToTypes( (new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{single}, new Dictionary<string,object?>(), ctx.RaiseErrors); if(conv.args.Length>0 && conv.args[0] is System.Collections.IEnumerable en && !(conv.args[0] is string)){ var list=en.Cast<object?>().ToArray(); if(list.Length>0) return list[rnd.Next(list.Length)]?.ToString()??""; } }catch{ if(ctx.RaiseErrors) throw; }
                 } else {
-                    // multi-arg: each arg must be valid py literal when raiseErrors
+                    // Multi-arg: convert each arg through the literal converter, then pick one.
                     var converters = Enumerable.Repeat((object)"py", a.Length).ToArray();
                     var conv = FuncParserHelpers.SafeConvertToTypes( (converters, new Dictionary<string,object?>()), a.Cast<object?>().ToArray(), new Dictionary<string,object?>(), ctx.RaiseErrors);
-                    // if conversion threw and RaiseErrors, it would have bubbled; otherwise pick from converted
+                    // A failed conversion either threw (raising mode) or passed through; pick from the results.
                     var list = conv.args.Select(o=> o?.ToString() ?? "").ToArray();
                     if(list.Length>0) return list[rnd.Next(list.Length)];
                 }
@@ -113,7 +117,7 @@ public class FuncParser
             ["justify_right"] = (a,k,ctx,raw) => JustifyHelper(a,k,ctx,"r"),
             ["justify_center"] = (a,k,ctx,raw) => JustifyHelper(a,k,ctx,"c"),
             ["clr"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; string start="", text="", end=""; if(a.Length>1){ start=a[0]; text=a.Length>1?a[1]:""; end=a.Length>2?a[2]:""; } else { text=a[0]; start=k.TryGetValue("start", out var sv)?sv:""; end=k.TryGetValue("end", out var ev2)?ev2:""; } start=string.IsNullOrEmpty(start)?"":("|"+start); end=string.IsNullOrEmpty(end)?(string.IsNullOrEmpty(start)?"":"|n"):("|"+end); return $"{start}{text}{end}"; },
-            ["pluralize"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; // mirroring python logic with raise_errors handling via ctx.RaiseErrors
+            ["pluralize"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; // Bad numbers throw only when raising; otherwise the singular echoes back.
                 bool raise = ctx.RaiseErrors;
                 if(a.Length>2){ var singular=a[0]??""; var number=a[1]; var plural=a[2]??""; if(!int.TryParse(number?.ToString(), out var nNum)){ if(raise) throw new ParsingError($"pluralize: number '{number}' not an integer"); return singular; } int nn=Math.Abs(nNum); return nn==0||nn==1? singular : plural; }
                 if(a.Length>1){ var singular=a[0]??""; var number=a[1]; if(number is null || string.IsNullOrEmpty(number.ToString())){ if(raise) throw new ParsingError($"pluralize: number '{number}' not an integer"); return singular; } if(!int.TryParse(number.ToString(), out var n2)){ if(raise) throw new ParsingError($"pluralize: number '{number}' not an integer"); return singular; } int nn2=Math.Abs(n2); return nn2==0||nn2==1? singular : (singular+"s"); } return a[0]??""; },
@@ -165,7 +169,7 @@ public class FuncParser
     {
         s=s.Trim();
         if(string.IsNullOrEmpty(s)) return "";
-        // Try py conversion via helpers for full fidelity
+        // Try the literal/arithmetic converters first, then plain number parses.
         try{
             var conv = FuncParserHelpers.SafeConvertToTypes( (new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{s}, new Dictionary<string,object?>(), true);
             var v = conv.args[0];
@@ -281,7 +285,7 @@ public class FuncParser
     private static string Capitalize(string s) => string.IsNullOrEmpty(s)?s: char.ToUpperInvariant(s[0]) + (s.Length>1? s[1..]: "");
 
 
-    // Instance constructors
+    // Constructors.
     public FuncParser(IReadOnlyDictionary<string, ParserCallable> callables, char startChar = StartChar, char escapeChar = EscapeChar, int maxNesting = MaxNesting, IDictionary<string, object?>? defaultKwargs = null)
     {
         _callables = new Dictionary<string, ParserCallable>(callables, StringComparer.Ordinal);
@@ -303,11 +307,11 @@ public class FuncParser
         _escapeChar = escapeChar;
         _maxNesting = maxNesting;
         _defaultKwargs = defaultKwargs is not null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
-        // Wrap each generic in the shared shape-sniffing core (below).
+        // Wrap each generic in the shape-sniffing adapter below.
         foreach(var kv in genericCallables) _callables[kv.Key]=BuildGenericWrapper(kv.Value, kv.Key);
         ValidateGenericCallables(genericCallables);
     }
-    // Fallback constructor accepting IDictionary<string, object> where values are Delegate or ParserCallable
+    // Mixed table: ParserCallables are stored as-is, Delegates are adapted.
     public FuncParser(IDictionary<string, object> mixedCallables, char startChar = StartChar, char escapeChar = EscapeChar, int maxNesting = MaxNesting, IDictionary<string, object?>? defaultKwargs = null)
     {
         _callables = new Dictionary<string, ParserCallable>(StringComparer.Ordinal);
@@ -327,7 +331,7 @@ public class FuncParser
         if(_hasGeneric) ValidateGenericCallables(genDict);
     }
 
-    // Convenience for empty dict
+    // Empty table: every `$...` echoes back unparsed.
     public FuncParser() : this(new Dictionary<string, ParserCallable>(StringComparer.Ordinal)) {}
 
     public IReadOnlyDictionary<string, ParserCallable> Callables => _callables;
@@ -336,11 +340,11 @@ public class FuncParser
     public int MaxNestingProp => _maxNesting;
     public IReadOnlyDictionary<string, object?> DefaultKwargs => _defaultKwargs;
 
-    // Shared shape-sniffing core for Delegate callables (both generic ctors):
-    // 2+ params forward exactly [string[] args, merged kwargs]; 1 array param
-    // takes [args]; 0 params take []; anything else spreads args positionally.
-    // DelegateInvoker normalizes arity AND type mismatches to
-    // TargetParameterCountException, caught below as ParsingError/"".
+    // Adapts a plain Delegate to the ParserCallable shape by sniffing its
+    // signature: 2+ params get (string[] args, merged kwargs); one array
+    // param gets (args); zero params get (); anything else spreads args
+    // positionally. DelegateInvoker turns arity/type mismatches into
+    // TargetParameterCountException, mapped below to ParsingError/"".
     private ParserCallable BuildGenericWrapper(Delegate del, string key)
     {
         return (a,k,ctx,raw) => {
@@ -362,8 +366,9 @@ public class FuncParser
             }
         };
     }
-    // Merged kwargs for Delegate forwarding: parsed string kwargs, then reserved
-    // funcparser/raise_errors/caller/receiver/mapping (Execute precedence).
+    // Kwargs handed to Delegate callables: the parsed string kwargs plus the
+    // reserved entries (funcparser, raise_errors, caller, receiver, mapping),
+    // which win over same-named parsed kwargs.
     private Dictionary<string, object?> BuildMergedKwargs(Dictionary<string,string> k, ParserContext ctx)
     {
         var kwargsObj = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -383,15 +388,15 @@ public class FuncParser
             try{ method = del.Method; }catch(Exception ex){ try { AtherizLogger.LogError($"Could not run getfullargspec on {kv.Key}: {ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.ValidateGenericCallables: " + logEx.Message, "ParsedFunc"); } continue; }
             var pars = method.GetParameters();
             bool hasVarArgs = pars.Any(p=> p.GetCustomAttributes(typeof(ParamArrayAttribute), false).Length>0 || p.ParameterType.IsArray);
-            // also consider params array via IsArray as varargs
+            // A params-array (or any array) param stands in for *args; any
+            // Dictionary param stands in for **kwargs.
             bool hasVarKw = pars.Any(p=> p.ParameterType.IsGenericType && (p.ParameterType.GetGenericTypeDefinition()==typeof(Dictionary<,>) || p.ParameterType.GetGenericTypeDefinition()==typeof(IDictionary<,>)) || p.ParameterType == typeof(Dictionary<string, object>) || p.ParameterType == typeof(Dictionary<string, string>) || p.ParameterType == typeof(Dictionary<string, object?>));
-            // Heuristic: if delegate has at least one Dictionary param, consider hasVarKw
-            // Check for ParamArray for kwargs not typical; we use dict presence.
+            // Heuristic: any Dictionary param counts as **kwargs support.
             if(!hasVarArgs) throw new ParsingError($"Parse-func callable '{kv.Key}' does not support *args.");
             if(!hasVarKw) throw new ParsingError($"Parse-func callable '{kv.Key}' does not support **kwargs.");
         }
     }
-    // Instance Execute with merging
+    // Runs one parsed call: merges kwargs, builds the context, invokes.
     public object? Execute(ParsedFunc pf, bool raiseErrors = false, IDictionary<string, object?>? reservedKwargs = null)
     {
         var funcname = pf.FuncName;
@@ -401,25 +406,25 @@ public class FuncParser
             return pf.ToString();
         }
         var argsStr = pf.Args.Select(o=> o?.ToString() ?? "").ToArray();
-        // Build kwargs dict: defaults < string kwargs < reserved < funcparser/raise_errors
+        // Precedence: defaults, then parsed kwargs, then reserved, then funcparser/raise_errors.
         var merged = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach(var kv in _defaultKwargs) merged[kv.Key]=kv.Value;
         foreach(var kv in pf.Kwargs) merged[kv.Key]=kv.Value;
         if(reservedKwargs is not null) foreach(var kv in reservedKwargs) merged[kv.Key]=kv.Value;
         merged["funcparser"]=this;
         merged["raise_errors"]=raiseErrors;
-        // Extract caller/receiver/mapping for ctx
+        // Context objects come from the merged kwargs ...
         var ctx = new ParserContext{ RaiseErrors=raiseErrors };
         if(merged.TryGetValue("caller", out var co) && co is GameObject gco) ctx.Caller=gco;
         if(merged.TryGetValue("receiver", out var ro) && ro is GameObject gro) ctx.Receiver=gro;
         if(merged.TryGetValue("mapping", out var mo) && mo is IDictionary<string, object?> md) ctx.Mapping=md;
-        // Also try reserved directly
+        // ... with reserved entries read last so they take precedence.
         if(reservedKwargs is not null){
             if(reservedKwargs.TryGetValue("caller", out var c2) && c2 is GameObject g2) ctx.Caller=g2;
             if(reservedKwargs.TryGetValue("receiver", out var r2) && r2 is GameObject gr2) ctx.Receiver=gr2;
             if(reservedKwargs.TryGetValue("mapping", out var m2) && m2 is IDictionary<string, object?> mm2) ctx.Mapping=mm2;
         }
-        // Convert merged to string dict for func signature (but also keep object dict for generic)
+        // Callables take string kwargs; live objects travel via the context.
         var kwargsStr = merged.ToDictionary(kv=>kv.Key, kv=> kv.Value?.ToString() ?? "", StringComparer.Ordinal);
         try
         {
@@ -433,23 +438,22 @@ public class FuncParser
         }
         catch (Exception)
         {
-            // log
+            // Non-raising mode: fall through to echoing the raw call.
             if(raiseErrors) throw;
             return pf.ToString();
         }
     }
 
-    // Instance Parse that returns object? (string or raw)
+    // Full parse: renders to a string, or hands back the raw call result when returnStr is false.
     public object? Parse(string? text, bool raiseErrors = false, bool escape = false, bool strip = false, bool returnStr = true, IDictionary<string, object?>? reservedKwargs = null)
     {
         if (text is null) return "";
         if (text.Length > MaxMessageSize) throw new ParsingError($"Input too long ({text.Length} chars)");
         if (string.IsNullOrEmpty(text)) return text;
-        // need to handle reservedKwargs that may contain caller/receiver/mapping for actor stance later? But instance parse's callables are generic; for actor stance we need to handle via reserved.
-        // Use internal parser with instance fields
+        // Reserved kwargs (caller/receiver/mapping) flow into every call's context.
         return ParseInternal(text, raiseErrors, escape, strip, returnStr, reservedKwargs, _callables, _startChar, _escapeChar, _maxNesting, _defaultKwargs, this);
     }
-    // Overload with actor/receiver/mapping convenience
+    // Convenience overload packing caller/receiver/mapping into reserved kwargs.
     public object? Parse(string? text, GameObject? caller, GameObject? receiver, IDictionary<string, object?>? mapping, bool raiseErrors = false, bool escape = false, bool strip = false, bool returnStr = true)
     {
         var reserved = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -462,7 +466,7 @@ public class FuncParser
     public object? ParseToAny(string? text, bool raiseErrors = false, bool escape = false, bool strip = false, IDictionary<string, object?>? reservedKwargs = null)
         => Parse(text, raiseErrors, escape, strip, false, reservedKwargs);
 
-    // Legacy static Parse used by GameObject
+    // Static entry used by GameObject.Msg: runs actor-stance `$` calls, then `{key}` substitution.
     public static string Parse(string? text, GameObject? actor, GameObject? receiver, IDictionary<string, object?>? mapping, bool raiseErrors = false, bool escape = false, bool strip = false)
     {
         if (text is null) return "";
@@ -473,7 +477,7 @@ public class FuncParser
         if (!hasFunc && !hasDirector) return text;
         string afterFunc = text;
         if(hasFunc){
-            // use static actor callables for legacy
+            // Actor-stance `$` pass over the shared static table.
             var reserved = new Dictionary<string, object?>(StringComparer.Ordinal);
             if(actor is not null) reserved["caller"]=actor;
             if(receiver is not null) reserved["receiver"]=receiver;
@@ -504,22 +508,22 @@ public class FuncParser
     public static string Parse(string? text, IDictionary<string, object?>? mapping, bool raiseErrors = false)
         => Parse(text, null, null, mapping, raiseErrors);
 
-    // Shared internal parser (instance-like). owner is the instance whose
-    // Parse/Execute entry routed here (null on the static legacy path, which
-    // genuinely has no instance): generic callables already capture their
-    // owning instance at wrap time, and this threads the same reference into
-    // the merged kwargs so ParserCallable callables see one consistent value.
+    // Common engine behind the instance and static entries. Owner is the
+    // instance the call came through (null on the static path, which has no
+    // instance): generic callables already capture their owning instance at
+    // wrap time, and the same reference is threaded into merged kwargs so
+    // callables see one consistent value.
     private static object? ParseInternal(string str, bool raiseErrors, bool escapeMode, bool stripMode, bool returnStr, IDictionary<string, object?>? reservedKwargs, IReadOnlyDictionary<string, ParserCallable> callables, char startChar, char escapeChar, int maxNesting, IReadOnlyDictionary<string, object?> defaultKwargs, FuncParser? owner = null)
     {
         return new RecursiveParser(str, raiseErrors, escapeMode, stripMode, returnStr, reservedKwargs, callables, startChar, escapeChar, maxNesting, defaultKwargs, owner).Run();
     }
 
-    // Stage 2b: recursive-descent replacement for the old char-loop scanner.
-    // Each open `$name(` is a Frame; a nested `$` recurses instead of pushing
-    // onto a manual callstack with snapshot/restore vars. Echo (old FullStr)
-    // appends happen at exactly the old append points, so unknown-func echo
-    // is byte-identical (pinned by FuncParserCharacterizationTests).
-    // Two accepted divergences from the old loop, both unpinned and
+    // Recursive-descent parser. Each open `$name(` becomes a Frame; a nested
+    // `$` recurses instead of pushing onto a manual stack. Echo text (the raw
+    // source of a call, used when it stays unparsed) is appended at the same
+    // points as the previous char-loop scanner, so unknown-func echo is
+    // byte-identical (pinned by FuncParserCharacterizationTests).
+    // Two accepted divergences from the previous scanner, both unpinned and
     // unreachable from production (no src callers use returnStr:false):
     // consecutive top-level calls stringify in order ("12"; the old code
     // leaked the first result as a phantom arg and returned raw 1), and a
@@ -540,7 +544,7 @@ public class FuncParser
         object? topPending;
         bool sawTopLiteral;
 
-        // One open `$name(` frame (old currFunc plus its shadow locals).
+        // One open `$name(` frame: the call currently being accumulated.
         sealed class Frame
         {
             public string Name = "";
@@ -564,7 +568,7 @@ public class FuncParser
             this.maxNesting = maxNesting; this.defaultKwargs = defaultKwargs; this.owner = owner;
         }
 
-        // Old ExecuteWithCallables local (its ctx parameter was never read).
+        // Runs one closed call against this parser's callable table.
         object? ExecuteFrame(ParsedFunc pf, bool re)
         {
             if (!callables.TryGetValue(pf.FuncName, out var func))
@@ -577,9 +581,9 @@ public class FuncParser
             foreach (var kv in defaultKwargs) merged[kv.Key] = kv.Value;
             foreach (var kv in pf.Kwargs) merged[kv.Key] = kv.Value;
             if (reservedKwargs is not null) foreach (var kv in reservedKwargs) merged[kv.Key] = kv.Value;
-            merged["funcparser"] = owner; // instance entry supplies the live parser, matching Execute; the static legacy path has no instance
+            merged["funcparser"] = owner; // instance entry supplies the live parser, matching Execute; the static path has no instance
             merged["raise_errors"] = re;
-            // Build ParserContext from merged
+            // Context objects come from the merged kwargs.
             var c = new ParserContext { RaiseErrors = re };
             if (merged.TryGetValue("caller", out var co2) && co2 is GameObject gco2) c.Caller = gco2;
             if (merged.TryGetValue("receiver", out var ro2) && ro2 is GameObject gro2) c.Receiver = gro2;
@@ -601,17 +605,18 @@ public class FuncParser
             while (pos < n)
             {
                 char ch = str[pos];
-                if (escapedTop) { outTop.Append(ch); escapedTop = false; pos++; continue; } // old 567, top level
-                if (ch == escapeChar) { if (pos + 1 >= n) { outTop.Append(ch); pos++; continue; } escapedTop = true; pos++; continue; } // old 568
-                if (ch == startChar && pos + 1 < n && str[pos + 1] == startChar) { outTop.Append(startChar); pos += 2; continue; } // old 569: no sawTopLiteral, mirroring the old loop
-                if (ch == startChar) { ParseTopCall(); continue; } // old 570/589: top level always opens
-                outTop.Append(ch); sawTopLiteral = true; pos++; continue; // old 591
+                if (escapedTop) { outTop.Append(ch); escapedTop = false; pos++; continue; } // Escaped char: emit literally.
+                if (ch == escapeChar) { if (pos + 1 >= n) { outTop.Append(ch); pos++; continue; } escapedTop = true; pos++; continue; } // Backslash escapes the next char; a trailing lone one emits as-is.
+                if (ch == startChar && pos + 1 < n && str[pos + 1] == startChar) { outTop.Append(startChar); pos += 2; continue; } // `$$` is a literal `$`.
+                if (ch == startChar) { ParseTopCall(); continue; } // A lone `$` always opens a call.
+                outTop.Append(ch); sawTopLiteral = true; pos++; continue; // Ordinary char.
             }
-            // Old 673-695 end-game. Top level keeps no leftover text (literals
-            // append straight to outTop), so only the pending slot matters.
+            // End of input. Top level keeps no leftover text (literals append
+            // straight to outTop), so only the pending call result matters:
+            // it joins the output when literal text was seen.
             string pendStr = topPending?.ToString() ?? "";
             if (pendStr != "" && sawTopLiteral) outTop.Append(pendStr);
-            if (!returnStr && pendStr != "" && outTop.Length == 0) return topPending;
+            if (!returnStr && pendStr != "" && outTop.Length == 0) return topPending; // returnStr:false hands back the raw result when the output is just the call.
             return outTop.ToString();
         }
 
@@ -620,17 +625,15 @@ public class FuncParser
             var frame = new Frame(startChar);
             pos++; // consume $
             var (closed, _, echo) = ParseFrame(frame, 1, 0, 0, 0);
-            if (!closed) outTop.Append(echo);
-            // Closed frames settle themselves (old 642-652): the result is
-            // appended to outTop when sawTopLiteral, else kept in topPending.
+            if (!closed) outTop.Append(echo); // Unclosed input echoes its raw source.
+            // A closed frame already settled its result into outTop/topPending.
         }
 
-        // Parses one `$name(...` frame. Returns (closed, value, echo): closed
-        // frames carry the executed result; input ending mid-frame returns
-        // closed:false with echo composed as echo+text+pending (the old
-        // 659-672 single-frame reassembly, matched exactly). Multi-frame
-        // pile-ups echo in input order instead of the old inside-out order;
-        // that path was never pinned.
+        // Parses one `$name(...` frame. Returns (closed, value, echo): a frame
+        // closed by `)` carries the executed result; input ending mid-frame
+        // returns closed:false with the raw source (echo+text+pending) so the
+        // caller echoes it verbatim. Pile-ups of unclosed frames echo in input
+        // order instead of inside-out; that path was never pinned by tests.
         (bool Closed, object? Value, string Echo) ParseFrame(Frame f, int depth, int paren0, int square0, int curly0)
         {
             int n = str.Length;
@@ -638,14 +641,15 @@ public class FuncParser
             while (pos < n)
             {
                 char ch = str[pos];
-                if (escaped) { f.Text.Append(ch); escaped = false; pos++; continue; } // old 567
-                if (ch == escapeChar) { if (pos + 1 >= n) { f.Text.Append(ch); pos++; continue; } escaped = true; pos++; continue; } // old 568
-                if (ch == startChar && pos + 1 < n && str[pos + 1] == startChar) { f.Text.Append(startChar); pos += 2; continue; } // old 569
+                if (escaped) { f.Text.Append(ch); escaped = false; pos++; continue; } // Escaped char: emit literally.
+                if (ch == escapeChar) { if (pos + 1 >= n) { f.Text.Append(ch); pos++; continue; } escaped = true; pos++; continue; } // Backslash escapes the next char; a trailing lone one emits as-is.
+                if (ch == startChar && pos + 1 < n && str[pos + 1] == startChar) { f.Text.Append(startChar); pos += 2; continue; } // `$$` is a literal `$`.
                 if (ch == startChar && f.Quoted < 0)
                 {
-                    // Old 570-588 nested open.
+                    // Nested `$` outside quotes opens an inner call, evaluated first (inside-out).
                     if (depth >= maxNesting)
                     {
+                        // Too deep: leave the `$` as literal text (or throw when raising).
                         if (raiseErrors) throw new ParsingError($"Only allows for parsing nesting function defs to a max depth of {maxNesting}.");
                         f.Text.Append(ch); pos++; continue;
                     }
@@ -656,14 +660,14 @@ public class FuncParser
                     var child = new Frame(startChar);
                     var (closed, value, echo) = ParseFrame(child, depth + 1, f.Paren, f.Square, f.Curly);
                     if (!closed) return (false, null, f.Echo.ToString() + f.Text.ToString() + (f.Pending?.ToString() ?? "") + echo);
-                    if (outerText.Length > 0) { f.Text.Append(outerText).Append(value?.ToString() ?? ""); f.Pending = null; }
-                    else { f.Text.Clear(); f.Pending = value; }
+                    if (outerText.Length > 0) { f.Text.Append(outerText).Append(value?.ToString() ?? ""); f.Pending = null; } // A nested result beside literal text merges into text ...
+                    else { f.Text.Clear(); f.Pending = value; } // ... alone it stays a raw pending value.
                     continue;
                 }
-                if (ch != ',' && ch != ')' && ch != '=') FlushPending(f); // old 592-593 exclusions
+                if (ch != ',' && ch != ')' && ch != '=') FlushPending(f); // Ordinary chars absorb a pending nested result, except at separators where it stays addressable.
                 if (ch == '"' || ch == '\'')
                 {
-                    // Old 594-602 quote open/close surgery.
+                    // Quotes: the quote chars are dropped; contents stay verbatim.
                     if (f.Quoted >= 0)
                     {
                         if (ch.ToString() == f.QuotedChar)
@@ -677,22 +681,22 @@ public class FuncParser
                     else { f.Text.Append(ch); f.Quoted = f.Text.Length - 1; f.QuotedChar = ch.ToString(); f.QuotedSeen = true; }
                     pos++; continue;
                 }
-                if (f.Quoted >= 0) { f.Text.Append(ch); pos++; continue; } // old 604
+                if (f.Quoted >= 0) { f.Text.Append(ch); pos++; continue; } // Inside quotes, everything is literal.
                 if (ch == '(')
                 {
-                    // Old 605-607: the first `(` takes the name verbatim.
+                    // The first `(` ends the function name, taken verbatim; deeper ones are literal.
                     if (f.Name == "") { f.Name = f.Text.ToString(); f.Echo.Append(f.Name).Append(ch); f.Text.Clear(); } else f.Text.Append(ch);
                     f.Paren++; pos++; continue;
                 }
-                if (ch == '[' || ch == ']') { f.Text.Append(ch); f.Square += ch == ']' ? -1 : 1; pos++; continue; } // old 609
-                if (ch == '{' || ch == '}') { f.Text.Append(ch); f.Curly += ch == '}' ? -1 : 1; pos++; continue; } // old 610
+                if (ch == '[' || ch == ']') { f.Text.Append(ch); f.Square += ch == ']' ? -1 : 1; pos++; continue; } // Brackets are literal; depth is tracked so separators inside them stay literal.
+                if (ch == '{' || ch == '}') { f.Text.Append(ch); f.Curly += ch == '}' ? -1 : 1; pos++; continue; } // Braces likewise (director `{key}` runs as a separate pass).
                 if (ch == '=')
                 {
-                    // Old 611-615: a pending nested result becomes the name
-                    // text (kept for the separator); the name is verbatim.
+                    // `=`: everything so far is the kwarg name. A pending nested
+                    // result becomes the name text; the name is trimmed for
+                    // lookup but kept verbatim for the echo.
                     if (f.Pending is string per2 && per2 != "") f.Text = new StringBuilder(per2);
                     else if (f.Pending is not null && f.Pending.ToString() != "") f.Text = new StringBuilder(f.Pending.ToString()!);
-                    // Key is trimmed but the echo keeps the verbatim text.
                     string kwname = f.Text.ToString().Trim();
                     f.Kwargs[kwname] = "";
                     f.Echo.Append(f.Text.ToString()).Append(ch);
@@ -700,12 +704,13 @@ public class FuncParser
                 }
                 if (ch == ',' || ch == ')')
                 {
-                    // Old 617-618: inside inner parens/brackets the separator is literal.
+                    // `,` or a call-level `)`: the pending nested result or the
+                    // accumulated text becomes the next arg/kwarg value.
+                    // Inside inner parens/brackets the separator is literal text.
                     if (f.Paren > 1) { f.Text.Append(ch); if (ch == ')') f.Paren--; pos++; continue; }
                     if (f.Square > 0 || f.Curly > 0) { f.Text.Append(ch); pos++; continue; }
-                    // Old 619-628 arg finalize. A pending nested result keeps
-                    // its raw object for positional args (old 623); everything
-                    // else stringifies here, exactly as the old branches did.
+                    // Finalize one arg: a pending nested result keeps its raw
+                    // object for positional args; everything else stringifies here.
                     if (f.Pending is string per3 && per3 != "")
                     {
                         if (f.CurrentKwarg != "") f.Kwargs[f.CurrentKwarg] = per3; else f.Args.Add(per3);
@@ -721,15 +726,18 @@ public class FuncParser
                         if (f.CurrentKwarg != "") f.Kwargs[f.CurrentKwarg] = f.Text.ToString();
                         else if (f.QuotedSeen || f.Text.ToString().Trim().Length > 0) f.Args.Add(f.Text.ToString());
                     }
-                    // Old 629-632: echo splices the executed value, then text.
+                    // The echo records the executed value plus the raw text, so an unclosed parent echoes faithfully.
                     string execStr = f.Pending?.ToString() ?? "";
                     if (!string.IsNullOrEmpty(execStr)) f.Echo.Append(execStr);
                     f.Echo.Append(f.Text.ToString()).Append(ch);
                     f.CurrentKwarg = ""; f.Pending = null; f.Text.Clear(); f.QuotedSeen = false;
                     if (ch == ')')
                     {
-                        // Old 633-653 close (the old loop's trailing i++
-                        // consumed the `)`; advance here since we return).
+                        // `)`: consume it, run the call (blanked in strip mode,
+                        // escaped in escape mode), and settle the result: nested
+                        // frames hand the raw value to the parent; top-level
+                        // frames append it to the output, or stash it as pending
+                        // when no literal text precedes it.
                         f.Paren = 0;
                         pos++;
                         object? exec = stripMode ? (object?)"" : escapeMode ? (object?)(escapeChar + f.Echo.ToString()) : ExecuteFrame(ToParsedFunc(f, depth, paren0, square0, curly0), raiseErrors);
@@ -740,13 +748,13 @@ public class FuncParser
                     }
                     pos++; continue;
                 }
-                f.Text.Append(ch); pos++; // old 657: ordinary char
+                f.Text.Append(ch); pos++; // Ordinary char.
             }
-            // End of input with the frame still open: unterminated echo.
+            // End of input with the frame still open: echo the raw source.
             return (false, null, f.Echo.ToString() + f.Text.ToString() + (f.Pending?.ToString() ?? ""));
         }
 
-        // Old 592-593: ordinary chars flush a pending nested result into text.
+        // Folds a pending nested result into the text buffer.
         static void FlushPending(Frame f)
         {
             if (f.Pending is string ers && ers != "") { f.Text.Append(ers); f.Pending = null; }
@@ -755,8 +763,7 @@ public class FuncParser
 
         ParsedFunc ToParsedFunc(Frame f, int depth, int paren0, int square0, int curly0)
         {
-            // InFuncStr is empty at execution time in the old loop too (it was
-            // cleared right after the echo append), so only FullStr is set.
+            // Only FullStr is populated: InFuncStr is always empty at execution time.
             var pf = new ParsedFunc { FuncName = f.Name };
             pf.Prefix = startChar;
             pf.Args.AddRange(f.Args);
@@ -770,7 +777,7 @@ public class FuncParser
 
     private static object? ParseInternalStaticLegacy(string str, bool raiseErrors, bool escapeMode, bool stripMode, bool returnStr, IDictionary<string, object?>? reservedKwargs)
     {
-        // delegate to ParseInternal using static ActorStanceCallables
+        // Static path runs on the shared actor-stance table.
         return ParseInternal(str, raiseErrors, escapeMode, stripMode, returnStr, reservedKwargs, ActorStanceCallables, StartChar, EscapeChar, MaxNesting, new Dictionary<string, object?>(StringComparer.Ordinal));
     }
 }
