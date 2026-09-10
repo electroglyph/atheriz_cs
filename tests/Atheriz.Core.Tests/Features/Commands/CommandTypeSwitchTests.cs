@@ -72,7 +72,7 @@ public sealed class CommandTypeSwitchTests
     {
         var puppet = new GameObject { Name = "Hero" };
         puppet.ClearMessages();
-        new QuitCommand().Run(puppet, null);
+        new Atheriz.Core.Commands.LoggedIn.QuitCommand().Run(puppet, null);
         Assert.Contains("Goodbye!", puppet.PeekMessages());
     }
 
@@ -81,7 +81,7 @@ public sealed class CommandTypeSwitchTests
     {
         var conn = new TestConnection();
         var sess = new SessionCaller { Connection = conn };
-        new QuitCommand().Run(sess, null);
+        new Atheriz.Core.Commands.LoggedIn.QuitCommand().Run(sess, null);
         Assert.True(conn.Closed);
     }
 
@@ -89,7 +89,7 @@ public sealed class CommandTypeSwitchTests
     public void QuitCommand_Run_SaysGoodbye_AndCloses_ForConnection()
     {
         var conn = new TestConnection();
-        new QuitCommand().Run(conn, null);
+        new Atheriz.Core.Commands.LoggedIn.QuitCommand().Run(conn, null);
         Assert.True(conn.Closed);
         Assert.Contains(conn.SentCommands, c => c == "text");
     }

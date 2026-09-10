@@ -4,9 +4,11 @@
 // base overload rethrows ParsingError when raiseErrors is set, and a real
 // get-announce on a Node location still reaches room members but not the
 // excluded actor (dynamic dispatch preserved).
+using Atheriz.Core;
 using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
@@ -21,7 +23,7 @@ public sealed class ContainmentAnnounceContractTests
         var watcher = GameObject.Create("Watcher", isPc: true);
         ObjectRegistry.AddObject(actor);
         ObjectRegistry.AddObject(watcher);
-        var loc = new Persistence.Dto.LocationRef.CoordLocation(room.Coord);
+        var loc = new LocationRef.CoordLocation(room.Coord);
         actor.Location = loc;
         watcher.Location = loc;
         room.AddObject(actor);
@@ -88,7 +90,7 @@ public sealed class ContainmentAnnounceContractTests
         var (room, actor, watcher) = SetupRoom("announce1");
         var item = GameObject.Create("widget", isItem: true);
         ObjectRegistry.AddObject(item);
-        item.Location = new Persistence.Dto.LocationRef.CoordLocation(room.Coord);
+        item.Location = new LocationRef.CoordLocation(room.Coord);
         room.AddObject(item);
         var cmd = new GetCommand();
         cmd.Run(actor, cmd.Parser!.ParseArgs(["widget"]));

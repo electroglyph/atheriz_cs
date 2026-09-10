@@ -244,7 +244,7 @@ internal static class GameObjectDtoConverter
             case { } when string.Equals(dto.Type, "node", StringComparison.OrdinalIgnoreCase):
                 return LoadNode(dto);
             default:
-                return LoadPlain(dto);
+                return LoadPlain(dto!);
         }
     }
 

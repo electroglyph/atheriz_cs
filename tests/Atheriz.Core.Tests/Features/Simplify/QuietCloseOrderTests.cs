@@ -3,6 +3,7 @@
 // each branch closes exactly what the old inline code closed.
 using Atheriz.Core.Commands;
 using Atheriz.Core.Commands.LoggedIn;
+using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Simplify;

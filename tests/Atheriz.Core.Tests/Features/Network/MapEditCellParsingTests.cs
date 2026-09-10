@@ -18,23 +18,23 @@ public sealed class MapEditCellParsingTests
         using var env = GlobalTestEnv.Enter();
         var badShapes = new List<List<object?>>
         {
-            [], // empty
-            [1, 2], // wrong count
-            [1, 2, "x", 1, 2, 3, 4], // wrong count
-            ["room", 1, 2, 3], // room needs 5
-            ["room", 1, 2, 3, "x"], // room coord not int
-            [1, "y", "x"], // coord not int
-            [1, 2, 5], // symbol not string
-            [1, 2, "x", 1, 2, ["blink"]], // bad attrs
+            new List<object?>(), // empty
+            new List<object?> { 1, 2 }, // wrong count
+            new List<object?> { 1, 2, "x", 1, 2, 3, 4 }, // wrong count
+            new List<object?> { "room", 1, 2, 3 }, // room needs 5
+            new List<object?> { "room", 1, 2, 3, "x" }, // room coord not int
+            new List<object?> { 1, "y", "x" }, // coord not int
+            new List<object?> { 1, 2, 5 }, // symbol not string
+            new List<object?> { 1, 2, "x", 1, 2, new List<object?> { "blink" } }, // bad attrs
         };
         foreach (var bad in badShapes)
         {
             // Bad cell first, middle, and last all fail the same silent way.
             foreach (var cells in new List<List<object?>>
                      {
-                         [bad, new List<object?> { 1, 2, "ok" }],
-                         [new List<object?> { 1, 2, "ok" }, bad],
-                         [new List<object?> { 1, 2, "ok" }, bad, new List<object?> { 3, 4, "ok2" }],
+                         new List<object?> { bad, new List<object?> { 1, 2, "ok" } },
+                         new List<object?> { new List<object?> { 1, 2, "ok" }, bad },
+                         new List<object?> { new List<object?> { 1, 2, "ok" }, bad, new List<object?> { 3, 4, "ok2" } },
                      })
             {
                 var conn = new TestConnection();

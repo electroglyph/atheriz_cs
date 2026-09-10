@@ -1,4 +1,5 @@
 using Atheriz.Core.Network;
+using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Tests.Features.Network;
 

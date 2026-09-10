@@ -1,9 +1,11 @@
 // Pins for the direction-flag tables (DoorDirectionCommand row order +
 // per-row wording, DoorCommand removal order): the table loops must reproduce
 // the old if-chains exactly, with opposite pairs n<->s, e<->w, u<->d.
+using Atheriz.Core;
 using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
@@ -14,7 +16,7 @@ public sealed class DirectionTableTests
     {
         var c = GameObject.Create("Builder", isPc: true, privilege: Atheriz.Core.Privilege.Builder);
         ObjectRegistry.AddObject(c);
-        c.Location = new Persistence.Dto.LocationRef.CoordLocation(node.Coord);
+        c.Location = new LocationRef.CoordLocation(node.Coord);
         node.AddObject(c);
         c.ClearMessages();
         return c;

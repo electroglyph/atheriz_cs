@@ -36,7 +36,7 @@ public sealed class WebSocketSendSerializationTests
             lock (_gate) SentBytes.Add(copy);
             return Task.CompletedTask;
         }
-        public int SendCount { lock (_gate) return SentBytes.Count; }
+        public int SendCount { get { lock (_gate) return SentBytes.Count; } }
     }
 
     [Fact]

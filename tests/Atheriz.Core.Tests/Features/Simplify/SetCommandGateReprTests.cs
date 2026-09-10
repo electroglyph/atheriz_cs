@@ -2,6 +2,7 @@
 // move/teleport gate (Ordinal — not the OrdinalIgnoreCase Protected set),
 // and the first-match repr switch.
 using Atheriz.Core.Commands.LoggedIn;
+using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Simplify;

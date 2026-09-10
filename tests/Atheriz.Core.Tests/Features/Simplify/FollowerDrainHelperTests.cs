@@ -1,9 +1,11 @@
 // Pins for the shared follower-script drain (FollowHelper.RemoveScriptsIfDrained):
 // unfollow and nofollow remove the drained FollowScript eagerly, keep it
 // while followers remain, and take no locks of their own (ordering preserved).
+using Atheriz.Core;
 using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
@@ -25,7 +27,7 @@ public sealed class FollowerDrainHelperTests
         {
             var o = GameObject.Create(name, isPc: true);
             ObjectRegistry.AddObject(o);
-            o.Location = new Persistence.Dto.LocationRef.CoordLocation(room.Coord);
+            o.Location = new LocationRef.CoordLocation(room.Coord);
             room.AddObject(o);
             o.ClearMessages();
             return o;

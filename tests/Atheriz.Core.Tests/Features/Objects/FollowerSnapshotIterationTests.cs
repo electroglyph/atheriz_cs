@@ -1,6 +1,8 @@
+using Atheriz.Core;
 using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
@@ -33,7 +35,7 @@ public class FollowerSnapshotIterationTests
         var o = GameObject.Create(name, isPc: true, privilege: Privilege.Player);
         ObjectRegistry.AddObject(o);
         o.IsConnected = true;
-        o.Location = new Persistence.Dto.LocationRef.CoordLocation(at.Coord);
+        o.Location = new LocationRef.CoordLocation(at.Coord);
         at.AddObject(o);
         o.ClearMessages();
         return o;
@@ -50,7 +52,7 @@ public class FollowerSnapshotIterationTests
         cmd.Run(follower, cmd.Parser!.ParseArgs(["Leader"]));
         Assert.Contains(follower.Id, leader.FollowersSnapshot);
         Assert.True(leader.MoveTo(n2, toExit: "north"));
-        Assert.Equal(n2.Coord, ((Persistence.Dto.LocationRef.CoordLocation)follower.Location).Coord);
+        Assert.Equal(n2.Coord, ((LocationRef.CoordLocation)follower.Location).Coord);
     }
 
     [Fact]
@@ -65,7 +67,7 @@ public class FollowerSnapshotIterationTests
         Assert.True(follower.MoveTo(n2));
         follower.ClearMessages();
         Assert.True(leader.MoveTo(n2, toExit: "north"));
-        Assert.Equal(n2.Coord, ((Persistence.Dto.LocationRef.CoordLocation)follower.Location).Coord);
-        Assert.Equal(n2.Coord, ((Persistence.Dto.LocationRef.CoordLocation)leader.Location).Coord);
+        Assert.Equal(n2.Coord, ((LocationRef.CoordLocation)follower.Location).Coord);
+        Assert.Equal(n2.Coord, ((LocationRef.CoordLocation)leader.Location).Coord);
     }
 }

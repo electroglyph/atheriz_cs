@@ -145,7 +145,6 @@ public static class ServerEvents
             doneChar = character; doneAcc = acc; doneHome = home; doneNewAccount = false;
             return;
         }
-        }
         err = Commands.UnloggedIn.Validation.ValidateAccountName(accountName);
         if (err is not null) { failMsg = err; return; }
         progressMsgs.Add($"Creating account '{accountName}'...");

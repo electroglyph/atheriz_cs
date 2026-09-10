@@ -219,10 +219,10 @@ public sealed class DropCommand : Command
         // Intentional: Drop checks the "put" lock, not "drop" — verbatim atheriz/commands/loggedin/drop.py:26.
         if (!loc.Access(go, "put")) { go.Msg("You can't drop something here!"); return; }
         dropName = dropName!.Trim();
+        List<GameObject> excludeSelf = [go];
         if (dropName == "all")
         {
             var contents = ObjectRegistry.Get(go.ContentsSnapshot.ToList()).ToList();
-            List<GameObject> excludeSelf = [go];
             foreach (var obj in contents)
             {
                 if (!obj.AtPreDrop(go)) continue;
@@ -235,7 +235,6 @@ public sealed class DropCommand : Command
         }
         var found = go.Search(dropName, true, go);
         if (found.Count == 0) { CommandHelpers.MsgObjectNotFound(go); return; }
-        List<GameObject> excludeSelf = [go];
         foreach (var f in found)
         {
             if (!f.AtPreDrop(go)) continue;

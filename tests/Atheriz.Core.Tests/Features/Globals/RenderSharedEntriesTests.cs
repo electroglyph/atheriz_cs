@@ -64,8 +64,8 @@ public class RenderSharedEntriesTests
             mi.AddListener(first);
             mi.AddListener(second);
             mi.Render(force: true);
-            Assert.Equal(1, first.Calls.Count);
-            Assert.Equal(1, second.Calls.Count);
+            Assert.Single(first.Calls);
+            Assert.Single(second.Calls);
             // Same filtered entries content, shared instance across absentees.
             Assert.Equal(first.Calls[0].entries, second.Calls[0].entries);
             Assert.NotEmpty(first.Calls[0].entries);
@@ -101,8 +101,8 @@ public class RenderSharedEntriesTests
             mi.AddListener(self);
             mi.AddListener(other);
             mi.Render(force: true);
-            Assert.Equal(1, self.Calls.Count);
-            Assert.Equal(1, other.Calls.Count);
+            Assert.Single(self.Calls);
+            Assert.Single(other.Calls);
             Assert.Empty(self.Calls[0].entries);
             Assert.NotEmpty(other.Calls[0].entries);
             Assert.NotSame(other.Calls[0].entries, self.Calls[0].entries);

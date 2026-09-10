@@ -197,10 +197,15 @@ public class ServerRegressionTests
     [Fact]
     public void TrailingBareFlag_NeverBecomesValue()
     {
+        // Guard lives once in the shared StripOptions core, not inline per handler.
+        var parser = SourceScan.Read("src", "Atheriz.Server", "Cli", "ArgumentParser.cs");
+        Assert.Equal(1, SourceScan.Count(parser, "i + 1 >= a.Length"));
         var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "CreateHandler.cs");
-        Assert.Contains("i + 1 >= a.Length", src);
+        Assert.Contains("StripPortOptions", src);
+        Assert.DoesNotContain("i + 1 >= a.Length", src);
         var novel = SourceScan.Read("src", "Atheriz.Server", "Cli", "NewHandler.cs");
-        Assert.Contains("i + 1 >= a.Length", novel);
+        Assert.Contains("StripKnownOptions", novel);
+        Assert.DoesNotContain("i + 1 >= a.Length", novel);
         Assert.Contains("filtered[0].StartsWith(\"-\", StringComparison.Ordinal)", novel);
     }
 
@@ -218,17 +223,28 @@ public class ServerRegressionTests
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "ReloadHandler.cs");
         Assert.DoesNotContain("FindTokenFile", src);
-        Assert.Equal(2, SourceScan.Count(src, "PostAdminAsync"));
+        // One resolution through the shared TLS-flipped retry helper, no raw calls.
+        Assert.Equal(1, SourceScan.Count(src, "PostAdminWithTlsFallbackAsync"));
+        Assert.DoesNotContain("PostAdminAsync(", src);
+        // The flipped-scheme retry itself: exactly two raw attempts in the helper.
+        var client = SourceScan.Read("src", "Atheriz.Server", "Cli", "ShutdownClient.cs");
+        Assert.Equal(2, SourceScan.Count(client, "await PostAdminAsync("));
     }
 
-    // respawn preserves the CLI telnet-port override.
+    // respawn preserves the CLI telnet-port override via the shared spawner:
+    // the literal lives once in DaemonSpawner.BuildSpawnArgs and both
+    // handlers funnel through it (behavior pinned by SpawnArgsBuilderTests).
     [Fact]
     public void Respawn_PreservesTelnetPort()
     {
+        var spawner = SourceScan.Read("src", "Atheriz.Server", "Cli", "DaemonSpawner.cs");
+        Assert.Equal(1, SourceScan.Count(spawner, "\"--telnet-port\""));
         var restart = SourceScan.Read("src", "Atheriz.Server", "Cli", "RestartHandler.cs");
-        Assert.Contains("--telnet-port", restart);
+        Assert.Contains("DaemonSpawner.BuildSpawnArgs", restart);
+        Assert.DoesNotContain("\"--telnet-port\"", restart);
         var reset = SourceScan.Read("src", "Atheriz.Server", "Cli", "ResetHandler.cs");
-        Assert.Contains("--telnet-port", reset);
+        Assert.Contains("DaemonSpawner.BuildSpawnArgs", reset);
+        Assert.DoesNotContain("\"--telnet-port\"", reset);
     }
 
     // pid waits must report their outcome.

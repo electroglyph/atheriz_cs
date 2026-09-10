@@ -136,8 +136,9 @@ public static class ExamFormatter
     {
         try
         {
-            using var it = en.GetEnumerator();
-            return !it.MoveNext();
+            var it = en.GetEnumerator();
+            try { return !it.MoveNext(); }
+            finally { (it as IDisposable)?.Dispose(); }
         }
         catch { return false; }
     }

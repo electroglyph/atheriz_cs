@@ -2,9 +2,11 @@
 // the null/desc preamble stays ungated and first, Node and container
 // locations share one view-gate + AtLook, and the noun/link fallback keeps
 // gate-before-resolve order.
+using Atheriz.Core;
 using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
@@ -17,12 +19,12 @@ public sealed class ShowLocationGateTests
         ObjectRegistry.AddObject(p);
         if (room is not null)
         {
-            p.Location = new Persistence.Dto.LocationRef.CoordLocation(room.Coord);
+            p.Location = new LocationRef.CoordLocation(room.Coord);
             room.AddObject(p);
         }
         else
         {
-            p.Location = Persistence.Dto.LocationRef.NullLocation.Instance;
+            p.Location = LocationRef.NullLocation.Instance;
         }
         p.ClearMessages();
         return p;

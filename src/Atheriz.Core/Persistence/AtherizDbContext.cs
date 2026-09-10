@@ -104,7 +104,13 @@ public sealed class AtherizDbContext : DbContext
     // identical on all paths), so one helper emits identical SQL in identical order.
     private void ApplyPragmas(string journalMode)
     {
-        Database.ExecuteSqlRaw($"PRAGMA journal_mode={journalMode};");
+        // Literal SQL per mode (not interpolation): the only callers pass
+        // "WAL" and "DELETE", so the switch arms emit identical statements.
+        Database.ExecuteSqlRaw(journalMode switch
+        {
+            "WAL" => "PRAGMA journal_mode=WAL;",
+            _ => "PRAGMA journal_mode=DELETE;",
+        });
         Database.ExecuteSqlRaw("PRAGMA synchronous=NORMAL;");
         Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;");
     }

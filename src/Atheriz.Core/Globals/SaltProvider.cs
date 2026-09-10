@@ -43,14 +43,14 @@ public static class SaltProvider
         string key = isDefault ? DefaultSaltKey : Path.GetFullPath(secretPath);
         lock (_lock)
         {
-            if (TryGetCachedLocked(key, isDefault, out var cached)) return cached;
+            if (TryGetCachedLocked(key, isDefault, out var cached) && cached is not null) return cached;
         }
         // RNG runs outside the global lock (RNG is thread-safe;
         // holding _lock over it serializes all salt callers for no reason).
         var preVal = CryptoRandom.UInt64String();
         lock (_lock)
         {
-            if (TryGetCachedLocked(key, isDefault, out var cached)) return cached;
+            if (TryGetCachedLocked(key, isDefault, out var cached) && cached is not null) return cached;
             var isAbs = Path.IsPathRooted(secretPath);
             if (!isAbs && !GameUtils.IsInGameFolder())
                 throw new InvalidOperationException(

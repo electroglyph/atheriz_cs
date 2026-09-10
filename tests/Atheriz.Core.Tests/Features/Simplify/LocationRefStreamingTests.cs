@@ -65,6 +65,6 @@ public class LocationRefStreamingTests
     [Fact]
     public void Truncated_FailsClosedAsJsonException()
     {
-        Assert.Throws<JsonException>(() => Read("""{"Area":"a""""));
+        Assert.Throws<JsonException>(() => Read("{\"Area\":\"a"));
     }
 }

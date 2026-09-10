@@ -1,8 +1,11 @@
 // Pin for the search-driven give split (the single-scan rewrite was dropped
 // as unsound): every candidate split is validated by real searches, so
 // multi-word item and target names resolve to the right pair.
+using Atheriz.Core;
 using Atheriz.Core.Commands.LoggedIn;
+using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
@@ -19,7 +22,7 @@ public sealed class GiveMultiWordResolutionTests
         var receiver = GameObject.Create("Bob Green", isPc: true);
         ObjectRegistry.AddObject(giver);
         ObjectRegistry.AddObject(receiver);
-        var loc = new Persistence.Dto.LocationRef.CoordLocation(node.Coord);
+        var loc = new LocationRef.CoordLocation(node.Coord);
         giver.Location = loc;
         receiver.Location = loc;
         node.AddObject(giver);
