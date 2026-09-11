@@ -1,4 +1,5 @@
 // Port of atheriz/commands/loggedin/group.py:222
+using System.Diagnostics.CodeAnalysis;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -18,10 +19,7 @@ public sealed class GroupCommand : Command
         string sub = list[0].ToLowerInvariant();
         if (sub == "list")
         {
-            var gc = GetGroupChannelId(go);
-            if (gc is null) { go.Msg("You are not in a group."); return; }
-            var channel = ObjectRegistry.GetSingle(gc.Value) as Channel;
-            if (channel is null) { go.Msg("Error: Group channel not found."); return; }
+            if (!TryGetGroupChannel(go, out var channel)) return;
             var names = channel.Listeners.Select(id => ObjectRegistry.GetSingle(id)?.GetDisplayName(go) ?? id.ToString()).ToList();
             go.Msg($"Group members: {string.Join(", ", names)}");
             return;
@@ -29,10 +27,7 @@ public sealed class GroupCommand : Command
         if (sub == "kick")
         {
             if (list.Count < 2) { go.Msg("Usage: group kick <name>"); return; }
-            var gc = GetGroupChannelId(go);
-            if (gc is null) { go.Msg("You are not in a group."); return; }
-            var channel = ObjectRegistry.GetSingle(gc.Value) as Channel;
-            if (channel is null) { go.Msg("Error: Group channel not found."); return; }
+            if (!TryGetGroupChannel(go, out var channel)) return;
             // check leader (typed: Channel.CreatedBy, F001)
             int createdBy = channel.CreatedBy;
             if (createdBy != go.Id) { go.Msg("You are not the leader of this group."); return; }
@@ -46,10 +41,7 @@ public sealed class GroupCommand : Command
         }
         if (sub == "leave")
         {
-            var gc = GetGroupChannelId(go);
-            if (gc is null) { go.Msg("You are not in a group."); return; }
-            var channel = ObjectRegistry.GetSingle(gc.Value) as Channel;
-            if (channel is null) { ClearGroupChannel(go); go.Msg("Error: Group channel not found."); return; }
+            if (!TryGetGroupChannel(go, out var channel, clearOnMissing: true)) return;
             bool wasLeader = channel.CreatedBy == go.Id;
             channel.Msg($"{go.GetDisplayName(null)} left the group.");
             channel.RemoveListener(go);
@@ -104,8 +96,7 @@ public sealed class GroupCommand : Command
             }
             else
             {
-                channel = ObjectRegistry.GetSingle(gc.Value) as Channel;
-                if (channel is null) { go.Msg("Error: Group channel not found."); return; }
+                if (!TryGetGroupChannel(go, out channel)) return;
                 if (channel.CreatedBy != go.Id) { go.Msg("You are not the leader of this group."); return; }
             }
             channel.AddListener(tgt);
@@ -115,22 +106,19 @@ public sealed class GroupCommand : Command
         }
         // message to group
         string message = string.Join(" ", list);
-        var gc2 = GetGroupChannelId(go);
-        if (gc2 is null) { go.Msg("You are not in a group."); return; }
-        var ch2 = ObjectRegistry.GetSingle(gc2.Value) as Channel;
-        if (ch2 is null) { go.Msg("Error: Group channel not found."); return; }
+        if (!TryGetGroupChannel(go, out var ch2)) return;
         ch2.Msg(message, go);
     }
     // Shared member resolution for add/kick: inventory, then viewable location,
     // then hidden-multiple detection. Msgs and returns null on any failure.
     private static GameObject? ResolveMember(GameObject go, string targetName, string selfMsg)
     {
-        var matches = ContentUtils.Search(go, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
+        var matches = ContentUtils.Search(go, targetName, ObjectRegistry.GetSingle, true, go);
         GameObject? loc = null;
         if (matches.Count == 0) { var locTmp = go.ResolveLocationObject() as GameObject; if (locTmp is not null && locTmp.Access(go, "view")) loc = locTmp; }
         else loc = go.ResolveLocationObject() as GameObject;
         if (matches.Count == 0 && loc is not null)
-            matches = loc is Node n ? n.Search(targetName, true, go) : ContentUtils.Search(loc, targetName, id => ObjectRegistry.Get(id).FirstOrDefault(), true, go);
+            matches = loc is Node n ? n.Search(targetName, true, go) : ContentUtils.Search(loc, targetName, ObjectRegistry.GetSingle, true, go);
         // Plain search returns the first match only, so a second object sharing
         // the resolved member's name would stay hidden. Probe both pools for a
         // same-named sibling and report multiples instead of guessing wrong.
@@ -141,14 +129,14 @@ public sealed class GroupCommand : Command
             foreach (var pool in new GameObject?[] { go, loc })
             {
                 if (pool is null || multiple) break;
-                foreach (var o in ContentUtils.GatherContents(pool, id => ObjectRegistry.Get(id).FirstOrDefault(), looker: go))
+                foreach (var o in ContentUtils.GatherContents(pool, ObjectRegistry.GetSingle, looker: go))
                 {
                     if (o != seen && string.Equals(o.Name, seen.Name, StringComparison.OrdinalIgnoreCase)) { multiple = true; break; }
                 }
             }
             if (multiple) { CommandHelpers.MsgMultipleMatchesFound(go, targetName); return null; }
         }
-        if (matches.Count == 0) { go.Msg($"Could not find '{targetName}'."); return null; }
+        if (matches.Count == 0) { CommandHelpers.MsgCouldNotFind(go, targetName); return null; }
         if (matches.Count > 1) { CommandHelpers.MsgMultipleMatchesFound(go, targetName); return null; }
         var tgt = matches[0];
         if (tgt == go) { go.Msg(selfMsg); return null; }
@@ -174,6 +162,21 @@ public sealed class GroupCommand : Command
     private static int? GetGroupChannelId(GameObject go) => go.GroupChannel;
     private static void SetGroupChannel(GameObject go, int id) { go.GroupChannel = id; }
     private static void ClearGroupChannel(GameObject go) { go.GroupChannel = null; }
+
+    private static bool TryGetGroupChannel(GameObject go, [NotNullWhen(true)] out Channel? ch, bool clearOnMissing = false)
+    {
+        ch = null;
+        var gc = GetGroupChannelId(go);
+        if (gc is null) { go.Msg("You are not in a group."); return false; }
+        ch = ObjectRegistry.GetSingle(gc.Value) as Channel;
+        if (ch is null)
+        {
+            if (clearOnMissing) ClearGroupChannel(go);
+            go.Msg("Error: Group channel not found.");
+            return false;
+        }
+        return true;
+    }
 }
 
 // extension helpers for Channel/GameObject group handling

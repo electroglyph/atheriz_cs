@@ -325,10 +325,12 @@ public static class InitialSetup
         }
         else character.PrivilegeLevel = Privilege.Admin;
 
+        if (!LockPolicies.TryResolve(LockPolicies.Builder, out var builderPred))
+            throw new InvalidOperationException($"Unknown lock policy '{LockPolicies.Builder}' while seeding world locks.");
         var button = GameObject.Create("A big red button", isItem: true);
         button.Desc = "A large button that glows with an ominous red light. Wonder if it does anything...";
         button.Aliases = new List<string>{"button"};
-        button.AddLock("get", (GameObject x) => x.IsBuilder, LockPolicies.Builder);
+        button.AddLock("get", builderPred, LockPolicies.Builder);
         if (button.ExternalCmdSet is null) button.ExternalCmdSet = new Commands.CmdSet();
         button.ExternalCmdSet.Add(new PushCommand());
         ObjectRegistry.AddObject(button);
@@ -336,8 +338,8 @@ public static class InitialSetup
 
         account.AddCharacter(character);
         var chan = Channel.Create("Server");
-        chan.AddLock("send", (GameObject x) => x.IsBuilder, LockPolicies.Builder);
-        chan.AddLock("view", (GameObject x) => x.IsBuilder, LockPolicies.Builder);
+        chan.AddLock("send", builderPred, LockPolicies.Builder);
+        chan.AddLock("view", builderPred, LockPolicies.Builder);
         chan.Desc = "for server announcements";
         chan.AddListener(character);
         if (!character.ChannelsSnapshot.Contains(chan.Id))

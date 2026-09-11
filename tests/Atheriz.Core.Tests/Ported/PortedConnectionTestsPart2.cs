@@ -345,9 +345,11 @@ public class PortedConnectionTestsPart2
         var mgr = MakeMgr();
         var c = new FakeConnection(); c.ClientHost="1.2.3.4";
         var longRaw = new string('x', 200) + "{ bad json";
-        // Clear malformed state via reflection (faithful to mgr._malformed_last.clear())
-        var lastField = typeof(ConnectionManager).GetField("_malformedLast", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static)!;
-        var lastDict = (System.Collections.IDictionary)lastField.GetValue(null)!;
+        // Clear malformed state via reflection (the holder owns the host map now)
+        var logField = typeof(ConnectionManager).GetField("_malformedLog", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static)!;
+        var log = logField.GetValue(null)!;
+        var lastField = typeof(ThrottledLog).GetField("_last", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
+        var lastDict = (System.Collections.IDictionary)lastField.GetValue(log)!;
         lastDict.Clear();
         using var cap = new CaptureAtherizLog();
         mgr.HandleCommand(c, longRaw);

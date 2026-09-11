@@ -24,6 +24,9 @@ public class GameTime
     private readonly Dictionary<(string Hour, string Minute), List<AlarmEntry>> _alarms = new();
     public bool Started { get; private set; }
 
+    // Single spelling of the log category for every LogDebug site in this file.
+    private const string LogScope = "GameTime";
+
     private readonly AtherizSettings _settings;
     private readonly AsyncTicker? _tickerOverride;
     private readonly AsyncThreadPool? _poolOverride;
@@ -102,7 +105,7 @@ public class GameTime
             catch (Exception ex)
             {
                 // Per-row report: corrupt ticks zero out loudly, not silently.
-                try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.Load: " + logEx.Message, "GameTime"); }
+                try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.Load: " + logEx.Message, LogScope); }
                 ResetLocked();
                 return;
             }
@@ -111,8 +114,7 @@ public class GameTime
                 ResetLocked();
                 return;
             }
-            _lock.EnterWriteLock();
-            try
+            using (WriteScope())
             {
                 _ticks = dto.Ticks;
                 _alarms.Clear();
@@ -130,14 +132,13 @@ public class GameTime
                     if (list.Count > 0) _alarms[key] = list;
                 }
             }
-            finally { _lock.ExitWriteLock(); }
         }
         catch (Exception ex)
         {
             // Preserve live ticks/alarms: only the pinned missing-row and
             // corrupt-row paths above reset to zero. An unexpected failure
             // here must be loud, not a silent live-state wipe.
-            try { AtherizLogger.LogError($"[Load] unexpected gametime load failure; preserving live state: {ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.Load: " + logEx.Message, "GameTime"); }
+            try { AtherizLogger.LogError($"[Load] unexpected gametime load failure; preserving live state: {ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.Load: " + logEx.Message, LogScope); }
         }
     }
 
@@ -195,9 +196,7 @@ public class GameTime
                     if (list.Count > 0) alarms[(hour, minute)] = list;
                 }
             }
-            _lock.EnterWriteLock();
-            try { _ticks = ticks; _alarms.Clear(); foreach (var kv in alarms) _alarms[kv.Key] = kv.Value; }
-            finally { _lock.ExitWriteLock(); }
+            using (WriteScope()) { _ticks = ticks; _alarms.Clear(); foreach (var kv in alarms) _alarms[kv.Key] = kv.Value; }
             // Migrate into the caller's context (not a fresh file-path
             // context), so Load(db) callers observe the result in THEIR db.
             try
@@ -205,7 +204,7 @@ public class GameTime
                 Save(db);
             }
             catch { return false; }
-            try { File.Delete(path); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.TryLoadLegacyFile: " + logEx.Message, "GameTime"); }
+            try { File.Delete(path); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.TryLoadLegacyFile: " + logEx.Message, LogScope); }
             return true;
         }
         catch { return false; }
@@ -273,8 +272,7 @@ public class GameTime
             { throw new ArgumentException("alarm data borrows a disposed JsonDocument", nameof(data), ex); }
         }
         // validate data is dict or null — typed already
-        _lock.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             var key = (hour, minute);
             if (!_alarms.TryGetValue(key, out var list))
@@ -284,7 +282,6 @@ public class GameTime
             }
             list.Add(new AlarmEntry { CallerId = callerId, Repeat = repeat, Data = owned });
         }
-        finally { _lock.ExitWriteLock(); }
     }
 
     public void AddAlarm(int hour, int minute, GameObject caller, bool repeat = false, Dictionary<string, JsonElement>? data = null)
@@ -292,22 +289,19 @@ public class GameTime
 
     public void RemoveAlarmsByCaller(int callerId)
     {
-        _lock.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             foreach (var list in _alarms.Values)
                 for (int i = list.Count - 1; i >= 0; i--)
                     if (list[i].CallerId == callerId) list.RemoveAt(i);
         }
-        finally { _lock.ExitWriteLock(); }
     }
 
     public void RemoveAlarmsByCaller(GameObject caller) => RemoveAlarmsByCaller(caller.Id);
 
     public void RemoveAlarm(string hour, string minute, int callerId)
     {
-        _lock.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             if (_alarms.TryGetValue((hour, minute), out var list))
             {
@@ -316,7 +310,6 @@ public class GameTime
                 if (idx >= 0) list.RemoveAt(idx);
             }
         }
-        finally { _lock.ExitWriteLock(); }
     }
 
     public void RemoveAlarm(string hour, string minute, GameObject caller)
@@ -330,8 +323,7 @@ public class GameTime
     // remove-by-id could delete the new entry — a check-then-act race).
     private void RemoveAlarmEntry(string hour, string minute, AlarmEntry entry)
     {
-        _lock.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             if (_alarms.TryGetValue((hour, minute), out var list))
             {
@@ -339,7 +331,6 @@ public class GameTime
                     if (ReferenceEquals(list[i], entry)) { list.RemoveAt(i); break; }
             }
         }
-        finally { _lock.ExitWriteLock(); }
     }
 
     public IReadOnlyDictionary<(string Hour, string Minute), List<AlarmEntry>> SnapshotAlarms()
@@ -379,18 +370,10 @@ public class GameTime
     private AsyncThreadPool OwnedPoolLocked() => _poolOverride ?? (_ownedPool ??= new AsyncThreadPool());
     private AsyncTicker OwnedTicker() { lock (_ownedLock) return _ownedTicker ??= new AsyncTicker(OwnedPoolLocked()); }
 
-    public void Start()
-    {
-        lock (_startLock)
-        {
-            if (Started) return;
-            var ticker = _tickerOverride ?? GlobalServices.TryGetTicker() ?? OwnedTicker();
-            ticker.AddCoro(OnTick, _settings.TimeUpdateSeconds);
-            _runningTicker = ticker;
-            Started = true;
-        }
-    }
-    public void Start(AsyncTicker ticker)
+    public void Start() => StartCore(_tickerOverride ?? GlobalServices.TryGetTicker() ?? OwnedTicker());
+    public void Start(AsyncTicker ticker) => StartCore(ticker);
+
+    private void StartCore(AsyncTicker ticker)
     {
         lock (_startLock)
         {
@@ -413,7 +396,7 @@ public class GameTime
         ticker?.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
         StopOwnedFallbacks();
         // see Stop(ticker) above — settings path, not ambient.
-        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, "GameTimePersistDto"); }
+        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, LogScope); }
     }
     public void Stop(AsyncTicker ticker)
     {
@@ -433,15 +416,15 @@ public class GameTime
         if (ours) StopOwnedFallbacks();
         // persist to this instance's settings path, not the ambient
         // Global (DoShutdown may run under explicit settings).
-        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, "GameTimePersistDto"); }
+        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, LogScope); }
     }
 
     private void StopOwnedFallbacks()
     {
         var t = Interlocked.Exchange(ref _ownedTicker, null);
-        if (t is not null) try { t.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, "GameTimePersistDto"); }
+        if (t is not null) try { t.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, LogScope); }
         var p = Interlocked.Exchange(ref _ownedPool, null);
-        if (p is not null) try { p.Stop(wait: false); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, "GameTimePersistDto"); }
+        if (p is not null) try { p.Stop(wait: false); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, LogScope); }
     }
 
     public bool SunUp()
@@ -457,26 +440,25 @@ public class GameTime
         bool beforeSun = SunUp(before.Hour);
         string beforePhase = before.MoonPhase;
 
-        _lock.EnterWriteLock();
-        try { _ticks++; }
-        finally { _lock.ExitWriteLock(); }
+        using (WriteScope()) { _ticks++; }
 
         var after = GetTime();
         List<((string Hour, string Minute) Key, AlarmEntry Entry)> callers = [];
-        _lock.EnterReadLock();
-        try
+        using (ReadScope())
         {
             void Collect(string h, string m)
             {
                 if (_alarms.TryGetValue((h, m), out var list))
                     foreach (var a in list) callers.Add(((h, m), a));
             }
-            Collect(after.Hour.ToString(), after.Minute.ToString());
-            Collect("?", after.Minute.ToString());
-            Collect(after.Hour.ToString(), "?");
+            // `after` is a fixed snapshot, so both values are loop-invariant.
+            var hourStr = after.Hour.ToString();
+            var minuteStr = after.Minute.ToString();
+            Collect(hourStr, minuteStr);
+            Collect("?", minuteStr);
+            Collect(hourStr, "?");
             Collect("?", "?");
         }
-        finally { _lock.ExitReadLock(); }
 
         if (callers.Count > 0)
         {
@@ -492,7 +474,7 @@ public class GameTime
                     var capturedAfter = after;
                     // Direct virtual dispatch (single-lookup target, port of getattr(objs[0], "at_alarm")):
                     // every GameObject exposes AtAlarm, so no reflection is needed.
-                    Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, "GameTimePersistDto"); } };
+                    Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, LogScope); } };
                     if (!pool.AddTask(act, $"alarm:{entry.CallerId}"))
                     {
                         AtherizLogger.LogWarning($"Task queue full; alarm for {target} retrying.");
@@ -521,7 +503,7 @@ public class GameTime
         {
             foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
             {
-                try { send(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, "GameTimePersistDto"); }
+                try { send(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, LogScope); }
             }
         }
         if (beforePhase != afterPhase)
@@ -570,9 +552,7 @@ public class GameTime
     public GameTimeInfo GetTime()
     {
         long current;
-        _lock.EnterReadLock();
-        try { current = _ticks; }
-        finally { _lock.ExitReadLock(); }
+        using (ReadScope()) { current = _ticks; }
 
         double tickDurationSeconds = _settings.TickMinutes * _settings.SecondsPerMinute;
         double totalSeconds = current * tickDurationSeconds;

@@ -22,8 +22,11 @@ public sealed class NounCommand : Command
         if (loc is null) { CommandHelpers.MsgNo(go); return; }
         string noun = pa.GetString("noun")!;
         string desc = string.Join(" ", pa.GetList("desc"));
-        string mode = loc.GetNoun(noun) is not null ? "Updated" : "Added";
-        loc.AddNoun(noun, desc);
-        go.Msg($"{mode} '{noun}'.");
+        // Atomic add-vs-update decision under the node write lock: a separate
+        // GetNoun read here let two concurrent adds of the same new noun both
+        // report "Added". Only the absent path inserts; the present path
+        // overwrites via AddNoun. Messages stay byte-identical.
+        if (loc.AddNounIfAbsent(noun, desc)) go.Msg($"Added '{noun}'.");
+        else { loc.AddNoun(noun, desc); go.Msg($"Updated '{noun}'."); }
     }
 }

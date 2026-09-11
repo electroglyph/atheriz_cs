@@ -27,7 +27,7 @@ void PrintHelp()
 }
 void PrintCommandHelp(string cmd)
 {
-    var defPort = new AtherizSettings().WebserverPort;
+    var defPort = AtherizSettings.Default.WebserverPort;
     // Command-to-row table: the start/restart and stop/reload pairs share
     // one row INSTANCE each (not copies), with the per-command word picked
     // by the row funcs. Dictionary order matches the --help listing order.
@@ -74,6 +74,16 @@ void PrintCommandHelp(string cmd)
     Console.WriteLine(row.Description(cmd));
     foreach (var line in row.Options) Console.WriteLine(line);
 }
+// Shared guard/ensure preamble for the spawn and foreground startup paths:
+// same guard messages, same exit codes. Pid-claim and host validation stay
+// per-caller (they differ between the paths).
+static void EnsureDirsOrExit(AtherizSettings s)
+{
+    try { Atheriz.Core.Utils.PathGuards.GuardSavePath(s.SavePath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
+    try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(s.SecretPath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
+    Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(s.SavePath);
+    Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(s.SecretPath);
+}
 if (rest.Contains("--help", StringComparer.Ordinal) || rest.Contains("-h", StringComparer.Ordinal)) { PrintCommandHelp(command); return; }
 // Port of argparse type=int for --port: non-int port is a usage error (exit 2).
 {
@@ -107,10 +117,7 @@ if (!foreground && command == "start")
 {
     // Port of atheriz.py start default: daemonize unless --foreground (spawn_daemon).
     var effSpawn = StopHandler.EffectiveSettingsValue;
-    try { Atheriz.Core.Utils.PathGuards.GuardSavePath(effSpawn.SavePath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
-    try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(effSpawn.SecretPath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
-    Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(effSpawn.SavePath);
-    Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(effSpawn.SecretPath);
+    EnsureDirsOrExit(effSpawn);
     int spawnPort = portOverride ?? effSpawn.WebserverPort;
     // Validate the host before claiming: an invalid --host fails the spawn
     // below, and must not leave a pid claim behind pointing at this CLI.
@@ -164,10 +171,7 @@ var settings = app.Services.GetRequiredService<AtherizSettings>();
 }
 AtherizSettings.Global = settings;
 try { Atheriz.Core.AtherizLogger.ApplySettings(settings); } catch { }
-try { Atheriz.Core.Utils.PathGuards.GuardSavePath(settings.SavePath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
-try { Atheriz.Core.Utils.PathGuards.GuardSecretPath(settings.SecretPath); } catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); Environment.Exit(1); return; }
-Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(settings.SavePath);
-Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(settings.SecretPath);
+EnsureDirsOrExit(settings);
 PidFile? pidFile = null;
 if (!PidFile.TryAcquire(settings.SavePath, out pidFile, out var pidReason, settings.WebserverPort)) { Console.WriteLine(pidReason ?? "Failed to acquire PID file."); Environment.Exit(1); return; }
 Console.WriteLine($"PID {Environment.ProcessId} acquired at {Path.Combine(settings.SavePath, "server.pid")}");

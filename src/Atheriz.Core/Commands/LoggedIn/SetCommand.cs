@@ -97,8 +97,7 @@ public sealed class SetCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { go.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var targetStr = pa.GetString("target") ?? "";
         var attr = pa.GetString("attribute") ?? "";
         var raw = pa.GetString("value") ?? "";
@@ -203,8 +202,7 @@ public sealed class UnsetCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { go.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var targetStr = pa.GetString("target") ?? "";
         var attr = pa.GetString("attribute") ?? "";
         var target = SetHelper.ResolveTarget(go, targetStr);

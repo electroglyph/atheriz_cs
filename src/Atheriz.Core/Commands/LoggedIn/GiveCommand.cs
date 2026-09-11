@@ -10,10 +10,12 @@ public sealed class GiveCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { go.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var loc = go.ResolveLocationObject();
         if (loc is null) { CommandHelpers.MsgNo(go); return; }
+        // Single snapshot for the inventory checks below: no mutation occurs
+        // before the first MoveTo, so one read covers all three sites.
+        var inv = go.ContentsSnapshot;
         var tokens = pa.GetList("args");
         if (tokens.Count == 0) { go.Msg("Give it to whom?"); return; }
         string? objName = null, targetName = null;
@@ -69,7 +71,7 @@ public sealed class GiveCommand : Command
                 var lastObj = string.Join(" ", tokens.Take(tokens.Count - 1));
                 var lastTgt = tokens.Last();
                 bool lastObjIsAll = lastObj.Equals("all", StringComparison.OrdinalIgnoreCase);
-                bool lastObjInInv = CommandHelpers.SearchWithFallback(go, lastObj).Any(o => go.ContentsSnapshot.Contains(o.Id));
+                bool lastObjInInv = CommandHelpers.SearchWithFallback(go, lastObj).Any(o => inv.Contains(o.Id));
                 if (lastObjIsAll || lastObjInInv)
                 { objName = lastObj; targetName = lastTgt; }
                 else
@@ -77,7 +79,7 @@ public sealed class GiveCommand : Command
                     var firstObj = tokens[0];
                     var restTgt = string.Join(" ", tokens.Skip(1));
                     bool firstObjIsAll = firstObj.Equals("all", StringComparison.OrdinalIgnoreCase);
-                    bool firstObjInInv = CommandHelpers.SearchWithFallback(go, firstObj).Any(o => go.ContentsSnapshot.Contains(o.Id));
+                    bool firstObjInInv = CommandHelpers.SearchWithFallback(go, firstObj).Any(o => inv.Contains(o.Id));
                     if (firstObjIsAll || firstObjInInv)
                     { objName = firstObj; targetName = restTgt; }
                     else { objName = lastObj; targetName = lastTgt; }
@@ -94,7 +96,7 @@ public sealed class GiveCommand : Command
         // only, so offline PCs that Python can give to stay reachable here.
         if (!target.IsContainer && !target.IsNpc && !target.IsPc) { go.Msg($"You can't give anything to {target.GetDisplayName(go)}."); return; }
         List<GameObject> objsToGive;
-        if (objName == "all") objsToGive = ObjectRegistry.Get(go.ContentsSnapshot.ToList());
+        if (objName == "all") objsToGive = ObjectRegistry.Get(inv);
         else
         {
             // Port of give.py:162 — caller.search is inventory-only: room

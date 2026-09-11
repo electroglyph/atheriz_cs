@@ -27,7 +27,7 @@ public sealed class ConnectCommand : Command
             return;
         }
         if (accounts.Count > 1) { caller.Msg("Error: Please contact server admin."); return; }
-        var account = accounts[0] as Account ?? (Account)accounts[0];
+        var account = (Account)accounts[0];
         if (account.IsBanned)
         {
             caller.Msg($"You have been banned from this server. Reason: {account.BanReason ?? "None specified"}");
@@ -61,7 +61,6 @@ public sealed class ConnectCommand : Command
         if (caller is BaseConnection conn2 && conn2.Session is not null)
         {
             conn2.Session.Account = account;
-            try { conn2.Session.AccountId = account.Id; } catch (Exception) { }
             conn2.SendCommand("logged_in");
             // Port of connect.py:154 await char_selection(caller, account) — fire-and-forget async
             _ = Task.Run(async () =>

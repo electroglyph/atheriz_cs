@@ -11,8 +11,7 @@ public sealed class GetCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { go.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var loc = go.ResolveLocationObject();
         if (loc is null) { CommandHelpers.MsgNo(go); return; }
         string? objName = null, sourceName = null;
@@ -52,7 +51,7 @@ public sealed class GetCommand : Command
                 if (!loc.Access(go, "get")) { go.Msg("You can't get something from here!"); return; }
                 source = loc;
             }
-            List<GameObject> srcContents = source is Node ns ? ns.GetContents() : ObjectRegistry.Get(source.ContentsSnapshot.ToList());
+            List<GameObject> srcContents = source is Node ns ? ns.GetContents() : ObjectRegistry.Get(source.ContentsSnapshot);
             // Hoisted out of the loop: the announce path only reads the
             // exclude set (it builds its own per-receiver state), so one
             // shared instance behaves the same as a fresh list per item.
@@ -115,6 +114,7 @@ public sealed class PutCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var goCaller, PrintHelp())) return;
+        List<GameObject> excludeSelf = [goCaller];
         string? objName = null;
         string? destName = null;
         // Port of put.py:25-42 — live ParsedArgs carry the `args` list.
@@ -160,7 +160,7 @@ public sealed class PutCommand : Command
         }
         if (objName == "all")
         {
-            var contents = goCaller.ContentsSnapshot.Select(id => ObjectRegistry.Get(id).FirstOrDefault()).Where(o=>o is not null).Cast<GameObject>().ToList();
+            var contents = goCaller.ContentsSnapshot.Select(ObjectRegistry.GetSingle).OfType<GameObject>().ToList();
             foreach (var obj in contents)
             {
                 if (obj.Id == destObj.Id) { caller.Msg($"You can't put {obj.Name} in {destObj.Name} - it would create a containment loop."); continue; }
@@ -169,7 +169,7 @@ public sealed class PutCommand : Command
                 if (!obj.MoveTo(destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name}."); continue; }
                 if (loc is not null)
                 {
-                    try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, mapping: null, exclude: new List<GameObject>{goCaller}); } catch (Exception) { }
+                    try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, mapping: null, exclude: excludeSelf); } catch (Exception) { }
                 }
                 caller.Msg($"You put {obj.Name} in {destObj.Name}.");
                 obj.AtPut(goCaller, destObj);
@@ -187,7 +187,7 @@ public sealed class PutCommand : Command
             if (!obj.MoveTo(destObj)) { caller.Msg($"You can't put {obj.Name} in {destObj.Name}."); continue; }
             if (loc is not null)
             {
-                try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, exclude: new List<GameObject>{goCaller}); } catch (Exception) { }
+                try { loc.MsgContents($"{goCaller.Name} put {obj.Name} in {destObj.Name}.", fromObj: goCaller, exclude: excludeSelf); } catch (Exception) { }
             }
             caller.Msg($"You put {obj.Name} in {destObj.Name}.");
             obj.AtPut(goCaller, destObj);
@@ -222,7 +222,7 @@ public sealed class DropCommand : Command
         List<GameObject> excludeSelf = [go];
         if (dropName == "all")
         {
-            var contents = ObjectRegistry.Get(go.ContentsSnapshot.ToList()).ToList();
+            var contents = ObjectRegistry.Get(go.ContentsSnapshot);
             foreach (var obj in contents)
             {
                 if (!obj.AtPreDrop(go)) continue;

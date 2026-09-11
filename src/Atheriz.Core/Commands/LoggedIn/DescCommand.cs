@@ -15,16 +15,14 @@ public sealed class DescCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { go.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var lst = pa.GetList("text");
         if (lst.Count > 0)
         {
             var loc = go.ResolveLocationObject();
             if (loc is null) { CommandHelpers.MsgNowhereExclaim(go); return; }
             string newDesc = string.Join(" ", lst).Replace("\\n", "\n");
-            if (loc is Node node) node.Desc = newDesc;
-            else loc.Desc = newDesc;
+            loc.Desc = newDesc;
             // at_look
             try { go.Msg(go.AtLook(loc)); } catch { go.Msg(newDesc); }
         }

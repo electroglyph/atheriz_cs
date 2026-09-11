@@ -10,7 +10,7 @@ public sealed class InventoryCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var p)) return;
-        var contents = Globals.ObjectRegistry.Get(p.ContentsSnapshot.ToList());
+        var contents = Globals.ObjectRegistry.Get(p.ContentsSnapshot);
         if (contents.Count == 0) p.Msg("You are carrying nothing.");
         else
         {

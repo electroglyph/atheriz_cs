@@ -211,20 +211,22 @@ public sealed class AsyncTicker
 
         private async Task TimerAsync(CancellationToken ct)
         {
-            var nextTick = DateTime.UtcNow + _interval;
+            double intervalSeconds = _interval.TotalSeconds;
+            double nextTick = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds() + intervalSeconds;
             try
             {
                 while (true)
                 {
                     lock (_lock) if (!_running) break;
-                    var delay = nextTick - DateTime.UtcNow;
+                    double delaySeconds = nextTick - Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                    TimeSpan delay = TimeSpan.FromSeconds(delaySeconds);
                     if (delay > TimeSpan.Zero)
                     {
                         try { await Task.Delay(delay, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; } catch (ObjectDisposedException) { break; }
                     }
                     else if (delay < -_interval)
                     {
-                        nextTick = DateTime.UtcNow;
+                        nextTick = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
                     }
                     List<Delegate> batch;
                     lock (_lock)
@@ -247,7 +249,7 @@ public sealed class AsyncTicker
                         if (!_pool.AddTask(() => TickOnce(c), name))
                             Release(c);
                     }
-                    nextTick += _interval;
+                    nextTick += intervalSeconds;
                 }
             }
             catch (OperationCanceledException) { }

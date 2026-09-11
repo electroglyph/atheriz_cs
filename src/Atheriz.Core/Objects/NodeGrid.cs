@@ -283,8 +283,12 @@ public sealed class NodeGrid
         Lock.EnterReadLock();
         try
         {
+            // Snapshot through the node-locked getter — reading the raw list
+            // here (grid lock only) raced a concurrent AddLink into
+            // InvalidOperationException mid-enumeration. Grid → node-read
+            // nests the same way AddNode does, so no new lock order.
             foreach (var node in Nodes.Values)
-                foreach (var link in node.Links)
+                foreach (var link in node.GetLinks())
                     if (link.Coord.Area != Area) crossLinks.Add((node, link));
         }
         finally { Lock.ExitReadLock(); }

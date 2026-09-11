@@ -1,4 +1,6 @@
 
+using System.Collections.Frozen;
+
 namespace Atheriz.Core.Objects;
 
 /// <summary>
@@ -6,7 +8,7 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public static class ContentUtils
 {
-    private static readonly HashSet<string> SingularWords = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly FrozenSet<string> SingularWords = new[]
     {
         "glass","grass","brass","class","mass","bass","pass","lass","crass",
         "bus","gas","plus","pus","thus","virus","campus","bonus","census",
@@ -21,7 +23,7 @@ public static class ContentUtils
         "measles","mumps","rabies","diabetes",
         "economics","politics","physics","mathematics","athletics","gymnastics",
         "barracks","chassis","precis",
-    };
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     // Port of settings.MAX_SEARCH_DEPTH — mutable for testing (mirrors monkeypatch in test_contents_search.py:340)
     public static int MaxSearchDepth = 100;
@@ -60,8 +62,7 @@ public static class ContentUtils
 
     public static List<GameObject> FilterContents(GameObject obj, Func<GameObject, bool> predicate)
     {
-        var contents = obj.ContentsSnapshot.Select(id => Globals.ObjectRegistry.Get(id).FirstOrDefault()).OfType<GameObject>().ToList();
-        return contents.Where(predicate).ToList();
+        return obj.ContentsSnapshot.Select(Globals.ObjectRegistry.GetSingle).OfType<GameObject>().Where(predicate).ToList();
     }
 
     public static string GroupByName(List<GameObject> objs, GameObject? looker = null)
@@ -251,7 +252,7 @@ public static class ContentUtils
     {
         ArgumentNullException.ThrowIfNull(loc);
         if (loc is Node node)
-            node.MsgContents(text, exclude: exclude as List<GameObject> ?? exclude?.ToList(), fromObj: fromObj, mapping: mapping as Dictionary<string, object?> ?? (mapping is null ? null : new Dictionary<string, object?>(mapping, StringComparer.Ordinal)), msgType: msgType);
+            node.MsgContents(text, exclude: exclude, fromObj: fromObj, mapping: mapping, msgType: msgType);
         else
             loc.MsgContents(text, fromObj: fromObj, mapping: mapping, exclude: exclude, msgType: msgType);
     }

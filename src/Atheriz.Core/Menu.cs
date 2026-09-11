@@ -24,7 +24,7 @@ public sealed class MenuEngine{
   }
   // Shared choice-dict build for the sync/async render paths: case-insensitive
   // map + identical ToLowerInvariant().Trim() duplicate-key throw (menu.py:47-51).
-  static Dictionary<string,Choice> BuildChoices(List<Choice> cl){var d=new Dictionary<string,Choice>(StringComparer.OrdinalIgnoreCase);foreach(var c in cl){var k=c.Key.ToLowerInvariant().Trim();if(d.ContainsKey(k))throw new InvalidOperationException($"duplicate menu key: '{c.Key}'");d[k]=c;}return d;}
+  static Dictionary<string,Choice> BuildChoices(List<Choice> cl){var d=new Dictionary<string,Choice>(StringComparer.OrdinalIgnoreCase);foreach(var c in cl){var k=NormalizeKey(c.Key);if(d.ContainsKey(k))throw new InvalidOperationException($"duplicate menu key: '{c.Key}'");d[k]=c;}return d;}
   public async Task RenderAsync(){ // Port of menu.py:53
    if(CurrentNodeSync is null&&CurrentNodeAsync is null)return;
    string t;List<Choice> cl;
@@ -38,7 +38,7 @@ public sealed class MenuEngine{
   // Shared input prefix for the sync/async handlers: normalization and lookup
   // (menu.py:81-82). Null means "no such key" (stay); the callback/goto/Stay
   // dispatch below stays per-handler (sync throws inline, async faults).
-  static string NormalizeKey(string s)=>s.ToLowerInvariant().Trim();
+  internal static string NormalizeKey(string s)=>s.ToLowerInvariant().Trim();
   Choice? TryGetChoice(string clean)=>_choices.TryGetValue(clean,out var ch)?ch:null;
   public bool HandleInput(string input){ // Port of menu.py:76
    if(_choices.Count==0){CurrentNodeSync=null;CurrentNodeAsync=null;return false;} // Port of menu.py:77
@@ -74,7 +74,7 @@ public sealed class Menu{
   while(true){
     var display=cur; if(Options.Count>0){var lines=new List<string>{$"\n{display}"}; foreach(var kv in Options)lines.Add(OptionDescs.TryGetValue(kv.Key,out var dd)?$"  [{kv.Key}] {dd}":$"  [{kv.Key}]"); display=string.Join("\r\n",lines);}
    var inp = await MenuPrompt.PromptWithTimeoutAsync(session, display, Timeout).ConfigureAwait(false); if(inp is null)break; // Port of menu.py:153-156 via MenuPrompt
-   var clean=inp.ToLowerInvariant().Trim(); if(!Options.TryGetValue(clean,out var h)){try{AtherizLogger.LogDebug($"menu unknown key: {clean}");}catch{} continue;} // Port of menu.py:82
+   var clean=MenuEngine.NormalizeKey(inp); if(!Options.TryGetValue(clean,out var h)){try{AtherizLogger.LogDebug($"menu unknown key: {clean}");}catch{} continue;} // Port of menu.py:82
    try{var keepGoing=await h(session,inp).ConfigureAwait(false); if(!keepGoing)return true;}catch(Exception ex){try{AtherizLogger.LogError($"menu handle_input failed: {ex}");}catch{} break;} // Port of menu.py:85; handler true = keep prompting, false = done (Run true = exited)
   } return false;
  }
@@ -82,7 +82,7 @@ public sealed class Menu{
  public static Task RunMenu(Session s,string p,Dictionary<string,Func<Session,string,Task<bool>>> opts,TimeSpan? to=null){var m=new Menu(p,opts,to); return m.Run(s,p);}
 }
 public static class MenuRunner{ // Port of menu.py:135 top-level run_menu future-based
- static Session? GetSess(object? caller){ if(caller is Session s)return s; if(caller is Atheriz.Core.Commands.ISessionProvider p){ try{ var v=p.Session; if(v is not null)return v; }catch{} } if(caller is GameObject go)return go.Session; return null;}
+ static Session? GetSess(object? caller){ if(caller is ISessionProvider p){ try{ return p.Session; }catch{ return null; } } return null;}
  // Shared prompt loop for the sync/async overloads below: display, timeout
  // prompt, handle, log-and-break, close. Render/handle ride as delegates —
  // the sync overload's ctor already rendered and its handler is sync.

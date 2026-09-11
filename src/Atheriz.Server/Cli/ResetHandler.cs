@@ -81,7 +81,6 @@ public static class ResetHandler
             }
         }
 
-        try { Atheriz.Core.Persistence.AtherizDbContext.CloseDatabase(); } catch { }
         try { Atheriz.Core.Persistence.AtherizDbContextFactory.CloseDatabase(); } catch { }
 
         Console.WriteLine("Deleting game data...");
@@ -101,7 +100,6 @@ public static class ResetHandler
         Directory.CreateDirectory(savePath);
         Atheriz.Core.Utils.FsUtil.TryChmod0700(savePath);
 
-        try { Atheriz.Core.Persistence.AtherizDbContext.ReopenDatabase(); } catch { }
         try { Atheriz.Core.Persistence.AtherizDbContextFactory.ReopenDatabase(); } catch { }
 
         Console.WriteLine("Setting up new world...");

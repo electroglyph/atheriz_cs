@@ -48,6 +48,14 @@ public static class CommandDispatcher
     // F010: shared auto-alias prefix scan (sorted keys, ignored-keys skip).
     // socialsFallback=true reproduces the Q5 two-pass rule (non-socials first, social fallback);
     // false is the plain scan for cmdsets without socials (unlogged-in path).
+    // NOTE: this stays as one GetSortedKeys snapshot plus one Get per
+    // prefix-matching candidate (a lock take each) rather than a single pass
+    // under one read scope. CmdSet exposes no read scope — its lock is
+    // private — so a single scope would need either a new scoped lock
+    // accessor or an in-CmdSet scan that bypasses the virtual Get override
+    // point, and holding one read across the sort + scan would stall Adds /
+    // Remove writers longer than these short discrete takes. The saving would
+    // apply to the typo path only.
     internal static (Command? cmd, string matchedAlias) AutoAlias(CmdSet cmdset, string rawCmdKey, bool socialsFallback)
     {
         Command? socialFallback = null;
@@ -142,7 +150,7 @@ public static class CommandDispatcher
             }
             if (cmd is null && _settings.AutoCommandAliasing)
             {
-                if (rawCmdKey.Length == 1 && NoAliasCommands.Contains(rawCmdKey.ToLowerInvariant()))
+                if (rawCmdKey.Length == 1 && NoAliasCommands.Contains(rawCmdKey))
                 {
                     puppet.Msg("You can't do that.");
                     return null;

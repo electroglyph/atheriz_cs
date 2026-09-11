@@ -181,7 +181,7 @@ public sealed class MazeCommand : Command
     }
     public static Dictionary<(int,int), List<(int,int)>> CreateMaze(int width, int height)
     {
-        Dictionary<(int,int), bool> visited = [];
+        HashSet<(int,int)> visited = [];
         List<(int,int)> GetValid((int,int) coord)
         {
             List<(int,int)> list = [];
@@ -189,7 +189,7 @@ public sealed class MazeCommand : Command
             if (coord.Item1 < width - 1) list.Add((coord.Item1 + 1, coord.Item2));
             if (coord.Item2 > 0) list.Add((coord.Item1, coord.Item2 - 1));
             if (coord.Item2 < height - 1) list.Add((coord.Item1, coord.Item2 + 1));
-            return list.Where(c => !visited.GetValueOrDefault(c, false)).ToList();
+            return list.Where(c => !visited.Contains(c)).ToList();
         }
         var start = (0,0);
         var valid = GetValid(start);
@@ -202,7 +202,7 @@ public sealed class MazeCommand : Command
         {
             if (valid.Count == 0) { if (path.Count == 0) { done = true; break; } path.RemoveAt(path.Count - 1); if (path.Count == 0) { done = true; break; } current = path.Last(); nodes = maze.GetValueOrDefault(current, []); valid = GetValid(current); continue; }
             var c = valid[Random.Shared.Next(valid.Count)];
-            visited[c] = true;
+            visited.Add(c);
             path.Add(c);
             if (nodes.Count == 0) maze[current] = new List<(int,int)>{c}; else { nodes.Add(c); maze[current] = nodes; }
             current = c;

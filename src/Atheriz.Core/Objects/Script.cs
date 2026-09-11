@@ -9,7 +9,7 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public class Script : GameObject
 {
-    public new static bool _is_thread_safe = true;
+    internal new static bool _is_thread_safe = true;
     private GameObject? _child; // Port of base_script.py:76 child: Object | None
 
     public Script()
@@ -22,7 +22,7 @@ public class Script : GameObject
         // Locked read: every write takes SyncRoot, so a bare field read can
         // observe a half-published re-attach and detach hooks from the wrong
         // (previous) child.
-        get { SyncRoot.EnterReadLock(); try { return _child; } finally { SyncRoot.ExitReadLock(); } }
+        get { using (ReadScope()) return _child; }
     }
 
     public override IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
@@ -47,14 +47,12 @@ public class Script : GameObject
     public void InstallHooks(GameObject child)
     {
         // Port of base_script.py:191-193 with self.lock: if self.child is not None and self.child is not child: raise ValueError
-        SyncRoot.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             if (_child is not null && !ReferenceEquals(_child, child))
                 throw new InvalidOperationException($"Script {Id} already attached to {_child} cannot be attached to {child}");
             _child = child;
         }
-        finally { SyncRoot.ExitWriteLock(); }
         // Port of base_script.py:194-203 at_funcs = [(d, getattr(self,d)) for d in dir(self) if d.startswith("at_") and (is_before or is_after or is_replace)]
         // marker classification cached per type (HookMarkerCache).
         var atFuncs = HookMarkerCache.ForType(GetType());
@@ -104,6 +102,7 @@ public class Script : GameObject
         {
             var parameters = method.GetParameters();
             Type? delegateType;
+            var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
             if (parameters.Length == 0)
             {
                 delegateType = method.ReturnType == typeof(void)
@@ -112,13 +111,11 @@ public class Script : GameObject
             }
             else if (method.ReturnType == typeof(void))
             {
-                var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
                 delegateType = GetActionType(paramTypes);
                 if (delegateType is null) return null;
             }
             else
             {
-                var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
                 var all = paramTypes.Append(method.ReturnType).ToArray();
                 delegateType = GetFuncType(all);
                 if (delegateType is null) return null;
@@ -158,9 +155,7 @@ public class Script : GameObject
         // Port of base_script.py:219 child = self.child if child is None else child
         if (child is null)
         {
-            SyncRoot.EnterReadLock();
-            try { child = _child; }
-            finally { SyncRoot.ExitReadLock(); }
+            using (ReadScope()) child = _child;
         }
         if (child is null) return; // Port of base_script.py:220-222 if child is None: logger.error...
         // marker classification cached per type (HookMarkerCache).
@@ -168,8 +163,7 @@ public class Script : GameObject
         // Port of base_script.py:233-240 with child.lock: mutate the hook sets
         // under the child's write lock via the typed accessor (no reflection).
         {
-            child.SyncRoot.EnterWriteLock();
-            try
+            using (child.WriteScope())
             {
                 // Fetch inside the lock: the live dict must not be grabbed
                 // beforehand (a concurrent InstallHook could replace it).
@@ -189,18 +183,15 @@ public class Script : GameObject
                             set.RemoveWhere(d => ReferenceEquals(d.Target, this));
                         }
                     }
-                }
-                finally { child.SyncRoot.ExitWriteLock(); }
+            }
         }
 
         // Also remove from child's scripts set
         child.RemoveScriptId(this.Id);
 
-        SyncRoot.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             if (ReferenceEquals(_child, child)) _child = null; // Port of base_script.py:133 object.__setattr__(self, "child", None)
         }
-        finally { SyncRoot.ExitWriteLock(); }
     }
 }

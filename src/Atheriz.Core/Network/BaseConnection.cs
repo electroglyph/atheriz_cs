@@ -123,15 +123,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     private static readonly TimeSpan RetryDrainDelay = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan RetryDrainRearmDelay = TimeSpan.FromMilliseconds(250);
     private const double InputBusyWindowSeconds = 1.0;
-    private static readonly Dictionary<string, double> _retryDrainDropLog = new();
-    private static readonly Lock _retryDrainDropLock = new();
+    private static readonly ThrottledLog _retryDrainDropLog = new(RetryDrainDropWindowSeconds);
 
     private static bool TryScheduleRetryDrain(BaseConnection self)
     {
         if (Interlocked.Increment(ref _outstandingRetryDrains) > MaxOutstandingRetryDrains)
         {
             Interlocked.Decrement(ref _outstandingRetryDrains);
-            if (ThrottleWindow.ShouldLog(_retryDrainDropLog, _retryDrainDropLock, "retry-drain", RetryDrainDropWindowSeconds))
+            if (_retryDrainDropLog.ShouldLog("retry-drain"))
                 try { Atheriz.Core.AtherizLogger.LogWarning("[Network] retry-drain backlog full; dropping retry"); } catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.TryScheduleRetryDrain: " + logEx.Message, "BaseConnection"); }
             return false;
         }

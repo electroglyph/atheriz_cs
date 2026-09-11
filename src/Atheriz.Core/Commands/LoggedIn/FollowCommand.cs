@@ -15,7 +15,7 @@ public sealed class FollowCommand : Command
         var targetName = pa?.GetString("target");
         if (string.IsNullOrEmpty(targetName)) { go.Msg("Follow who?"); return; }
         var matches = CommandHelpers.SearchWithFallback(go, targetName!);
-        if (matches.Count == 0) { go.Msg($"Could not find '{targetName}'."); return; }
+        if (matches.Count == 0) { CommandHelpers.MsgCouldNotFind(go, targetName); return; }
         if (matches.Count > 1) { CommandHelpers.MsgMultipleMatchesFound(go, targetName); return; }
         var target = matches[0];
         if (target == go) { go.Msg("You can't follow yourself!"); return; }
@@ -82,7 +82,7 @@ public sealed class UnfollowCommand : Command
         if (leader is not null)
         {
             leader.RemoveFollower(go.Id);
-            if (go.Access(leader, "view")) leader.Msg($"{go.GetDisplayName(leader)} is no longer following you.");
+            FollowHelper.NotifyUnfollowedLeader(leader, go);
             // clean up the drained FollowScript like nofollow does.
             // Python leaves this to the leader's next move (follow.py:170-192
             // has no script cleanup); without a move the script lingers, so
@@ -108,7 +108,7 @@ public sealed class NofollowCommand : Command
         if (go.NoFollow)
         {
             go.Msg("You will no longer allow others to follow you.");
-            var followers = go.FollowersSnapshot.ToList();
+            var followers = go.FollowersSnapshot;
             HashSet<int> keep = [];
             foreach (var id in followers)
             {

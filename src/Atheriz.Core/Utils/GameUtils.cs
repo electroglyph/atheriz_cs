@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Text.RegularExpressions;
 
 namespace Atheriz.Core.Utils;
@@ -414,9 +413,6 @@ public static class GameUtils
         if (strs.Count == 2) return string.Join(normEnd + " ", strs);
         return string.Join(normSep + " ", strs.Take(strs.Count - 1)) + normEnd + " " + strs[^1];
     }
-
-    // Port of atheriz/utils.py:642 _build_signature_from_code shim — in C# use MethodInfo.GetParameters
-    public static ParameterInfo[] BuildSignature(Delegate del) => del.Method.GetParameters(); // Port of utils.py:642 shim
 
     // Port of atheriz/utils.py:141 detach — deepcopy via JSON roundtrip (mirrors dill roundtrip)
     public static T? Detach<T>(T value)

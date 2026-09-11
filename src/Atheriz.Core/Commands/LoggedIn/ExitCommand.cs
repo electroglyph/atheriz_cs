@@ -154,7 +154,7 @@ public sealed class LoggedInExitCommand : Command
             catch (Exception) { }
             // Port of exit.py:100-103 — the leader's notice is gated on the
             // follower's view of the leader, and vice versa.
-            try { if (c.Access(leader, "view")) leader.Msg($"{c.GetDisplayName(leader)} is no longer following you."); } catch (Exception) { }
+            try { FollowHelper.NotifyUnfollowedLeader(leader, c); } catch (Exception) { }
             try { if (leader.Access(c, "view")) c.Msg($"You are no longer following {leader.GetDisplayName(c)}."); } catch (Exception) { }
         }
         c.Following = null;

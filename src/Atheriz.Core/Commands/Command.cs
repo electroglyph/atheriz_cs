@@ -58,10 +58,8 @@ public abstract class Command
 
     public virtual string PrintHelp()
     {
-        var a = new List<string> { Key };
-        a.AddRange(Aliases);
         if (Parser is null) return HelpHelper.FormatNoParser(this);
-        return Parser.FormatHelp() + $"\nAliases: {string.Join(", ", a)}\n" + ExtraDesc;
+        return Parser.FormatHelp() + $"\nAliases: {HelpHelper.FormatAliasList(this)}\n" + ExtraDesc;
     }
 
     /// <summary>

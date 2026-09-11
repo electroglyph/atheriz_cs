@@ -46,6 +46,35 @@ public partial class NodeHandler
     private readonly HashSet<(Coord From, Coord To)> _removedTrans = new();
     private readonly HashSet<Coord> _removedDoors = new();
 
+    // Shared tombstone snapshot / revalidate / clear core for the three
+    // domains (areas/transitions/doors). The domain lock arrives as a
+    // parameter and is bracketed exactly as the inlined code was: per-domain
+    // locks, sequential takes, read for snapshot/revalidate, write for clear.
+    private static HashSet<T> SnapshotDeletesLocked<T>(ReaderWriterLockSlim rwLock, HashSet<T> removed, ICollection<T> live)
+    {
+        rwLock.EnterReadLock();
+        try
+        {
+            HashSet<T> snap = new(removed);
+            snap.ExceptWith(live);
+            return snap;
+        }
+        finally { rwLock.ExitReadLock(); }
+    }
+    private static void RevalidateDeletesLocked<T>(ReaderWriterLockSlim rwLock, HashSet<T> deletes, ICollection<T> live)
+    {
+        rwLock.EnterReadLock();
+        try { deletes.ExceptWith(live); }
+        finally { rwLock.ExitReadLock(); }
+    }
+    private static void ClearDeletesLocked<T>(ReaderWriterLockSlim rwLock, HashSet<T> removed, HashSet<T> deletes)
+    {
+        if (deletes.Count == 0) return;
+        rwLock.EnterWriteLock();
+        try { removed.ExceptWith(deletes); }
+        finally { rwLock.ExitWriteLock(); }
+    }
+
     private static NodeHandler? _current;
     private static readonly Lock _currentLock = new();
     public static NodeHandler? GetCurrent() { lock (_currentLock) return _current; }
@@ -256,9 +285,7 @@ public partial class NodeHandler
 
         int maxNodeId = 0;
         List<NodeArea> areasSnap;
-        Lock.EnterReadLock();
-        try { areasSnap = _areas.Values.ToList(); }
-        finally { Lock.ExitReadLock(); }
+        using (ReadScope()) { areasSnap = _areas.Values.ToList(); }
         foreach (var area in areasSnap)
         {
             area.Lock.EnterReadLock();
@@ -372,7 +399,7 @@ public partial class NodeHandler
     // Restores the transient save flags cleared for persistence.
     private void RestoreSaveFlags(bool handlerWas, bool transWas, bool doorsWas, List<NodeArea> clearedAreas, List<NodeGrid> clearedGrids, List<Node> clearedNodes)
     {
-        if (handlerWas) { Lock.EnterWriteLock(); try { _modified = true; } finally { Lock.ExitWriteLock(); } }
+        if (handlerWas) { using (WriteScope()) { _modified = true; } }
         if (transWas) { Lock2.EnterWriteLock(); try { _modified2 = true; } finally { Lock2.ExitWriteLock(); } }
         if (doorsWas) { Lock3.EnterWriteLock(); try { _modified3 = true; } finally { Lock3.ExitWriteLock(); } }
         foreach (var a in clearedAreas) { a.Lock.EnterWriteLock(); try { a.IsModified = true; } finally { a.Lock.ExitWriteLock(); } }
@@ -387,17 +414,17 @@ public partial class NodeHandler
         bool handlerWas;
         long areaGen0;
         HashSet<string> areaDeletes;
-        using (ReadScope()) { areaRefs = _areas.Values.ToList(); handlerWas = _modified; areaGen0 = _areaGen; areaDeletes = new HashSet<string>(_removedAreas); areaDeletes.ExceptWith(_areas.Keys); }
+        using (ReadScope()) { areaRefs = _areas.Values.ToList(); handlerWas = _modified; areaGen0 = _areaGen; areaDeletes = SnapshotDeletesLocked(Lock, _removedAreas, _areas.Keys); }
         List<Transition> transRefs = [];
         bool transWas;
         long transGen0;
         HashSet<(Coord From, Coord To)> transDeletes;
-        using (ReadScope2()) { transRefs = _transitions.Values.ToList(); transWas = _modified2; transGen0 = _transGen; transDeletes = new HashSet<(Coord From, Coord To)>(_removedTrans); transDeletes.ExceptWith(_transitions.Keys); }
+        using (ReadScope2()) { transRefs = _transitions.Values.ToList(); transWas = _modified2; transGen0 = _transGen; transDeletes = SnapshotDeletesLocked(Lock2, _removedTrans, _transitions.Keys); }
         List<(Coord, Dictionary<string, Door>)> doorsRefs;
         bool doorsWas;
         long doorGen0;
         HashSet<Coord> doorDeletes;
-        using (ReadScope3()) { doorsRefs = _doors.Select(kv => (kv.Key, new Dictionary<string, Door>(kv.Value))).ToList(); doorsWas = _modified3; doorGen0 = _doorGen; doorDeletes = new HashSet<Coord>(_removedDoors); doorDeletes.ExceptWith(_doors.Keys); }
+        using (ReadScope3()) { doorsRefs = _doors.Select(kv => (kv.Key, new Dictionary<string, Door>(kv.Value))).ToList(); doorsWas = _modified3; doorGen0 = _doorGen; doorDeletes = SnapshotDeletesLocked(Lock3, _removedDoors, _doors.Keys); }
 
         // Detach copies (fresh locks, is_modified false). Clean domains are
         // skipped before paying for the copies: their rows are already
@@ -560,7 +587,7 @@ public partial class NodeHandler
         {
             // Area branch is gen-guarded like transitions/doors: a concurrent
             // AddArea/AddNode between snapshot and clean must survive.
-            if (handlerWas) { Lock.EnterWriteLock(); try { if (_areaGen == areaGen0) _modified = false; } finally { Lock.ExitWriteLock(); } }
+            if (handlerWas) { using (WriteScope()) { if (_areaGen == areaGen0) _modified = false; } }
             if (transWas) { Lock2.EnterWriteLock(); try { if (_transGen == transGen0) _modified2 = false; } finally { Lock2.ExitWriteLock(); } }
             if (doorsWas) { Lock3.EnterWriteLock(); try { if (_doorGen == doorGen0) _modified3 = false; } finally { Lock3.ExitWriteLock(); } }
         }
@@ -587,15 +614,9 @@ public partial class NodeHandler
                 // removed then re-added after the snapshot must not be
                 // deleted at commit. Read locks inside the gate follow the
                 // IsStillSaveable precedent in ObjectRegistry.SaveObjects.
-                Lock.EnterReadLock();
-                try { areaDeletes.ExceptWith(_areas.Keys); }
-                finally { Lock.ExitReadLock(); }
-                Lock2.EnterReadLock();
-                try { transDeletes.ExceptWith(_transitions.Keys); }
-                finally { Lock2.ExitReadLock(); }
-                Lock3.EnterReadLock();
-                try { doorDeletes.ExceptWith(_doors.Keys); }
-                finally { Lock3.ExitReadLock(); }
+                RevalidateDeletesLocked(Lock, areaDeletes, _areas.Keys);
+                RevalidateDeletesLocked(Lock2, transDeletes, _transitions.Keys);
+                RevalidateDeletesLocked(Lock3, doorDeletes, _doors.Keys);
                 foreach (var name in areaDeletes)
                 {
                     var row = ctx.Areas.Find(name);
@@ -631,8 +652,8 @@ public partial class NodeHandler
         MarkHandlerClean();
         // Success path only (every failure path above returns or throws):
         // the tombstoned rows are now gone from the DB.
-        if (areaDeletes.Count > 0) { Lock.EnterWriteLock(); try { _removedAreas.ExceptWith(areaDeletes); } finally { Lock.ExitWriteLock(); } }
-        if (transDeletes.Count > 0) { Lock2.EnterWriteLock(); try { _removedTrans.ExceptWith(transDeletes); } finally { Lock2.ExitWriteLock(); } }
-        if (doorDeletes.Count > 0) { Lock3.EnterWriteLock(); try { _removedDoors.ExceptWith(doorDeletes); } finally { Lock3.ExitWriteLock(); } }
+        ClearDeletesLocked(Lock, _removedAreas, areaDeletes);
+        ClearDeletesLocked(Lock2, _removedTrans, transDeletes);
+        ClearDeletesLocked(Lock3, _removedDoors, doorDeletes);
     }
 }

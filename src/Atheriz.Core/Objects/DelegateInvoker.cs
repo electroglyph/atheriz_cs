@@ -19,7 +19,13 @@ public static class DelegateInvoker
     // count + compiled invoker. Replaces the per-invoke Method.GetParameters()
     // reflection on the hook hot path; the arity/type checks below reproduce the
     // exact same TargetParameterCountException behavior as before.
-    private sealed record DelegateMetadata(Type[] Types, object?[] Defaults, int RequiredCount, Func<object?[], object?> Invoker);
+    private sealed class DelegateMetadata(Type[] types, object?[] defaults, int requiredCount, Func<object?[], object?> invoker)
+    {
+        public Type[] Types { get; } = types;
+        public object?[] Defaults { get; } = defaults;
+        public int RequiredCount { get; } = requiredCount;
+        public Func<object?[], object?> Invoker { get; } = invoker;
+    }
     private static readonly ConditionalWeakTable<Delegate, DelegateMetadata> _cache = new();
 
     public static object? Invoke(Delegate d, object?[] args)

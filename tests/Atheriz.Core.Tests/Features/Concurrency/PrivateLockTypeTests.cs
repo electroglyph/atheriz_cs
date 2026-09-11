@@ -15,6 +15,8 @@ namespace Atheriz.Core.Tests.Features.Concurrency;
 // same-thread re-entry throws instead of deadlocking). Each pin asserts the
 // converted field type so a silent revert to object fails loudly. Behavior
 // (mutual exclusion) is covered by the surrounding concurrency suites.
+// The six throttle dict+Lock pairs live in ThrottledLog holder instances now,
+// so those sites pin the holder field type plus the holder's single lock.
 public sealed class PrivateLockTypeTests
 {
     private static void AssertPrivateLockFieldIsLock(Type declaringType, string fieldName)
@@ -23,6 +25,14 @@ public sealed class PrivateLockTypeTests
             fieldName, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
         Assert.NotNull(field);
         Assert.Equal(typeof(System.Threading.Lock), field.FieldType);
+    }
+
+    private static void AssertPrivateHolderIsThrottledLog(Type declaringType, string fieldName)
+    {
+        var field = declaringType.GetField(
+            fieldName, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+        Assert.NotNull(field);
+        Assert.Equal(typeof(ThrottledLog), field.FieldType);
     }
 
     [Fact]
@@ -86,39 +96,45 @@ public sealed class PrivateLockTypeTests
     }
 
     [Fact]
-    public void WebSocketHandler_OversizeLock_IsLockType()
+    public void ThrottledLog_InternalLock_IsLockType()
     {
-        AssertPrivateLockFieldIsLock(typeof(WebSocketHandler), "_wsOversizeLock");
+        AssertPrivateLockFieldIsLock(typeof(ThrottledLog), "_lock");
     }
 
     [Fact]
-    public void BaseConnection_RetryDrainDropLock_IsLockType()
+    public void WebSocketHandler_OversizeThrottle_IsHolder()
     {
-        AssertPrivateLockFieldIsLock(typeof(BaseConnection), "_retryDrainDropLock");
+        AssertPrivateHolderIsThrottledLog(typeof(WebSocketHandler), "_wsOversizeLog");
     }
 
     [Fact]
-    public void WebSocketProtocol_OversizeLock_IsLockType()
+    public void BaseConnection_RetryDrainDropThrottle_IsHolder()
     {
-        AssertPrivateLockFieldIsLock(typeof(WebSocketProtocol), "_oversizeLock");
+        AssertPrivateHolderIsThrottledLog(typeof(BaseConnection), "_retryDrainDropLog");
     }
 
     [Fact]
-    public void TelnetProtocol_OverlongDropLock_IsLockType()
+    public void WebSocketProtocol_OversizeThrottle_IsHolder()
     {
-        AssertPrivateLockFieldIsLock(typeof(TelnetProtocol), "_overlongDropLock");
+        AssertPrivateHolderIsThrottledLog(typeof(WebSocketProtocol), "_oversizeLog");
     }
 
     [Fact]
-    public void ConnectionManager_MalformedLock_IsLockType()
+    public void TelnetProtocol_OverlongDropThrottle_IsHolder()
     {
-        AssertPrivateLockFieldIsLock(typeof(ConnectionManager), "_malformedLock");
+        AssertPrivateHolderIsThrottledLog(typeof(TelnetProtocol), "_overlongDropLog");
     }
 
     [Fact]
-    public void ConnectionManager_OversizeLock_IsLockType()
+    public void ConnectionManager_MalformedThrottle_IsHolder()
     {
-        AssertPrivateLockFieldIsLock(typeof(ConnectionManager), "_oversizeLock");
+        AssertPrivateHolderIsThrottledLog(typeof(ConnectionManager), "_malformedLog");
+    }
+
+    [Fact]
+    public void ConnectionManager_OversizeThrottle_IsHolder()
+    {
+        AssertPrivateHolderIsThrottledLog(typeof(ConnectionManager), "_oversizeLog");
     }
 
     [Fact]

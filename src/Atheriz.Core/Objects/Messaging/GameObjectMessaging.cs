@@ -120,9 +120,10 @@ public partial class GameObject
             }
             if (recvList is not null && !string.IsNullOrEmpty(recvText))
             {
+                string allRecv = string.Join(", ", recvList.Select(r => r.GetDisplayName(r)));
                 foreach (var receiver in recvList)
                 {
-                    var rMapping = BuildSayMapping(GetDisplayName(receiver), loc is not null ? loc.GetDisplayName(receiver) : null, receiver.GetDisplayName(receiver), string.Join(", ", recvList.Select(r => r.GetDisplayName(r))), message, custom);
+                    var rMapping = BuildSayMapping(GetDisplayName(receiver), loc is not null ? loc.GetDisplayName(receiver) : null, receiver.GetDisplayName(receiver), allRecv, message, custom);
                     receiver.Msg(recvText, this, rMapping, false, type);
                 }
             }

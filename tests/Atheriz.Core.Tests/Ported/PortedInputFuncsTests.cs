@@ -5,6 +5,7 @@ using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Commands;
+using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Ported;
 
@@ -20,19 +21,27 @@ public class PortedInputFuncsTests
     {
         [InputFunc("custom")] public void Foo(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
     }
-    private sealed class FindsDecoratedHelper : InputFuncs
+    private sealed class ExplicitExtraHelper : InputFuncs
     {
-        [InputFunc] public void Foo(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
-        [InputFunc("bar")] public void BarMethod(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
+        public void Foo(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
+        public void BarMethod(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
+        protected override void RegisterExtraHandlers(Dictionary<string, Delegate> handlers)
+        {
+            AddInputHandler(handlers, nameof(Foo), (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)Foo, nameof(Foo));
+            AddInputHandler(handlers, "bar", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)BarMethod, nameof(BarMethod));
+        }
     }
-    private sealed class IgnoresUndecoratedHelper : InputFuncs
+    private sealed class PlainSubclassHelper : InputFuncs
     {
-        [InputFunc] public void Foo(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
         public void NotAHandler() { }
     }
-    private sealed class SubclassWithCustomHelper : InputFuncs
+    private sealed class ExplicitCustomHelper : InputFuncs
     {
-        [InputFunc("my_custom")] public void MyHandler(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
+        public void MyHandler(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
+        protected override void RegisterExtraHandlers(Dictionary<string, Delegate> handlers)
+        {
+            AddInputHandler(handlers, "my_custom", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)MyHandler, nameof(MyHandler));
+        }
     }
 
     [Fact]
@@ -61,8 +70,9 @@ public class PortedInputFuncsTests
         var m = typeof(DecoratorExplicitHelper).GetMethod(nameof(DecoratorExplicitHelper.Foo))!;
         var attr = m.GetCustomAttribute<InputFuncAttribute>()!;
         Assert.Equal("custom", attr.Name);
-        // Via InputFuncs subclass
-        var inp = new FindsDecoratedHelper();
+        // Via explicit subclass registration (attribute discovery was removed;
+        // subclasses call AddInputHandler explicitly).
+        var inp = new ExplicitExtraHelper();
         var handlers = inp.GetHandlers();
         Assert.Contains("bar", handlers.Keys);
     }
@@ -77,23 +87,36 @@ public class PortedInputFuncsTests
     }
 
     [Fact]
-    public void GetHandlers_FindsDecoratedMethods()
+    public void GetHandlers_RegistersExplicitSubclassHandlers()
     {
         using var env = GlobalTestEnv.Enter();
-        var inp = new FindsDecoratedHelper();
+        var inp = new ExplicitExtraHelper();
         var handlers = inp.GetHandlers();
         Assert.Contains("Foo", handlers.Keys);
         Assert.Contains("bar", handlers.Keys);
+        // dual-name form: explicit "bar" also registered under the method name.
+        Assert.Contains("BarMethod", handlers.Keys);
     }
 
     [Fact]
-    public void GetHandlers_IgnoresUndecoratedMethods()
+    public void GetHandlers_SubclassWithoutOverride_AddsNothing()
     {
         using var env = GlobalTestEnv.Enter();
-        var inp = new IgnoresUndecoratedHelper();
+        var inp = new PlainSubclassHelper();
         var handlers = inp.GetHandlers();
-        Assert.Contains("Foo", handlers.Keys);
+        Assert.Contains(handlers.Keys, k => k.Equals("Text", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain("NotAHandler", handlers.Keys);
+    }
+
+    [Fact]
+    public void GetHandlers_HasNoReflectionDiscovery()
+    {
+        // Production must not scan methods/attributes to find handlers.
+        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "ConnectionManager.cs");
+        Assert.DoesNotContain("GetMethods(", src);
+        Assert.DoesNotContain("GetCustomAttribute<", src);
+        Assert.DoesNotContain("CreateDelegate(", src);
+        Assert.DoesNotContain("using System.Reflection;", src);
     }
 
     [Fact]
@@ -458,7 +481,7 @@ public class PortedInputFuncsTests
     public void SubclassCanAddHandlers()
     {
         using var env = GlobalTestEnv.Enter();
-        var inp = new SubclassWithCustomHelper();
+        var inp = new ExplicitCustomHelper();
         var handlers = inp.GetHandlers();
         Assert.Contains("my_custom", handlers.Keys);
         Assert.Contains(handlers.Keys, k => k.Equals("Text", StringComparison.OrdinalIgnoreCase));

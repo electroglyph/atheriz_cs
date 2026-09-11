@@ -34,7 +34,7 @@ public sealed class NodeLink
 // Port of atheriz/objects/nodes.py:79
 public partial class Node : GameObject
 {
-    public new static bool _is_thread_safe = true;
+    internal new static bool _is_thread_safe = true;
     // Single lock: Node shares the base SyncRoot (atheriz/objects/nodes.py uses one
     // self.lock; the split _nodeLock caused node->base vs base->node order inversions).
     // NodeLock/Lock are kept as aliases for existing callers (NodeGrid, Pathfind, tests).
@@ -48,12 +48,18 @@ public partial class Node : GameObject
     private Coord _coord;
     public Coord Coord
     {
-        get { SyncRoot.EnterReadLock(); try { return _coord; } finally { SyncRoot.ExitReadLock(); } }
-        set { SyncRoot.EnterWriteLock(); try { _coord = value; } finally { SyncRoot.ExitWriteLock(); } }
+        get => Read(() => _coord);
+        set => Write(() => _coord = value);
     }
     public string Theme { get; set; } = "";
     public string? LegendDesc { get; set; }
-    public List<NodeLink> Links { get; set; } = [];
+    // Null assignment is a bug at the single write point — fail loud pointing
+    // at the culprit instead of letting readers null-check per call.
+    public List<NodeLink> Links
+    {
+        get => field;
+        set => field = value ?? throw new ArgumentNullException(nameof(value));
+    } = [];
     public Dictionary<string, string> Nouns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public double OpenAttenuation { get; set; } = 10.0; // Port of nodes.py:134 DEFAULT_OPEN_SOUND_ATTENUATION
     public double EnclosedAttenuation { get; set; } = 20.0; // Port of nodes.py:135 DEFAULT_ENCLOSED_SOUND_ATTENUATION
@@ -148,6 +154,8 @@ public partial class Node : GameObject
         node = null;
         return false;
     }
+    // Shared category and message prefix for suppressed-error logs below.
+    private const string LogContext = "Node";
     private sealed class NoIdMarker
     {
         public static readonly NoIdMarker Instance = new();
@@ -217,7 +225,7 @@ public partial class Node : GameObject
         foreach (var obj in contents)
         {
             if (excl is not null && excl.Contains(obj)) continue;
-            try { func(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.ForContents: " + logEx.Message, "NoIdMarker"); }
+            try { func(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".ForContents: " + logEx.Message, LogContext); }
         }
     }
 
@@ -307,7 +315,7 @@ public partial class Node : GameObject
         bool open = false;
         var nh = NodeHandler.GetCurrent();
         Dictionary<string, Door>? doors = null;
-        try { doors = nh?.GetDoors(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.AtHear: " + logEx.Message, "NoIdMarker"); }
+        try { doors = nh?.GetDoors(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".AtHear: " + logEx.Message, LogContext); }
         if (doors is not null && doors.Count > 0)
         {
             foreach (var d in doors.Values) { if (!d.Closed) { open = true; break; } }
@@ -325,7 +333,7 @@ public partial class Node : GameObject
                 if (!pre.ok) continue;
                 o.AtHear(pre.emitter, pre.desc, pre.msg, pre.loudness, pre.isSay);
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.AtHear: " + logEx.Message, "NoIdMarker"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".AtHear: " + logEx.Message, LogContext); }
         }
             return loud2 - attenuation;
         }, emitter, soundDesc, soundMsg, loudness, isSay);
@@ -363,7 +371,7 @@ public partial class Node : GameObject
             int count = 0;
             HashSet<int> seen = [];
             var contents = obj.GetContents();
-            foreach (var content in contents.ToList())
+            foreach (var content in contents)
             {
                 if (!seen.Add(content.Id)) continue;
                 var res = content.Delete(caller, true);
@@ -377,7 +385,7 @@ public partial class Node : GameObject
         {
             List<object> allOps = [];
             int count = 0;
-            var contents = obj.GetContents().ToList();
+            var contents = obj.GetContents();
             foreach (var content in contents)
             {
                 bool moved = false;
@@ -385,8 +393,7 @@ public partial class Node : GameObject
                 GameObject? homeObj = null;
                 if (homeRef is Persistence.Dto.LocationRef.ObjectLocation ol)
                 {
-                    var got = ObjectRegistry.Get(ol.ObjectId);
-                    homeObj = got.FirstOrDefault();
+                    homeObj = ObjectRegistry.GetSingle(ol.ObjectId);
                 }
                 else if (homeRef is Persistence.Dto.LocationRef.CoordLocation cl)
                 {
@@ -414,8 +421,8 @@ public partial class Node : GameObject
                 {
                     if (ReferenceEquals(content.ResolveLocationObject(), obj))
                     {
-                        try { obj.RemoveObject(content); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
-                        try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
+                        try { obj.RemoveObject(content); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
+                        try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
                     }
                     var res = content.Delete(caller, true);
                     if (res is not null) { allOps.AddRange(res.Value.ops); count += res.Value.count; }
@@ -427,9 +434,9 @@ public partial class Node : GameObject
         {
             if (IsTickable)
             {
-                try { GlobalTickerHolder.Get()?.RemoveCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
+                try { GlobalTickerHolder.Get()?.RemoveCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
             }
-            try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.Delete: " + logEx.Message, "NoIdMarker"); }
+            try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
         }
         if (caller is not null && !AtDelete(caller)) return null;
         SyncRoot.EnterWriteLock();
@@ -460,7 +467,7 @@ public partial class Node : GameObject
         {
             if (!Access(caller, "delete"))
             {
-                try { caller?.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NoIdMarker.AtDelete: " + logEx.Message, "NoIdMarker"); }
+                try { caller?.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".AtDelete: " + logEx.Message, LogContext); }
                 return false;
             }
             return true;

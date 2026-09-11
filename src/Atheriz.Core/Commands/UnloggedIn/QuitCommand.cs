@@ -1,5 +1,3 @@
-using Atheriz.Core.Network;
-
 namespace Atheriz.Core.Commands.UnloggedIn;
 
 public sealed class QuitCommand : Command
@@ -13,18 +11,7 @@ public sealed class QuitCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         caller.Msg("Goodbye!");
-        if (caller is GameObject go)
-        {
-            try { go.Session?.Connection?.Close(); } catch (Exception) { }
-        }
-        else if (caller is Session sess)
-        {
-            try { sess.Connection?.Close(); } catch (Exception) { }
-        }
-        if (caller is BaseConnection bc)
-        {
-            try { bc.Close(); } catch (Exception) { }
-        }
+        LoggedIn.ConnectionHelper.CloseQuietly(caller);
     }
 }
 

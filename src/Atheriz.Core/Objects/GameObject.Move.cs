@@ -102,8 +102,7 @@ public partial class GameObject
         var loc = Location;
         if (loc is LocationRef.ObjectLocation ol)
         {
-            var objs = ObjectRegistry.Get(ol.ObjectId);
-            return objs.FirstOrDefault();
+            return ObjectRegistry.GetSingle(ol.ObjectId);
         }
         if (loc is LocationRef.CoordLocation cl)
         {
@@ -138,8 +137,7 @@ public partial class GameObject
         {
             if (locRef is LocationRef.ObjectLocation ol2)
             {
-                var objs = ObjectRegistry.Get(ol2.ObjectId);
-                destObj = objs.FirstOrDefault();
+                destObj = ObjectRegistry.GetSingle(ol2.ObjectId);
             }
             else if (locRef is LocationRef.CoordLocation cl2)
             {
@@ -218,7 +216,7 @@ public partial class GameObject
                     var cid = stack.Pop();
                     if (!visited.Add(cid)) continue;
                     if (cid == destObj.Id) return false;
-                    var obj = ObjectRegistry.Get(cid).FirstOrDefault();
+                    var obj = ObjectRegistry.GetSingle(cid);
                     if (obj is not null && obj.IsContainer)
                     {
                         foreach (var sub in obj.ContentsSnapshot) stack.Push(sub);
@@ -282,26 +280,17 @@ public partial class GameObject
         // pre-gates run with NO location locks held (user hooks can
         // move things and take other locks, so they must not run under the
         // sort_locks order established below).
-        if (oldLoc is not null)
+        // Unified gate arms: null and non-null oldLoc took the same
+        // (oldLoc, null) receive arguments, so one guarded call covers both.
+        // The re-verify guard below keeps its shape (simplify.md 8.4 covers
+        // that staging, not these arms).
+        if (oldLoc is not null && oldLoc.IsNode)
         {
-            if (oldLoc.IsNode)
-            {
-                bool preOk = oldLoc.AtPreObjectLeave(destObj, toExit);
-                if (!preOk) return false;
-            }
-            if (destObj.IsNode)
-            {
-                bool preOk2 = destObj.AtPreObjectReceive(oldLoc, null);
-                if (!preOk2) return false;
-            }
+            if (!oldLoc.AtPreObjectLeave(destObj, toExit)) return false;
         }
-        else
+        if (destObj.IsNode)
         {
-            if (destObj.IsNode)
-            {
-                bool preOk = destObj.AtPreObjectReceive(null, null);
-                if (!preOk) return false;
-            }
+            if (!destObj.AtPreObjectReceive(oldLoc, null)) return false;
         }
 
         // The pre-gates above run with no location locks held and hooks can move
@@ -394,24 +383,12 @@ public partial class GameObject
 
         // advisory leave/receive hooks run AFTER location locks are
         // released (oldLoc/destObj locals stay valid). No locks held here.
-        if (oldLoc is not null)
-        {
-            if (oldLoc.IsNode)
-            {
-                oldLoc.AtObjectLeave(destObj, toExit);
-            }
-            if (destObj.IsNode)
-            {
-                destObj.AtObjectReceive(oldLoc, null);
-            }
-        }
-        else
-        {
-            if (destObj.IsNode)
-            {
-                destObj.AtObjectReceive(null, null);
-            }
-        }
+        // Same fold as the pre-gates above: null oldLoc passes through as
+        // the null receive source, matching both prior branches.
+        if (oldLoc is not null && oldLoc.IsNode)
+            oldLoc.AtObjectLeave(destObj, toExit);
+        if (destObj.IsNode)
+            destObj.AtObjectReceive(oldLoc, null);
 
         // Trigger at_post_move — Port of base_obj.py:1253 / 1360
         AtPostMove(destObj, toExit);

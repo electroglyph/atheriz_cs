@@ -30,12 +30,7 @@ public static class JsonTableLoader
         where TRow : class, IJsonEntity
     {
         var (buffer, bad, rows) = DeserializeBuffer(set, deserialize, nameof(LoadList));
-        int failed = 0;
-        foreach (var (dto, row) in buffer)
-        {
-            try { add(dto, row); }
-            catch (Exception ex) { failed++; AtherizLogger.LogDebug($"Suppressed JsonTableLoader.LoadList<{typeof(TRow).Name}> add: {ex.Message}", "JsonTableLoader"); }
-        }
+        int failed = TryAddAll(buffer, add, nameof(LoadList));
         if (bad > 0 || failed > 0)
             AtherizLogger.LogWarning($"LoadList<{typeof(TRow).Name}>: {rows.Count} rows, skipped {bad} corrupt, {failed} add-failures.");
     }
@@ -47,15 +42,30 @@ public static class JsonTableLoader
         // Buffer outside the lock, add under it: deserializing while holding the
         // write lock would stall every reader for the whole parse.
         var (buffer, bad, rows) = DeserializeBuffer(set, deserialize, nameof(LoadInto));
-        int failed = 0;
+        int failed;
         lockObj.EnterWriteLock();
         try
         {
-            foreach (var (dto, row) in buffer) { try { add(dto, row); } catch (Exception ex) { failed++; AtherizLogger.LogDebug($"Suppressed JsonTableLoader.LoadInto<{typeof(TRow).Name}> add: {ex.Message}", "JsonTableLoader"); } }
+            failed = TryAddAll(buffer, add, nameof(LoadInto));
         }
         finally { lockObj.ExitWriteLock(); }
         if (bad > 0 || failed > 0)
             AtherizLogger.LogWarning($"LoadInto<{typeof(TRow).Name}>: {rows.Count} rows, skipped {bad} corrupt, {failed} add-failures.");
+    }
+
+    // Shared add phase for LoadList/LoadInto: per-item add with per-loader
+    // op name in the suppression log. Takes no lock; each caller keeps its
+    // own lock discipline (LoadInto calls this under its write lock).
+    private static int TryAddAll<TRow, TDto>(List<(TDto dto, TRow row)> buffer, Action<TDto, TRow> add, string op)
+        where TRow : class
+    {
+        int failed = 0;
+        foreach (var (dto, row) in buffer)
+        {
+            try { add(dto, row); }
+            catch (Exception ex) { failed++; AtherizLogger.LogDebug($"Suppressed JsonTableLoader.{op}<{typeof(TRow).Name}> add: {ex.Message}", "JsonTableLoader"); }
+        }
+        return failed;
     }
 
     /// <summary>Load and deserialize without row context, returning list (for buffered copy patterns). Skips are counted and logged.</summary>

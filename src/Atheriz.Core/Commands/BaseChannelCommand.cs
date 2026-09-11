@@ -21,12 +21,12 @@ public class BaseChannelCommand : Command
     {
         _key = k;
         // force parser rebuild so FormatHelp shows new prog (Parser lazily rebuilds when null)
-        try { Parser = null; } catch (Exception) { }
+        Parser = null;
     }
     public void SetDesc(string d)
     {
         _desc = d;
-        try { Parser = null; } catch (Exception) { }
+        Parser = null;
     }
 
     // Use fields to match Python's __dict__ keys for test reflection (id, _channel)
@@ -73,9 +73,8 @@ public class BaseChannelCommand : Command
             ch = _channel;
             return true;
         }
-        var c = ObjectRegistry.Get(id);
-        if (c.Count == 0) return false;
-        var obj = c[0];
+        var obj = ObjectRegistry.GetSingle(id);
+        if (obj is null) return false;
         if (obj.IsDeleted) return false;
         if (obj is not Channel found) return false;
         _channel = found;
@@ -127,18 +126,18 @@ public class BaseChannelCommand : Command
         {
             if (!ch.Access(go, "view"))
             {
-                caller.Msg("You do not have permission to view this channel.");
+                CommandHelpers.MsgChannelViewDenied(caller);
                 return;
             }
             var h = ch.GetHistory();
             if (!string.IsNullOrEmpty(h)) caller.Msg(h);
-            else caller.Msg("No history available.");
+            else CommandHelpers.MsgNoChannelHistory(caller);
         }
         else if (pa.GetString("message") is string msg && !string.IsNullOrWhiteSpace(msg))
         {
             if (!ch.Access(go, "send"))
             {
-                caller.Msg("You do not have permission to send to this channel.");
+                CommandHelpers.MsgChannelSendDenied(caller);
                 return;
             }
             ch.Msg(msg, go);

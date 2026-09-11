@@ -153,10 +153,9 @@ public static class AdminToken
         if (remoteIp is null) return false;
         if (!System.Net.IPAddress.TryParse(remoteIp, out var ip)) return false;
         if (System.Net.IPAddress.IsLoopback(ip)) return true;
-        if (ip.IsIPv4MappedToIPv6 && System.Net.IPAddress.IsLoopback(ip.MapToIPv4())) return true;
+        if (ip.IsIPv4MappedToIPv6) { var v4 = ip.MapToIPv4(); if (System.Net.IPAddress.IsLoopback(v4) || v4.GetAddressBytes()[0] == 127) return true; }
         // Whole 127/8 (IsLoopback is exact-match only: 127.0.0.1 / ::1).
         if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && ip.GetAddressBytes()[0] == 127) return true;
-        if (ip.IsIPv4MappedToIPv6 && ip.MapToIPv4().GetAddressBytes()[0] == 127) return true;
         return false;
     }
 }

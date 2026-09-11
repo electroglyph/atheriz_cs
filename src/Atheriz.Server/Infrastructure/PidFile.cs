@@ -133,9 +133,14 @@ public sealed class PidFile : IDisposable
             if (p is not null)
             {
                 string outp = ReadHelperOutput(p, TimeSpan.FromSeconds(5));
-                foreach (var line in outp.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                // One split of the captured lsof output; both passes scan the
+                // same array so verified servers keep priority over any holder.
+                // Scoped to this path: the ss fallback below keeps its own
+                // parse (different backend, different token shape).
+                var lines = outp.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var line in lines)
                     if (int.TryParse(line.Trim(), out var cand) && IsServerProcess(cand) && IsProcessListeningOnPort(cand, port)) { pid = cand; return true; }
-                foreach (var line in outp.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                foreach (var line in lines)
                     if (int.TryParse(line.Trim(), out var cand) && IsProcessListeningOnPort(cand, port)) { pid = cand; return true; }
             }
         }

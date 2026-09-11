@@ -62,8 +62,8 @@ internal static class GameObjectDtoConverter
         var puppet = obj.GetPuppetRestore();
         if (puppet is not null)
         {
-            if (puppet.TryGetValue("is_pc", out var v) && v is bool b) serIsPc = b;
-            if (puppet.TryGetValue("privilege_level", out var p))
+            if (puppet.TryGetValue(GameObject.PuppetRestoreIsPcKey, out var v) && v is bool b) serIsPc = b;
+            if (puppet.TryGetValue(GameObject.PuppetRestorePrivilegeKey, out var p))
             {
                 if (p is Privilege priv) serPriv = priv;
                 else if (p is int i) serPriv = (Privilege)i;
@@ -136,7 +136,7 @@ internal static class GameObjectDtoConverter
         string? registered = RegisteredNameFor(t);
         if (registered is not null)
         {
-            dto.Extra[markerKey] = JsonSerializer.SerializeToElement(registered, JsonOptions.Default);
+            dto.Extra[markerKey] = JsonOptions.ToElement(registered);
         }
         else
         {
@@ -321,17 +321,22 @@ internal static class GameObjectDtoConverter
         if (dto.Location is LocationRef.CoordLocation cl) return cl.Coord;
         if (dto.Extra is not null && dto.Extra.TryGetValue("Coord", out var ce))
         {
-            try { return JsonSerializer.Deserialize<Coord>(ce.GetRawText(), JsonOptions.Default)!; }
+            try { return ce.Deserialize<Coord>(JsonOptions.Default)!; }
             catch (Exception ex) { AtherizLogger.LogError($"Bad Extra Coord for object {dto.Id}; using limbo origin.", ex); }
         }
         return new Coord("limbo", 0, 0, 0);
     }
 
+    private const string SaveSql = "INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)";
+
     public static (string Sql, object[] Params) GetSaveOps(GameObject obj)
-        => ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [obj.Id, BuildSaveJson(obj, clearing: false)]);
+        => GetSaveOpsCore(obj, clearing: false);
 
     public static (string Sql, object[] Params) GetSaveOpsClearing(GameObject obj)
-        => ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [obj.Id, BuildSaveJson(obj, clearing: true)]);
+        => GetSaveOpsCore(obj, clearing: true);
+
+    private static (string Sql, object[] Params) GetSaveOpsCore(GameObject obj, bool clearing)
+        => (SaveSql, [obj.Id, BuildSaveJson(obj, clearing)]);
 
     private static string BuildSaveJson(GameObject obj, bool clearing)
     {
@@ -361,11 +366,6 @@ internal static class GameObjectDtoConverter
             dto = snapshotUnderLock();
             if (clearing) dto.IsModified = false;
             snapshotOk = true;
-        }
-        catch
-        {
-            obj.SetIsModifiedRawNoLock(had);
-            throw;
         }
         finally
         {

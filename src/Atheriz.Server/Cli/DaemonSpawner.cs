@@ -3,6 +3,9 @@ namespace Atheriz.Server.Cli;
 
 public static class DaemonSpawner
 {
+    // Split once: the last-token parse and the fallback first-parse scan
+    // below read the same token array from the daemon-pid output.
+    private static readonly char[] PidSeparators = ['\n', '\r', ' ', '\t'];
     // Bash single-quote armor: inside '...' nothing expands ($, `, \, !
     // are all literal), so --host/--port values cannot inject commands.
     // An embedded ' ends the quote, inserts an escaped quote, and reopens.
@@ -88,9 +91,10 @@ public static class DaemonSpawner
                 {
                     pidStr = proc.StandardOutput.ReadToEnd().Trim();
                     proc.WaitForExit(2000);
-                    var last = pidStr.Split(new[] { '\n', '\r', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "";
+                    var toks = pidStr.Split(PidSeparators, StringSplitOptions.RemoveEmptyEntries);
+                    var last = toks.LastOrDefault() ?? "";
                     if (int.TryParse(last, out var p)) daemonPid = p;
-                    if (daemonPid == -1) { foreach (var tok in pidStr.Split(new[] { '\n', '\r', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)) if (int.TryParse(tok, out p)) { daemonPid = p; break; } }
+                    if (daemonPid == -1) { foreach (var tok in toks) if (int.TryParse(tok, out p)) { daemonPid = p; break; } }
                 }
             }
             catch (Exception ex)
@@ -115,7 +119,9 @@ public static class DaemonSpawner
                 // parent's settings must never feed these lines. Inherited
                 // environment survives into the child, so the env TLS probe
                 // stays valid. Anything else is in save/server.log.
-                var shippedDefaults = new Atheriz.Core.Settings.AtherizSettings();
+                // Read-only banner use (ports/flags below), so the shared
+                // Default instance is safe here — never assigned through.
+                var shippedDefaults = AtherizSettings.Default;
                 int effPort = port ?? shippedDefaults.WebserverPort;
                 string effHost = host ?? shippedDefaults.WebserverInterface;
                 string dispHost = effHost.Contains(':') ? $"[{effHost}]" : effHost;

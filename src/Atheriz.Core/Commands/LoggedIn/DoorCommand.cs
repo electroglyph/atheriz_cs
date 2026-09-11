@@ -28,8 +28,7 @@ public sealed class DoorCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { go.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         bool north = pa.GetBool("north"), south = pa.GetBool("south"), east = pa.GetBool("east"), west = pa.GetBool("west"), up = pa.GetBool("up"), down = pa.GetBool("down");
         bool remove = pa.GetBool("remove"), auto = pa.GetBool("auto");
         if (!remove && !(north||south||east||west||up||down))
@@ -114,7 +113,7 @@ public sealed class DoorCommand : Command
             // Port of door.py: to_node link handling (verbatim messages)
             var toLinks = toNode.GetLinks();
             bool needDestLink = true;
-            foreach (var l in toLinks.ToList())
+            foreach (var l in toLinks)
             {
                 if (l.Name == oppLong)
                 {
@@ -137,7 +136,7 @@ public sealed class DoorCommand : Command
             }
             var hereLinks = loc.GetLinks();
             bool needHereLink = true;
-            foreach (var l in hereLinks.ToList())
+            foreach (var l in hereLinks)
             {
                 if (l.Name == def.longName)
                 {

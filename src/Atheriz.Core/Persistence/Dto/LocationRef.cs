@@ -27,6 +27,8 @@ public abstract record LocationRef
 
 public sealed class LocationRefConverter : JsonConverter<LocationRef>
 {
+    private const string NumericCoordRequired = "Coord location requires numeric X/Y/Z.";
+
     public override LocationRef? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType == JsonTokenType.Null) return LocationRef.NullLocation.Instance;
@@ -67,17 +69,17 @@ public sealed class LocationRefConverter : JsonConverter<LocationRef>
                         $"The requested operation requires an element of type 'String', but the target element has type '{reader.TokenType}'.");
                     break;
                 case "X":
-                    if (reader.TokenType != JsonTokenType.Number) throw new JsonException("Coord location requires numeric X/Y/Z.");
+                    if (reader.TokenType != JsonTokenType.Number) throw new JsonException(NumericCoordRequired);
                     x = reader.GetInt32();
                     xOk = true;
                     break;
                 case "Y":
-                    if (reader.TokenType != JsonTokenType.Number) throw new JsonException("Coord location requires numeric X/Y/Z.");
+                    if (reader.TokenType != JsonTokenType.Number) throw new JsonException(NumericCoordRequired);
                     y = reader.GetInt32();
                     yOk = true;
                     break;
                 case "Z":
-                    if (reader.TokenType != JsonTokenType.Number) throw new JsonException("Coord location requires numeric X/Y/Z.");
+                    if (reader.TokenType != JsonTokenType.Number) throw new JsonException(NumericCoordRequired);
                     z = reader.GetInt32();
                     zOk = true;
                     break;
@@ -96,7 +98,7 @@ public sealed class LocationRefConverter : JsonConverter<LocationRef>
         if (hasArea)
         {
             if (!xOk || !yOk || !zOk)
-                throw new JsonException("Coord location requires numeric X/Y/Z.");
+                throw new JsonException(NumericCoordRequired);
             return LocationRef.FromCoord(new Coord(area, x, y, z));
         }
         if (hasObjectId)

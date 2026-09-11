@@ -9,6 +9,12 @@ namespace Atheriz.Core.Commands.LoggedIn;
 
 internal static class FollowHelper
 {
+    internal static void NotifyUnfollowedLeader(GameObject leader, GameObject follower)
+    {
+        ArgumentNullException.ThrowIfNull(leader);
+        ArgumentNullException.ThrowIfNull(follower);
+        if (follower.Access(leader, "view")) leader.Msg($"{follower.GetDisplayName(leader)} is no longer following you.");
+    }
     internal static void RemoveScriptsIfDrained(GameObject leader)
     {
         ArgumentNullException.ThrowIfNull(leader);

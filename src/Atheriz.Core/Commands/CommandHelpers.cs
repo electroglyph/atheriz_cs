@@ -19,6 +19,17 @@ public static class CommandHelpers
         return false;
     }
     /// <summary>
+    /// Shared null/non-parsed args guard: sends <see cref="Command.PrintHelp"/>
+    /// to <paramref name="caller"/> and returns false unless <paramref name="args"/>
+    /// is parsed args. Call sites keep <see cref="RequirePuppet"/> first.
+    /// </summary>
+    public static bool RequireParsedArgs(this Command cmd, IMessageTarget caller, object? args, [NotNullWhen(true)] out GameArgumentParser.ParsedArgs? pa)
+    {
+        pa = args as GameArgumentParser.ParsedArgs;
+        if (pa is null) { caller.Msg(cmd.PrintHelp()); return false; }
+        return true;
+    }
+    /// <summary>
     /// Shared "local verbs" scan: external cmdsets from location contents, then
     /// inventory (mirrors inputfuncs.py loc.contents + puppet.contents order).
     /// Single home for the scan repeated in dispatch, help, and none-suggest.
@@ -30,7 +41,7 @@ public static class CommandHelpers
         {
             foreach (var id in loc.ContentsSnapshot)
             {
-                var o = ObjectRegistry.Get(id).FirstOrDefault();
+                var o = ObjectRegistry.GetSingle(id);
                 if (o?.ExternalCmdSet is not null) yield return o.ExternalCmdSet;
             }
             // the location's OWN set too — dispatch consults it
@@ -41,7 +52,7 @@ public static class CommandHelpers
         }
         foreach (var id in go.ContentsSnapshot)
         {
-            var o = ObjectRegistry.Get(id).FirstOrDefault();
+            var o = ObjectRegistry.GetSingle(id);
             if (o?.ExternalCmdSet is not null) yield return o.ExternalCmdSet;
         }
     }
@@ -124,8 +135,8 @@ public static class CommandHelpers
         // Handle parenthesized coord like "(area,0,0,0)" (comma form only).
         if (TryParseCommaCoord(raw, out var coord))
         {
-            var node = ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(coord)).FirstOrDefault() as GameObject;
-            if (node is not null) return [node];
+            var node = ObjectRegistry.FindNodeByCoord(coord);
+            if (node is not null) return [(GameObject)node];
             return [];
         }
         if (raw.Equals("me", StringComparison.OrdinalIgnoreCase)) return [caller];
@@ -137,9 +148,9 @@ public static class CommandHelpers
         if (raw.StartsWith("#", StringComparison.Ordinal))
         {
             if (!TryParseIdRef(raw, out var id)) return [];
-            var objs = ObjectRegistry.Get(id);
-            if (objs.Count == 0) return [];
-            return [objs[0]];
+            var obj = ObjectRegistry.GetSingle(id);
+            if (obj is null) return [];
+            return [obj];
         }
         // Standard search via caller + loc fallback — use virtual Search so mocks work (mirrors python caller.search)
         var matches = caller.Search(raw, true, caller);
@@ -149,7 +160,7 @@ public static class CommandHelpers
             if (loc is not null && loc.Access(caller, "view"))
             {
                 if (loc is Node node) matches = node.Search(raw, true, caller);
-                else matches = ContentUtils.Search(loc, raw, id => ObjectRegistry.Get(id).FirstOrDefault(), true, caller);
+                else matches = ContentUtils.Search(loc, raw, ObjectRegistry.GetSingle, true, caller);
             }
         }
         return matches;
@@ -161,7 +172,7 @@ public static class CommandHelpers
     public static List<GameObject> SearchIn(GameObject container, string query, GameObject? looker = null)
     {
         if (container is Node n) return n.Search(query, true, looker);
-        return ContentUtils.Search(container, query, id => ObjectRegistry.Get(id).FirstOrDefault(), true, looker);
+        return ContentUtils.Search(container, query, ObjectRegistry.GetSingle, true, looker);
     }
 
     /// <summary>
@@ -207,6 +218,11 @@ public static class CommandHelpers
     public static void MsgObjectNotFound(IMessageTarget go) => go.Msg("Object not found.");
     public static string FormatNoMatchFound(string name) => $"No match found for '{name}'.";
     public static void MsgNoMatchFound(IMessageTarget go, string name) => go.Msg(FormatNoMatchFound(name));
+    public static string FormatCouldNotFind(string name) => $"Could not find '{name}'.";
+    public static void MsgCouldNotFind(IMessageTarget go, string name) => go.Msg(FormatCouldNotFind(name));
+    public static void MsgChannelViewDenied(IMessageTarget go) => go.Msg("You do not have permission to view this channel.");
+    public static void MsgChannelSendDenied(IMessageTarget go) => go.Msg("You do not have permission to send to this channel.");
+    public static void MsgNoChannelHistory(IMessageTarget go) => go.Msg("No history available.");
     public static void MsgMultipleMatches(IMessageTarget go, string name) => go.Msg($"Multiple matches for '{name}'.");
     public static void MsgMultipleMatchesColon(IMessageTarget go, string name) => go.Msg($"Multiple matches for '{name}':");
     public static void MsgMultipleMatchesFound(IMessageTarget go, string name) => go.Msg($"Multiple matches found for '{name}'.");

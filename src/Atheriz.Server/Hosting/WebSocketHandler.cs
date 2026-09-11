@@ -4,8 +4,7 @@ namespace Atheriz.Server.Hosting;
 
 public static class WebSocketHandler
 {
-    private static readonly Dictionary<string, double> _wsOversizeLast = new();
-    private static readonly Lock _wsOversizeLock = new();
+    private static readonly ThrottledLog _wsOversizeLog = new(5.0);
 
     public static async Task HandleAsync(HttpContext context, AtherizSettings settings)
     {
@@ -84,7 +83,7 @@ public static class WebSocketHandler
                 if (isClose) break;
                 if (tooBig)
                 {
-                    bool shouldLog = ThrottleWindow.ShouldLog(_wsOversizeLast, _wsOversizeLock, clientHost, 5.0);
+                    bool shouldLog = _wsOversizeLog.ShouldLog(clientHost);
                     if (shouldLog)
                     {
                         var msg = $"[WebSocket] Message too large from {clientHost} (over {maxMessageSize} bytes)";

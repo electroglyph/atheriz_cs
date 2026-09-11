@@ -70,11 +70,10 @@ public sealed class WebSocketConnection : BaseConnection
         if (task.IsFaulted)
         {
             var ex = task.Exception?.InnerException ?? task.Exception;
-            if (ex is OperationCanceledException) { }
-            else if (ex is ObjectDisposedException) { } // post-dispose race: socket already gone
-            else if (ex is not null) try { Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Async task failed: {ex}"); } catch { Console.Error.WriteLine($"[WebSocket] Async task failed: {ex}"); }
+            // OperationCanceledException and ObjectDisposedException stay silent
+            // (post-dispose race: socket already gone); anything else is logged.
+            if (ex is not (OperationCanceledException or ObjectDisposedException) and not null) try { Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Async task failed: {ex}"); } catch { Console.Error.WriteLine($"[WebSocket] Async task failed: {ex}"); }
         }
-        else if (task.IsCanceled) { }
     }
 
     // port of websocket.py:68-70 _locked_send — bounded: a hung peer must not
@@ -183,12 +182,8 @@ public sealed class WebSocketConnection : BaseConnection
     // port of websocket.py:139-150 close — now via limiter sole accounting
     public override void Close()
     {
-        if (!_limiter.TryMarkClosing())
-        {
-            _closing = true;
-            return;
-        }
         _closing = true;
+        if (!_limiter.TryMarkClosing()) return;
         try
         {
             // port of websocket.py:145-148 _is_on_loop_thread branching — scheduled via Task.Run.
@@ -227,12 +222,11 @@ public interface IWebSocketDisconnect { }
 public sealed class WebSocketProtocol : BaseProtocol
 {
     // Oversize throttling — port of websocket.py:15-27 (now via ThrottleWindow)
-    private static readonly Lock _oversizeLock = new();
-    private static readonly Dictionary<string, double> _oversizeLast = new();
+    private static readonly ThrottledLog _oversizeLog = new(OversizeWindow);
     private const double OversizeWindow = 5.0; // port of websocket.py:17
 
     private static bool ShouldLogOversize(string host) // port of websocket.py:20-27
-        => ThrottleWindow.ShouldLog(_oversizeLast, _oversizeLock, host, OversizeWindow);
+        => _oversizeLog.ShouldLog(host);
 
     // Port of websocket.py:153-199 WebSocketProtocol.setup.
     // Test doubles implement IWebSocketApp/IWebSocketPeer ( FakeApp /

@@ -8,7 +8,7 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public class Channel : GameObject
 {
-    public new static bool _is_thread_safe = true;
+    internal new static bool _is_thread_safe = true;
     private readonly Lock _histLock = new();
     // Port of base_channel.py history entries: (timestamp, sender, message)
     // tuples. Listeners receive the FormatMessage form; History projects the
@@ -271,10 +271,11 @@ public class Channel : GameObject
 
     public override (string Sql, object[] Params) GetSaveOpsClearing() => BuildSaveOps(clearing: true);
 
+    private List<ChannelHistoryEntry> SnapshotHistory() { lock (_histLock) return _history.ToList(); }
+
     private (string Sql, object[] Params) BuildSaveOps(bool clearing)
     {
-        List<ChannelHistoryEntry> histSnap;
-        lock (_histLock) { histSnap = _history.ToList(); }
+        List<ChannelHistoryEntry> histSnap = SnapshotHistory();
         // Flag dance + post-release encode live in the shared converter core;
         // only the history-snapshot DTO body stays here.
         string json = Persistence.Converters.GameObjectDtoConverter.BuildSaveJson(this, () => BuildDto(histSnap), clearing);
@@ -283,8 +284,7 @@ public class Channel : GameObject
 
     public override GameObjectDto ToDto()
     {
-        List<ChannelHistoryEntry> histSnap;
-        lock (_histLock) { histSnap = _history.ToList(); }
+        List<ChannelHistoryEntry> histSnap = SnapshotHistory();
         return BuildDto(histSnap);
     }
 

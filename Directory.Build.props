@@ -1,6 +1,7 @@
 <Project>
   <PropertyGroup>
-    <LangVersion>14.0</LangVersion>
+    <LangVersion>latest</LangVersion>
+    <AnalysisLevel>latest</AnalysisLevel>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>

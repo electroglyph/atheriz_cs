@@ -104,11 +104,11 @@ public class TelnetConnection : BaseConnection
         });
     }
 
+    // WriterWrite expects pre-normalized text (OffloopWrite runs TelnetText first).
     private void WriterWrite(string text)
     {
-        var tt = TelnetText(text);
         // Typed only: all writers implement ITelnetWriter (Simple/Mock/Stream).
-        if (Writer is ITelnetWriter itw0) itw0.Write(tt);
+        if (Writer is ITelnetWriter itw0) itw0.Write(text);
     }
 
     private void WriterIac(byte cmd, byte opt)
@@ -283,12 +283,8 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
 
     public override void Close()
     {
-        if (!_limiter.TryMarkClosing())
-        {
-            _closing = true;
-            return;
-        }
         _closing = true;
+        if (!_limiter.TryMarkClosing()) return;
         try
         {
             if (IsOnLoopThread()) WriterClose();
@@ -398,8 +394,7 @@ public sealed class TelnetStreamWriter : ITelnetWriter
 public sealed class TelnetProtocol : BaseProtocol
 {
     // Per-IP 5s throttle for the overlong-input-drop warning (WS parity via ThrottleWindow).
-    private static readonly Dictionary<string, double> _overlongDropLog = new();
-    private static readonly Lock _overlongDropLock = new();
+    private static readonly ThrottledLog _overlongDropLog = new(5.0);
     private const int TELNET_INPUT_CHUNK = 4096; // port of telnet.py:45
 
     public static (int rows, int cols) ClampNaws(int rows, int cols)
@@ -704,7 +699,7 @@ public sealed class TelnetProtocol : BaseProtocol
         // writer.SetExtCallback(31, OnNaws);
         // try { writer.Iac(253, 31); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); }
         manager.Dispatch(connection, "client_ready", [], []);
-        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine).ConfigureAwait(false)) { if (rawLine is null) { if (ThrottleWindow.ShouldLog(_overlongDropLog, _overlongDropLock, host, 5.0)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Filter stray IAC bytes (0xFF) that telnet clients may send even without DO (e.g., telnetlib pre-negotiation). When decoded as UTF8, 0xFF becomes U+FFFD.
+        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine).ConfigureAwait(false)) { if (rawLine is null) { if (_overlongDropLog.ShouldLog(host)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Filter stray IAC bytes (0xFF) that telnet clients may send even without DO (e.g., telnetlib pre-negotiation). When decoded as UTF8, 0xFF becomes U+FFFD.
             if (line.Length > 0 && (line[0] == '\uFFFD' || line[0] == (char)255 || line.Contains("\uFFFD"))) {
                 // Strip leading IAC sequences: find first alphabetic char of actual command
                 int start = 0;

@@ -105,8 +105,8 @@ public class FuncParser
                     if(list.Length>0) return list[rnd.Next(list.Length)];
                 }
                 return a[rnd.Next(a.Length)]; },
-            ["pad"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; string t=a[0]??""; int w=78; if(k.TryGetValue("width", out var ws)&& long.TryParse(ws,out var wl)) w=(int)Math.Min(wl, FuncParserHelpers.MaxTextWidth); else if(a.Length>1&& long.TryParse(a[1], out var wl2)) w=(int)Math.Min(wl2, FuncParserHelpers.MaxTextWidth); string al="c"; if(k.TryGetValue("align", out var alv)) al=alv; else if(a.Length>2) al=a[2]; string fc=" "; if(k.TryGetValue("fillchar", out var fcv)) fc=fcv; else if(a.Length>3) fc=a[3]; return FuncParserHelpers.Pad(t,w,al,fc); },
-            ["crop"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; string t=a[0]??""; int w=78; if(k.TryGetValue("width", out var ws)&& long.TryParse(ws,out var wl)) w=(int)Math.Min(wl, FuncParserHelpers.MaxTextWidth); else if(a.Length>1&& long.TryParse(a[1], out var wl2)) w=(int)Math.Min(wl2, FuncParserHelpers.MaxTextWidth); string suffix="[...]"; if(k.TryGetValue("suffix", out var sv)) suffix=sv; else if(a.Length>2) suffix=a[2]; return FuncParserHelpers.Crop(t,w,suffix); },
+            ["pad"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; string t=a[0]??""; int w = ResolveWidth(a, k); string al="c"; if(k.TryGetValue("align", out var alv)) al=alv; else if(a.Length>2) al=a[2]; string fc=" "; if(k.TryGetValue("fillchar", out var fcv)) fc=fcv; else if(a.Length>3) fc=a[3]; return FuncParserHelpers.Pad(t,w,al,fc); },
+            ["crop"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; string t=a[0]??""; int w = ResolveWidth(a, k); string suffix="[...]"; if(k.TryGetValue("suffix", out var sv)) suffix=sv; else if(a.Length>2) suffix=a[2]; return FuncParserHelpers.Crop(t,w,suffix); },
             ["space"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; long wLong=1; bool parsed = long.TryParse(a[0], out wLong); if(!parsed) wLong=1; if(wLong<0) wLong=1; wLong=Math.Min(wLong, FuncParserHelpers.MaxTextWidth); return new string(' ', (int)wLong); },
             ["just"] = (a,k,ctx,raw) => JustifyHelper(a,k,ctx,"f"),
             ["ljust"] = (a,k,ctx,raw) => JustifyHelper(a,k,ctx,"l"),
@@ -155,11 +155,16 @@ public class FuncParser
         if(op=="+" ) return (a[0]??"") + (a[1]??"");
         return "";
     }
+    private static int ResolveWidth(string[] a, Dictionary<string, string> k, int dflt = 78)
+    {
+        if (k.TryGetValue("width", out var ws) && long.TryParse(ws, out var wl)) return (int)Math.Min(wl, FuncParserHelpers.MaxTextWidth);
+        if (a.Length > 1 && long.TryParse(a[1], out var wl2)) return (int)Math.Min(wl2, FuncParserHelpers.MaxTextWidth);
+        return dflt;
+    }
     private static string JustifyHelper(string[] a, Dictionary<string,string> k, ParserContext ctx, string defAlign)
     {
         if(a.Length==0) return "";
-        string text=a[0]??""; int width=78; string align=defAlign; int indent=0;
-        if(k.TryGetValue("width", out var ws) && long.TryParse(ws, out var wl)) width=(int)Math.Min(wl, FuncParserHelpers.MaxTextWidth); else if(a.Length>1 && long.TryParse(a[1], out var wl2)) width=(int)Math.Min(wl2, FuncParserHelpers.MaxTextWidth);
+        string text=a[0]??""; int width = ResolveWidth(a, k); string align=defAlign; int indent=0;
         if(k.TryGetValue("align", out var alv)) align=alv; else if(a.Length>2) align=a[2];
         if(k.TryGetValue("indent", out var ivs) && int.TryParse(ivs, out var ivi)) indent=ivi; else if(a.Length>3 && int.TryParse(a[3], out var ivi2)) indent=ivi2;
         indent = Math.Max(0, Math.Min(indent, width));
@@ -185,10 +190,12 @@ public class FuncParser
         try{ return FuncParserHelpers.SafeArithEval(s).ToString(System.Globalization.CultureInfo.InvariantCulture); }catch{ return s; }
     }
 
+    private static GameObject? ResolveMappedActor(IDictionary<string, object?>? mapping, string? key, GameObject? fallback) => key is not null && mapping is not null && mapping.TryGetValue(key, out var m) && m is GameObject go ? go : fallback;
+    private static string? ResolveGender(GameObject? obj) => obj is null ? null : obj is IGenderProvider gp ? gp.GetGender() : obj.Gender;
+
     private static object? HandleYou(string[] args, Dictionary<string,string> kwargs, ParserContext ctx, ParsedFunc raw)
     {
-        GameObject? caller = ctx.Caller;
-        if (args.Length>0 && ctx.Mapping is not null && ctx.Mapping.TryGetValue(args[0], out var mapped) && mapped is GameObject go) caller = go;
+        GameObject? caller = ResolveMappedActor(ctx.Mapping, args.Length > 0 ? args[0] : null, ctx.Caller);
         if (caller is null || ctx.Receiver is null)
         {
             if(ctx.RaiseErrors) throw new ParsingError("No caller or receiver supplied to $you callable.");
@@ -202,8 +209,7 @@ public class FuncParser
     }
     private static object? HandleYour(string[] args, Dictionary<string,string> kwargs, ParserContext ctx, ParsedFunc raw)
     {
-        GameObject? caller = ctx.Caller;
-        if (args.Length>0 && ctx.Mapping is not null && ctx.Mapping.TryGetValue(args[0], out var mapped) && mapped is GameObject go) caller = go;
+        GameObject? caller = ResolveMappedActor(ctx.Mapping, args.Length > 0 ? args[0] : null, ctx.Caller);
         if (caller is null || ctx.Receiver is null)
         {
             if(ctx.RaiseErrors) throw new ParsingError("No caller or receiver supplied to $your callable.");
@@ -226,9 +232,7 @@ public class FuncParser
             return raw.ToString();
         }
         var verb = args[0]??"";
-        string? key = args.Length>1? args[1]: null;
-        GameObject? obj = ctx.Caller;
-        if (key is not null && ctx.Mapping is not null && ctx.Mapping.TryGetValue(key, out var m) && m is GameObject go2) obj = go2;
+        GameObject? obj = ResolveMappedActor(ctx.Mapping, args.Length > 1 ? args[1] : null, ctx.Caller);
         var (second, third) = Conjugate.VerbActorStanceComponents(verb, plural:false);
         return obj == ctx.Receiver ? second : third;
     }
@@ -241,13 +245,11 @@ public class FuncParser
             return raw.ToString();
         }
         var verb = args[0]??"";
-        string? key = args.Length>1? args[1]: null;
-        GameObject? obj = ctx.Caller;
-        if (key is not null && ctx.Mapping is not null && ctx.Mapping.TryGetValue(key, out var m) && m is GameObject go2) obj = go2;
+        GameObject? obj = ResolveMappedActor(ctx.Mapping, args.Length > 1 ? args[1] : null, ctx.Caller);
         bool plural=false;
         if(obj is not null)
         {
-            string? g = obj is IGenderProvider gp ? gp.GetGender() : obj.Gender;
+            string? g = ResolveGender(obj);
             if(!string.IsNullOrEmpty(g)) plural = g.Equals("plural", StringComparison.OrdinalIgnoreCase);
         }
         var (second, third) = Conjugate.VerbActorStanceComponents(verb, plural:plural);
@@ -271,7 +273,7 @@ public class FuncParser
         else if(options.Count>1) optObj = options;
         string? defaultGender = "neutral";
         if(obj is not null){
-            string? g = obj is IGenderProvider gp ? gp.GetGender() : obj.Gender;
+            string? g = ResolveGender(obj);
             if(!string.IsNullOrEmpty(g)) defaultGender = g;
         }
         string defaultViewpoint = "2nd person";
@@ -285,50 +287,66 @@ public class FuncParser
     private static string Capitalize(string s) => string.IsNullOrEmpty(s)?s: char.ToUpperInvariant(s[0]) + (s.Length>1? s[1..]: "");
 
 
-    // Constructors.
+    // Constructors. Each public ctor prepares only its callable-table triple
+    // and delegates to the private core below, which owns the seven
+    // field assignments. Construction-time only.
     public FuncParser(IReadOnlyDictionary<string, ParserCallable> callables, char startChar = StartChar, char escapeChar = EscapeChar, int maxNesting = MaxNesting, IDictionary<string, object?>? defaultKwargs = null)
+        : this(new Dictionary<string, ParserCallable>(callables, StringComparer.Ordinal), new Dictionary<string, Delegate>(StringComparer.Ordinal), false, startChar, escapeChar, maxNesting, defaultKwargs)
     {
-        _callables = new Dictionary<string, ParserCallable>(callables, StringComparer.Ordinal);
-        _genericCallables = new Dictionary<string, Delegate>(StringComparer.Ordinal);
-        _hasGeneric = false;
-        _startChar = startChar;
-        _escapeChar = escapeChar;
-        _maxNesting = maxNesting;
-        _defaultKwargs = defaultKwargs is not null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
     }
 
 
     public FuncParser(IDictionary<string, Delegate> genericCallables, char startChar = StartChar, char escapeChar = EscapeChar, int maxNesting = MaxNesting, IDictionary<string, object?>? defaultKwargs = null)
+        : this(new Dictionary<string, ParserCallable>(StringComparer.Ordinal), new Dictionary<string, Delegate>(genericCallables, StringComparer.Ordinal), true, startChar, escapeChar, maxNesting, defaultKwargs)
     {
-        _callables = new Dictionary<string, ParserCallable>(StringComparer.Ordinal);
-        _genericCallables = new Dictionary<string, Delegate>(genericCallables, StringComparer.Ordinal);
-        _hasGeneric = true;
-        _startChar = startChar;
-        _escapeChar = escapeChar;
-        _maxNesting = maxNesting;
-        _defaultKwargs = defaultKwargs is not null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
         // Wrap each generic in the shape-sniffing adapter below.
         foreach(var kv in genericCallables) _callables[kv.Key]=BuildGenericWrapper(kv.Value, kv.Key);
         ValidateGenericCallables(genericCallables);
     }
     // Mixed table: ParserCallables are stored as-is, Delegates are adapted.
     public FuncParser(IDictionary<string, object> mixedCallables, char startChar = StartChar, char escapeChar = EscapeChar, int maxNesting = MaxNesting, IDictionary<string, object?>? defaultKwargs = null)
+        : this(new Dictionary<string, ParserCallable>(StringComparer.Ordinal), CollectMixedGenerics(mixedCallables), HasMixedGenerics(mixedCallables), startChar, escapeChar, maxNesting, defaultKwargs)
     {
-        _callables = new Dictionary<string, ParserCallable>(StringComparer.Ordinal);
-        _genericCallables = new Dictionary<string, Delegate>(StringComparer.Ordinal);
-        _hasGeneric = false;
+        foreach(var kv in mixedCallables){
+            if(kv.Value is ParserCallable pc) _callables[kv.Key]=pc;
+            else if(kv.Value is Delegate d) _callables[kv.Key]=BuildGenericWrapper(d, kv.Key);
+        }
+        if(_hasGeneric) ValidateGenericCallables(_genericCallables);
+    }
+
+    // Single field-init core for the three public ctors above.
+    private FuncParser(Dictionary<string, ParserCallable> callables, Dictionary<string, Delegate> genericCallables, bool hasGeneric, char startChar, char escapeChar, int maxNesting, IDictionary<string, object?>? defaultKwargs)
+    {
+        _callables = callables;
+        _genericCallables = genericCallables;
+        _hasGeneric = hasGeneric;
         _startChar = startChar;
         _escapeChar = escapeChar;
         _maxNesting = maxNesting;
         _defaultKwargs = defaultKwargs is not null ? new Dictionary<string, object?>(defaultKwargs, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
-        var genDict = new Dictionary<string, Delegate>(StringComparer.Ordinal);
-        foreach(var kv in mixedCallables){
-            if(kv.Value is ParserCallable pc) _callables[kv.Key]=pc;
-            else if(kv.Value is Delegate d){ genDict[kv.Key]=d; _hasGeneric=true; _genericCallables[kv.Key]=d;
-                _callables[kv.Key]=BuildGenericWrapper(d, kv.Key);
-            }
+    }
+
+    // Construction-time scan of a mixed table: ParserCallable entries are
+    // stored as-is, so only plain Delegates land in the generics triple.
+    private static Dictionary<string, Delegate> CollectMixedGenerics(IDictionary<string, object> mixedCallables)
+    {
+        Dictionary<string, Delegate> genDict = new(StringComparer.Ordinal);
+        foreach (var kv in mixedCallables)
+        {
+            if (kv.Value is Delegate d && d is not ParserCallable)
+                genDict[kv.Key] = d;
         }
-        if(_hasGeneric) ValidateGenericCallables(genDict);
+        return genDict;
+    }
+
+    private static bool HasMixedGenerics(IDictionary<string, object> mixedCallables)
+    {
+        foreach (var kv in mixedCallables)
+        {
+            if (kv.Value is Delegate d && d is not ParserCallable)
+                return true;
+        }
+        return false;
     }
 
     // Empty table: every `$...` echoes back unparsed.
@@ -340,6 +358,8 @@ public class FuncParser
     public int MaxNestingProp => _maxNesting;
     public IReadOnlyDictionary<string, object?> DefaultKwargs => _defaultKwargs;
 
+    // Shape decided once at wrap time from the immutable delegate signature.
+    private enum GenericWrapperShape { ArgsAndKwargs, ArgsArray, ZeroArgs, Spread }
     // Adapts a plain Delegate to the ParserCallable shape by sniffing its
     // signature: 2+ params get (string[] args, merged kwargs); one array
     // param gets (args); zero params get (); anything else spreads args
@@ -347,17 +367,21 @@ public class FuncParser
     // TargetParameterCountException, mapped below to ParsingError/"".
     private ParserCallable BuildGenericWrapper(Delegate del, string key)
     {
+        var pars = del.Method.GetParameters();
+        var shape = pars.Length >= 2 ? GenericWrapperShape.ArgsAndKwargs
+            : pars.Length == 1 && pars[0].ParameterType.IsArray ? GenericWrapperShape.ArgsArray
+            : pars.Length == 0 ? GenericWrapperShape.ZeroArgs
+            : GenericWrapperShape.Spread;
         return (a,k,ctx,raw) => {
             try
             {
-                var pars = del.Method.GetParameters();
-                if(pars.Length>=2)
-                    return DelegateInvoker.Invoke(del, new object?[]{ a, BuildMergedKwargs(k, ctx) });
-                if(pars.Length==1 && pars[0].ParameterType.IsArray)
-                    return DelegateInvoker.Invoke(del, new object?[]{ a });
-                if(pars.Length==0)
-                    return DelegateInvoker.Invoke(del, Array.Empty<object?>());
-                return DelegateInvoker.Invoke(del, a.Cast<object?>().ToArray());
+                return shape switch
+                {
+                    GenericWrapperShape.ArgsAndKwargs => DelegateInvoker.Invoke(del, [a, BuildMergedKwargs(k, ctx)]),
+                    GenericWrapperShape.ArgsArray => DelegateInvoker.Invoke(del, [a]),
+                    GenericWrapperShape.ZeroArgs => DelegateInvoker.Invoke(del, []),
+                    _ => DelegateInvoker.Invoke(del, a.Cast<object?>().ToArray()),
+                };
             }
             catch (System.Reflection.TargetParameterCountException tpe)
             {
@@ -390,7 +414,7 @@ public class FuncParser
             bool hasVarArgs = pars.Any(p=> p.GetCustomAttributes(typeof(ParamArrayAttribute), false).Length>0 || p.ParameterType.IsArray);
             // A params-array (or any array) param stands in for *args; any
             // Dictionary param stands in for **kwargs.
-            bool hasVarKw = pars.Any(p=> p.ParameterType.IsGenericType && (p.ParameterType.GetGenericTypeDefinition()==typeof(Dictionary<,>) || p.ParameterType.GetGenericTypeDefinition()==typeof(IDictionary<,>)) || p.ParameterType == typeof(Dictionary<string, object>) || p.ParameterType == typeof(Dictionary<string, string>) || p.ParameterType == typeof(Dictionary<string, object?>));
+            bool hasVarKw = pars.Any(p=> p.ParameterType.IsGenericType && (p.ParameterType.GetGenericTypeDefinition()==typeof(Dictionary<,>) || p.ParameterType.GetGenericTypeDefinition()==typeof(IDictionary<,>)));
             // Heuristic: any Dictionary param counts as **kwargs support.
             if(!hasVarArgs) throw new ParsingError($"Parse-func callable '{kv.Key}' does not support *args.");
             if(!hasVarKw) throw new ParsingError($"Parse-func callable '{kv.Key}' does not support **kwargs.");
@@ -410,20 +434,15 @@ public class FuncParser
         var merged = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach(var kv in _defaultKwargs) merged[kv.Key]=kv.Value;
         foreach(var kv in pf.Kwargs) merged[kv.Key]=kv.Value;
+        // Reserved entries are folded in last so they take precedence.
         if(reservedKwargs is not null) foreach(var kv in reservedKwargs) merged[kv.Key]=kv.Value;
         merged["funcparser"]=this;
         merged["raise_errors"]=raiseErrors;
-        // Context objects come from the merged kwargs ...
+        // Context objects come from the merged kwargs.
         var ctx = new ParserContext{ RaiseErrors=raiseErrors };
         if(merged.TryGetValue("caller", out var co) && co is GameObject gco) ctx.Caller=gco;
         if(merged.TryGetValue("receiver", out var ro) && ro is GameObject gro) ctx.Receiver=gro;
         if(merged.TryGetValue("mapping", out var mo) && mo is IDictionary<string, object?> md) ctx.Mapping=md;
-        // ... with reserved entries read last so they take precedence.
-        if(reservedKwargs is not null){
-            if(reservedKwargs.TryGetValue("caller", out var c2) && c2 is GameObject g2) ctx.Caller=g2;
-            if(reservedKwargs.TryGetValue("receiver", out var r2) && r2 is GameObject gr2) ctx.Receiver=gr2;
-            if(reservedKwargs.TryGetValue("mapping", out var m2) && m2 is IDictionary<string, object?> mm2) ctx.Mapping=mm2;
-        }
         // Callables take string kwargs; live objects travel via the context.
         var kwargsStr = merged.ToDictionary(kv=>kv.Key, kv=> kv.Value?.ToString() ?? "", StringComparer.Ordinal);
         try
@@ -485,21 +504,10 @@ public class FuncParser
             var obj = ParseInternalStaticLegacy(text, raiseErrors, escape, strip, true, reserved);
             afterFunc = obj?.ToString() ?? "";
         }
-        if (hasDirector && mapping is not null && receiver is not null)
+        if (hasDirector && mapping is not null)
         {
             var displayMap = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (var kv in mapping)
-            {
-                if (kv.Value is GameObject go) displayMap[kv.Key] = go.GetDisplayName(receiver);
-                else displayMap[kv.Key] = kv.Value?.ToString() ?? "";
-            }
-            var safe = new FuncParserHelpers.SafeFormatMap(displayMap);
-            afterFunc = safe.Format(afterFunc);
-        }
-        else if (hasDirector && mapping is not null)
-        {
-            var displayMap = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (var kv in mapping) displayMap[kv.Key] = kv.Value is GameObject go ? go.Name : kv.Value?.ToString() ?? "";
+            foreach (var kv in mapping) displayMap[kv.Key] = kv.Value is GameObject go ? (receiver is not null ? go.GetDisplayName(receiver) : go.Name) : kv.Value?.ToString() ?? "";
             var safe = new FuncParserHelpers.SafeFormatMap(displayMap);
             afterFunc = safe.Format(afterFunc);
         }

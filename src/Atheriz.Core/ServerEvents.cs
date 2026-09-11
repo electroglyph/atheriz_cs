@@ -16,31 +16,24 @@ public static class ServerEvents
     public static void AtServerStart() => AtServerStart(null);
     // Port of server_events.py:8 preserve hook signature at_server_start(sender).
     // Python is pass (silent); the hook walk stays as the game-code extension point.
-    public static void AtServerStart(object? sender)
+    private static void Fire(string hookName, object? sender)
     {
-        if (sender is not null) InvokeHooks("at_server_start", sender); // Port of base_obj hookable iteration
-        else InvokeHooks("at_server_start");
+        if (sender is not null) InvokeHooks(hookName, sender); // Port of base_obj hookable iteration
+        else InvokeHooks(hookName);
     }
+    public static void AtServerStart(object? sender) => Fire("at_server_start", sender);
 
     // Port of server_events.py:12 def at_server_stop()
     public static void AtServerStop() => AtServerStop(null);
     // Port of server_events.py:12 preserve hook signature at_server_stop(sender)
     // Python is pass (silent); the hook walk stays as the game-code extension point.
-    public static void AtServerStop(object? sender)
-    {
-        if (sender is not null) InvokeHooks("at_server_stop", sender);
-        else InvokeHooks("at_server_stop");
-    }
+    public static void AtServerStop(object? sender) => Fire("at_server_stop", sender);
 
     // Port of server_events.py:16 def at_server_reload()
     public static void AtServerReload() => AtServerReload(null);
     // Port of server_events.py:16 preserve hook signature at_server_reload(sender)
     // Python is pass (silent); the hook walk stays as the game-code extension point.
-    public static void AtServerReload(object? sender)
-    {
-        if (sender is not null) InvokeHooks("at_server_reload", sender);
-        else InvokeHooks("at_server_reload");
-    }
+    public static void AtServerReload(object? sender) => Fire("at_server_reload", sender);
 
     // Early-exit existence/single lookups over the registry. Same shape as
     // ObjectRegistry.FilterBy: snapshot under the read lock, predicates run

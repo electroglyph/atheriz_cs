@@ -118,10 +118,7 @@ public static class AtherizDbContextFactory
                 }
                 int dropped = 0;
                 using var txn = conn.BeginTransaction();
-                using var mk = conn.CreateCommand();
-                mk.Transaction = txn;
-                mk.CommandText = "CREATE TABLE \"transitions_new\" (\"FromArea\" TEXT NOT NULL, \"FromX\" INTEGER NOT NULL, \"FromY\" INTEGER NOT NULL, \"FromZ\" INTEGER NOT NULL, \"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"FromArea\",\"FromX\",\"FromY\",\"FromZ\",\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))";
-                mk.ExecuteNonQuery();
+                ExecuteNonQuery(conn, txn, "CREATE TABLE \"transitions_new\" (\"FromArea\" TEXT NOT NULL, \"FromX\" INTEGER NOT NULL, \"FromY\" INTEGER NOT NULL, \"FromZ\" INTEGER NOT NULL, \"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"FromArea\",\"FromX\",\"FromY\",\"FromZ\",\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))");
                 // One INSERT command for the whole loop, rebound per row: minting a
                 // command + eight parameters per row dominated large migrations.
                 // Every parameter is rebound for EVERY row below — a stale binding
@@ -159,14 +156,8 @@ public static class AtherizDbContextFactory
                     pD.Value = (object?)row.Data ?? DBNull.Value;
                     ins.ExecuteNonQuery();
                 }
-                using var drop = conn.CreateCommand();
-                drop.Transaction = txn;
-                drop.CommandText = "DROP TABLE \"transitions\"";
-                drop.ExecuteNonQuery();
-                using var ren = conn.CreateCommand();
-                ren.Transaction = txn;
-                ren.CommandText = "ALTER TABLE \"transitions_new\" RENAME TO \"transitions\"";
-                ren.ExecuteNonQuery();
+                ExecuteNonQuery(conn, txn, "DROP TABLE \"transitions\"");
+                ExecuteNonQuery(conn, txn, "ALTER TABLE \"transitions_new\" RENAME TO \"transitions\"");
                 txn.Commit();
                 AtherizLogger.LogWarning($"MigrateTransitionsTable: rebuilt destination-only table, migrated {rows.Count - dropped}/{rows.Count} rows, dropped {dropped} undecodable.");
             }
@@ -181,11 +172,28 @@ public static class AtherizDbContextFactory
         name.Replace("_", "", StringComparison.Ordinal).ToLowerInvariant();
 
     private static string GetStr(System.Data.Common.DbDataReader r, System.Collections.Generic.Dictionary<string, int> ord, string col)
-        => r.IsDBNull(ord[col]) ? "" : r.GetString(ord[col]);
+    {
+        var idx = ord[col];
+        return r.IsDBNull(idx) ? "" : r.GetString(idx);
+    }
     private static string? GetMaybeStr(System.Data.Common.DbDataReader r, System.Collections.Generic.Dictionary<string, int> ord, string col)
-        => r.IsDBNull(ord[col]) ? null : r.GetString(ord[col]);
+    {
+        var idx = ord[col];
+        return r.IsDBNull(idx) ? null : r.GetString(idx);
+    }
     private static int GetInt(System.Data.Common.DbDataReader r, System.Collections.Generic.Dictionary<string, int> ord, string col)
-        => r.IsDBNull(ord[col]) ? 0 : Convert.ToInt32(r.GetValue(ord[col]));
+    {
+        var idx = ord[col];
+        return r.IsDBNull(idx) ? 0 : Convert.ToInt32(r.GetValue(idx));
+    }
+
+    private static void ExecuteNonQuery(System.Data.Common.DbConnection conn, System.Data.Common.DbTransaction txn, string sql)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = txn;
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
 
     private static System.Data.Common.DbParameter AddParam(System.Data.Common.DbCommand cmd, string name, object? value)
     {

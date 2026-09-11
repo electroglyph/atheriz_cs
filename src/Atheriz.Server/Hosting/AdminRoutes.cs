@@ -6,6 +6,14 @@ namespace Atheriz.Server.Hosting;
 
 public static class AdminRoutes
 {
+    // Shared oversized-body limit for the hot_reload/shutdown admin routes
+    // (create_account caps through ReadCappedJsonBodyAsync instead).
+    private const long MaxAdminBodyBytes = 4096;
+
+    // Nullable comparison: a missing Content-Length (chunked) is never
+    // greater, so chunked bodies fall through exactly as before.
+    private static bool IsBodyTooLarge(HttpContext ctx) => ctx.Request.ContentLength > MaxAdminBodyBytes;
+
     public static void MapAdminRoutes(this WebApplication app, AtherizSettings settings)
     {
         bool RequireAdmin(HttpContext ctx, string action, out string? error)
@@ -28,7 +36,7 @@ public static class AdminRoutes
         {
             if (!RequireAdmin(ctx, "reload", out var err))
                 return AdminError(err);
-            if (ctx.Request.ContentLength > 4096)
+            if (IsBodyTooLarge(ctx))
                 return Results.Json(new { status = "error", message = "Request body too large." });
             try
             {
@@ -74,7 +82,7 @@ public static class AdminRoutes
         {
             if (!RequireAdmin(ctx, "shutdown", out var err))
                 return AdminError(err);
-            if (ctx.Request.ContentLength > 4096)
+            if (IsBodyTooLarge(ctx))
                 return Results.Json(new { status = "error", message = "Request body too large." });
 
             Console.Error.WriteLine("Internal shutdown request received. Running shutdown tasks...");

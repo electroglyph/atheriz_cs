@@ -14,6 +14,15 @@ public sealed class GameArgumentParser
     public bool AddHelp { get; }
 
     private readonly List<ArgumentDef> _defs = new();
+    // Version counter for the precomputed def maps below: bumped on every _defs
+    // mutation path (both AddArgument overloads and every Builder mutator, which
+    // edits a def already in the list). ParseArgs rebuilds the cached maps only
+    // when the version changed, so post-build mutations stay visible without a
+    // per-call rebuild when defs are effectively static.
+    private int _defsVersion;
+    private List<ArgumentDef>? _cachedPositionals;
+    private Dictionary<string, ArgumentDef>? _cachedOptionals;
+    private int _cachedDefsVersion = -1;
 
     public GameArgumentParser(string prog = "", string description = "", bool addHelp = true)
     {
@@ -30,6 +39,7 @@ public sealed class GameArgumentParser
                 Help = "show this help message and exit",
                 IsHelp = true,
             });
+            _defsVersion++;
         }
     }
 
@@ -61,25 +71,20 @@ public sealed class GameArgumentParser
     public sealed class Builder
     {
         private readonly ArgumentDef _def;
+        private Action? _onMutated;
         public Builder(ArgumentDef def) => _def = def;
-        public Builder Help(string h) { _def.Help = h; return this; }
-        public Builder Required(bool v = true) { _def.Required = v; _def.RequiredExplicit = true; return this; }
-        public Builder Action(ArgAction a) { _def.Action = a; return this; }
-        public Builder Nargs(NargsKind k) { _def.Nargs = k; return this; }
+        internal void AttachInvalidation(Action onMutated) => _onMutated = onMutated;
+        private void Touch() => _onMutated?.Invoke();
+        public Builder Help(string h) { _def.Help = h; Touch(); return this; }
+        public Builder Required(bool v = true) { _def.Required = v; _def.RequiredExplicit = true; Touch(); return this; }
+        public Builder Action(ArgAction a) { _def.Action = a; Touch(); return this; }
+        public Builder Nargs(NargsKind k) { _def.Nargs = k; Touch(); return this; }
         public Builder Nargs(string s) => Nargs(ParseNargs(s));
-        public Builder Type<T>() { _def.Type = typeof(T); return this; }
-        public Builder Type(Type t) { _def.Type = t; return this; }
-        public Builder Default(object? v) { _def.DefaultValue = v; return this; }
-        public Builder Const(object? v) { _def.ConstValue = v; return this; }
-        public Builder Choices(params string[] c) { _def.Choices = c; return this; }
-        private static NargsKind ParseNargs(string s) => s switch
-        {
-            "?" => NargsKind.Optional,
-            "*" => NargsKind.ZeroOrMore,
-            "+" => NargsKind.OneOrMore,
-            "REMAINDER" or "..." => NargsKind.Remainder,
-            _ => NargsKind.None
-        };
+        public Builder Type<T>() { _def.Type = typeof(T); Touch(); return this; }
+        public Builder Type(Type t) { _def.Type = t; Touch(); return this; }
+        public Builder Default(object? v) { _def.DefaultValue = v; Touch(); return this; }
+        public Builder Const(object? v) { _def.ConstValue = v; Touch(); return this; }
+        public Builder Choices(params string[] c) { _def.Choices = c; Touch(); return this; }
     }
 
     // Dest derivation shared by both AddArgument overloads: like argparse,
@@ -92,6 +97,15 @@ public sealed class GameArgumentParser
         return raw;
     }
 
+    private static NargsKind ParseNargs(string s) => s switch
+    {
+        "?" => NargsKind.Optional,
+        "*" => NargsKind.ZeroOrMore,
+        "+" => NargsKind.OneOrMore,
+        "REMAINDER" or "..." => NargsKind.Remainder,
+        _ => NargsKind.None
+    };
+
     // Python-compatible AddArgument overloads
     public Builder AddArgument(params string[] names)
     {
@@ -99,7 +113,10 @@ public sealed class GameArgumentParser
         // dest: like argparse, prefer long option (--) for optional args
         def.Dest = DeriveDest(names);
         _defs.Add(def);
-        return new Builder(def);
+        _defsVersion++;
+        var builder = new Builder(def);
+        builder.AttachInvalidation(() => _defsVersion++);
+        return builder;
     }
 
     public Builder AddArgument(string name, string help = "", string nargs = "", string action = "", Type? type = null, object? defaultValue = null, string[]? choices = null, bool? required = null)
@@ -123,13 +140,16 @@ public sealed class GameArgumentParser
             DefaultValue = defaultValue,
             Type = type,
         };
-        if (!string.IsNullOrEmpty(nargs)) def.Nargs = nargs switch { "?" => NargsKind.Optional, "*" => NargsKind.ZeroOrMore, "+" => NargsKind.OneOrMore, "REMAINDER" => NargsKind.Remainder, _ => NargsKind.None };
+        if (!string.IsNullOrEmpty(nargs)) def.Nargs = ParseNargs(nargs);
         if (!string.IsNullOrEmpty(action)) def.Action = action switch { "store_true" => ArgAction.StoreTrue, "store_false" => ArgAction.StoreFalse, "append" => ArgAction.Append, _ => ArgAction.Store };
         // dest
         def.Dest = DeriveDest(def.Names);
         if (type is not null) def.Type = type;
         _defs.Add(def);
-        return new Builder(def);
+        _defsVersion++;
+        var builder = new Builder(def);
+        builder.AttachInvalidation(() => _defsVersion++);
+        return builder;
     }
 
     // usage names positionals (argparse shape), shared by help/usage.
@@ -261,6 +281,23 @@ public sealed class GameArgumentParser
     private static bool LooksLikeUnknownOption(string tok)
         => tok.StartsWith("-", StringComparison.Ordinal) && tok.Length > 1 && !IsNegativeNumber(tok);
 
+    private void EnsureDefMaps(out List<ArgumentDef> positionalDefs, out Dictionary<string, ArgumentDef> optionalMap)
+    {
+        if (_cachedPositionals is not null && _cachedOptionals is not null && _cachedDefsVersion == _defsVersion)
+        {
+            positionalDefs = _cachedPositionals;
+            optionalMap = _cachedOptionals;
+            return;
+        }
+        positionalDefs = _defs.Where(d => !d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal)) && !d.IsHelp).ToList();
+        optionalMap = [];
+        foreach (var d in _defs.Where(d => d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))))
+            foreach (var n in d.Names) optionalMap[n] = d;
+        _cachedPositionals = positionalDefs;
+        _cachedOptionals = optionalMap;
+        _cachedDefsVersion = _defsVersion;
+    }
+
     public ParsedArgs ParseArgs(IReadOnlyList<string> argList)
     {
         // No blanket -h/--help pre-scan: help tokens inside free-text values
@@ -288,10 +325,7 @@ public sealed class GameArgumentParser
             }
         }
 
-        var positionalDefs = _defs.Where(d => !d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal)) && !d.IsHelp).ToList();
-        Dictionary<string, ArgumentDef> optionalMap = [];
-        foreach (var d in _defs.Where(d => d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))))
-            foreach (var n in d.Names) optionalMap[n] = d;
+        EnsureDefMaps(out var positionalDefs, out var optionalMap);
 
         int posIdx = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);

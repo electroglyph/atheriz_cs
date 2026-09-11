@@ -289,14 +289,8 @@ public static class AtherizLogger
         }
         catch { try { Console.Error.WriteLine(message); } catch { } }
     }
-    public static void LogErrorRobust(string message)
-    {
-        try { LogRobust(LogLevel.Error, message); } catch { Console.Error.WriteLine(message); }
-    }
-    public static void LogInformationRobust(string message)
-    {
-        try { LogRobust(LogLevel.Information, message); } catch { Console.Error.WriteLine(message); }
-    }
+    public static void LogErrorRobust(string message) => LogRobust(LogLevel.Error, message);
+    public static void LogInformationRobust(string message) => LogRobust(LogLevel.Information, message);
 
     // Compat overloads mirroring ILogger
     public static void Info(string msg) => LogInformation(msg);

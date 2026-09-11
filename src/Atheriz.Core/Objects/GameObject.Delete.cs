@@ -276,7 +276,7 @@ public partial class GameObject
                     // No delete
                 }
             }
-            foreach (var content in contentObjs.ToList())
+            foreach (var content in contentObjs)
             {
                 processed.Add(content.Id);
                 MoveOrDelete(content);
@@ -354,7 +354,7 @@ public partial class GameObject
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
         try
         {
-            foreach (var fid in obj.FollowersSnapshot.ToList())
+            foreach (var fid in obj.FollowersSnapshot)
             {
                 try
                 {
@@ -368,7 +368,7 @@ public partial class GameObject
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
         try
         {
-            foreach (var chId in obj.ChannelsSnapshot.ToList())
+            foreach (var chId in obj.ChannelsSnapshot)
             {
                 try
                 {

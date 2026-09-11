@@ -135,6 +135,11 @@ public sealed class AtherizDbContext : DbContext
         }
     }
 
+    private void TryApplyWalPragmas()
+    {
+        try { ApplyWalPragmas(); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback: {ex.Message}"); }
+    }
+
     // truncate the WAL on shutdown so -wal/-shm files cannot grow
     // unbounded across restarts. Best-effort: runs after the final save.
     public void CheckpointWal()
@@ -150,7 +155,7 @@ public sealed class AtherizDbContext : DbContext
         using (await DbWriteGate.EnterAsync(ct).ConfigureAwait(false))
         {
             await Database.EnsureCreatedAsync(ct).ConfigureAwait(false);
-            try { ApplyWalPragmas(); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback: {ex.Message}"); }
+            TryApplyWalPragmas();
         }
     }
 
@@ -160,7 +165,7 @@ public sealed class AtherizDbContext : DbContext
         try
         {
             Database.EnsureCreated();
-            try { ApplyWalPragmas(); } catch (Exception ex) { Console.Error.WriteLine($"WAL pragma fallback: {ex.Message}"); }
+            TryApplyWalPragmas();
         }
         finally { DbWriteGate.Exit(); }
     }

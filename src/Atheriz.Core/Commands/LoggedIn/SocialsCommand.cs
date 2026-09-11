@@ -5,6 +5,10 @@ namespace Atheriz.Core.Commands.LoggedIn;
 public sealed class SocialsCommand : Command
 {
     public override string Key => "socials";
+    // Aliases builds a fresh snapshot per access because SocialsDict is a public
+    // mutable static dictionary with no change notification: game code can add or
+    // remove entries directly, so there is no single invalidation point where a
+    // cached snapshot could be refreshed. Caching here would serve stale aliases.
     public override IReadOnlyList<string> Aliases => SocialsDict.Keys.ToList();
     public override string Desc => "Social commands. Use 'help socials' for list.";
     public override string Category => "Socials";
@@ -100,7 +104,7 @@ public sealed class SocialsCommand : Command
             // "me"/"here"/coords — like Look/Follow/Give. Raw go.Search +
             // loc.Search missed all of those and skipped the view gate.
             var targets = CommandHelpers.SearchWithFallback(go, targetName);
-            if (targets.Count == 0) { go.Msg($"Could not find '{targetName}'."); return; }
+            if (targets.Count == 0) { CommandHelpers.MsgCouldNotFind(go, targetName); return; }
             if (targets.Count > 1) { go.Msg($"Multiple matches for '{targetName}'. Be more specific."); return; }
             var target = targets[0];
             string msg = templates.target;

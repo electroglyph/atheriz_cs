@@ -17,8 +17,7 @@ public sealed class SayCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var puppet)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { puppet.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var lst = pa.GetList("text");
         if (lst.Count > 0)
         {

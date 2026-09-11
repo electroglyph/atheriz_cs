@@ -270,25 +270,25 @@ public class PortedMapTests
     // --- GetDirs 4 ---
     [Fact] public void GetDirs_NoNeighbors()
     {
-        var (n,s,e,w) = MapInfo.GetDirs(new Dictionary<(int,int),string>(), (0,0), new List<string>{"#"});
+        var (n,s,e,w) = MapInfo.GetDirs(new Dictionary<(int,int),string>(), (0,0), new HashSet<string> { "#" });
         Assert.Equal((false,false,false,false), (n,s,e,w));
     }
     [Fact] public void GetDirs_NorthNeighbor()
     {
         var grid = new Dictionary<(int,int),string>{[(0,1)]="#"};
-        var (n,s,e,w) = MapInfo.GetDirs(grid, (0,0), new List<string>{"#"});
+        var (n,s,e,w) = MapInfo.GetDirs(grid, (0,0), new HashSet<string> { "#" });
         Assert.True(n); Assert.False(s); Assert.False(e); Assert.False(w);
     }
     [Fact] public void GetDirs_AllNeighbors()
     {
         var grid = new Dictionary<(int,int),string>{[(0,1)]="#",[(0,-1)]="#",[(1,0)]="#",[(-1,0)]="#"};
-        var (n,s,e,w) = MapInfo.GetDirs(grid, (0,0), new List<string>{"#"});
+        var (n,s,e,w) = MapInfo.GetDirs(grid, (0,0), new HashSet<string> { "#" });
         Assert.Equal((true,true,true,true), (n,s,e,w));
     }
     [Fact] public void GetDirs_OnlyMatchingChars()
     {
         var grid = new Dictionary<(int,int),string>{[(0,1)]="X"};
-        var (n,s,e,w) = MapInfo.GetDirs(grid, (0,0), new List<string>{"#"});
+        var (n,s,e,w) = MapInfo.GetDirs(grid, (0,0), new HashSet<string> { "#" });
         Assert.False(n);
     }
 

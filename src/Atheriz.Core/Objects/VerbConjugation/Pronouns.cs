@@ -130,7 +130,7 @@ public static class Pronouns
         string? viewpoint = null)
     {
         if (string.IsNullOrEmpty(pronoun)) return (pronoun, pronoun);
-        var pronounLower = pronoun == "I" ? "I" : pronoun.ToLowerInvariant();
+        var pronounLower = pronoun.ToLowerInvariant();
         if (!PronounTable.TryGetValue(pronounLower, out var entry))
             return (pronoun, pronoun);
 

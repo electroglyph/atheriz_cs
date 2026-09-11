@@ -12,9 +12,36 @@ public static class HelpHelper
         return FormatNoParser(cmd);
     }
 
+    public static string FormatAliasList(Command cmd)
+    {
+        ArgumentNullException.ThrowIfNull(cmd);
+        return string.Join(", ", [cmd.Key, ..cmd.Aliases]);
+    }
+
     public static string FormatNoParser(Command cmd)
     {
-        string aliasStr = cmd.Aliases.Count > 0 ? $"{cmd.Key}, {string.Join(", ", cmd.Aliases)}" : cmd.Key;
+        string aliasStr = FormatAliasList(cmd);
         return $"\n{cmd.Desc}\n\nAliases: {aliasStr}\n" + cmd.ExtraDesc;
+    }
+
+    /// <summary>
+    /// Shared global help lookup: sends the formatted help when
+    /// <paramref name="query"/> names a visible accessible command in
+    /// <paramref name="set"/> and returns true; otherwise returns false
+    /// without sending anything (the caller owns the local tail and the
+    /// not-found message).
+    /// </summary>
+    public static bool TryShowGlobal(CmdSet set, IMessageTarget caller, string query)
+    {
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(caller);
+        if (string.IsNullOrEmpty(query)) return false;
+        var cmd = set.Get(query);
+        if (cmd is not null && cmd.Access(caller) && !cmd.Hide)
+        {
+            caller.Msg(FormatFor(cmd));
+            return true;
+        }
+        return false;
     }
 }

@@ -59,19 +59,20 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     /// replacement instance (matched by id). Python's __class__ swap preserves
     /// identity; C# must rewire direct refs after AddObject replaces the id.
     /// </summary>
+    private static bool ShouldRewire(GameObject? cur, GameObject rep) => cur is not null && cur.Id == rep.Id && !ReferenceEquals(cur, rep);
     public void ReplacePuppetRefs(GameObject replacement)
     {
         lock (Lock)
         {
-            if (Puppet is not null && Puppet.Id == replacement.Id && !ReferenceEquals(Puppet, replacement))
+            if (ShouldRewire(Puppet, replacement))
                 Puppet = replacement;
-            if (LastPuppet is not null && LastPuppet.Id == replacement.Id && !ReferenceEquals(LastPuppet, replacement))
+            if (ShouldRewire(LastPuppet, replacement))
                 LastPuppet = replacement;
             for (int i = 0; i < _puppetStack.Count; i++)
             {
                 var (prev, target) = _puppetStack[i];
-                var nprev = (prev is not null && prev.Id == replacement.Id && !ReferenceEquals(prev, replacement)) ? replacement : prev;
-                var ntarget = (target.Id == replacement.Id && !ReferenceEquals(target, replacement)) ? replacement : target;
+                var nprev = ShouldRewire(prev, replacement) ? replacement : prev;
+                var ntarget = ShouldRewire(target, replacement) ? replacement : target;
                 if (!ReferenceEquals(nprev, prev) || !ReferenceEquals(ntarget, target))
                     _puppetStack[i] = (nprev, ntarget);
             }
@@ -202,10 +203,10 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                     var locRef = puppet.Location;
                     if (locRef is Atheriz.Core.Persistence.Dto.LocationRef.ObjectLocation ol)
                     {
-                        var objs = Globals.ObjectRegistry.Get(ol.ObjectId);
-                        if (objs.Count > 0)
+                        var single = Globals.ObjectRegistry.GetSingle(ol.ObjectId);
+                        if (single is not null)
                         {
-                            objs[0].RemoveObject(puppet);
+                            single.RemoveObject(puppet);
                         }
                     }
                     else if (locRef is Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation cl)
@@ -251,10 +252,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     }
 
     // Port of session.py:118-119 msg
-    public void Msg(string text)
-    {
-        Connection?.Msg(text);
-    }
+    public void Msg(string text) => Msg(text, null);
 
     // Full msg overload. Port of session.msg(*args, **kwargs) -> connection.msg:
     // a msgType becomes the command (mirrors connection.py popping the kwarg key).

@@ -1,6 +1,5 @@
 using System.Collections.Frozen;
 using System.Diagnostics;
-using System.Reflection;
 using Atheriz.Core.Concurrency;
 
 namespace Atheriz.Core.Network;
@@ -11,7 +10,9 @@ namespace Atheriz.Core.Network;
 // Line-number comments reference manager.py original.
 
 /// <summary>
-/// Attribute to mark InputFunc handlers — mirrors <c>atheriz/inputfuncs.py:64 @inputfunc</c>.
+/// Legacy marker for input-func handlers — mirrors <c>atheriz/inputfuncs.py:64 @inputfunc</c>.
+/// Discovery by attribute was removed: subclasses register extras explicitly
+/// via <see cref="InputFuncs.RegisterExtraHandlers"/>. Kept as public API only.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method)]
 public sealed class InputFuncAttribute : Attribute
@@ -38,65 +39,40 @@ public class InputFuncs
         var handlers = new Dictionary<string, Delegate>(StringComparer.OrdinalIgnoreCase);
         // explicit registration list — the eight known handlers bind
         // with no per-construction reflection (method-group delegates).
-        // Subclass extras (tests only in practice) register via the override
-        // hook below, mirroring Python get_handlers subclass discovery.
-        void Add(string name, Action<BaseConnection, List<object?>, Dictionary<string, object?>> del, string methodName)
-        {
-            handlers[name] = del;
-            if (!name.Equals(methodName, StringComparison.OrdinalIgnoreCase)) handlers[methodName] = del;
-        }
-        Add("text", Text, nameof(Text));
-        Add("term_size", TermSize, nameof(TermSize));
-        Add("map_size", MapSize, nameof(MapSize));
-        Add("screenreader", Screenreader, nameof(Screenreader));
-        Add("client_ready", ClientReady, nameof(ClientReady));
-        Add("map_edit", MapEditHandler, nameof(MapEditHandler));
-        Add("map_validate_moves", MapValidateMovesHandler, nameof(MapValidateMovesHandler));
-        Add("map_edit_legend", MapEditLegendHandler, nameof(MapEditLegendHandler));
+        // Subclasses add extras by overriding RegisterExtraHandlers and
+        // calling AddInputHandler explicitly (no attribute scanning).
+        AddInputHandler(handlers, "text", Text, nameof(Text));
+        AddInputHandler(handlers, "term_size", TermSize, nameof(TermSize));
+        AddInputHandler(handlers, "map_size", MapSize, nameof(MapSize));
+        AddInputHandler(handlers, "screenreader", Screenreader, nameof(Screenreader));
+        AddInputHandler(handlers, "client_ready", ClientReady, nameof(ClientReady));
+        AddInputHandler(handlers, "map_edit", MapEditHandler, nameof(MapEditHandler));
+        AddInputHandler(handlers, "map_validate_moves", MapValidateMovesHandler, nameof(MapValidateMovesHandler));
+        AddInputHandler(handlers, "map_edit_legend", MapEditLegendHandler, nameof(MapEditLegendHandler));
         RegisterExtraHandlers(handlers);
         return handlers;
     }
 
     /// <summary>
-    /// Subclass hook for extra [InputFunc] handlers. The default discovers
-    /// methods declared on subclasses only (never re-scans the base eight);
-    /// exact-<see cref="InputFuncs"/> instances pay zero reflection.
+    /// Registers one handler under its command name plus the method name when
+    /// they differ (single case-insensitive registry; the derived lowercase
+    /// form is covered by the comparer itself).
+    /// </summary>
+    protected static void AddInputHandler(Dictionary<string, Delegate> handlers, string name, Delegate del, string methodName)
+    {
+        handlers[name] = del;
+        if (!name.Equals(methodName, StringComparison.OrdinalIgnoreCase)) handlers[methodName] = del;
+    }
+
+    /// <summary>
+    /// Subclass hook for extra handlers. The base is a no-op: subclasses
+    /// override it and call <see cref="AddInputHandler"/> explicitly.
     /// </summary>
     protected virtual void RegisterExtraHandlers(Dictionary<string, Delegate> handlers)
     {
-        if (GetType() == typeof(InputFuncs)) return;
-        var methods = GetType().GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-        foreach (var m in methods)
-        {
-            if (m.DeclaringType == typeof(InputFuncs)) continue;
-            var attr = m.GetCustomAttribute<InputFuncAttribute>();
-            if (attr is not null)
-            {
-                var name = attr.Name ?? m.Name;
-                // Create delegate of signature Action<BaseConnection, List<object?>, Dictionary<string,object?>>
-                try
-                {
-                    var del = Delegate.CreateDelegate(typeof(Action<BaseConnection, List<object?>, Dictionary<string, object?>>), this, m, false);
-                    if (del is not null)
-                    {
-                        handlers[name] = del;
-                        if (!name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) handlers[m.Name] = del;
-                    }
-                    else
-                    {
-                        // fallback generic Delegate
-                        var del2 = m.CreateDelegate(typeof(Action<BaseConnection, List<object?>, Dictionary<string, object?>>), this);
-                        handlers[name] = del2;
-                        if (!name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) handlers[m.Name] = del2;
-                    }
-                }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InputFuncs.RegisterExtraHandlers: " + logEx.Message, "InputFuncs"); }
-            }
-        }
     }
 
     // Port of inputfuncs.py:240-301 text handler — core command dispatch
-    [InputFunc("text")]
     public void Text(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         try
@@ -167,7 +143,6 @@ public class InputFuncs
     }
 
     // Port of inputfuncs.py:302-320 term_size
-    [InputFunc("term_size")]
     public void TermSize(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         var settings = AtherizSettings.Global;
@@ -177,7 +152,6 @@ public class InputFuncs
     }
 
     // Port of inputfuncs.py:322-340 map_size
-    [InputFunc("map_size")]
     public void MapSize(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         var settings = AtherizSettings.Global;
@@ -220,7 +194,6 @@ public class InputFuncs
     }
 
     // Port of inputfuncs.py:342-360 screenreader
-    [InputFunc("screenreader")]
     public void Screenreader(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         if (args.Count > 0)
@@ -237,7 +210,6 @@ public class InputFuncs
 
     // Port of inputfuncs.py:362-374 client_ready — prompt welcome screen
     // Port of atheriz/connection_screen.py:95 via ConnectionScreen.Render
-    [InputFunc("client_ready")]
     public void ClientReady(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         // Port of inputfuncs.py:399-401 render(connection.session) + msg + prompt
@@ -264,10 +236,16 @@ public class InputFuncs
         }
         if (v is System.Text.Json.JsonElement jel && jel.ValueKind==System.Text.Json.JsonValueKind.Array)
         {
-            var arr = jel.EnumerateArray().Select(e=> e.TryGetInt32(out var iv)?iv:-999).ToArray();
+            int jelLen = jel.GetArrayLength();
+            int[] arr = new int[jelLen];
+            int colorIdx = 0;
+            foreach (var e in jel.EnumerateArray())
+                arr[colorIdx++] = (e.ValueKind==System.Text.Json.JsonValueKind.Number && e.TryGetInt32(out var iv)) ? iv : -999;
             if (arr.Length!=3) return false;
             if (arr[0]==-1 && arr[1]==-1 && arr[2]==-1) return true;
-            return arr.All(x=> x>=0 && x<=255);
+            foreach (var x in arr)
+                if (!(x>=0 && x<=255)) return false;
+            return true;
         }
         return false;
     }
@@ -340,13 +318,15 @@ public class InputFuncs
             if (coord is List<object?> lst)
             {
                 if (lst.Count!=2) return false;
-                if (lst.Any(x=> !(x is int))) return false;
+                foreach (var x in lst)
+                    if (x is not int) return false;
             }
             else if (coord is System.Text.Json.JsonElement je2 && je2.ValueKind==System.Text.Json.JsonValueKind.Array)
             {
                 var arr = je2.EnumerateArray().ToList();
                 if (arr.Count!=2) return false;
-                if (arr.Any(e=> !e.TryGetInt32(out _))) return false;
+                foreach (var e in arr)
+                    if (e.ValueKind!=System.Text.Json.JsonValueKind.Number || !e.TryGetInt32(out _)) return false;
             }
             else return false;
         }
@@ -374,8 +354,10 @@ public class InputFuncs
         if (v is null) return true;
         if (v is int || v is double || v is float) return true;
         if (v is System.Text.Json.JsonElement je && (je.ValueKind == System.Text.Json.JsonValueKind.Number || je.ValueKind == System.Text.Json.JsonValueKind.Null)) return true;
-        if (v is List<object?> lst && lst.Count == 3 && lst.All(x => x is int))
+        if (v is List<object?> lst && lst.Count == 3)
         {
+            foreach (var x in lst)
+                if (x is not int) return false;
             int a = (int)lst[0]!; int b = (int)lst[1]!; int c = (int)lst[2]!;
             if (a == -1 && b == -1 && c == -1) return true;
             int lo = allowPartialTransparent ? -1 : 0;
@@ -419,7 +401,13 @@ public class InputFuncs
     private static List<object?> ToList(object? o)
     {
         if (o is List<object?> lst) return lst;
-        if (o is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Array) return je.EnumerateArray().Select(ConnectionManager.JsonElementToObject).ToList()!;
+        if (o is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Array)
+        {
+            var converted = new List<object?>(je.GetArrayLength());
+            foreach (var item in je.EnumerateArray())
+                converted.Add(ConnectionManager.JsonElementToObject(item));
+            return converted;
+        }
         return [];
     }
 
@@ -506,7 +494,6 @@ public class InputFuncs
     }
 
     // Port of inputfuncs.py:376-489 map_edit
-    [InputFunc("map_edit")]
     public void MapEditHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         if (args.Count < 3) return;
@@ -557,14 +544,32 @@ public class InputFuncs
                             // decode fg/bg
                             (byte R,byte G,byte B)? fgT=null; (byte R,byte G,byte B)? bgT=null;
                             List<object?> fgList = ToList(fg); List<object?> bgList = ToList(bg);
-                            bool fgTrans = fgList.Count==3 && fgList.All(x=> ToInt(x)==-1);
-                            bool bgTrans = bgList.Count==3 && bgList.All(x=> ToInt(x)==-1);
+                            bool fgTrans = fgList.Count==3;
+                            if (fgTrans)
+                            {
+                                foreach (var e in fgList)
+                                {
+                                    if (ToInt(e)!=-1) { fgTrans = false; break; }
+                                }
+                            }
+                            bool bgTrans = bgList.Count==3;
+                            if (bgTrans)
+                            {
+                                foreach (var e in bgList)
+                                {
+                                    if (ToInt(e)!=-1) { bgTrans = false; break; }
+                                }
+                            }
                             if (!fgTrans && fgList.Count==3) fgT = ((byte)ToInt(fgList[0]), (byte)ToInt(fgList[1]), (byte)ToInt(fgList[2]));
                             if (!bgTrans && bgList.Count==3) bgT = ((byte)ToInt(bgList[0]), (byte)ToInt(bgList[1]), (byte)ToInt(bgList[2]));
                             var attrList = ToList(attrs);
-                            bool bold = attrList.Any(a=> a is string s && s=="bold" || a is System.Text.Json.JsonElement je && je.GetString()=="bold");
-                            bool italic = attrList.Any(a=> a is string s && s=="italic" || a is System.Text.Json.JsonElement je && je.GetString()=="italic");
-                            bool underline = attrList.Any(a=> a is string s && s=="underline" || a is System.Text.Json.JsonElement je && je.GetString()=="underline");
+                            bool bold = false, italic = false, underline = false;
+                            foreach (var a in attrList)
+                            {
+                                if ((a is string s && s=="bold") || (a is System.Text.Json.JsonElement je && je.GetString()=="bold")) bold = true;
+                                if ((a is string s2 && s2=="italic") || (a is System.Text.Json.JsonElement je2 && je2.GetString()=="italic")) italic = true;
+                                if ((a is string s3 && s3=="underline") || (a is System.Text.Json.JsonElement je3 && je3.GetString()=="underline")) underline = true;
+                            }
                             string wrapped = GameUtils.WrapRgb(sym, fgT, bgT, bold, italic, underline);
                             mi.PreGrid[(x,y)] = wrapped;
                         }
@@ -601,7 +606,6 @@ public class InputFuncs
         connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
     }
 
-    [InputFunc("map_validate_moves")]
     public void MapValidateMovesHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         if (args.Count < 3 || args.Count > 4) return;
@@ -654,10 +658,12 @@ public class InputFuncs
         if (grid2 is null) denied = Enumerable.Range(0, movesList.Count).ToList();
         else
         {
-            var moves = movesList.Select(mObj=> {
-                var m=ToList(mObj);
-                return ((ToInt(m[0]), ToInt(m[1])), (ToInt(m[2]), ToInt(m[3])));
-            }).ToList();
+            var moves = new List<((int, int), (int, int))>(movesList.Count);
+            foreach (var mObj in movesList)
+            {
+                var m = ToList(mObj);
+                moves.Add(((ToInt(m[0]), ToInt(m[1])), (ToInt(m[2]), ToInt(m[3]))));
+            }
             var failed = grid2.CheckMoves(moves, context);
             denied = failed.OrderBy(x=>x).ToList();
         }
@@ -671,7 +677,6 @@ public class InputFuncs
         else connection.SendCommand("moves_ok", new List<object?>{ seq, newKey }, []);
     }
 
-    [InputFunc("map_edit_legend")]
     public void MapEditLegendHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         if (args.Count < 3)
@@ -690,16 +695,18 @@ public class InputFuncs
         if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []); return; }
         var legend = ToList(legendObj);
         if (legend.Count>200) { connection.SendCommand("map_edit_reject", new List<object?>{ "Too many legend entries (max 200)." }, []); return; }
+        // Single validating parse: normalize once per entry, in index order
+        // with first-failure reject, and share the dicts with the apply phase.
+        var parsedLegend = new List<Dictionary<string, object?>>(legend.Count);
         for(int idx=0; idx<legend.Count; idx++)
         {
-            var entry = legend[idx];
-            // Normalize JsonElement to dict if needed
-            object? norm = NormalizeDict(entry) ?? entry;
-            if (!IsLegendEntry(norm))
+            var dict = NormalizeDict(legend[idx]);
+            if (dict is null || !IsLegendEntry(dict))
             {
                 connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid legend entry at index {idx}." }, []);
                 return;
             }
+            parsedLegend.Add(dict);
         }
         var result = ConsumeOrReply(connection, key, seq);
         if (result is null) return;
@@ -718,10 +725,9 @@ public class InputFuncs
             // stored winner; a locally built loser is dropped, not last-wins.
             mi = mh.GetOrAddMapInfo(result.Chain.Area, result.Chain.Z, mi);
         }
-        List<LegendEntry> newEntries = [];
-        foreach (var eObj in legend)
+        List<LegendEntry> newEntries = new(parsedLegend.Count);
+        foreach (var dict in parsedLegend)
         {
-            if (NormalizeDict(eObj) is not { } dict) continue;
             var le = new LegendEntry();
             le.Symbol = dict.TryGetValue("symbol", out var sy) ? sy as string : null;
             var desc = dict.TryGetValue("desc", out var de) ? de : null;
@@ -732,8 +738,12 @@ public class InputFuncs
                 if (co is List<object?> lst && lst.Count>=2) le.Coord = (ToInt(lst[0]), ToInt(lst[1]));
                 else if (co is System.Text.Json.JsonElement je2 && je2.ValueKind==System.Text.Json.JsonValueKind.Array)
                 {
-                    var arr = je2.EnumerateArray().Select(x=> x.TryGetInt32(out var iv)?iv:0).ToArray();
-                    if (arr.Length>=2) le.Coord=(arr[0],arr[1]);
+                    int coordLen = je2.GetArrayLength();
+                    int[] coordArr = new int[coordLen];
+                    int coordIdx = 0;
+                    foreach (var x in je2.EnumerateArray())
+                        coordArr[coordIdx++] = x.TryGetInt32(out var iv) ? iv : 0;
+                    if (coordArr.Length>=2) le.Coord=(coordArr[0],coordArr[1]);
                 }
             }
             else le.Coord=null;
@@ -769,8 +779,7 @@ public class InputFuncs
 public class ConnectionManager
 {
     // Port of manager.py:10-24 malformed throttling — now via ThrottleWindow
-    private static readonly Lock _malformedLock = new();
-    private static readonly Dictionary<string, double> _malformedLast = new();
+    private static readonly ThrottledLog _malformedLog = new(MalformedWindow);
     private const double MalformedWindow = 5.0; // port of manager.py:12
 
     private static string SummarizeRaw(string rawMessage, int limit = 80) // port of manager.py:14-15
@@ -781,15 +790,14 @@ public class ConnectionManager
     }
 
     private static bool ShouldLogMalformed(string host) // port of manager.py:17-24
-        => ThrottleWindow.ShouldLog(_malformedLast, _malformedLock, host, MalformedWindow);
+        => _malformedLog.ShouldLog(host);
 
     // Port of websocket.py:15-27 oversize throttling (per-host 5s window),
     // for the shared HandleCommand size cap .
-    private static readonly Lock _oversizeLock = new();
-    private static readonly Dictionary<string, double> _oversizeLast = new();
+    private static readonly ThrottledLog _oversizeLog = new(OversizeWindow);
     private const double OversizeWindow = 5.0; // port of websocket.py:13
     private static bool ShouldLogOversize(string host)
-        => ThrottleWindow.ShouldLog(_oversizeLast, _oversizeLock, host, OversizeWindow);
+        => _oversizeLog.ShouldLog(host);
 
     // Reference equality comparer — mirrors id(connection) at manager.py:52,113,125
     private sealed class ReferenceEqualityComparer : IEqualityComparer<BaseConnection>
@@ -870,6 +878,10 @@ public class ConnectionManager
         finally { _lock.ExitReadLock(); }
     }
 
+    // Registration-time host for per-IP accounting and disconnect: the
+    // snapshot taken at register time, else the live value, else "?".
+    private static string HostOf(BaseConnection c) => c.RegisteredHost ?? c.ClientHost ?? "?";
+
     // refusal teardown runs outside the manager write lock (see
     // RefuseConnection). Close() does task/socket work that used to stall
     // every register/disconnect/count op while the lock was held.
@@ -889,7 +901,7 @@ public class ConnectionManager
             {
                 var sameHost = _perIpCounts.TryGetValue(host, out var cnt) ? cnt : 0;
                 // if overwriting same conn_id, don't count itself twice — manager.py:88-91
-                if (_connections.TryGetValue(connId, out var existing) && (existing.RegisteredHost ?? existing.ClientHost ?? "?") == host)
+                if (_connections.TryGetValue(connId, out var existing) && HostOf(existing) == host)
                     sameHost--;
                 if (sameHost >= limit)
                     refusal = $"[Network] Refusing connection from {host}: per-IP limit ({limit}) reached";
@@ -907,7 +919,7 @@ public class ConnectionManager
             // handle overwrite: adjust old host count — manager.py:102-113
             if (_connections.TryGetValue(connId, out var old))
             {
-                var oldHost = old.RegisteredHost ?? old.ClientHost ?? "?";
+                var oldHost = HostOf(old);
                 if (oldHost == host) sameHostReregister = true;
                 else if (oldHost != "?" && oldHost != host)
                 {
@@ -984,7 +996,7 @@ public class ConnectionManager
     public virtual void Disconnect(BaseConnection connection)
     {
         string? connId = null;
-        var host = connection.RegisteredHost ?? connection.ClientHost ?? "?"; // port of manager.py:123
+        var host = HostOf(connection); // port of manager.py:123
         _lock.EnterWriteLock();
         try
         {
@@ -1092,7 +1104,13 @@ public class ConnectionManager
     private static object? StripInputValue(object? value)
     {
         if (value is string s) return GameUtils.StripTerminalEscapes(s); // port of manager.py:32-33
-        if (value is List<object?> lst) return lst.Select(StripInputValue).ToList(); // port of manager.py:34-35
+        if (value is List<object?> lst) // port of manager.py:34-35
+        {
+            var stripped = new List<object?>(lst.Count);
+            foreach (var item in lst)
+                stripped.Add(StripInputValue(item));
+            return stripped;
+        }
         if (value is Dictionary<string, object?> dict) // port of manager.py:36-37
         {
             Dictionary<string, object?> res = [];
@@ -1171,7 +1189,10 @@ public class ConnectionManager
         // Handlers run on game threadpool via connection's serialized input queue — manager.py:218-221
         if (_settings.StripInputEscapeSequences) // port of manager.py:222
         {
-            args = args.Select(StripInputValue).ToList(); // port of manager.py:223
+            var strippedArgs = new List<object?>(args.Count);
+            foreach (var item in args)
+                strippedArgs.Add(StripInputValue(item));
+            args = strippedArgs; // port of manager.py:223
             var boxed = StripInputValue(kwargs);
             if (boxed is Dictionary<string, object?> d) kwargs = d;
         }
@@ -1196,7 +1217,7 @@ public class ConnectionManager
         return el.ValueKind switch
         {
             JsonValueKind.String => el.GetString(),
-            JsonValueKind.Number => el.TryGetInt32(out var i) ? i : el.TryGetInt64(out var l) ? l : el.GetDouble(),
+            JsonValueKind.Number => ToJsonNumber(el),
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.Null => null,
@@ -1219,6 +1240,17 @@ public class ConnectionManager
             foreach (var prop in o.EnumerateObject()) dict[prop.Name] = JsonElementToObject(prop.Value);
             return dict;
         }
+    }
+
+    // Number conversion that preserves the narrowest fitting type: a chained
+    // ternary would unify int/long/double to double and silently widen every
+    // integer (breaking `is int` checks downstream), so plain if/returns box
+    // each arm exactly.
+    private static object ToJsonNumber(System.Text.Json.JsonElement el)
+    {
+        if (el.TryGetInt32(out var i)) return i;
+        if (el.TryGetInt64(out var l)) return l;
+        return el.GetDouble();
     }
 
     // For tests / introspection — expose internal state counts similar to Python's _connections

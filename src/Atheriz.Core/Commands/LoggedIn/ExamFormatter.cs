@@ -97,8 +97,8 @@ public static class ExamFormatter
     private static string ExpandId(int id)    {
         try
         {
-            var res = ObjectRegistry.Get(id);
-            if (res.Count > 0) return $"#{id} ({res[0].Name})";
+            var single = ObjectRegistry.GetSingle(id);
+            if (single is not null) return $"#{id} ({single.Name})";
         }
         catch (Exception) { }
         return $"#{id}";
@@ -194,7 +194,7 @@ public static class ExamFormatter
             {
                 int id = Convert.ToInt32(val);
                 if (id == -1) return "-1";
-                var name = ObjectRegistry.Get(id).FirstOrDefault()?.Name;
+                var name = ObjectRegistry.GetSingle(id)?.Name;
                 return name is not null ? $"{id} ({name})" : id.ToString();
             }
             catch (Exception) { }

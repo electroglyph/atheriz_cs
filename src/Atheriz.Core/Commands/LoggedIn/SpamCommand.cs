@@ -29,7 +29,7 @@ public sealed class SpamCommand : Command
         var existingNames = new HashSet<string>(
             ObjectRegistry.FilterBy(o => o.IsAccount).Select(o => o.Name),
             StringComparer.OrdinalIgnoreCase);
-        List<(string a, string p, string c)> created = [];
+        List<(string a, string c)> created = [];
         for (int idx = 1; idx <= count; idx++)
         {
             string an = $"account{idx}";
@@ -47,7 +47,7 @@ public sealed class SpamCommand : Command
                 else if (home is not null) character.MoveTo(home);
                 account.AddCharacter(character);
                 ObjectRegistry.AddObject(character);
-                created.Add((an, pw, cn));
+                created.Add((an, cn));
             }
             catch (InvalidOperationException) { go.Msg($"Account '{an}' already exists, skipping..."); }
             catch (Exception ex) { go.Msg($"Failed {an}: {ex.Message}"); }
@@ -66,7 +66,7 @@ public sealed class SpamCommand : Command
             // passwords are never persisted — account/character
             // names only (Python's plaintext password column removed).
             f.Write("# Account Name | Character Name\n");
-            foreach (var (a, _, c) in created)
+            foreach (var (a, c) in created)
                 f.Write($"{a}|{c}\n");
         }
         catch (Exception) { }

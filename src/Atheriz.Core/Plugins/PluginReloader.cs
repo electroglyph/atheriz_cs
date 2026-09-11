@@ -70,6 +70,9 @@ public static class PluginReloader
         return false;
     }
     private static bool IsExcluded(string p) => IsExcludedAssembly(p);
+    // Shared suppressed-log helper: the op string is preserved verbatim so
+    // the emitted text stays byte-identical to the inlined LogDebug calls.
+    private static void Suppress(string op, Exception ex) => AtherizLogger.LogDebug("Suppressed PluginReloader." + op + ": " + ex.Message, "PluginReloader");
     // Port of atheriz/reloader.py:340 _reload_game_logic — single load per assembly.
     // (The old pass1 scan-ALC existed only to count forward refs, then unloaded with
     // a stop-the-world triple GC while the gate was held; PluginLoader.Load scans
@@ -84,7 +87,7 @@ public static class PluginReloader
             await Task.Yield();
             var full = Path.GetFullPath(assemblyPath);
             if (!File.Exists(full)) { Console.Error.WriteLine($"[HotReload] Not found: {full}"); return false; }
-            if (_loader is not null) { try{_loader.Unload();}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ReloadAsync: " + logEx.Message, "PluginReloader"); } _loader=null; GC.Collect(); }
+            if (_loader is not null) { try{_loader.Unload();}catch (Exception logEx) { Suppress("ReloadAsync", logEx); } _loader=null; GC.Collect(); }
             _loader = new PluginLoader();
             try { _loader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
             Console.Error.WriteLine($"[HotReload] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
@@ -114,7 +117,7 @@ public static class PluginReloader
         foreach(var obj in live.ToList()){ try{if(PatchSingleObject(obj,newType))patched++;}catch(Exception ex){Console.Error.WriteLine($"[HotReload] patch {obj.Id}: {ex.Message}");} }
         // Only the live replacements need ResolveRelations (old instances are detached after AddObject rewire).
         var newLive=ObjectRegistry.FilterBy(o=>o.GetType()==newType);
-        foreach(var obj in newLive){ try{ obj.ResolveRelations(); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchLiveObjects: " + logEx.Message, "PluginReloader"); }}
+        foreach(var obj in newLive){ try{ obj.ResolveRelations(); }catch (Exception logEx) { Suppress("PatchLiveObjects", logEx); }}
         return patched;
     }
     /// <summary>
@@ -126,19 +129,19 @@ public static class PluginReloader
     private static void RewireReferences(GameObject oldObj, GameObject newObj)
     {
         foreach (var c in ObjectRegistry.FilterBy(o => o.IsChannel))
-            try { if (c is Channel ch) ch.ReplaceListener(newObj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RewireReferences: " + logEx.Message, "PluginReloader"); }
-        try { GlobalServices.GetMapHandler()?.ReplaceMapEntries(oldObj.Id, newObj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RewireReferences: " + logEx.Message, "PluginReloader"); }
+            try { if (c is Channel ch) ch.ReplaceListener(newObj); } catch (Exception logEx) { Suppress("RewireReferences", logEx); }
+        try { GlobalServices.GetMapHandler()?.ReplaceMapEntries(oldObj.Id, newObj); } catch (Exception logEx) { Suppress("RewireReferences", logEx); }
         if (newObj is Node nn)
         {
             try
             {
-                foreach (var g in SnapshotGrids(GlobalServices.GetNodeHandler())) try { g.ReplaceNodeValue(nn); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RewireReferences: " + logEx.Message, "PluginReloader"); }
+                foreach (var g in SnapshotGrids(GlobalServices.GetNodeHandler())) try { g.ReplaceNodeValue(nn); } catch (Exception logEx) { Suppress("RewireReferences", logEx); }
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RewireReferences: " + logEx.Message, "PluginReloader"); }
+            catch (Exception logEx) { Suppress("RewireReferences", logEx); }
         }
         // Own session (transient _session was restored onto newObj above).
         // Cross-session puppet-stack Prev refs are out of contract (no session registry).
-        try { newObj.Session?.ReplacePuppetRefs(newObj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RewireReferences: " + logEx.Message, "PluginReloader"); }
+        try { newObj.Session?.ReplacePuppetRefs(newObj); } catch (Exception logEx) { Suppress("RewireReferences", logEx); }
     }
     // Shared handler→areas→grids read-lock snapshot walk for RewireReferences
     // above and ReregisterTicks below. Per-site extras stay at their sites:
@@ -173,10 +176,10 @@ public static class PluginReloader
     {
         var oldType=oldObj.GetType();
         var saved=new Dictionary<string,object?>(StringComparer.Ordinal);
-        foreach(var fn in _transientFields){ var f=FindField(oldType,fn); if(f is not null) try{saved[fn]=f.GetValue(oldObj);}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }}
+        foreach(var fn in _transientFields){ var f=FindField(oldType,fn); if(f is not null) try{saved[fn]=f.GetValue(oldObj);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }}
         Dictionary<FieldInfo,object?> origSnap = [];
         var oldFields=GetAllFields(oldType);
-        foreach(var f in oldFields) try{origSnap[f]=f.GetValue(oldObj);}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
+        foreach(var f in oldFields) try{origSnap[f]=f.GetValue(oldObj);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
         var lk=oldObj.SyncRoot; bool taken=false;
         try{
             try{lk.EnterWriteLock(); taken=true;}catch{taken=false;}
@@ -186,9 +189,9 @@ public static class PluginReloader
                 if(_transientFields.Contains(fOld.Name)) continue;
                 if(!newByName.TryGetValue(fOld.Name,out var fNew)) continue;
                 if(fNew.IsInitOnly) continue;
-                try{ var v=fOld.GetValue(oldObj); if(v is null||fNew.FieldType.IsAssignableFrom(v.GetType())||fNew.FieldType.IsAssignableFrom(fOld.FieldType)||fNew.FieldType==typeof(object)) fNew.SetValue(newObj,v); else try{fNew.SetValue(newObj,v);}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
+                try{ var v=fOld.GetValue(oldObj); if(v is null||fNew.FieldType.IsAssignableFrom(v.GetType())||fNew.FieldType.IsAssignableFrom(fOld.FieldType)||fNew.FieldType==typeof(object)) fNew.SetValue(newObj,v); else try{fNew.SetValue(newObj,v);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
             }
-            foreach(var kv in saved){ var fNew=FindField(newType,kv.Key); if(fNew is not null&&!fNew.IsInitOnly) try{fNew.SetValue(newObj,kv.Value);}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); } }
+            foreach(var kv in saved){ var fNew=FindField(newType,kv.Key); if(fNew is not null&&!fNew.IsInitOnly) try{fNew.SetValue(newObj,kv.Value);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); } }
             // GetUninitializedObject skips field initializers, so readonly fields (e.g. _flags)
             // stay null — the copy loop above skips init-only fields. Backfill them from the
             // old instance (shared refs are safe: the old instance is detached after rewire).
@@ -203,25 +206,25 @@ public static class PluginReloader
                         if (v is not null) fNew.SetValue(newObj, v);
                     }
                 }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
+                catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
             }
             var lf=FindField(newType,"_lock");
-            if(lf is not null) try{ var cur=lf.GetValue(newObj); if(cur is null) lf.SetValue(newObj,saved.TryGetValue("_lock",out var v)?v:new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion)); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
-            try{newObj.Id=oldObj.Id;}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
+            if(lf is not null) try{ var cur=lf.GetValue(newObj); if(cur is null) lf.SetValue(newObj,saved.TryGetValue("_lock",out var v)?v:new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion)); }catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
+            try{newObj.Id=oldObj.Id;}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
             // release the old-object write lock BEFORE AddObject +
             // RewireReferences (which take channel/map/area/grid/session
             // locks). Holding it across inverted the registry→object order
             // of FilterBy while ReloadAsync holds WorldLock.
-            if(taken) try{lk.ExitWriteLock(); taken=false;}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
+            if(taken) try{lk.ExitWriteLock(); taken=false;}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
             ObjectRegistry.AddObject(newObj);
             // C# cannot swap __class__ in place like Python: AddObject replaced the id,
             // so rewire direct refs (channels/map/nodes/sessions hold instances, not ids).
             try { RewireReferences(oldObj, newObj); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Rewire {oldObj.Id}: {ex.Message}"); }
             return true;
         }catch{
-            try{ foreach(var kv in origSnap) try{kv.Key.SetValue(oldObj,kv.Value);}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }
+            try{ foreach(var kv in origSnap) try{kv.Key.SetValue(oldObj,kv.Value);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
             throw;
-        }finally{ if(taken) try{lk.ExitWriteLock();}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.PatchSingleObject: " + logEx.Message, "PluginReloader"); }}
+        }finally{ if(taken) try{lk.ExitWriteLock();}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }}
     }
     private static FieldInfo? FindField(Type t,string n){ var cur=t; while(cur is not null&&cur!=typeof(object)){ var f=cur.GetField(n,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic); if(f is not null) return f; cur=cur.BaseType; } return null; }
     private static List<FieldInfo> GetAllFields(Type t){ List<FieldInfo> l = []; var cur=t; while(cur is not null&&cur!=typeof(object)){ l.AddRange(cur.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.DeclaredOnly)); cur=cur.BaseType; } return l; }
@@ -236,7 +239,7 @@ public static class PluginReloader
                 try{nodes=grid.Nodes.Values.Where(n=>n.IsTickable).ToList();}finally{grid.Lock.ExitReadLock();}
                 foreach(var n in nodes) if(!tickables.Contains(n)) tickables.Add(n);
             }
-        }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ReregisterTicks: " + logEx.Message, "PluginReloader"); }
+        }catch (Exception logEx) { Suppress("ReregisterTicks", logEx); }
         RemoveTickDelegatesFor(ticker,tickables);
         foreach(var obj in tickables){
             double secs=1; try{secs=obj.TickSeconds;}catch{secs=1;} if(secs<=0) secs=1;
@@ -244,7 +247,7 @@ public static class PluginReloader
             // carries AtTick, so the old reflective tick-method lookup plus
             // Invoke was pure overhead with identical dispatch (all overrides,
             // no `new` shadows). No behavior change.
-            try{ Action act=()=>{try{obj.AtTick();}catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ReregisterTicks: " + logEx.Message, "PluginReloader"); }}; ticker.AddCoro(act,secs);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] rereg {obj.Id}: {ex.Message}");}
+            try{ Action act=()=>{try{obj.AtTick();}catch (Exception logEx) { Suppress("ReregisterTicks", logEx); }}; ticker.AddCoro(act,secs);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] rereg {obj.Id}: {ex.Message}");}
         }
     }
     private static void RemoveTickDelegatesFor(AsyncTicker ticker, List<GameObject> tickables)
@@ -271,7 +274,7 @@ public static class PluginReloader
                     if (d is Action a) ticker.RemoveCoro(a, iv);
                     else if (d is Func<Task> f) ticker.RemoveCoro(f, iv);
                 }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.RemoveTickDelegatesFor: " + logEx.Message, "PluginReloader"); }
+                catch (Exception logEx) { Suppress("RemoveTickDelegatesFor", logEx); }
             }
         }
     }
@@ -344,7 +347,7 @@ public static class PluginReloader
     {
         int added = 0;
         var searchDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try { searchDirs.Add(Directory.GetCurrentDirectory()); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.DiscoverGameAssembly: " + logEx.Message, "PluginReloader"); }
+        try { searchDirs.Add(Directory.GetCurrentDirectory()); } catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
         try
         {
             var sp = settings.SavePath;
@@ -354,10 +357,10 @@ public static class PluginReloader
                 var gameRoot = Path.GetDirectoryName(Path.GetFullPath(abs));
                 if (!string.IsNullOrWhiteSpace(gameRoot) && Directory.Exists(gameRoot)) searchDirs.Add(gameRoot);
                 // also parent of gameRoot (handles save/ inside mygame)
-                try { var parent = Path.GetDirectoryName(gameRoot!); if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent)) searchDirs.Add(parent); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.DiscoverGameAssembly: " + logEx.Message, "PluginReloader"); }
+                try { var parent = Path.GetDirectoryName(gameRoot!); if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent)) searchDirs.Add(parent); } catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.DiscoverGameAssembly: " + logEx.Message, "PluginReloader"); }
+        catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
         foreach (var dir in searchDirs)
         {
             string[] csprojs;
@@ -389,7 +392,7 @@ public static class PluginReloader
                         foreach (var cs in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
                             if (File.GetLastWriteTimeUtc(cs) > dllTime) { needBuild = true; break; }
                     }
-                    catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.DiscoverGameAssembly: " + logEx.Message, "PluginReloader"); }
+                    catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
                 }
                 // Reload never shells a compiler (pipe-deadlock + trust: a dropped-in
                 // .csproj must not trigger compilation). Only use already-built dlls.

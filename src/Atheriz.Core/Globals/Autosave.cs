@@ -33,6 +33,9 @@ public static class Autosave
 
     private static double IntervalSeconds(AtherizSettings s) => s.AutosaveMinutes * 60.0;
 
+    private static T Resolve<T>(T? arg, ref T? cached, Func<T> getter) where T : class
+        => arg ?? Volatile.Read(ref cached) ?? getter();
+
     /// <summary>
     /// Mirrors <c>autosave_tick</c>: saves objects, map, node, time.
     /// Failures are collected and logged; channel msg stubbed.
@@ -95,7 +98,7 @@ public static class Autosave
         {
             // volatile read — written under _lock by Start/Stop on
             // other threads; a torn read would save via a stale handler.
-            var mh = mapHandler ?? Volatile.Read(ref _cachedMap) ?? GlobalServices.GetMapHandler();
+            var mh = Resolve(mapHandler, ref _cachedMap, GlobalServices.GetMapHandler);
             // Save into the explicit-settings DB, not the ambient one.
             // The parameterless Save() persists singleton state via the ambient
             // path — under explicit settings that tore the world (objects in
@@ -107,7 +110,7 @@ public static class Autosave
         // node — Port of autosave.py:27 get_node_handler().save() singleton reuse
         SaveSection("node", db =>
         {
-            var nh = nodeHandler ?? Volatile.Read(ref _cachedNodes) ?? GlobalServices.GetNodeHandler();
+            var nh = Resolve(nodeHandler, ref _cachedNodes, GlobalServices.GetNodeHandler);
             // Explicit-settings DB (see map section above).
             nh.Save(db);
         });
@@ -117,7 +120,7 @@ public static class Autosave
         {
             SaveSection("time", db =>
             {
-                var gt = gameTime ?? Volatile.Read(ref _cachedTime) ?? GlobalServices.GetGameTime();
+                var gt = Resolve(gameTime, ref _cachedTime, GlobalServices.GetGameTime);
                 // Explicit-settings DB (see map section above).
                 gt.Save(db);
             });

@@ -15,6 +15,25 @@ public partial class Node
         }
         finally { SyncRoot.ExitWriteLock(); }
     }
+    // Atomic insert-if-absent core for the noun command: the check and the
+    // insert share one write hold, so concurrent adds of the same new noun
+    // cannot both report "Added". Returns true when it inserted (absent),
+    // false when the noun already exists (existing text kept — the caller
+    // overwrites via AddNoun and reports "Updated"). Same lowered-key storage
+    // as AddNoun, so bytes match either path.
+    public bool AddNounIfAbsent(string key, string desc)
+    {
+        SyncRoot.EnterWriteLock();
+        try
+        {
+            var lowered = key.ToLowerInvariant();
+            if (Nouns.ContainsKey(lowered)) return false;
+            Nouns[lowered] = desc;
+            IsModified = true;
+            return true;
+        }
+        finally { SyncRoot.ExitWriteLock(); }
+    }
     // Port of nodes.py:516 remove_noun
     public void RemoveNoun(string key)
     {
@@ -78,9 +97,9 @@ public partial class Node
     // before resolve, never after.
     internal string? TryResolveLookTarget(string name, GameObject looker)
     {
-        var noun = GetNoun(name.ToLowerInvariant());
+        var noun = GetNoun(name);
         if (noun is not null) return noun;
-        var link = GetLinks().FirstOrDefault(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || l.Aliases.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase)));
+        var link = FindLink(name);
         if (link is null) return null;
         var ln = NodeHandler.GetCurrent()?.GetNode(link.Coord);
         return ln?.ReturnAppearance(looker);
@@ -134,24 +153,34 @@ public partial class Node
         finally { SyncRoot.ExitReadLock(); }
     }
     // Port of nodes.py:657 add_link
-    public void AddLink(NodeLink link)
+    // Insert core shared with AddLinkIfAbsent: caller holds the write lock.
+    private bool AddLinkRawNoLock(NodeLink link)
     {
-        SyncRoot.EnterWriteLock();
-        try
-        {
-            if (Links.Count > 0 && Links.Contains(link)) return;
-            if (Links.Count == 0) Links = [link];
-            else Links.Add(link);
-            IsModified = true;
-        }
-        finally { SyncRoot.ExitWriteLock(); }
-        // notify occupants
-        foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddLink: " + logEx.Message, "Node"); }
+        if (Links.Count > 0 && Links.Contains(link)) return false;
+        if (Links.Count == 0) Links = [link];
+        else Links.Add(link);
+        IsModified = true;
+        return true;
+    }
+    // Publish tail shared with AddLinkIfAbsent: runs lock-free after release.
+    // logContext keeps the per-caller label.
+    private void PublishLinkAdded(NodeLink link, string logContext)
+    {
+        foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + logContext + ": " + logEx.Message, "Node"); }
         if (link.Coord.Area != Coord.Area)
         {
             var nh = NodeHandler.GetCurrent();
             nh?.AddTransition(new Transition(Coord, link.Coord, link.Name));
         }
+    }
+    public void AddLink(NodeLink link)
+    {
+        bool added;
+        SyncRoot.EnterWriteLock();
+        try { added = AddLinkRawNoLock(link); }
+        finally { SyncRoot.ExitWriteLock(); }
+        if (!added) return;
+        PublishLinkAdded(link, "Node.AddLink");
     }
     // Port of nodes.py:677
     public bool AddLinkIfAbsent(string name, Func<NodeLink> factory)
@@ -163,23 +192,17 @@ public partial class Node
         try { if (HasLinkNameNoLock(name)) return false; }
         finally { SyncRoot.ExitReadLock(); }
         var link = factory();
+        bool added;
         SyncRoot.EnterWriteLock();
         try
         {
             if (HasLinkNameNoLock(name)) return false;
             // inline add_link logic but avoid double lock
-            if (Links.Count > 0 && Links.Contains(link)) return false;
-            if (Links.Count == 0) Links = [link];
-            else Links.Add(link);
-            IsModified = true;
+            added = AddLinkRawNoLock(link);
         }
         finally { SyncRoot.ExitWriteLock(); }
-        foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddLinkIfAbsent: " + logEx.Message, "Node"); }
-        if (link.Coord.Area != Coord.Area)
-        {
-            var nh = NodeHandler.GetCurrent();
-            nh?.AddTransition(new Transition(Coord, link.Coord, link.Name));
-        }
+        if (!added) return false;
+        PublishLinkAdded(link, "Node.AddLinkIfAbsent");
         return true;
     }
     // Port of nodes.py:688
@@ -284,7 +307,7 @@ public partial class Node
     // stays here. Node delivery keeps catch-all fallback semantics
     // (nodeSemantics: true): any parser failure falls back to raw text and
     // raiseErrors never throws — unlike the base overload.
-    public void MsgContents(string? text, List<GameObject>? exclude = null, GameObject? fromObj = null, Dictionary<string, object?>? mapping = null, bool raiseErrors = false, string? msgType = null)
+    public void MsgContents(string? text, IEnumerable<GameObject>? exclude = null, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, bool raiseErrors = false, string? msgType = null)
     {
         ContentUtils.EmitToContents(GetContents(), this, text, fromObj, mapping, exclude, msgType, raiseErrors, nodeSemantics: true);
     }
@@ -309,7 +332,6 @@ public partial class Node
     // Port of nodes.py:863 get_display_exits
     public string GetDisplayExits(GameObject? looker = null)
     {
-        if (Links is null) return "";
         string names;
         SyncRoot.EnterReadLock();
         try { names = string.Join(", ", Links.Select(l => l.Name)); }
@@ -358,12 +380,9 @@ public partial class Node
     public override string ReturnAppearance(GameObject? looker = null)
     {
         if (looker is null) return "You see nothing here.";
-        const string tmpl = "{name}{desc}{doors}{exits}{characters}{things}";
-        return tmpl.Replace("{name}", GetDisplayName(looker))
-                   .Replace("{desc}", GetDisplayDesc(looker))
-                   .Replace("{doors}", GetDisplayDoors(looker))
-                   .Replace("{exits}", GetDisplayExits(looker))
-                   .Replace("{characters}", GetDisplayCharacters(looker))
-                   .Replace("{things}", GetDisplayThings(looker));
+        // Parts concatenate with no separators; each part emits literally, so
+        // a placeholder token inside user-controlled text (e.g. "{desc}" in a
+        // name) stays as-is instead of being swallowed by a later pass.
+        return string.Concat(GetDisplayName(looker), GetDisplayDesc(looker), GetDisplayDoors(looker), GetDisplayExits(looker), GetDisplayCharacters(looker), GetDisplayThings(looker));
     }
 }

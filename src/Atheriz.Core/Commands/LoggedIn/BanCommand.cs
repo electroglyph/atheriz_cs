@@ -19,8 +19,7 @@ public sealed class BanCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { caller.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var targetName = pa.GetString("target");
         if (string.IsNullOrWhiteSpace(targetName)) { caller.Msg(PrintHelp()); return; }
         var reason = pa.GetString("reason");
@@ -89,8 +88,7 @@ public sealed class UnbanCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { caller.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var targetName = pa.GetString("target");
         if (string.IsNullOrWhiteSpace(targetName)) { caller.Msg(PrintHelp()); return; }
         bool wantAccount = pa.GetBool("account");

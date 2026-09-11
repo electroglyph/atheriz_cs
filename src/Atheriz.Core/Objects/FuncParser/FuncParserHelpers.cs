@@ -95,7 +95,7 @@ public static class FuncParserHelpers
     {
         width ??= 78;
         width = Math.Min(width.Value, MaxTextWidth);
-        align = new[] { "c", "l", "r" }.Contains(align) ? align : "c";
+        align = align switch { "c" or "l" or "r" => align, _ => "c" };
         fillchar = string.IsNullOrEmpty(fillchar) ? " " : fillchar[0].ToString();
         int w = DisplayLen(text);
         if (w >= width) return text;
@@ -280,33 +280,40 @@ public static class FuncParserHelpers
     // --- SafeConvertToTypes port (funcparser_helpers.py:404) ---
     // Single canonical shape: a ValueTuple of (arg converters, kwarg converters).
     // All call sites pass this shape, so no runtime shape-sniffing is needed.
+    /// <summary>
+    /// Converts <paramref name="args"/> entries and <paramref name="kwargs"/> values
+    /// through the supplied converters, in place.
+    /// Caller ownership: both <paramref name="args"/> and <paramref name="kwargs"/>
+    /// are consumed, not retained — converted values overwrite the caller's array
+    /// slots and dictionary entries. The kwargs path always mutated in place; the
+    /// args path matches it. Callers retaining their inputs must pass a copy.
+    /// </summary>
     public static (object?[] args, Dictionary<string,object?> kwargs) SafeConvertToTypes((object?[] argConvs, Dictionary<string,object?> kwConvs) converters, object?[] args, Dictionary<string,object?> kwargs, bool raiseErrors = true)
     {
         var argList = converters.argConvs?.ToList() ?? [];
         var kwDict = converters.kwConvs ?? [];
-        // Convert args
+        // Convert args in place: the array is owned by the caller (see contract
+        // above), so no defensive copy — converted values overwrite each slot.
         if(args is not null && argList.Count>0){
-            var argsCopy = args.ToList();
-            for(int i=0;i< Math.Min(argsCopy.Count, argList.Count); i++){
+            for(int i=0;i< Math.Min(args.Length, argList.Count); i++){
                 var conv = argList[i];
                 string convName = conv?.ToString() ?? "";
                 if(convName=="py" || convName=="python") conv = (Func<object?,object?>)(o=> _SafeEval(o));
                 try{
                     if(conv is Type tp){
-                        if(argsCopy[i] is string s && tp==typeof(int) && int.TryParse(s, out var iv)) argsCopy[i]=iv;
-                        else if(argsCopy[i] is string s2 && tp==typeof(float) && double.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var dv)) argsCopy[i]=dv;
-                        else if(tp==typeof(string)) argsCopy[i]=argsCopy[i]?.ToString();
-                        else argsCopy[i]= Convert.ChangeType(argsCopy[i], tp);
+                        if(args[i] is string s && tp==typeof(int) && int.TryParse(s, out var iv)) args[i]=iv;
+                        else if(args[i] is string s2 && tp==typeof(float) && double.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var dv)) args[i]=dv;
+                        else if(tp==typeof(string)) args[i]=args[i]?.ToString();
+                        else args[i]= Convert.ChangeType(args[i], tp);
                     }else if(conv is Delegate del){
-                        argsCopy[i]= DelegateInvoker.Invoke(del, new object?[]{ argsCopy[i] });
+                        args[i]= DelegateInvoker.Invoke(del, new object?[]{ args[i] });
                     }else if(conv is Func<object?,object?> fn){
-                        argsCopy[i]= fn(argsCopy[i]);
+                        args[i]= fn(args[i]);
                     }
                 }catch{
                     if(raiseErrors) throw;
                 }
             }
-            args = argsCopy.ToArray();
         }
         if(kwDict.Count>0 && kwargs is not null){
             foreach(var kv in kwDict){

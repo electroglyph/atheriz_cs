@@ -14,8 +14,7 @@ public sealed class EmoteCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var p)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { p.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var lst = pa.GetList("text");
         if (lst.Count > 0 && p.ResolveLocationObject() is not null)
         {

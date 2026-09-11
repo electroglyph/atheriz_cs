@@ -68,18 +68,28 @@ public static class GlobalServices
     // Port of get.py:169-176 get_node_handler
     // the singleton owner publishes itself as current explicitly
     // (the ctor no longer hijacks it).
-    public static NodeHandler GetNodeHandler() => GetOrCreateSingleton(ref _nodeHandler, () => { var h = new NodeHandler(autoLoad: true); NodeHandler.SetCurrent(h); return h; });
+    // Null settings means ambient: the parameterless overload keeps the
+    // ambient Load() path instead of passing Global explicitly, preserving
+    // the ambient-vs-explicit DB-resolution difference.
+    private static NodeHandler CreateNodeHandler(AtherizSettings? settings)
+    {
+        var h = settings is null ? new NodeHandler(autoLoad: true) : new NodeHandler(settings, autoLoad: true);
+        NodeHandler.SetCurrent(h);
+        return h;
+    }
+    public static NodeHandler GetNodeHandler() => GetOrCreateSingleton(ref _nodeHandler, () => CreateNodeHandler(null));
     // Settings-pinned boot: first creation loads from settings.SavePath instead
     // of the ambient path, so DoStartup(settings) uses one database .
-    public static NodeHandler GetNodeHandler(AtherizSettings settings) => GetOrCreateSingleton(ref _nodeHandler, () => { var h = new NodeHandler(settings, autoLoad: true); NodeHandler.SetCurrent(h); return h; });
+    public static NodeHandler GetNodeHandler(AtherizSettings settings) => GetOrCreateSingleton(ref _nodeHandler, () => CreateNodeHandler(settings));
 
+    private static MapHandler CreateMapHandler(AtherizSettings settings) => new(settings, autoLoad: true);
     // Port of get.py:129-136 get_map_handler
     public static MapHandler GetMapHandler() => GetOrCreateSingleton(ref _mapHandler, () =>
     {
         var settings = AtherizSettings.Global;
-        return new MapHandler(settings, autoLoad: true);
+        return CreateMapHandler(settings);
     });
-    public static MapHandler GetMapHandler(AtherizSettings settings) => GetOrCreateSingleton(ref _mapHandler, () => new MapHandler(settings, autoLoad: true));
+    public static MapHandler GetMapHandler(AtherizSettings settings) => GetOrCreateSingleton(ref _mapHandler, () => CreateMapHandler(settings));
 
     // Port of get.py:69-76 get_game_time
     public static GameTime GetGameTime() => GetOrCreateSingleton(ref _gameTime, () =>
@@ -197,27 +207,29 @@ public static class GlobalServices
     }
 
     // Port of startstop.py:78-81 clearing singletons on shutdown: _ASYNC_THREAD_POOL=None etc
+    // Call with _singletonLock write held. Clears more than the three Python
+    // names: world handlers must release so the next boot reloads instead of
+    // resurrecting stale in-memory world, and command sets are rebuilt lazily
+    // (reusing them across a world reload keeps references to discarded world).
+    private static void ClearHoldersLocked()
+    {
+        _asyncThreadPool = null;
+        _asyncTicker = null;
+        _nodeHandler = null;
+        _mapHandler = null;
+        _gameTime = null;
+        _serverChannel = null;
+        _loggedInCmdSet = null;
+        _unloggedInCmdSet = null;
+        _connectionManager = null;
+    }
+
     internal static void ClearForShutdown()
     {
         _singletonLock.EnterWriteLock();
         try
         {
-            _asyncThreadPool = null;
-            _asyncTicker = null;
-            _connectionManager = null;
-            // Note: Python clears only those three under _SINGLETON_LOCK; we also clear channel cache lazily on next call
-            // For completeness also clear channel cache
-            _serverChannel = null;
-            // Shutdown must release world handlers so the next boot reloads
-            // instead of resurrecting stale in-memory world (like Reset).
-            _nodeHandler = null;
-            _mapHandler = null;
-            _gameTime = null;
-            // command sets too — they are rebuilt lazily on next
-            // boot, and reusing instances across a world reload keeps
-            // references to the discarded world (Reset() already clears them).
-            _loggedInCmdSet = null;
-            _unloggedInCmdSet = null;
+            ClearHoldersLocked();
         }
         finally { _singletonLock.ExitWriteLock(); }
     }
@@ -228,15 +240,7 @@ public static class GlobalServices
         _singletonLock.EnterWriteLock();
         try
         {
-            _asyncThreadPool = null;
-            _asyncTicker = null;
-            _nodeHandler = null;
-            _mapHandler = null;
-            _gameTime = null;
-            _serverChannel = null;
-            _loggedInCmdSet = null;
-            _unloggedInCmdSet = null;
-            _connectionManager = null;
+            ClearHoldersLocked();
         }
         finally { _singletonLock.ExitWriteLock(); }
         // Also reset underlying registries that are not singletons but global
@@ -244,30 +248,17 @@ public static class GlobalServices
         try { ConnectionManager.GlobalInstance = null; } catch (Exception) { }
     }
 
-    public static AsyncTicker? TryGetTicker()
+    private static T? TryRead<T>(ref T? field) where T : class
     {
-        try { var snap = Volatile.Read(ref _asyncTicker); return snap; } catch { return null; }
+        try { return Volatile.Read(ref field); } catch { return null; }
     }
-    public static AsyncThreadPool? TryGetPool()
-    {
-        try { var snap = Volatile.Read(ref _asyncThreadPool); return snap; } catch { return null; }
-    }
-    public static GameTime? TryGetGameTime()
-    {
-        try { var snap = Volatile.Read(ref _gameTime); return snap; } catch { return null; }
-    }
-    public static MapHandler? TryGetMapHandler()
-    {
-        try { var snap = Volatile.Read(ref _mapHandler); return snap; } catch { return null; }
-    }
-    public static NodeHandler? TryGetNodeHandler()
-    {
-        try { var snap = Volatile.Read(ref _nodeHandler); return snap; } catch { return null; }
-    }
-    public static ConnectionManager? TryGetConnectionManager()
-    {
-        try { var snap = Volatile.Read(ref _connectionManager); return snap; } catch { return null; }
-    }
+
+    public static AsyncTicker? TryGetTicker() => TryRead(ref _asyncTicker);
+    public static AsyncThreadPool? TryGetPool() => TryRead(ref _asyncThreadPool);
+    public static GameTime? TryGetGameTime() => TryRead(ref _gameTime);
+    public static MapHandler? TryGetMapHandler() => TryRead(ref _mapHandler);
+    public static NodeHandler? TryGetNodeHandler() => TryRead(ref _nodeHandler);
+    public static ConnectionManager? TryGetConnectionManager() => TryRead(ref _connectionManager);
 
     // Typed singleton override (F001: replaces GlobalServices._nodeHandler/_mapHandler
     // reflection writes in MazeCommand). Same-lock assignment, no behavior change.

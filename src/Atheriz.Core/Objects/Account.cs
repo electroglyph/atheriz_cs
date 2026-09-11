@@ -11,7 +11,7 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public class Account : GameObject
 {
-    public new static bool _is_thread_safe = true;
+    internal new static bool _is_thread_safe = true;
     public static bool GroupSave => false; // Fix for test_account.py:39
 
     private string _passwordHash = "";
@@ -249,20 +249,20 @@ public class Account : GameObject
         // restore account extras if present (private fields direct, no dirty mark)
         if (dto.Extra.TryGetValue("password", out var pw))
         {
-            if (pw.ValueKind == System.Text.Json.JsonValueKind.String) acc._passwordHash = pw.GetString() ?? "";
-            else acc._passwordHash = pw.GetRawText().Trim('"');
+            acc._passwordHash = ReadExtraString(pw);
         }
         if (dto.Extra.TryGetValue("characters", out var ch) && ch.ValueKind == System.Text.Json.JsonValueKind.Array)
             acc._characters = ch.EnumerateArray().Select(e => e.GetInt32()).ToList();
         else if (!dto.Extra.ContainsKey("characters")) acc._characters = [];
         if (dto.Extra.TryGetValue("banReason", out var br))
         {
-            if (br.ValueKind == System.Text.Json.JsonValueKind.String) acc._banReason = br.GetString() ?? "";
-            else acc._banReason = br.GetRawText().Trim('"');
+            acc._banReason = ReadExtraString(br);
         }
         if (dto.Extra.TryGetValue("loggedIn", out var li) && li.ValueKind == System.Text.Json.JsonValueKind.True) acc._loggedIn = true;
         else acc._loggedIn = false;
         acc.IsModified = wantModified;
         return acc;
     }
+
+    private static string ReadExtraString(System.Text.Json.JsonElement el) => el.ValueKind == System.Text.Json.JsonValueKind.String ? el.GetString() ?? "" : el.GetRawText().Trim('"');
 }

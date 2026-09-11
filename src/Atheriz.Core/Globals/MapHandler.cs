@@ -252,9 +252,10 @@ public class MapInfo
         return (string.Join("\n", lines), minX, maxY);
     }
 
-    public static (bool N, bool S, bool E, bool W) GetDirs(Dictionary<(int X, int Y), string> grid, (int X, int Y) coord, List<string> chars)
-        => GetDirs(grid, coord, new HashSet<string>(chars));
-
+    // The List<string> overload was removed; callers pass HashSet<string> directly
+    // to avoid a per-call copy. This narrows the public surface: external game
+    // code calling the removed overload will fail to compile. No in-repo callers
+    // remain, but out-of-repo callers cannot be verified from this tree.
     public static (bool N, bool S, bool E, bool W) GetDirs(Dictionary<(int X, int Y), string> grid, (int X, int Y) coord, HashSet<string> chars)
     {
         bool n = false, s = false, e = false, w = false;
@@ -319,8 +320,7 @@ public class MapInfo
 
     public void PreRender()
     {
-        Lock.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             Dictionary<string, string> placeholderStyles = new()
             {
@@ -353,28 +353,24 @@ public class MapInfo
             PostGrid.EnsureCapacity(PreGrid.Count);
             foreach (var kv in PreGrid) PostGrid[kv.Key] = toPlace.TryGetValue(kv.Key, out var resolved) ? resolved : kv.Value;
         }
-        finally { Lock.ExitWriteLock(); }
     }
 
     public void UpdateGrid((int X, int Y) coord, string newSymbol)
     {
         bool shouldRender;
-        Lock.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             PreGrid[coord] = newSymbol;
             MapChanged = true;
             IsModified = true;
             shouldRender = _batchUpdate == 0;
         }
-        finally { Lock.ExitWriteLock(); }
         if (shouldRender) Render(true);
     }
 
     public IDisposable BatchUpdate()
     {
-        Lock.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             _batchUpdate++;
             if (PreGrid.Count == 0 && PostGrid.Count > 0)
@@ -382,7 +378,6 @@ public class MapInfo
                 foreach (var kv in PostGrid) PreGrid[kv.Key] = kv.Value;
             }
         }
-        finally { Lock.ExitWriteLock(); }
         return new BatchScope(this);
     }
 
@@ -396,13 +391,11 @@ public class MapInfo
             if (_disposed) return;
             _disposed = true;
             bool shouldRender;
-            _mi.Lock.EnterWriteLock();
-            try
+            using (_mi.WriteScope())
             {
                 _mi._batchUpdate--;
                 shouldRender = _mi._batchUpdate == 0 && _mi.MapChanged;
             }
-            finally { _mi.Lock.ExitWriteLock(); }
             if (shouldRender) _mi.Render(true);
         }
     }
@@ -423,10 +416,9 @@ public class MapInfo
             }
             if (loc is Persistence.Dto.LocationRef.ObjectLocation ol)
             {
-                var objs = Globals.ObjectRegistry.Get(ol.ObjectId);
-                if (objs.Count > 0)
+                var target = Globals.ObjectRegistry.GetSingle(ol.ObjectId);
+                if (target is not null)
                 {
-                    var target = objs[0];
                     if (target is Node n) { coord = (n.Coord.X, n.Coord.Y); return true; }
                     var tloc = target.Location;
                     if (tloc is Persistence.Dto.LocationRef.CoordLocation tcl) { coord = (tcl.Coord.X, tcl.Coord.Y); return true; }
@@ -466,7 +458,12 @@ public class MapInfo
                 objEntries.Add((o.Id, (sym, desc, c)));
             }
         }
-        var staticEntries = staticSnapshot.Where(e => e.Coord is not null).Select(e => (e.Symbol ?? "", e.Desc ?? "", e.Coord!.Value)).ToList();
+        var staticEntries = new List<(string, string, (int, int))>(staticSnapshot.Count);
+        foreach (var e in staticSnapshot)
+        {
+            if (e.Coord is not null)
+                staticEntries.Add((e.Symbol ?? "", e.Desc ?? "", e.Coord.Value));
+        }
         return (objEntries, staticEntries);
     }
 
@@ -504,8 +501,7 @@ public class MapInfo
         bool wasSuppressed;
         List<GameObject> objectsSnapshot = new();
         List<LegendEntry> staticSnapshot = new();
-        Lock.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             isOver = IsOverLegendCap();
             listenersSnapshot = Listeners.Values.ToList();
@@ -522,7 +518,6 @@ public class MapInfo
                 staticSnapshot = LegendEntries.ToList();
             }
         }
-        finally { Lock.ExitWriteLock(); }
 
         if (isOver && !wasSuppressed)
         {
@@ -535,9 +530,15 @@ public class MapInfo
         if (!isOver)
         {
             var (objEntries, staticEntries) = BuildEntries(objectsSnapshot, staticSnapshot);
+            // Shared filtered list across listeners absent from objEntries, like Render:
+            // read-only downstream (ProjectLegendEntries copies for the payload).
+            // If an at_legend_update hook mutates the received list it leaks to later
+            // listeners — same assumption Render makes for at_map_update (see simplify.md §8.1).
+            List<(string, string, (int, int))>? sharedEntries = null;
             foreach (var l in listenersSnapshot)
             {
-                Suppress(() => { l.AtLegendUpdate(EntriesFor(objEntries, staticEntries, l.Id), true, Name); }, "AtLegendUpdate");
+                var entries = EntriesForShared(objEntries, staticEntries, l.Id, ref sharedEntries);
+                Suppress(() => { l.AtLegendUpdate(entries, true, Name); }, "AtLegendUpdate");
             }
         }
     }
@@ -546,21 +547,16 @@ public class MapInfo
     {
         bool needsPre;
         long gen;
-        Lock.EnterReadLock();
-        try { needsPre = (force || MapChanged) && PreGrid.Count > 0; gen = _mapGen; }
-        finally { Lock.ExitReadLock(); }
+        using (ReadScope()) { needsPre = (force || MapChanged) && PreGrid.Count > 0; gen = _mapGen; }
         if (needsPre) PreRender();
-        Lock.EnterWriteLock();
-        try { if (_mapGen == gen) MapChanged = false; }
-        finally { Lock.ExitWriteLock(); }
+        using (WriteScope()) { if (_mapGen == gen) MapChanged = false; }
 
         List<GameObject> listeners;
         Dictionary<(int X, int Y), string> gridSnapshot;
         List<GameObject> objectsSnapshot;
         List<LegendEntry> staticSnapshot;
         bool showLegend;
-        Lock.EnterReadLock();
-        try
+        using (ReadScope())
         {
             showLegend = !IsOverLegendCap();
             listeners = Listeners.Values.ToList();
@@ -568,7 +564,6 @@ public class MapInfo
             staticSnapshot = LegendEntries.ToList();
             gridSnapshot = new Dictionary<(int X, int Y), string>(PostGrid);
         }
-        finally { Lock.ExitReadLock(); }
 
         var (objEntries, staticEntries) = BuildEntries(objectsSnapshot, staticSnapshot);
         List<(string, string, (int, int))>? sharedEntries = null;
@@ -609,40 +604,30 @@ public class MapInfo
 
     public virtual void AddListener(GameObject listener, bool notify = false)
     {
-        Lock.EnterWriteLock();
-        try { Listeners[listener.Id] = listener; }
-        finally { Lock.ExitWriteLock(); }
+        using (WriteScope()) { Listeners[listener.Id] = listener; }
         if (notify) Render(true);
     }
 
     public virtual void RemoveListener(GameObject listener)
     {
-        Lock.EnterWriteLock();
-        try { Listeners.Remove(listener.Id); }
-        finally { Lock.ExitWriteLock(); }
+        using (WriteScope()) { Listeners.Remove(listener.Id); }
     }
 
     public virtual void AddMapable(GameObject mapable, bool notify = true)
     {
-        Lock.EnterWriteLock();
-        try { Objects[mapable.Id] = mapable; }
-        finally { Lock.ExitWriteLock(); }
+        using (WriteScope()) { Objects[mapable.Id] = mapable; }
         if (notify) RenderLegend();
     }
 
     public virtual void RemoveMapable(GameObject mapable)
     {
-        Lock.EnterWriteLock();
-        try { Objects.Remove(mapable.Id); }
-        finally { Lock.ExitWriteLock(); }
+        using (WriteScope()) { Objects.Remove(mapable.Id); }
         RenderLegend();
     }
 
     public virtual void AddMapableList(IEnumerable<GameObject> mapables, bool notify = true)
     {
-        Lock.EnterWriteLock();
-        try { foreach (var m in mapables) Objects[m.Id] = m; }
-        finally { Lock.ExitWriteLock(); }
+        using (WriteScope()) { foreach (var m in mapables) Objects[m.Id] = m; }
         if (notify) RenderLegend();
     }
 
@@ -656,8 +641,7 @@ public class MapInfo
 
         public static MapInfoPersistDto FromDomain(MapInfo mi)
         {
-            mi.Lock.EnterReadLock();
-            try
+            using (mi.ReadScope())
             {
                 return new MapInfoPersistDto
                 {
@@ -667,7 +651,6 @@ public class MapInfo
                     LegendEntries = mi.LegendEntries.Select(LegendEntryDto.FromDomain).ToList(),
                 };
             }
-            finally { mi.Lock.ExitReadLock(); }
         }
 
         public MapInfo ToDomain(AtherizSettings settings)
@@ -819,13 +802,10 @@ public class MapHandler
             Lock.EnterWriteLock();
             try
             {
-                if (buffer.Count == 0)
+                bool shouldSwap = buffer.Count > 0 || (!dbCheckFailed && !dbHasRows);
+                if (!shouldSwap)
                 {
-                    if (dbCheckFailed || dbHasRows)
-                    {
-                        try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
-                    }
-                    else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; _removedSinceSave.RemoveWhere(k => _data.ContainsKey(k)); }
+                    try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
                 }
                 else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; _removedSinceSave.RemoveWhere(k => _data.ContainsKey(k)); }
             }
@@ -863,8 +843,7 @@ public class MapHandler
         // misses late edits at shutdown's single non-force save.
         List<((string Area, int Z) Key, MapInfo Info)> refs;
         HashSet<(string Area, int Z)> deletes;
-        Lock.EnterReadLock();
-        try
+        using (ReadScope())
         {
             refs = _data.Select(kv => (kv.Key, kv.Value)).ToList();
             // A key re-added after Clear() (SetMapInfo/GetOrCreate) is live
@@ -872,7 +851,6 @@ public class MapHandler
             deletes = new HashSet<(string Area, int Z)>(_removedSinceSave);
             deletes.ExceptWith(_data.Keys);
         }
-        finally { Lock.ExitReadLock(); }
 
         List<((string Area, int Z) Key, MapInfo.MapInfoPersistDto Dto, MapInfo Original)> snapshot = [];
         List<MapInfo> cleared = [];
@@ -882,9 +860,7 @@ public class MapHandler
         {
             foreach (var mi in cleared)
             {
-                mi.Lock.EnterWriteLock();
-                try { mi.MapChanged = true; mi.IsModified = true; }
-                finally { mi.Lock.ExitWriteLock(); }
+                using (mi.WriteScope()) { mi.MapChanged = true; mi.IsModified = true; }
             }
         }
 
@@ -893,8 +869,7 @@ public class MapHandler
             foreach (var (k, mi) in refs)
             {
                 bool wasChanged;
-                mi.Lock.EnterWriteLock();
-                try
+                using (mi.WriteScope())
                 {
                     wasChanged = mi.MapChanged || mi.IsModified;
                     if (wasChanged)
@@ -904,7 +879,6 @@ public class MapHandler
                         cleared.Add(mi);
                     }
                 }
-                finally { mi.Lock.ExitWriteLock(); }
 
                 // Skip unchanged maps before paying for the DTO snapshot.
                 if (!force && !wasChanged && !_settings.AlwaysSaveAll && !ObjectRegistry.AlwaysSaveAll) continue;
@@ -938,9 +912,7 @@ public class MapHandler
                 }
                 // Re-validate in-txn : a key removed then re-added
                 // after the snapshot must not be deleted at commit.
-                Lock.EnterReadLock();
-                try { deletes.ExceptWith(_data.Keys); }
-                finally { Lock.ExitReadLock(); }
+                using (ReadScope()) { deletes.ExceptWith(_data.Keys); }
                 foreach (var key in deletes)
                 {
                     var row = ctx.MapData.Find(key.Area, key.Z);
@@ -961,9 +933,7 @@ public class MapHandler
         // the tombstoned rows are now gone from the DB.
         if (deletes.Count > 0)
         {
-            Lock.EnterWriteLock();
-            try { _removedSinceSave.ExceptWith(deletes); }
-            finally { Lock.ExitWriteLock(); }
+            using (WriteScope()) { _removedSinceSave.ExceptWith(deletes); }
         }
     }
 
@@ -1045,8 +1015,8 @@ public class MapHandler
         if (loc is Persistence.Dto.LocationRef.CoordLocation cl) return cl.Coord;
         if (loc is Persistence.Dto.LocationRef.ObjectLocation ol)
         {
-            var target = ObjectRegistry.Get(ol.ObjectId);
-            if (target.Count > 0 && target[0] is Node n) return n.Coord;
+            var target = ObjectRegistry.GetSingle(ol.ObjectId);
+            if (target is Node n) return n.Coord;
         }
         // fallback: if GameObject is Node itself
         if (obj is Node node) return node.Coord;
@@ -1074,24 +1044,29 @@ public class MapHandler
         var coord = ExtractCoord(listener);
         if (coord is null) return;
         MapInfo? mi;
-        Lock.EnterReadLock();
-        try { _data.TryGetValue((coord.Value.Area, coord.Value.Z), out mi); }
-        finally { Lock.ExitReadLock(); }
+        using (ReadScope()) { _data.TryGetValue((coord.Value.Area, coord.Value.Z), out mi); }
         mi?.RemoveListener(listener);
+    }
+
+    // Shared move resolve: snapshot fromMap under the handler read lock,
+    // release, then GetOrCreate the destination. Covers snapshot + create
+    // only; add/remove/render/SendUnbackground stay per caller. The read hold
+    // is never carried across the create or any info lock (snapshot-then-mutate).
+    private void ResolveMoveMaps(Coord? fromCoord, Coord toCoord, out MapInfo? fromMap, out MapInfo toMap)
+    {
+        using (ReadScope())
+        {
+            fromMap = null;
+            if (fromCoord is not null)
+                _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
+        }
+        toMap = GetOrCreate(toCoord.Area, toCoord.Z);
     }
 
     public void MoveListener(GameObject listener, Coord toCoord, Coord? fromCoord = null)
     {
-        // Snapshot under the handler lock, then mutate via each MapInfo's own
-        // lock (never nested): handler->info nesting inverts ReplaceMapEntries'
-        // info-only discipline and risks deadlock once any path locks info->handler.
-        MapInfo? fromMap = null;
         bool areaChanged = fromCoord is not null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
-        using (ReadScope())
-        {
-            if (fromCoord is not null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
-        }
-        var toMap = GetOrCreate(toCoord.Area, toCoord.Z);
+        ResolveMoveMaps(fromCoord, toCoord, out var fromMap, out var toMap);
         fromMap?.RemoveListener(listener);
         toMap.AddListener(listener);
         if (areaChanged) SendUnbackground(listener);
@@ -1113,12 +1088,7 @@ public class MapHandler
             cur.Render(true);
             return;
         }
-        MapInfo? fromMap = null;
-        using (ReadScope())
-        {
-            if (fromCoord is not null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
-        }
-        var toMap = GetOrCreate(toCoord.Area, toCoord.Z);
+        ResolveMoveMaps(fromCoord, toCoord, out var fromMap, out var toMap);
         fromMap?.RemoveMapable(mapable);
         toMap.AddMapable(mapable);
         fromMap?.Render(false);
@@ -1130,28 +1100,21 @@ public class MapHandler
         if (fromCoord is not null && fromCoord.Value.Area == toCoord.Area && fromCoord.Value.Z == toCoord.Z)
         {
             var cur = GetOrCreate(toCoord.Area, toCoord.Z);
-            cur.Lock.EnterWriteLock();
-            try
+            using (cur.WriteScope())
             {
                 cur.Listeners[obj.Id] = obj;
                 cur.Objects[obj.Id] = obj;
             }
-            finally { cur.Lock.ExitWriteLock(); }
             cur.RenderLegend();
             cur.Render(true);
             return;
         }
-        MapInfo? fromMap = null;
         bool areaChanged = fromCoord is not null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
         // Snapshot under the handler lock, then mutate via each MapInfo's own
         // lock: the old code wrote fromMap/toMap.Listeners/Objects directly
         // while holding only the handler lock, racing Render/AddMapable which
         // take the info lock (lost entries / torn dictionaries).
-        using (ReadScope())
-        {
-            if (fromCoord is not null) _data.TryGetValue((fromCoord.Value.Area, fromCoord.Value.Z), out fromMap);
-        }
-        var toMap = GetOrCreate(toCoord.Area, toCoord.Z);
+        ResolveMoveMaps(fromCoord, toCoord, out var fromMap, out var toMap);
         if (fromMap is not null && !ReferenceEquals(fromMap, toMap))
         {
             fromMap.RemoveListener(obj);
@@ -1172,27 +1135,21 @@ public class MapHandler
     public void RemoveMapable(GameObject mapable, string fromArea, int fromZ)
     {
         MapInfo? fromMap;
-        Lock.EnterReadLock();
-        try { _data.TryGetValue((fromArea, fromZ), out fromMap); }
-        finally { Lock.ExitReadLock(); }
+        using (ReadScope()) { _data.TryGetValue((fromArea, fromZ), out fromMap); }
         fromMap?.RemoveMapable(mapable);
     }
 
     public void Clear()
     {
-        Lock.EnterWriteLock();
-        try
+        using (WriteScope())
         {
             foreach (var k in _data.Keys) _removedSinceSave.Add(k);
             _data.Clear();
         }
-        finally { Lock.ExitWriteLock(); }
     }
 
     public IReadOnlyDictionary<(string Area, int Z), MapInfo> Snapshot()
     {
-        Lock.EnterReadLock();
-        try { return new Dictionary<(string, int), MapInfo>(_data); }
-        finally { Lock.ExitReadLock(); }
+        using (ReadScope()) { return new Dictionary<(string, int), MapInfo>(_data); }
     }
 }

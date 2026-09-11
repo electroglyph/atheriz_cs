@@ -181,19 +181,19 @@ public class PortedSqliteTests
         nh.Save(force:true);
 
         // Unpatch the classes to simulate a fresh server start
-        foreach (var cls in new[] { typeof(GameObject), typeof(Channel), typeof(Account), typeof(Script), typeof(Node) })
-        {
-            var f = cls.GetField("_is_thread_safe", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.FlattenHierarchy);
-            if (f != null) f.SetValue(null, false);
-        }
+        GameObject._is_thread_safe = false;
+        Channel._is_thread_safe = false;
+        Account._is_thread_safe = false;
+        Script._is_thread_safe = false;
+        Node._is_thread_safe = false;
         // Load objects from DB
         ObjectRegistry.ClearAll();
         // Simulate fresh load where ensure_thread_safe would be re-applied: set flags true again
-        foreach (var cls in new[] { typeof(GameObject), typeof(Channel), typeof(Account), typeof(Script), typeof(Node) })
-        {
-            var f = cls.GetField("_is_thread_safe", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.FlattenHierarchy);
-            if (f != null) f.SetValue(null, true);
-        }
+        GameObject._is_thread_safe = true;
+        Channel._is_thread_safe = true;
+        Account._is_thread_safe = true;
+        Script._is_thread_safe = true;
+        Node._is_thread_safe = true;
         ObjectRegistry.LoadObjects(env.TempPath);
         var nh2 = new NodeHandler();
         nh2.Load(new AtherizDbContext(env.TempPath));
@@ -203,11 +203,11 @@ public class PortedSqliteTests
         var loadedScript = ObjectRegistry.Get(script.Id).FirstOrDefault();
         var loadedNode = nh2.GetNode(new Coord("TestAreaTS",10,10,0));
         // Test if classes have had ensure_thread_safe applied — via _is_thread_safe
-        Assert.True((bool)(typeof(GameObject).GetField("_is_thread_safe", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.FlattenHierarchy)!.GetValue(null) ?? false), "Object missing thread_safe patch!");
-        Assert.True((bool)(typeof(Channel).GetField("_is_thread_safe", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.FlattenHierarchy)!.GetValue(null) ?? false), "Channel missing thread_safe patch!");
-        Assert.True((bool)(typeof(Account).GetField("_is_thread_safe", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.FlattenHierarchy)!.GetValue(null) ?? false), "Account missing thread_safe patch!");
-        Assert.True((bool)(typeof(Script).GetField("_is_thread_safe", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.FlattenHierarchy)!.GetValue(null) ?? false), "Script missing thread_safe patch!");
-        Assert.True((bool)(typeof(Node).GetField("_is_thread_safe", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.FlattenHierarchy)!.GetValue(null) ?? false), "Node missing thread_safe patch!");
+        Assert.True(GameObject._is_thread_safe, "Object missing thread_safe patch!");
+        Assert.True(Channel._is_thread_safe, "Channel missing thread_safe patch!");
+        Assert.True(Account._is_thread_safe, "Account missing thread_safe patch!");
+        Assert.True(Script._is_thread_safe, "Script missing thread_safe patch!");
+        Assert.True(Node._is_thread_safe, "Node missing thread_safe patch!");
         // Also verify loaded instances exist
         Assert.NotNull(loadedObj);
         Assert.NotNull(loadedChan);

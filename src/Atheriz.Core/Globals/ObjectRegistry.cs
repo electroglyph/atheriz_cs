@@ -200,33 +200,30 @@ public static class ObjectRegistry
     public static void UnbanIp(string host) => TempBannedIps.Remove(host);
 
     // --- creation cooldowns (unified per host, ? bypass) ---
-    private static string CooldownKey(string host) => host;
     public static bool CreationCooldownActive(string host, double now)
     {
         if (host == "?") return false;
-        var key = CooldownKey(host);
-        if (!CreationCooldowns.TryGetValue(key, out var exp)) return false;
+        if (!CreationCooldowns.TryGetValue(host, out var exp)) return false;
         if (exp > now) return true;
-        CreationCooldowns.RemoveIfEqual(key, exp);
+        CreationCooldowns.RemoveIfEqual(host, exp);
         return false;
     }
     public static void ApplyCreationCooldown(string op, string host, double now, double cooldown)
     {
         if (host == "?" || cooldown <= 0) return;
-        CreationCooldowns.Set(CooldownKey(host), now + cooldown);
+        CreationCooldowns.Set(host, now + cooldown);
     }
     public static bool TryReserveCreationCooldown(string op, string host, double now, double cooldown)
     {
         if (host == "?") return true;
-        var key = CooldownKey(host);
         if (cooldown <= 0) return !CreationCooldownActive(host, now);
         // Atomic check+reserve on the dict's own lock (F005) — no snapshot, no outer lock.
-        return CreationCooldowns.CheckAndSet(key, now + cooldown, (exists, exp) => !exists || exp <= now);
+        return CreationCooldowns.CheckAndSet(host, now + cooldown, (exists, exp) => !exists || exp <= now);
     }
     public static void ClearCreationCooldown(string host)
     {
         if (host == "?") return;
-        CreationCooldowns.Remove(CooldownKey(host));
+        CreationCooldowns.Remove(host);
     }
 
     // --- failed login map exposed for parity ---
@@ -291,7 +288,14 @@ public static class ObjectRegistry
         // a lazy enumerable would execute arbitrary caller code under AllLock.
         var list = ids.ToList();
         AllLock.EnterReadLock();
-        try { return list.Select(id => AllObjects.TryGetValue(id, out var o) ? o : null).OfType<GameObject>().ToList(); }
+        try
+        {
+            List<GameObject> res = new(list.Count);
+            foreach (var id in list)
+                if (AllObjects.TryGetValue(id, out var o) && o is not null)
+                    res.Add(o);
+            return res;
+        }
         finally { AllLock.ExitReadLock(); }
     }
 
@@ -456,16 +460,14 @@ public static class ObjectRegistry
         catch (InvalidOperationException ex)
         {
             // Closed-DB guard is the IsClosed flag (no message sniffing).
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+            RunClosedDbGuard(ex, "load");
             AtherizLogger.LogWarning("database closed");
             return;
         }
         catch (Exception ex)
         {
             // Closed-DB races only (no message sniffing): anything else propagates.
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+            RunClosedDbGuard(ex, "load");
             return;
         }
         if (objects.Count == 0)
@@ -509,11 +511,11 @@ public static class ObjectRegistry
     // Closed-DB guard: the IsClosed flag decides (no message sniffing).
     // Rethrows anything raised while the DB is open; logs and swallows
     // only the closed-DB race.
-    private static void RunClosedDbGuard(Exception ex)
+    private static void RunClosedDbGuard(Exception ex, string what)
     {
         if (!AtherizDbContext.IsClosed)
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw();
-        AtherizLogger.LogWarning($"database closed; skipping load: {ex.Message}");
+        AtherizLogger.LogWarning($"database closed; skipping {what}: {ex.Message}");
     }
 
     public static void LoadObjects(string savePath)
@@ -522,13 +524,13 @@ public static class ObjectRegistry
         try { db = new AtherizDbContext(savePath); }
         catch (InvalidOperationException ex)
         {
-            RunClosedDbGuard(ex);
+            RunClosedDbGuard(ex, "load");
             return;
         }
         catch (Exception ex)
         {
             // Closed-DB races only (no message sniffing): anything else propagates.
-            RunClosedDbGuard(ex);
+            RunClosedDbGuard(ex, "load");
             return;
         }
         using (db)
@@ -536,25 +538,25 @@ public static class ObjectRegistry
             try { db.Database.EnsureCreated(); }
             catch (InvalidOperationException ex)
             {
-                RunClosedDbGuard(ex);
+                RunClosedDbGuard(ex, "load");
                 return;
             }
             catch (Exception ex)
             {
                 // Closed-DB races only (no message sniffing): anything else propagates.
-                RunClosedDbGuard(ex);
+                RunClosedDbGuard(ex, "load");
                 return;
             }
             try { LoadObjects(db); }
             catch (InvalidOperationException ex)
             {
-                RunClosedDbGuard(ex);
+                RunClosedDbGuard(ex, "load");
                 return;
             }
             catch (Exception ex)
             {
                 // Closed-DB races only (no message sniffing): anything else propagates.
-                RunClosedDbGuard(ex);
+                RunClosedDbGuard(ex, "load");
                 return;
             }
         }
@@ -567,12 +569,15 @@ public static class ObjectRegistry
         try { snapshot = AllObjects.Values.ToList(); }
         finally { AllLock.ExitReadLock(); }
 
-        var filtered = snapshot.Where(o =>
+        List<GameObject> filtered = new(snapshot.Count);
+        foreach (var o in snapshot)
         {
             o.SyncRoot.EnterReadLock();
-            try { return !o.IsTemporary && !o.IsNode && !o.IsDeleted; }
+            bool keep;
+            try { keep = !o.IsTemporary && !o.IsNode && !o.IsDeleted; }
             finally { o.SyncRoot.ExitReadLock(); }
-        }).ToList();
+            if (keep) filtered.Add(o);
+        }
 
         // Best-effort dirty-restore shared by every failure path below:
         // per-item suppression so one torn lock can't abort the restore
@@ -642,8 +647,7 @@ public static class ObjectRegistry
         catch (Exception ex)
         {
             // Closed-DB races only (no message sniffing): anything else propagates.
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
+            RunClosedDbGuard(ex, "save");
             Restore(pending.Select(p => p.obj));
             return;
         }
@@ -663,8 +667,7 @@ public static class ObjectRegistry
         catch (Exception ex)
         {
             // Closed-DB guard is the IsClosed flag (no message sniffing).
-            if (!AtherizDbContext.IsClosed) throw;
-            AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
+            RunClosedDbGuard(ex, "save");
             // restore cleared flags? none yet, but ensure pending objects stay dirty
             // We haven't built pending yet, so nothing to restore; just log warning not exception
             return;
@@ -675,16 +678,14 @@ public static class ObjectRegistry
             catch (Exception ex)
             {
                 // Closed-DB guard is the IsClosed flag (no message sniffing).
-                if (!AtherizDbContext.IsClosed) throw;
-                AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
+                RunClosedDbGuard(ex, "save");
                 return;
             }
             try { SaveObjects(db, force); }
             catch (Exception ex)
             {
                 // Closed-DB guard is the IsClosed flag (no message sniffing).
-                if (!AtherizDbContext.IsClosed) throw;
-                AtherizLogger.LogWarning($"database closed; skipping save: {ex.Message}");
+                RunClosedDbGuard(ex, "save");
                 return;
             }
         }

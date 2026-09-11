@@ -7,7 +7,6 @@ public sealed class HelpCommand : Command
     public override string Desc => "Show help for commands.";
     public override string Category => "General";
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("command", nargs: "?", help: "Command to get help on"); }
-    private static string PrintHelpFor(Command cmd) => HelpHelper.FormatFor(cmd);
 
     // Help-table width clamp shared by every caller shape below: the table
     // reserves two columns, and widths below 20 collapse.
@@ -42,8 +41,7 @@ public sealed class HelpCommand : Command
             caller.Msg("\n" + HelpFormatter.Format(cmds, sr, tw + 2));
             return;
         }
-        var cmd = cs.Get(query!);
-        if (cmd is not null && cmd.Access(caller) && !cmd.Hide) { caller.Msg(PrintHelpFor(cmd)); return; }
+        if (HelpHelper.TryShowGlobal(cs, caller, query!)) return;
         caller.Msg("Command not found.");
     }
 }

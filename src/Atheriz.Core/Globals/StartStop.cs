@@ -146,6 +146,34 @@ public static class StartStop
         }
     }
 
+    // Shared shutdown/reload announce: GetServerChannel → null-check → Msg → swallow.
+    // Message stays byte-identical per caller; empty catches preserved.
+    private static void AnnounceChannel(string message)
+    {
+        try
+        {
+            var channel = GlobalServices.GetServerChannel();
+            if (channel is not null)
+            {
+                try { channel.Msg(message); } catch (Exception) { }
+            }
+        }
+        catch (Exception) { }
+    }
+
+    // Shared game-time stop: ticker ?? TryGetTicker(), then Stop(t) or Stop().
+    private static void StopGameTime(AsyncTicker? ticker)
+    {
+        try
+        {
+            var gt = TryGetGameTime();
+            var t = ticker ?? TryGetTicker();
+            if (gt is not null && t is not null) gt.Stop(t);
+            else if (gt is not null) gt.Stop();
+        }
+        catch (Exception) { }
+    }
+
     // Port of startstop.py:49-82 do_shutdown
     public static void DoShutdown(AtherizSettings? settings = null, AsyncThreadPool? pool = null, AsyncTicker? ticker = null)
     {
@@ -161,15 +189,7 @@ public static class StartStop
             _shuttingDown = true;
 
             // Port of startstop.py:57 channel = get_server_channel(); if channel: channel.msg("Server is shutting down!")
-            try
-            {
-                var channel = GlobalServices.GetServerChannel();
-                if (channel is not null)
-                {
-                    try { channel.Msg("Server is shutting down!"); } catch (Exception) { }
-                }
-            }
-            catch (Exception) { }
+            AnnounceChannel("Server is shutting down!");
 
             Console.Error.WriteLine("Starting shutdown sequence..."); // Port of logger.info
 
@@ -191,17 +211,7 @@ public static class StartStop
             // Port of startstop.py:67-68 if TIME_SYSTEM_ENABLED: get_game_time().stop
             if (settings.TimeSystemEnabled)
             {
-                ShutdownStep("game_time_stop", () =>
-                {
-                    try
-                    {
-                        var gt = TryGetGameTime();
-                        var t = ticker ?? TryGetTicker();
-                        if (gt is not null && t is not null) gt.Stop(t);
-                        else if (gt is not null) gt.Stop();
-                    }
-                    catch (Exception) { }
-                });
+                ShutdownStep("game_time_stop", () => StopGameTime(ticker));
             }
 
             // Port of startstop.py:69 ticker_stop
@@ -365,12 +375,7 @@ public static class StartStop
         lock (_worldLock)
         {
             // Port of startstop.py:127 channel msg
-            try
-            {
-                var ch = GlobalServices.GetServerChannel();
-                if (ch is not null) try { ch.Msg("Server is reloading..."); } catch (Exception) { }
-            }
-            catch (Exception) { }
+            AnnounceChannel("Server is reloading...");
 
             Console.Error.WriteLine("Starting reload sequence..."); // Port of logger.info
 
@@ -380,17 +385,7 @@ public static class StartStop
             // Port of startstop.py:138-139 if TIME_SYSTEM_ENABLED: get_game_time().stop()
             if (settings.TimeSystemEnabled)
             {
-                ShutdownStep("game_time_stop", () =>
-                {
-                    try
-                    {
-                        var gt = TryGetGameTime();
-                        var t = ticker ?? TryGetTicker();
-                        if (gt is not null && t is not null) gt.Stop(t);
-                        else if (gt is not null) gt.Stop();
-                    }
-                    catch (Exception) { }
-                });
+                ShutdownStep("game_time_stop", () => StopGameTime(ticker));
             }
 
             // Port of startstop.py:140 stop_autosave()
@@ -457,12 +452,7 @@ public static class StartStop
             });
 
             // Port of startstop.py:150-152 channel msg reloaded
-            try
-            {
-                var ch = GlobalServices.GetServerChannel();
-                if (ch is not null) try { ch.Msg("Server reloaded"); } catch (Exception) { }
-            }
-            catch (Exception) { }
+            AnnounceChannel("Server reloaded");
 
             Console.Error.WriteLine("Reload sequence completed."); // Port of logger.info
         }

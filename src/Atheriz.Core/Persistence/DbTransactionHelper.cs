@@ -1,5 +1,6 @@
 // Port of atheriz/database_setup.py:Database.lock RLock scaffold + do_setup transaction
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Atheriz.Core.Persistence;
 
@@ -126,7 +127,7 @@ public static class DbTransactionHelper
                 }
                 catch (Exception ex) when (attempt < maxAttempts && IsBusyConflict(ex))
                 {
-                    try { tx.Rollback(); } catch (Exception) { }
+                    RollbackQuiet(tx);
                     // Clean tracker per attempt : retrying work() +
                     // SaveChanges() on the same context with a dirty tracker
                     // throws already-tracked / re-inserts the same key instead
@@ -136,7 +137,7 @@ public static class DbTransactionHelper
                 }
                 catch
                 {
-                    try { tx.Rollback(); } catch (Exception) { }
+                    RollbackQuiet(tx);
                     try { onRollback?.Invoke(); } catch (Exception) { }
                     throw;
                 }
@@ -146,6 +147,12 @@ public static class DbTransactionHelper
         {
             DbWriteGate.Exit();
         }
+    }
+
+    /// <summary>Best-effort rollback; a rollback failure never masks the save error under handling.</summary>
+    private static void RollbackQuiet(IDbContextTransaction tx)
+    {
+        try { tx.Rollback(); } catch (Exception) { }
     }
 
     /// <summary>True when <paramref name="ex"/> (or any inner) is SQLITE_BUSY (5) or SQLITE_LOCKED (6).</summary>

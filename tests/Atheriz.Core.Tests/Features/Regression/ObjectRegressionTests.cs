@@ -148,15 +148,16 @@ public class ObjectRegressionTests
         // Not a bare auto-property: no compiler-generated backing field.
         Assert.Null(typeof(Node).GetField("<Coord>k__BackingField",
             BindingFlags.Instance | BindingFlags.NonPublic));
-        // The Node-class accessor takes the node lock on both paths.
+        // The Node-class accessor takes the node lock on both paths (via the
+        // shared Read()/Write() helpers — same _lock, same boundaries).
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Node.cs");
         var anchor = src.IndexOf("private Coord _coord;", StringComparison.Ordinal);
         Assert.True(anchor >= 0);
         var idx = src.IndexOf("public Coord Coord", anchor, StringComparison.Ordinal);
         Assert.True(idx >= 0);
         var window = src.Substring(idx, Math.Min(400, src.Length - idx));
-        Assert.Contains("EnterReadLock", window);
-        Assert.Contains("EnterWriteLock", window);
+        Assert.Contains("Read(() =>", window);
+        Assert.Contains("Write(() =>", window);
     }
 
     // exit installation must run after the two location locks release.
@@ -751,7 +752,7 @@ public class ObjectRegressionTests
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Script.cs");
         var region = SourceScan.Region(src, "public void RemoveHooks(");
-        Assert.True(region.IndexOf("EnterWriteLock", StringComparison.Ordinal) < region.IndexOf("HooksRawNoLock", StringComparison.Ordinal));
+        Assert.True(region.IndexOf("child.WriteScope()", StringComparison.Ordinal) < region.IndexOf("HooksRawNoLock", StringComparison.Ordinal));
     }
 
     // NodeLink equality is name+coord only (nodes.py:63-66 __eq__).

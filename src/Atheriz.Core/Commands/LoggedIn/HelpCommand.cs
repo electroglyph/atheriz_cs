@@ -13,7 +13,6 @@ public sealed class HelpCommand : Command
     public override bool UseParser => true;
 
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("command", nargs: "?", help: "Command to get help on"); }
-    private static string PrintHelpFor(Command cmd) => HelpHelper.FormatFor(cmd);
     public override void Run(IMessageTarget caller, object? args)
     {
         var pa = args as GameArgumentParser.ParsedArgs;
@@ -52,16 +51,15 @@ public sealed class HelpCommand : Command
             caller.Msg(sb.ToString());
             return;
         }
-        var cmd = CommandRegistry.LoggedIn.Get(query!);
-        if (cmd is not null && cmd.Access(caller) && !cmd.Hide) { caller.Msg(PrintHelpFor(cmd)); return; }
+        if (HelpHelper.TryShowGlobal(CommandRegistry.LoggedIn, caller, query!)) return;
         // search local
         if (caller is Objects.GameObject go2)
         {
             foreach (var set in CommandHelpers.LocalVerbSets(go2))
             {
                 var c = set.Get(query!);
-                if (c is not null && c.Access(go2) && !c.Hide) { caller.Msg(PrintHelpFor(c)); return; }
-                foreach (var cc in set.GetAll()) if (cc.Aliases.Any(a => a.Equals(query, StringComparison.OrdinalIgnoreCase)) && cc.Access(go2) && !cc.Hide) { caller.Msg(PrintHelpFor(cc)); return; }
+                if (c is not null && c.Access(go2) && !c.Hide) { caller.Msg(HelpHelper.FormatFor(c)); return; }
+                foreach (var cc in set.GetAll()) if (cc.Aliases.Any(a => a.Equals(query, StringComparison.OrdinalIgnoreCase)) && cc.Access(go2) && !cc.Hide) { caller.Msg(HelpHelper.FormatFor(cc)); return; }
             }
         }
         caller.Msg("Command not found.");

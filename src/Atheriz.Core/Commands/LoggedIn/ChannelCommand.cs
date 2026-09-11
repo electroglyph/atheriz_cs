@@ -31,8 +31,7 @@ public sealed class ChannelCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null) { caller.Msg(PrintHelp()); return; }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         if (pa.GetBool("list"))
         {
             var channels = ObjectRegistry.FilterBy(x => x.IsChannel);
@@ -92,15 +91,15 @@ public sealed class ChannelCommand : Command
         }
         else if (pa.GetBool("subscribe"))
         {
-            if (!channel.Access(go, "view")) { go.Msg("You do not have permission to view this channel."); return; }
+            if (!channel.Access(go, "view")) { CommandHelpers.MsgChannelViewDenied(go); return; }
             go.Subscribe(channel);
         }
         else if (pa.GetBool("replay"))
         {
-            if (!channel.Access(go, "view")) { go.Msg("You do not have permission to view this channel."); return; }
+            if (!channel.Access(go, "view")) { CommandHelpers.MsgChannelViewDenied(go); return; }
             var h = channel.GetHistory();
             if (!string.IsNullOrEmpty(h)) go.Msg(h);
-            else go.Msg("No history available.");
+            else CommandHelpers.MsgNoChannelHistory(go);
         }
         else
         {
@@ -109,7 +108,7 @@ public sealed class ChannelCommand : Command
             // Port of channel.py:122 elif args.message — an empty message
             // list is falsy and falls through silently (no help text).
             if (string.IsNullOrWhiteSpace(message)) return;
-            if (!channel.Access(go, "send")) { go.Msg("You do not have permission to send to this channel."); return; }
+            if (!channel.Access(go, "send")) { CommandHelpers.MsgChannelSendDenied(go); return; }
             channel.Send(message, go);
         }
     }

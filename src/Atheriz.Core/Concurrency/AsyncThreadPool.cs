@@ -25,7 +25,7 @@ public class AsyncThreadPool : IDisposable
     private int _busy;
     private int _reliefCount;
     private long _lastReliefSpawnTicks;
-    private long _lastFullLogTicks;
+    private double _lastFullLogSeconds = double.NegativeInfinity;
     private bool _stopped;
     // Signalled by Stop so sleep loops exit promptly without Thread.Sleep polling.
     private readonly ManualResetEventSlim _stopEvent = new(false);
@@ -326,10 +326,9 @@ public class AsyncThreadPool : IDisposable
             lock (_lock) { stopped = _stopped; busy = _busy; }
             if (stopped) return;
             int qsize;
-            lock (_queueLock) qsize = _queue.Count;
-            // use actual queue limit for saturated check, not capped view
             int limit;
-            lock (_queueLock) limit = _queueLimit;
+            lock (_queueLock) { qsize = _queue.Count; limit = _queueLimit; }
+            // use actual queue limit for saturated check, not capped view
             bool saturated = qsize > 0 && (busy >= _maxThreads - 1 || (limit != 0 && qsize >= limit));
             double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
             if (saturated)
@@ -442,10 +441,10 @@ public class AsyncThreadPool : IDisposable
         {
             if (_stopped)
             {
-                long now = DateTime.UtcNow.Ticks;
-                if (now - _lastFullLogTicks > TimeSpan.FromSeconds(10).Ticks)
+                double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                if (now - _lastFullLogSeconds > TimeSpan.FromSeconds(10).TotalSeconds)
                 {
-                    _lastFullLogTicks = now;
+                    _lastFullLogSeconds = now;
                     Console.Error.WriteLine("[AsyncThreadPool] task submitted after stop; discarded");
                 }
                 return false;
@@ -454,10 +453,10 @@ public class AsyncThreadPool : IDisposable
             {
                 if (_queueLimit != 0 && _queue.Count >= _queueLimit)
                 {
-                    long now = DateTime.UtcNow.Ticks;
-                    if (now - _lastFullLogTicks > TimeSpan.FromSeconds(10).Ticks)
+                    double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                    if (now - _lastFullLogSeconds > TimeSpan.FromSeconds(10).TotalSeconds)
                     {
-                        _lastFullLogTicks = now;
+                        _lastFullLogSeconds = now;
                         Console.Error.WriteLine($"[AsyncThreadPool] task queue full ({_queueLimit}); dropping task");
                     }
                     return false;
@@ -508,14 +507,34 @@ public class AsyncThreadPool : IDisposable
     public void Delay(double seconds, Action action) => Delay(TimeSpan.FromSeconds(seconds), action);
     public void Delay(double seconds, Func<Task> asyncFunc) => Delay(TimeSpan.FromSeconds(seconds), asyncFunc);
 
+    private void DisposeWatchdog()
+    {
+        Timer? watchdog;
+        lock (_lock) { watchdog = _watchdogTimer; _watchdogTimer = null; }
+        if (watchdog is not null)
+        {
+            try { watchdog.Change(Timeout.Infinite, Timeout.Infinite); } catch (ObjectDisposedException) { }
+            watchdog.Dispose();
+        }
+    }
+
     public void Stop(bool wait = true, TimeSpan? timeout = null)
     {
         var to = timeout ?? TimeSpan.FromSeconds(10);
+        bool alreadyStopped;
         lock (_lock)
         {
-            if (_stopped) return;
-            _stopped = true;
-            _stopEvent.Set();
+            alreadyStopped = _stopped;
+            if (!alreadyStopped)
+            {
+                _stopped = true;
+                _stopEvent.Set();
+            }
+        }
+        if (alreadyStopped)
+        {
+            DisposeWatchdog();
+            return;
         }
         AtherizLogger.LogInformation("at AsyncThreadPool.stop() ..."); // info upstream (asyncthreadpool.py:307), not an error
 
@@ -547,6 +566,10 @@ public class AsyncThreadPool : IDisposable
             }
         }
 
+        // Stop the watchdog before the join gate: Change-before-Dispose is
+        // non-blocking, and an in-flight tick exits immediately on _stopped.
+        DisposeWatchdog();
+
         if (wait)
         {
             // One deadline shared by all fixed workers: sequential Join(to)
@@ -563,22 +586,12 @@ public class AsyncThreadPool : IDisposable
             lock (_lock) reliefSnap = new List<Thread>(_reliefThreads);
             foreach (var t in reliefSnap) t.Join(TimeSpan.FromSeconds(1));
             lock (_lock) _reliefThreads.RemoveAll(t => !t.IsAlive);
-
-            // Stop the watchdog first: Change-before-Dispose so no new tick
-            // starts, and an in-flight tick exits immediately on _stopped.
-            Timer? watchdog;
-            lock (_lock) { watchdog = _watchdogTimer; _watchdogTimer = null; }
-            if (watchdog is not null)
-            {
-                try { watchdog.Change(Timeout.Infinite, Timeout.Infinite); } catch (ObjectDisposedException) { }
-                watchdog.Dispose();
-            }
         }
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed) { DisposeWatchdog(); return; }
         Stop(wait: true);
         _stopEvent.Dispose();
         _disposed = true;

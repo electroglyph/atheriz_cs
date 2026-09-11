@@ -9,14 +9,20 @@ public partial class NodeHandler
         try { return _doors.TryGetValue(coord,out var d) ? new Dictionary<string,Door>(d): null; }
         finally { Lock3.ExitReadLock(); }
     }
+    // The caller holds Lock3 write; this helper takes none.
+    private Dictionary<string,Door> GetOrCreateDoorDictLocked(Coord c)
+    {
+        if (!_doors.TryGetValue(c,out var d)) { d=new(); _doors[c]=d; }
+        return d;
+    }
     public void AddDoor(Door door)
     {
         Lock3.EnterWriteLock();
         try
         {
-            if (!_doors.TryGetValue(door.FromCoord,out var d)) { d=new(); _doors[door.FromCoord]=d; }
+            var d=GetOrCreateDoorDictLocked(door.FromCoord);
             d[door.FromExit]=door;
-            if (!_doors.TryGetValue(door.ToCoord,out var d2)) { d2=new(); _doors[door.ToCoord]=d2; }
+            var d2=GetOrCreateDoorDictLocked(door.ToCoord);
             d2[door.ToExit]=door;
             _modified3=true;
             _doorGen++;
@@ -95,16 +101,12 @@ public partial class NodeHandler
         finally { Lock.ExitUpgradeableReadLock(); }
         var grid=area.GetOrAddGrid(node.Coord.Z);
         grid.AddNode(node);
-        Lock.EnterWriteLock();
-        try { _modified=true; _areaGen++; }
-        finally { Lock.ExitWriteLock(); }
+        using (WriteScope()) { _modified=true; _areaGen++; }
         ObjectRegistry.AddObject(node);
     }
     public void AddArea(NodeArea area)
     {
-        Lock.EnterWriteLock();
-        try { _areas[area.Name]=area; _modified=true; _areaGen++; }
-        finally { Lock.ExitWriteLock(); }
+        using (WriteScope()) { _areas[area.Name]=area; _modified=true; _areaGen++; }
     }
     public void ReplaceArea(NodeArea area)
     {
@@ -165,15 +167,11 @@ public partial class NodeHandler
     }
     public NodeArea? GetArea(string name)
     {
-        Lock.EnterReadLock();
-        try { return _areas.TryGetValue(name,out var a)?a:null; }
-        finally { Lock.ExitReadLock(); }
+        using (ReadScope()) { return _areas.TryGetValue(name,out var a)?a:null; }
     }
     public List<NodeArea> GetAreas()
     {
-        Lock.EnterReadLock();
-        try { return _areas.Values.ToList(); }
-        finally { Lock.ExitReadLock(); }
+        using (ReadScope()) { return _areas.Values.ToList(); }
     }
     public Node? GetNode(Coord coord)
     {

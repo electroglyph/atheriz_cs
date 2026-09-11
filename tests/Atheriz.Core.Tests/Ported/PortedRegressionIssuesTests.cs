@@ -178,12 +178,12 @@ public class PortedRegressionIssuesTests
     [Fact]
     public void BuildSignatureFromCodeHandlesVarargsAndKwonlyCorrectly()
     {
-        // In C# BuildSignature handles MethodInfo params; test varargs/kwonly via params array
+        // In C# signatures come from the explicit MethodInfo API; test varargs/kwonly via params array
         void Foo(int a, int b, int c=3, params int[] args) {}
         var mi = typeof(PortedRegressionIssuesTests).GetMethod(nameof(BuildSignatureFromCodeHandlesVarargsAndKwonlyCorrectly), System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-        // Just verify our GameUtils.BuildSignature works for method with params
+        // Just verify the explicit signature API works for a method with params
         var del = (Action<int,int,int,int[]>)Foo;
-        var sig = GameUtils.BuildSignature(del);
+        var sig = del.Method.GetParameters();
         Assert.True(sig.Length >= 3);
         // posonly simulated: C# doesn't have posonly, but we verify that signature string contains expected
         Assert.Contains(sig, p=> p.Name=="a");
@@ -194,11 +194,11 @@ public class PortedRegressionIssuesTests
     {
         void Foo1(int a, int b, int c, int d=3, params int[] args) {}
         var del1 = (Action<int,int,int,int,int[]>)Foo1;
-        var sig1 = GameUtils.BuildSignature(del1);
+        var sig1 = del1.Method.GetParameters();
         Assert.True(sig1.Length >= 4);
         void Foo2(int a, params int[] args) {}
         var del2 = (Action<int,int[]>)Foo2;
-        var sig2 = GameUtils.BuildSignature(del2);
+        var sig2 = del2.Method.GetParameters();
         Assert.True(sig2.Length >= 1);
     }
 

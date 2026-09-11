@@ -56,26 +56,27 @@ internal sealed class NodeAreaDto
                 var nd=kv.Value;
                 Node node;
                 // Preserve concrete Node subclass via ObjectType (dill-like fidelity) — mirrors GameObject.FromDto __object_type handling
+                Node? inst = null;
                 if (!string.IsNullOrEmpty(nd.ObjectType))
                 {
                     // Explicit subtype registry (replaces Type.GetType +
                     // assembly scan + Activator): only registered names
                     // reconstruct; anything else falls through to plain Node.
-                    Node? inst = null;
                     try { Node.TryCreatePersistedSubtype(nd.ObjectType!, nd.Coord, out inst); } catch { inst = null; }
-                    if (inst is not null)
-                    {
-                            // Remove from ObjectRegistry the auto-registered instance's temporary id collision
-                            try { ObjectRegistry.RemoveObject(inst); } catch (Exception) { }
-                            inst.Coord = nd.Coord;
-                            HydrateNode(inst, nd, assignName: false);
-                            node = inst;
-                            grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
-                            continue;
-                        }
                 }
-                node = Node.CreateForLoad(nd.Coord);
-                HydrateNode(node, nd, assignName: true);
+                if (inst is not null)
+                {
+                    // Remove from ObjectRegistry the auto-registered instance's temporary id collision
+                    try { ObjectRegistry.RemoveObject(inst); } catch (Exception) { }
+                    inst.Coord = nd.Coord;
+                    HydrateNode(inst, nd, assignName: false);
+                    node = inst;
+                }
+                else
+                {
+                    node = Node.CreateForLoad(nd.Coord);
+                    HydrateNode(node, nd, assignName: true);
+                }
                 grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
             }
             area.Grids[z]=grid;

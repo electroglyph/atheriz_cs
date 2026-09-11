@@ -12,8 +12,8 @@ public partial class GameObject
     // quelled/can_hear/is_mapable are not part of the snapshot by design — documented here per AGENTS.md.
     // Transient puppet-restore dict keys (in-memory only, never persisted).
     // Consts make typos compile-time errors; values stay byte-identical.
-    private const string PuppetRestoreIsPcKey = "is_pc";
-    private const string PuppetRestorePrivilegeKey = "privilege_level";
+    internal const string PuppetRestoreIsPcKey = "is_pc";
+    internal const string PuppetRestorePrivilegeKey = "privilege_level";
 
     // Shared suppressed-log wrapper for the hook/state fan-out below: every site
     // catches exactly Exception, logs only logEx.Message under its own context
@@ -95,7 +95,6 @@ public partial class GameObject
         // Port of puppet.py:84-110 checks (`target is caller` plus same-id
         // reload instances, which share identity through the registry).
         if (npc == this) return false;
-        if (npc.Id != -1 && npc.Id == this.Id) return false;
         if (npc.IsAccount || npc.IsChannel || npc.IsNode) return false; // Port of _puppetable
         if (!npc.Access(this, "puppet")) return false; // Port of puppet.py:94
         // Fast-path peek (unlocked, advisory only): skip work when the target
@@ -249,10 +248,9 @@ public partial class GameObject
             {
                 Suppress("AtPostPuppet", () =>
                 {
-                    var chObjs = ObjectRegistry.Get(c);
-                    if (chObjs.Count > 0)
+                    var ch = ObjectRegistry.GetSingle(c);
+                    if (ch is not null)
                     {
-                        var ch = chObjs[0];
                         if (ch is Channel channelObj)
                             channelObj.AddListener(this);
                         // non-Channel IsChannel objects are ignored

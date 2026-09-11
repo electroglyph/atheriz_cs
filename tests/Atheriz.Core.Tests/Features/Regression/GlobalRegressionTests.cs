@@ -181,9 +181,11 @@ public class GlobalRegressionTests
     public void ClearForShutdown_ClearsCommandSets()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "GlobalServices.cs");
-        var region = SourceScan.Region(src, "internal static void ClearForShutdown()");
-        Assert.Contains("_loggedInCmdSet = null", region);
-        Assert.Contains("_unloggedInCmdSet = null", region);
+        var shutdown = SourceScan.Region(src, "internal static void ClearForShutdown()");
+        Assert.Contains("ClearHoldersLocked()", shutdown);
+        var holders = SourceScan.Region(src, "private static void ClearHoldersLocked()");
+        Assert.Contains("_loggedInCmdSet = null", holders);
+        Assert.Contains("_unloggedInCmdSet = null", holders);
     }
 
     // Stop(otherTicker) must not kill owned fallbacks out from under live use.

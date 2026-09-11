@@ -51,23 +51,11 @@ public sealed class BuildCommand : Command
         bool room=false, road=false, path=false;
         string? desc=null;
         bool single=false, dbl=false, round=false, none=false;
-        if (args is null)
-        {
-            caller.Msg(PrintHelp());
-            return;
-        }
-        if (args is GameArgumentParser.ParsedArgs pa)
-        {
-            n=pa.GetBool("n"); e=pa.GetBool("e"); s=pa.GetBool("s"); w=pa.GetBool("w"); u=pa.GetBool("u"); d=pa.GetBool("d"); x=pa.GetBool("x");
-            room=pa.GetBool("room"); road=pa.GetBool("road"); path=pa.GetBool("path");
-            desc=pa["desc"] as string;
-            single=pa.GetBool("single"); dbl=pa.GetBool("double"); round=pa.GetBool("round"); none=pa.GetBool("none");
-        }
-        else
-        {
-            caller.Msg(PrintHelp());
-            return;
-        }
+        if (!this.RequireParsedArgs(caller, args, out var pa)) return;
+        n=pa.GetBool("n"); e=pa.GetBool("e"); s=pa.GetBool("s"); w=pa.GetBool("w"); u=pa.GetBool("u"); d=pa.GetBool("d"); x=pa.GetBool("x");
+        room=pa.GetBool("room"); road=pa.GetBool("road"); path=pa.GetBool("path");
+        desc=pa["desc"] as string;
+        single=pa.GetBool("single"); dbl=pa.GetBool("double"); round=pa.GetBool("round"); none=pa.GetBool("none");
 
         // Node and map handlers via Singletons
         var nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();
@@ -138,33 +126,26 @@ public sealed class BuildCommand : Command
         }
         void EnsureLinks(Node node, bool nn,bool ss,bool ee,bool ww)
         {
-            if (nn)
+            var rows = new (bool active, string name, string alias, int dx, int dy, string opp, string oppAlias)[]
             {
-                node.AddLinkIfAbsent("north", () => new NodeLink("north", new Coord(node.Coord.Area, node.Coord.X, node.Coord.Y+1, node.Coord.Z), new List<string>{"n"}));
-                var toCoord = new Coord(node.Coord.Area, node.Coord.X, node.Coord.Y+1, node.Coord.Z);
-                var toNode = nh.GetNode(toCoord);
-                if (toNode is not null) toNode.AddLinkIfAbsent("south", () => new NodeLink("south", node.Coord, new List<string>{"s"}));
-            }
-            if (ss)
+                (nn, "north", "n", 0, 1, "south", "s"),
+                (ss, "south", "s", 0, -1, "north", "n"),
+                (ee, "east", "e", 1, 0, "west", "w"),
+                (ww, "west", "w", -1, 0, "east", "e"),
+            };
+            foreach (var row in rows)
             {
-                node.AddLinkIfAbsent("south", () => new NodeLink("south", new Coord(node.Coord.Area, node.Coord.X, node.Coord.Y-1, node.Coord.Z), new List<string>{"s"}));
-                var toCoord = new Coord(node.Coord.Area, node.Coord.X, node.Coord.Y-1, node.Coord.Z);
+                if (!row.active) continue;
+                string name = row.name;
+                string alias = row.alias;
+                string opp = row.opp;
+                string oppAlias = row.oppAlias;
+                int dx = row.dx;
+                int dy = row.dy;
+                node.AddLinkIfAbsent(name, () => new NodeLink(name, new Coord(node.Coord.Area, node.Coord.X + dx, node.Coord.Y + dy, node.Coord.Z), new List<string> { alias }));
+                var toCoord = new Coord(node.Coord.Area, node.Coord.X + dx, node.Coord.Y + dy, node.Coord.Z);
                 var toNode = nh.GetNode(toCoord);
-                if (toNode is not null) toNode.AddLinkIfAbsent("north", () => new NodeLink("north", node.Coord, new List<string>{"n"}));
-            }
-            if (ee)
-            {
-                node.AddLinkIfAbsent("east", () => new NodeLink("east", new Coord(node.Coord.Area, node.Coord.X+1, node.Coord.Y, node.Coord.Z), new List<string>{"e"}));
-                var toCoord = new Coord(node.Coord.Area, node.Coord.X+1, node.Coord.Y, node.Coord.Z);
-                var toNode = nh.GetNode(toCoord);
-                if (toNode is not null) toNode.AddLinkIfAbsent("west", () => new NodeLink("west", node.Coord, new List<string>{"w"}));
-            }
-            if (ww)
-            {
-                node.AddLinkIfAbsent("west", () => new NodeLink("west", new Coord(node.Coord.Area, node.Coord.X-1, node.Coord.Y, node.Coord.Z), new List<string>{"w"}));
-                var toCoord = new Coord(node.Coord.Area, node.Coord.X-1, node.Coord.Y, node.Coord.Z);
-                var toNode = nh.GetNode(toCoord);
-                if (toNode is not null) toNode.AddLinkIfAbsent("east", () => new NodeLink("east", node.Coord, new List<string>{"e"}));
+                if (toNode is not null) toNode.AddLinkIfAbsent(opp, () => new NodeLink(opp, node.Coord, new List<string> { oppAlias }));
             }
         }
 

@@ -119,9 +119,7 @@ public static class Pathfind
         if (nh is null) return (false, [], []);
         // Port of pathfind.py:98 start_node/end_node
         var startNode = new PathNode(null, start);
-        startNode.G = startNode.H = startNode.F = 0;
         var endNode = new PathNode(null, end);
-        endNode.G = endNode.H = endNode.F = 0;
 
         // Port of pathfind.py:102 open_list + closed_set + open_by_pos.
         // The queue orders nodes via CompareTo, like heapq via __lt__.
