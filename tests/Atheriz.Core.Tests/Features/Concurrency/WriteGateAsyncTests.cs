@@ -2,11 +2,10 @@ using Atheriz.Core.Persistence;
 
 namespace Atheriz.Core.Tests.Features.Concurrency;
 
-// Regression pins for the audit4 net fix (N-2): an async lease holder that
-// re-enters must nest instead of deadlocking on its own permit, while a
-// forked flow is still refused fail-fast.
+// An async lease holder that re-enters must nest instead of deadlocking on
+// its own permit, while a forked flow is still refused fail-fast.
 [Collection("Ported")]
-public class Audit4WriteGateFixTests
+public class WriteGateAsyncTests
 {
     [Fact]
     public async Task EnterAsync_NestedTake_NestsWithoutBlocking()

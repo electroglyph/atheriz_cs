@@ -15,7 +15,7 @@ public class DoorLinkParityTests
     [Fact]
     public void AddLink_Twins_DedupNameOnly()
     {
-        // Behavior pin (audit4 O-3): lookups fold case, so both add paths
+        // Link lookups fold case, so both add paths dedup name-only
         // dedup name-only (case-insensitive). Same-name-different-coord is
         // REFUSED by AddLink and by AddLinkIfAbsent alike — the second link
         // would be installed but unreachable (shadowed).

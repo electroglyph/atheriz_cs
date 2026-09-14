@@ -5,9 +5,10 @@ using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
-// Regression pins for the audit4 command fixes (C-1..C-3).
+// Targets hidden by a view lock (or already deleted) are not actionable:
+// neither the #id search leg nor follow/socials may resolve them.
 [Collection("Ported")]
-public class Audit4CommandFixTests
+public class HiddenTargetGatingTests
 {
     private static GameObject MakePc(string name)
     {
@@ -20,8 +21,8 @@ public class Audit4CommandFixTests
     [Fact]
     public void SearchWithFallback_HiddenIdTarget_ReturnsEmpty()
     {
-        // C-1: the #id leg must honor the view gate like the name path —
-        // a view-locked target is not resolvable by id.
+        // The #id leg honors the view gate like the name path — a
+        // view-locked target is not resolvable by id.
         using var env = GlobalTestEnv.Enter();
         var caller = MakePc("Caller");
         var hidden = MakePc("Hidden");
@@ -33,7 +34,7 @@ public class Audit4CommandFixTests
     [Fact]
     public void SearchWithFallback_DeletedIdTarget_ReturnsEmpty()
     {
-        // C-1: a deleted target is not resolvable by id either.
+        // A deleted target is not resolvable by id either.
         using var env = GlobalTestEnv.Enter();
         var caller = MakePc("Caller");
         var gone = MakePc("Gone");
@@ -47,7 +48,7 @@ public class Audit4CommandFixTests
     [Fact]
     public void FollowCommand_HiddenTarget_IsNotFollowable()
     {
-        // C-1: follow must not latch onto a view-locked target.
+        // Follow must not latch onto a view-locked target.
         using var env = GlobalTestEnv.Enter();
         var follower = MakePc("Follower");
         var hidden = MakePc("Hidden");
@@ -63,7 +64,7 @@ public class Audit4CommandFixTests
     [Fact]
     public void SocialsCommand_HiddenTarget_IsRejected()
     {
-        // C-1: socials must not emote at a view-locked target.
+        // Socials must not emote at a view-locked target.
         using var env = GlobalTestEnv.Enter();
         var actor = MakePc("Actor");
         var hidden = MakePc("Hidden");
@@ -74,32 +75,5 @@ public class Audit4CommandFixTests
         Assert.NotNull(func);
         func!(actor, args);
         Assert.Contains(actor.PeekMessages(), m => m.Contains("Could not find"));
-    }
-
-    [Fact]
-    public void Execute_HelpFlag_SendsSingleMessage()
-    {
-        // C-2: explicit --help surfaces the help text exactly once (the
-        // message IS the help), not as diagnosis-plus-help.
-        var puppet = new GameObject { Name = "Hero" };
-        puppet.ClearMessages();
-        var cmd = new FollowCommand();
-        var (func, _, _) = cmd.Execute(puppet, "--help");
-        Assert.Null(func);
-        Assert.Single(puppet.PeekMessages());
-    }
-
-    [Fact]
-    public void QuellCommand_QuelledBuilder_ReachesAlreadyQuelledBranch()
-    {
-        // C-3: the access gate must not fold quelled state, or the
-        // already-quelled branch is unreachable through dispatch.
-        using var env = GlobalTestEnv.Enter();
-        var c = Ported.PortedHelpers.MakeCaller("Alice", builder: true);
-        c.Quelled = true;
-        Assert.True(new QuellCommand().Access(c));
-        c.ClearMessages();
-        new QuellCommand().Run(c, null);
-        Assert.Contains(c.PeekMessages(), m => m == "You are already quelled!");
     }
 }

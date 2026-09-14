@@ -2,11 +2,10 @@ using Atheriz.Server.Cli;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// Regression pins for the audit4 server fix (S-1): CLI handler
-// failure/abort paths must record a nonzero exit signal (consumed by
-// Program.cs) instead of silently succeeding.
+// CLI handler failure/abort paths must record a nonzero exit signal
+// (consumed by Program.cs) instead of silently succeeding.
 [Collection("Ported")]
-public class Audit4CliExitCodeTests
+public class CliExitCodeTests
 {
     private static int FindFreePort()
     {

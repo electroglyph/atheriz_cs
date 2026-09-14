@@ -4,11 +4,11 @@ using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Tests.Features.Network;
 
-// Regression pin for the audit4 net fix (N-1): re-registering the same
-// connection object under a new id must evict the stale id instead of
-// double-counting the per-IP bucket and orphaning a slot on disconnect.
+// Re-registering the same connection object under a new id must evict the
+// stale id instead of double-counting the per-IP bucket and orphaning a
+// slot on disconnect.
 [Collection("Ported")]
-public class Audit4ConnectionFixTests
+public class ConnectionReregisterTests
 {
     [Fact]
     public void RegisterConnection_SameObjectNewId_KeepsSingleSlot()

@@ -4,18 +4,17 @@ using Atheriz.Core.Settings;
 
 namespace Atheriz.Core.Tests.Features.Globals;
 
-// Regression pin for the audit4 globals fix (G-1): the shutdown checkpoint
-// must honor the ATHERIZ_SAVE_PATH environment override like autosave does,
-// instead of writing to the raw settings path.
+// The shutdown checkpoint must honor the ATHERIZ_SAVE_PATH environment
+// override like autosave does, instead of writing to the raw settings path.
 [Collection("Ported")]
-public class Audit4SavePathFixTests
+public class SaveWorldEnvPathTests
 {
     [Fact]
     public void SaveWorld_HonorsSavePathEnvOverride()
     {
         using var env = GlobalTestEnv.Enter();
-        var envDir = Path.Combine(Path.GetTempPath(), "atheriz_g1env_" + Guid.NewGuid().ToString("N"));
-        var settingsDir = Path.Combine(Path.GetTempPath(), "atheriz_g1set_" + Guid.NewGuid().ToString("N"));
+        var envDir = Path.Combine(Path.GetTempPath(), "atheriz_saveenv_" + Guid.NewGuid().ToString("N"));
+        var settingsDir = Path.Combine(Path.GetTempPath(), "atheriz_saveset_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(envDir);
         Directory.CreateDirectory(settingsDir);
         var oldEnv = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
