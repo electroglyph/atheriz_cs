@@ -16,7 +16,7 @@ public static class NewHandler
         var gameName = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (string.IsNullOrWhiteSpace(gameName)) gameName = folder;
         var folderAbs = Path.GetFullPath(folder);
-        if (!Infrastructure.GameTemplateGenerator.CreateGameFolder(folderAbs, gameName, overwrite)) return false;
+        if (!Infrastructure.GameTemplateGenerator.CreateGameFolder(folderAbs, gameName, overwrite)) { CliExitCode.Set(1); return false; }
 
         bool foreground = ArgumentParser.HasFlag(a, "--foreground", "-f");
         if (foreground)
@@ -26,14 +26,16 @@ public static class NewHandler
             // folderAbs as the child working directory instead and must not
             // mutate this process (a library-visible global).
             Console.WriteLine($"\nChanging directory to '{folder}'...");
-            try { Directory.SetCurrentDirectory(folderAbs); } catch (Exception ex) { Console.Error.WriteLine($"Failed to change directory: {ex.Message}"); return false; }
+            try { Directory.SetCurrentDirectory(folderAbs); } catch (Exception ex) { Console.Error.WriteLine($"Failed to change directory: {ex.Message}"); CliExitCode.Set(1); return false; }
             Console.WriteLine("Starting server...");
+            CliExitCode.Set(0);
             return true;
         }
         else
         {
             Console.WriteLine("Starting server...");
-            await DaemonSpawner.SpawnDaemonAsync(a, folderAbs).ConfigureAwait(false);
+            bool spawned = await DaemonSpawner.SpawnDaemonAsync(a, folderAbs).ConfigureAwait(false);
+            CliExitCode.Set(spawned ? 0 : 1);
             return false;
         }
     }

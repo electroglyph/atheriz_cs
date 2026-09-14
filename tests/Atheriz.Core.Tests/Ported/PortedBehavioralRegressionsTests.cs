@@ -172,7 +172,7 @@ public class PortedBehavioralRegressionsTests
     {
         var p = new Atheriz.Core.Commands.GameArgumentParser(prog: "test", addHelp: true);
         p.AddArgument("--foo", help: "foo");
-        Assert.Throws<Atheriz.Core.Commands.CommandError>(() => p.ParseArgs(new[] { "--help" }));
+        Assert.ThrowsAny<Atheriz.Core.Commands.CommandError>(() => p.ParseArgs(new[] { "--help" }));
         // exit with null message is silent (no throw)
         p.Exit(0, null);
         var ex = Assert.Throws<Atheriz.Core.Commands.CommandError>(() => p.Exit(1, "oops"));

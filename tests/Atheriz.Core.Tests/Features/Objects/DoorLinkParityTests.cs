@@ -13,12 +13,12 @@ namespace Atheriz.Core.Tests.Features.Objects;
 public class DoorLinkParityTests
 {
     [Fact]
-    public void AddLink_Twins_KeepPythonAsymmetry()
+    public void AddLink_Twins_DedupNameOnly()
     {
-        // Behavior pin, corrected for Python parity (nodes.py:662-691):
-        // add_link dedups (name, coord) while add_link_if_absent dedups
-        // name-only — DELIBERATELY different. Same-name-different-coord is
-        // ADDED by AddLink and REFUSED by AddLinkIfAbsent. Pins the asymmetry.
+        // Behavior pin (audit4 O-3): lookups fold case, so both add paths
+        // dedup name-only (case-insensitive). Same-name-different-coord is
+        // REFUSED by AddLink and by AddLinkIfAbsent alike — the second link
+        // would be installed but unreachable (shadowed).
         ObjectRegistry.ClearAll();
         try
         {
@@ -32,7 +32,7 @@ public class DoorLinkParityTests
             n2.AddLink(new NodeLink("north", coordA, new List<string> { "n" }));
             n1.AddLink(new NodeLink("north", coordB, new List<string> { "n" }));
             bool absentAdded = n2.AddLinkIfAbsent("north", () => new NodeLink("north", coordB, new List<string> { "n" }));
-            Assert.Equal(2, n1.GetLinks().Count(l => l.Name == "north"));
+            Assert.Single(n1.GetLinks(), l => l.Name == "north");
             Assert.False(absentAdded);
             Assert.Single(n2.GetLinks(), l => l.Name == "north");
         }

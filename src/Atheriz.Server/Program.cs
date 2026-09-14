@@ -97,12 +97,12 @@ try
 {
 switch (command)
 {
-    case "stop": await StopHandler.HandleStopAsync(rest).ConfigureAwait(false); return;
-    case "reload": await ReloadHandler.HandleReloadAsync(rest).ConfigureAwait(false); return;
-    case "restart": { bool fgRestart = await RestartHandler.HandleRestartAsync(rest).ConfigureAwait(false); if (fgRestart) { command = "start"; break; } return; }
-    case "reset": await ResetHandler.HandleResetAsync(rest).ConfigureAwait(false); return;
-    case "create": await CreateHandler.HandleCreateAsync(rest).ConfigureAwait(false); return;
-    case "new": { bool fg = await NewHandler.HandleNewAsync(rest).ConfigureAwait(false); if (fg) { command = "start"; break; } return; }
+    case "stop": await StopHandler.HandleStopAsync(rest).ConfigureAwait(false); Environment.Exit(CliExitCode.Code); return;
+    case "reload": await ReloadHandler.HandleReloadAsync(rest).ConfigureAwait(false); Environment.Exit(CliExitCode.Code); return;
+    case "restart": { bool fgRestart = await RestartHandler.HandleRestartAsync(rest).ConfigureAwait(false); if (fgRestart) { command = "start"; break; } Environment.Exit(CliExitCode.Code); return; }
+    case "reset": await ResetHandler.HandleResetAsync(rest).ConfigureAwait(false); Environment.Exit(CliExitCode.Code); return;
+    case "create": await CreateHandler.HandleCreateAsync(rest).ConfigureAwait(false); Environment.Exit(CliExitCode.Code); return;
+    case "new": { bool fg = await NewHandler.HandleNewAsync(rest).ConfigureAwait(false); if (fg) { command = "start"; break; } Environment.Exit(CliExitCode.Code); return; }
     case "test": Environment.Exit(TestHandler.HandleTest(rest)); return;
     case "--help": case "-h": PrintHelp(); return;
     case "start": break;

@@ -51,6 +51,6 @@ public class ArgumentParserTests
         // Without a REMAINDER positional, unknown dash tokens stay errors.
         var p = new GameArgumentParser("prog");
         p.AddArgument("name");
-        Assert.Throws<CommandError>(() => p.ParseArgs(["--help"]));
+        Assert.ThrowsAny<CommandError>(() => p.ParseArgs(["--help"]));
     }
 }

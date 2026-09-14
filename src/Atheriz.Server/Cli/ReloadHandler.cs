@@ -17,15 +17,15 @@ public static class ReloadHandler
         // plaintext or vice versa) retry once with the flipped scheme.
         var resp = await ShutdownClient.PostAdminWithTlsFallbackAsync(port, settings.SecretPath, "/_internal/hot_reload", null, tlsOn).ConfigureAwait(false);
         sw.Stop();
-        if (resp is null) { Console.WriteLine($"Error connecting to server at {url}"); return; }
+        if (resp is null) { Console.WriteLine($"Error connecting to server at {url}"); CliExitCode.Set(1); return; }
         var body = resp.Body;
         try
         {
             var status = resp.GetStatus("ok");
             var msg = resp.GetMessage();
-            if (status == "ok") { Console.WriteLine($"Success! {msg}"); Console.WriteLine($"Reload took {sw.Elapsed.TotalMilliseconds:F2}ms"); }
-            else Console.WriteLine($"Failed: {msg}");
+            if (status == "ok") { Console.WriteLine($"Success! {msg}"); Console.WriteLine($"Reload took {sw.Elapsed.TotalMilliseconds:F2}ms"); CliExitCode.Set(0); }
+            else { Console.WriteLine($"Failed: {msg}"); CliExitCode.Set(1); }
         }
-        catch { Console.WriteLine($"Response: {body}"); }
+        catch { Console.WriteLine($"Response: {body}"); CliExitCode.Set(1); }
     }
 }

@@ -512,7 +512,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             snapshot = new List<Func<GameObject, bool>>(lst);
         }
         foreach (var fn in snapshot)
-            if (!fn(accessingObj)) return false;
+        {
+            bool ok;
+            try { ok = fn(accessingObj); }
+            catch { return false; }
+            if (!ok) return false;
+        }
         return true;
     }
 

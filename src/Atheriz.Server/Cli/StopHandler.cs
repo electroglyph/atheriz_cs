@@ -43,6 +43,7 @@ public static class StopHandler
             if (!PidFile.IsServerProcess(pid) || !PidFile.IsProcessListeningOnPort(pid, port))
             {
                 Console.WriteLine($"Found process (PID: {pid}) on port {port} is not a verified server; refusing to terminate.");
+                CliExitCode.Set(1);
                 return;
             }
             string foundName = "process";
@@ -62,20 +63,22 @@ public static class StopHandler
                     var cwdL = new FileInfo($"/proc/{pid}/cwd").LinkTarget; if (!string.IsNullOrEmpty(cwdL)) { var pf = Path.Combine(cwdL, "save", "server.pid"); PidFile.ReleaseIfOwner(pf, pid); }
                 }
                 catch { }
+                CliExitCode.Set(0);
                 return;
             }
-            catch (Exception ex) { Console.WriteLine($"Error stopping found process: {ex.Message}"); return; }
+            catch (Exception ex) { Console.WriteLine($"Error stopping found process: {ex.Message}"); CliExitCode.Set(1); return; }
         }
         Process? proc = null;
         try { proc = Process.GetProcessById(pid); }
-        catch (ArgumentException) { Console.WriteLine("Process from PID file not found; removing stale PID file."); PidFile.ReleaseIfOwner(pidFilePath, pid); return; }
-        catch (Exception ex) { Console.WriteLine($"Could not inspect PID {pid}: {ex.Message}"); return; }
+        catch (ArgumentException) { Console.WriteLine("Process from PID file not found; removing stale PID file."); PidFile.ReleaseIfOwner(pidFilePath, pid); CliExitCode.Set(0); return; }
+        catch (Exception ex) { Console.WriteLine($"Could not inspect PID {pid}: {ex.Message}"); CliExitCode.Set(1); return; }
         // Per-PID hold only: the port being listened on by *someone* while
         // this pid is a server must never implicate this pid .
         bool listening = PidFile.IsProcessListeningOnPort(pid, port);
         if (!listening)
         {
             Console.WriteLine($"PID {pid} is not listening on port {port}; refusing to terminate an unverified process.");
+            CliExitCode.Set(1);
             return;
         }
         bool isServer = PidFile.IsServerProcess(pid);
@@ -84,6 +87,7 @@ public static class StopHandler
             // name the failed check — this branch fired on the
             // process-identity gate, not the port-listening gate above.
             Console.WriteLine($"PID {pid} is not a verified Atheriz server process; refusing to terminate an unverified process.");
+            CliExitCode.Set(1);
             return;
         }
         Console.Write($"Stopping server process with PID: {pid}...");
@@ -98,8 +102,8 @@ public static class StopHandler
                 // Owner-verified: only remove the file when it still names
                 // the process just stopped — never a successor's pid file
                 // across the kill/delete window (pid reuse).
-                if (!stillRunning) PidFile.ReleaseIfOwner(pidFilePath, pid);
-                else Console.WriteLine("\nWarning: Process still exists after kill.");
+                if (!stillRunning) { PidFile.ReleaseIfOwner(pidFilePath, pid); CliExitCode.Set(0); }
+                else { Console.WriteLine("\nWarning: Process still exists after kill."); CliExitCode.Set(1); }
             }
             catch { }
         }
@@ -114,9 +118,11 @@ public static class StopHandler
         {
             case ShutdownRequestResult.Accepted:
                 Console.WriteLine("Graceful shutdown request accepted; the server will stop itself.");
+                CliExitCode.Set(0);
                 return;
             case ShutdownRequestResult.AuthRejected:
                 // A live server refused us: abort here, never escalate into signals.
+                CliExitCode.Set(1);
                 return;
             default: break;
         }
@@ -131,10 +137,11 @@ public static class StopHandler
                 return;
             }
             Console.WriteLine("No server process found.");
+            CliExitCode.Set(1);
             return;
         }
         int? pid = PidFile.TryReadPid(pidFilePath);
-        if (pid is null) Console.WriteLine("Invalid PID file content.");
+        if (pid is null) { Console.WriteLine("Invalid PID file content."); CliExitCode.Set(1); }
         if (pid is not null)
         {
             await KillVerifiedPidAsync(pid.Value, port, pidFilePath).ConfigureAwait(false);

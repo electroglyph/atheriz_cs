@@ -25,7 +25,7 @@ public static class ResetHandler
             if (isRunning) Console.WriteLine("The server is currently running and will be stopped.");
             Console.Write("Are you sure you want to continue? [y/N] ");
             var resp = Console.ReadLine();
-            if (!string.Equals(resp, "y", StringComparison.OrdinalIgnoreCase)) { Console.WriteLine("Aborted."); return; }
+            if (!string.Equals(resp, "y", StringComparison.OrdinalIgnoreCase)) { Console.WriteLine("Aborted."); CliExitCode.Set(1); return; }
         }
         // Ports that must be free before the wipe: the CLI override plus the
         // configured ports, so a mismatched --port cannot blind the guard
@@ -44,6 +44,7 @@ public static class ResetHandler
                     // Our own server holds these ports; it is stopped below. Anything else aborts.
                     if (isRunning && pid is not null && Infrastructure.PidFile.IsProcessListeningOnPort(pid.Value, ep.Port)) continue;
                     Console.WriteLine($"Port {ep.Port} still listening; abort");
+                    CliExitCode.Set(1);
                     return;
                 }
             }
@@ -71,12 +72,14 @@ public static class ResetHandler
                         if (watchPorts.Contains(ep.Port) && Infrastructure.PidFile.IsProcessListeningOnPort(pid.Value, ep.Port))
                         {
                             Console.WriteLine($"Port {ep.Port} still listening; abort");
+                            CliExitCode.Set(1);
                             return;
                         }
                     }
                 }
                 catch { }
                 Console.WriteLine("Warning: Process still exists after kill.");
+                CliExitCode.Set(1);
                 return;
             }
         }
@@ -89,14 +92,14 @@ public static class ResetHandler
         // never deleted, but an absent dir needs no protection.
         if (Directory.Exists(savePath))
         {
-            try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath, force); } catch (Exception ex) { Console.WriteLine(ex.Message); return; }
+            try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath, force); } catch (Exception ex) { Console.WriteLine(ex.Message); CliExitCode.Set(1); return; }
             try
             {
                 Directory.Delete(savePath, recursive: true);
             }
-            catch (Exception ex) { Console.WriteLine($"Failed to delete save: {ex.Message}"); return; }
+            catch (Exception ex) { Console.WriteLine($"Failed to delete save: {ex.Message}"); CliExitCode.Set(1); return; }
         }
-        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return; }
+        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); CliExitCode.Set(1); return; }
         Directory.CreateDirectory(savePath);
         Atheriz.Core.Utils.FsUtil.TryChmod0700(savePath);
 
@@ -111,13 +114,14 @@ public static class ResetHandler
             Atheriz.Core.InitialSetup.DoSetup(savePath, prompt: false);
             Console.WriteLine("Success! New world created.");
         }
-        catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); return; }
+        catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); CliExitCode.Set(1); return; }
 
         // Port of atheriz.py:1629 reset always daemonizes after setup.
         // respawn preserves the CLI telnet-port override, else the
         // replacement silently binds the configured default instead.
         var resetTelnetPort = ArgumentParser.ParseTelnetPort(a);
         var resetSpawnArgs = DaemonSpawner.BuildSpawnArgs(port, host, resetTelnetPort);
-        await DaemonSpawner.SpawnDaemonAsync(resetSpawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
+        bool resetSpawned = await DaemonSpawner.SpawnDaemonAsync(resetSpawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
+        CliExitCode.Set(resetSpawned ? 0 : 1);
     }
 }

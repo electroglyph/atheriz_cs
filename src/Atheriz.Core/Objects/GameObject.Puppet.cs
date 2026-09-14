@@ -165,7 +165,7 @@ public partial class GameObject
     public bool Unpuppet(Session session)
     {
         if (session is null) return false;
-        GameObject prev;
+        GameObject? prev;
         GameObject target;
         Dictionary<string, object>? restore;
         // Single critical section : pop + restore-apply + rewire are
@@ -175,15 +175,24 @@ public partial class GameObject
         lock (session.Lock)
         {
             if (!session.TryPopPuppetEntry(out var prevEntry, out target)) return false;
-            prev = prevEntry!;
+            prev = prevEntry;
             // Read the restore here; applied after AtUnpuppet below so game
             // hooks observe the pre-restore target like puppet.py:164-192.
             restore = target.GetPuppetRestore();
             target.Session = null;
-            session.Puppet = prev;
-            prev.Session = session;
+            if (prev is null || prev.IsDeleted)
+            {
+                session.Puppet = null;
+            }
+            else
+            {
+                session.Puppet = prev;
+                prev.Session = session;
+            }
         }
-        Suppress("Unpuppet", () => target.AtUnpuppet(prev));
+        // prev is never null in practice (Puppet always pushes a live
+        // origin), so the fallback only satisfies the type system.
+        Suppress("Unpuppet", () => target.AtUnpuppet(prev ?? target));
         // Ownership re-check: a concurrent Puppet during AtUnpuppet owns the target
         // now. A stolen target skips BOTH the stale
         // restore and AtDisconnect — tearing down another session's live puppet is
@@ -226,7 +235,8 @@ public partial class GameObject
         {
             Suppress("Unpuppet", () => target.AtDisconnect());
         }
-        Suppress("Unpuppet", () => prev.AtPostPuppet());
+        if (prev is not null && !prev.IsDeleted)
+            Suppress("Unpuppet", () => prev.AtPostPuppet());
         return true;
     }
 

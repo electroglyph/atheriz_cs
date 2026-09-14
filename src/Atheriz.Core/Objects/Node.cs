@@ -410,12 +410,15 @@ public partial class Node : GameObject
                 }
                 if (homeObj is not null)
                 {
-                    if (content.MoveTo(homeObj)) moved = true;
-                    else if (fallback is not null && content.MoveTo(fallback, force: true, announce: false)) moved = true;
+                    try { if (content.MoveTo(homeObj, force: false, announce: false)) moved = true; } catch { moved = false; }
+                    if (!moved && fallback is not null)
+                    {
+                        try { if (content.MoveTo(fallback, force: true, announce: false)) moved = true; } catch { moved = false; }
+                    }
                 }
                 else if (fallback is not null)
                 {
-                    if (content.MoveTo(fallback, force: true, announce: false)) moved = true;
+                    try { if (content.MoveTo(fallback, force: true, announce: false)) moved = true; } catch { moved = false; }
                 }
                 if (!moved)
                 {

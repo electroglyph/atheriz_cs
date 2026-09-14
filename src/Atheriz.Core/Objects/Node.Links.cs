@@ -157,6 +157,7 @@ public partial class Node
     private bool AddLinkRawNoLock(NodeLink link)
     {
         if (Links.Count > 0 && Links.Contains(link)) return false;
+        if (Links.Count > 0 && HasLinkNameNoLock(link.Name)) return false;
         if (Links.Count == 0) Links = [link];
         else Links.Add(link);
         IsModified = true;

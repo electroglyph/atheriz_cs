@@ -889,12 +889,22 @@ public class ConnectionManager
     public virtual bool RegisterConnection(string connId, BaseConnection connection)
     {
         var host = connection.ClientHost ?? "?"; // port of manager.py:76
-        connection.RegisteredHost = host;
         var limit = _settings.MaxConnectionsPerIp; // port of manager.py:77
         string? refusal = null;
         _lock.EnterWriteLock();
         try
         {
+            // Same object re-registering under a new id: its stale id must be
+            // evicted, or one socket holds two slots (double per-IP count and
+            // an orphaned id on disconnect). Decided here, applied only on
+            // admission below — a refused re-register must not destroy the
+            // live previous registration. The stale slot's host is the
+            // previously recorded one (RegisteredHost is overwritten after).
+            string? evictId = null;
+            if (_connToId.TryGetValue(connection, out var prevId) && prevId != connId
+                && _connections.TryGetValue(prevId, out var prevStored) && ReferenceEquals(prevStored, connection))
+                evictId = prevId;
+            var evictHost = evictId is not null ? (connection.RegisteredHost ?? host) : null;
             if (ObjectRegistry.IsIpBanned(host)) // port of manager.py:79-85
                 refusal = $"[Network] Refusing connection from banned host {host}";
             else if (limit > 0 && host != "?") // port of manager.py:86-101
@@ -903,15 +913,31 @@ public class ConnectionManager
                 // if overwriting same conn_id, don't count itself twice — manager.py:88-91
                 if (_connections.TryGetValue(connId, out var existing) && HostOf(existing) == host)
                     sameHost--;
+                // the pending eviction frees one same-host slot on admission
+                if (evictHost == host)
+                    sameHost--;
                 if (sameHost >= limit)
                     refusal = $"[Network] Refusing connection from {host}: per-IP limit ({limit}) reached";
             }
             // Total-connection admission cap (0 = unlimited). Checked after the
-            // per-IP gate so the refusal reason stays specific.
-            if (refusal is null && _settings.MaxTotalConnections > 0 && _connections.Count >= _settings.MaxTotalConnections)
+            // per-IP gate so the refusal reason stays specific. The pending
+            // eviction nets out on admission, so it is discounted here.
+            if (refusal is null && _settings.MaxTotalConnections > 0 && _connections.Count - (evictId is not null ? 1 : 0) >= _settings.MaxTotalConnections)
                 refusal = $"[Network] Refusing connection from {host}: total limit ({_settings.MaxTotalConnections}) reached";
+            connection.RegisteredHost = host;
             if (refusal is null)
             {
+            if (evictId is not null)
+            {
+                _connections.Remove(evictId);
+                if (evictHost != "?" && evictHost is not null)
+                {
+                    var evictCnt = _perIpCounts.TryGetValue(evictHost, out var ev) ? ev - 1 : -1;
+                    if (evictCnt <= 0) _perIpCounts.Remove(evictHost);
+                    else _perIpCounts[evictHost] = evictCnt;
+                }
+                _connToId.Remove(connection);
+            }
             // Re-registering the same conn id from the same host replaces the same
             // registration, so it must not increment the per-IP counter again —
             // double-counting leaks the bucket toward a false limit refusal.
@@ -1012,6 +1038,29 @@ public class ConnectionManager
                         var cnt = _perIpCounts.TryGetValue(host, out var c) ? c - 1 : -1;
                         if (cnt <= 0) _perIpCounts.Remove(host);
                         else _perIpCounts[host] = cnt;
+                    }
+                }
+            }
+            // Orphan sweep: no other id may still point at this same object
+            // (each such slot leaked a per-IP count toward a false limit
+            // refusal). Normally impossible — Register evicts the stale id —
+            // but a disconnect must leave no dangling slot behind.
+            List<string>? orphans = null;
+            foreach (var kv in _connections)
+            {
+                if (ReferenceEquals(kv.Value, connection))
+                    (orphans ??= new()).Add(kv.Key);
+            }
+            if (orphans is not null)
+            {
+                foreach (var oid in orphans)
+                {
+                    _connections.Remove(oid);
+                    if (host != "?")
+                    {
+                        var ocnt = _perIpCounts.TryGetValue(host, out var oc) ? oc - 1 : -1;
+                        if (ocnt <= 0) _perIpCounts.Remove(host);
+                        else _perIpCounts[host] = ocnt;
                     }
                 }
             }

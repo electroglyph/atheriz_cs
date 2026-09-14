@@ -22,6 +22,10 @@ public sealed class FollowCommand : Command
         if (!target.IsPc && !target.IsNpc) { go.Msg("You can't follow that!"); return; }
         if (target.NoFollow && !go.IsBuilder) { go.Msg($"{target.Name} will not lead you."); return; }
         if (go.Following == target.Id) { go.Msg($"You are already following {target.Name}!"); return; }
+        // View gate after the specific diagnostics (self/type/nofollow/
+        // already-following keep their messages): a deleted or unviewable
+        // target is not followable, reported as not-found.
+        if (target.IsDeleted || !target.Access(go, "view")) { CommandHelpers.MsgCouldNotFind(go, targetName); return; }
         // Lock order registry -> object: create + register the script BEFORE
         // taking the target lock (AddObject takes the registry AllLock, which
         // must never nest under an object lock). Re-checked under the lock;

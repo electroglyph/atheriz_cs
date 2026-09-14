@@ -177,7 +177,13 @@ public class Door
         {
             if (!_locks.TryGetValue(lockName, out var lst) || lst.Count == 0) return true; snap = [.. lst];
         }
-        foreach (var fn in snap) if (!fn(caller)) return false;
+        foreach (var fn in snap)
+        {
+            bool ok;
+            try { ok = fn(caller); }
+            catch { return false; }
+            if (!ok) return false;
+        }
         return true;
     }
     public bool CanOpen(GameObject? caller) => Access(caller, "open");

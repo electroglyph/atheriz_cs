@@ -148,11 +148,21 @@ public partial class GameObject
         }
 
         // Port of base_obj.py:1107 if not force and not at_pre_move(...): return False
+        // FollowScript.at_pre_move pushes one entry per AtPreMove call; every
+        // veto return below (before AtPostMove) must pop its partner or the
+        // stack leaks and later moves pair with stale entries. Force moves
+        // skip AtPreMove (no push), so their AtPostMove pop is a no-op on an
+        // empty stack.
+        bool followPushed = false;
         if (!force)
         {
             var effectiveCaller = caller ?? this;
             if (!Access(effectiveCaller, "move")) return false;
-            if (!AtPreMove(destObj, toExit)) return false;
+            followPushed = true;
+            bool preOk;
+            try { preOk = AtPreMove(destObj, toExit); }
+            catch { FollowScript.CancelPendingPush(this); throw; }
+            if (!preOk) { FollowScript.CancelPendingPush(this); return false; }
         }
 
         // Port of base_obj.py:1109-1117 if destination is None: remove from loc, location=None, at_post_move
@@ -178,7 +188,7 @@ public partial class GameObject
         // Python: if dest is not Node: walk chain via location until Node or None checking self
         // Note: no depth limit — seen set prevents infinite, and deep chains beyond 100 must still be detected (test_containment:105)
         // Self/cycle guard also applies to Node destinations .
-        if (ReferenceEquals(destObj, this) || destObj.Id == this.Id) return false;
+        if (ReferenceEquals(destObj, this) || destObj.Id == this.Id) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
         if (!destObj.IsNode)
         {
             var cur = destObj;
@@ -189,8 +199,8 @@ public partial class GameObject
             bool reachedNode = false;
             while (cur is not null)
             {
-                if (cur == this || cur.Id == this.Id) return false; // Port of base_obj.py:1122-1123
-                if (!seen.Add(cur.Id)) return false; // cycle
+                if (cur == this || cur.Id == this.Id) { if (followPushed) FollowScript.CancelPendingPush(this); return false; } // Port of base_obj.py:1122-1123
+                if (!seen.Add(cur.Id)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; } // cycle
                 // Get next location in chain
                 var next = cur.ResolveLocationObject();
                 if (next is null) break;
@@ -215,7 +225,7 @@ public partial class GameObject
                 {
                     var cid = stack.Pop();
                     if (!visited.Add(cid)) continue;
-                    if (cid == destObj.Id) return false;
+                    if (cid == destObj.Id) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
                     var obj = ObjectRegistry.GetSingle(cid);
                     if (obj is not null && obj.IsContainer)
                     {
@@ -286,18 +296,18 @@ public partial class GameObject
         // that staging, not these arms).
         if (oldLoc is not null && oldLoc.IsNode)
         {
-            if (!oldLoc.AtPreObjectLeave(destObj, toExit)) return false;
+            if (!oldLoc.AtPreObjectLeave(destObj, toExit)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
         }
         if (destObj.IsNode)
         {
-            if (!destObj.AtPreObjectReceive(oldLoc, null)) return false;
+            if (!destObj.AtPreObjectReceive(oldLoc, null)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
         }
 
         // The pre-gates above run with no location locks held and hooks can move
         // things (see the comment above). If `this` is no longer where the gates
         // ran, abort instead of removing from a stale room and double-inserting
         // into the destination.
-        if (!ReferenceEquals(ResolveLocationObject(), oldLoc)) return false;
+        if (!ReferenceEquals(ResolveLocationObject(), oldLoc)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
 
         // Try to acquire locks in order (deadlock avoidance)
         // For C# we use ReaderWriterLockSlim EnterWriteLock with recursion; acquire all, do move, release reverse
@@ -312,7 +322,7 @@ public partial class GameObject
         try
         {
             // Port of base_obj.py:1187-1206 checks inside _do_with_nodes
-            if (destObj.IsDeleted) return false; // Port of base_obj.py:1187 if is_deleted: return False
+            if (destObj.IsDeleted) { if (followPushed) FollowScript.CancelPendingPush(this); return false; } // Port of base_obj.py:1187 if is_deleted: return False
             // No grid-presence probe here: the old probe's arms both fell through
             // to the move (dead block paying a registry lookup per move for no
             // decision), so unregistered-but-live nodes stay movable.
@@ -372,7 +382,7 @@ public partial class GameObject
             }
         }
 
-        if (!success) return false;
+        if (!success) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
 
         // Deferred exit installation : runs after both location
         // locks released, alongside the leave/receive hooks below.

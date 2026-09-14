@@ -382,11 +382,18 @@ public partial class GameObject
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
         try
         {
+            // Captured before AtDisconnect: the hook nulls obj.Session, so
+            // the puppet unwind below must use this handle, not re-read it.
             var sess = obj.Session;
             if (sess is not null)
             {
                 try { obj.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
                 try { sess.Connection?.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                // A deleted id must not linger in the puppet stack or as the
+                // session's live puppet — Unpuppet would otherwise pop it and
+                // rewire the session onto a deleted object.
+                try { lock (sess.Lock) { sess.RemovePuppetEntriesFor(obj); } } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                try { lock (sess.Lock) { if (ReferenceEquals(sess.Puppet, obj)) sess.Puppet = null; if (ReferenceEquals(sess.LastPuppet, obj)) sess.LastPuppet = null; } } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
             }
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }

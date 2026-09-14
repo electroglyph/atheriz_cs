@@ -188,19 +188,19 @@ public sealed class GameArgumentParser
 
     public string FormatUsage() => BuildUsage() + "\n";
 
-    public void PrintHelp() => throw new CommandError(FormatHelp());
+    public void PrintHelp() => throw new CommandHelpException(FormatHelp());
     // the file overload honors file (argparse print_help(file=...));
     // null/absent file keeps the Msg-surface throw.
     public void PrintHelp(object? file)
     {
         if (file is System.IO.TextWriter w) { w.Write(FormatHelp()); return; }
-        throw new CommandError(FormatHelp());
+        throw new CommandHelpException(FormatHelp());
     }
-    public void PrintUsage() => throw new CommandError(FormatUsage());
+    public void PrintUsage() => throw new CommandHelpException(FormatUsage());
     public void PrintUsage(object? file)
     {
         if (file is System.IO.TextWriter w) { w.Write(FormatUsage()); return; }
-        throw new CommandError(FormatUsage());
+        throw new CommandHelpException(FormatUsage());
     }
     public void Error(string message) => throw new CommandError(message);
     public void Exit(int status = 0, string? message = null)
@@ -358,7 +358,7 @@ public sealed class GameArgumentParser
                     DrainRemainder(positionalDefs[posIdx].Dest, ref i);
                     break;
                 }
-                if (opt.IsHelp) throw new CommandError(FormatHelp());
+                if (opt.IsHelp) throw new CommandHelpException(FormatHelp());
                 // presence tracking so required flags with non-null
                 // bool defaults (store_true/store_false) are detectable.
                 seen.Add(opt.Dest);

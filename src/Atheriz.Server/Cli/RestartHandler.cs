@@ -40,6 +40,7 @@ public static class RestartHandler
                     if (!exited && ours)
                     {
                         Console.WriteLine($" old server (PID {oldPid}) did not stop; aborting restart.");
+                        CliExitCode.Set(1);
                         return false;
                     }
                 }
@@ -57,18 +58,20 @@ public static class RestartHandler
         if (!await WaitForPortFreeAsync(portVal, 100).ConfigureAwait(false))
         {
             Console.WriteLine($"Error: port {portVal} still listening after stop; aborting restart (not spawning).");
+            CliExitCode.Set(1);
             return false;
         }
 
-        if (fg) { Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms"); return true; }
+        if (fg) { Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms"); CliExitCode.Set(0); return true; }
         // respawn preserves the CLI telnet-port override, else the
         // replacement silently binds the configured default instead.
         var telnetPort = ArgumentParser.ParseTelnetPort(a);
         var spawnArgs = DaemonSpawner.BuildSpawnArgs(port, host, telnetPort);
-        await DaemonSpawner.SpawnDaemonAsync(spawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
+        bool respawned = await DaemonSpawner.SpawnDaemonAsync(spawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
         // Wait for the new server to come up on the port (bounded).
         if (!await WaitForPortUpAsync(portVal, 150).ConfigureAwait(false)) Console.WriteLine($"Warning: port {portVal} not listening yet; check save/server.log.");
         Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms");
+        CliExitCode.Set(respawned ? 0 : 1);
         return false;
     }
 

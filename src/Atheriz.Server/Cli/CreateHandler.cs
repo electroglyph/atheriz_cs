@@ -30,9 +30,9 @@ public static class CreateHandler
                 var status = resp.GetStatus("error");
                 var msg = resp.GetMessage();
                 Console.WriteLine(msg);
-                if (status == "ok" || status == "error") return;
+                if (status == "ok" || status == "error") { CliExitCode.Set(0); return; }
             }
-            catch { Console.WriteLine(resp.Body); return; }
+            catch { Console.WriteLine(resp.Body); CliExitCode.Set(0); return; }
         }
         Console.WriteLine("No running server detected; creating directly against the database.");
         Console.WriteLine("Loading existing data...");
@@ -46,11 +46,12 @@ public static class CreateHandler
             if (Infrastructure.PidFile.IsLiveClaim(pidFile, out int ownerPid))
             {
                 Console.WriteLine($"A live server owns this world (verified server.pid {ownerPid}); stop it first instead of offline create.");
+                CliExitCode.Set(1);
                 return;
             }
         }
         catch { }
-        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return; }
+        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); CliExitCode.Set(1); return; }
         Directory.CreateDirectory(savePath);
         try
         {
@@ -58,8 +59,9 @@ public static class CreateHandler
             db.Database.EnsureCreated();
             Atheriz.Core.Globals.ObjectRegistry.LoadObjects(savePath);
         }
-        catch (Exception ex) { Console.WriteLine($"Load failed: {ex.Message}"); return; }
+        catch (Exception ex) { Console.WriteLine($"Load failed: {ex.Message}"); CliExitCode.Set(1); return; }
         // Port of atheriz.py:1456-1459 offline path: at_char_create against the database.
         ServerEvents.AtCharCreate(accName, charName, pw);
+        CliExitCode.Set(0);
     }
 }

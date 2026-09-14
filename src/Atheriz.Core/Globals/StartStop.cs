@@ -463,7 +463,8 @@ public static class StartStop
     private static void SaveWorld(AtherizSettings settings)
     {
         // Crash-consistency journal: see AutosaveTick.
-        Persistence.CheckpointJournal.MarkDirty(settings.SavePath);
+        string savePath = Persistence.AtherizDbContextFactory.ResolveSavePath(settings);
+        Persistence.CheckpointJournal.MarkDirty(savePath);
         bool ok = true;
         // One transaction for all three groups. WithGateAndTransaction joins an
         // ambient transaction instead of opening its own, so opening one here
@@ -479,7 +480,7 @@ public static class StartStop
             Console.Error.WriteLine("checkpoint gate busy; saving without atomic transaction (journal still detects).");
         try
         {
-            using var db = new AtherizDbContext(settings.SavePath);
+            using var db = new AtherizDbContext(savePath);
             db.Database.EnsureCreated();
             if (atomic)
             {
@@ -492,7 +493,7 @@ public static class StartStop
         }
         catch (Exception ex) { ok = false; Console.Error.WriteLine($"checkpoint context failed:\n{ex}"); }
         finally { if (atomic) DbWriteGate.Exit(); }
-        if (ok) Persistence.CheckpointJournal.MarkClean(settings.SavePath);
+        if (ok) Persistence.CheckpointJournal.MarkClean(savePath);
     }
 
     // The three save groups shared by the atomic and fallback shapes above.

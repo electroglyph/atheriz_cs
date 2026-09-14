@@ -54,6 +54,12 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         return true;
     }
     internal void ClearPuppetEntries() => _puppetStack.Clear();
+    internal void RemovePuppetEntriesFor(GameObject obj)
+    {
+        if (obj is null) return;
+        int id = obj.Id;
+        _puppetStack.RemoveAll(e => (e.Prev is not null && e.Prev.Id == id) || e.Target.Id == id);
+    }
     /// <summary>
     /// Hot-reload rewire: point Puppet/LastPuppet/PuppetStack entries at the
     /// replacement instance (matched by id). Python's __class__ swap preserves

@@ -9,7 +9,9 @@ public sealed class QuellCommand : Command
     public override string Desc => "Quell your privileges to the level of a normal player.";
     public override string Category => "Building";
     public override bool UseParser => false;
-    public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
+    // Raw privilege check (no quelled fold): a quelled builder must still
+    // reach Run for the already-quelled branch, mirroring UnquellCommand.
+    public override bool Access(IMessageTarget caller) => caller is GameObject g && g.PrivilegeLevel >= Privilege.Builder;
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;

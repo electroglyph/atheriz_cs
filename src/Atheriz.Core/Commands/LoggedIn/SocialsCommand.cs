@@ -107,6 +107,7 @@ public sealed class SocialsCommand : Command
             if (targets.Count == 0) { CommandHelpers.MsgCouldNotFind(go, targetName); return; }
             if (targets.Count > 1) { go.Msg($"Multiple matches for '{targetName}'. Be more specific."); return; }
             var target = targets[0];
+            if (target.IsDeleted || !target.Access(go, "view")) { CommandHelpers.MsgCouldNotFind(go, targetName); return; }
             string msg = templates.target;
             go.AtSayFull(msg, msgSelf: msg, msgLocation: msg,
                 mapping: new Dictionary<string, object?> { ["you"] = go, ["target"] = target });

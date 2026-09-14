@@ -94,7 +94,7 @@ public class PortedBaseCmdTests
     public void GameArgumentParser_PrintHelpRaises()
     {
         var p = new GameArgumentParser(prog: "x", description: "d");
-        var ex = Assert.Throws<CommandError>(() => p.PrintHelp());
+        var ex = Assert.ThrowsAny<CommandError>(() => p.PrintHelp());
         var msg = ex.Message.ToLowerInvariant();
         Assert.True(msg.Contains("usage:") || msg.Contains("options:"));
     }
@@ -103,7 +103,7 @@ public class PortedBaseCmdTests
     public void GameArgumentParser_PrintUsageRaises()
     {
         var p = new GameArgumentParser(prog: "x");
-        var ex = Assert.Throws<CommandError>(() => p.PrintUsage());
+        var ex = Assert.ThrowsAny<CommandError>(() => p.PrintUsage());
         Assert.Contains("usage:", ex.Message.ToLowerInvariant());
     }
 

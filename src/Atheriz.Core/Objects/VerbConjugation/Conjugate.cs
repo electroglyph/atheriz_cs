@@ -196,7 +196,7 @@ public static class Conjugate
     private static bool MatchesAnyTense(string verb, string infinitive, IEnumerable<string> tenses, bool negated)
     {
         foreach (var tense in tenses)
-            if (verb == VerbConjugate(infinitive, tense, negate: negated))
+            if (string.Equals(verb, VerbConjugate(infinitive, tense, negate: negated), StringComparison.OrdinalIgnoreCase))
                 return true;
         return false;
     }
@@ -241,8 +241,8 @@ public static class Conjugate
         {
             var tense = kv.Key;
             var idx = kv.Value;
-            if (idx < data.Length && data[idx] == verb) return tense;
-            if (idx + VerbTensesKeys.Count < data.Length && data[idx + VerbTensesKeys.Count] == verb) return tense;
+            if (idx < data.Length && string.Equals(data[idx], verb, StringComparison.OrdinalIgnoreCase)) return tense;
+            if (idx + VerbTensesKeys.Count < data.Length && string.Equals(data[idx + VerbTensesKeys.Count], verb, StringComparison.OrdinalIgnoreCase)) return tense;
         }
         if (string.Equals(infinitive, verb, StringComparison.OrdinalIgnoreCase)) return "infinitive";
         // No table form matched (conjugate.py:263-267 falls off the end).
@@ -267,7 +267,7 @@ public static class Conjugate
         {
             var expected = VerbConjugate(infinitive, target, negate: negated);
             if (string.IsNullOrEmpty(expected)) return false;
-            return verb == expected;
+            return string.Equals(verb, expected, StringComparison.OrdinalIgnoreCase);
         }
         return false;
     }
@@ -283,8 +283,8 @@ public static class Conjugate
         if (PastPersonTenses.TryGetValue(personNorm, out var target))
         {
             var expected = VerbConjugate(infinitive, target, negate: negated);
-            if (!string.IsNullOrEmpty(expected)) return verb == expected;
-            return verb == VerbConjugate(infinitive, "past", negate: negated);
+            if (!string.IsNullOrEmpty(expected)) return string.Equals(verb, expected, StringComparison.OrdinalIgnoreCase);
+            return string.Equals(verb, VerbConjugate(infinitive, "past", negate: negated), StringComparison.OrdinalIgnoreCase);
         }
         return false;
     }

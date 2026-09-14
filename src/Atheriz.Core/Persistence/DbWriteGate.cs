@@ -27,6 +27,18 @@ public static class DbWriteGate
     // same-flow re-entry from an inherited copy on a thread that never called
     // Enter — the holder thread id can.
     private static int _holderThreadId;
+    // Async-lease ownership. The claim is written to AsyncLocal BEFORE the
+    // first await, so it flows to the caller's continuation and any nested
+    // EnterAsync on the same logical flow (any pool thread). The global
+    // holder id pairs it with the live lease: a stale per-flow token from a
+    // released lease never equals the current holder, so sequential leases in
+    // one flow take the normal path. A token match on the acquire thread is
+    // same-flow nesting (no semaphore take); a match on any other thread is
+    // a fork — refused fail-fast, like the sync fork path.
+    private static long _claimSource;
+    private static readonly AsyncLocal<long> _asyncClaim = new();
+    private static long _asyncHolder;
+    private static int _asyncHolderThread;
 
     public static SemaphoreSlim Semaphore => _sem;
 
@@ -60,14 +72,39 @@ public static class DbWriteGate
         Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
     }
 
-    public static async Task<WriteHold> EnterAsync(CancellationToken ct = default)
+    // Genuinely async take — awaiting the semaphore frees the pool thread
+    // instead of blocking it, so saturated saves no longer pin drain
+    // workers. Recorded as a lease (not AsyncLocal): an AsyncLocal write
+    // made after an await lands in a forked ExecutionContext and never
+    // propagates back to the caller's flow, so the matching exit would see
+    // count 0 and leak the permit.
+    // Deliberately NOT an async method: the ownership claim below must be
+    // published on the CALLER's ExecutionContext, and async builders scope
+    // AsyncLocal writes (a pre-await write inside an async body never
+    // reaches the caller). A plain method body runs on the caller's context
+    // directly, so the claim sticks for nested takes. Only the true-wait
+    // path goes async (EnterAsyncCore).
+    public static Task<WriteHold> EnterAsync(CancellationToken ct = default)
     {
-        // genuinely async take — awaiting the semaphore frees the
-        // pool thread instead of blocking it, so saturated saves no longer
-        // pin drain workers. Recorded as a lease (not AsyncLocal): an
-        // AsyncLocal write made after an await lands in a forked
-        // ExecutionContext and never propagates back to the caller's flow,
-        // so the matching exit would see count 0 and leak the permit.
+        // Async-owner fast path: a nested EnterAsync on the flow already
+        // holding the async lease must not take the semaphore (the outer
+        // lease cannot release while awaiting it — deadlock). Same-thread
+        // match is same-flow nesting; any other thread carrying the live
+        // token is a fork and is refused instead of running DB work beside
+        // the holder. (A nested take after an await that resumes on another
+        // pool thread also refuses — loud failure beats silent deadlock;
+        // nested takes in this codebase are synchronous, so the pattern
+        // never triggers.) A stale per-flow token from a released lease
+        // never equals the live holder, so sequential leases take the
+        // normal path.
+        long flowClaim = _asyncClaim.Value;
+        long liveHolder = Volatile.Read(ref _asyncHolder);
+        if (flowClaim != 0 && flowClaim == liveHolder)
+        {
+            if (Environment.CurrentManagedThreadId == Volatile.Read(ref _asyncHolderThread))
+                return Task.FromResult(WriteHold.Nested());
+            throw new InvalidOperationException("DbWriteGate.EnterAsync refused on a forked flow while another flow holds the gate.");
+        }
         // Re-entrant on a flow already holding via sync Enter (AsyncLocal
         // reads flow down reliably): nested hold, no semaphore take.
         // A forked copy (count inherited, different thread) is never
@@ -82,12 +119,20 @@ public static class DbWriteGate
                 throw new InvalidOperationException("DbWriteGate.EnterAsync refused on a forked flow while another flow holds the gate.");
             _recursion.Value = 1;
             Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
-            return WriteHold.Owned();
+            return Task.FromResult(WriteHold.Owned(0));
         }
-        if (_recursion.Value > 0) return WriteHold.Nested();
+        if (_recursion.Value > 0) return Task.FromResult(WriteHold.Nested());
+        long claim = Interlocked.Increment(ref _claimSource);
+        _asyncClaim.Value = claim;
+        return EnterAsyncCore(claim, ct);
+    }
+
+    private static async Task<WriteHold> EnterAsyncCore(long claim, CancellationToken ct)
+    {
         await _sem.WaitAsync(ct).ConfigureAwait(false);
-        Volatile.Write(ref _holderThreadId, Environment.CurrentManagedThreadId);
-        return WriteHold.Owned();
+        Volatile.Write(ref _asyncHolder, claim);
+        Volatile.Write(ref _asyncHolderThread, Environment.CurrentManagedThreadId);
+        return WriteHold.Owned(claim);
     }
 
     /// <summary>
@@ -98,12 +143,19 @@ public static class DbWriteGate
     public readonly struct WriteHold : IDisposable
     {
         private readonly bool _owns;
-        internal WriteHold(bool owns) => _owns = owns;
+        private readonly long _claim;
+        internal WriteHold(bool owns) => (_owns, _claim) = (owns, 0);
+        internal WriteHold(bool owns, long claim) => (_owns, _claim) = (owns, claim);
         internal static WriteHold Nested() => new(false);
-        internal static WriteHold Owned() => new(true);
+        internal static WriteHold Owned(long claim) => new(true, claim);
         public void Dispose()
         {
-            if (_owns) _sem.Release();
+            if (!_owns) return;
+            // Clear the async-owner fast-path token only if this lease is
+            // still the live holder, then release the permit.
+            if (_claim != 0 && Volatile.Read(ref _asyncHolder) == _claim)
+                Volatile.Write(ref _asyncHolder, 0);
+            _sem.Release();
         }
     }
 

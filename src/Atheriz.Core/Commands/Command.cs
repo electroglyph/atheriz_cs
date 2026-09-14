@@ -181,6 +181,14 @@ public abstract class Command
                 parsed.CmdString = cmdstring;
             }
         }
+        catch (CommandHelpException che)
+        {
+            // Explicit --help (or PrintHelp/PrintUsage): the message already
+            // IS the help text, so surface it once. Real parse errors below
+            // keep the diagnosis+help shape.
+            if (!string.IsNullOrEmpty(che.Message)) caller.Msg(che.Message);
+            return (null, null, null);
+        }
         catch (CommandError ce)
         {
             // surface the diagnosis WITH the help. (Python

@@ -136,20 +136,24 @@ public static class CommandHelpers
         if (TryParseCommaCoord(raw, out var coord))
         {
             var node = ObjectRegistry.FindNodeByCoord(coord);
-            if (node is not null) return [(GameObject)node];
-            return [];
+            if (node is null || node.IsDeleted) return [];
+            if (!node.Access(caller, "view")) return [];
+            return [(GameObject)node];
         }
         if (raw.Equals("me", StringComparison.OrdinalIgnoreCase)) return [caller];
         if (raw.Equals("here", StringComparison.OrdinalIgnoreCase))
         {
             var locHere = caller.ResolveLocationObject();
-            return locHere is not null ? [locHere] : [];
+            if (locHere is null || locHere.IsDeleted) return [];
+            if (!locHere.Access(caller, "view")) return [];
+            return [locHere];
         }
         if (raw.StartsWith("#", StringComparison.Ordinal))
         {
             if (!TryParseIdRef(raw, out var id)) return [];
             var obj = ObjectRegistry.GetSingle(id);
-            if (obj is null) return [];
+            if (obj is null || obj.IsDeleted) return [];
+            if (!obj.Access(caller, "view")) return [];
             return [obj];
         }
         // Standard search via caller + loc fallback — use virtual Search so mocks work (mirrors python caller.search)

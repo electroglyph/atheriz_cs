@@ -19,6 +19,20 @@ public sealed class FollowScript : Script
 
     public GameObject? OldLoc => _oldLocStack.TryPeek(out var v) ? v : null;
 
+    internal void CancelOnePush() => _oldLocStack.TryPop(out _);
+
+    internal static void CancelPendingPush(GameObject owner)
+    {
+        try
+        {
+            foreach (var s in owner.GetScriptsByType("FollowScript"))
+            {
+                try { if (s is FollowScript fs) fs.CancelOnePush(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed FollowScript.CancelPendingPush: " + logEx.Message, "FollowScript"); }
+            }
+        }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed FollowScript.CancelPendingPush: " + logEx.Message, "FollowScript"); }
+    }
+
     [Before]
     public void at_pre_move(GameObject? destination, string? toExit = null)
     {
