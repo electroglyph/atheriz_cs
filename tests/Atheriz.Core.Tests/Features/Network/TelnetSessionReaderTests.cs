@@ -159,10 +159,11 @@ public sealed class TelnetSessionReaderTests
     public async Task TelnetSessionReader_LeadBomNeverReachesDispatch()
     {
         // Boundary contract: a leading U+FEFF never reaches command dispatch.
-        // The hermetic pipe path is library-stripped, but the live socket path
-        // is not (PortedServerIntegrationTests telnet login fails neutered with
-        // a FEFF-prefixed command word) — so the reader's one-shot preamble
-        // guard stays, and this pins the dispatch-visible outcome end to end.
+        // The library preserves FEFF on the hermetic path (raw ReadAsync probe),
+        // so this is the reader's one-shot preamble guard doing the work — kept
+        // because the live socket path needs it (PortedServerIntegrationTests
+        // telnet login fails neutered with a FEFF-prefixed command word).
+        // This pins the dispatch-visible outcome end to end.
         using var env = GlobalTestEnv.Enter();
         var (peer, serverStream) = InMemoryPipe.Create();
         using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);

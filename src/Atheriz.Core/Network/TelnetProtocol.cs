@@ -652,7 +652,7 @@ public sealed class TelnetProtocol : BaseProtocol
             // Same-port peek budget mirrors the old 250 ms poll + 250 ms budget.
             TlsAutoDetect = tlsCert is not null ? TimeSpan.FromMilliseconds(250) : Timeout.InfiniteTimeSpan,
             Log = msg => { try { AtherizLogger.LogDebug(msg, "TelnetServer"); } catch { } },
-            AcceptFilterV2 = filter,
+            AcceptFilter = filter,
         };
     }
 

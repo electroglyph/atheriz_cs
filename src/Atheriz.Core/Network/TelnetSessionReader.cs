@@ -17,13 +17,13 @@ public sealed class TelnetSessionReader : TextReader
     private readonly CancellationToken _stopping;
     private string _carry = string.Empty;
     private int _pos;
-    // Leading-BOM guard: on the live socket path the first command word can
-    // arrive with a U+FEFF prefix (pinned live by PortedServerIntegrationTests
-    // telnet login — neutered, login fails with a FEFF-prefixed command word),
-    // which would otherwise poison the lookup. The hermetic pipe path never
-    // exhibits it (the library decoder drops a leading BOM there), so this
-    // costs nothing when absent and saves login when present. Exactly once per
-    // connection; later FEFF is data.
+    // Leading-BOM guard: the first command word can arrive with a U+FEFF prefix
+    // (pinned live by PortedServerIntegrationTests telnet login — neutered,
+    // login fails with a FEFF-prefixed command word; the bytes come from the
+    // client's StreamWriter(Encoding.UTF8), which emits EF-BB-BF), which would
+    // otherwise poison the lookup. The library preserves FEFF on every path
+    // (hermetic probe: EF BB BF + "cmd" survives raw ReadAsync), so this strip
+    // does the work everywhere. Exactly once per connection; later FEFF is data.
     private bool _preamble = true;
 
     public TelnetSessionReader(ServerSession session, CancellationToken stopping = default)

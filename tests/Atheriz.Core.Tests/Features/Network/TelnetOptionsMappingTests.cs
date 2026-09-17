@@ -40,7 +40,7 @@ public sealed class TelnetOptionsMappingTests
         Assert.Null(options.StatusInterval);
         Assert.Null(options.ServerCertificate);
         Assert.Equal(Timeout.InfiniteTimeSpan, options.TlsAutoDetect);
-        Assert.Same(filter, options.AcceptFilterV2);
+        Assert.Same(filter, options.AcceptFilter);
         Assert.NotNull(options.Log);
     }
 
