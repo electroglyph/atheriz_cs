@@ -672,13 +672,27 @@ public sealed class TelnetProtocol : BaseProtocol
             {
                 pending = await server.AcceptTcpAsync(stopping).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException)
+            {
+                // Shutdown only when OUR token died: a timed-out accept (e.g. the TLS
+                // handshake deadline) can also surface as cancellation when the
+                // library's linked CTS wins the race against its TimeoutException.
+                // Breaking here would silently stop the listener on a single slow
+                // peer (seen under parallel-suite load), so only a real shutdown
+                // breaks; anything else drains the handoff and continues.
+                handoff.TryDequeue(out _);
+                if (stopping.IsCancellationRequested) break;
+                try { AtherizLogger.LogDebug("[Telnet] accept cancelled without shutdown; continuing", "TelnetProtocol"); } catch { }
+                continue;
+            }
             catch (ObjectDisposedException) { if (stopping.IsCancellationRequested) break; handoff.TryDequeue(out _); continue; }
             catch (SocketException) { if (stopping.IsCancellationRequested) break; handoff.TryDequeue(out _); continue; }
             // Refuse exceptions derive InvalidOperationException — catch before
             // it. The filter already warned; the library logged its own
             // over-capacity line via options.Log.
             catch (ConnectionRefusedByFilterException) { handoff.TryDequeue(out _); continue; }
+            // Unreachable while library caps stay 0 (Atheriz enforces bans/caps):
+            // kept so a future cap change degrades to a refused peer, not a throw.
             catch (SessionCapacityException) { handoff.TryDequeue(out _); continue; }
             catch (PerIpCapacityException) { handoff.TryDequeue(out _); continue; }
             catch (TimeoutException ex) { handoff.TryDequeue(out _); try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] handshake timeout: {ex.Message}"); } catch { } continue; }

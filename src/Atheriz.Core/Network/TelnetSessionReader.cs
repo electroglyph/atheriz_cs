@@ -17,11 +17,13 @@ public sealed class TelnetSessionReader : TextReader
     private readonly CancellationToken _stopping;
     private string _carry = string.Empty;
     private int _pos;
-    // StreamReader preamble parity: .NET telnet clients built on StreamWriter
-    // send one UTF-8 BOM at stream start, which StreamReader decoding used to
-    // swallow. Raw session slices keep it as U+FEFF, which would otherwise
-    // prefix the first command word and fail the lookup — so the first
-    // non-empty slice drops one leading U+FEFF, exactly once per connection.
+    // Leading-BOM guard: on the live socket path the first command word can
+    // arrive with a U+FEFF prefix (pinned live by PortedServerIntegrationTests
+    // telnet login — neutered, login fails with a FEFF-prefixed command word),
+    // which would otherwise poison the lookup. The hermetic pipe path never
+    // exhibits it (the library decoder drops a leading BOM there), so this
+    // costs nothing when absent and saves login when present. Exactly once per
+    // connection; later FEFF is data.
     private bool _preamble = true;
 
     public TelnetSessionReader(ServerSession session, CancellationToken stopping = default)

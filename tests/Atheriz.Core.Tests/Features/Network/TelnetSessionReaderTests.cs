@@ -154,4 +154,192 @@ public sealed class TelnetSessionReaderTests
             peer.Dispose();
         }
     }
+
+    [Fact]
+    public async Task TelnetSessionReader_LeadBomNeverReachesDispatch()
+    {
+        // Boundary contract: a leading U+FEFF never reaches command dispatch.
+        // The hermetic pipe path is library-stripped, but the live socket path
+        // is not (PortedServerIntegrationTests telnet login fails neutered with
+        // a FEFF-prefixed command word) — so the reader's one-shot preamble
+        // guard stays, and this pins the dispatch-visible outcome end to end.
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var reader = new TelnetSessionReader(session, cts.Token);
+            var collect = CollectLinesBoundedAsync(reader, 65536);
+            var bytes = Encoding.UTF8.GetBytes("\uFEFFcmd\r\n");
+            await peer.WriteAsync(bytes, 0, bytes.Length, cts.Token);
+            peer.Close();
+            var lines = await collect;
+            Assert.Equal(new string?[] { "cmd" }, lines);
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task TelnetSessionReader_LaterBomPreserved()
+    {
+        // Only a leading FEFF is framing; an interior one is data (also
+        // library-provided). Slice-coalescing independent: whether the writes
+        // arrive as one slice or two, the first non-empty slice starts with
+        // 'a' either way.
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var reader = new TelnetSessionReader(session, cts.Token);
+            var collect = CollectLinesBoundedAsync(reader, 65536);
+            var bytes = Encoding.UTF8.GetBytes("a\r\n\uFEFFb\r\n");
+            await peer.WriteAsync(bytes, 0, bytes.Length, cts.Token);
+            peer.Close();
+            var lines = await collect;
+            Assert.Equal(new string?[] { "a", "\uFEFFb" }, lines);
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task TelnetSessionReader_QuietThenData()
+    {
+        // Live-but-quiet slices are waited through, not reported as EOF: data
+        // arriving after several empty 100 ms slices still delivers.
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var reader = new TelnetSessionReader(session, cts.Token);
+            var buf = new char[16];
+            var readTask = reader.ReadAsync(buf.AsMemory(), cts.Token).AsTask();
+            await Task.Delay(350, cts.Token);
+            Assert.False(readTask.IsCompleted, "quiet session must keep the read pending, not EOF");
+            var bytes = Encoding.UTF8.GetBytes("hi\r\n");
+            await peer.WriteAsync(bytes, 0, bytes.Length, cts.Token);
+            var n = await readTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal("hi\r\n", new string(buf, 0, n));
+            peer.Close();
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
+
+    // NOTE (probed 2026-09-17): the session layer drops a "\n" that immediately
+    // follows "\r" at end-of-stream ("hello\r\n"+close arrives as "hello\r";
+    // bare trailing "\n" survives). Dispatch-invisible — ReadCappedLines treats
+    // "\r" and "\r\n" as the same terminator — so byte-exact tests below simply
+    // avoid a trailing "\n" instead of pinning the upstream quirk.
+    [Fact]
+    public async Task TelnetSessionReader_PartialCarryAcrossSmallReads()
+    {
+        // A slice bigger than the destination is served across calls via the
+        // carry cursor — no bytes lost or duplicated at the boundary.
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var reader = new TelnetSessionReader(session, cts.Token);
+            var bytes = Encoding.UTF8.GetBytes("hello\r\nXY");
+            await peer.WriteAsync(bytes, 0, bytes.Length, cts.Token);
+            peer.Close();
+            var sb = new StringBuilder();
+            var buf = new char[2];
+            while (true)
+            {
+                var n = await reader.ReadAsync(buf.AsMemory(), cts.Token);
+                if (n == 0) break;
+                sb.Append(buf, 0, n);
+            }
+            Assert.Equal("hello\r\nXY", sb.ToString());
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
+
+    [Fact]
+    public void TelnetSessionReader_SyncReadDelivers()
+    {
+        // The sync TextReader contract serves session slices like the async one.
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var reader = new TelnetSessionReader(session, cts.Token);
+            var bytes = Encoding.UTF8.GetBytes("sync\r\ntail");
+            peer.WriteAsync(bytes, 0, bytes.Length, cts.Token).GetAwaiter().GetResult();
+            peer.Close();
+            var sb = new StringBuilder();
+            var buf = new char[16];
+            int n;
+            while ((n = reader.Read(buf, 0, buf.Length)) != 0) sb.Append(buf, 0, n);
+            Assert.Equal("sync\r\ntail", sb.ToString());
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task TelnetSessionReader_PreCancelledTokenReadsAsEof()
+    {
+        // A cancelled stopping token reports EOF instead of blocking: the
+        // library maps a cancelled wait to empty, and the reader maps
+        // empty-plus-cancelled to 0.
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        try
+        {
+            var reader = new TelnetSessionReader(session, new CancellationToken(true));
+            var buf = new char[8];
+            Assert.Equal(0, await reader.ReadAsync(buf.AsMemory()));
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
+
+    [Fact]
+    public void TelnetSessionReader_ArgumentValidation()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        try
+        {
+            var reader = new TelnetSessionReader(session);
+            Assert.Throws<ArgumentNullException>(() => reader.Read(null!, 0, 1));
+            Assert.Throws<ArgumentNullException>(() => { reader.ReadAsync(null!, 0, 1).GetAwaiter().GetResult(); });
+            Assert.Throws<ArgumentOutOfRangeException>(() => reader.Read(new char[4], -1, 1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => reader.Read(new char[4], 0, -1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => reader.Read(new char[4], 3, 2));
+            Assert.Equal(0, reader.ReadAsync(Memory<char>.Empty).GetAwaiter().GetResult());
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
 }

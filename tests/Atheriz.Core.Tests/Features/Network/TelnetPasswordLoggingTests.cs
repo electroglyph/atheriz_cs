@@ -19,7 +19,38 @@ public class TelnetPasswordLoggingTests
         // credentials would land in save/server.log. Correct behavior redacts
         // the secret before logging.
         const string password = "s3cr3t-pw-xyz9";
+        var (got, log) = await RunMaskingCaseAsync($"connect alice {password}");
+        Assert.Equal($"connect alice {password}", got);
+        Assert.DoesNotContain(password, log);
+        Assert.Contains("connect alice ***", log);
+    }
+
+    [Theory]
+    [InlineData("connect alice s3cr3t-pw", "connect alice s3cr3t-pw", "connect alice ***", "s3cr3t-pw")]
+    [InlineData("CONNECT Alice MixedCase-Pw9", "CONNECT Alice MixedCase-Pw9", "connect Alice ***", "MixedCase-Pw9")]
+    [InlineData("connect   spaced   wide-pw   extra", "connect   spaced   wide-pw   extra", "connect spaced ***", "wide-pw")]
+    [InlineData("connect solopw", "connect solopw", "connect solopw ***", null)]
+    [InlineData("connect", "connect", "[Telnet] recv 'connect' from", null)]
+    public async Task Telnet_ConnectVariants_RedactedInLogVerbatimInDispatch(
+        string input, string expectedDispatched, string expectedLogFragment, string? secret)
+    {
+        // Masking shape: dispatch always gets the raw line (no over-redaction),
+        // the transport trace keeps at most `connect <account> ***`.
+        var (dispatched, log) = await RunMaskingCaseAsync(input);
+        Assert.Equal(expectedDispatched, dispatched);
+        Assert.Contains(expectedLogFragment, log);
+        if (secret is not null) Assert.DoesNotContain(secret, log);
+    }
+
+    private static async Task<(string Dispatched, string Log)> RunMaskingCaseAsync(string input)
+    {
         using var env = GlobalTestEnv.Enter();
+        // The recv trace logs at Debug, below the default Information gate, so
+        // enable debug capture for the duration (restored in finally). A temp
+        // SavePath keeps file logging out of the repo tree.
+        var logDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(logDir);
+        AtherizLogger.ApplySettings(new AtherizSettings { LogLevel = "debug", SavePath = logDir });
         var mgr = PortedHelpers.MakeManager();
         var prevGlobal = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mgr;
@@ -35,30 +66,27 @@ public class TelnetPasswordLoggingTests
             var settings = new AtherizSettings();
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             string log;
+            string got;
             using (var cap = new CaptureAtherizLog())
             {
                 var task = TelnetProtocol.HandleSessionAsync(session, "127.0.0.1", mgr, settings, cts.Token);
-                var bytes = Encoding.UTF8.GetBytes($"connect alice {password}\r\n");
+                var bytes = Encoding.UTF8.GetBytes(input + "\r\n");
                 await peer.WriteAsync(bytes, 0, bytes.Length, cts.Token);
-                var got = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
-                Assert.Equal($"connect alice {password}", got);
+                got = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 peer.Close();
-                // The in-memory peer close cannot flip the server end's
-                // Connected flag (real sockets do on FIN), so also cancel the
-                // stopping token: the reader reports EOF on cancel, exactly
-                // like a dead transport at shutdown.
-                cts.Cancel();
                 await task.WaitAsync(TimeSpan.FromSeconds(10));
                 await Task.Delay(50);
                 log = cap.Read();
             }
-            Assert.DoesNotContain(password, log);
+            return (got, log);
         }
         finally
         {
             try { peer.Dispose(); } catch { }
             mgr.Atp.Stop(wait: false);
             ConnectionManager.GlobalInstance = prevGlobal;
+            try { AtherizLogger.ApplySettings(); } catch { }
+            try { Directory.Delete(logDir, true); } catch { }
         }
     }
 

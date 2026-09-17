@@ -8,7 +8,10 @@ using System.Text;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
 using Atheriz.Core.Settings;
+using Atheriz.Core.Tests;
 using Atheriz.Core.Tests.Ported;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using telnet_cs;
 using telnet_cs.Server;
 
@@ -113,6 +116,189 @@ public sealed class TelnetServerIntegrationTests
             await Task.Delay(25);
         }
         return null;
+    }
+
+    private static async Task<List<TelnetConnection>> WaitForSessionsAsync(ConnectionManager mgr, int n, int timeoutMs = 10000)    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            var snap = mgr.ConnectionsSnapshot;
+            if (snap.Count == n && snap.Values.All(v => v is TelnetConnection))
+                return snap.Values.Cast<TelnetConnection>().ToList();
+            await Task.Delay(25);
+        }
+        return [];
+    }
+
+    [Fact]
+    public async Task ConcurrentClients_IndependentSessionsAndTeardown()
+    {
+        // The handoff correlation must hold under concurrent accepts: every
+        // session lands labeled with its peer host, dispatches route to the
+        // right connection, and all tear down cleanly.
+        using var env = GlobalTestEnv.Enter();
+        var settings = new AtherizSettings
+        {
+            TelnetInterface = "127.0.0.1",
+            MaxConnectionsPerIp = 10,
+            MaxTotalConnections = 100,
+        };
+        var got = new ConcurrentQueue<(string Conn, string Line)>();
+        using var stack = await StartAsync(settings);
+        var mgr = stack.Manager;
+        mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+        {
+            if (a.Count > 0) got.Enqueue((c.SessionId ?? "?", a[0]?.ToString() ?? ""));
+        }));
+
+        const int peers = 4;
+        var clients = new List<TcpClient>();
+        var streams = new List<NetworkStream>();
+        try
+        {
+            await Task.WhenAll(Enumerable.Range(0, peers).Select(async _ =>
+            {
+                var client = new TcpClient();
+                lock (clients) clients.Add(client);
+                await client.ConnectAsync(IPAddress.Loopback, stack.Port);
+            }));
+            foreach (var client in clients)
+            {
+                var stream = client.GetStream();
+                streams.Add(stream);
+                var opening = await ReadUntilAsync(stream, [ClearScreen]);
+                Assert.True(Contains(opening, ClearScreen), "peer got no prompt: " + Convert.ToHexString(opening));
+            }
+            var sessions = await WaitForSessionsAsync(mgr, peers);
+            Assert.Equal(peers, sessions.Count);
+            Assert.Equal(peers, sessions.Select(s => s.SessionId).Distinct().Count());
+            Assert.All(sessions, s => Assert.Equal("127.0.0.1", s.ClientHost));
+
+            await Task.WhenAll(streams.Select((stream, i) =>
+                stream.WriteAsync(Encoding.UTF8.GetBytes($"hello-{i}\r\n")).AsTask()));
+            Assert.True(await PortedHelpers.WaitAsync(() => got.Count == peers, 10000),
+                $"only {got.Count}/{peers} lines dispatched");
+            Assert.Equal(peers, got.Select(g => g.Line).Distinct().Count());
+        }
+        finally
+        {
+            foreach (var stream in streams) try { stream.Dispose(); } catch { }
+            foreach (var client in clients) CloseAbortive(client);
+            foreach (var client in clients) try { client.Dispose(); } catch { }
+        }
+        Assert.True(await WaitForEmptyAsync(mgr), "connections lingered after concurrent teardown");
+    }
+
+    [Fact]
+    public async Task PostNegotiationBan_RefusedWithoutSession()
+    {
+        // Banned between filter and handler (the TOCTOU window): HandleSessionAsync
+        // must refuse with no registration and no dispatch, even past the filter.
+        using var env = GlobalTestEnv.Enter();
+        var mgr = PortedHelpers.MakeManager();
+        var prevGlobal = ConnectionManager.GlobalInstance;
+        ConnectionManager.GlobalInstance = mgr;
+        const string host = "127.0.0.2";
+        ObjectRegistry.BanIp(host);
+        try
+        {
+            var ready = new ConcurrentQueue<string>();
+            mgr.RegisterHandler("client_ready", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+            {
+                ready.Enqueue(c.SessionId ?? "?");
+            }));
+            var (peer, serverStream) = telnet_cs.Transport.InMemoryPipe.Create();
+            using var session = new ServerSession(serverStream, QuietOptionsForHandle(), CancellationToken.None);
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await TelnetProtocol.HandleSessionAsync(session, host, mgr, new AtherizSettings(), cts.Token)
+                    .WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally { try { peer.Dispose(); } catch { } }
+            Assert.Empty(mgr.ConnectionsSnapshot);
+            await Task.Delay(500);
+            Assert.Empty(ready);
+        }
+        finally
+        {
+            ObjectRegistry.UnbanIp(host);
+            try { mgr.Atp.Stop(wait: false); } catch { }
+            ConnectionManager.GlobalInstance = prevGlobal;
+        }
+    }
+
+    [Fact]
+    public async Task CapRaceAtHandle_RefusedWithoutSession()
+    {
+        // Lost the cap race after passing the filter: RegisterConnection refuses
+        // inside HandleSessionAsync — no second session, no dispatch, no hang.
+        using var env = GlobalTestEnv.Enter();
+        var settings = new AtherizSettings { MaxTotalConnections = 1 };
+        var mgr = PortedHelpers.MakeManager(settings);
+        var prevGlobal = ConnectionManager.GlobalInstance;
+        ConnectionManager.GlobalInstance = mgr;
+        try
+        {
+            Assert.True(mgr.RegisterConnection("dummy", new TestConnection("dummy")));
+            var ready = new ConcurrentQueue<string>();
+            mgr.RegisterHandler("client_ready", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+            {
+                ready.Enqueue(c.SessionId ?? "?");
+            }));
+            var (peer, serverStream) = telnet_cs.Transport.InMemoryPipe.Create();
+            using var session = new ServerSession(serverStream, QuietOptionsForHandle(), CancellationToken.None);
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await TelnetProtocol.HandleSessionAsync(session, "127.0.0.3", mgr, settings, cts.Token)
+                    .WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally { try { peer.Dispose(); } catch { } }
+            var snap = mgr.ConnectionsSnapshot;
+            Assert.Single(snap);
+            Assert.True(snap.ContainsKey("dummy"));
+            await Task.Delay(500);
+            Assert.Empty(ready);
+        }
+        finally
+        {
+            try { mgr.Atp.Stop(wait: false); } catch { }
+            ConnectionManager.GlobalInstance = prevGlobal;
+        }
+    }
+
+    private static TelnetServerOptions QuietOptionsForHandle() => new()
+    {
+        TextEncoding = Encoding.UTF8,
+        RequestCharacterSet = false,
+        IdleTimeout = Timeout.InfiniteTimeSpan,
+        HandshakeTimeout = Timeout.InfiniteTimeSpan,
+        StatusInterval = null,
+        Log = null,
+    };
+
+    [Fact]
+    public async Task CleanFinChurn_ReleasesSlotEveryCycle()
+    {
+        // Five sequential graceful closes must each unwind: with the default
+        // per-IP cap of 2, any leaked slot would refuse cycle 3+.
+        using var env = GlobalTestEnv.Enter();
+        var settings = new AtherizSettings { TelnetInterface = "127.0.0.1" };
+        using var stack = await StartAsync(settings);
+        var mgr = stack.Manager;
+        for (int i = 0; i < 5; i++)
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, stack.Port);
+            using var stream = client.GetStream();
+            var opening = await ReadUntilAsync(stream, [ClearScreen]);
+            Assert.True(Contains(opening, ClearScreen), $"cycle {i}: no prompt, slot leaked");
+            var session = await WaitForSessionAsync(mgr);
+            Assert.NotNull(session);
+            CloseClean(client);
+            Assert.True(await WaitForEmptyAsync(mgr), $"cycle {i}: connection ghosted after clean FIN");
+        }
     }
 
     // Abortive close (RST, discards buffers): the pre-0.14.0 era's only
@@ -444,5 +630,381 @@ public sealed class TelnetServerIntegrationTests
             Assert.True(await WaitForEmptyAsync(mgr), "TLS connection ghosted after close_notify");
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        if (string.IsNullOrEmpty(needle)) return 0;
+        int count = 0, at = 0;
+        while ((at = haystack.IndexOf(needle, at, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            at += needle.Length;
+        }
+        return count;
+    }
+
+    [Fact]
+    public async Task HandlerPipeline_ClientReadyEmptySkipOverlongThrottle()
+    {
+        // The live line pipeline: client_ready fires once, blank/whitespace lines
+        // never dispatch, an overlong line drops with ONE throttled warning (never
+        // its bytes), and the stream recovers on the next line.
+        using var env = GlobalTestEnv.Enter();
+        var logDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(logDir);
+        AtherizLogger.ApplySettings(new AtherizSettings { LogLevel = "debug", SavePath = logDir });
+        try
+        {
+            var settings = new AtherizSettings { TelnetInterface = "127.0.0.1", TelnetMaxLine = 16 };
+            var got = new ConcurrentQueue<string>();
+            var ready = new ConcurrentQueue<string>();
+            using var stack = await StartAsync(settings);
+            var mgr = stack.Manager;
+            mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+            {
+                if (a.Count > 0) got.Enqueue(a[0]?.ToString() ?? "");
+            }));
+            mgr.RegisterHandler("client_ready", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+            {
+                ready.Enqueue(c.SessionId ?? "?");
+            }));
+
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, stack.Port);
+            using var stream = client.GetStream();
+            _ = await ReadUntilAsync(stream, [ClearScreen]);
+            var session = await WaitForSessionAsync(mgr);
+            Assert.NotNull(session);
+            Assert.True(await PortedHelpers.WaitAsync(() => !ready.IsEmpty, 10000), "client_ready never dispatched");
+            Assert.Equal(session.SessionId, ready.First());
+
+            string log;
+            using (var cap = new CaptureAtherizLog())
+            {
+                await stream.WriteAsync(Encoding.UTF8.GetBytes("\r\n   \r\n"));
+                await Task.Delay(750);
+                Assert.Empty(got);
+                var floodX = new string('x', 64) + "\r\nfine\r\n";
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(floodX));
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(new string('y', 64) + "\r\n"));
+                Assert.True(await PortedHelpers.WaitAsync(() => got.Any(s => s == "fine"), 10000),
+                    "stream did not recover after overlong drop");
+                await Task.Delay(250);
+                log = cap.Read();
+            }
+            Assert.Equal("fine", got.Single());
+            Assert.DoesNotContain(new string('x', 64), log);
+            Assert.DoesNotContain(new string('y', 64), log);
+            Assert.Equal(1, CountOccurrences(log, "[Telnet] dropped overlong input line"));
+
+            CloseAbortive(client);
+            Assert.True(await WaitForEmptyAsync(mgr), "connection lingered after abortive close");
+        }
+        finally
+        {
+            try { AtherizLogger.ApplySettings(); } catch { }
+            try { Directory.Delete(logDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task Naws_VariantsApplyLive()
+    {
+        // NAWS re-apply against custom bounds: in-bounds lands verbatim, a zero
+        // report is ignored, and out-of-range clamps to the configured min.
+        using var env = GlobalTestEnv.Enter();
+        var settings = new AtherizSettings
+        {
+            TelnetInterface = "127.0.0.1",
+            TelnetNawsMinCols = 40,
+            TelnetNawsMaxCols = 200,
+            TelnetNawsMinRows = 10,
+            TelnetNawsMaxRows = 50,
+        };
+        var got = new ConcurrentQueue<string>();
+        using var stack = await StartAsync(settings);
+        var mgr = stack.Manager;
+        mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+        {
+            if (a.Count > 0) got.Enqueue(a[0]?.ToString() ?? "");
+        }));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, stack.Port);
+        using var stream = client.GetStream();
+        _ = await ReadUntilAsync(stream, [ClearScreen]);
+        var session = await WaitForSessionAsync(mgr);
+        Assert.NotNull(session);
+
+        static byte[] Naws(int cols, int rows) =>
+            [255, 250, 31, (byte)(cols >> 8), (byte)cols, (byte)(rows >> 8), (byte)rows, 255, 240];
+
+        await stream.WriteAsync(Naws(100, 40));
+        await stream.WriteAsync(Encoding.UTF8.GetBytes("one\r\n"));
+        Assert.True(await PortedHelpers.WaitAsync(() => got.Any(s => s == "one"), 10000), "line after NAWS never dispatched");
+        Assert.True(await PortedHelpers.WaitAsync(() => session.Session.TermWidth == 100, 5000), $"TermWidth={session.Session.TermWidth}");
+        Assert.Equal(40, session.Session.TermHeight);
+
+        await stream.WriteAsync(Naws(0, 0));
+        await stream.WriteAsync(Encoding.UTF8.GetBytes("two\r\n"));
+        Assert.True(await PortedHelpers.WaitAsync(() => got.Any(s => s == "two"), 10000), "line after zero NAWS never dispatched");
+        await Task.Delay(500);
+        Assert.Equal(100, session.Session.TermWidth);
+        Assert.Equal(40, session.Session.TermHeight);
+
+        await stream.WriteAsync(Naws(10, 5));
+        await stream.WriteAsync(Encoding.UTF8.GetBytes("three\r\n"));
+        Assert.True(await PortedHelpers.WaitAsync(() => got.Any(s => s == "three"), 10000), "line after small NAWS never dispatched");
+        Assert.True(await PortedHelpers.WaitAsync(() => session.Session.TermWidth == 40, 5000), $"TermWidth={session.Session.TermWidth}");
+        Assert.Equal(10, session.Session.TermHeight);
+
+        CloseAbortive(client);
+        Assert.True(await WaitForEmptyAsync(mgr), "connection lingered after abortive close");
+    }
+
+    private static int FreePort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
+    private static async Task<bool> WaitForTcpAsync(IPAddress addr, int port, int timeoutMs = 10000)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            try
+            {
+                using var probe = new TcpClient();
+                await probe.ConnectAsync(addr, port);
+                try { probe.LingerState = new LingerOption(true, 0); } catch { }
+                return true;
+            }
+            catch { await Task.Delay(100); }
+        }
+        return false;
+    }
+
+    private static async Task<bool> IsTcpOpenAsync(IPAddress addr, int port)
+    {
+        try
+        {
+            using var probe = new TcpClient();
+            await probe.ConnectAsync(addr, port).WaitAsync(TimeSpan.FromSeconds(3));
+            try { probe.LingerState = new LingerOption(true, 0); } catch { }
+            return true;
+        }
+        catch { return false; }
+    }
+
+    [Fact]
+    public async Task Setup_IHostPath_ServesTelnetAndStopsWithHost()
+    {
+        // The real IHost wiring (not the lifespan-composition branch): Setup starts
+        // a serving listener, and host shutdown stops it via ApplicationStopping.
+        using var env = GlobalTestEnv.Enter();
+        var port = FreePort();
+        var settings = new AtherizSettings { TelnetInterface = "127.0.0.1", TelnetPort = port };
+        var mgr = PortedHelpers.MakeManager(settings);
+        var prevGlobal = ConnectionManager.GlobalInstance;
+        ConnectionManager.GlobalInstance = mgr;
+        var host = Host.CreateDefaultBuilder()
+            .ConfigureServices(s =>
+            {
+                s.AddSingleton(settings);
+                s.AddSingleton(mgr);
+            })
+            .Build();
+        try
+        {
+            new TelnetProtocol().Setup(host);
+            await host.StartAsync();
+            Assert.True(await WaitForTcpAsync(IPAddress.Loopback, port), "telnet never listened via Setup");
+            Assert.True(await WaitForEmptyAsync(mgr), "probe session lingered");
+
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, port);
+            using var stream = client.GetStream();
+            var opening = await ReadUntilAsync(stream, [ClearScreen]);
+            Assert.True(Contains(opening, ClearScreen), "no prompt via Setup-started server: " + Convert.ToHexString(opening));
+            CloseAbortive(client);
+            Assert.True(await WaitForEmptyAsync(mgr), "session lingered");
+
+            await host.StopAsync();
+            await Task.Delay(500);
+            Assert.False(await IsTcpOpenAsync(IPAddress.Loopback, port), "telnet still listening after host stop");
+        }
+        finally
+        {
+            try { await host.StopAsync().WaitAsync(TimeSpan.FromSeconds(10)); } catch { }
+            try { host.Dispose(); } catch { }
+            try { mgr.Atp.Stop(wait: false); } catch { }
+            ConnectionManager.GlobalInstance = prevGlobal;
+        }
+    }
+
+    [Fact]
+    public async Task Setup_IHostPath_SkippedWhenDisabled()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var port = FreePort();
+        var settings = new AtherizSettings { TelnetInterface = "127.0.0.1", TelnetPort = port, TelnetEnabled = false };
+        var mgr = PortedHelpers.MakeManager(settings);
+        var prevGlobal = ConnectionManager.GlobalInstance;
+        ConnectionManager.GlobalInstance = mgr;
+        var host = Host.CreateDefaultBuilder()
+            .ConfigureServices(s =>
+            {
+                s.AddSingleton(settings);
+                s.AddSingleton(mgr);
+            })
+            .Build();
+        try
+        {
+            new TelnetProtocol().Setup(host);
+            await host.StartAsync();
+            await Task.Delay(1000);
+            Assert.False(await IsTcpOpenAsync(IPAddress.Loopback, port), "telnet listened while disabled");
+            await host.StopAsync();
+        }
+        finally
+        {
+            try { await host.StopAsync().WaitAsync(TimeSpan.FromSeconds(10)); } catch { }
+            try { host.Dispose(); } catch { }
+            try { mgr.Atp.Stop(wait: false); } catch { }
+            ConnectionManager.GlobalInstance = prevGlobal;
+        }
+    }
+
+    [Fact]
+    public async Task AcceptLoop_DisposedServer_BreaksPromptly()
+    {
+        // Teardown ordering: a stopped listener with a cancelled token must break
+        // the accept loop (not spin on ObjectDisposed or hang in AcceptTcpAsync).
+        using var env = GlobalTestEnv.Enter();
+        var mgr = PortedHelpers.MakeManager();
+        try
+        {
+            var settings = new AtherizSettings { TelnetInterface = "127.0.0.1" };
+            var handoff = new ConcurrentQueue<string?>();
+            var filter = TelnetProtocol.BuildAcceptFilter(mgr, handoff);
+            var options = TelnetProtocol.BuildServerOptions(settings, null, filter);
+            using var server = new TelnetServer(0, options);
+            server.Start();
+            server.Stop();
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+            await TelnetProtocol.AcceptLoopAsync(server, handoff, mgr, settings, cts.Token)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally { try { mgr.Atp.Stop(wait: false); } catch { } }
+    }
+
+    [Fact]
+    public async Task TlsHandshakeTimeout_DropsStalledPeerAndSurvives()
+    {
+        // A peer that starts TLS (0x16) then stalls past the 10 s handshake deadline
+        // is dropped by the accept path, and the loop keeps serving afterwards.
+        // Covers both surfacing races: TimeoutException→warn+continue AND
+        // OperationCanceledException→continue (the library's linked CTS can win the
+        // race against its own TimeoutException under load; the loop used to break
+        // on that path and silently stop listening — full-suite failure with
+        // loop done=True, no fault, neither arm logged).
+        // Debug capture identifies the accept arm on failure: "handshake timeout"
+        // (TimeoutException→continue) vs "accept failed" (InvalidOperation→break).
+        using var env = GlobalTestEnv.Enter();
+        var logDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(logDir);
+        AtherizLogger.ApplySettings(new AtherizSettings { LogLevel = "debug", SavePath = logDir });
+        var (dir, cert) = MakeCert();
+        try
+        {
+            var settings = new AtherizSettings { TelnetInterface = "127.0.0.1" };
+            var got = new ConcurrentQueue<string>();
+            using var stack = await StartAsync(settings, cert);
+            var mgr = stack.Manager;
+            mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+            {
+                if (a.Count > 0) got.Enqueue(a[0]?.ToString() ?? "");
+            }));
+
+            string log;
+            using (var cap = new CaptureAtherizLog())
+            {
+                using var stalled = new TcpClient();
+                await stalled.ConnectAsync(IPAddress.Loopback, stack.Port);
+                using var sstream = stalled.GetStream();
+                sstream.ReadTimeout = 25000;
+                await sstream.WriteAsync(new byte[] { 0x16 });
+                // The server must close the stalled handshake itself (EOF, not a
+                // read-timeout IOException which would mean we are still waiting).
+                Assert.Equal(-1, sstream.ReadByte());
+                Assert.Empty(mgr.ConnectionsSnapshot);
+
+                using var good = new TcpClient();
+                await good.ConnectAsync(IPAddress.Loopback, stack.Port);
+                using var gstream = good.GetStream();
+                var opening = await ReadUntilAsync(gstream, [ClearScreen], timeoutMs: 20000);
+                var dbg = cap.Read();
+                Assert.True(Contains(opening, ClearScreen),
+                    $"loop did not survive the handshake timeout; loop done={stack.LoopTask.IsCompleted} " +
+                    $"loop fault={stack.LoopTask.Exception?.GetBaseException().Message} " +
+                    $"handshake-timeouts={CountOccurrences(dbg, "handshake timeout")} " +
+                    $"accept-failed={CountOccurrences(dbg, "accept failed")}");
+                await gstream.WriteAsync(Encoding.UTF8.GetBytes("after-timeout\r\n"));
+                Assert.True(await PortedHelpers.WaitAsync(() => got.Any(s => s == "after-timeout"), 10000), "good peer lost");
+                CloseAbortive(good);
+                Assert.True(await WaitForEmptyAsync(mgr), "connections lingered");
+                log = cap.Read();
+            }
+            Assert.True(log.Contains("handshake timeout", StringComparison.Ordinal)
+                || log.Contains("accept cancelled without shutdown", StringComparison.Ordinal),
+                "expected a known continue-arm trace; log tail: " + log.Substring(Math.Max(0, log.Length - 2000)));
+            Assert.DoesNotContain("accept failed", log);
+        }
+        finally
+        {
+            try { AtherizLogger.ApplySettings(); } catch { }
+            try { Directory.Delete(logDir, true); } catch { }
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task OpeningPreset_IsExactlyDoTtype()
+    {
+        // Wire lock: with charset negotiation off and no peer TTYPE answer, the
+        // only negotiation bytes before our clear-screen prompt are DO TTYPE.
+        // A library upgrade adding preset bytes fails here deliberately.
+        using var env = GlobalTestEnv.Enter();
+        var settings = new AtherizSettings { TelnetInterface = "127.0.0.1" };
+        using var stack = await StartAsync(settings);
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, stack.Port);
+        using var stream = client.GetStream();
+        var opening = await ReadUntilAsync(stream, [ClearScreen]);
+        Assert.True(Contains(opening, ClearScreen), "no prompt: " + Convert.ToHexString(opening));
+        var idx = IndexOf(opening, ClearScreen);
+        Assert.True(idx >= 0, "clear-screen marker missing");
+        Assert.Equal(DoTtype, opening[..idx]);
+        CloseAbortive(client);
+        Assert.True(await WaitForEmptyAsync(stack.Manager), "connection lingered");
+    }
+
+    private static int IndexOf(byte[] haystack, byte[] needle)
+    {
+        if (needle.Length == 0 || haystack.Length < needle.Length) return -1;
+        for (var i = 0; i <= haystack.Length - needle.Length; i++)
+        {
+            var match = true;
+            for (var j = 0; j < needle.Length; j++)
+                if (haystack[i + j] != needle[j]) { match = false; break; }
+            if (match) return i;
+        }
+        return -1;
     }
 }

@@ -94,13 +94,17 @@ public class TelnetConnectionTests
             {
                 var big = new string('x', 8 << 20);
                 var writeTask = Task.Run(() => writer.Write(big));
-                // Completed promptly (a bounded IOException counts — the point
-                // is it never hangs); an unobserved fault would be worse.
-                bool done;
-                try { done = writeTask.Wait(TimeSpan.FromSeconds(15)); }
-                catch (AggregateException) { done = true; }
-                if (writeTask.IsFaulted) _ = writeTask.Exception;
-                Assert.True(done, "write to a non-draining peer must not block the game thread indefinitely");
+                // Prompt return AND the right fault: the 5 s RunWrite deadline must
+                // surface as IOException("telnet write timed out") — the old
+                // SocketException shape — so a wedged peer closes the connection
+                // instead of parking the game thread (an unobserved fault or a
+                // hang would both be worse).
+                try { writeTask.Wait(TimeSpan.FromSeconds(15)); }
+                catch (AggregateException) { }
+                Assert.True(writeTask.IsCompleted, "write to a non-draining peer must not block the game thread indefinitely");
+                Assert.True(writeTask.IsFaulted, "8 MiB into an undrained peer must exceed the write deadline");
+                var io = Assert.IsType<IOException>(writeTask.Exception!.InnerException);
+                Assert.Contains("telnet write timed out", io.Message);
             }
             finally
             {

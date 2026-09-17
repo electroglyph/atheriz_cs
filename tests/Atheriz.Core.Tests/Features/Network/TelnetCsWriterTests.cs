@@ -357,4 +357,94 @@ public sealed class TelnetCsWriterTests
             peer.Dispose();
         }
     }
+
+    [Fact]
+    public void TelnetCsWriter_NonAsciiPrompt_ReserveEqualsWire()
+    {
+        // UTF-8 reserve==wire: the limiter reserves GetByteCount(text) and the
+        // session must emit exactly those bytes (RequestCharacterSet stays off,
+        // so no write-path re-encoding can drift the accounting).
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        using var conn = new TelnetConnection(new object(), new TelnetCsWriter(session, "1.2.3.4"));
+        try
+        {
+            var text = "héllo wörld ✓";
+            var expected = Encoding.UTF8.GetBytes(text);
+            conn.SendCommand("text", new List<object?> { text });
+            Assert.Equal(expected, ReadExactly(peer, expected.Length));
+            Assert.Equal(0, conn.PendingBytes);
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
+
+    [Fact]
+    public void TelnetCsWriter_DontEchoThrows()
+    {
+        // The DONT verb takes the same caller-error arm as the pinned DO case.
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        var writer = new TelnetCsWriter(session, "1.2.3.4");
+        try
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => writer.Iac(254, 1));
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
+
+    [Fact]
+    public void TelnetCsWriter_IdempotentWontResendIsSilent()
+    {
+        // Mirror of the WILL resend pin: WONT from the default (already-WONT)
+        // state emits nothing, and repeating it stays silent.
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        var writer = new TelnetCsWriter(session, "1.2.3.4");
+        try
+        {
+            writer.Iac(252, 1);
+            AssertPeerSilent(peer);
+            writer.Iac(252, 1);
+            AssertPeerSilent(peer);
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+    }
+
+    [Fact]
+    public void TelnetCsWriter_LifecycleAndContractTrivia()
+    {
+        // Small surface, one trip: SetExtCallback is a contract no-op, empty host
+        // falls back to "?", an empty fused prompt is a bare toggle, dispose is
+        // idempotent, and Close never throws (even post-dispose).
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        var writer = new TelnetCsWriter(session, "1.2.3.4");
+        try
+        {
+            writer.SetExtCallback(31, static (_, _) => { });
+            Assert.Equal("?", new TelnetCsWriter(session, "").GetPeerHost());
+            writer.IacWithText(251, 1, string.Empty);
+            Assert.Equal(new byte[] { 255, 251, 1 }, ReadExactly(peer, 3));
+        }
+        finally
+        {
+            peer.Dispose();
+        }
+        writer.Dispose();
+        writer.Dispose();
+        writer.Close();
+    }
 }

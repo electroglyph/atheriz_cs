@@ -95,7 +95,7 @@ During iteration, use `--filter` for focused tests; run the full suite once at t
 
 ## Configuration
 
-Ports and paths are in `src/Atheriz.Server/appsettings.json` (`Atheriz:` section). Defaults: `save` / `secret` in the game folder, `ServerName AtheriZ`, web `0.0.0.0:9999`, telnet `0.0.0.0:4444`.
+Ports and paths are in `src/Atheriz.Server/appsettings.json` (`Atheriz:` section). Defaults: `save` / `secret` in the game folder, `ServerName AtheriZ`, web `0.0.0.0:9999`, telnet `0.0.0.0:4444`. The telnet server (via `telnet_cs`) sends `DO TTYPE` on connect, then `WILL SGA` / `WILL BINARY` / `DO NAWS` once negotiation advances; charset negotiation stays off and text is UTF-8 both ways.
 
 You can override with `appsettings.Development.json` or `ATHERIZ_` environment variables (e.g. `ATHERIZ_SSL_CERTFILE` for TLS, `ATHERIZ_SUPERUSER_USERNAME` / `ATHERIZ_SUPERUSER_PASSWORD` for the initial superuser).
 
