@@ -619,18 +619,40 @@ public class PortedTelnetTests
         Assert.Contains("secret", w.Fused[0].Item3);
         Assert.Empty(w.Iacs); Assert.Empty(w.Writes);
     }
-    private sealed class CountingStream : System.IO.MemoryStream
+    private static telnet_cs.Server.TelnetServerOptions QuietSessionOptions() => new()
     {
-        public int WriteCalls;
-        public override void Write(byte[] buffer, int offset, int count) { WriteCalls++; base.Write(buffer, offset, count); }
-    }
-    [Fact] public void StreamWriterIacWithTextSingleLockedWrite()
+        TextEncoding = Encoding.UTF8,
+        RequestCharacterSet = false,
+        IdleTimeout = Timeout.InfiniteTimeSpan,
+        HandshakeTimeout = Timeout.InfiniteTimeSpan,
+        StatusInterval = null,
+        Log = null,
+    };
+    [Fact] public void SessionWriterIacWithTextFusesToggleAndPrompt()
     {
-        using var ms = new CountingStream();
-        using var tcp = new System.Net.Sockets.TcpClient();
-        var w = new TelnetStreamWriter(ms, tcp);
-        w.IacWithText(251, 1, "hi");
-        Assert.Equal(1, ms.WriteCalls);
-        Assert.Equal(new byte[]{255,251,1,(byte)'h',(byte)'i'}, ms.ToArray());
+        // The fused WILL ECHO + prompt frame moved from the deleted
+        // TelnetStreamWriter single locked write to TelnetCsWriter.IacWithText
+        // (one WriteWithEchoAsync frame through the RFC 1143 machine).
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = telnet_cs.Transport.InMemoryPipe.Create();
+        using var session = new telnet_cs.Server.ServerSession(serverStream, QuietSessionOptions(), CancellationToken.None);
+        try
+        {
+            var w = new TelnetCsWriter(session, "1.2.3.4");
+            w.IacWithText(251, 1, "hi");
+            peer.ReceiveTimeout = 5000;
+            var got = new byte[5];
+            for (int i = 0; i < got.Length; i++)
+            {
+                int b = peer.ReadByte();
+                Assert.True(b >= 0, "peer hit EOF mid-frame");
+                got[i] = (byte)b;
+            }
+            Assert.Equal(new byte[] { 255, 251, 1, (byte)'h', (byte)'i' }, got);
+        }
+        finally
+        {
+            peer.Dispose();
+        }
     }
 }

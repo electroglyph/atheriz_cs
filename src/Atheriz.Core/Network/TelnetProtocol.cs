@@ -1,11 +1,12 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
-using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using telnet_cs.Server;
 
 namespace Atheriz.Core.Network;
 
@@ -328,69 +329,6 @@ public interface ITelnetApp
     ITelnetRouter? Router { get; }
 }
 
-public sealed class TelnetStreamWriter : ITelnetWriter
-{
-    private readonly Stream _stream;
-    private readonly TcpClient _client;
-    private readonly Lock _writeLock = new();
-    private int _pendingWriteBytes; // buffered-not-flushed bytes (see Write)
-    private Action<int,int>? _nawsCallback;
-    public TelnetStreamWriter(Stream stream, TcpClient client)
-    {
-        _stream = stream; _client = client;
-        // Armed once at connect, not per write: the property is a syscall,
-        // and nothing in the writer's lifetime changes it afterwards.
-        try { _client.SendTimeout = 2000; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Connect: " + logEx.Message, "TelnetStreamWriter"); }
-    }
-    public void Write(string text)
-    {
-        // Bounded write: a peer that never drains must not stall
-        // the game thread forever. SendTimeout turns a wedged peer into a
-        // SocketException instead of an indefinite block. Socket.SendTimeout
-        // has no effect on SslStream, so TLS writes get an explicit timeout.
-        WriteLocked(Encoding.UTF8.GetBytes(text));
-    }
-    // Single locked stream-write body: track buffered-not-yet-flushed bytes
-    // (the asyncio get_write_buffer_size() semantic from telnet.py:138-156) so
-    // the write-buffer check is live. Never report SO_SNDBUF capacity here:
-    // SendBufferSize (~2.6MB) dwarfs TelnetMaxPendingBytes and caused
-    // false closes when it was returned by mistake.
-    private void WriteLocked(byte[] bytes)
-    {
-        lock (_writeLock)
-        {
-            _pendingWriteBytes += bytes.Length;
-            try
-            {
-                if (_stream is SslStream)
-                {
-                    var wt = _stream.WriteAsync(bytes, 0, bytes.Length);
-                    if (!wt.Wait(TimeSpan.FromSeconds(5))) throw new IOException("TLS write timed out");
-                }
-                else _stream.Write(bytes, 0, bytes.Length);
-            }
-            finally { _pendingWriteBytes -= bytes.Length; }
-        }
-    }
-    public void Iac(byte cmd, byte opt) => WriteLocked([255, cmd, opt]);
-    // Fused IAC-then-text in one locked stream write: no other thread's bytes
-    // can slip between the negotiation bytes and the prompt they govern.
-    public void IacWithText(byte cmd, byte opt, string text)
-    {
-        var textBytes = Encoding.UTF8.GetBytes(text);
-        var bytes = new byte[3 + textBytes.Length];
-        bytes[0] = 255; bytes[1] = cmd; bytes[2] = opt;
-        Buffer.BlockCopy(textBytes, 0, bytes, 3, textBytes.Length);
-        WriteLocked(bytes);
-    }
-    public void Close() { try { _stream.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Close: " + logEx.Message, "TelnetStreamWriter"); } try { _client.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetStreamWriter.Close: " + logEx.Message, "TelnetStreamWriter"); } }
-    // Port of telnet.py:138-156 — pending (buffered, unflushed) bytes, not capacity.
-    public int? GetWriteBufferSize() => Volatile.Read(ref _pendingWriteBytes);
-    public void SetExtCallback(byte opt, Action<int, int> callback) { if (opt == 31) _nawsCallback = callback; }
-    public void TriggerNaws(int rows, int cols) => _nawsCallback?.Invoke(rows, cols);
-    public string? GetPeerHost() { try { return ((IPEndPoint)_client.Client.RemoteEndPoint!).Address.ToString(); } catch { return null; } }
-}
-
 public sealed class TelnetProtocol : BaseProtocol
 {
     // Per-IP 5s throttle for the overlong-input-drop warning (WS parity via ThrottleWindow).
@@ -398,8 +336,15 @@ public sealed class TelnetProtocol : BaseProtocol
     private const int TELNET_INPUT_CHUNK = 4096; // port of telnet.py:45
 
     public static (int rows, int cols) ClampNaws(int rows, int cols)
+        => ClampNaws(rows, cols, AtherizSettings.Global);
+
+    // Settings-threading overload: HandleSessionAsync honors its settings
+    // parameter for TelnetMaxLine, so the NAWS clamp must too — Global can
+    // diverge from the live settings (e.g. per-game configuration).
+    public static (int rows, int cols) ClampNaws(int rows, int cols, AtherizSettings settings)
     {
-        var s = AtherizSettings.Global;
+        ArgumentNullException.ThrowIfNull(settings);
+        var s = settings;
         return (Math.Max(s.TelnetNawsMinRows, Math.Min(rows, s.TelnetNawsMaxRows)), Math.Max(s.TelnetNawsMinCols, Math.Min(cols, s.TelnetNawsMaxCols)));
     }
 
@@ -569,40 +514,24 @@ public sealed class TelnetProtocol : BaseProtocol
         // port of telnet.py:402-433 run_telnet_server composition via lifespan
         Task.Run(async () =>
         {
-            TcpListener? listener = null;
+            TelnetServer? server = null;
             try
             {
-                IPAddress bindAddr;
-                if (!IPAddress.TryParse(settings.TelnetInterface, out bindAddr!)) throw new InvalidOperationException($"Unparseable TelnetInterface '{settings.TelnetInterface}'; refusing to bind an unintended interface.");
-                listener = new TcpListener(bindAddr, settings.TelnetPort);
                 var tlsCert = settings.TelnetTlsEnabled ? BuildTelnetSslContext(settings) : null;
                 if (tlsCert is not null) Atheriz.Core.AtherizLogger.LogInformation($"SSL is enabled for telnet (cert: {settings.SslCertFile}) with auto-detection for plaintext clients");
                 else if (settings.TelnetTlsEnabled) Atheriz.Core.AtherizLogger.LogWarning("TELNET_TLS_ENABLED is on but no usable cert — running plaintext");
+                var handoff = new ConcurrentQueue<string?>();
+                var filter = BuildAcceptFilter(manager, handoff);
+                var options = BuildServerOptions(settings, tlsCert, filter);
                 Atheriz.Core.AtherizLogger.LogInformation($"Starting Telnet Protocol on {settings.TelnetInterface}:{settings.TelnetPort}");
-                listener.Start();
-                using var reg = lifetime.ApplicationStopping.Register(() => { try { listener.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); } });
-                while (!lifetime.ApplicationStopping.IsCancellationRequested)
-                {
-                    TcpClient client;
-                    try { client = await listener.AcceptTcpClientAsync(lifetime.ApplicationStopping).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { break; }
-                    catch (SocketException) { if (lifetime.ApplicationStopping.IsCancellationRequested) break; continue; }
-                    // admission checks precede the handler spawn — a
-                    // banned/over-limit peer is refused here instead of
-                    // queueing a task that RegisterConnection would reject.
-                    string preHost = "?";
-                    try { preHost = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString(); } catch { }
-                    if (ObjectRegistry.IsIpBanned(preHost) || manager.ShouldRefusePreSpawn(preHost))
-                    {
-                        try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] Refusing pre-spawn connection from {preHost} (banned or over connection cap)."); } catch { }
-                        try { client.Close(); } catch { }
-                        continue;
-                    }
-                    var _ht = Task.Run(() => HandleTelnetClientAsync(client, tlsCert, manager, settings, lifetime)); _ = _ht.ContinueWith(t => { if (t.IsFaulted && t.Exception is not null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] HandleClient fault: {t.Exception}"); }, TaskScheduler.Default);
-                }
+                server = new TelnetServer(settings.TelnetPort, options);
+                server.Start();
+                var running = server;
+                using var reg = lifetime.ApplicationStopping.Register(() => { try { running.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); } });
+                await AcceptLoopAsync(server, handoff, manager, settings, lifetime.ApplicationStopping).ConfigureAwait(false);
             }
             catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] server failed: {ex}"); }
-            finally { try { listener?.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); } Atheriz.Core.AtherizLogger.LogInformation("Telnet Protocol server stopped."); }
+            finally { try { server?.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); } Atheriz.Core.AtherizLogger.LogInformation("Telnet Protocol server stopped."); }
         });
     }
 
@@ -654,52 +583,167 @@ public sealed class TelnetProtocol : BaseProtocol
         }
     }
 
-    private static async Task HandleTelnetClientAsync(TcpClient client, X509Certificate2? tlsCert, ConnectionManager manager, AtherizSettings settings, IHostApplicationLifetime lifetime)
+    // Peer-label helper for the accept filter: the library exposes the endpoint
+    // to the filter, but ServerSession.RemoteEndPoint is internal, so the filter
+    // snapshots this string for TelnetCsWriter.GetPeerHost.
+    internal static string HostOf(EndPoint? endpoint)
     {
-        string host = "?";
-        try { host = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); }
-        if (ObjectRegistry.IsIpBanned(host)) { Atheriz.Core.AtherizLogger.LogWarning($"Host {host} in temp ban list has tried to connect."); try { client.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); } return; }
-        Stream netStream = client.GetStream();
-        Stream stream = netStream;
-        SslStream? sslStream = null;
-        if (tlsCert is not null)
+        try { return endpoint is IPEndPoint ip ? ip.Address.ToString() : "?"; }
+        catch { return "?"; }
+    }
+
+    // Admission mapping (telnet.md Phase 3b): Atheriz stays the single source of
+    // truth for bans/caps (ban + per-IP + total). The library evaluates this
+    // before any TLS handshake or preset bytes, so a refused peer gets no bytes
+    // and no handler task — the same pre-spawn refuse the raw loop did inline.
+    internal static Func<EndPoint?, AcceptDecision> BuildAcceptFilter(ConnectionManager manager, ConcurrentQueue<string?> handoff)
+    {
+        ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(handoff);
+        return endpoint =>
         {
+            var host = HostOf(endpoint);
+            // Handoff invariant: the accept loop below is sequential, so each
+            // filter run enqueues exactly one entry and the loop dequeues
+            // exactly one per AcceptTcpAsync (success takes it, any failure
+            // drains it) — the snapshot always belongs to the current accept.
+            handoff.Enqueue(host);
+            if (ObjectRegistry.IsIpBanned(host) || manager.ShouldRefusePreSpawn(host))
+            {
+                try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] Refusing pre-spawn connection from {host} (banned or over connection cap)."); } catch { }
+                return new AcceptDecision(false, "banned-or-over-cap");
+            }
+            return new AcceptDecision(true);
+        };
+    }
+
+    // Settings/options mapping (telnet.md Phase 4). Library caps stay unlimited
+    // so only Atheriz counts fire (no divergent enforcement); timeouts stay
+    // deadline-free for parity (no enforced idle/handshake existed — the
+    // 5-minute pre-login orphan sweep still reaps silent sockets).
+    internal static TelnetServerOptions BuildServerOptions(AtherizSettings settings, X509Certificate2? tlsCert, Func<EndPoint?, AcceptDecision> filter)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(filter);
+        if (!IPAddress.TryParse(settings.TelnetInterface, out var bindAddr))
+            throw new InvalidOperationException($"Unparseable TelnetInterface '{settings.TelnetInterface}'; refusing to bind an unintended interface.");
+        return new TelnetServerOptions
+        {
+            ListenAddress = bindAddr,
+            TextEncoding = Encoding.UTF8,
+            // Keep write bytes == UTF-8 reserve: charset negotiation would only
+            // retune per-read decoding, never the write path, and the engine
+            // reserves limiter bytes as UTF-8 — no drift while this stays off.
+            RequestCharacterSet = false,
+            // Re-enables NAWS (the raw-socket path sent no DO NAWS to avoid IAC
+            // garbage in StreamReader text; session text is already decoded).
+            RequestWindowSize = true,
+            MaxConcurrentSessions = 0,
+            MaxConnectionsPerIp = 0,
+            // Unlimited: overlong-drop stays Atheriz-side (ReadCappedLines
+            // drop+continue); the library cap would fail-closed (disconnect).
+            MaxBufferedTextChars = 0,
+            IdleTimeout = Timeout.InfiniteTimeSpan,
+            // 10 s bounds the accept-inline TLS handshake exactly like the old
+            // AuthenticateAsServerAsync cap; plaintext stays deadline-free.
+            HandshakeTimeout = tlsCert is not null ? TimeSpan.FromSeconds(10) : Timeout.InfiniteTimeSpan,
+            StatusInterval = null,
+            ServerCertificate = tlsCert,
+            // Same-port peek budget mirrors the old 250 ms poll + 250 ms budget.
+            TlsAutoDetect = tlsCert is not null ? TimeSpan.FromMilliseconds(250) : Timeout.InfiniteTimeSpan,
+            Log = msg => { try { AtherizLogger.LogDebug(msg, "TelnetServer"); } catch { } },
+            AcceptFilterV2 = filter,
+        };
+    }
+
+    // Sequential accept loop: admission already ran inside AcceptTcpAsync, and
+    // NegotiateAsync (opening preset) runs inside the per-session task so a
+    // slow peer never stalls other accepts.
+    internal static async Task AcceptLoopAsync(TelnetServer server, ConcurrentQueue<string?> handoff, ConnectionManager manager, AtherizSettings settings, CancellationToken stopping)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        ArgumentNullException.ThrowIfNull(handoff);
+        ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(settings);
+        while (!stopping.IsCancellationRequested)
+        {
+            ServerSession pending;
             try
             {
-                if (client.Client.Poll(250 * 1000, SelectMode.SelectRead) && client.Available >= 2)
-                {
-                    byte[] peek = new byte[2];
-                    int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek);
-                    if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); stream = sslStream; }
-                }
-                else if (client.Available == 0)
-                {
-                    // no fixed 100ms tax on every plaintext login — wait
-                    // only until the client's first bytes actually arrive (or a
-                    // short budget expires), then peek once. Data already in
-                    // flight wakes the loop in ~10ms; a slow TLS hello inside
-                    // the budget is still detected instead of being parsed as
-                    // plaintext. Past the budget the bytes are treated as
-                    // plaintext, exactly as before.
-                    var autodetectDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(250);
-                    while (client.Available < 2 && DateTime.UtcNow < autodetectDeadline)
-                        await Task.Delay(10).ConfigureAwait(false);
-                    if (client.Available >= 2) { byte[] peek = new byte[2]; int peeked = client.Client.Receive(peek, 2, SocketFlags.Peek); if (peeked >= 2 && peek[0] == 0x16 && peek[1] == 0x03) { sslStream = new SslStream(netStream, false); await sslStream.AuthenticateAsServerAsync(tlsCert).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); stream = sslStream; } } }
+                pending = await server.AcceptTcpAsync(stopping).ConfigureAwait(false);
             }
-            catch (Exception ex) { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] TLS autodetect failed for {host}: {ex}"); stream = netStream; }
+            catch (OperationCanceledException) { break; }
+            catch (ObjectDisposedException) { if (stopping.IsCancellationRequested) break; handoff.TryDequeue(out _); continue; }
+            catch (SocketException) { if (stopping.IsCancellationRequested) break; handoff.TryDequeue(out _); continue; }
+            // Refuse exceptions derive InvalidOperationException — catch before
+            // it. The filter already warned; the library logged its own
+            // over-capacity line via options.Log.
+            catch (ConnectionRefusedByFilterException) { handoff.TryDequeue(out _); continue; }
+            catch (SessionCapacityException) { handoff.TryDequeue(out _); continue; }
+            catch (PerIpCapacityException) { handoff.TryDequeue(out _); continue; }
+            catch (TimeoutException ex) { handoff.TryDequeue(out _); try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] handshake timeout: {ex.Message}"); } catch { } continue; }
+            catch (InvalidOperationException ex) { handoff.TryDequeue(out _); try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] accept failed: {ex.Message}"); } catch { } break; }
+            catch (Exception ex) { handoff.TryDequeue(out _); try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] accept failed: {ex.Message}"); } catch { } continue; }
+            handoff.TryDequeue(out var host);
+            var session = pending;
+            var peerHost = host ?? "?";
+            var _ht = Task.Run(() => NegotiateThenHandleAsync(server, session, peerHost, manager, settings, stopping)); _ = _ht.ContinueWith(t => { if (t.IsFaulted && t.Exception is not null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] HandleClient fault: {t.Exception}"); }, TaskScheduler.Default);
         }
-        var reader = new StreamReader(stream, Encoding.UTF8);
-        var writer = new TelnetStreamWriter(stream, client);
+    }
+
+    // NAWS re-enable: the opening preset asks for window-size reports and the
+    // library stashes them on ClientWindowSize; apply (clamped) to the game
+    // session. Polled per received line — reports arrive right after connect.
+    private static void ApplyNaws(TelnetCsWriter writer, TelnetConnection connection, AtherizSettings settings)
+    {
+        try
+        {
+            var size = writer.Session.ClientWindowSize;
+            if (size is not { } reported) return;
+            if (reported.Width == 0 || reported.Height == 0) return;
+            var (rows, cols) = ClampNaws(reported.Height, reported.Width, settings);
+            if (connection.Session.TermWidth != cols) connection.Session.TermWidth = cols;
+            if (connection.Session.TermHeight != rows) connection.Session.TermHeight = rows;
+        }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.ApplyNaws: " + logEx.Message, "TelnetProtocol"); }
+    }
+
+    // Opening preset (DO TTYPE et al.) goes out here, inside the per-session
+    // task: a slow peer stalls only its own negotiation, never the accept loop.
+    internal static async Task NegotiateThenHandleAsync(TelnetServer server, ServerSession pending, string host, ConnectionManager manager, AtherizSettings settings, CancellationToken stopping)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        ArgumentNullException.ThrowIfNull(pending);
+        ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(settings);
+        ServerSession session;
+        try
+        {
+            session = await server.NegotiateAsync(pending, stopping).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { try { pending.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.NegotiateThenHandleAsync: " + logEx.Message, "TelnetProtocol"); } return; }
+        catch (TimeoutException ex) { try { Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] handshake timeout: {ex.Message}"); } catch { } try { pending.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.NegotiateThenHandleAsync: " + logEx.Message, "TelnetProtocol"); } return; }
+        catch (Exception ex) { try { Atheriz.Core.AtherizLogger.LogError($"[Telnet] negotiation failed for {host}: {ex.Message}"); } catch { } try { pending.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.NegotiateThenHandleAsync: " + logEx.Message, "TelnetProtocol"); } return; }
+        await HandleSessionAsync(session, host, manager, settings, stopping).ConfigureAwait(false);
+    }
+
+    internal static async Task HandleSessionAsync(ServerSession session, string host, ConnectionManager manager, AtherizSettings settings, CancellationToken stopping)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(settings);
+        if (ObjectRegistry.IsIpBanned(host)) { Atheriz.Core.AtherizLogger.LogWarning($"Host {host} in temp ban list has tried to connect."); try { session.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.HandleSessionAsync: " + logEx.Message, "TelnetProtocol"); } return; }
         var connId = manager.GenerateConnectionId();
+        var writer = new TelnetCsWriter(session, host);
+        var reader = new TelnetSessionReader(session, stopping);
         var connection = new TelnetConnection(reader, writer, connId, settings); connection.ClientHost = host;
-        if (!manager.RegisterConnection(connId, connection)) return;
-        try { writer.Write("\r\n\x1b[1;1H\x1b[2J"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); }
-        // NAWS handling disabled to avoid telnet option negotiation garbage (client WILL response being treated as command). Python's telnet.py handles this via asyncio telnetlib, but our StreamReader would treat IAC as text. For now skip DO NAWS to keep input clean for telnetlib/raw clients.
-        // void OnNaws(int rows, int cols) { if (rows <= 0 || cols <= 0) return; var (clampedRows, clampedCols) = ClampNaws(rows, cols); connection.Session.TermWidth = clampedCols; connection.Session.TermHeight = clampedRows; }
-        // writer.SetExtCallback(31, OnNaws);
-        // try { writer.Iac(253, 31); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); }
+        // connection.Dispose tears down writer (which owns the session) and
+        // reader, so every path below exits through it exactly once.
+        if (!manager.RegisterConnection(connId, connection)) { try { connection.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.HandleSessionAsync: " + logEx.Message, "TelnetProtocol"); } return; }
+        try { writer.Write("\r\n\x1b[1;1H\x1b[2J"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.HandleSessionAsync: " + logEx.Message, "TelnetProtocol"); }
+        ApplyNaws(writer, connection, settings);
         manager.Dispatch(connection, "client_ready", [], []);
-        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine).ConfigureAwait(false)) { if (rawLine is null) { if (_overlongDropLog.ShouldLog(host)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Filter stray IAC bytes (0xFF) that telnet clients may send even without DO (e.g., telnetlib pre-negotiation). When decoded as UTF8, 0xFF becomes U+FFFD.
+        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine).ConfigureAwait(false)) { if (rawLine is null) { if (_overlongDropLog.ShouldLog(host)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Session text is already negotiation-decoded, but keep the stray-IAC guard: a peer can still emit bare 0xFF, which decodes as U+FFFD.
             if (line.Length > 0 && (line[0] == '\uFFFD' || line[0] == (char)255 || line.Contains("\uFFFD"))) {
                 // Strip leading IAC sequences: find first alphabetic char of actual command
                 int start = 0;
@@ -707,6 +751,7 @@ public sealed class TelnetProtocol : BaseProtocol
                 if (start >= line.Length) continue;
                 line = line.Substring(start);
             }
+            ApplyNaws(writer, connection, settings);
             line = line.Trim();
             if (string.IsNullOrEmpty(line)) continue;
             var logLine = line;
@@ -718,6 +763,6 @@ public sealed class TelnetProtocol : BaseProtocol
             Atheriz.Core.AtherizLogger.LogDebug($"[Telnet] recv '{logLine}' from {connId} host={host}");
             manager.Dispatch(connection, "text", new List<object?> { line }, []); } }
         catch (OperationCanceledException) { } catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error in shell for {connId}: {e}"); }
-        finally { manager.Disconnect(connection); try { writer.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); } try { client.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed LifespanDisposable.HandleTelnetClientAsync: " + logEx.Message, "LifespanDisposable"); } }
+        finally { manager.Disconnect(connection); try { connection.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.HandleSessionAsync: " + logEx.Message, "TelnetProtocol"); } }
     }
 }

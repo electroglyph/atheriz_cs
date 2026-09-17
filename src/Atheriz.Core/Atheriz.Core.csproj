@@ -24,6 +24,8 @@
     <PackageReference Include="Microsoft.Data.Sqlite.Core" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <!-- Telnet wire engine (server sessions). The engine owns the protocol. -->
+    <PackageReference Include="telnet_cs" />
   </ItemGroup>
 
 

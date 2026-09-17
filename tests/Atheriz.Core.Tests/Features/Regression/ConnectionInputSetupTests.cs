@@ -75,14 +75,15 @@ public class ConnectionInputSetupTests
         Assert.DoesNotContain("{\n            {", src);
     }
 
-    // The send timeout is armed once at connect, not syscall'd per write.
+    // Every session write is bounded by one bridge deadline, not per-write socket syscalls.
     [Fact]
-    public void TelnetWriter_SendTimeout_ArmedAtConnect()
+    public void TelnetWriter_WriteDeadline_BoundsAllSessionWrites()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "TelnetProtocol.cs");
-        Assert.Contains("Suppressed TelnetStreamWriter.Connect", src);
-        Assert.DoesNotContain("Suppressed TelnetStreamWriter.Write", src);
-        Assert.DoesNotContain("Suppressed TelnetStreamWriter.IacWithText", src);
+        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "TelnetCsWriter.cs");
+        Assert.Contains("WriteTimeout", src);
+        Assert.Contains("telnet write timed out", src);
+        Assert.DoesNotContain("Suppressed TelnetCsWriter.Write", src);
+        Assert.DoesNotContain("Suppressed TelnetCsWriter.IacWithText", src);
     }
 
     // Id generation is a lock-free counter: unique under concurrency.

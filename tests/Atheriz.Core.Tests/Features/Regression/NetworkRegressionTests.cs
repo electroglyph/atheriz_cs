@@ -252,10 +252,10 @@ public class NetworkRegressionTests
     public void AcceptChecks_PrecedeHandlerSpawn()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Network", "TelnetProtocol.cs");
-        int accept = src.IndexOf("AcceptTcpClientAsync", StringComparison.Ordinal);
-        int spawn = src.IndexOf("Task.Run(() => HandleTelnetClientAsync", accept, StringComparison.Ordinal);
+        int accept = src.IndexOf("AcceptTcpAsync", StringComparison.Ordinal);
+        int spawn = src.IndexOf("NegotiateThenHandleAsync", accept, StringComparison.Ordinal);
         Assert.True(accept >= 0 && spawn > accept);
-        Assert.Contains("IsIpBanned", src.Substring(accept, spawn - accept));
+        Assert.Contains("ConnectionRefusedByFilterException", src.Substring(accept, spawn - accept));
     }
 
     // Plugin discovery (GetTypes scan) and live-patch field copy

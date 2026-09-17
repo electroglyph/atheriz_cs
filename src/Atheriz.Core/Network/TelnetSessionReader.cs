@@ -1,0 +1,102 @@
+using telnet_cs.Server;
+
+namespace Atheriz.Core.Network;
+
+/// <summary>
+/// Blocking <see cref="TextReader"/> over a telnet_cs <see cref="ServerSession"/>'s decoded text
+/// slices, so the engine's <see cref="TelnetProtocol.ReadCappedLines"/> framing (overlong-drop,
+/// split-CRLF holdback, \r\x00 strip, EOF tail) runs unchanged on session text instead of raw
+/// socket bytes. Timeout slices ("") on a live session are waited through; only a dead session
+/// reads as EOF. Wire errors propagate for the accept loop to log and disconnect on.
+/// </summary>
+public sealed class TelnetSessionReader : TextReader
+{
+    private static readonly TimeSpan ReadSlice = TimeSpan.FromMilliseconds(100);
+
+    private readonly ServerSession _session;
+    private readonly CancellationToken _stopping;
+    private string _carry = string.Empty;
+    private int _pos;
+    // StreamReader preamble parity: .NET telnet clients built on StreamWriter
+    // send one UTF-8 BOM at stream start, which StreamReader decoding used to
+    // swallow. Raw session slices keep it as U+FEFF, which would otherwise
+    // prefix the first command word and fail the lookup — so the first
+    // non-empty slice drops one leading U+FEFF, exactly once per connection.
+    private bool _preamble = true;
+
+    public TelnetSessionReader(ServerSession session, CancellationToken stopping = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        _session = session;
+        _stopping = stopping;
+    }
+
+    public override Task<int> ReadAsync(char[] buffer, int index, int count)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (buffer.Length - index < count)
+        {
+            throw new ArgumentException("Offset and count exceed buffer bounds.", nameof(count));
+        }
+
+        return ReadCoreAsync(buffer.AsMemory(index, count), CancellationToken.None).AsTask();
+    }
+
+    public override ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default) =>
+        ReadCoreAsync(buffer, cancellationToken);
+
+    public override int Read(char[] buffer, int index, int count)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        // Sync TextReader contract over the session's async slices. Same safety shape
+        // as TelnetCsWriter.Write: context-free server threads, ConfigureAwait(false)
+        // throughout the library, session-serialized reads.
+        return ReadCoreAsync(buffer.AsMemory(index, count), CancellationToken.None).AsTask().GetAwaiter().GetResult();
+    }
+
+    private async ValueTask<int> ReadCoreAsync(Memory<char> destination, CancellationToken callerToken)
+    {
+        if (destination.IsEmpty)
+        {
+            return 0;
+        }
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_stopping, callerToken);
+        while (true)
+        {
+            if (_pos < _carry.Length)
+            {
+                int n = Math.Min(_carry.Length - _pos, destination.Length);
+                _carry.AsSpan(_pos, n).CopyTo(destination.Span);
+                _pos += n;
+                return n;
+            }
+
+            _carry = string.Empty;
+            _pos = 0;
+            string slice = await _session.ReadAsync(ReadSlice, linked.Token).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(slice))
+            {
+                if (_preamble)
+                {
+                    _preamble = false;
+                    if (slice[0] == '\uFEFF')
+                    {
+                        slice = slice[1..];
+                    }
+                }
+                _carry = slice;
+                continue;
+            }
+
+            if (!_session.IsConnected || linked.Token.IsCancellationRequested)
+            {
+                return 0;
+            }
+
+            // Live but quiet: keep blocking like a socket read instead of reporting EOF.
+        }
+    }
+}

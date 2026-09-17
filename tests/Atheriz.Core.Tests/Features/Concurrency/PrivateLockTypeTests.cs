@@ -60,12 +60,6 @@ public sealed class PrivateLockTypeTests
     }
 
     [Fact]
-    public void TelnetStreamWriter_WriteLock_IsLockType()
-    {
-        AssertPrivateLockFieldIsLock(typeof(TelnetStreamWriter), "_writeLock");
-    }
-
-    [Fact]
     public void Channel_HistoryLock_IsLockType()
     {
         AssertPrivateLockFieldIsLock(typeof(Channel), "_histLock");

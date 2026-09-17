@@ -50,36 +50,66 @@ public class TelnetConnectionTests
     }
 
     [Fact]
-    public void Telnet_Write_ToNonReadingPeer_ReturnsPromptly()
+    public async Task Telnet_Write_ToNonReadingPeer_ReturnsPromptly()
     {
-        // Behavior: writes run on the game thread with a timeout — a peer
-        // that never drains must not stall the worker forever.
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        TcpClient? server = null;
-        TcpClient? client = null;
+        // Behavior: writes run on the game thread with a deadline — a peer
+        // that never drains must not stall the worker forever. The bound moved
+        // from the deleted TelnetStreamWriter socket SendTimeout into
+        // TelnetCsWriter.RunWrite (5 s) over the session write.
+        using var env = GlobalTestEnv.Enter();
+        var options = new telnet_cs.Server.TelnetServerOptions
+        {
+            TextEncoding = System.Text.Encoding.UTF8,
+            RequestCharacterSet = false,
+            DisableAllNegotiation = true,
+            IdleTimeout = Timeout.InfiniteTimeSpan,
+            HandshakeTimeout = Timeout.InfiniteTimeSpan,
+            StatusInterval = null,
+            Log = null,
+        };
+        using var server = new telnet_cs.Server.TelnetServer(0, options);
+        server.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         try
         {
-            client = new TcpClient();
-            client.Connect(IPAddress.Loopback, port);
-            server = listener.AcceptTcpClient();
-            var writer = new TelnetStreamWriter(server.GetStream(), server);
-            var big = new string('x', 8 << 20);
-            var writeTask = Task.Run(() => writer.Write(big));
-            // Completed promptly (a bounded SocketException counts — the point
-            // is it never hangs); an unobserved fault would be worse.
-            bool done;
-            try { done = writeTask.Wait(TimeSpan.FromSeconds(3)); }
-            catch (AggregateException) { done = true; }
-            if (writeTask.IsFaulted) _ = writeTask.Exception;
-            Assert.True(done, "write to a non-draining peer must not block the game thread indefinitely");
+            var acceptTask = server.AcceptTcpAsync(cts.Token);
+            using var client = new TcpClient();
+            client.Connect(IPAddress.Loopback, server.Port);
+            var pending = await acceptTask.WaitAsync(TimeSpan.FromSeconds(10));
+            // NegotiateAsync returns the same instance it is given, so only
+            // the negotiated session is disposed (the library Dispose is not
+            // idempotent).
+            telnet_cs.Server.ServerSession session;
+            try
+            {
+                session = await server.NegotiateAsync(pending, cts.Token).WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch
+            {
+                try { pending.Dispose(); } catch { }
+                throw;
+            }
+            var writer = new TelnetCsWriter(session, "127.0.0.1");
+            try
+            {
+                var big = new string('x', 8 << 20);
+                var writeTask = Task.Run(() => writer.Write(big));
+                // Completed promptly (a bounded IOException counts — the point
+                // is it never hangs); an unobserved fault would be worse.
+                bool done;
+                try { done = writeTask.Wait(TimeSpan.FromSeconds(15)); }
+                catch (AggregateException) { done = true; }
+                if (writeTask.IsFaulted) _ = writeTask.Exception;
+                Assert.True(done, "write to a non-draining peer must not block the game thread indefinitely");
+            }
+            finally
+            {
+                writer.Dispose();
+            }
         }
         finally
         {
-            try { server?.Close(); } catch { }
-            try { client?.Close(); } catch { }
-            try { listener.Stop(); } catch { }
+            try { server.Stop(); } catch { }
         }
     }
 
