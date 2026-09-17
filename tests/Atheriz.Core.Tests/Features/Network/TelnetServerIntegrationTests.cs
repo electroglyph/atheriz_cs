@@ -995,6 +995,98 @@ public sealed class TelnetServerIntegrationTests
         Assert.True(await WaitForEmptyAsync(stack.Manager), "connection lingered");
     }
 
+    [Fact]
+    public async Task NegotiateThenHandle_PeerAbortsDuringPreset_LogsAndSurvives()
+    {
+        // The generic-failure arm (neither Timeout nor cancel): a peer that
+        // RSTs before the opening preset goes out must fail the negotiation
+        // with a "negotiation failed" error, leave no connection behind, and
+        // the loop must keep serving. The RST must win the race against the
+        // preset write, so each attempt asserts the strict invariants (no
+        // linger, loop alive) and a small attempt budget covers the scheduling
+        // race; the log assertion fires on the first observed generic failure.
+        using var env = GlobalTestEnv.Enter();
+        var settings = new AtherizSettings { TelnetInterface = "127.0.0.1" };
+        using var stack = await StartAsync(settings);
+        var mgr = stack.Manager;
+        var sawNegotiationFailed = false;
+        string tail = "";
+        using (var cap = new CaptureAtherizLog())
+        {
+            for (var i = 0; i < 5 && !sawNegotiationFailed; i++)
+            {
+                using var raw = new TcpClient();
+                await raw.ConnectAsync(IPAddress.Loopback, stack.Port);
+                CloseAbortive(raw);
+                for (var j = 0; j < 40 && !sawNegotiationFailed; j++)
+                {
+                    await Task.Delay(50);
+                    tail = cap.Read();
+                    sawNegotiationFailed = tail.Contains("negotiation failed", StringComparison.Ordinal);
+                }
+                Assert.True(await WaitForEmptyAsync(mgr), $"attempt {i}: connection lingered");
+                Assert.False(stack.LoopTask.IsCompleted, $"attempt {i}: accept loop died");
+            }
+            if (!sawNegotiationFailed) tail = cap.Read();
+        }
+        Assert.True(sawNegotiationFailed,
+            "generic negotiation-failure arm never fired in 5 attempts; log tail: " + tail.Substring(Math.Max(0, tail.Length - 2000)));
+
+        // Survival: a good peer is served afterwards.
+        var got = new ConcurrentQueue<string>();
+        mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+        {
+            if (a.Count > 0) got.Enqueue(a[0]?.ToString() ?? "");
+        }));
+        using var good = new TcpClient();
+        await good.ConnectAsync(IPAddress.Loopback, stack.Port);
+        using var gstream = good.GetStream();
+        var opening = await ReadUntilAsync(gstream, [ClearScreen], timeoutMs: 20000);
+        Assert.True(Contains(opening, ClearScreen), "loop did not survive the aborted negotiation");
+        await gstream.WriteAsync(Encoding.UTF8.GetBytes("after-abort\r\n"));
+        Assert.True(await PortedHelpers.WaitAsync(() => !got.IsEmpty, 10000), "good peer lost");
+        Assert.Equal("after-abort", got.First());
+        CloseAbortive(good);
+        Assert.True(await WaitForEmptyAsync(mgr), "connections lingered");
+    }
+
+    [Fact]
+    public async Task DoubledIacPrefix_LiveSocket_DispatchesStrippedCommand()
+    {
+        // Live-socket pin for the leading-IAC strip. Shape survey, all live:
+        // a lone 0xFF (same write or split across reads) never reaches the
+        // strip — the library drops it and holds framing across reads, so
+        // "hello" dispatches with or without the guard. A doubled 0xFF 0xFF
+        // (escaped literal) decodes as U+FFFD ahead of the command word, and
+        // only the handler's leading-junk guard delivers the bare command —
+        // neuter the guard and this dispatches "�hello". Do not simplify the
+        // probe to a single 0xFF: that shape passes vacuously either way.
+        using var env = GlobalTestEnv.Enter();
+        var settings = new AtherizSettings { TelnetInterface = "127.0.0.1" };
+        var got = new ConcurrentQueue<string>();
+        using var stack = await StartAsync(settings);
+        var mgr = stack.Manager;
+        mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+        {
+            if (a.Count > 0) got.Enqueue(a[0]?.ToString() ?? "");
+        }));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, stack.Port);
+        using var stream = client.GetStream();
+        var opening = await ReadUntilAsync(stream, [DoTtype, ClearScreen]);
+        Assert.True(Contains(opening, ClearScreen), "no prompt: " + Convert.ToHexString(opening));
+        var session = await WaitForSessionAsync(mgr);
+        Assert.NotNull(session);
+
+        byte[] probe = [0xFF, 0xFF, .. Encoding.UTF8.GetBytes("hello\r\n")];
+        await stream.WriteAsync(probe);
+        Assert.True(await PortedHelpers.WaitAsync(() => !got.IsEmpty, 10000), "IAC-prefixed command never dispatched");
+        Assert.Equal("hello", got.First());
+        CloseAbortive(client);
+        Assert.True(await WaitForEmptyAsync(mgr), "connection lingered");
+    }
+
     private static int IndexOf(byte[] haystack, byte[] needle)
     {
         if (needle.Length == 0 || haystack.Length < needle.Length) return -1;
