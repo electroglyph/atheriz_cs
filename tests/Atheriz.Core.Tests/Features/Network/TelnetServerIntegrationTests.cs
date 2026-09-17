@@ -20,16 +20,12 @@ namespace Atheriz.Core.Tests.Features.Network;
 // TelnetSessionReaderTests) by proving the wiring — filter, loop, NAWS
 // re-apply, echo toggles, TLS autodetect — end to end.
 //
-// Close-path contract (telnet_cs 0.13.0): every close below is ABORTIVE
-// (SO_LINGER 0 => RST) on purpose. A clean FIN is delivered by the socket
-// as a 0-byte read, which the library reports as an empty slice with no
-// error and never closes on — while ServerSession.IsConnected is the local
-// socket flag, so it stays true. TelnetSessionReader therefore reads a
-// clean FIN as "live but quiet" forever: the handler never exits and the
-// connection ghosts (slot + per-IP count + a 100ms read spin leak). An RST
-// instead surfaces as an IOException through the read, which unwinds the
-// handler into Disconnect — so RST disconnect IS covered here, and the FIN
-// gap is tracked separately (upstream library behavior; see telnet.md).
+// Close-path contract (telnet_cs 0.14.0): both peer-close paths are
+// asserted. A clean FIN (plaintext `Shutdown(Send)`, TLS `close_notify`)
+// is observed by the library and unwinds the handler into Disconnect; an
+// abortive RST (SO_LINGER 0) flips the local Connected flag false with the
+// same outcome. Pre-0.14.0 the clean FIN ghosted (slot + per-IP count +
+// read spin leaked); see telnet.md.
 [Collection("Ported")]
 public sealed class TelnetServerIntegrationTests
 {
@@ -119,13 +115,21 @@ public sealed class TelnetServerIntegrationTests
         return null;
     }
 
-    // Abortive close (RST, discards buffers): the only peer-close path the
-    // 0.13.0 read contract surfaces, so the only one this suite asserts.
-    // See the class comment for the clean-FIN gap.
+    // Abortive close (RST, discards buffers): the pre-0.14.0 era's only
+    // surfacing close path, still covered as the hostile-peer case.
     private static void CloseAbortive(TcpClient client)
     {
         try { client.LingerState = new LingerOption(true, 0); } catch { }
         try { client.Close(); } catch { }
+    }
+
+    // Clean FIN on the send direction only: the socket stays open for
+    // reading (so the server's own FIN reply has somewhere to go) while the
+    // server must observe our EOF. Shutdown is explicit, so unlike Close it
+    // cannot turn into an RST from unread greeting bytes.
+    private static void CloseClean(TcpClient client)
+    {
+        try { client.Client.Shutdown(SocketShutdown.Send); } catch { }
     }
 
     private static async Task<bool> WaitForEmptyAsync(ConnectionManager mgr, int timeoutMs = 10000)
@@ -169,6 +173,28 @@ public sealed class TelnetServerIntegrationTests
 
         CloseAbortive(client);
         Assert.True(await WaitForEmptyAsync(mgr), "connection lingered after abortive close");
+    }
+
+    [Fact]
+    public async Task CleanFin_DisconnectsSession()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var settings = new AtherizSettings { TelnetInterface = "127.0.0.1" };
+        using var stack = await StartAsync(settings);
+        var mgr = stack.Manager;
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, stack.Port);
+        using var stream = client.GetStream();
+        _ = await ReadUntilAsync(stream, [ClearScreen]);
+        var session = await WaitForSessionAsync(mgr);
+        Assert.NotNull(session);
+
+        // Graceful close: FIN on our send direction, socket held open.
+        // Pre-0.14.0 the server ghosted here (empty slices + Connected
+        // stuck true); now the handler must unwind into Disconnect.
+        CloseClean(client);
+        Assert.True(await WaitForEmptyAsync(mgr), "connection ghosted after clean FIN");
     }
 
     [Fact]
@@ -329,6 +355,10 @@ public sealed class TelnetServerIntegrationTests
 
             // TLS peer on the same port.
             using var tls = new TcpClient();
+            // Arm RST-before-SslStream-teardown: SslStream.Dispose closes the
+            // socket first (a FIN the server ghosts on), so the linger must be
+            // armed here for the close below to actually reset.
+            tls.LingerState = new LingerOption(true, 0);
             await tls.ConnectAsync(IPAddress.Loopback, stack.Port);
             using var ssl = new SslStream(tls.GetStream(), false, (_, _, _, _) => true);
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -352,16 +382,66 @@ public sealed class TelnetServerIntegrationTests
             Assert.True(await PortedHelpers.WaitAsync(() => got.Any(s => s == "via-tls"), 10000), "TLS line lost");
 
             Assert.True(await PortedHelpers.WaitAsync(() => mgr.ConnectionsSnapshot.Count == 2, 10000), "expected both peers registered");
-            // No teardown assert here: the TLS session's close path is the
-            // same upstream gap as plaintext FIN — transport errors inside
-            // the decrypt loop collapse to -1/empty (ByteStreamHandler
-            // TryReadByteCore maps IOException/InvalidOperation to -1), so
-            // even an abortive close never surfaces. Plaintext RST teardown
-            // IS covered by the tests above; TLS close rides the same
-            // upstream fix. Just release the peers.
+            // RST teardown on both peers (linger pre-armed above for TLS, so
+            // the socket resets instead of FIN-closing through SslStream).
+            tls.Close();
             ssl.Dispose();
             CloseAbortive(plain);
-            CloseAbortive(tls);
+            Assert.True(await WaitForEmptyAsync(mgr), "connections lingered after abortive close");
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task TlsCloseNotify_DisconnectsSession()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (dir, cert) = MakeCert();
+        try
+        {
+            var settings = new AtherizSettings { TelnetInterface = "127.0.0.1" };
+            using var stack = await StartAsync(settings, cert);
+            var mgr = stack.Manager;
+            var got = new ConcurrentQueue<string>();
+            mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) =>
+            {
+                if (a.Count > 0) got.Enqueue(a[0]?.ToString() ?? "");
+            }));
+
+            using var tls = new TcpClient();
+            await tls.ConnectAsync(IPAddress.Loopback, stack.Port);
+            using var ssl = new SslStream(tls.GetStream(), false, (_, _, _, _) => true);
+            await ssl.AuthenticateAsClientAsync("localhost", null, false);
+            var tOpening = new List<byte>();
+            var tmp = new byte[4096];
+            using var tcts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try
+            {
+                while (!Contains([.. tOpening], ClearScreen))
+                {
+                    var n = await ssl.ReadAsync(tmp, tcts.Token);
+                    if (n == 0) break;
+                    tOpening.AddRange(tmp.Take(n));
+                }
+            }
+            catch (OperationCanceledException) { }
+            Assert.True(Contains([.. tOpening], ClearScreen), "TLS peer got no prompt");
+            var session = await WaitForSessionAsync(mgr);
+            Assert.NotNull(session);
+
+            // A full round-trip first: the session must be live and past any
+            // handshake tracking before the close, so only the close itself
+            // can explain the disconnect below.
+            var tline = Encoding.UTF8.GetBytes("via-tls\r\n");
+            await ssl.WriteAsync(tline);
+            Assert.True(await PortedHelpers.WaitAsync(() => got.Any(s => s == "via-tls"), 10000), "TLS line lost");
+
+            // Graceful TLS close: send close_notify but never await the
+            // reciprocal notify the server never sends, and hold the raw
+            // socket open so the server observes decrypt-EOS rather than
+            // TCP FIN. Pre-0.14.0 this ghosted like plaintext FIN.
+            _ = ssl.ShutdownAsync().ContinueWith(t => t.Exception, TaskScheduler.Default);
+            Assert.True(await WaitForEmptyAsync(mgr), "TLS connection ghosted after close_notify");
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

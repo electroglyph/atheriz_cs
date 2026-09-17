@@ -13,8 +13,10 @@
     <!-- Pinned exact: telnet_cs is pre-1.0 and ships breaking changes between
          minor versions (its README calls this out). The Atheriz telnet adapter
          (TelnetCsWriter / TelnetProtocol) targets the 0.13.0 ECHO API
-         (ServerSession.SetEchoAsync / WriteWithEchoAsync); float only deliberately. -->
-    <PackageVersion Include="telnet_cs" Version="0.13.0" />
+         (ServerSession.SetEchoAsync / WriteWithEchoAsync) plus the 0.14.0
+         clean-close contract (peer FIN / TLS close_notify unwind the session);
+         float only deliberately. -->
+    <PackageVersion Include="telnet_cs" Version="0.14.0" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageVersion Include="coverlet.collector" Version="6.0.0" />
   </ItemGroup>
