@@ -15,7 +15,9 @@ C# port of `atheriz` (Python MUD server, v0.9.0) on **.NET 10** (C# 14, `net10.0
   node --version
   npm --version
   ```
-  On Arch: `sudo pacman -S dotnet-sdk nodejs npm`
+  On Arch: `sudo pacman -S dotnet-sdk aspnet-targeting-pack nodejs npm`
+  (`aspnet-targeting-pack` is required: without it the `Atheriz.Server` web
+  project fails at restore with `NETSDK1226: Prune Package data not found`.)
 
 ## Build
 
