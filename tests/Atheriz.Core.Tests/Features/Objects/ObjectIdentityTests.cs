@@ -2,10 +2,10 @@ using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
-// Object hash must not depend on the mutable Id: transient objects sit in
-// hash sets (exclusion sets in Node/ForContents paths) while ids are
-// assigned, and a shifting hash strands them in the wrong bucket
-// (GameObject.cs:131 with :300-306).
+// Object identity is the registry id (Equals/== by Id), and the hash is a
+// snapshot taken at construction / load-path re-key: a member whose public
+// Id is reassigned inside a hash container keeps its bucket (findable),
+// while same-Id duplicates arranged via SetIdRaw hash equal.
 [Collection("Ported")]
 public class ObjectIdentityTests
 {
@@ -14,8 +14,12 @@ public class ObjectIdentityTests
     {
         // Port of nodes.py:92 — hash(id), matching Equals-by-Id .
         // Same-Id instances (e.g. reload duplicates) hash equal.
-        var o = new GameObject(); // transient Id == -1
-        o.Id = 4242;
+        // Arranged via the load-path re-key (public Id reassignment after
+        // hashing intentionally leaves the construction-time snapshot, so a
+        // member mutated inside a hash container stays findable — see
+        // CorrectnessBatchATests.HashSet_MembershipSurvivesIdReassignment).
+        var o = new GameObject();
+        o.SetIdRaw(4242);
         Assert.Equal(4242.GetHashCode(), o.GetHashCode());
     }
 
@@ -28,7 +32,7 @@ public class ObjectIdentityTests
         // Assert.Contains (linear scan that never consults the hash).
         var a = GameObject.Create("hash-a");
         var b = GameObject.Create("hash-b");
-        b.Id = a.Id;
+        b.SetIdRaw(a.Id);
         var set = new HashSet<GameObject> { a };
         Assert.True(set.TryGetValue(b, out var found));
         Assert.Same(a, found);

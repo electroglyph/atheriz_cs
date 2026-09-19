@@ -30,7 +30,7 @@ public class PortedAccountTests
     {
         using var env=GlobalTestEnv.Enter();
         var a=new Account();
-        Assert.Equal(-1, a.Id);
+        Assert.NotEqual(-1, a.Id); // instances own a registry id from birth
         Assert.Equal("", a.Name);
         Assert.Equal("", a.PasswordHash);
         Assert.Empty(a.Characters);

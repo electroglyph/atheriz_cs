@@ -150,7 +150,7 @@ public class PortedChannelTests
         var chan = new Channel();
         Assert.Equal("", chan.Name);
         Assert.Equal("", chan.Desc);
-        Assert.Equal(-1, chan.Id);
+        Assert.NotEqual(-1, chan.Id); // instances own a registry id from birth
         Assert.Equal(-1, chan.CreatedBy);
         Assert.Null(chan.Command);
     }

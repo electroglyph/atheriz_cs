@@ -217,7 +217,27 @@ public sealed class GameArgumentParser
         public bool Has(string key) => _map.ContainsKey(key);
         public T Get<T>(string key, T fallback = default!) => _map.TryGetValue(key, out var v) && v is T t ? t : fallback;
         public string? GetString(string key) => _map.TryGetValue(key, out var v) ? v?.ToString() : null;
-        public List<string> GetList(string key) => _map.TryGetValue(key, out var v) ? v as List<string> ?? new() : new();
+        public List<string> GetList(string key)
+        {
+            if (!_map.TryGetValue(key, out var v)) return new();
+            if (v is List<string> ls) return ls;
+            // Typed-append dests store converted values (see GetObjList);
+            // project back so string readers keep working.
+            if (v is List<object?> lo) return lo.Select(o => o?.ToString() ?? "").ToList();
+            return new();
+        }
+        // Live list of append-dest values, promoting a plain string list in
+        // place so repeated appends share one list. Converted (non-string)
+        // elements round-trip through GetList via ToString.
+        public List<object?> GetObjList(string key)
+        {
+            if (_map.TryGetValue(key, out var v))
+            {
+                if (v is List<object?> lo) return lo;
+                if (v is List<string> ls) { var conv = ls.Cast<object?>().ToList(); _map[key] = conv; return conv; }
+            }
+            return new();
+        }
         public bool GetBool(string key) => _map.TryGetValue(key, out var v) && v is bool b && b;
         public IReadOnlyDictionary<string, object?> AsDict() => _map;
         internal void Set(string k, object? v) => _map[k] = v;
@@ -377,11 +397,17 @@ public sealed class GameArgumentParser
                         {
                             lst.Add(argList[i++]);
                         }
-                        // append or set
+                        // append or set (append converts each element like the
+                        // single-store path below, instead of keeping strings).
                         if (opt.Action == ArgAction.Append)
                         {
-                            var cur = result.GetList(opt.Dest);
-                            cur.AddRange(lst);
+                            var cur = result.GetObjList(opt.Dest);
+                            foreach (var s in lst)
+                            {
+                                object convLst = ConvertTypedValue(opt.Type, tok, s);
+                                CheckChoices(opt.Choices, tok, s);
+                                cur.Add(convLst);
+                            }
                             result.Set(opt.Dest, cur);
                         }
                         else result.Set(opt.Dest, lst);
@@ -399,8 +425,10 @@ public sealed class GameArgumentParser
                         CheckChoices(opt.Choices, tok, val);
                         if (opt.Action == ArgAction.Append)
                         {
-                            var cur = result.GetList(opt.Dest);
-                            cur.Add(val);
+                            var cur = result.GetObjList(opt.Dest);
+                            object convApp = ConvertTypedValue(opt.Type, tok, val);
+                            CheckChoices(opt.Choices, tok, val);
+                            cur.Add(convApp);
                             result.Set(opt.Dest, cur);
                         }
                         else result.Set(opt.Dest, conv);

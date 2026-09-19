@@ -58,14 +58,16 @@ public class PortedFuncParserGapTests
         Assert.Contains(new string('a',10), r!);
     }
 
-    // 4. Length cap raises (extended)
+    // 4. Length cap honors raiseErrors: raising throws,
+    // non-raising echoes the raw text.
     [Fact] public void LengthCapRaises()
     {
         using var env=GlobalTestEnv.Enter();
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>());
         var huge=new string('x', 2*65536+1);
-        var ex=Assert.Throws<FuncParser.ParsingError>(()=> p.Parse(huge));
+        var ex=Assert.Throws<FuncParser.ParsingError>(()=> p.Parse(huge, raiseErrors: true));
         Assert.Contains("too long", ex.Message.ToLower());
+        Assert.Equal(huge, p.Parse(huge, raiseErrors: false)?.ToString());
         var atcap=new string('x', 2*65536);
         Assert.Equal(atcap, p.Parse(atcap)?.ToString());
     }

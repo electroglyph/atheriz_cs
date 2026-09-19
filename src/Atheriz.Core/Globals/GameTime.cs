@@ -470,7 +470,11 @@ public class GameTime
                 var target = ObjectRegistry.GetSingle(entry.CallerId);
                 if (target is not null)
                 {
-                    var capturedData = entry.Data;
+                    // Clone per firing: handing out the LIVE stored dict
+                    // lets firing N's mutation become firing N+1's payload
+                    // (D2). Clone detaches from any caller document, as at
+                    // ingress; a null payload stays null.
+                    var capturedData = entry.Data?.ToDictionary(kv => kv.Key, kv => kv.Value.Clone());
                     var capturedAfter = after;
                     // Direct virtual dispatch (single-lookup target, port of getattr(objs[0], "at_alarm")):
                     // every GameObject exposes AtAlarm, so no reflection is needed.

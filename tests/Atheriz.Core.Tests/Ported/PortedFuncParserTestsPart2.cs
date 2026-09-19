@@ -136,7 +136,7 @@ public class PortedFuncParserTestsPart2
             var o=p.Parse(expr)?.ToString(); Assert.True(o!.Length <= FuncParserHelpers._MAX_TEXT_WIDTH);
         }
     }
-    [Fact] public void LengthCapRaises(){ using var env=GlobalTestEnv.Enter(); var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>()); var huge=new string('x', 2*65536+1); var ex=Assert.Throws<FuncParser.ParsingError>(()=> p.Parse(huge)); Assert.Contains("too long", ex.Message.ToLower()); var atcap=new string('x', 2*65536); Assert.Equal(atcap, p.Parse(atcap)?.ToString()); }
+    [Fact] public void LengthCapRaises(){ using var env=GlobalTestEnv.Enter(); var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>()); var huge=new string('x', 2*65536+1); var ex=Assert.Throws<FuncParser.ParsingError>(()=> p.Parse(huge, raiseErrors: true)); Assert.Contains("too long", ex.Message.ToLower()); Assert.Equal(huge, p.Parse(huge, raiseErrors: false)?.ToString()); var atcap=new string('x', 2*65536); Assert.Equal(atcap, p.Parse(atcap)?.ToString()); }
     // Resync
     [Fact] public void EscapePreservesConsecutiveNested(){
         using var env=GlobalTestEnv.Enter();

@@ -224,11 +224,11 @@ public static class FuncParserHelpers
             while (true)
             {
                 Skip(); if (_pos >= _s.Length) break;
-                if (_pos + 1 < _s.Length && _s[_pos] == '/' && _s[_pos+1] == '/') { _pos+=2; var r=ParsePow(); left = Math.Floor(left / r); }
+                if (_pos + 1 < _s.Length && _s[_pos] == '/' && _s[_pos+1] == '/') { _pos+=2; var r=ParsePow(); if (r == 0) throw new InvalidOperationException("integer division by zero"); left = Math.Floor(left / r); }
                 else if (_pos + 1 < _s.Length && _s[_pos] == '*' && _s[_pos+1] == '*') break; // handled in pow
                 else if (_s[_pos] == '*') { _pos++; var r=ParsePow(); left = left * r; }
-                else if (_s[_pos] == '/') { _pos++; var r=ParsePow(); left = left / r; }
-                else if (_s[_pos] == '%') { _pos++; var r=ParsePow(); left = left % r; }
+                else if (_s[_pos] == '/') { _pos++; var r=ParsePow(); if (r == 0) throw new InvalidOperationException("division by zero"); left = left / r; }
+                else if (_s[_pos] == '%') { _pos++; var r=ParsePow(); if (r == 0) throw new InvalidOperationException("modulo by zero"); left = left % r; }
                 else break;
             }
             return left;

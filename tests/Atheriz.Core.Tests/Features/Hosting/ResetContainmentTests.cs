@@ -130,7 +130,7 @@ public class ResetContainmentTests
     {
         var oldU = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME");
         var oldP = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
-        Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", "su");
+        Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", "suadmin");
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", "supersecret123");
         try { body(); }
         finally

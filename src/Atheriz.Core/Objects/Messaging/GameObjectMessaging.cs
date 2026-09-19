@@ -129,7 +129,10 @@ public partial class GameObject
             }
             if (loc is not null && !string.IsNullOrEmpty(locText))
             {
-                var locMapping = BuildSayMapping(GetDisplayName(this), loc.GetDisplayName(this), null, recvList is not null ? string.Join(", ", recvList.Select(r => r.ToString())) : null, message, custom);
+                // Bystanders share the speaker's view of the receiver list (same
+                // as the self message above): r.ToString() has no override and
+                // renders the CLR type name into chat.
+                var locMapping = BuildSayMapping(GetDisplayName(this), loc.GetDisplayName(this), null, recvList is not null ? allRecvSelf : null, message, custom);
                 List<GameObject> exclude = [];
                 if (selfText is string s2 && !string.IsNullOrEmpty(s2)) exclude.Add(this);
                 if (recvList is not null) exclude.AddRange(recvList);

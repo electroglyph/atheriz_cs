@@ -166,6 +166,26 @@ public static class ObjectRegistry
     }
     private static readonly Dictionary<GameObject, int> _keysByRef = new(ReferenceComparer.Instance);
 
+    // Tombstone journal for game deletes: Delete() unregisters the object
+    // immediately (in-memory authority) but the DB row can only die at a
+    // checkpoint (DB discipline: writes happen on save). SaveObjects only
+    // upserts live members, so without this the row survives and the object
+    // resurrects on the next load. Drained by SaveObjects; dropped by
+    // ClearAll/LoadObjects (world replacement discards pending intent).
+    // Guarded by AllLock like AllObjects.
+    private static readonly HashSet<int> _pendingDeletions = new();
+
+    /// <summary>
+    /// Journals a deleted non-temporary id so the next checkpoint removes
+    /// its row. Called at every site that builds a delete op.
+    /// </summary>
+    public static void NoteDeleted(int id)
+    {
+        AllLock.EnterWriteLock();
+        try { _pendingDeletions.Add(id); }
+        finally { AllLock.ExitWriteLock(); }
+    }
+
     // All callers hold AllLock write.
     private static void IndexInsert(GameObject obj)
     {
@@ -375,6 +395,7 @@ public static class ObjectRegistry
             {
                 AllObjects.Clear();
                 _keysByRef.Clear();
+                _pendingDeletions.Clear();
                 // Already holding IdGenerator.LockObj; SetId is safe (Monitor is re-entrant).
                 IdGenerator.SetId(-1);
             }
@@ -489,6 +510,9 @@ public static class ObjectRegistry
             {
                 AllObjects.Clear();
                 _keysByRef.Clear();
+                // World replacement: pending delete intent belongs to the
+                // discarded world (un-saved deletes come back with the load).
+                _pendingDeletions.Clear();
                 foreach (var kv in objects) { AllObjects[kv.Key] = kv.Value; _keysByRef[kv.Value] = kv.Key; }
             }
             finally { AllLock.ExitWriteLock(); }
@@ -579,6 +603,31 @@ public static class ObjectRegistry
             if (keep) filtered.Add(o);
         }
 
+        // Drain the delete journal with this checkpoint: ids re-registered
+        // since the delete (same-id recreate) are live and must survive.
+        List<int> tombstones;
+        AllLock.EnterWriteLock();
+        try
+        {
+            tombstones = _pendingDeletions.Where(id => !AllObjects.ContainsKey(id)).ToList();
+            _pendingDeletions.Clear();
+        }
+        finally { AllLock.ExitWriteLock(); }
+
+        // A failed checkpoint must not lose delete intent: re-journal so a
+        // later checkpoint retries (the rows are still there).
+        void RestoreTombstones()
+        {
+            if (tombstones.Count == 0) return;
+            try
+            {
+                AllLock.EnterWriteLock();
+                try { foreach (var id in tombstones) _pendingDeletions.Add(id); }
+                finally { AllLock.ExitWriteLock(); }
+            }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.SaveObjects: " + logEx.Message, "BoundedDictionary"); }
+        }
+
         // Best-effort dirty-restore shared by every failure path below:
         // per-item suppression so one torn lock can't abort the restore
         // of the rest (shutdown races).
@@ -616,11 +665,12 @@ public static class ObjectRegistry
                 // so restore every cleared flag and rethrow (the transaction
                 // below never runs).
                 Restore(cleared.Append(obj));
+                RestoreTombstones();
                 throw;
             }
         }
 
-        if (pending.Count == 0) return;
+        if (pending.Count == 0 && tombstones.Count == 0) return;
 
         try
         {
@@ -642,11 +692,17 @@ public static class ObjectRegistry
                         row.Type = obj.IsAccount ? "account" : obj.IsChannel ? "channel" : "object";
                     });
                 }
+                // Deletes ride the same transaction, after the upserts: a
+                // tombstone always postdates its object's unregistration, so
+                // no live row written above carries a tombstoned id.
+                if (tombstones.Count > 0)
+                    ctx.Objects.Where(o => tombstones.Contains(o.Id)).ExecuteDelete();
             }, onRollback: () => Restore(pending.Select(p => p.obj)));
         }
         catch (Exception ex)
         {
             // Closed-DB races only (no message sniffing): anything else propagates.
+            RestoreTombstones();
             RunClosedDbGuard(ex, "save");
             Restore(pending.Select(p => p.obj));
             return;

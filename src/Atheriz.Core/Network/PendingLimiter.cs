@@ -105,8 +105,9 @@ public sealed class PendingLimiter
     /// <summary>
     /// Sync release for telnet success path — mirrors Python <c>with pending_lock: pending-=nb</c> in finally.
     /// Fixes telnet leak where success never decremented.
-    /// Over-release clamps to zero instead of throwing: duplicate completions
-    /// must neither corrupt debt nor crash send paths — but the imbalance is
+    /// An over-release (duplicate completion) is a no-op for the counters:
+    /// zeroing them would wipe unrelated legitimate debt, defeating
+    /// backpressure so the overflow-close never fires. The imbalance is
     /// still surfaced via a warning.
     /// </summary>
     public void ReleaseSync(int nb)
@@ -116,9 +117,7 @@ public sealed class PendingLimiter
             if (nb == 0) return;
             if (_pendingCount <= 0 || _pendingBytes < nb)
             {
-                AtherizLogger.LogWarning($"PendingLimiter.ReleaseSync({nb}) over-release (bytes={_pendingBytes}, count={_pendingCount}); clamping to zero.", "PendingLimiter");
-                _pendingBytes = 0;
-                _pendingCount = 0;
+                AtherizLogger.LogWarning($"PendingLimiter.ReleaseSync({nb}) over-release (bytes={_pendingBytes}, count={_pendingCount}); ignoring.", "PendingLimiter");
                 return;
             }
             _pendingBytes -= nb;

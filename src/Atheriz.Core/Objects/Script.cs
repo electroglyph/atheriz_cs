@@ -16,6 +16,12 @@ public class Script : GameObject
     {
         IsScript = true;
     }
+    // Load-path construction: skips the id draw (caller adopts the stored id
+    // via SetIdRaw before publication). See GameObject.SkipIdDraw.
+    internal Script(SkipIdDraw skip) : base(skip)
+    {
+        IsScript = true;
+    }
 
     public GameObject? Child
     {

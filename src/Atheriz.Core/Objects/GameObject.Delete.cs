@@ -103,7 +103,13 @@ public partial class GameObject
                 try { isTemp = obj._flags.IsTemporary; }
                 finally { obj._lock.ExitReadLock(); }
                 if (!isTemp)
+                {
                     ops.Add(obj.GetDelOps());
+                    // Journal the row death: the checkpoint drain executes it
+                    // (DeleteCommand discards the returned ops, and SaveObjects
+                    // only upserts live members).
+                    ObjectRegistry.NoteDeleted(obj.Id);
+                }
             }
             // handle truncated survivors: if survivor location's id is in seen, detach
             foreach (var survivor in truncated)
@@ -319,7 +325,11 @@ public partial class GameObject
                 if (loc2 is not null) loc2.RemoveContent(this.Id);
             } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
             if (!this.IsTemporary)
+            {
                 ops.Add(this.GetDelOps());
+                // Journal the row death (see the recursive path above).
+                ObjectRegistry.NoteDeleted(this.Id);
+            }
             // include self in count
             ObjectRegistry.RemoveObject(this);
             TeardownDeleted(this);

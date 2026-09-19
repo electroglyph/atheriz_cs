@@ -26,6 +26,11 @@ public partial class GameObject : IMessageTarget, ISessionProvider
 
     // --- identity ---
     private int _id = -1;
+    private int _hashCache;
+    // Hash snapshot: fixed at construction / load-path re-key (see SetIdRaw),
+    // never by the public Id setter. Mutating Id after the instance entered
+    // a HashSet/Dictionary keeps it findable (same bucket); same-Id
+    // instances arranged before first hashing still hash equal.
     private string _name = "";
     private string _desc = "";
     private string _symbol = "X";
@@ -68,6 +73,27 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     private CmdSet? _externalCmdSet;
 
     public GameObject()
+    {
+        // Every instance owns a unique registry id from birth: Equals and
+        // GetHashCode are id-based, so a transient Id (-1) that is later
+        // reassigned breaks HashSet/Dictionary membership (the member stays
+        // in the old hash bucket). Load paths use SkipIdDraw + SetIdRaw.
+        _id = GetNextId();
+        _hashCache = _id.GetHashCode();
+        _lastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+        _mapEnabled = true;
+    }
+
+    // Load-path construction token: skips the id draw (the caller adopts the
+    // stored id via SetIdRaw before publication, so the generator watermark
+    // is untouched by loads). The instance must never be hashed or published
+    // before SetIdRaw — all load call sites re-key synchronously.
+    internal sealed class SkipIdDraw
+    {
+        private SkipIdDraw() { }
+        internal static readonly SkipIdDraw Instance = new();
+    }
+    internal GameObject(SkipIdDraw _)
     {
         _lastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
         _mapEnabled = true;
@@ -125,6 +151,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
 
     // --- properties (setters mark isModified) ---
+    // Id reassignment intentionally does NOT move the hash snapshot: an
+    // instance already sitting in a HashSet/Dictionary stays findable under
+    // its construction-time hash. Fresh load-path re-keying goes through
+    // SetIdRaw (which does move the snapshot, before first hashing).
     public int Id { get => Read(() => _id); set => SetIfChanged(ref _id, value); }
     public virtual string Name { get => Read(() => _name); set => SetIfChanged(ref _name, value); }
     public string Desc { get => Read(() => _desc); set => SetIfChanged(ref _desc, value); }
@@ -320,7 +350,11 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         return false;
     }
     // Port of nodes.py:92 — hash by registry id, matching Equals above.
-    public override int GetHashCode() => Id.GetHashCode();
+    // Snapshot semantics (see _hashCache): the public Id setter never moves
+    // the hash, so mutating Id after hash-container insertion keeps the
+    // member findable. Same-Id instances arranged before first hashing
+    // (Create/load/duplicate patterns) hash equal as before.
+    public override int GetHashCode() => Read(() => _hashCache);
 
     // ==/!= use the same Id value-equality as Equals (nodes.py:85-93),
     // so same-Id reload instances compare equal instead of falling back to
@@ -735,7 +769,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         bool isTickable = false, double tickSeconds = 1.0, GameObject? caller = null, Privilege privilege = Privilege.Guest)
     {
         var obj = new GameObject();
-        obj._id = GetNextId();
         obj._name = name;
         obj._desc = desc;
         obj._aliases = aliases is null ? [] : new List<string>(aliases);
@@ -791,7 +824,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
 
     // --- persistence helpers exposed for GameObjectDtoConverter ---
-    internal void SetIdRaw(int id) => Write(() => { _id = id; _flags.IsModified = true; });
+    // Load-path re-key: moves the hash snapshot with the id. Only for fresh
+    // (never-hashed) instances — production delete/create paths use this;
+    // the public setter deliberately leaves the snapshot alone.
+    internal void SetIdRaw(int id) => Write(() => { _id = id; _hashCache = id.GetHashCode(); _flags.IsModified = true; });
     internal Dictionary<string, System.Text.Json.JsonElement> GetExtraSnapshot() => Read(() => new Dictionary<string, System.Text.Json.JsonElement>(_extra));
     internal Dictionary<string, List<Func<GameObject, bool>>> GetLocksSnapshot() => Read(() => new Dictionary<string, List<Func<GameObject, bool>>>(_locks));
     internal Dictionary<string, List<string>> GetLockPoliciesSnapshot() => Read(() => new Dictionary<string, List<string>>(_lockPolicies));

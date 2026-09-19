@@ -161,7 +161,7 @@ public partial class Node : GameObject
         public static readonly NoIdMarker Instance = new();
         private NoIdMarker() { }
     }
-    private Node(NoIdMarker _, Coord coord)
+    private Node(NoIdMarker _, Coord coord) : base(SkipIdDraw.Instance)
     {
         Coord = coord;
         base.Name = "room";
@@ -457,7 +457,11 @@ public partial class Node : GameObject
         // RemoveNode never sees). RemoveObject is a same-thread idempotent
         // remove when the handler already unregistered it.
         if (!IsTemporary)
+        {
             ops.Add(GetDelOps());
+            // Journal the row death so the checkpoint drain removes it.
+            ObjectRegistry.NoteDeleted(Id);
+        }
         ObjectRegistry.RemoveObject(this);
         TeardownDeleted(this);
         return (1 + kids, ops);

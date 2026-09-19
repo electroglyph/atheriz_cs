@@ -82,11 +82,13 @@ public static class GameTemplateGenerator
                 {
                     // No ReadKey without a console: input would throw, so read
                     // the line with an echo warning instead of failing.
+                    // Verbatim (no Trim): passwords are significant at login,
+                    // so trimming here would store a different password (C3).
                     Console.Error.WriteLine("Warning: input is redirected; password will be echoed.");
-                    password = Console.ReadLine()?.Trim();
+                    password = Console.ReadLine();
                 }
                 else try { password = GameUtils.ReadSecretLine(); }
-                catch { password = Console.ReadLine()?.Trim(); }
+                catch { password = Console.ReadLine(); }
                 if (string.IsNullOrEmpty(password))
                 {
                     Console.WriteLine("Error: Password cannot be empty.");
@@ -154,6 +156,17 @@ public static class GameTemplateGenerator
         try { var gi = Path.Combine(folderPath, ".gitignore"); if (!File.Exists(gi)) File.WriteAllText(gi, "save/\nsecret/\nbin/\nobj/\n"); } catch { }
         if (shouldSetup)
         {
+            // Fail fast on invalid credentials: DoSetup would either throw
+            // (half-built world) or skip the superuser silently, and the
+            // Success banner below names the superuser — never print it
+            // for credentials that cannot produce one (E1).
+            var errU = Atheriz.Core.Commands.UnloggedIn.Validation.ValidateAccountName(username);
+            if (errU is not null) { Console.WriteLine($"Error: invalid superuser username: {errU}"); return false; }
+            var errP = Atheriz.Core.Commands.UnloggedIn.Validation.ValidatePassword(password!);
+            if (errP is not null) { Console.WriteLine($"Error: invalid superuser password: {errP}"); return false; }
+        }
+        if (shouldSetup)
+        {
             Console.WriteLine("\nSetting up initial world state...");
             try
             {
@@ -163,8 +176,12 @@ public static class GameTemplateGenerator
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Warning: initial world setup failed: {ex.Message}");
+                // Setup failure is fatal: the world is half-built (or the
+                // superuser missing), so report failure instead of falling
+                // through to the Success banner and `return true` (E1).
+                Console.Error.WriteLine($"Error: initial world setup failed: {ex.Message}");
                 Console.WriteLine("  Run `create` to add superuser later or set ATHERIZ_SUPERUSER_USERNAME/PASSWORD and re-run.");
+                return false;
             }
         }
         Console.WriteLine($"\nSuccess! Game folder '{targetPath}' created/updated with:");

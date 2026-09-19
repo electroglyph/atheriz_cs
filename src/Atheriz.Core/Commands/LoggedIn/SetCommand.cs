@@ -12,7 +12,10 @@ public sealed class SetCommand : Command
     {
         p.AddArgument("target", help: "Object to modify (name, #id, 'me', or 'here').");
         p.AddArgument("attribute", help: "Attribute name to set.");
-        p.AddArgument("value", help: "Value to set (evaluated with ast.literal_eval).");
+        // Multi-word values (`set me desc hello world`): OneOrMore keeps the
+        // missing-value required error and dash handling of a single
+        // positional; Run joins the tokens back with spaces.
+        p.AddArgument("value", help: "Value to set (evaluated with ast.literal_eval).", nargs: "+");
     }
     private static object? ConvertJsonElement(JsonElement je)
     {
@@ -100,7 +103,10 @@ public sealed class SetCommand : Command
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var targetStr = pa.GetString("target") ?? "";
         var attr = pa.GetString("attribute") ?? "";
-        var raw = pa.GetString("value") ?? "";
+        // `value` is OneOrMore: join multi-word tokens back. The scalar
+        // fallback covers programmatic ParsedArgs with a plain string.
+        var valueTokens = pa.GetList("value");
+        var raw = valueTokens.Count > 0 ? string.Join(" ", valueTokens) : (pa.GetString("value") ?? "");
         var target = SetHelper.ResolveTarget(go, targetStr);
         if (target is null) return;
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }

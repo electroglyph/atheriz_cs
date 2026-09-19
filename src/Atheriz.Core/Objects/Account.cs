@@ -23,6 +23,12 @@ public class Account : GameObject
     {
         IsAccount = true;
     }
+    // Load-path construction: skips the id draw (caller adopts the stored id
+    // via SetIdRaw before publication). See GameObject.SkipIdDraw.
+    internal Account(SkipIdDraw skip) : base(skip)
+    {
+        IsAccount = true;
+    }
     public override bool AtDelete(GameObject? caller)
     {
         // Unconditional true (test_account.py:88 — not access-gated like the base),
@@ -137,7 +143,21 @@ public class Account : GameObject
         bool hashOk = CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(hash), Encoding.UTF8.GetBytes(curHash));
         bool ok = nameOk && hashOk;
         SyncRoot.EnterWriteLock();
-        try { _loggedIn = ok; }
+        try
+        {
+            // The snapshot above can go stale while PBKDF2 runs: a rotation
+            // in that window must not log in with the OLD password (D1).
+            // Re-read under the write lock; when the stored hash moved,
+            // re-verify the already-computed candidate against the CURRENT
+            // hash (no second PBKDF2 needed — same salt, same algorithm).
+            if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(curHash), Encoding.UTF8.GetBytes(_passwordHash)))
+            {
+                nameOk = string.Equals(Name, name, StringComparison.OrdinalIgnoreCase);
+                hashOk = CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(hash), Encoding.UTF8.GetBytes(_passwordHash));
+                ok = nameOk && hashOk;
+            }
+            _loggedIn = ok;
+        }
         finally { SyncRoot.ExitWriteLock(); }
         return ok;
     }
@@ -178,7 +198,6 @@ public class Account : GameObject
         if (existsCheck is not null && existsCheck(name))
             throw new InvalidOperationException($"Account with this name ({name}) already exists.");
         var acc = new T();
-        acc.Id = GameObject.GetNextId();
         acc.Name = name;
         acc.SyncRoot.EnterWriteLock();
         try
@@ -238,8 +257,8 @@ public class Account : GameObject
 
     public new static Account FromDto(GameObjectDto dto)
     {
-        var acc = new Account();
-        acc.Id = dto.Id;
+        var acc = new Account(SkipIdDraw.Instance);
+        acc.SetIdRaw(dto.Id);
         // Use shared GameObject field copy (internal) to avoid recursion and duplication
         GameObject.ApplyDtoFields(acc, dto, null);
         // Ensure IsAccount flag true without leaving dirty flag if dto was clean
@@ -252,7 +271,17 @@ public class Account : GameObject
             acc._passwordHash = ReadExtraString(pw);
         }
         if (dto.Extra.TryGetValue("characters", out var ch) && ch.ValueKind == System.Text.Json.JsonValueKind.Array)
-            acc._characters = ch.EnumerateArray().Select(e => e.GetInt32()).ToList();
+        {
+            // One corrupt entry must not abort the whole account load:
+            // keep the valid ids, skip the rest.
+            var list = new List<int>();
+            foreach (var e in ch.EnumerateArray())
+            {
+                if (e.ValueKind == System.Text.Json.JsonValueKind.Number && e.TryGetInt32(out var v))
+                    list.Add(v);
+            }
+            acc._characters = list;
+        }
         else if (!dto.Extra.ContainsKey("characters")) acc._characters = [];
         if (dto.Extra.TryGetValue("banReason", out var br))
         {

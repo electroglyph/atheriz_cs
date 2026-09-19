@@ -50,7 +50,6 @@ public sealed class WanderCommand : Command
         public WandererNpc(string name) : this()
         {
             Name = name;
-            Id = IdGenerator.GetUniqueId();
             ObjectRegistry.AddObject(this);
         }
         public override void AtTick()

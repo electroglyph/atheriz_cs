@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Entities;
@@ -114,7 +115,11 @@ public sealed class LegendEntry : IEquatable<LegendEntry>
         if (data.TryGetValue("coord", out var ce) && ce.ValueKind == JsonValueKind.Array)
         {
             var arr = ce.EnumerateArray().Select(e => e.GetInt32()).ToArray();
-            if (arr.Length >= 2) coord = (arr[0], arr[1]);
+            // Exactly [x, y] like the live loader: extras must not silently
+            // truncate and singletons must not invent y=0.
+            if (arr.Length != 2)
+                throw new JsonException($"Coord array must have exactly 2 elements ([x, y]); got {arr.Length}.");
+            coord = (arr[0], arr[1]);
         }
         bool show = true;
         if (data.TryGetValue("show", out var sh) && (sh.ValueKind == JsonValueKind.True || sh.ValueKind == JsonValueKind.False))
@@ -671,7 +676,14 @@ public class MapInfo
                     mi.PostGrid[(x, y)] = kv.Value;
                 else AtherizLogger.LogWarning($"[Load] skipping malformed post-grid key '{kv.Key}' in area '{Name}'.");
             }
-            foreach (var le in LegendEntries) mi.LegendEntries.Add(le.ToDomain());
+            foreach (var le in LegendEntries)
+            {
+                // Malformed persisted entries warn, not vanish silently —
+                // and must not abort the whole area load (same convention
+                // as the malformed grid keys above).
+                try { mi.LegendEntries.Add(le.ToDomain()); }
+                catch (Exception ex) { AtherizLogger.LogWarning($"[Load] skipping malformed legend entry in area '{Name}': {ex.Message}"); }
+            }
             mi.MapChanged = false;
             mi.IsModified = false;
             return mi;
@@ -702,8 +714,17 @@ public class MapInfo
 
         public LegendEntry ToDomain()
         {
+            // A legend coord is exactly [x, y] (matches TupleCoordConverter
+            // and the network validator): extras must not silently truncate
+            // and singletons must not invent y=0 — both throw instead.
+            // Null stays legal (coord-less entry).
             (int, int)? c = null;
-            if (Coord is not null && Coord.Count >= 2) c = (Coord[0], Coord[1]);
+            if (Coord is not null)
+            {
+                if (Coord.Count != 2)
+                    throw new JsonException($"Coord array must have exactly 2 elements ([x, y]); got {Coord.Count}.");
+                c = (Coord[0], Coord[1]);
+            }
             var e = new LegendEntry(Symbol, Desc, c);
             e.Show = Show;
             e.Fg = Fg;

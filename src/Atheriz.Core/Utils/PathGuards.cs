@@ -74,7 +74,9 @@ public static class PathGuards
     public static void EnsureSecretPathValid(string secretPath) => GuardSecretPath(secretPath);
 
     /// <summary>
-    /// Refuses filesystem roots: wiping <c>/</c>, <c>C:\</c> etc. is never a valid game operation.
+    /// Refuses filesystem roots — and direct children of the root
+    /// (<c>/save</c>, <c>C:\save</c>): wiping at the top level is never a
+    /// valid game operation. The exact-root check alone let those through.
     /// </summary>
     public static void DenyRoot(string path)
     {
@@ -84,6 +86,9 @@ public static class PathGuards
         var normRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         if (string.Equals(normFull, normRoot, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Refusing to wipe filesystem root: {path}");
+        var parent = Path.GetDirectoryName(normFull);
+        if (parent is not null && string.Equals(parent.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), normRoot, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Refusing to wipe top-level directory: {path}");
     }
 
     /// <summary>
@@ -110,7 +115,23 @@ public static class PathGuards
             foreach (var marker in WipeMarkers)
                 if (File.Exists(Path.Combine(full, marker))) return;
         }
-        if (force && GameUtils.IsInGameFolder()) return;
+        // Contained override only: --force waives the marker check for a
+        // target inside the game folder we stand in. A foreign absolute
+        // path (SavePath bound from config/env) keeps the marker
+        // requirement — otherwise `reset --force` from inside a game
+        // folder recursively deletes an arbitrary configured path.
+        // Fail closed: an undeterminable CWD refuses.
+        if (force && GameUtils.IsInGameFolder())
+        {
+            try
+            {
+                var cwd = Path.GetFullPath(Directory.GetCurrentDirectory());
+                var rel = Path.GetRelativePath(cwd, full);
+                if (!rel.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(rel))
+                    return;
+            }
+            catch { }
+        }
         throw new InvalidOperationException(
             $"Refusing to wipe '{path}': not an initialized world (expected world markers). Pass --force inside a game folder to override.");
     }

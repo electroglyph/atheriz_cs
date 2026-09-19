@@ -35,8 +35,10 @@ public sealed class GetCommand : Command
             sourceName = null;
         }
         if (string.IsNullOrWhiteSpace(objName)) { go.Msg(PrintHelp()); return; }
-        // Handle "all" case
-        if (objName == "all")
+        // Handle "all" case (case-insensitive: the search keyword is
+        // lowercased, so `ALL` must bulk here instead of falling through
+        // to the single-object path with different messages).
+        if (objName.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
             GameObject source;
             if (sourceName is not null)

@@ -187,11 +187,19 @@ public sealed class NodeGrid
         Dictionary<(int, int), int> sourceCounts = [];
         foreach (var m in moves)
             sourceCounts[m.src] = sourceCounts.TryGetValue(m.src, out var n) ? n + 1 : 1;
+        // Duplicate destinations: two moves into the same empty cell both pass
+        // the occupied checks below, then ApplyMoves overwrites — the first
+        // node is evicted from the dict but keeps its stale coord (lost).
+        // Fail every move sharing a destination, like duplicate sources.
+        Dictionary<(int, int), int> destCounts = [];
+        foreach (var m in moves)
+            destCounts[m.dst] = destCounts.TryGetValue(m.dst, out var dn) ? dn + 1 : 1;
         var sourceSet = new HashSet<(int, int)>(moves.Select(m => m.src));
         for (int i = 0; i < moves.Count; i++)
         {
             var (src, dst) = moves[i];
             if (sourceCounts[src] > 1) { failed.Add(i); continue; }
+            if (destCounts[dst] > 1) { failed.Add(i); continue; }
             if (!occupied.Contains(src)) { failed.Add(i); continue; }
             if (occupied.Contains(dst) && !sourceSet.Contains(dst)) failed.Add(i);
         }

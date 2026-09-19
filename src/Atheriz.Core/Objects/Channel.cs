@@ -26,12 +26,18 @@ public class Channel : GameObject
         IsChannel = true;
         _historyLimit = historyLimit;
     }
+    // Load-path construction: skips the id draw (caller adopts the stored id
+    // via SetIdRaw before publication). See GameObject.SkipIdDraw.
+    internal Channel(SkipIdDraw skip, int historyLimit = 50) : base(skip)
+    {
+        IsChannel = true;
+        _historyLimit = historyLimit;
+    }
 
     public static Channel Create(string name, GameObject? caller = null)
     {
         var ch = new Channel();
         ch.Name = name;
-        ch.Id = Globals.IdGenerator.GetUniqueId();
         ch.CreatedBy = caller?.Id ?? -1;
         Globals.ObjectRegistry.AddObjectUnique(ch, o => o.IsChannel && string.Equals(o.Name, name, StringComparison.OrdinalIgnoreCase), $"Channel {name} already exists.");
         ch.AtCreate();
@@ -193,7 +199,11 @@ public class Channel : GameObject
         Globals.ObjectRegistry.RemoveObject(this);
         List<object> ops = [];
         if (!this.IsTemporary)
+        {
             ops.Add(this.GetDelOps());
+            // Journal the row death so the checkpoint drain removes it.
+            Globals.ObjectRegistry.NoteDeleted(this.Id);
+        }
         return (1, ops);
     }
 

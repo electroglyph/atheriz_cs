@@ -1,7 +1,6 @@
 // Pins for the dead same-id recheck removal (GameObject.Puppet.cs): the
 // reference-or-same-id `==` guard alone refuses self-puppeting and
 // same-id reload instances, and the operator keeps its same-id semantics.
-using System.Reflection;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 
@@ -10,12 +9,9 @@ namespace Atheriz.Core.Tests.Features.Objects;
 [Collection("Ported")]
 public sealed class PuppetSameIdGuardTests
 {
-    private static void SetId(GameObject o, int id)
-    {
-        var f = typeof(GameObject).GetField("_id", BindingFlags.NonPublic | BindingFlags.Instance);
-        Assert.NotNull(f);
-        f!.SetValue(o, id);
-    }
+    // Same-Id duplicates are arranged via the load-path re-key (which moves
+    // the hash snapshot with the id), mirroring reload/deserialize.
+    private static void SetId(GameObject o, int id) => o.SetIdRaw(id);
 
     [Fact]
     public void Puppet_SelfPuppet_Refused()

@@ -312,10 +312,17 @@ public static class MapEdit
         Lock.EnterWriteLock();
         try
         {
-            EvictLocked();
+            // Resolve before evicting: after a cap shrink the key being
+            // consumed may be the eviction victim, and its consume must not
+            // fail unknown_key. Rotation is count-neutral and the reject
+            // paths mutate nothing, so the cap stays enforced on the miss
+            // path here and on every Grant/AddChain.
             bool resolved = TryResolveLocked(key, out MapEditChain? chain, out bool previousHit, removeStale: true);
             if (!resolved || chain is null)
+            {
+                EvictLocked();
                 return new MapEditResult(MapEditStatus.Reject, reason: "unknown_key");
+            }
             if (chain.Ip != ip)
                 return new MapEditResult(MapEditStatus.Reject, reason: "ip");
             if (previousHit)

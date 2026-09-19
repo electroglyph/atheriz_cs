@@ -467,7 +467,13 @@ public class FuncParser
     public object? Parse(string? text, bool raiseErrors = false, bool escape = false, bool strip = false, bool returnStr = true, IDictionary<string, object?>? reservedKwargs = null)
     {
         if (text is null) return "";
-        if (text.Length > MaxMessageSize) throw new ParsingError($"Input too long ({text.Length} chars)");
+        // Oversize input honors raiseErrors like every other parse failure:
+        // non-raising mode echoes the raw text instead of throwing.
+        if (text.Length > MaxMessageSize)
+        {
+            if (raiseErrors) throw new ParsingError($"Input too long ({text.Length} chars)");
+            return text;
+        }
         if (string.IsNullOrEmpty(text)) return text;
         // Reserved kwargs (caller/receiver/mapping) flow into every call's context.
         return ParseInternal(text, raiseErrors, escape, strip, returnStr, reservedKwargs, _callables, _startChar, _escapeChar, _maxNesting, _defaultKwargs, this);
@@ -489,7 +495,11 @@ public class FuncParser
     public static string Parse(string? text, GameObject? actor, GameObject? receiver, IDictionary<string, object?>? mapping, bool raiseErrors = false, bool escape = false, bool strip = false)
     {
         if (text is null) return "";
-        if (text.Length > MaxMessageSize) throw new ParsingError($"Input too long ({text.Length} chars)");
+        if (text.Length > MaxMessageSize)
+        {
+            if (raiseErrors) throw new ParsingError($"Input too long ({text.Length} chars)");
+            return text;
+        }
         if (string.IsNullOrEmpty(text)) return text;
         bool hasFunc = text.Contains(StartChar);
         bool hasDirector = mapping is not null && text.Contains('{') && text.Contains('}');

@@ -96,7 +96,7 @@ public sealed class GiveCommand : Command
         // only, so offline PCs that Python can give to stay reachable here.
         if (!target.IsContainer && !target.IsNpc && !target.IsPc) { go.Msg($"You can't give anything to {target.GetDisplayName(go)}."); return; }
         List<GameObject> objsToGive;
-        if (objName == "all") objsToGive = ObjectRegistry.Get(inv);
+        if (objName.Equals("all", StringComparison.OrdinalIgnoreCase)) objsToGive = ObjectRegistry.Get(inv);
         else
         {
             // Port of give.py:162 — caller.search is inventory-only: room
@@ -127,6 +127,6 @@ public sealed class GiveCommand : Command
             }
             else go.Msg($"You can't give {obj.Name} to {target.Name}.");
         }
-        if (!givenAny && objName == "all") go.Msg("You have nothing to give.");
+        if (!givenAny && objName.Equals("all", StringComparison.OrdinalIgnoreCase)) go.Msg("You have nothing to give.");
     }
 }

@@ -212,6 +212,10 @@ internal static class GameObjectDtoConverter
             {
                 if (TryCreateSubtype(typeName!, out var inst) && inst is not null)
                 {
+                    // Game-registered factories construct normally (their draw
+                    // is inherent to the Func<GameObject> shape); the stored
+                    // id is adopted immediately below so the row still loads
+                    // under its own id with a matching hash snapshot.
                     if (inst is Node subNode)
                     {
                         Coord subCoord = ExtractCoord(dto);
@@ -259,6 +263,8 @@ internal static class GameObjectDtoConverter
             {
                 if (TryCreateSubtype(typeName!, out var scoped) && scoped is not null)
                 {
+                    // Same game-factory note as the object branch above: the
+                    // stored id is adopted immediately below.
                     scoped.SetIdRaw(dto.Id);
                     GameObject.ApplyDtoFields(scoped, dto, null);
                     scoped.IsScript = true;
@@ -267,7 +273,7 @@ internal static class GameObjectDtoConverter
                 AtherizLogger.LogError($"Unknown __script_type '{typeName}' for object {dto.Id}; loading as base script.");
             }
         }
-        var s = new Script();
+        var s = new Script(GameObject.SkipIdDraw.Instance);
         s.SetIdRaw(dto.Id);
         GameObject.ApplyDtoFields(s, dto, null);
         s.IsScript = true;
@@ -277,7 +283,7 @@ internal static class GameObjectDtoConverter
     // Channel branch: Type=="channel" -> create Channel instance and restore history
     private static GameObject LoadChannel(GameObjectDto dto)
     {
-        var ch = new Channel();
+        var ch = new Channel(GameObject.SkipIdDraw.Instance);
         ch.SetIdRaw(dto.Id);
         GameObject.ApplyDtoFields(ch, dto, null);
         ch.IsChannel = true;
@@ -309,7 +315,7 @@ internal static class GameObjectDtoConverter
 
     private static GameObject LoadPlain(GameObjectDto dto)
     {
-        GameObject o = new();
+        GameObject o = new(GameObject.SkipIdDraw.Instance);
         o.SetIdRaw(dto.Id);
         GameObject.ApplyDtoFields(o, dto, isNodeOverride: null);
         return o;

@@ -113,7 +113,7 @@ public class ObjectRegressionTests
         {
             var a = GameObject.Create("a");
             var b = GameObject.Create("b");
-            b.Id = a.Id;
+            b.SetIdRaw(a.Id);
             Assert.Equal(a, b);
             // NB: xUnit's Assert.Contains scans linearly and ignores hashes;
             // assert the hash contract directly.
@@ -314,7 +314,7 @@ public class ObjectRegressionTests
             var g2 = new NodeGrid("reggrid", 0);
             var n1 = new Node(new Coord("reggrid", 0, 0, 0));
             var n2 = new Node(new Coord("reggrid", 0, 0, 0));
-            n2.Id = n1.Id;
+            n2.SetIdRaw(n1.Id);
             g1.AddNode(n1);
             g2.AddNode(n2);
             Assert.Equal(g1, g2);
@@ -655,11 +655,14 @@ public class ObjectRegressionTests
 
     // The length cap raises unconditionally (funcparser.py:324-325 raises
     // before raise_errors is consulted); at-cap input passes through.
+    // Oversize input honors raiseErrors like every other parse failure:
+    // raising mode throws, non-raising mode echoes the raw text.
     [Fact]
-    public void OversizeInput_AlwaysRaises()
+    public void OversizeInput_HonorsRaiseErrors()
     {
         var big = new string('y', FuncParser.MaxMessageSize + 1);
-        Assert.Throws<FuncParser.ParsingError>(() => new FuncParser().Parse(big, raiseErrors: false));
+        Assert.Throws<FuncParser.ParsingError>(() => new FuncParser().Parse(big, raiseErrors: true));
+        Assert.Equal(big, new FuncParser().Parse(big, raiseErrors: false));
         var atCap = new string('y', FuncParser.MaxMessageSize);
         Assert.Equal(atCap, new FuncParser().Parse(atCap, raiseErrors: false));
     }

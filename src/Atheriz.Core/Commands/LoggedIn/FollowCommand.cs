@@ -34,7 +34,6 @@ public sealed class FollowCommand : Command
         if (!target.GetScriptsByType("FollowScript").Any())
         {
             fresh = new Atheriz.Core.Objects.FollowScript();
-            fresh.Id = Atheriz.Core.Globals.IdGenerator.GetUniqueId();
             fresh.Name = $"FollowScript_for_{go.Id}";
             fresh.IsModified = true;
             Atheriz.Core.Globals.ObjectRegistry.AddObject(fresh);

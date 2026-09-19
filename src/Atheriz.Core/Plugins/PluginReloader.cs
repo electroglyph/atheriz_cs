@@ -210,7 +210,7 @@ public static class PluginReloader
             }
             var lf=FindField(newType,"_lock");
             if(lf is not null) try{ var cur=lf.GetValue(newObj); if(cur is null) lf.SetValue(newObj,saved.TryGetValue("_lock",out var v)?v:new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion)); }catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
-            try{newObj.Id=oldObj.Id;}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
+            try{newObj.SetIdRaw(oldObj.Id);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
             // release the old-object write lock BEFORE AddObject +
             // RewireReferences (which take channel/map/area/grid/session
             // locks). Holding it across inverted the registry→object order

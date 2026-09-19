@@ -204,7 +204,11 @@ public static class InitialSetup
 
         if (!skipSuperuser && string.IsNullOrWhiteSpace(p))
         {
-            p = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD")?.Trim();
+            // Passwords are verbatim: unlike usernames they are never
+            // trimmed (CheckPassword compares the exact string, so a
+            // trimmed store would lock out the typed password — C3).
+            // Whitespace-only still counts as missing (empty check below).
+            p = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
             if (string.IsNullOrWhiteSpace(p))
             {
                 if (promptInput is not null)
@@ -214,12 +218,11 @@ public static class InitialSetup
                     try
                     {
                         if (ReferenceEquals(promptInput, Console.In)) p = GameUtils.ReadSecretLine();
-                        else p = promptInput.ReadLine()?.Trim();
+                        else p = promptInput.ReadLine();
                     }
-                    catch { p = promptInput.ReadLine()?.Trim(); }
+                    catch { p = promptInput.ReadLine(); }
                 }
             }
-            else p = p!.Trim();
             if (string.IsNullOrWhiteSpace(p))
             {
                 Console.Error.WriteLine("Error: Password cannot be empty.");
@@ -227,7 +230,6 @@ public static class InitialSetup
                 skipSuperuser = true;
             }
         }
-        else if (p is not null) p = p.Trim();
 
         if (!skipSuperuser)
         {
@@ -282,7 +284,6 @@ public static class InitialSetup
         var alarmCoord = new Coord(LIMBO_AREA, 0, 0, LIMBO_GRID - 1);
         var alarmNode = ResolveSeedNode(nh, area, alarmCoord);
         var alarmObj = new AlarmObject();
-        alarmObj.Id = IdGenerator.GetUniqueId();
         alarmObj.Name = "A flashing dashboard";
         alarmObj.Desc = "A large display showing a multitude of plots and status readouts.";
         alarmObj.IsItem = true;
