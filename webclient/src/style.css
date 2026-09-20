@@ -740,6 +740,10 @@ body.tool-eyedropper-active #main-canvas {
 }
 
 /* Google Font Picker */
+/* Sub-dialog: always stacks above its parent modal (e.g. the Text tool). */
+#google-font-picker-modal {
+  z-index: 1001;
+}
 .gfp-tabs {
   display: flex;
   gap: 2px;

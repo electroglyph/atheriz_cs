@@ -258,7 +258,7 @@ describe('text tool dialog font initialization', () => {
         const { TextToolDialog } = await import('../src/ui/TextToolDialog');
         const appState: any = { fontFamily: 'Unifont', bgColor: [0, 0, 0], fgColor: [255, 255, 255] };
         const canvasState: any = { width: 20, height: 10 };
-        const dialog: any = new TextToolDialog(appState, canvasState, () => {}, () => ({ width: 10, height: 10 }));
+        const dialog: any = new TextToolDialog(appState, () => canvasState, () => {}, () => ({ width: 10, height: 10 }));
         dialog.initFonts();
         const firstCount = dialog.fontSelect.options.length;
         expect(firstCount).toBeGreaterThan(0);

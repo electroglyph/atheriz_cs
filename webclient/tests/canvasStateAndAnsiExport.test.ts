@@ -144,14 +144,29 @@ describe('ansi export background handling for sparse layers', () => {
 });
 
 describe('text tool undo handling', () => {
-    it('pushes undo before mutation', () => {
+    it('dialog holds no canvas reference: it reads the live state through a getter', () => {
         const p = path.resolve(import.meta.dirname, '../src/ui/TextToolDialog.ts');
         const content = fs.readFileSync(p, 'utf-8');
-        const pushIndex = content.indexOf('this.undoStack.push(this.canvasState)');
+        // Storing the state object went stale on every New/undo/load swap
+        // (render-text then resurrected the discarded map); the getter
+        // reads the owner's live binding on every open/confirm instead.
+        expect(content).toContain('getCanvasState: () => CanvasState');
+        expect(content).not.toContain('private canvasState');
+        expect(content).not.toContain('updateCanvasState');
+        // The post-await re-read still applies: a swap landing mid-conversion
+        // must not resurrect the pre-await map.
         const renderIndex = content.indexOf('await renderTextToAnsiLayer');
-        expect(pushIndex).toBeGreaterThan(-1);
+        const liveIndex = content.indexOf('const live = this.getCanvasState()');
+        const applyIndex = content.indexOf('applyTextRender(');
+        const confirmIndex = content.indexOf('this.onConfirm(live)');
         expect(renderIndex).toBeGreaterThan(-1);
-        expect(pushIndex).toBeLessThan(renderIndex);
+        expect(liveIndex).toBeGreaterThan(renderIndex);
+        expect(applyIndex).toBeGreaterThan(liveIndex);
+        expect(confirmIndex).toBeGreaterThan(applyIndex);
+        // applyTextRender itself checkpoints undo before adding the layer.
+        const util = fs.readFileSync(path.resolve(import.meta.dirname, '../src/utils/TextToANSI.ts'), 'utf-8');
+        const fn = util.slice(util.indexOf('export function applyTextRender'));
+        expect(fn.indexOf('undoStack.push(state)')).toBeLessThan(fn.indexOf('state.addLayer'));
     });
 
     it('main does not push after mutation for text tool', () => {

@@ -149,7 +149,10 @@ async function initApp() {
     };
 
 
-    const textToolDialog = new TextToolDialog(appState, canvasState, (newState) => {
+    // The dialog never holds a canvas reference: it reads the live state
+    // through the getter on every open/confirm, so New/undo/load swaps
+    // cannot leave it pointing at a discarded map.
+    const textToolDialog = new TextToolDialog(appState, () => canvasState, (newState) => {
         canvasState = newState;
         context.state = canvasState;
         undoStack.setCurrentState(canvasState);
@@ -314,10 +317,6 @@ async function initApp() {
         rotateTool.applyTransform(context, mode);
     };
 
-    const syncTextToolDialog = () => {
-        textToolDialog.updateCanvasState(canvasState);
-    };
-
     const leftResizer = new SidebarResizer('sidebar', 'sidebar-resizer');
     const rightResizer = new SidebarResizer('right-sidebar', 'right-sidebar-resizer', true);
 
@@ -370,7 +369,6 @@ async function initApp() {
             selection: selectionTool,
             layers: layerManager,
             tools: context,
-            afterReset: syncTextToolDialog,
         }, w, h);
         canvasState = created.state;
         roomCellSet = created.roomCells;
@@ -382,7 +380,6 @@ async function initApp() {
         
         renderer.updateState(canvasState);
         layerManager.updateState(canvasState);
-        syncTextToolDialog();
     });
 
     new ImageImportDialog(async (buffer, w, h, config) => {
@@ -408,7 +405,6 @@ async function initApp() {
             }
             canvasState.applyBatch(batch);
             renderer.updateState(canvasState);
-            syncTextToolDialog();
         } catch (e) {
             console.error("Failed to load image:", e);
         }
@@ -452,7 +448,6 @@ async function initApp() {
                 undoStack.setCurrentState(canvasState);
                 renderer.updateState(canvasState);
                 layerManager.updateState(canvasState);
-                syncTextToolDialog();
             } catch (err) {
                 console.error('Failed to load ANSI file:', err);
             }
@@ -509,7 +504,6 @@ async function initApp() {
             undoStack.setCurrentState(canvasState);
             renderer.updateState(canvasState);
             layerManager.updateState(canvasState);
-            syncTextToolDialog();
         },
         () => {
             previewState = null;

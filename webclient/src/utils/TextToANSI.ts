@@ -1,28 +1,41 @@
 import { CanvasState } from "../state/CanvasState";
+import { UndoStack } from "../state/UndoStack";
 import { Cell } from "../types";
 import { convertImageToAnsi } from "./imageLoader";
 import { parseAnsiToCells } from "./ansiParser";
 import { ChafaConfig } from "./chafaDefaults";
 import { CellMetrics } from "./fontMetrics";
 
+/**
+ * Grid size for a text crop that spans the allowed width inside the current
+ * map. Scales the crop up or down to fill min(maxWidth, map width) —
+ * preserving aspect — then shrinks to fit when that would exceed the map
+ * height bound (map height - 2). The map itself is never resized.
+ */
 export function calculateGrid(
   cropW: number,
   cropH: number,
   maxWidthGlyphs: number,
+  canvasWidth: number,
   canvasHeight: number,
-  fontRatio: number,
+  cellMetrics: CellMetrics,
 ): { cols: number; rows: number } {
-  const maxRows = Math.max(1, canvasHeight - 2);
+  const cellW = Math.max(1, cellMetrics.width);
+  const cellH = Math.max(1, cellMetrics.height);
   // fontRatio = cellWidth / cellHeight. rows = (cols * cropH * fontRatio) / cropW
-  let cols = maxWidthGlyphs;
+  const fontRatio = cellW / cellH;
+  const maxCols = Math.max(1, Math.min(maxWidthGlyphs, canvasWidth));
+  const maxRows = Math.max(1, canvasHeight - 2);
+
+  let cols = maxCols;
   let rows = Math.max(1, Math.round((cols * cropH * fontRatio) / cropW));
 
   if (rows > maxRows) {
-    cols = Math.max(1, Math.round((maxRows * cropW) / (cropH * fontRatio)));
     rows = maxRows;
+    cols = Math.max(1, Math.round((maxRows * cropW) / (cropH * fontRatio)));
   }
 
-  return { cols: Math.min(cols, maxWidthGlyphs), rows: Math.max(1, rows) };
+  return { cols: Math.min(cols, maxCols), rows: Math.min(Math.max(1, rows), maxRows) };
 }
 
 export function previewFontString(cellFont: string, px = 96): string {
@@ -30,21 +43,38 @@ export function previewFontString(cellFont: string, px = 96): string {
 }
 
 /**
+ * Unapplied text-conversion result: converted cells in row-major order over
+ * a cols x rows grid, plus the layer label. Placement onto map coordinates
+ * happens in buildTextBatch against the LIVE map size, so a canvas replaced
+ * mid-conversion (New/resize/load/undo) still gets centered output.
+ */
+export interface TextRenderResult {
+  label: string;
+  cells: Cell[];
+  cols: number;
+  rows: number;
+}
+
+/**
  * Pipeline to convert drawn text on a temporary Canvas into quantized ANSI art:
  * 1. Derives an exact bounding box isolating the text content.
  * 2. Crops the source canvas to eliminate arbitrary whitespace.
- * 3. Dynamically calculates an ANSI grid matching the font aspect ratio.
+ * 3. Dynamically calculates an ANSI grid spelling the crop across the full
+ *    allowed map width at the font aspect ratio (shrinking to fit the map
+ *    height when needed), never resizing the map itself.
  * 4. Passes standard PNG data to Chafa for WASM-based color quantization.
- * 5. Applies resulting Chafa cells natively into the application State.
+ * 5. Returns the converted cells WITHOUT touching any CanvasState, so the
+ *    caller can apply them to the live canvas even if it was replaced while
+ *    the async conversion was in flight.
  */
 export async function renderTextToAnsiLayer(
   text: string,
   maxWidthGlyphs: number,
-  canvasState: CanvasState,
+  mapSize: { width: number; height: number },
   chafaConfig: ChafaConfig,
   sourceCanvas: HTMLCanvasElement,
   cellMetrics: CellMetrics,
-) {
+): Promise<TextRenderResult | null> {
   const fontRatio = cellMetrics.width / cellMetrics.height;
 
   const ctx = sourceCanvas.getContext("2d")!;
@@ -82,7 +112,7 @@ export async function renderTextToAnsiLayer(
     console.warn(
       "[TextToANSI] SCAN FAILED: No colored pixels found in preview.",
     );
-    return;
+    return null;
   }
 
   const pad = 10;
@@ -125,9 +155,9 @@ export async function renderTextToAnsiLayer(
     }, "image/png");
   });
 
-  if (!buffer) return;
+  if (!buffer) return null;
 
-  const grid = calculateGrid(cropW, cropH, maxWidthGlyphs, canvasState.height, fontRatio);
+  const grid = calculateGrid(cropW, cropH, maxWidthGlyphs, mapSize.width, mapSize.height, cellMetrics);
   const totalCols = grid.cols;
   const totalRows = grid.rows;
 
@@ -140,9 +170,30 @@ export async function renderTextToAnsiLayer(
 
   const rawCells = await parseAnsiToCells(ansi, totalCols, totalRows);
 
+  return {
+    label: `Text: ${text.substring(0, 10)}`,
+    cells: rawCells,
+    cols: totalCols,
+    rows: totalRows,
+  };
+}
+
+/**
+ * Centers converted cells on the map, skipping blank (transparent/black
+ * background, empty char) cells so text never paints over the map with
+ * empty fills. Coordinates outside the map are left for applyBatch to
+ * clamp into overflow.
+ */
+export function buildTextBatch(
+  rawCells: Cell[],
+  totalCols: number,
+  totalRows: number,
+  mapWidth: number,
+  mapHeight: number,
+): { col: number; row: number; cell: Cell }[] {
   const batch: { col: number; row: number; cell: Cell }[] = [];
-  const startX = Math.floor(canvasState.width / 2 - totalCols / 2);
-  const startY = Math.floor(canvasState.height / 2 - totalRows / 2);
+  const startX = Math.floor(mapWidth / 2 - totalCols / 2);
+  const startY = Math.floor(mapHeight / 2 - totalRows / 2);
 
   for (let i = 0; i < rawCells.length; i++) {
     const localCol = i % totalCols;
@@ -165,8 +216,21 @@ export async function renderTextToAnsiLayer(
     });
   }
 
-  if (batch.length > 0) {
-    canvasState.addLayer(`Text: ${text.substring(0, 10)}`, false);
-    canvasState.applyBatch(batch);
-  }
+  return batch;
+}
+
+/**
+ * Applies a converted result to the given (live) state: undo checkpoint,
+ * then a new layer with the batch. No-op for null/empty results.
+ */
+export function applyTextRender(
+  state: CanvasState,
+  undoStack: UndoStack | null,
+  label: string,
+  batch: { col: number; row: number; cell: Cell }[],
+): void {
+  if (batch.length === 0) return;
+  if (undoStack) undoStack.push(state);
+  state.addLayer(label, false);
+  state.applyBatch(batch);
 }

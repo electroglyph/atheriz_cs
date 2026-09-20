@@ -25,7 +25,6 @@ function makeDeps() {
   undoStack.setCurrentState(previous);
   const tools = { state: previous };
   const layers = { updateState: vi.fn() };
-  const afterReset = vi.fn();
 
   // Stale overlays from the previous map: teal room outlines plus a
   // selection that includes a room cell.
@@ -39,9 +38,8 @@ function makeDeps() {
     selection,
     layers,
     tools,
-    afterReset,
   } satisfies NewCanvasDeps;
-  return { deps, previous, layers, afterReset };
+  return { deps, previous, layers };
 }
 
 describe('beginNewCanvas', () => {
@@ -76,8 +74,8 @@ describe('beginNewCanvas', () => {
     expect(deps.renderer.getSelectedCells().size).toBe(0);
   });
 
-  it('pushes the discarded canvas for undo and notifies dependents', () => {
-    const { deps, previous, layers, afterReset } = makeDeps();
+  it('pushes the discarded canvas for undo and rebinds dependents', () => {
+    const { deps, previous, layers } = makeDeps();
 
     const created = beginNewCanvas(deps, 10, 6);
 
@@ -90,6 +88,5 @@ describe('beginNewCanvas', () => {
     expect(undone!.width).toBe(8);
     expect(undone!.height).toBe(8);
     expect(layers.updateState).toHaveBeenCalledWith(created.state);
-    expect(afterReset).toHaveBeenCalledTimes(1);
   });
 });

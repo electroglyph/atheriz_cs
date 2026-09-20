@@ -58,7 +58,7 @@ function makeDialog(): TextToolDialog {
   const canvasState = new CanvasState(24, 24);
   return new TextToolDialog(
     appState,
-    canvasState,
+    () => canvasState,
     () => {},
     () => ({ width: 8, height: 16, font: '8px monospace', advance: 8 }),
   );

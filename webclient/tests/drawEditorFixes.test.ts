@@ -377,6 +377,8 @@ describe('SidebarResizer destroy removes window unload listeners', () => {
 
 describe('TextToANSI calculateGrid clamps rows on tiny canvases', () => {
   it('returns at least one row and a sane column count for height 2', () => {
-    expect(calculateGrid(10, 10, 80, 2, 0.5)).toEqual({ cols: 2, rows: 1 });
+    expect(
+      calculateGrid(10, 10, 80, 80, 2, { width: 5, height: 10, font: '10px monospace', advance: 5 }),
+    ).toEqual({ cols: 2, rows: 1 });
   });
 });

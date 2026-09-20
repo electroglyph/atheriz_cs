@@ -1,6 +1,6 @@
 import { GOOGLE_FONTS, GOOGLE_FONT_CATEGORIES, GoogleFontCategory } from '../data/googleFonts';
 import { loadFontPreview, preloadManifest } from '../utils/googleFontLoader';
-import { closeOtherModals } from './modalHelper';
+import { closeOtherModals, visibleModalIds } from './modalHelper';
 
 const PAGE_SIZE = 40;
 // Max concurrent preview loads to avoid flooding the network with requests
@@ -29,6 +29,9 @@ export class GoogleFontPicker {
 
     private selectedFamily: string | null = null;
 
+    /** Element that had focus before the picker opened; restored on close. */
+    private returnFocusTo: HTMLElement | null = null;
+
     private activeCategory: GoogleFontCategory | 'all' = 'all';
     private searchQuery = '';
     private filteredFonts: { family: string; category: string }[] = [];
@@ -45,9 +48,22 @@ export class GoogleFontPicker {
     private boundDocumentKeyDown = (e: KeyboardEvent) => {
         if (this.modal.classList.contains('hidden')) return;
         if (e.key === 'Escape') {
+            // Picker-only: don't let this leak to canvas tools underneath
+            // (e.g. SelectionTool would clear the canvas selection too).
+            e.preventDefault();
+            e.stopPropagation();
             this.close();
         } else if (e.key === 'Enter' && this.selectedFamily) {
-            this.confirm();
+            if (e.target === this.searchInput) {
+                // Typing Enter in the search box must not confirm a stale
+                // selection made before the query; highlight the top hit.
+                e.preventDefault();
+                this.selectFirstVisible();
+            } else {
+                e.preventDefault();
+                e.stopPropagation();
+                this.confirm();
+            }
         }
     };
 
@@ -194,10 +210,30 @@ export class GoogleFontPicker {
         this.btnOk.disabled = false;
     }
 
+    /** Highlight the top filtered font; confirms nothing. */
+    private selectFirstVisible(): void {
+        const first = this.filteredFonts[0];
+        if (!first) return;
+        const item = this.listContainer.querySelector(`[data-family="${escapeCss(first.family)}"]`);
+        if (item instanceof HTMLElement) {
+            this.selectItem(item, first.family);
+        } else {
+            // Item not rendered (virtualized below the fold): still record
+            // the pending selection so Use Font applies it.
+            this.selectedFamily = first.family;
+            this.btnOk.disabled = false;
+        }
+    }
+
     /** Apply the highlighted font, if any, and dismiss the picker. */
     private confirm(): void {
+        if (this.modal.classList.contains('hidden')) return;
         if (!this.selectedFamily) return;
-        this.onSelect(this.selectedFamily);
+        // Idempotent: Enter on a focused Use Font button fires both keydown
+        // and click, which would otherwise apply the font twice.
+        const family = this.selectedFamily;
+        this.selectedFamily = null;
+        this.onSelect(family);
         this.close();
     }
 
@@ -229,7 +265,12 @@ export class GoogleFontPicker {
     }
 
     public open() {
-        closeOtherModals('google-font-picker-modal');
+        // Sub-dialog: stack above whatever is already open (e.g. the Text
+        // tool) instead of hiding it. Hiding the parent here is what used to
+        // nuke the whole text dialog when a font was picked, because closing
+        // the picker then left both modals hidden.
+        closeOtherModals('google-font-picker-modal', visibleModalIds());
+        this.returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         preloadManifest();
         this.searchInput.value = '';
         this.searchQuery = '';
@@ -252,5 +293,9 @@ export class GoogleFontPicker {
         // Do NOT reset previewInFlight: in-flight loads still settle and
         // decrement it in their finally blocks; zeroing here would drive the
         // counter negative and admit extra concurrent loads on next open.
+        // Hand focus back where it was (usually the G Fonts button) so the
+        // parent dialog stays keyboard-usable.
+        if (this.returnFocusTo?.isConnected) this.returnFocusTo.focus();
+        this.returnFocusTo = null;
     }
 }

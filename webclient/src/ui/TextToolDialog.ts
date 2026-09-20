@@ -1,7 +1,7 @@
 import { CanvasState } from '../state/CanvasState';
 import { UndoStack } from '../state/UndoStack';
 import { AppState } from '../types';
-import { renderTextToAnsiLayer } from '../utils/TextToANSI';
+import { renderTextToAnsiLayer, buildTextBatch, applyTextRender } from '../utils/TextToANSI';
 import { ChafaConfig, DEFAULT_CHAFA_OPTIONS } from '../utils/chafaDefaults';
 import { CellMetrics } from '../utils/fontMetrics';
 import { GoogleFontPicker } from './GoogleFontPicker';
@@ -34,13 +34,16 @@ export class TextToolDialog {
     private googleFontPicker: GoogleFontPicker;
     private onConfirm: (state: CanvasState) => void;
     private appState: AppState;
-    private canvasState: CanvasState;
+    // Never store the canvas: New/undo/load swap the state object, and any
+    // stored reference silently goes stale (render-text then resurrected the
+    // discarded map). The getter reads the owner's live binding every time.
+    private getCanvasState: () => CanvasState;
     private getCellMetrics: () => CellMetrics;
     private undoStack: UndoStack | null = null;
 
-    constructor(appState: AppState, canvasState: CanvasState, onConfirm: (state: CanvasState) => void, getCellMetrics: () => CellMetrics, undoStack?: UndoStack) {
+    constructor(appState: AppState, getCanvasState: () => CanvasState, onConfirm: (state: CanvasState) => void, getCellMetrics: () => CellMetrics, undoStack?: UndoStack) {
         this.appState = appState;
-        this.canvasState = canvasState;
+        this.getCanvasState = getCanvasState;
         this.onConfirm = onConfirm;
         this.getCellMetrics = getCellMetrics;
         this.undoStack = undoStack ?? null;
@@ -68,10 +71,6 @@ export class TextToolDialog {
         this.bindEvents();
     }
 
-    public updateCanvasState(state: CanvasState) {
-        this.canvasState = state;
-    }
-
     private bindEvents() {
         this.btnCancel.addEventListener('click', () => this.close());
         
@@ -89,16 +88,29 @@ export class TextToolDialog {
 
             
             try {
-                if (this.undoStack) this.undoStack.push(this.canvasState);
-                await renderTextToAnsiLayer(
+                const target = this.getCanvasState();
+                const result = await renderTextToAnsiLayer(
                     text,
                     maxWidth,
-                    this.canvasState,
+                    { width: target.width, height: target.height },
                     this.userConfig,
                     this.previewCanvas,
                     this.getCellMetrics(),
                 );
-                this.onConfirm(this.canvasState);
+                // The canvas may have been replaced (New/resize/load/undo)
+                // while the async conversion was in flight. Re-read the live
+                // state: applying to `target` would resurrect the discarded
+                // map — old text and all — underneath the user.
+                const live = this.getCanvasState();
+                if (result) {
+                    applyTextRender(
+                        live,
+                        this.undoStack,
+                        result.label,
+                        buildTextBatch(result.cells, result.cols, result.rows, live.width, live.height),
+                    );
+                }
+                this.onConfirm(live);
                 this.close();
             } catch (e) {
                 console.error("Text conversion failed:", e);
@@ -333,9 +345,10 @@ export class TextToolDialog {
         const matchingOption = Array.from(this.fontSelect.options).find((option) => option.value === this.appState.fontFamily);
         if (matchingOption) this.fontSelect.value = this.appState.fontFamily;
         this.input.value = '';
-        this.maxWidthInput.max = this.canvasState.width.toString();
-        this.maxWidthInput.value = this.canvasState.width.toString();
-        this.maxWidthVal.innerText = this.canvasState.width.toString();
+        const liveWidth = this.getCanvasState().width;
+        this.maxWidthInput.max = liveWidth.toString();
+        this.maxWidthInput.value = liveWidth.toString();
+        this.maxWidthVal.innerText = liveWidth.toString();
         this.stretchInput.value = '100';
         this.stretchVal.innerText = '100%';
         await this.ensureSelectedFontLoaded();

@@ -14,7 +14,6 @@ export interface NewCanvasDeps {
     selection: SelectionSync;
     layers: { updateState(state: CanvasState): void };
     tools: { state: CanvasState };
-    afterReset: () => void;
 }
 
 /**
@@ -41,6 +40,5 @@ export function beginNewCanvas(
     deps.undoStack.setCurrentState(state);
     deps.renderer.updateState(state);
     deps.layers.updateState(state);
-    deps.afterReset();
     return { state, roomCells };
 }

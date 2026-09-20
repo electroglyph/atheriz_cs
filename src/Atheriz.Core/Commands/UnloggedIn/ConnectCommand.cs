@@ -110,9 +110,10 @@ public sealed class ConnectCommand : Command
                 caller.Msg("All characters are banned.");
                 return;
             }
-            caller.Msg(text);
+            // Single Prompt(display): menu + prompt line in one message, so the
+            // webclient prints one trailing ">" (Msg + Prompt = double prompt).
             string choice;
-            try { choice = await caller.Session.Prompt("Enter your choice:").ConfigureAwait(false); }
+            try { choice = await caller.Session.Prompt(text + "Enter your choice:").ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
             catch { return; }
             if (choice is null) return;

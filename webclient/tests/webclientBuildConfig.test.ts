@@ -107,16 +107,22 @@ describe('browser shim for node:module is typed to match node API', () => {
     });
 });
 
-describe('revision is generated from webclient content hash at build time', () => {
-    it('defines __WEBCLIENT_REVISION__ via content hash', () => {
+describe('version is read from package.json at build time', () => {
+    it('defines __WEBCLIENT_VERSION__ from the package version', () => {
         const cfg = src('vite.config.ts');
-        expect(cfg).toContain('__WEBCLIENT_REVISION__');
-        expect(cfg).toContain('webclientHash');
-        expect(cfg).toContain('createHash');
+        expect(cfg).toContain('__WEBCLIENT_VERSION__');
+        expect(cfg).toContain('webclientVersion');
+        expect(cfg).toContain('package.json');
     });
 
     it('declares the global in vite-env.d.ts', () => {
         const dts = src('src/vite-env.d.ts');
-        expect(dts).toContain('__WEBCLIENT_REVISION__');
+        expect(dts).toContain('__WEBCLIENT_VERSION__');
+    });
+
+    it('prints the version (not a revision string) on webclient load', () => {
+        const main = src('src/webclient/main.ts');
+        expect(main).toContain('__WEBCLIENT_VERSION__');
+        expect(main).not.toContain('__WEBCLIENT_REVISION__');
     });
 });

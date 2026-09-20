@@ -16,10 +16,12 @@ describe('bundled terminal font is referenced consistently', () => {
   });
 });
 
-describe('chafa.wasm URL resolves under a deployment subpath', () => {
-  it('imageLoader resolves the wasm URL from BASE_URL, not hardcoded root', () => {
+describe('chafa.wasm factory is called without locateFile', () => {
+  it('imageLoader passes no options: chafa-wasm@0.3.3 ignores the locateFile return value and fetches unhashed <bundleDir>/chafa.wasm', () => {
     const src = readFileSync(join(root, 'src/utils/imageLoader.ts'), 'utf8');
+    // No locateFile property may be passed to the factory (mentioning it in
+    // a comment is fine); only its truthiness is ever read by chafa-wasm.
+    expect(src).not.toMatch(/locateFile\s*:/);
     expect(src).not.toMatch(/['"]\/chafa\.wasm['"]/);
-    expect(src).toContain('import.meta.env.BASE_URL');
   });
 });

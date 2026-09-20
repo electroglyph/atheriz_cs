@@ -1,47 +1,14 @@
 import { defineConfig } from 'vite';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-function collectFiles(dir: string, out: string[] = []): string[] {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) collectFiles(full, out);
-        else out.push(full);
+function webclientVersion(): string {
+    const pkgPath = path.resolve(import.meta.dirname, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: string };
+    if (typeof pkg.version !== 'string' || !pkg.version) {
+        throw new Error(`webclient ${pkgPath} has no version string`);
     }
-    return out;
-}
-
-function webclientHash(): string {
-    const hash = crypto.createHash('sha256');
-    const webclientDir = path.resolve(import.meta.dirname, 'src/webclient');
-    let files: string[] = [];
-    try {
-        files = collectFiles(webclientDir);
-    } catch {}
-    files.sort();
-    for (const file of files) {
-        try {
-            hash.update(fs.readFileSync(file));
-        } catch {}
-    }
-    return hash.digest('hex');
-}
-
-function webclientRevision(): string {
-    const cachePath = path.resolve(import.meta.dirname, '.webclient-revision.json');
-    const hash = webclientHash();
-    try {
-        const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8')) as { hash?: string; revision?: string };
-        if (cached.hash === hash && typeof cached.revision === 'string' && cached.revision) {
-            return cached.revision;
-        }
-    } catch {}
-    const revision = new Date().toISOString();
-    try {
-        fs.writeFileSync(cachePath, JSON.stringify({ hash, revision, generatedAt: revision }, null, 2) + '\n');
-    } catch {}
-    return revision;
+    return pkg.version;
 }
 
 export default defineConfig({
@@ -50,7 +17,7 @@ export default defineConfig({
   // Assets are served via FastAPI's /static mount, so base must be /static/.
   base: '/static/',
   define: {
-    __WEBCLIENT_REVISION__: JSON.stringify(webclientRevision()),
+    __WEBCLIENT_VERSION__: JSON.stringify(webclientVersion()),
   },
   resolve: {
     alias: {
