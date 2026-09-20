@@ -457,6 +457,24 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     if (cs is null) { cs = new Commands.CmdSet(); InternalCmdSet = cs; }
                     try { cs.Add(cmd); }
                     catch (InvalidOperationException) { /* already installed */ }
+                    // A Delete/Unsubscribe detach can land between the
+                    // peer-add above and this install: its cmdset removal
+                    // then slips past the not-yet-added command and orphans
+                    // a live command for a dead/unsubscribed channel (race
+                    // R3). Re-validate under the peer read lock and roll the
+                    // install back on mismatch. Keeping it is safe when the
+                    // check passes: any later detach removes this exact
+                    // (cached) instance. IsDeletedSnapshot is lock-free, so
+                    // no peer->channel nesting here (see above).
+                    bool stale;
+                    _lock.EnterReadLock();
+                    try { stale = !_channels.Contains(channel.Id) || channel.IsDeletedSnapshot(); }
+                    finally { _lock.ExitReadLock(); }
+                    if (stale)
+                    {
+                        try { cs.Remove(cmd); }
+                        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Subscribe: " + logEx.Message, "GameObject"); }
+                    }
                 }
             }
             catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Subscribe: " + logEx.Message, "GameObject"); }

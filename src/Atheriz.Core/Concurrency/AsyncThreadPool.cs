@@ -198,7 +198,16 @@ public class AsyncThreadPool : IDisposable
                         }
                     }
                     // Brief yield for fixed workers to pick sentinel (relief thread, not pool worker)
-                    _stopEvent.Wait(TimeSpan.FromMilliseconds(50)); lock (_lock) if (_stopped) return;
+                    _stopEvent.Wait(TimeSpan.FromMilliseconds(50));
+                    lock (_lock)
+                    {
+                        if (_stopped)
+                        {
+                            _reliefCount--;
+                            try { _reliefThreads.Remove(Thread.CurrentThread); } catch { }
+                            return;
+                        }
+                    }
                     continue;
                 }
                 break;

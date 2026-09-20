@@ -7,7 +7,10 @@ public abstract class Command
 {
     private static readonly AsyncLocal<(Command cmd, GameArgumentParser parser)?> ParserBuilding = new();
 
-    private GameArgumentParser? _parser;
+    // Volatile publication (R1): the getter's outer null check is an
+    // unsynchronized read, so the constructing thread's SetupParser writes
+    // must be visible to any thread observing a non-null _parser.
+    private volatile GameArgumentParser? _parser;
     private readonly Lock _parserLock = new();
 
     public virtual string Key => "base";

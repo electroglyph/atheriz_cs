@@ -58,7 +58,7 @@ public static class Autosave
 
     public static void AutosaveTick(AtherizSettings? settings, MapHandler? mapHandler = null, NodeHandler? nodeHandler = null, GameTime? gameTime = null)
     {
-        settings ??= _cachedSettings ?? AtherizSettings.Global;
+        settings ??= Volatile.Read(ref _cachedSettings) ?? AtherizSettings.Global;
         List<string> failures = [];
 
         // Crash-consistency journal: dirty before tables, clean

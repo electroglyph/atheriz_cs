@@ -23,6 +23,11 @@ public sealed class GameArgumentParser
     private List<ArgumentDef>? _cachedPositionals;
     private Dictionary<string, ArgumentDef>? _cachedOptionals;
     private int _cachedDefsVersion = -1;
+    // Guards the lazy def-map cache below: parsers are shared across command
+    // threads, and a post-publish _defs mutation racing EnsureDefMaps could
+    // otherwise tear the rebuild (R2). The lock also serializes concurrent
+    // first-builds so only one identical map set is published.
+    private readonly Lock _cacheLock = new();
 
     public GameArgumentParser(string prog = "", string description = "", bool addHelp = true)
     {
@@ -303,19 +308,22 @@ public sealed class GameArgumentParser
 
     private void EnsureDefMaps(out List<ArgumentDef> positionalDefs, out Dictionary<string, ArgumentDef> optionalMap)
     {
-        if (_cachedPositionals is not null && _cachedOptionals is not null && _cachedDefsVersion == _defsVersion)
+        lock (_cacheLock)
         {
-            positionalDefs = _cachedPositionals;
-            optionalMap = _cachedOptionals;
-            return;
+            if (_cachedPositionals is not null && _cachedOptionals is not null && _cachedDefsVersion == _defsVersion)
+            {
+                positionalDefs = _cachedPositionals;
+                optionalMap = _cachedOptionals;
+                return;
+            }
+            positionalDefs = _defs.Where(d => !d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal)) && !d.IsHelp).ToList();
+            optionalMap = [];
+            foreach (var d in _defs.Where(d => d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))))
+                foreach (var n in d.Names) optionalMap[n] = d;
+            _cachedPositionals = positionalDefs;
+            _cachedOptionals = optionalMap;
+            _cachedDefsVersion = _defsVersion;
         }
-        positionalDefs = _defs.Where(d => !d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal)) && !d.IsHelp).ToList();
-        optionalMap = [];
-        foreach (var d in _defs.Where(d => d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))))
-            foreach (var n in d.Names) optionalMap[n] = d;
-        _cachedPositionals = positionalDefs;
-        _cachedOptionals = optionalMap;
-        _cachedDefsVersion = _defsVersion;
     }
 
     public ParsedArgs ParseArgs(IReadOnlyList<string> argList)

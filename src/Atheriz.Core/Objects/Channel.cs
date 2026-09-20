@@ -221,6 +221,10 @@ public class Channel : GameObject
         List<GameObject> listeners;
         lock (_histLock)
         {
+            // A delete racing the send wins: the message is dropped instead
+            // of appending to a dead channel's history (R5). User feedback
+            // stays at the command layer, which already resolves liveness.
+            if (_channelDeleted) return;
             _history.AddLast(entry);
             while (_history.Count > _historyLimit) _history.RemoveFirst();
             listeners = _listeners.Values.ToList();

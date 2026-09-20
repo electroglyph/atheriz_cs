@@ -67,6 +67,11 @@ public sealed class ChannelCommand : Command
             if (channel.IsDeleted) { go.Msg($"Channel {chName} not found."); return; }
             lock (CacheLock)
             {
+                // Re-check under the insert lock: a delete landing between the
+                // scan above and this insert must not cache a dead channel (R5).
+                // CacheLock -> channel _histLock matches the order at the
+                // lookup above, so no new lock-order edge is introduced.
+                if (channel.IsDeleted) { go.Msg($"Channel {chName} not found."); return; }
                 if (ChannelCache.TryGetValue(nameLower, out var existing) && !existing.IsDeleted && existing.Name.Equals(chName, StringComparison.OrdinalIgnoreCase))
                     channel = existing;
                 else

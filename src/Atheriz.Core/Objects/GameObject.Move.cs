@@ -169,6 +169,7 @@ public partial class GameObject
         if (destObj is null)
         {
             GameObject? locObj = ResolveLocationObject();
+            var nullSnap = Location;
             // Same ordered-acquire discipline as the main path — loc then
             // self in CompareLockOrder sequence, not loc-always-first.
             if (locObj is not null && !ReferenceEquals(locObj, this))
@@ -178,6 +179,11 @@ public partial class GameObject
                 foreach (var o in pair) o.SyncRoot.EnterWriteLock();
                 try
                 {
+                    // R6 re-verify (same as the main path): abort if this
+                    // moved between the resolve above and the acquire here,
+                    // instead of removing from a stale room. Record
+                    // value-compare against the pre-acquire snapshot.
+                    if (!Equals(_location, nullSnap)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
                     locObj._contents.Remove(this.Id); locObj._flags.IsModified = true;
                     _location = LocationRef.NullLocation.Instance; _flags.IsModified = true;
                 }
@@ -321,6 +327,15 @@ public partial class GameObject
             if (!destObj.AtPreObjectReceive(oldLoc, null)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
         }
 
+        // Snapshot the live location BEFORE the re-verify below: the
+        // under-lock check compares live _location against this snapshot,
+        // so the two must observe the same era. (Snapshotting after the
+        // re-verify would let a move landing between them pair a fresh
+        // snapshot with a stale oldLoc and pass vacuously.) Every window
+        // is then covered: resolve->snapshot by the re-verify, snapshot->
+        // check by the under-lock compare. No locks held here, so the
+        // property read is order-safe.
+        var locSnapshot = Location;
         // The pre-gates above run with no location locks held and hooks can move
         // things (see the comment above). If `this` is no longer where the gates
         // ran, abort instead of removing from a stale room and double-inserting
@@ -356,6 +371,17 @@ public partial class GameObject
             // A move to the current location skips the remove/add churn: the
             // membership is already correct, and stamping both ends dirty
             // buys a checkpoint write for no state change.
+            // Re-verify the source under the held locks: the pre-lock
+            // re-verify above can lose to a concurrent move landing between
+            // the check and the acquire, and the body below would then
+            // remove from a stale room while another room keeps a ghost
+            // member (race R6). Reads _location directly (own write lock is
+            // held) so no registry lock joins the ordered set. LocationRef
+            // is a record: value-compare against the pre-acquire snapshot,
+            // so any concurrent relocation aborts instead of
+            // double-inserting (an unresolvable source is NOT nowhere —
+            // oldLoc null with a live _location must still proceed).
+            if (!Equals(_location, locSnapshot)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
             if (oldLoc is not null && !ReferenceEquals(destObj, oldLoc))
             {
                 oldLoc._contents.Remove(this.Id);
