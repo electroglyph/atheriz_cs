@@ -1,5 +1,9 @@
+using Atheriz.Core.Commands;
+using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Tests;
+using Atheriz.Core.Tests.Ported;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
@@ -62,5 +66,28 @@ public class ChannelUnsubscribeTests
             Assert.Empty(go.ChannelsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
+    public void Unsubscribe_WithoutViewLock_ReportsNotFound()
+    {
+        // Channel -u must answer identically for "view-locked" and
+        // "nonexistent" names, or it oracles channel existence.
+        using var env = GlobalTestEnv.Enter();
+        PortedHelpers.ClearChannelCache();
+        try
+        {
+            var caller = PortedHelpers.MakeCallerWithId("f10user", 11);
+            var channel = Channel.Create("f10chan");
+            channel.AddLock("view", _ => false);
+            var cmd = new ChannelCommand();
+            cmd.Run(caller, cmd.Parser!.ParseArgs(["-c", "f10chan", "-u"]));
+            var denied = string.Join(" ", caller.PeekMessages());
+            Assert.Contains("Channel f10chan not found.", denied);
+            caller.ClearMessages();
+            cmd.Run(caller, cmd.Parser!.ParseArgs(["-c", "f10missing", "-u"]));
+            Assert.Equal(denied.Replace("f10chan", "f10missing"), string.Join(" ", caller.PeekMessages()));
+        }
+        finally { PortedHelpers.ClearChannelCache(); }
     }
 }

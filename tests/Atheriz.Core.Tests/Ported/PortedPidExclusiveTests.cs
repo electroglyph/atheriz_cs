@@ -102,7 +102,7 @@ public class PortedPidExclusiveTests
         // identity gate, so the wiring is pinned here.
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/PidFile.cs");
         var start = src.IndexOf("public static bool TryAcquire(", StringComparison.Ordinal);
-        var end = src.IndexOf("private static void DirSync(", StringComparison.Ordinal);
+        var end = src.IndexOf("// Shared pid-file read for the CLI liveness probes", StringComparison.Ordinal);
         var body = src.Substring(start, end - start);
         Assert.Equal(1, body.Split("FreshLiveClaimWentStale(pidPath, oldPid.Value)", StringSplitOptions.None).Length - 1);
         Assert.Equal(2, body.Split("= StaleVerdict();", StringSplitOptions.None).Length - 1);

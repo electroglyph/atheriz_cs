@@ -1,5 +1,4 @@
 using System.Net.NetworkInformation;
-using System.Runtime.InteropServices;
 
 namespace Atheriz.Server.Infrastructure;
 
@@ -436,11 +435,8 @@ public sealed class PidFile : IDisposable
                 // flush can leave an empty pid file that later parses as invalid.
                 fs.Flush(true);
                 // UnixFileMode 0o600 — atheriz.py relies on os.open 0o600; we set via FsUtil per AGENTS POSIX best-effort
-                FsUtil.TryChmod0600(pidPath);
-                // Dirsync the save dir so the server.pid directory entry itself
-                // survives a crash (file fsync alone does not persist the entry).
-                DirSync(Path.GetDirectoryName(pidPath));
 
+                FsUtil.TryChmod0600(pidPath);
                 pidFile = new PidFile(pidPath, true, currentPid);
                 return true;
             }
@@ -475,35 +471,6 @@ public sealed class PidFile : IDisposable
 
         reason = "Failed to acquire PID file after retries";
         return false;
-    }
-
-    // Best-effort POSIX dirsync: fsync the directory fd so a newly created
-    // pid-file entry is durable across a crash. No-op on non-POSIX
-    // platforms; never throws.
-    // Directory-sync P/Invokes live beside their only caller (DirSync):
-    // kill stays in Cli.ProcessHelper beside RequestTerminate.
-    private static class NativeMethods
-    {
-        [DllImport("libc", SetLastError = true, CharSet = CharSet.Ansi)]
-        internal static extern int open(string pathname, int flags);
-        [DllImport("libc", SetLastError = true)]
-        internal static extern int fsync(int fd);
-        [DllImport("libc", SetLastError = true)]
-        internal static extern int close(int fd);
-    }
-
-    private static void DirSync(string? dir)
-    {
-        if (string.IsNullOrEmpty(dir)) return;
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
-        try
-        {
-            int fd = NativeMethods.open(dir, 0); // O_RDONLY
-            if (fd < 0) return;
-            try { NativeMethods.fsync(fd); }
-            finally { NativeMethods.close(fd); }
-        }
-        catch { }
     }
 
     // Shared pid-file read for the CLI liveness probes (create/reset/

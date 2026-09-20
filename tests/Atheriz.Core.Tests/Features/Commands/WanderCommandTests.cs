@@ -89,4 +89,24 @@ public class WanderCommandTests
         }
         finally { Teardown(); }
     }
+
+    [Fact]
+    public void Wander_MassSpawn_ProducesUniqueNames()
+    {
+        // Mass spawns must yield unique names even when the name counter is
+        // reused — never silently replace an existing NPC.
+        ObjectRegistry.ClearAll();
+        NodeHandler.SetCurrent(null);
+        try
+        {
+            var (_, _, builder) = SetupRoom();
+            var pa = new GameArgumentParser.ParsedArgs();
+            pa["count"] = 300;
+            new WanderCommand().Run(builder, pa);
+            var names = ObjectRegistry.FilterBy(o => o.Name.StartsWith("Wanderer ")).Select(o => o.Name).ToList();
+            Assert.Equal(300, names.Count);
+            Assert.Equal(300, names.Distinct().Count());
+        }
+        finally { Teardown(); }
+    }
 }

@@ -4,7 +4,8 @@ using Atheriz.Server.Infrastructure;
 namespace Atheriz.Core.Tests.Features.Simplify;
 
 // One token-file read shared by the five admin-token sites. Empty-file
-// semantics stay per-site: EnsureToken treats empty as missing (regenerate),
+// semantics stay per-site: EnsureToken throws on an unusable file (minting
+// a silent replacement would invalidate the running server's token),
 // ReadToken/CheckAdmin let it flow into the comparison.
 [Collection("Ported")]
 public class TokenFileEmptySemanticsTests
@@ -31,14 +32,15 @@ public class TokenFileEmptySemanticsTests
     }
 
     [Fact]
-    public void EnsureToken_EmptyFile_TreatedAsMissing()
+    public void EnsureToken_EmptyFile_Throws()
     {
         var dir = NewSecretDir();
         try
         {
             File.WriteAllText(Path.Combine(dir, "admin.token"), "   \n");
             // Exists-but-empty: the atomic create loses the race to the
-            // existing file and the reread finds nothing usable.
+            // existing file and there is no winner to read back, so
+            // EnsureToken throws instead of minting a silent replacement.
             Assert.Throws<InvalidOperationException>(() => AdminToken.EnsureToken(dir));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }

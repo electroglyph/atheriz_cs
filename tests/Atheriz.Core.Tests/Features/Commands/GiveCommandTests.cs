@@ -1,5 +1,6 @@
 using Atheriz.Core;
 using Atheriz.Core.Commands;
+using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Tests;
@@ -80,5 +81,40 @@ public class GiveCommandTests
             Assert.DoesNotContain(coin.Id, giver.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
+    public void Give_GiverGiveLock_AllowsGive()
+    {
+        // AtPreGive checks the giver's "give" lock, so a giver-scoped give
+        // lock must allow (not veto) the give.
+        using var env = GlobalTestEnv.Enter();
+        var nh = new NodeHandler(autoLoad: false);
+        NodeHandler.SetCurrent(nh);
+        try
+        {
+            var node = new Node(new Coord("f5give", 0, 0, 0));
+            nh.AddNode(node);
+            var giver = GameObject.Create("giver", isPc: true);
+            ObjectRegistry.AddObject(giver);
+            giver.IsConnected = true;
+            Assert.True(giver.MoveTo(node));
+            var receiver = GameObject.Create("receiver", isPc: true);
+            ObjectRegistry.AddObject(receiver);
+            receiver.IsConnected = true;
+            Assert.True(receiver.MoveTo(node));
+            var item = GameObject.Create("f5coin");
+            item.IsItem = true;
+            ObjectRegistry.AddObject(item);
+            item.AddLock("give", o => o.Id == giver.Id);
+            Assert.True(item.MoveTo(giver));
+            var cmd = new GiveCommand();
+            giver.ClearMessages();
+            cmd.Run(giver, cmd.Parser!.ParseArgs(["f5coin", "receiver"]));
+            Assert.Contains("You give f5coin to receiver.", string.Join(" ", giver.PeekMessages()));
+            Assert.Contains(item.Id, receiver.ContentsSnapshot);
+            Assert.DoesNotContain(item.Id, giver.ContentsSnapshot);
+        }
+        finally { NodeHandler.SetCurrent(null); }
     }
 }

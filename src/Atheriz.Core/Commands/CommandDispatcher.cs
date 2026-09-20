@@ -56,7 +56,7 @@ public static class CommandDispatcher
     // point, and holding one read across the sort + scan would stall Adds /
     // Remove writers longer than these short discrete takes. The saving would
     // apply to the typo path only.
-    internal static (Command? cmd, string matchedAlias) AutoAlias(CmdSet cmdset, string rawCmdKey, bool socialsFallback)
+    internal static (Command? cmd, string matchedAlias) AutoAlias(CmdSet cmdset, string rawCmdKey, bool socialsFallback, IMessageTarget? caller = null)
     {
         Command? socialFallback = null;
         string socialFallbackKey = "";
@@ -70,6 +70,12 @@ public static class CommandDispatcher
             if (key.StartsWith(rawCmdKey, StringComparison.OrdinalIgnoreCase))
             {
                 var candidate = cmdset.Get(key);
+                // Access gate: a near-miss of a forbidden verb must not
+                // resolve to it (dispatch would deny with "You can't do
+                // that." while genuine gibberish falls to NoneCommand —
+                // a closeness oracle). Skipped candidates fall through
+                // to NoneCommand exactly like gibberish.
+                if (caller is not null && candidate is not null && !candidate.Access(caller)) continue;
                 if (socialsFallback && candidate is LoggedIn.SocialsCommand)
                 {
                     socialFallback ??= candidate;
@@ -157,7 +163,7 @@ public static class CommandDispatcher
                 }
                 // Deliberate divergence from Python: non-social commands take priority over socials
                 // (else "sa"→salute would shadow "say", etc.).
-                (cmd, matchedAlias) = AutoAlias(CommandRegistry.LoggedIn, rawCmdKey, socialsFallback: true);
+                (cmd, matchedAlias) = AutoAlias(CommandRegistry.LoggedIn, rawCmdKey, socialsFallback: true, caller: puppet);
             }
             if (cmd is null)
             {
@@ -224,7 +230,7 @@ public static class CommandDispatcher
         {
             if (_settings.AutoCommandAliasing)
             {
-                (cmd, matchedAlias) = AutoAlias(cmdset, rawCmdKey, socialsFallback: false);
+                (cmd, matchedAlias) = AutoAlias(cmdset, rawCmdKey, socialsFallback: false, caller: connection);
             }
             if (cmd is null)
             {

@@ -169,17 +169,30 @@ public partial class GameObject
         if (destObj is null)
         {
             GameObject? locObj = ResolveLocationObject();
-            if (locObj is not null)
+            // Same ordered-acquire discipline as the main path — loc then
+            // self in CompareLockOrder sequence, not loc-always-first.
+            if (locObj is not null && !ReferenceEquals(locObj, this))
             {
-                // Need to handle both GameObject container and Node container
-                // For Node, need NodeLock handling? Simplified via RemoveContent
-                locObj._lock.EnterWriteLock();
-                try { locObj._contents.Remove(this.Id); locObj._flags.IsModified = true; }
-                finally { locObj._lock.ExitWriteLock(); }
+                List<GameObject> pair = [locObj, this];
+                pair.Sort(CompareLockOrder);
+                foreach (var o in pair) o.SyncRoot.EnterWriteLock();
+                try
+                {
+                    locObj._contents.Remove(this.Id); locObj._flags.IsModified = true;
+                    _location = LocationRef.NullLocation.Instance; _flags.IsModified = true;
+                }
+                finally
+                {
+                    for (int i = pair.Count - 1; i >= 0; i--)
+                        try { pair[i].SyncRoot.ExitWriteLock(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
+                }
             }
-            _lock.EnterWriteLock();
-            try { _location = LocationRef.NullLocation.Instance; _flags.IsModified = true; }
-            finally { _lock.ExitWriteLock(); }
+            else
+            {
+                _lock.EnterWriteLock();
+                try { _location = LocationRef.NullLocation.Instance; _flags.IsModified = true; }
+                finally { _lock.ExitWriteLock(); }
+            }
             AtPostMove(null, toExit);
             return true;
         }
@@ -275,16 +288,21 @@ public partial class GameObject
             }
             return a.Id.CompareTo(b.Id);
         }
-        List<GameObject> toLock = new(2);
-        if (oldLoc is null || CompareLockOrder(destObj, oldLoc) < 0)
+        List<GameObject> toLock = new(3);
+        // Own lock joins the ordered set (dedupe by instance): acquiring
+        // self after dest/old inverts the global Node->Object/Id order and
+        // deadlocks opposite-direction moves (ABBA). All three are taken
+        // in CompareLockOrder sequence; the body below updates own fields
+        // directly with no nested acquire.
         {
-            toLock.Add(destObj);
-            if (oldLoc is not null) toLock.Add(oldLoc);
-        }
-        else
-        {
-            toLock.Add(oldLoc);
-            toLock.Add(destObj);
+            List<GameObject> candidates = new(3) { destObj };
+            if (oldLoc is not null) candidates.Add(oldLoc);
+            candidates.Add(this);
+            List<GameObject> distinct = new(3);
+            foreach (var c in candidates)
+                if (!distinct.Any(d => ReferenceEquals(d, c))) distinct.Add(c);
+            distinct.Sort(CompareLockOrder);
+            toLock.AddRange(distinct);
         }
 
         // pre-gates run with NO location locks held (user hooks can
@@ -306,8 +324,15 @@ public partial class GameObject
         // The pre-gates above run with no location locks held and hooks can move
         // things (see the comment above). If `this` is no longer where the gates
         // ran, abort instead of removing from a stale room and double-inserting
-        // into the destination.
-        if (!ReferenceEquals(ResolveLocationObject(), oldLoc)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+        // into the destination. Compare by id, not instance — a load-graft
+        // may swap the location object for a fresh instance with the same id,
+        // which is still the same location, not a concurrent move.
+        {
+            var curLoc = ResolveLocationObject();
+            bool sameLoc = (curLoc is null && oldLoc is null)
+                || (curLoc is not null && oldLoc is not null && curLoc.Id == oldLoc.Id);
+            if (!sameLoc) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+        }
 
         // Try to acquire locks in order (deadlock avoidance)
         // For C# we use ReaderWriterLockSlim EnterWriteLock with recursion; acquire all, do move, release reverse
@@ -360,16 +385,11 @@ public partial class GameObject
                 newLocRef = new LocationRef.ObjectLocation(destObj.Id);
 
             // Need to update own fields without deadlock (we already hold dest/old locks, need own lock)
-            // Release ordering: we hold old/dest locks, now acquire own lock
-            // To avoid double-lock ordering issues, we already hold old/dest; acquiring self lock after is okay because self not in toLock (unless old/dest == self which cycle would have aborted)
-            _lock.EnterWriteLock();
-            try
-            {
-                _location = newLocRef;
-                _lastTouchedBy = destObj.Id;
-                _flags.IsModified = true;
-            }
-            finally { _lock.ExitWriteLock(); }
+            // Own SyncRoot is already held (it joined the ordered toLock
+            // set above), so assign directly — no nested acquire.
+            _location = newLocRef;
+            _lastTouchedBy = destObj.Id;
+            _flags.IsModified = true;
 
             success = true;
         }

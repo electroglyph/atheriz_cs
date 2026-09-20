@@ -76,4 +76,15 @@ public class FuncParserTests
         Assert.Equal("jump", you2);
         Assert.Equal("jumps", them2);
     }
+
+    [Fact]
+    public void Div_ByZero_ReturnsEmptyAndRaisesWhenAsked()
+    {
+        // $div by zero must fail safely instead of emitting Infinity/NaN.
+        using var _env = GlobalTestEnv.Enter();
+        var p = new FuncParser(FuncParser.FuncParserCallables);
+        Assert.Equal("", p.Parse("$div(1, 0)")?.ToString());
+        Assert.Throws<FuncParser.ParsingError>(() => p.Parse("$div(1, 0)", raiseErrors: true));
+        Assert.Contains("2", p.Parse("$div(4, 2)")?.ToString());
+    }
 }

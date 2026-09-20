@@ -1,5 +1,6 @@
 using Atheriz.Core;
 using Atheriz.Core.Commands;
+using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 
@@ -38,6 +39,37 @@ public class MoveCommandTests
             var loc = builder.ResolveLocationObject() as Node;
             Assert.NotNull(loc);
             Assert.Equal(startCoord, loc!.Coord);
+        }
+        finally
+        {
+            NodeHandler.SetCurrent(null);
+            ObjectRegistry.ClearAll();
+        }
+    }
+
+    [Fact]
+    public void Move_MultiWordSpaceForm_ShowsUsage()
+    {
+        // The space-separated form takes exactly four tokens; a quoted
+        // multi-word area arrives as 5+ tokens and is refused with Usage.
+        // Multi-word areas use the comma form: move (my area,1,2,3).
+        ObjectRegistry.ClearAll();
+        NodeHandler.SetCurrent(null);
+        try
+        {
+            var nh = new NodeHandler(autoLoad: false);
+            NodeHandler.SetCurrent(nh);
+            var c = GameObject.Create("f7b", privilege: Privilege.Builder);
+            ObjectRegistry.AddObject(c);
+            var before = c.Location;
+            var pa = new GameArgumentParser.ParsedArgs();
+            pa["coord"] = new List<string> { "my area", "1", "2", "3" };
+            c.ClearMessages();
+            new MoveCommand().Run(c, pa);
+            var msgs = string.Join(" ", c.PeekMessages());
+            Assert.Contains("Usage:", msgs);
+            Assert.DoesNotContain("Moved to", msgs);
+            Assert.Same(before, c.Location);
         }
         finally
         {

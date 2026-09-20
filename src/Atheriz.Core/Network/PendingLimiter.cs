@@ -89,6 +89,10 @@ public sealed class PendingLimiter
 
     /// <summary>
     /// Called from task_done callback — mirrors <c>websocket.py:55-60</c>.
+    /// An over-release (duplicate completion) is a no-op for the counters,
+    /// mirroring <see cref="ReleaseSync"/>: clamping would wipe unrelated
+    /// legitimate debt, defeating backpressure so the overflow-close never
+    /// fires. The tracking entry is still removed; the imbalance is warned.
     /// </summary>
     public void Release(Task task)
     {
@@ -96,8 +100,13 @@ public sealed class PendingLimiter
         {
             if (_byTask.Remove(task, out var nb))
             {
-                _pendingBytes = Math.Max(0, _pendingBytes - nb);
-                _pendingCount = Math.Max(0, _pendingCount - 1);
+                if (_pendingCount <= 0 || _pendingBytes < nb)
+                {
+                    AtherizLogger.LogWarning($"PendingLimiter.Release(task) over-release (bytes={_pendingBytes}, count={_pendingCount}, nb={nb}); ignoring.", "PendingLimiter");
+                    return;
+                }
+                _pendingBytes -= nb;
+                _pendingCount--;
             }
         }
     }
@@ -125,6 +134,39 @@ public sealed class PendingLimiter
         }
     }
 
+    /// <summary>
+    /// Single release for a failed send-attach: the reservation from
+    /// <see cref="TryReserve(int)"/> is either tracked to <paramref name="task"/>
+    /// (release via the entry) or untracked because <c>Task.Run</c>/<see cref="Track"/>
+    /// threw first (sync release). Exactly one decrement happens — the old
+    /// <c>ReleaseSync + re-attached TaskDone</c> sequence subtracted twice.
+    /// Over-release is ignored with a warning (counters preserved).
+    /// </summary>
+    public void ReleaseAttachFailure(Task? task, int nb)
+    {
+        lock (_lock)
+        {
+            if (task is not null && _byTask.Remove(task, out var tracked))
+            {
+                if (_pendingCount <= 0 || _pendingBytes < tracked)
+                {
+                    AtherizLogger.LogWarning($"PendingLimiter.ReleaseAttachFailure over-release (bytes={_pendingBytes}, count={_pendingCount}, nb={tracked}); ignoring.", "PendingLimiter");
+                    return;
+                }
+                _pendingBytes -= tracked;
+                _pendingCount--;
+                return;
+            }
+            if (nb == 0) return;
+            if (_pendingCount <= 0 || _pendingBytes < nb)
+            {
+                AtherizLogger.LogWarning($"PendingLimiter.ReleaseAttachFailure({nb}) over-release (bytes={_pendingBytes}, count={_pendingCount}); ignoring.", "PendingLimiter");
+                return;
+            }
+            _pendingBytes -= nb;
+            _pendingCount--;
+        }
+    }
     /// <summary>
     /// Associate already-reserved bytes with task (when reserve happened before task creation).
     /// exact accounting — when the task already carries a reservation

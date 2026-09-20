@@ -36,4 +36,19 @@ public class DoorLockPersistenceTests
         var back = Door.FromDto(door.ToDto());
         Assert.True(back.Access(sneaky, "open"));
     }
+
+    [Fact]
+    public void AccessLock_UnresolvableNamedPolicy_FailsClosedOnRoundtrip()
+    {
+        // A named-but-unresolvable policy must fail closed across a save/load
+        // round-trip instead of failing open.
+        var door = Door.Create(new Coord("f3a", 0, 0, 0), "east", new Coord("f3a", 1, 0, 0), "west");
+        var target = GameObject.Create("target");
+        var other = GameObject.Create("other");
+        door.AddLock("open", o => o.Id != target.Id, LockPolicies.NotSelf);
+        Assert.True(door.Access(other, "open"));
+        var back = Door.FromDto(door.ToDto());
+        Assert.False(back.Access(other, "open"));
+        Assert.Contains("not-self", string.Join(";", back.ToDto().Locks));
+    }
 }

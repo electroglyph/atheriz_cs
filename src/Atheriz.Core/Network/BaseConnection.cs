@@ -253,6 +253,19 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         }
         if (TryAddDrainTask()) return; // port of connection.py:126-127
         lock (Lock) { _inputRunning = false; } // port of connection.py:128-129
+        // Stopped pool: AddTask will never succeed again, so rescheduling
+        // would spin a 50ms timer chain forever on a live connection with
+        // queued input. Drop the retry (shutdown disconnects clear the
+        // queue) and terminate the chain instead.
+        try
+        {
+            if (ResolvePool().IsStopped)
+            {
+                try { Atheriz.Core.AtherizLogger.LogWarning("[Network] threadpool stopped; dropping input-drain retry"); } catch { }
+                return;
+            }
+        }
+        catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.RetryDrain: " + logEx.Message, "BaseConnection"); }
         ScheduleRetryDrain(this); // port of connection.py:131
     }
 

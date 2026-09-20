@@ -17,9 +17,7 @@ public static class AdminToken
 
     // Shared token-file read for the five admin-token sites. Returns the raw
     // trimmed content, or null when missing/unreadable. Empty is NOT mapped
-    // to null here — each site keeps its own empty semantics (EnsureToken
-    // treats empty as missing, ReadToken/CheckAdmin let it flow into the
-    // comparison, the CLI posts it as a bearer value).
+    // to null here — each site keeps its own empty semantics.
     internal static string? TryReadTokenFile(string tokenFile)
     {
         try { return File.ReadAllText(tokenFile, Encoding.UTF8).Trim(); }
@@ -69,6 +67,8 @@ public static class AdminToken
             // a valid token (truncating here would DoS the running server's token).
             var raced = TryReadTokenFile(tokenFile);
             if (!string.IsNullOrEmpty(raced)) return raced;
+            var late = TryReadTokenFile(tokenFile);
+            if (!string.IsNullOrEmpty(late)) return late;
             throw new InvalidOperationException($"Admin token file already exists at {tokenFile} but could not be read.");
         }
     }

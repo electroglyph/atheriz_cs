@@ -69,13 +69,13 @@ internal sealed class NodeAreaDto
                     // Remove from ObjectRegistry the auto-registered instance's temporary id collision
                     try { ObjectRegistry.RemoveObject(inst); } catch (Exception) { }
                     inst.Coord = nd.Coord;
-                    HydrateNode(inst, nd, assignName: false);
+                    HydrateNode(inst, nd);
                     node = inst;
                 }
                 else
                 {
                     node = Node.CreateForLoad(nd.Coord);
-                    HydrateNode(node, nd, assignName: true);
+                    HydrateNode(node, nd);
                 }
                 grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
             }
@@ -85,14 +85,13 @@ internal sealed class NodeAreaDto
     }
 
     // Shared hydration core for the subtype + plain branches above. The
-    // assignName flag is load-bearing: the subtype branch deliberately does NOT
-    // assign Name (base Name stays the coord string) and performs
-    // registry-collision cleanup at its site, while the plain branch assigns
-    // nd.Name. A verbatim shared helper would overwrite subtype Names.
-    private static void HydrateNode(Node node, NodeDto nd, bool assignName)
+    // persisted nd.Name is authoritative in both branches: the subtype factory
+    // only rebuilds the concrete type at its coord (it cannot restore a custom
+    // Name), so skipping the assignment here loses renames on reload.
+    private static void HydrateNode(Node node, NodeDto nd)
     {
         nd.Migrate();
-        if (assignName) node.Name = nd.Name;
+        node.Name = nd.Name;
         node.Desc = nd.Desc;
         node.Theme = nd.Theme;
         node.Symbol = nd.Symbol;

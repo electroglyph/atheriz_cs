@@ -2,6 +2,7 @@ using Atheriz.Core.Concurrency;
 using Atheriz.Core.Network;
 using Atheriz.Core.Settings;
 using Atheriz.Core.Tests;
+using Atheriz.Core.Tests.Ported;
 using Atheriz.Server.Hosting;
 using Atheriz.Server.Infrastructure;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -74,6 +75,29 @@ public class HostingRegressionTests
             Assert.Equal(0, mgr.ConnectionCount);
         }
         finally { pool.Stop(wait: false); }
+    }
+
+    [Fact]
+    public void SweepOrphanedConnections_KeepsPuppetedSession()
+    {
+        // a session that attached a puppet is live, not orphaned, even
+        // when the sweep runs right after login.
+        using var env = GlobalTestEnv.Enter();
+        var mgr = PortedHelpers.MakeManager();
+        var prev = ConnectionManager.GlobalInstance;
+        ConnectionManager.GlobalInstance = mgr;
+        try
+        {
+            var conn = new TestConn("sweep-kept", "10.9.9.9");
+            conn.Session.Puppet = PortedHelpers.MakeCaller("sweep-kept-puppet");
+            Assert.True(mgr.RegisterConnection("sweep-kept", conn));
+            Assert.Equal(0, mgr.SweepOrphanedConnections(TimeSpan.FromMilliseconds(-1)));
+        }
+        finally
+        {
+            mgr.Atp.Stop(wait: false);
+            ConnectionManager.GlobalInstance = prev;
+        }
     }
 
     [Fact]

@@ -207,4 +207,68 @@ public class WebSocketHandlerTests
             ConnectionManager.GlobalInstance = null;
         }
     }
+
+    private sealed class DisposalTrackingSocket : ScriptedWebSocket
+    {
+        public bool Disposed { get; private set; }
+        public override void Dispose() { Disposed = true; }
+        public override Task CloseAsync(WebSocketCloseStatus status, string? description, CancellationToken ct)
+        {
+            _closeStatus = status;
+            _state = WebSocketState.Closed;
+            return Task.CompletedTask;
+        }
+        public override Task SendAsync(ArraySegment<byte> b, WebSocketMessageType t, bool e, CancellationToken c) =>
+            Task.CompletedTask;
+        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken ct) =>
+            Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true));
+    }
+
+    [Fact]
+    public async Task Ws_NullGlobalManager_DisposesSocket()
+    {
+        // Refusal must dispose the socket, not just close it, or the
+        // socket and FD leak until GC.
+        ConnectionManager.GlobalInstance = null;
+        try
+        {
+            var fake = new DisposalTrackingSocket();
+            var settings = new AtherizSettings { WebsocketMaxMessageSize = 100_000 };
+            var http = new DefaultHttpContext();
+            http.Connection.RemoteIpAddress = IPAddress.Loopback;
+            http.Features.Set<IHttpWebSocketFeature>(new StaticWsFeature(fake));
+            await WebSocketHandler.HandleAsync(http, settings).WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.Equal(WebSocketCloseStatus.InternalServerError, fake.CloseStatus);
+            Assert.True(fake.Disposed);
+        }
+        finally
+        {
+            ConnectionManager.GlobalInstance = null;
+        }
+    }
+
+    [Fact]
+    public async Task Ws_CappedManager_DisposesConnection()
+    {
+        // Same disposal requirement on the register-refused path when the
+        // connection hits the total-connection cap.
+        var settings = new AtherizSettings { MaxTotalConnections = 1 };
+        var mgr = PortedHelpers.MakeManager(settings);
+        ConnectionManager.GlobalInstance = mgr;
+        try
+        {
+            Assert.True(mgr.RegisterConnection("ws-cap-fill", new TestConn("ws-cap-fill", "10.0.0.1")));
+            var fake = new DisposalTrackingSocket();
+            var http = new DefaultHttpContext();
+            http.Connection.RemoteIpAddress = IPAddress.Loopback;
+            http.Features.Set<IHttpWebSocketFeature>(new StaticWsFeature(fake));
+            await WebSocketHandler.HandleAsync(http, settings).WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.True(fake.Disposed);
+        }
+        finally
+        {
+            mgr.Atp.Stop(wait: false);
+            ConnectionManager.GlobalInstance = null;
+        }
+    }
 }

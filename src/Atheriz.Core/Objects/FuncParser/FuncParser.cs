@@ -146,6 +146,13 @@ public class FuncParser
         bool bothNumeric = double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v1) && double.TryParse(a[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v2);
         if(bothNumeric)
         {
+            // Double division by zero yields Infinity/NaN, never throws —
+            // guard explicitly so chat never renders non-numeric output.
+            if (op == "/" && v2 == 0)
+            {
+                if (ctx.RaiseErrors) throw new ParsingError("division by zero");
+                return "";
+            }
             try{
                 double res = op=="+"?v1+v2: op=="-"?v1-v2: op=="*"?v1*v2: op=="/"?v1/v2:0;
                 if(op!="/" && !a[0].Contains('.') && !a[1].Contains('.') && a[0].Trim().All(c=>char.IsDigit(c)||c=='-' ) && a[1].Trim().All(c=>char.IsDigit(c)||c=='-')) return ((long)res).ToString();

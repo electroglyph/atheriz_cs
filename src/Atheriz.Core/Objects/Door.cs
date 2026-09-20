@@ -526,7 +526,25 @@ public class Door
                 if (string.IsNullOrEmpty(pol)) continue;
                 if (LockPolicies.TryResolve(pol, out var pred))
                     d.AddLock(lockName, pred, pol);
-                else Atheriz.Core.AtherizLogger.LogError($"Unknown lock policy '{pol}' on door lock '{lockName}'; lock dropped.");
+                else if (pol == LockPolicies.Custom)
+                {
+                    // Ad-hoc lambda: no declarative policy was ever persisted
+                    // (documented engine-wide contract, mirrored by GameObject
+                    // lock restore) — dropped with a loud log, never executed.
+                    Atheriz.Core.AtherizLogger.LogError($"Dropping unpersistable 'custom' lambda on door lock '{lockName}'; access allowed.");
+                }
+                else
+                {
+                    // Fail closed — a NAMED but unresolvable policy (e.g. a
+                    // target-bound pc-view/not-self/puppet-owner entry that
+                    // only the 2-arg resolver binds, which Door must not use
+                    // with a dummy target) must deny, not vanish:
+                    // Door.Access returns true for missing entries, so dropping
+                    // the entry escalates to allow. Keep the policy name so a
+                    // re-save preserves the entry (still denying).
+                    Atheriz.Core.AtherizLogger.LogError($"Unknown lock policy '{pol}' on door lock '{lockName}'; denying access.");
+                    d.AddLock(lockName, _ => false, pol);
+                }
             }
         }
         return d;

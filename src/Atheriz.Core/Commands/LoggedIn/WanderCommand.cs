@@ -28,12 +28,34 @@ public sealed class WanderCommand : Command
         {
             var randomNode = grid.GetRandomNode();
             if (randomNode is null) continue;
-            string name = $"Wanderer {Random.Shared.Next(1000, 9999)}";
-            var npc = new WandererNpc(name);
+            var npc = SpawnUniqueWanderer();
             npc.MoveTo(randomNode);
         }
         sw.Stop();
         go.Msg($"Spawned {count} NPCs across area '{loc.Coord.Area}' in {sw.Elapsed.TotalMilliseconds:F2} milliseconds");
+    }
+
+    // Wanderer NNNN names must be unique: duplicates feed SearchWithFallback
+    // "Multiple matches" ambiguity. Probe sequentially from a random start
+    // so concurrent spawns spread out; the 9000-slot namespace always has a
+    // free number in practice, and saturation throws loudly instead of
+    // silently replacing an existing NPC.
+    private static WandererNpc SpawnUniqueWanderer()
+    {
+        int start = Random.Shared.Next(1000, 9999);
+        for (int i = 0; i < 9000; i++)
+        {
+            int n = 1000 + ((start - 1000 + i) % 9000);
+            var npc = new WandererNpc();
+            npc.Name = $"Wanderer {n}";
+            try
+            {
+                ObjectRegistry.AddObjectUnique(npc, o => string.Equals(o.Name, npc.Name, StringComparison.OrdinalIgnoreCase), $"Duplicate wanderer name {npc.Name}.");
+                return npc;
+            }
+            catch (InvalidOperationException) { }
+        }
+        throw new InvalidOperationException("Wanderer namespace saturated.");
     }
     internal sealed class WandererNpc : GameObject
     {

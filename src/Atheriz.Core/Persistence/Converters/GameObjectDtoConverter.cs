@@ -383,13 +383,16 @@ internal static class GameObjectDtoConverter
 
     // Encode runs after lock release; a serialization failure must restore
     // the flag the snapshot cleared (both clearing and non-clearing paths).
+    // OR with the current value — a mutation that dirtied the object
+    // during the unlocked encode window must not be wiped by the stale
+    // snapshot (a failed save must never clean concurrent work).
     private static string EncodeSaveJson(GameObject obj, GameObjectDto dto, bool had)
     {
         try { return GameObjectDtoSerializer.ToJson(dto); }
         catch
         {
             obj.SyncRoot.EnterWriteLock();
-            try { obj.SetIsModifiedRawNoLock(had); }
+            try { obj.SetIsModifiedRawNoLock(had || obj.GetIsModifiedRawNoLock()); }
             finally { obj.SyncRoot.ExitWriteLock(); }
             throw;
         }

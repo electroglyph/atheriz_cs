@@ -19,9 +19,14 @@ public sealed class MoveCommand : Command
         var raw = string.Join(" ", pa.GetList("coord")).Trim();
         if (raw.StartsWith("(", StringComparison.Ordinal) && raw.EndsWith(")", StringComparison.Ordinal)) raw = raw[1..^1];
         List<string> parts;
-        if (raw.Contains(",")) parts = raw.Split(',').Select(s => s.Trim()).ToList();
+        bool commaForm = raw.Contains(",");
+        if (commaForm) parts = raw.Split(',').Select(s => s.Trim()).ToList();
         else parts = raw.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ToList();
-        if (parts is not [var area, var xs, var ys, var zs]) { go.Msg("Usage: move <area> <x> <y> <z>  or  move (<area>,<x>,<y>,<z>)"); return; }
+        // Both forms take exactly four fields: the space form splits on
+        // whitespace (area x y z), the comma form on commas. Multi-word
+        // areas use the comma form: move (my area,1,2,3).
+        if (parts.Count != 4) { go.Msg("Usage: move <area> <x> <y> <z>  or  move (<area>,<x>,<y>,<z>)"); return; }
+        string area = parts[0], xs = parts[1], ys = parts[2], zs = parts[3];
         if (!int.TryParse(xs, out var x) || !int.TryParse(ys, out var y) || !int.TryParse(zs, out var z))
         {
             go.Msg("x, y, and z must be integers.");

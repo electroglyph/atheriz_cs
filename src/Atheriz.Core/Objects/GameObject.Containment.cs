@@ -30,7 +30,9 @@ public partial class GameObject
     }
     public virtual bool AtPreGive(GameObject giver, GameObject receiver)
     {
-        return Hookable("at_pre_give", () => Access(receiver, "give"), giver, receiver);
+        // The actor is the giver (mirrors AtPreGet/AtPreDrop checking the
+        // getter/dropper) — the receiver's "give" lock must not gate the giver.
+        return Hookable("at_pre_give", () => Access(giver, "give"), giver, receiver);
     }
     public virtual void AtGive(GameObject giver, GameObject receiver)
     {

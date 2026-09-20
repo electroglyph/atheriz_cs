@@ -250,6 +250,25 @@ public sealed class NodeGrid
                 oldToNewFull[oldCoord] = newCoord;
                 node.Coord = newCoord;
                 Nodes[dst] = node;
+                // Members ride the node — their CoordLocation still names
+                // the old cell, so lookups by the new coord ghost them (empty
+                // look, stale exits). Remap exact-old-coord members to the new
+                // coord; object-inventory members (ObjectLocation) are untouched.
+                try
+                {
+                    foreach (var cid in node.ContentsSnapshot)
+                    {
+                        var member = ObjectRegistry.GetSingle(cid);
+                        if (member is null) continue;
+                        if (member.Location is Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation cl
+                            && cl.Coord.Equals(oldCoord))
+                        {
+                            try { member.Location = Atheriz.Core.Persistence.Dto.LocationRef.FromCoord(newCoord); }
+                            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeGrid.ApplyMoves member remap: " + logEx.Message, "NodeGrid"); }
+                        }
+                    }
+                }
+                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeGrid.ApplyMoves member scan: " + logEx.Message, "NodeGrid"); }
             }
             // rewrite links inside this grid
             affected = moved.ToDictionary(m => m.node.Id, m => m.node);

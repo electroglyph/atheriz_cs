@@ -39,4 +39,22 @@ public sealed class BuildSaveJsonFlagRestoreTests
         Assert.True(obj.IsModified);
         Assert.False(obj.SyncRoot.IsWriteLockHeld);
     }
+
+    [Fact]
+    public void BuildSaveJson_EncodeHookThrowing_PreservesLiveDirtyFlag()
+    {
+        // A mutation that dirties the object during the unlocked encode
+        // window must survive a failed encode (live flag OR stale snapshot).
+        using var env = GlobalTestEnv.Enter();
+        var obj = GameObject.Create("save-fails-hook");
+        obj.IsModified = false;
+        GameObjectDtoSerializer.ToJsonHook = _ => { obj.IsModified = true; throw new InvalidOperationException("boom"); };
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                GameObjectDtoConverter.BuildSaveJson(obj, () => GameObjectDto.Create(obj.Id, "save-fails-hook"), false));
+            Assert.True(obj.IsModified);
+        }
+        finally { GameObjectDtoSerializer.ToJsonHook = null; }
+    }
 }

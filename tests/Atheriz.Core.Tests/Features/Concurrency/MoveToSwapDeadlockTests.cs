@@ -1,0 +1,47 @@
+using Atheriz.Core.Globals;
+using Atheriz.Core.Objects;
+using Atheriz.Core.Persistence.Dto;
+using Atheriz.Core.Tests;
+using Atheriz.Core.Tests.Ported;
+
+namespace Atheriz.Core.Tests.Features.Concurrency;
+
+// The mover's own lock joins the ordered lock set, so opposite-direction
+// moves can never deadlock ABBA.
+[Collection("Ported")]
+public sealed class MoveToSwapDeadlockTests
+{
+    [Fact]
+    public void MoveTo_ConcurrentSwap_CompletesWithoutDeadlock()
+    {
+        // Two movers swapping rooms take mover/source/destination locks in
+        // one global order, so the swap always completes instead of
+        // deadlocking.
+        using var env = GlobalTestEnv.Enter();
+        var cA = new Coord("swaparea", 0, 0, 0);
+        var cB = new Coord("swaparea", 1, 0, 0);
+        var nodeA = new Node(cA);
+        var nodeB = new Node(cB);
+        try { ObjectRegistry.AddObject(nodeA); } catch { }
+        try { ObjectRegistry.AddObject(nodeB); } catch { }
+        var nh = new NodeHandler(autoLoad: false);
+        NodeHandler.SetCurrent(nh);
+        try
+        {
+            nh.AddNode(nodeA);
+            nh.AddNode(nodeB);
+            var objA = PortedHelpers.MakeCaller("swapa");
+            var objB = PortedHelpers.MakeCaller("swapb");
+            Assert.True(objA.MoveTo(nodeA, force: true));
+            Assert.True(objB.MoveTo(nodeB, force: true));
+            var t1 = Task.Run(() => objA.MoveTo(nodeB, force: true));
+            var t2 = Task.Run(() => objB.MoveTo(nodeA, force: true));
+            Assert.True(Task.WaitAll([t1, t2], 15000));
+            Assert.True(t1.Result);
+            Assert.True(t2.Result);
+            Assert.Equal(cB, Assert.IsType<LocationRef.CoordLocation>(objA.Location).Coord);
+            Assert.Equal(cA, Assert.IsType<LocationRef.CoordLocation>(objB.Location).Coord);
+        }
+        finally { NodeHandler.SetCurrent(null); }
+    }
+}

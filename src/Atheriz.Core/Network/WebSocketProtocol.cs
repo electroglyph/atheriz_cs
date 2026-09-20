@@ -141,8 +141,12 @@ public sealed class WebSocketConnection : BaseConnection
         }
         catch (Exception e) // port of websocket.py:99-103
         {
-            _limiter.ReleaseSync(nb);
-            if (task is not null) try { task.ContinueWith(t => TaskDone(t), TaskScheduler.Default); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed WebSocketConnection.SendCommand: " + logEx.Message, "WebSocketConnection"); }
+            // Single release — the reservation is either tracked to task
+            // or untracked (Task.Run/Track threw first). The old ReleaseSync
+            // + re-attached TaskDone subtracted twice, and Release's clamp
+            // then wiped unrelated legitimate debt. No re-attach: nothing
+            // will complete this task through the limiter again.
+            _limiter.ReleaseAttachFailure(task, nb);
             Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Error sending command: {e}");
             return;
         }

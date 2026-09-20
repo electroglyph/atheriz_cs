@@ -437,7 +437,7 @@ public class ServerRegressionTests
         Assert.DoesNotContain("catch (InvalidOperationException) { throw; }", src);
     }
 
-    // single chmod; 64B token re-read per request.
+    // single chmod at the missing-file creation site; 64B token re-read per request.
     [Fact]
     public void TokenHandling_IsSimple()
     {

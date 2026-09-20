@@ -33,11 +33,23 @@ public static class WebSocketHandler
             // presence). Post-startup the global is always set; null means a
             // miswired host, so refuse the socket instead of forking a world.
             try { await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.InternalServerError, "Server not ready", default).ConfigureAwait(false); } catch { }
+            // Refused socket is never registered: nothing will Disconnect
+            // (and thereby dispose) it, so dispose the raw socket here —
+            // otherwise each refusal leaks the socket and FD until GC.
+            try { webSocket.Dispose(); } catch { }
             return;
         }
         var connId = manager.GenerateConnectionId();
         var connection = new WebSocketConnection(webSocket, sessionId: connId, settings: settings, clientHost: clientHost);
-        if (!manager.RegisterConnection(connId, connection)) return;
+        if (!manager.RegisterConnection(connId, connection))
+        {
+            // Refused (ban/cap): RegisterConnection already ran
+            // RefuseConnection (Close only, no dispose) and nothing will
+            // Disconnect this connection later — dispose here like the
+            // telnet refusal path, or socket + send-lock leak until GC.
+            try { connection.Dispose(); } catch { }
+            return;
+        }
 
         try
         {

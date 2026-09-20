@@ -146,11 +146,13 @@ public class Account : GameObject
         try
         {
             // The snapshot above can go stale while PBKDF2 runs: a rotation
-            // in that window must not log in with the OLD password (D1).
-            // Re-read under the write lock; when the stored hash moved,
-            // re-verify the already-computed candidate against the CURRENT
-            // hash (no second PBKDF2 needed — same salt, same algorithm).
-            if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(curHash), Encoding.UTF8.GetBytes(_passwordHash)))
+            // in that window must not log in with the OLD password (D1), and a
+            // rename in that window must not log in under the OLD name.
+            // Re-read under the write lock; when either the stored hash or the
+            // name moved, re-verify the already-computed candidate against the
+            // CURRENT values (no second PBKDF2 needed — same salt, same algorithm).
+            if (!string.Equals(curName, Name, StringComparison.OrdinalIgnoreCase)
+                || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(curHash), Encoding.UTF8.GetBytes(_passwordHash)))
             {
                 nameOk = string.Equals(Name, name, StringComparison.OrdinalIgnoreCase);
                 hashOk = CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(hash), Encoding.UTF8.GetBytes(_passwordHash));

@@ -86,6 +86,10 @@ public sealed class ChannelCommand : Command
         if (pa.GetBool("unsubscribe"))
         {
             // Port of channel.py:110-111 — silent, no confirmation message.
+            // View-gated like every other branch, and denied reads as
+            // not-found (same message as an unknown name) so probing names
+            // via -u cannot distinguish "view-locked" from "nonexistent".
+            if (!channel.Access(go, "view")) { go.Msg($"Channel {chName} not found."); return; }
             go.Unsubscribe(channel);
             return;
         }

@@ -4,8 +4,8 @@ using Atheriz.Server.Cli;
 namespace Atheriz.Core.Tests.Features.Simplify;
 
 // Shared dot-wait cadence (Delay(100) + Write(".")); per-caller exit probes
-// keep their own catch semantics. Directory-sync P/Invokes live beside their
-// only caller (PidFile.DirSync); kill stays with RequestTerminate.
+// keep their own catch semantics. Native (libc) P/Invoke is banned
+// repo-wide — see NoNativeLibcTests.
 [Collection("Ported")]
 public class DotWaitNativeSplitTests
 {
@@ -13,21 +13,6 @@ public class DotWaitNativeSplitTests
     public async Task WaitForPidExit_DeadPid_ReportsExited()
     {
         Assert.True(await ProcessHelper.WaitForPidExitAsync(int.MaxValue));
-    }
-
-    [Fact]
-    public void NativeMethods_SplitByCaller()
-    {
-        var helper = SourceScan.Read("src", "Atheriz.Server", "Cli", "ProcessHelper.cs");
-        var helperNative = SourceScan.Region(helper, "internal static class NativeMethods");
-        Assert.Contains("kill(", helperNative);
-        Assert.DoesNotContain("fsync", helperNative);
-        Assert.DoesNotContain("extern int open(", helperNative);
-        var pid = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
-        var pidNative = SourceScan.Region(pid, "private static class NativeMethods");
-        Assert.Contains("fsync", pidNative);
-        Assert.Contains("extern int open(", pidNative);
-        Assert.DoesNotContain("kill(", pidNative);
     }
 
     [Fact]

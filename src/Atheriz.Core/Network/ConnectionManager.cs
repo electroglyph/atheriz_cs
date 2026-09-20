@@ -1004,7 +1004,16 @@ public class ConnectionManager
             try
             {
                 var s = c.Session;
-                if (s is null || s.Puppet is not null || s.Account is not null) continue;
+                // Read under session.Lock — the login/puppet path mutates
+                // Puppet/Account under it, so an unlocked read can observe a
+                // stale null and nominate a just-logged-in connection.
+                if (s is not null)
+                {
+                    lock (s.Lock)
+                    {
+                        if (s.Puppet is not null || s.Account is not null) continue;
+                    }
+                }
                 if (c.ConnectedAtUtc > cutoff) continue;
                 stale.Add(c);
             }
@@ -1013,7 +1022,22 @@ public class ConnectionManager
         int swept = 0;
         foreach (var c in stale)
         {
-            try { Disconnect(c); swept++; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.SweepOrphanedConnections: " + logEx.Message, "ConnectionManager"); }
+            // Re-validate under session.Lock immediately before
+            // Disconnect — a login landing between the scan above and now
+            // must not be reaped (TOCTOU).
+            try
+            {
+                var s = c.Session;
+                if (s is not null)
+                {
+                    lock (s.Lock)
+                    {
+                        if (s.Puppet is not null || s.Account is not null) continue;
+                    }
+                }
+                Disconnect(c); swept++;
+            }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.SweepOrphanedConnections: " + logEx.Message, "ConnectionManager"); }
         }
         return swept;
     }

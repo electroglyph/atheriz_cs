@@ -1,21 +1,14 @@
-using System.Runtime.InteropServices;
-
 namespace Atheriz.Server.Cli;
 
 public static class ProcessHelper
 {
     // Port of atheriz.py stop_server terminate() (SIGTERM) before kill() (SIGKILL):
     // signal first, escalate only when the process survives.
+    // Process.Kill() sends SIGTERM on Unix (graceful first step) and
+    // terminates on Windows; KillProcessWithDots escalates below when the
+    // process survives.
     public static void RequestTerminate(Process proc)
     {
-        try
-        {
-            if (!OperatingSystem.IsWindows())
-            {
-                if (NativeMethods.kill(proc.Id, 15) == 0) return;
-            }
-        }
-        catch { }
         try { if (!proc.HasExited) proc.Kill(entireProcessTree: false); } catch { }
     }
 
@@ -65,9 +58,4 @@ public static class ProcessHelper
         try { using var q = Process.GetProcessById(pid); return q.HasExited; } catch (ArgumentException) { return true; } catch { return false; }
     }
 
-    internal static class NativeMethods
-    {
-        [DllImport("libc", SetLastError = true)]
-        internal static extern int kill(int pid, int sig);
-    }
 }
