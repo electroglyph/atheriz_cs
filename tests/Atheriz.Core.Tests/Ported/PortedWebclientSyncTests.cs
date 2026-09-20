@@ -280,7 +280,7 @@ public class PortedWebclientSyncTests
     }
 
     [Fact]
-    public void CompiledWebclient_WarningUsesDeployCommand()
+    public void DrawEntryIdentical_ReturnsNull()
     {
         using var env = GlobalTestEnv.Enter();
         var tmp = Path.Combine(Path.GetTempPath(), $"wcsync_{Guid.NewGuid():N}");
@@ -289,19 +289,118 @@ public class PortedWebclientSyncTests
         {
             var engine = Path.Combine(tmp, "engine", "web");
             MakeTree(Path.Combine(engine, "templates"), EngineTemplates);
-            MakeTree(Path.Combine(engine, "static"), new Dictionary<string,string>{ ["webclient/index.html"] = "compiled" });
+            var engineStatic = new Dictionary<string,string>(EngineStatic) { ["atheriz_draw/index.html"] = "draw-v1" };
+            MakeTree(Path.Combine(engine, "static"), engineStatic);
             var game = MakeGame(tmp, new()
             {
                 ["templates"] = new(EngineTemplates),
-                ["static"] = new() { ["webclient/index.html"] = "stale" },
+                ["static"] = new(engineStatic),
+            });
+            Assert.Null(Atheriz.Server.Infrastructure.WebclientSyncChecker.CheckSync(game, engine));
+        }
+        finally { try{Directory.Delete(tmp,true);}catch{} }
+    }
+
+    [Fact]
+    public void DrawEntryDifferent_FlagsModified()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var tmp = Path.Combine(Path.GetTempPath(), $"wcsync_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            var engine = Path.Combine(tmp, "engine", "web");
+            MakeTree(Path.Combine(engine, "templates"), EngineTemplates);
+            var engineStatic = new Dictionary<string,string>(EngineStatic) { ["atheriz_draw/index.html"] = "draw-v1" };
+            MakeTree(Path.Combine(engine, "static"), engineStatic);
+            var gameStatic = new Dictionary<string,string>(EngineStatic) { ["atheriz_draw/index.html"] = "draw-v2" };
+            var game = MakeGame(tmp, new()
+            {
+                ["templates"] = new(EngineTemplates),
+                ["static"] = new(gameStatic),
+            });
+            var summary = Atheriz.Server.Infrastructure.WebclientSyncChecker.CheckSync(game, engine);
+            Assert.NotNull(summary);
+            Assert.Equal(new[]{"index.html"}, summary!["atheriz_draw"]["different"].ToArray());
+            Assert.Empty(summary["atheriz_draw"]["missing"]);
+            Assert.Empty(summary["atheriz_draw"]["extra"]);
+            var msg = Atheriz.Server.Infrastructure.WebclientSyncChecker.FormatWarning(summary, game, "posix", engine);
+            Assert.Contains("web/static/atheriz_draw", msg);
+            Assert.Contains("1 modified", msg);
+        }
+        finally { try{Directory.Delete(tmp,true);}catch{} }
+    }
+
+    [Fact]
+    public void DrawEntryMissing_FlagsMissing()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var tmp = Path.Combine(Path.GetTempPath(), $"wcsync_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            var engine = Path.Combine(tmp, "engine", "web");
+            MakeTree(Path.Combine(engine, "templates"), EngineTemplates);
+            var engineStatic = new Dictionary<string,string>(EngineStatic) { ["atheriz_draw/index.html"] = "draw-v1" };
+            MakeTree(Path.Combine(engine, "static"), engineStatic);
+            var game = MakeGame(tmp, new()
+            {
+                ["templates"] = new(EngineTemplates),
+                ["static"] = new(EngineStatic),
+            });
+            var summary = Atheriz.Server.Infrastructure.WebclientSyncChecker.CheckSync(game, engine);
+            Assert.NotNull(summary);
+            Assert.Equal(new[]{"index.html"}, summary!["atheriz_draw"]["missing"].ToArray());
+            Assert.Empty(summary["atheriz_draw"]["different"]);
+            var msg = Atheriz.Server.Infrastructure.WebclientSyncChecker.FormatWarning(summary, game, "posix", engine);
+            Assert.Contains("web/static/atheriz_draw", msg);
+            Assert.Contains("1 missing", msg);
+        }
+        finally { try{Directory.Delete(tmp,true);}catch{} }
+    }
+
+    [Fact]
+    public void NoEngineDrawEntry_DrawIgnored()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var tmp = Path.Combine(Path.GetTempPath(), $"wcsync_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            var engine = MakeEngine(tmp);
+            var gameStatic = new Dictionary<string,string>(EngineStatic) { ["atheriz_draw/index.html"] = "draw-v9" };
+            var game = MakeGame(tmp, new()
+            {
+                ["templates"] = new(EngineTemplates),
+                ["static"] = new(gameStatic),
+            });
+            Assert.Null(Atheriz.Server.Infrastructure.WebclientSyncChecker.CheckSync(game, engine));
+        }
+        finally { try{Directory.Delete(tmp,true);}catch{} }
+    }
+
+    [Fact]
+    public void DrawOnlyEngine_WarningUsesDeployCommand()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var tmp = Path.Combine(Path.GetTempPath(), $"wcsync_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            var engine = Path.Combine(tmp, "engine", "web");
+            MakeTree(Path.Combine(engine, "templates"), EngineTemplates);
+            MakeTree(Path.Combine(engine, "static"), new Dictionary<string,string>{ ["atheriz_draw/index.html"] = "draw-v1" });
+            var game = MakeGame(tmp, new()
+            {
+                ["templates"] = new(EngineTemplates),
+                ["static"] = new Dictionary<string,string>{ ["atheriz_draw/index.html"] = "draw-stale" },
             });
             var summary = Atheriz.Server.Infrastructure.WebclientSyncChecker.CheckSync(game, engine);
             Assert.NotNull(summary);
             var msg = Atheriz.Server.Infrastructure.WebclientSyncChecker.FormatWarning(summary!, game, null, engine);
+            Assert.Contains("web/static/atheriz_draw", msg);
             Assert.Contains("deploy.py", msg);
             Assert.Contains($"game --web-root \"{Path.Combine(game, "web")}\"", msg);
-            Assert.DoesNotContain("npm run", msg);
-            Assert.DoesNotContain("cp -r", msg);
         }
         finally { try{Directory.Delete(tmp,true);}catch{} }
     }

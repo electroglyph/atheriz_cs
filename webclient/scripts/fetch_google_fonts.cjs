@@ -4,6 +4,9 @@ const path = require('path');
 
 const URL = 'https://fonts.google.com/metadata/fonts';
 const OUT = path.join(__dirname, '..', 'src', 'data', 'googleFonts.ts');
+// NOTE: this script refreshes only the full catalogue. The bundled offline
+// set in src/data/featuredGoogleFonts.ts is FROZEN (pinned for webclient
+// 1.1.0) and is deliberately never rewritten here.
 
 https.get(URL, (res) => {
     let data = '';

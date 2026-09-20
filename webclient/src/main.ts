@@ -2,6 +2,7 @@ import { measureCellMetrics } from './utils/fontMetrics';
 import { CanvasState } from './state/CanvasState';
 import { UndoStack } from './state/UndoStack';
 import { GridRenderer } from './canvas/GridRenderer';
+import { beginNewCanvas } from './canvas/newCanvas';
 import { CanvasController } from './canvas/CanvasController';
 import { ToolManager } from './tools/ToolManager';
 import { AppState, Color } from './types';
@@ -359,14 +360,20 @@ async function initApp() {
     applyRoomColor();
 
     new NewCanvasDialog((w, h) => {
-        undoStack.push(canvasState);
-        canvasState = new CanvasState(w, h);
-        
-        context.state = canvasState;
-        undoStack.setCurrentState(canvasState);
-        renderer.updateState(canvasState);
-        layerManager.updateState(canvasState);
-        syncTextToolDialog();
+        // New means a cleared map; the reset helper owns the full sequence
+        // (undo push, room/selection overlay clears, state rebind) so the
+        // wiring itself stays unit-tested. The mapedit session stays bound
+        // so Save still targets the same map.
+        const created = beginNewCanvas({
+            undoStack,
+            renderer,
+            selection: selectionTool,
+            layers: layerManager,
+            tools: context,
+            afterReset: syncTextToolDialog,
+        }, w, h);
+        canvasState = created.state;
+        roomCellSet = created.roomCells;
     });
 
     new ResizeCanvasDialog(() => canvasState, (w, h) => {

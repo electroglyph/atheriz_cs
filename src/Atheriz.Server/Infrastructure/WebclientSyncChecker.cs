@@ -111,9 +111,47 @@ public static class WebclientSyncChecker
             };
         }
 
+        // Draw app entry: compare only index.html (it embeds the hashed asset
+        // names, so any rebuild changes it). Skipped entirely when the engine
+        // ships no draw entry — nothing to judge the game copy against.
+        var engineDrawIndex = FindEngineDrawIndex(engineWeb, contentRoot);
+        if (engineDrawIndex is not null)
+        {
+            var gameDrawIndex = Path.Combine(gameWeb, "static", "atheriz_draw", "index.html");
+            var drawMissing = new List<string>();
+            var drawDifferent = new List<string>();
+            if (!File.Exists(gameDrawIndex))
+                drawMissing.Add("index.html");
+            else if (FileHash(engineDrawIndex) != FileHash(gameDrawIndex))
+                drawDifferent.Add("index.html");
+            summary["atheriz_draw"] = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+            {
+                ["missing"] = drawMissing,
+                ["different"] = drawDifferent,
+                ["extra"] = new(),
+            };
+        }
+
         if (summary.Values.All(v => v["missing"].Count == 0 && v["different"].Count == 0 && v["extra"].Count == 0))
             return null;
         return summary;
+    }
+
+    private static string? FindEngineDrawIndex(string engineWeb, string contentRoot)
+    {
+        // Shipped/project copies first: in the DLL-run layout engineWeb
+        // resolves to the game's own web dir (self-compare, always clean),
+        // so the layout-derived candidate goes last. The up-three-levels
+        // probe mirrors the deploy.py heuristic in FormatWarning (bin /
+        // Debug|Release / net10.0 -> project dir).
+        var candidates = new[]
+        {
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "wwwroot", "atheriz_draw", "index.html")),
+            Path.Combine(AppContext.BaseDirectory, "wwwroot", "atheriz_draw", "index.html"),
+            Path.Combine(contentRoot, "wwwroot", "atheriz_draw", "index.html"),
+            Path.Combine(engineWeb, "static", "atheriz_draw", "index.html"),
+        };
+        return candidates.FirstOrDefault(File.Exists);
     }
 
     private static string? ResolveEngineWeb(string contentRoot)
@@ -143,7 +181,7 @@ public static class WebclientSyncChecker
         osName ??= OperatingSystem.IsWindows() ? "nt" : "posix";
         string? engineWeb = engineWebOverride ?? ResolveEngineWeb(contentRoot) ?? Path.Combine(contentRoot, "web");
         var lines = new List<string> { "WARNING: Game webclient is out of sync with the server's!" };
-        foreach (var area in new[] { "templates", "static" })
+        foreach (var area in new[] { "templates", "static", "atheriz_draw" })
         {
             if (!summary.TryGetValue(area, out var d)) continue;
             var missing = d.TryGetValue("missing", out var m) ? m : [];
@@ -154,13 +192,15 @@ public static class WebclientSyncChecker
             if (different.Count > 0) parts.Add($"{different.Count} modified");
             if (missing.Count > 0) parts.Add($"{missing.Count} missing");
             if (extra.Count > 0) parts.Add($"{extra.Count} extra");
-            lines.Add($"  web/{area}/webclient: {string.Join(", ", parts)}");
+            var displayPath = area == "atheriz_draw" ? "web/static/atheriz_draw" : $"web/{area}/webclient";
+            lines.Add($"  {displayPath}: {string.Join(", ", parts)}");
             var names = different.Concat(missing).Concat(extra).Take(3).ToList();
             lines.Add("    e.g. " + string.Join(", ", names));
         }
         var compiledWebclient = File.Exists(Path.Combine(engineWeb, "static", "webclient", "index.html"))
             || File.Exists(Path.Combine(contentRoot, "wwwroot", "webclient", "index.html"))
-            || File.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot", "webclient", "index.html"));
+            || File.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot", "webclient", "index.html"))
+            || FindEngineDrawIndex(engineWeb, contentRoot) is not null;
         if (compiledWebclient)
         {
             // Try locate deploy.py for message — mirrors Python's deploy_py = Path(__file__).resolve().parent.parent / "webclient" / "deploy.py"

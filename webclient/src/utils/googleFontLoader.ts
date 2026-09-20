@@ -59,11 +59,11 @@ function injectStylesheet(href: string, fallbackHref?: string): void {
 }
 
 function cdnPreviewUrl(family: string): string {
-    return `${CDN_BASE}?family=${cssEscapedFamily(family)}&text=${encodeURIComponent(family)}`;
+    return `${CDN_BASE}?family=${cssEscapedFamily(family)}&text=${encodeURIComponent(family)}&display=swap`;
 }
 
 function cdnFullUrl(family: string): string {
-    return `${CDN_BASE}?family=${cssEscapedFamily(family)}:wght@400;700`;
+    return `${CDN_BASE}?family=${cssEscapedFamily(family)}:wght@400;700&display=swap`;
 }
 
 export function loadFontPreview(family: string): void {

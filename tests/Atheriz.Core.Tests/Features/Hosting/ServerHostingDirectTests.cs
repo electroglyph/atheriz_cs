@@ -29,7 +29,7 @@ public class ServerHostingDirectTests
         }
     }
 
-    private static async Task<Booted> BootAsync(bool withWwwroot = false)
+    private static async Task<Booted> BootAsync(bool withWwwroot = false, bool withDrawEntry = false)
     {
         var tmp = Path.Combine(Path.GetTempPath(), "ahost_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmp);
@@ -41,6 +41,12 @@ public class ServerHostingDirectTests
             await File.WriteAllTextAsync(Path.Combine(assets, "app.js"), "console.log(1);");
             // Hashed bundle outside assets/: proves the hash-infix rule beyond the prefix rule.
             await File.WriteAllTextAsync(Path.Combine(tmp, "wwwroot", "app.ab12cd34ef.js"), "console.log(1);");
+        }
+        if (withDrawEntry)
+        {
+            var drawDir = Path.Combine(tmp, "wwwroot", "atheriz_draw");
+            Directory.CreateDirectory(drawDir);
+            await File.WriteAllTextAsync(Path.Combine(drawDir, "index.html"), "<html><body>DrawEntryMarker</body></html>");
         }
         var settings = new AtherizSettings
         {
@@ -142,6 +148,51 @@ public class ServerHostingDirectTests
         var rooted = await b.Client.GetAsync("/static/app.ab12cd34ef.js");
         Assert.Equal(HttpStatusCode.OK, rooted.StatusCode);
         Assert.Contains("immutable", rooted.Headers.GetValues("Cache-Control").First());
+    }
+
+    [Fact]
+    public async Task StaticFile_DrawDirectoryUrl_ServesEntryHtml()
+    {
+        // mapedit opens /static/atheriz_draw/ (launch.ts DRAW_PATH): the
+        // directory URL must resolve the default document, not fall through
+        // the pipeline to 404.
+        await using var b = await BootAsync(withDrawEntry: true);
+        var resp = await b.Client.GetAsync("/static/atheriz_draw/");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("DrawEntryMarker", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task StaticFile_DrawAliases_AllSpellingsServeEntryWithoutAmbiguity()
+    {
+        // Duplicate slash/no-slash route patterns threw
+        // AmbiguousMatchException (HTTP 500) for either spelling.
+        await using var b = await BootAsync(withDrawEntry: true);
+        foreach (var path in new[] { "/atheriz_draw", "/atheriz_draw/", "/atheriz_draw/index.html" })
+        {
+            var resp = await b.Client.GetAsync(path);
+            Assert.True(resp.StatusCode == HttpStatusCode.OK, path);
+            Assert.Contains("DrawEntryMarker", await resp.Content.ReadAsStringAsync());
+        }
+    }
+
+    [Fact]
+    public async Task StaticFile_WebclientAliases_RedirectWithoutAmbiguity()
+    {
+        // Same duplicate-pattern 500 hazard as the draw aliases had.
+        await using var b = await BootAsync();
+        var addr = b.App.Urls.First(u => u.StartsWith("http://", StringComparison.Ordinal));
+        using var noRedirect = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        {
+            BaseAddress = new Uri(addr),
+            Timeout = TimeSpan.FromSeconds(10),
+        };
+        foreach (var path in new[] { "/webclient", "/webclient/" })
+        {
+            var resp = await noRedirect.GetAsync(path);
+            Assert.True(resp.StatusCode == HttpStatusCode.Found, path);
+            Assert.Equal("/webclient/index.html", resp.Headers.Location?.ToString());
+        }
     }
 
     [Fact]

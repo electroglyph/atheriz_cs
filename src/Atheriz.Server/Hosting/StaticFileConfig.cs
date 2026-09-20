@@ -32,9 +32,23 @@ public static class StaticFileConfig
             Console.WriteLine($"Serving static files from: {staticCandidate}");
             var contentTypeProvider = new FileExtensionContentTypeProvider();
             contentTypeProvider.Mappings[".wasm"] = "application/wasm";
+            var physicalProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.GetFullPath(staticCandidate));
+            // Default documents for directory URLs (e.g. /static/atheriz_draw/
+            // serves atheriz_draw/index.html): without this the static
+            // middleware passes directory paths through and they 404 at the
+            // end of the pipeline. Only index.html is a default — never
+            // default.htm-style fallbacks. Existing file URLs are untouched.
+            var defaultFiles = new DefaultFilesOptions
+            {
+                FileProvider = physicalProvider,
+                RequestPath = "/static",
+            };
+            defaultFiles.DefaultFileNames.Clear();
+            defaultFiles.DefaultFileNames.Add("index.html");
+            app.UseDefaultFiles(defaultFiles);
             app.UseStaticFiles(new StaticFileOptions
             {
-                FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.GetFullPath(staticCandidate)),
+                FileProvider = physicalProvider,
                 RequestPath = "/static",
                 ContentTypeProvider = contentTypeProvider,
                 OnPrepareResponse = ctx =>
@@ -92,8 +106,10 @@ public static class StaticFileConfig
             if (hit is not null) return Results.File(hit, contentType: "text/html");
             return Results.NotFound("Webclient not built — run webclient build and deploy.");
         });
-        foreach (var route in new[] { "/webclient", "/webclient/" })
-            app.MapGet(route, () => Results.Redirect("/webclient/index.html"));
+        // Single registration: the bare pattern also matches the
+        // trailing-slash spelling, and registering both throws
+        // AmbiguousMatchException (HTTP 500) for either spelling.
+        app.MapGet("/webclient", () => Results.Redirect("/webclient/index.html"));
         IResult ServeDraw(HttpContext ctx)
         {
             // Entry HTML is never cached (hashed bundles underneath are immutable).
@@ -105,10 +121,11 @@ public static class StaticFileConfig
             }
             return Results.Content("AtheriZ Draw not built — run `npm run build` in webclient/ and deploy.", "text/html", statusCode: 404);
         }
-        // Route-table loop for the draw aliases: registration ORDER is
-        // preserved (first-match wins in static-file middleware).
-        foreach (var route in new[] { "/atheriz_draw", "/atheriz_draw/", "/atheriz_draw/index.html" })
-            app.MapGet(route, ServeDraw);
+        // Single registrations (same ambiguity rule as /webclient above):
+        // the bare pattern covers both slash spellings, while the
+        // index.html spelling needs its own pattern (extra path segment).
+        app.MapGet("/atheriz_draw", ServeDraw);
+        app.MapGet("/atheriz_draw/index.html", ServeDraw);
         app.MapGet("/health", () => Results.Json(new { status = "ok", server = settings.ServerName }));
         // Readiness probe: /health stays unconditional liveness (webclient relies on it);
         // /ready reports whether DoStartup ran to completion.

@@ -206,7 +206,7 @@ describe('google font picker fallback for CSS.escape', () => {
     beforeEach(() => {
         document.body.innerHTML = `
             <div id="google-font-picker-modal" class="modal hidden">
-                <div id="gfp-tabs"></div><input id="gfp-search" /><div id="gfp-list"></div><button id="gfp-cancel"></button><div id="gfp-sentinel"></div>
+                <div id="gfp-tabs"></div><input id="gfp-search" /><div id="gfp-list"></div><button id="gfp-cancel"></button><button id="gfp-ok"></button><div id="gfp-sentinel"></div>
             </div>`;
     });
     afterEach(() => {
@@ -242,7 +242,7 @@ describe('text tool dialog font initialization', () => {
             <button id="text-tool-google-fonts-btn"></button>
             <select id="text-tool-align"><option value="left">Left</option></select>
             <div id="text-chafa-options-container"></div>
-            <div id="google-font-picker-modal" class="modal hidden"><div id="gfp-tabs"></div><input id="gfp-search" /><div id="gfp-list"></div><button id="gfp-cancel"></button><div id="gfp-sentinel"></div></div>
+            <div id="google-font-picker-modal" class="modal hidden"><div id="gfp-tabs"></div><input id="gfp-search" /><div id="gfp-list"></div><button id="gfp-cancel"></button><button id="gfp-ok"></button><div id="gfp-sentinel"></div></div>
         `;
         // @ts-ignore mock document.fonts
         if (!document.fonts) {

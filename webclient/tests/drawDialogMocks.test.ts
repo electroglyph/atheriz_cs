@@ -49,6 +49,7 @@ function setupGfpDom() {
       <div id="gfp-list"></div>
       <div id="gfp-sentinel"></div>
       <button id="gfp-cancel">Cancel</button>
+      <button id="gfp-ok">Use Font</button>
     </div>`;
 }
 

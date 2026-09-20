@@ -6,6 +6,7 @@ import { ChafaConfig, DEFAULT_CHAFA_OPTIONS } from '../utils/chafaDefaults';
 import { CellMetrics } from '../utils/fontMetrics';
 import { GoogleFontPicker } from './GoogleFontPicker';
 import { loadFontFull, fontNameToCSS } from '../utils/googleFontLoader';
+import { FEATURED_GOOGLE_FONTS } from '../data/featuredGoogleFonts';
 import { closeOtherModals } from './modalHelper';
 
 export class TextToolDialog {
@@ -109,7 +110,9 @@ export class TextToolDialog {
         });
 
         this.input.addEventListener('input', () => this.schedulePreview());
-        this.fontSelect.addEventListener('change', () => this.schedulePreview());
+        this.fontSelect.addEventListener('change', () => {
+            void this.ensureSelectedFontLoaded().then(() => this.schedulePreview());
+        });
         this.styleSelect.addEventListener('change', () => this.schedulePreview());
         this.stretchInput.addEventListener('input', () => {
             this.stretchVal.innerText = `${this.stretchInput.value}%`;
@@ -228,6 +231,21 @@ export class TextToolDialog {
             opt.textContent = f.name;
             this.fontSelect.appendChild(opt);
         }
+
+        // Featured Google Fonts: bundled under public/gfonts, so they work
+        // offline. Anything else comes via the G Fonts button (streams from
+        // Google). Values use fontNameToCSS so picker selections dedupe here.
+        const featuredSep = document.createElement('option');
+        featuredSep.disabled = true;
+        featuredSep.textContent = '── Featured Google Fonts ──';
+        this.fontSelect.appendChild(featuredSep);
+
+        for (const f of FEATURED_GOOGLE_FONTS) {
+            const opt = document.createElement('option');
+            opt.value = fontNameToCSS(f.family);
+            opt.textContent = f.family;
+            this.fontSelect.appendChild(opt);
+        }
         
         // Try to sync with app font
         const matchesApp = Array.from(this.fontSelect.options).find(o => o.value === this.appState.fontFamily);
@@ -272,6 +290,19 @@ export class TextToolDialog {
         }
     }
 
+        /**
+     * Featured dropdown entries have no stylesheet until first use; inject it
+     * (local cache when bundled, Google CDN otherwise) before previewing.
+     * Picker-added fonts are already loaded; system fonts need nothing.
+     */
+    private async ensureSelectedFontLoaded(): Promise<void> {
+        const selected = this.fontSelect.value;
+        const featured = FEATURED_GOOGLE_FONTS.find(f => fontNameToCSS(f.family) === selected);
+        if (featured) {
+            await loadFontFull(featured.family);
+        }
+    }
+
     private async selectGoogleFont(family: string) {
         await loadFontFull(family);
         const cssVal = fontNameToCSS(family);
@@ -307,6 +338,7 @@ export class TextToolDialog {
         this.maxWidthVal.innerText = this.canvasState.width.toString();
         this.stretchInput.value = '100';
         this.stretchVal.innerText = '100%';
+        await this.ensureSelectedFontLoaded();
         await this.updatePreview();
         this.modal.classList.remove('hidden');
         this.input.focus();

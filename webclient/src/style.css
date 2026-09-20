@@ -808,6 +808,11 @@ body.tool-eyedropper-active #main-canvas {
   color: #fff;
 }
 
+.gfp-item.selected {
+  background: #007acc;
+  color: #fff;
+}
+
 .gfp-item:last-child {
   border-bottom: none;
 }

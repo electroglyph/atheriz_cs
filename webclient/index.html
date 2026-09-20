@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Atheriz Draw</title>
+    <!-- Preconnect so streamed (non-bundled) Google Fonts start fast -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- We link the custom font CSS directly, vite will inline it -->
     <link rel="stylesheet" href="./fonts/KreativeSquare.css" />
     <link rel="stylesheet" href="./fonts/Unifont.css" />
@@ -370,6 +373,7 @@
         <div id="gfp-list" class="gfp-list"></div>
         <div class="modal-actions">
           <button id="gfp-cancel">Cancel</button>
+          <button id="gfp-ok" class="primary" disabled>Use Font</button>
         </div>
       </div>
     </div>

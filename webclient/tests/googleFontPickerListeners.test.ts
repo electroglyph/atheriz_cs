@@ -18,13 +18,14 @@ function setupDom() {
     'gfp-list',
     'gfp-tabs',
     'gfp-cancel',
+    'gfp-ok',
     'gfp-sentinel',
   ];
   const els: Record<string, HTMLElement> = {};
   for (const id of ids) {
-    const el = document.createElement(id === 'gfp-search' || id === 'gfp-cancel' ? 'input' : 'div');
+    const el = document.createElement(id === 'gfp-search' || id === 'gfp-cancel' || id === 'gfp-ok' ? 'input' : 'div');
     if (id === 'gfp-search') (el as HTMLInputElement).type = 'text';
-    if (id === 'gfp-cancel') (el as HTMLInputElement).type = 'button';
+    if (id === 'gfp-cancel' || id === 'gfp-ok') (el as HTMLInputElement).type = 'button';
     el.id = id;
     document.body.appendChild(el);
     els[id] = el;

@@ -3,6 +3,9 @@
 //   node scripts/cache_google_fonts.js            (preview only, ~15MB)
 //   node scripts/cache_google_fonts.js --full      (preview + full fonts, VERY large)
 //   node scripts/cache_google_fonts.js --limit 50  (only first 50 fonts)
+//   node scripts/cache_google_fonts.js --full --featured
+//       (only the featured offline set from src/data/featuredGoogleFonts.ts;
+//       this is the supported configuration — keep public/gfonts small.)
 
 const https = require('https');
 const fs = require('fs');
@@ -13,6 +16,7 @@ const CSS_DIR = path.join(OUT_DIR, 'css');
 const FONT_DIR = path.join(OUT_DIR, 'f');
 const MANIFEST = path.join(OUT_DIR, 'manifest.json');
 const FONTS_FILE = path.join(__dirname, '..', 'src', 'data', 'googleFonts.ts');
+const FEATURED_FILE = path.join(__dirname, '..', 'src', 'data', 'featuredGoogleFonts.ts');
 
 const CONCURRENCY = 20;
 const MAX_RETRIES = 3;
@@ -21,11 +25,14 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 const args = process.argv.slice(2);
 const doFull = args.includes('--full');
+const useFeatured = args.includes('--featured');
 const limitIdx = args.indexOf('--limit');
 const limit = limitIdx >= 0 ? parseInt(args[limitIdx + 1], 10) : 0;
 
 function parseFontFamilies() {
-    const content = fs.readFileSync(FONTS_FILE, 'utf-8');
+    const useFeatured = process.argv.slice(2).includes('--featured');
+    const source = useFeatured ? FEATURED_FILE : FONTS_FILE;
+    const content = fs.readFileSync(source, 'utf-8');
     const families = [];
     const re = /family:\s*"([^"]+)"/g;
     let m;
@@ -212,10 +219,10 @@ async function runPool(tasks, concurrency) {
 
 async function main() {
     const families = parseFontFamilies();
-    const fonts = limit > 0 ? families.slice(0, limit) : families;
+    const fonts = useFeatured ? families : (limit > 0 ? families.slice(0, limit) : families);
 
     console.log('Google Fonts Cache Downloader');
-    console.log(`Fonts: ${fonts.length} | Concurrency: ${CONCURRENCY} | Mode: ${doFull ? 'preview + full' : 'preview only'}`);
+    console.log(`Fonts: ${fonts.length}${useFeatured ? ' (featured set)' : ''} | Concurrency: ${CONCURRENCY} | Mode: ${doFull ? 'preview + full' : 'preview only'}`);
     console.log(`Output: ${OUT_DIR}`);
     console.log('');
 

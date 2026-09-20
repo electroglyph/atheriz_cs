@@ -3,7 +3,7 @@ import { loadFontPreview, preloadManifest } from '../utils/googleFontLoader';
 import { closeOtherModals } from './modalHelper';
 
 const PAGE_SIZE = 40;
-// Max concurrent preview loads to avoid flooding the dev server
+// Max concurrent preview loads to avoid flooding the network with requests
 const PREVIEW_CONCURRENCY = 4;
 
 function escapeCss(value: string): string {
@@ -24,7 +24,10 @@ export class GoogleFontPicker {
     private listContainer: HTMLElement;
     private tabContainer: HTMLElement;
     private btnCancel: HTMLButtonElement;
+    private btnOk: HTMLButtonElement;
     private onSelect: (family: string) => void;
+
+    private selectedFamily: string | null = null;
 
     private activeCategory: GoogleFontCategory | 'all' = 'all';
     private searchQuery = '';
@@ -40,8 +43,11 @@ export class GoogleFontPicker {
     private previewInFlight = 0;
 
     private boundDocumentKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape' && !this.modal.classList.contains('hidden')) {
+        if (this.modal.classList.contains('hidden')) return;
+        if (e.key === 'Escape') {
             this.close();
+        } else if (e.key === 'Enter' && this.selectedFamily) {
+            this.confirm();
         }
     };
 
@@ -53,6 +59,7 @@ export class GoogleFontPicker {
         this.listContainer = document.getElementById('gfp-list')!;
         this.tabContainer = document.getElementById('gfp-tabs')!;
         this.btnCancel = document.getElementById('gfp-cancel') as HTMLButtonElement;
+        this.btnOk = document.getElementById('gfp-ok') as HTMLButtonElement;
         this.sentinel = document.getElementById('gfp-sentinel')!;
 
         this.buildTabs();
@@ -100,6 +107,7 @@ export class GoogleFontPicker {
 
     private bindEvents() {
         this.btnCancel.addEventListener('click', () => this.close());
+        this.btnOk.addEventListener('click', () => this.confirm());
 
         let debounce: ReturnType<typeof setTimeout> | null = null;
         this.searchInput.addEventListener('input', () => {
@@ -161,8 +169,11 @@ export class GoogleFontPicker {
             // the browser trying to shape text with an unloaded font immediately.
             item.dataset.family = f.family;
             item.addEventListener('click', () => {
-                this.onSelect(f.family);
-                this.close();
+                this.selectItem(item, f.family);
+            });
+            item.addEventListener('dblclick', () => {
+                this.selectItem(item, f.family);
+                this.confirm();
             });
             // Observe for lazy font loading instead of loading eagerly
             this.fontObserver.observe(item);
@@ -171,6 +182,23 @@ export class GoogleFontPicker {
 
         this.listContainer.insertBefore(fragment, this.sentinel);
         this.renderedCount = end;
+    }
+
+    /** Highlight a single item as the pending selection; confirms nothing. */
+    private selectItem(item: HTMLElement, family: string): void {
+        this.listContainer.querySelectorAll('.gfp-item.selected').forEach(el => {
+            el.classList.remove('selected');
+        });
+        item.classList.add('selected');
+        this.selectedFamily = family;
+        this.btnOk.disabled = false;
+    }
+
+    /** Apply the highlighted font, if any, and dismiss the picker. */
+    private confirm(): void {
+        if (!this.selectedFamily) return;
+        this.onSelect(this.selectedFamily);
+        this.close();
     }
 
     /**
@@ -206,6 +234,8 @@ export class GoogleFontPicker {
         this.searchInput.value = '';
         this.searchQuery = '';
         this.activeCategory = 'all';
+        this.selectedFamily = null;
+        this.btnOk.disabled = true;
         this.updateActiveTab();
         this.applyFilter();
         this.modal.classList.remove('hidden');
@@ -215,7 +245,8 @@ export class GoogleFontPicker {
     public close() {
         this.modal.classList.add('hidden');
         // Stop observing all items immediately so pending preview loads are
-        // not triggered after the picker is dismissed, preventing server load.
+        // not triggered after the picker is dismissed, preventing extra
+        // font downloads.
         this.fontObserver.disconnect();
         this.previewQueue.length = 0;
         // Do NOT reset previewInFlight: in-flight loads still settle and

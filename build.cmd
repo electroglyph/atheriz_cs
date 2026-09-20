@@ -109,7 +109,9 @@ if "%NEED_WEB_BUILD%"=="0" (
   )
   if exist "%SRC_DIST%\gfonts" xcopy /E /Y /I "%SRC_DIST%\gfonts" "%DEST_WWWROOT%\gfonts\" >nul
 
-  echo %SRC_HASH% > "%SRC_HASH_FILE%"
+  echo %SRC_HASH%>"%SRC_HASH_FILE%"
+  REM no space before the redirect above: a trailing space would land in the
+  REM hash file and break the unchanged-skip comparison on the next run
   echo Webclient deployed to %DEST_WWWROOT%
 )
 
