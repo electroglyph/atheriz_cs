@@ -131,6 +131,7 @@ public sealed class PluginLoader : IDisposable
         }
 
         int found = 0;
+        Type? gameSetupType = null;
         try
         {
             foreach (var type in _loaded.GetTypes())
@@ -143,6 +144,11 @@ public sealed class PluginLoader : IDisposable
                 {
                     if (TryRegister(attr.BaseType, attr.ReplacementType, $"from {type.Name}", " (e.g. plugin vendored its own Atheriz.Core copy)")) found++;
                 }
+                // Game-setup entry for CLI world creation (reset/new): a public
+                // non-abstract class implementing IGameSetup. Collected in the
+                // same discovery pass, instantiated once below.
+                if (gameSetupType is null && type.IsClass && !type.IsAbstract && typeof(IGameSetup).IsAssignableFrom(type))
+                    gameSetupType = type;
             }
             // Assembly-level attributes
             foreach (var a in _loaded.GetCustomAttributes<EntityReplacementAttribute>())
@@ -166,6 +172,25 @@ public sealed class PluginLoader : IDisposable
             Console.Error.WriteLine($"[PluginLoader] Loaded {Path.GetFileName(full)} — no [EntityReplacement] found (mirrors 'No CLASS_INJECTIONS').");
         else
             Console.Error.WriteLine($"[PluginLoader] Loaded {found} replacement(s) from {Path.GetFileName(full)}.");
+        // Instantiate the discovered game-setup entry, if any. This is plugin
+        // discovery completing (same exemption as the scan above): module
+        // initializers do NOT run eagerly on collectible-ALC loads, so
+        // self-registration never fires and the CLI would silently fall back
+        // to the template world. Constrained to public IGameSetup classes
+        // with a public parameterless ctor; a single instance per load.
+        if (gameSetupType is not null)
+        {
+            try
+            {
+                if (Activator.CreateInstance(gameSetupType) is IGameSetup setup)
+                {
+                    InitialSetup.GameSetup = setup;
+                    Console.Error.WriteLine($"[PluginLoader] Game setup: {gameSetupType.FullName}.");
+                }
+                else Console.Error.WriteLine($"[PluginLoader] Game setup {gameSetupType.FullName} has no public parameterless ctor; template setup will run.");
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"[PluginLoader] Game setup {gameSetupType.FullName} failed: {ex.Message}; template setup will run."); }
+        }
     }
 
     /// <summary>

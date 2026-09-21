@@ -15,6 +15,14 @@ public class GameSetupDispatchTests
             => Calls.Add(string.Join("|", savePath, username, password, secretPath, prompt));
     }
 
+    // Staged as the fake game (StageFakeGame copies this assembly): discovery
+    // must instantiate the public IGameSetup entry on load, because module
+    // initializers do not run eagerly on collectible-ALC loads.
+    public sealed class StubGameSetup : IGameSetup
+    {
+        public void DoSetup(string savePath, string? username, string? password, string? secretPath, bool prompt) { }
+    }
+
     [Fact]
     public void RunSetup_GameRegistered_UsesGameSetup()
     {
@@ -46,6 +54,38 @@ public class GameSetupDispatchTests
             {
                 InitialSetup.RunSetup(Path.Combine(dir, "save"), prompt: false);
                 Assert.True(Directory.Exists(Path.Combine(dir, "save")));
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+        }
+        finally { InitialSetup.GameSetup = prev; }
+    }
+
+    [Fact]
+    public void BootLoad_GameSetupEntry_InstantiatedOnLoad()
+    {
+        // StageFakeGame copies this assembly: its public StubGameSetup must be
+        // instantiated and registered by discovery (compared by name — the
+        // instance lives in the plugin ALC by design).
+        using var env = GlobalTestEnv.Enter();
+        var prev = InitialSetup.GameSetup;
+        try
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "atheriz_setupgame_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            var csproj = Path.Combine(dir, "setupgame.csproj");
+            File.WriteAllText(csproj, "<Project></Project>");
+            File.SetLastWriteTimeUtc(csproj, DateTime.UtcNow.AddMinutes(-5));
+            var binDir = Path.Combine(dir, "bin", "Release", "net10.0");
+            Directory.CreateDirectory(binDir);
+            var dllPath = Path.Combine(binDir, "setupgame.dll");
+            File.Copy(typeof(GameSetupDispatchTests).Assembly.Location, dllPath);
+            File.SetLastWriteTimeUtc(dllPath, DateTime.UtcNow);
+            try
+            {
+                var settings = new Atheriz.Core.Settings.AtherizSettings { SavePath = Path.Combine(dir, "save") };
+                Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings);
+                Assert.NotNull(InitialSetup.GameSetup);
+                Assert.Equal(typeof(StubGameSetup).FullName, InitialSetup.GameSetup!.GetType().FullName);
             }
             finally { try { Directory.Delete(dir, true); } catch { } }
         }
