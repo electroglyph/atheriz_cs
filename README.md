@@ -15,6 +15,8 @@ C# port of `atheriz` (Python MUD server, v0.9.0) on **.NET 10** (C# 14, `net10.0
   node --version
   npm --version
   ```
+- **Python 3** — only needed to redeploy the webclient into a game folder (`deploy.py` uses the standard library only).
+- **rsync** — used by `build.sh` to stage the webclient (`sudo pacman -S rsync` / `apt install rsync`).
   On Arch: `sudo pacman -S dotnet-sdk aspnet-targeting-pack nodejs npm`
   (`aspnet-targeting-pack` is required: without it the `Atheriz.Server` web
   project fails at restore with `NETSDK1226: Prune Package data not found`.)
@@ -49,7 +51,7 @@ All commands work through the launch scripts:
 # Windows: atheriz.cmd --help / atheriz.cmd new MyGame
 ```
 
-That creates `MyGame.csproj`, `GameSettings.cs`, `CustomObject.cs`, etc., plus `save/`, `secret/` and `web/` (with the webclient).
+That creates `MyGame.csproj`, `GameSettings.cs`, `CustomObject.cs`, etc., plus `save/`, `secret/` and `web/` (with the webclient) — and its own `atheriz.sh` / `atheriz.cmd` launchers plus `build.sh` / `build.cmd` build scripts (see below).
 
 For a non-interactive `new` (scripts, CI), pass the superuser credentials via the environment instead of the prompts:
 
@@ -57,7 +59,9 @@ For a non-interactive `new` (scripts, CI), pass the superuser credentials via th
 ATHERIZ_SUPERUSER_USERNAME=admin ATHERIZ_SUPERUSER_PASSWORD=admin1234 ./atheriz.sh new /tmp/MyGame --overwrite
 ```
 
-From inside your game folder:
+From inside your game folder — every new game gets its own `atheriz.sh` /
+`atheriz.cmd`, so you never need to go back to the repo root (they forward
+to the engine; override its location with `ATHERIZ_ROOT` if it moved):
 
 ```bash
 cd /tmp/MyGame
@@ -68,6 +72,24 @@ cd /tmp/MyGame
 ./atheriz.sh reload
 ./atheriz.sh reset --yes
 # Windows: atheriz.cmd create ... / atheriz.cmd start --foreground
+```
+
+## Build a game
+
+Game folders also get their own `build.sh` / `build.cmd`. From inside the game folder:
+
+```bash
+./build.sh               # rebuild the game plugin (Release) + redeploy the webclient into the game
+./build.sh --no-web      # plugin only
+./build.sh --web         # webclient redeploy only
+./build.sh --reload      # build, then hot-load the running server (any combo: e.g. --no-web --reload)
+# Windows: build.cmd [--no-web] [--web] [--reload]
+```
+
+The plugin build is what `reload` picks up (reload never compiles — it skips stale sources with "run `dotnet build` first"). The web step is equivalent to running this from the repo root:
+
+```bash
+python webclient/deploy.py game --web-root "/tmp/MyGame/web"
 ```
 
 If you prefer `dotnet` directly:
@@ -89,7 +111,7 @@ The server also supports `restart` and `test` (`test [core] [args...]` forwards 
 From the repo root:
 
 ```bash
-dotnet test Atheriz.sln -c Release              # full suite (~4,300 tests; required after server changes)
+dotnet test Atheriz.sln -c Release              # full suite (~5,000 tests; required after server changes)
 dotnet test tests/Atheriz.Core.Tests/Atheriz.Core.Tests.csproj -c Release --filter FullyQualifiedName~PortedAccountTests
 ```
 

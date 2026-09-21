@@ -190,6 +190,8 @@ public static class GameTemplateGenerator
         Console.WriteLine($"    - {gName}.csproj (refs Atheriz.Core)");
         Console.WriteLine("    - README.md, save/, secret/");
         Console.WriteLine("    - web/ (templates and static files)");
+        Console.WriteLine("    - atheriz.sh, atheriz.cmd (per-game launchers: ./atheriz.sh start)");
+        Console.WriteLine("    - build.sh, build.cmd (per-game build: ./build.sh [--no-web] [--web] [--reload])");
         if (shouldSetup)
         {
             Console.WriteLine("  Initial world:");
@@ -224,6 +226,10 @@ public static class GameTemplateGenerator
         var csprojName = gameName + ".csproj"; var csprojPath = Path.Combine(folderPath, csprojName);
         string coreRef = "../src/Atheriz.Core/Atheriz.Core.csproj";
         bool coreFound = false;
+        // Engine checkout root (the directory containing src/) for the
+        // per-game launchers baked below: same upward search as coreRef so
+        // the wrappers point at the engine that generated them.
+        string engineRoot = "";
         try
         {
             var asmDir = Path.GetDirectoryName(typeof(GameTemplateGenerator).Assembly.Location) ?? "";
@@ -231,7 +237,7 @@ public static class GameTemplateGenerator
             for (int i = 0; i < 8 && cur is not null; i++)
             {
                 var cand = Path.Combine(cur.FullName, "src", "Atheriz.Core", "Atheriz.Core.csproj");
-                if (File.Exists(cand)) { var rel = Path.GetRelativePath(folderPath, cand); coreRef = rel; if (!File.Exists(Path.Combine(folderPath, rel)) && Path.IsPathRooted(cand)) coreRef = cand; coreFound = true; break; }
+                if (File.Exists(cand)) { var rel = Path.GetRelativePath(folderPath, cand); coreRef = rel; if (!File.Exists(Path.Combine(folderPath, rel)) && Path.IsPathRooted(cand)) coreRef = cand; coreFound = true; engineRoot = cur.FullName; break; }
                 cur = cur.Parent;
             }
         } catch { }
@@ -254,11 +260,30 @@ public static class GameTemplateGenerator
         foreach (var kind in CustomKinds) files[kind.File] = kind.Emit(gameName);
         files["AssemblyInfo.cs"] = AI(gameName);
         files["README.md"] = RM(gameName);
+        // Baked relative engine path for the per-game build scripts: valid
+        // wherever the game is created and moves with engine+games together
+        // (unlike the launchers' absolute fallback). Empty when the engine
+        // root is unknown — those builds rely on ATHERIZ_ROOT/upward search.
+        string engineRel = "";
+        try { if (!string.IsNullOrEmpty(engineRoot)) engineRel = Path.GetRelativePath(folderPath, engineRoot); } catch { }
+        // Per-game launchers: forward every command to the engine launcher
+        // with the game folder as CWD. Plain writes (like every template
+        // above) so `new --overwrite` refreshes customized wrappers back to
+        // generated ones.
+        files["atheriz.sh"] = ShWrapper(engineRoot);
+        files["atheriz.cmd"] = CmdWrapper(engineRoot);
+        // Per-game builds: Release plugin build + webclient redeploy into
+        // this game. Same plain-write refresh semantics as the launchers.
+        files["build.sh"] = BuildSh(gameName, engineRel);
+        files["build.cmd"] = BuildCmd(gameName, engineRel);
         foreach (var kv in files)
         {
             Console.WriteLine($"  Creating {kv.Key}...");
             File.WriteAllText(Path.Combine(folderPath, kv.Key), kv.Value);
         }
+        // Best-effort executable bit for the shell wrappers (no-op on Windows).
+        Atheriz.Core.Utils.FsUtil.TryChmod0755(Path.Combine(folderPath, "atheriz.sh"));
+        Atheriz.Core.Utils.FsUtil.TryChmod0755(Path.Combine(folderPath, "build.sh"));
         Console.WriteLine("  Copying web folder...");
     }
     private static string GS(string ns) => $"// Port of atheriz/new.py:292\n// Port of atheriz/settings.py\nnamespace {ns};\nusing Atheriz.Core.Settings;\n/// <summary>Game settings — mirrors settings.py. See AtherizSettings.</summary>\npublic static class GameSettings\n{{\n    public const string SavePath = \"save\";\n    public const string SecretPath = \"secret\";\n    public const string ServerName = \"{ns}\";\n    public const bool WebclientSyncCheck = true;\n}}\n";
@@ -475,9 +500,218 @@ public static class GameTemplateGenerator
         var ctor = "    public CustomScript() : base() { }\n";
         return GenCustom(ns, typeof(Atheriz.Core.Objects.Script), header, ctor);
     }
-    private static string RM(string ns) => $"# {ns} — Atheriz Game Folder\nGenerated via `atheriz-cs new {ns}` (ports `atheriz/new.py:784`).\n## Run\n```\n# Game code is a class library loaded by the server (no Program.cs needed).\n# From this folder:\ndotnet run --project ../src/Atheriz.Server -- start\n```\n";
+    private static string RM(string ns) => $"# {ns} — Atheriz Game Folder\nGenerated via `atheriz-cs new {ns}` (ports `atheriz/new.py:784`).\n## Run\n```\n# From this folder (the wrappers forward to the engine launcher):\n./atheriz.sh start\n# (atheriz.cmd start on Windows; set ATHERIZ_ROOT if the engine moved)\n# Rebuild this game (plugin Release + webclient redeploy):\n./build.sh\n# (build.cmd on Windows; --no-web for code only, --web for web only,\n# --reload to hot-load a running server)\n# Game code is a class library loaded by the server (no Program.cs needed).\n# Direct alternative:\ndotnet run --project ../src/Atheriz.Server -- start\n```\n";
     // Assembly attributes for scaffolded games (checked-in template carries AssemblyInfo.cs with the same shape).
     private static string AI(string ns) => $"using System.Reflection;\n[assembly: AssemblyDescription(\"{ns} — Atheriz game plugin, loaded by Atheriz.Server via PluginLoader.\")]\n";
+    // Per-game launchers: thin forwarders to the engine's atheriz.sh/cmd.
+    // Engine resolution is ATHERIZ_ROOT env override first, then an upward
+    // search for the engine checkout (covers moved/copied game folders),
+    // then the absolute path baked in at `new` time. Arguments pass through
+    // untouched and CWD (the game folder) is never changed, so every engine
+    // command works: start|stop|restart|reload|reset|create|new|test.
+    private static string ShWrapper(string engineRoot) => """
+        #!/usr/bin/env bash
+        # Auto-generated by `atheriz.sh new` — per-game launcher. Forwards every
+        # command to the engine launcher; the game folder (current directory) is
+        # never changed. Override the engine location with ATHERIZ_ROOT.
+        set -euo pipefail
+        ENGINE_ROOT="${ATHERIZ_ROOT:-}"
+        if [ -z "$ENGINE_ROOT" ]; then
+          dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          depth=0
+          while [ "$depth" -lt 12 ]; do
+            if [ -f "$dir/src/Atheriz.Server/Atheriz.Server.csproj" ]; then ENGINE_ROOT="$dir"; break; fi
+            parent="$(dirname "$dir")"
+            if [ "$parent" = "$dir" ]; then break; fi
+            dir="$parent"
+            depth=$((depth + 1))
+          done
+        fi
+        if [ -z "$ENGINE_ROOT" ]; then ENGINE_ROOT="__ATHERIZ_ENGINE_ROOT__"; fi
+        if [ ! -f "$ENGINE_ROOT/atheriz.sh" ]; then
+          echo "error: engine launcher not found under '$ENGINE_ROOT' (set ATHERIZ_ROOT to the engine checkout)" >&2
+          exit 1
+        fi
+        exec "$ENGINE_ROOT/atheriz.sh" "$@"
+        """.Replace("__ATHERIZ_ENGINE_ROOT__", (engineRoot ?? "").Replace('\\', '/')) + "\n";
+    private static string CmdWrapper(string engineRoot) => """
+        @echo off
+        REM Auto-generated by `atheriz.cmd new` — per-game launcher. Forwards every
+        REM command to the engine launcher; the game folder (current directory) is
+        REM never changed. Override the engine location with ATHERIZ_ROOT.
+        set "ENGINE_ROOT=__ATHERIZ_ENGINE_ROOT__"
+        if defined ATHERIZ_ROOT set "ENGINE_ROOT=%ATHERIZ_ROOT%"
+        if not exist "%ENGINE_ROOT%\atheriz.cmd" (
+          echo error: engine launcher not found under '%ENGINE_ROOT%' (set ATHERIZ_ROOT to the engine checkout) 1>&2
+          exit /b 1
+        )
+        call "%ENGINE_ROOT%\atheriz.cmd" %*
+        exit /b %errorlevel%
+        """.Replace("__ATHERIZ_ENGINE_ROOT__", engineRoot ?? "") + "\n";
+    // Per-game builds: `dotnet build -c Release` the game plugin (reload
+    // discovers the Release dll, falling back to Debug) plus a webclient
+    // redeploy into this game via the engine's deploy.py (which rebuilds
+    // the bundle itself). Default runs both steps; --no-web is plugin-only,
+    // --web is web-only, --reload forwards to the sibling atheriz wrapper
+    // so a running server hot-loads the fresh dll (loud failure when no
+    // server runs — a build must not mask that). Engine resolution mirrors
+    // the launchers, except the baked fallback is the relative path above.
+    private static string BuildSh(string gameName, string engineRel) => """
+        #!/usr/bin/env bash
+        # Auto-generated by `atheriz.sh new` — per-game build. Rebuilds the game
+        # plugin (Release) and redeploys the webclient into this game's web/ folder.
+        # Usage: ./build.sh [--no-web] [--web] [--reload]
+        #   (no flags)  build the plugin AND redeploy the webclient
+        #   --no-web    plugin only (skip web redeploy)
+        #   --web       web redeploy only (skip plugin build)
+        #   --reload    after a successful build, reload the running server so it
+        #               hot-loads the fresh dll (fails loudly if no server runs)
+        # Engine resolution: ATHERIZ_ROOT wins, then an upward search for the
+        # engine checkout, then the relative path baked in at `new` time.
+        set -euo pipefail
+        GAME_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        ENGINE_ROOT="${ATHERIZ_ROOT:-}"
+        if [ -z "$ENGINE_ROOT" ]; then
+          dir="$GAME_DIR"
+          depth=0
+          while [ "$depth" -lt 12 ]; do
+            if [ -f "$dir/src/Atheriz.Server/Atheriz.Server.csproj" ]; then ENGINE_ROOT="$dir"; break; fi
+            parent="$(dirname "$dir")"
+            if [ "$parent" = "$dir" ]; then break; fi
+            dir="$parent"
+            depth=$((depth + 1))
+          done
+        fi
+        if [ -z "$ENGINE_ROOT" ]; then ENGINE_ROOT="$GAME_DIR/__ATHERIZ_ENGINE_REL__"; fi
+        usage() {
+          echo "Usage: ./build.sh [--no-web] [--web] [--reload]"
+          echo "  (no flags)  build the game plugin (Release) and redeploy the webclient"
+          echo "  --no-web    plugin only"
+          echo "  --web       web redeploy only"
+          echo "  --reload    reload the running server after a successful build"
+        }
+        DO_BUILD=1
+        DO_WEB=1
+        DO_RELOAD=0
+        for arg in "$@"; do
+          case "$arg" in
+            --no-web) DO_WEB=0 ;;
+            --web) DO_BUILD=0 ;;
+            --reload) DO_RELOAD=1 ;;
+            --help|-h) usage; exit 0 ;;
+            *) echo "error: unknown arg: $arg" >&2; usage >&2; exit 1 ;;
+          esac
+        done
+        if [ "$DO_BUILD" -eq 0 ] && [ "$DO_WEB" -eq 0 ]; then
+          echo "error: --no-web and --web together leave nothing to do" >&2
+          exit 1
+        fi
+        CSPROJ="$GAME_DIR/__GAME_NAME__.csproj"
+        if [ "$DO_BUILD" -eq 1 ]; then
+          if ! command -v dotnet >/dev/null 2>&1; then
+            echo "error: dotnet SDK required (see engine global.json)" >&2
+            exit 1
+          fi
+          if [ ! -f "$CSPROJ" ]; then
+            echo "error: game project not found: $CSPROJ" >&2
+            exit 1
+          fi
+          dotnet build "$CSPROJ" -c Release
+        fi
+        if [ "$DO_WEB" -eq 1 ]; then
+          PY=python
+          if ! command -v python >/dev/null 2>&1; then
+            if command -v python3 >/dev/null 2>&1; then PY=python3; else
+              echo "error: python required for the webclient deploy" >&2
+              exit 1
+            fi
+          fi
+          if [ ! -f "$ENGINE_ROOT/webclient/deploy.py" ]; then
+            echo "error: deploy.py not found under '$ENGINE_ROOT' (set ATHERIZ_ROOT to the engine checkout)" >&2
+            exit 1
+          fi
+          "$PY" "$ENGINE_ROOT/webclient/deploy.py" game --web-root "$GAME_DIR/web"
+        fi
+        if [ "$DO_RELOAD" -eq 1 ]; then
+          if [ ! -f "$GAME_DIR/atheriz.sh" ]; then
+            echo "error: per-game launcher missing: $GAME_DIR/atheriz.sh" >&2
+            exit 1
+          fi
+          "$GAME_DIR/atheriz.sh" reload
+        fi
+        echo "Build complete."
+        """.Replace("__GAME_NAME__", gameName).Replace("__ATHERIZ_ENGINE_REL__", (engineRel ?? "").Replace('\\', '/')) + "\n";
+    private static string BuildCmd(string gameName, string engineRel) => """
+        @echo off
+        REM Auto-generated by `atheriz.cmd new` — per-game build. Rebuilds the game
+        REM plugin (Release) and redeploys the webclient into this game's web/ folder.
+        REM Usage: build.cmd [--no-web] [--web] [--reload]
+        REM   (no flags)  build the plugin AND redeploy the webclient
+        REM   --no-web    plugin only (skip web redeploy)
+        REM   --web       web redeploy only (skip plugin build)
+        REM   --reload    after a successful build, reload the running server so it
+        REM               hot-loads the fresh dll (fails loudly if no server runs)
+        REM Engine resolution: ATHERIZ_ROOT wins, else the relative path baked in
+        REM at `new` time, resolved against this script's directory.
+        setlocal EnableDelayedExpansion
+        set "GAME_DIR=%~dp0"
+        if "%GAME_DIR:~-1%"=="\" set "GAME_DIR=%GAME_DIR:~0,-1%"
+        set "ENGINE_ROOT="
+        if defined ATHERIZ_ROOT set "ENGINE_ROOT=%ATHERIZ_ROOT%"
+        if not defined ENGINE_ROOT (
+          pushd "%GAME_DIR%\__ATHERIZ_ENGINE_REL__" 2>nul
+          if not errorlevel 1 (
+            set "ENGINE_ROOT=!CD!"
+            popd
+          )
+        )
+        if not defined ENGINE_ROOT (
+          echo error: engine checkout not found (set ATHERIZ_ROOT to the engine checkout) 1>&2
+          exit /b 1
+        )
+        set "DO_BUILD=1"
+        set "DO_WEB=1"
+        set "DO_RELOAD=0"
+        :parse
+        if "%~1"=="" goto :parsed
+        if /i "%~1"=="--no-web" ( set "DO_WEB=0" ) else if /i "%~1"=="--web" ( set "DO_BUILD=0" ) else if /i "%~1"=="--reload" ( set "DO_RELOAD=1" ) else if /i "%~1"=="--help" ( call :usage & exit /b 0 ) else ( echo error: unknown arg: %~1 1>&2 & exit /b 1 )
+        shift
+        goto :parse
+        :parsed
+        if "%DO_BUILD%"=="0" if "%DO_WEB%"=="0" (
+          echo error: --no-web and --web together leave nothing to do 1>&2
+          exit /b 1
+        )
+        if "%DO_BUILD%"=="1" (
+          where dotnet >nul 2>nul
+          if errorlevel 1 ( echo error: dotnet SDK required 1>&2 & exit /b 1 )
+          if not exist "%GAME_DIR%\__GAME_NAME__.csproj" ( echo error: game project not found: %GAME_DIR%\__GAME_NAME__.csproj 1>&2 & exit /b 1 )
+          dotnet build "%GAME_DIR%\__GAME_NAME__.csproj" -c Release
+          if errorlevel 1 exit /b 1
+        )
+        if "%DO_WEB%"=="1" (
+          set "PY=python"
+          where python >nul 2>nul
+          if errorlevel 1 set "PY=python3"
+          if not exist "%ENGINE_ROOT%\webclient\deploy.py" ( echo error: deploy.py not found under '%ENGINE_ROOT%' (set ATHERIZ_ROOT to the engine checkout) 1>&2 & exit /b 1 )
+          "!PY!" "%ENGINE_ROOT%\webclient\deploy.py" game --web-root "%GAME_DIR%\web"
+          if errorlevel 1 exit /b 1
+        )
+        if "%DO_RELOAD%"=="1" (
+          if not exist "%GAME_DIR%\atheriz.cmd" ( echo error: per-game launcher missing: %GAME_DIR%\atheriz.cmd 1>&2 & exit /b 1 )
+          call "%GAME_DIR%\atheriz.cmd" reload
+          if errorlevel 1 exit /b 1
+        )
+        echo Build complete.
+        exit /b 0
+        :usage
+        echo Usage: build.cmd [--no-web] [--web] [--reload]
+        echo   (no flags)  build the game plugin (Release) and redeploy the webclient
+        echo   --no-web    plugin only
+        echo   --web       web redeploy only
+        echo   --reload    reload the running server after a successful build
+        exit /b 0
+        """.Replace("__GAME_NAME__", gameName).Replace("__ATHERIZ_ENGINE_REL__", engineRel ?? "") + "\n";
     // Port of atheriz/new.py:530 copy_web_folder
     public static void CopyWebFolder(string destination, string? webSrc = null)
     {
