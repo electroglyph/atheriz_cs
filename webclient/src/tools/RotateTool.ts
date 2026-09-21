@@ -1,8 +1,10 @@
 import { Tool, ToolContext } from './Tool';
 import { Point, Cell, RotateMode } from '../types';
+import { cellEquals } from '../utils/colors';
 
 import { transformCharacter } from '../utils/transformMappings';
 import { measureCellMetrics } from '../utils/fontMetrics';
+import { parseCellKey } from '../utils/cellKeys';
 
 function getCellAspect(fontFamily: string): number {
     try {
@@ -23,6 +25,36 @@ export class RotateTool implements Tool {
     private cx: number = 0;
     private cy: number = 0;
 
+    // atan2(0,0) is implementation-defined noise: a click exactly on the
+    // rotation center means "no rotation", so fall back to the given angle.
+    private static angleOf(dx: number, dy: number, fallback: number): number {
+        return (dx === 0 && dy === 0) ? fallback : Math.atan2(dy, dx);
+    }
+
+    private static inBounds(ctx: ToolContext, c: number, r: number): boolean {
+        return c >= 0 && c < ctx.state.width && r >= 0 && r < ctx.state.height;
+    }
+
+    // Merge clears + placements (placements win on overlap) and drop writes
+    // that would not change the cell, so content-identical transforms push
+    // no undo entry. Out-of-bounds destinations are clipped (dropped).
+    private static buildBatch(
+        ctx: ToolContext,
+        clearUpdates: { col: number; row: number; cell: Cell }[],
+        placeUpdates: { col: number; row: number; cell: Cell }[]
+    ): { col: number; row: number; cell: Cell }[] {
+        const merged = new Map<string, { col: number; row: number; cell: Cell }>();
+        for (const u of [...clearUpdates, ...placeUpdates]) {
+            if (RotateTool.inBounds(ctx, u.col, u.row)) {
+                merged.set(`${u.col},${u.row}`, u);
+            }
+        }
+        return [...merged.values()].filter(u => {
+            const current = ctx.state.getCell(u.col, u.row);
+            return !current || !cellEquals(current, u.cell);
+        });
+    }
+
     public applyTransform(ctx: ToolContext, mode: Exclude<RotateMode, 'free'>) {
         const selected = ctx.renderer.getSelectedCells();
         const activeLayer = ctx.state.getActiveLayer();
@@ -31,9 +63,15 @@ export class RotateTool implements Tool {
 
         if (selected && selected.size > 0) {
             for (const key of selected) {
-                const [col, row] = key.split(',').map(Number);
+                const parsed = parseCellKey(key);
+                if (!parsed) continue;
+                const col = parsed.col;
+                const row = parsed.row;
                 const cell = ctx.state.getCell(col, row);
-                if (cell) {
+                // Skip empty cells (same emptiness rule as CanvasState.setCell:
+                // no char and a transparent bg), so rotating a selection that
+                // is already blank pushes no undo entry.
+                if (cell && ((cell.char && cell.char.trim() !== '') || cell.bg[0] !== -1)) {
                     targetCells.push({ col, row, originCell: cell });
                 }
             }
@@ -50,8 +88,9 @@ export class RotateTool implements Tool {
             }
             if (activeLayer.overflowCells) {
                 for (const [key, c] of activeLayer.overflowCells.entries()) {
-                    const [col, row] = key.split(',').map(Number);
-                    targetCells.push({ col, row, originCell: c });
+                    const parsed = parseCellKey(key);
+                    if (!parsed) continue;
+                    targetCells.push({ col: parsed.col, row: parsed.row, originCell: c });
                 }
             }
         }
@@ -70,8 +109,6 @@ export class RotateTool implements Tool {
 
         const width = maxCol - minCol + 1;
         const height = maxRow - minRow + 1;
-
-        ctx.undoStack.push(ctx.state);
 
         const clearUpdates = targetCells.map(tc => ({
             col: tc.col, row: tc.row, 
@@ -118,7 +155,7 @@ export class RotateTool implements Tool {
                 row: finalRow,
                 originCell: { ...tc.originCell, char: newChar }
             });
-            if (selected && selected.size > 0) {
+            if (selected && selected.size > 0 && RotateTool.inBounds(ctx, finalCol, finalRow)) {
                 mappedSelection.add(`${finalCol},${finalRow}`);
             }
         }
@@ -127,7 +164,12 @@ export class RotateTool implements Tool {
             col: ntc.col, row: ntc.row, cell: ntc.originCell
         }));
 
-        ctx.state.applyBatch([...clearUpdates, ...placeUpdates]);
+        // Content-identical or fully-clipped transforms push no undo entry.
+        const batch = RotateTool.buildBatch(ctx, clearUpdates, placeUpdates);
+        if (batch.length === 0) return;
+
+        ctx.undoStack.push(ctx.state);
+        ctx.state.applyBatch(batch);
 
         if (mappedSelection.size > 0) {
             ctx.renderer.setSelection(mappedSelection);
@@ -150,10 +192,11 @@ export class RotateTool implements Tool {
 
         if (selected && selected.size > 0) {
             for (const key of selected) {
-                const [col, row] = key.split(',').map(Number);
-                const cell = ctx.state.getCell(col, row);
+                const parsed = parseCellKey(key);
+                if (!parsed) continue;
+                const cell = ctx.state.getCell(parsed.col, parsed.row);
                 if (cell) {
-                    this.movingCells.push({ col, row, originCell: cell });
+                    this.movingCells.push({ col: parsed.col, row: parsed.row, originCell: cell });
                 }
             }
         } else {
@@ -169,8 +212,9 @@ export class RotateTool implements Tool {
             }
             if (activeLayer.overflowCells) {
                 for (const [key, c] of activeLayer.overflowCells.entries()) {
-                    const [col, row] = key.split(',').map(Number);
-                    this.movingCells.push({ col, row, originCell: c });
+                    const parsed = parseCellKey(key);
+                    if (!parsed) continue;
+                    this.movingCells.push({ col: parsed.col, row: parsed.row, originCell: c });
                 }
             }
         }
@@ -191,7 +235,7 @@ export class RotateTool implements Tool {
 
         const dy = cell.y - this.cy;
         const dx = cell.x - this.cx;
-        this.startAngle = Math.atan2(dy, dx);
+        this.startAngle = RotateTool.angleOf(dx, dy, 0);
         this.currentTheta = 0;
     }
 
@@ -200,7 +244,7 @@ export class RotateTool implements Tool {
         
         const dy = to.y - this.cy;
         const dx = to.x - this.cx;
-        const currentAngle = Math.atan2(dy, dx);
+        const currentAngle = RotateTool.angleOf(dx, dy, this.startAngle);
         this.currentTheta = currentAngle - this.startAngle;
 
         this.updateFreeHover(ctx, this.currentTheta);
@@ -279,17 +323,18 @@ export class RotateTool implements Tool {
         
         const dy = cell.y - this.cy;
         const dx = cell.x - this.cx;
-        const currentAngle = Math.atan2(dy, dx);
+        const currentAngle = RotateTool.angleOf(dx, dy, this.startAngle);
         this.currentTheta = currentAngle - this.startAngle;
 
         ctx.renderer.clearPreview();
 
-        if (this.currentTheta === 0) {
+        // Epsilon zero check: a click on the center (or float noise) must
+        // not record an undo entry for a no-op rotation.
+        if (Math.abs(this.currentTheta) < 1e-9) {
             this.anchor = null;
+            this.movingCells = [];
             return;
         }
-
-        ctx.undoStack.push(ctx.state);
 
         const W = getCellAspect(ctx.appState.fontFamily);
         const H = 1.0;
@@ -328,7 +373,7 @@ export class RotateTool implements Tool {
                 const sr = Math.round((oy / H) + this.cy);
                 
                 const oCell = originHash.get(`${sc},${sr}`);
-                if (oCell) {
+                if (oCell && RotateTool.inBounds(ctx, c, r)) {
                     newTargetCells.push({ col: c, row: r, originCell: oCell });
                     if (wasSelected) mappedSelection.add(`${c},${r}`);
                 }
@@ -343,7 +388,16 @@ export class RotateTool implements Tool {
             col: ntc.col, row: ntc.row, cell: ntc.originCell
         }));
 
-        ctx.state.applyBatch([...clearUpdates, ...placeUpdates]);
+        // Content-identical or fully-clipped rotations push no undo entry.
+        const batch = RotateTool.buildBatch(ctx, clearUpdates, placeUpdates);
+        if (batch.length === 0) {
+            this.anchor = null;
+            this.movingCells = [];
+            return;
+        }
+
+        ctx.undoStack.push(ctx.state);
+        ctx.state.applyBatch(batch);
 
         if (mappedSelection.size > 0) {
             ctx.renderer.setSelection(mappedSelection);

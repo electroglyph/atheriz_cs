@@ -23,7 +23,12 @@ export class RectangleTool implements Tool {
         if (!this.anchor) return;
         this.currentTarget = cell;
         
-        const cells = this.getRectCells(ctx, this.anchor, this.currentTarget);
+        // Clip here (not in getRectCells, which stays pure for preview):
+        // commits must never write overflowCells.
+        const w = ctx.state.width;
+        const h = ctx.state.height;
+        const cells = this.getRectCells(ctx, this.anchor, this.currentTarget)
+            .filter(u => u.col >= 0 && u.col < w && u.row >= 0 && u.row < h);
 
         // Only record undo when at least one cell actually changes.
         if (cells.some(u => {

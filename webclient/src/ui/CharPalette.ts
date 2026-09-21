@@ -1,6 +1,9 @@
 import { CHAR_GROUPS, CHAR_NAMES } from '../utils/characters';
 import { AppState } from '../types';
 
+/** Max custom characters kept per palette (and in localStorage). */
+export const MAX_CUSTOM_CHARS = 256;
+
 export class CharPalette {
     private container: HTMLElement;
     private appState: AppState;
@@ -25,11 +28,17 @@ export class CharPalette {
                             if (typeof char === 'string' && char.length > 0 && !customGroup.chars.includes(char)) {
                                 customGroup.chars.push(char);
                             }
+                            if (customGroup.chars.length >= MAX_CUSTOM_CHARS) break;
+                        }
+                        if (customGroup.chars.length > MAX_CUSTOM_CHARS) {
+                            customGroup.chars.length = MAX_CUSTOM_CHARS;
                         }
                     }
                 }
             }
-        } catch {}
+        } catch {
+            // Corrupt or inaccessible storage: start with built-in chars.
+        }
         this.render();
     }
 
@@ -38,10 +47,11 @@ export class CharPalette {
         if (!customGroup) return;
         let added = false;
         for (const char of chars) {
-            if (!customGroup.chars.includes(char)) {
-                customGroup.chars.push(char);
-                added = true;
-            }
+            if (typeof char !== 'string' || char.length === 0) continue;
+            if (customGroup.chars.includes(char)) continue;
+            if (customGroup.chars.length >= MAX_CUSTOM_CHARS) break;
+            customGroup.chars.push(char);
+            added = true;
         }
         if (added) {
             try {

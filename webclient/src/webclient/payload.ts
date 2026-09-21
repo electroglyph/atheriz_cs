@@ -16,7 +16,25 @@ export function asBoolean(value: unknown): boolean {
 }
 
 export function asPosition(value: unknown): [number, number] | undefined {
-    return Array.isArray(value) && typeof value[0] === 'number' && typeof value[1] === 'number' ? [value[0], value[1]] : undefined;
+    if (!Array.isArray(value) || typeof value[0] !== 'number' || typeof value[1] !== 'number') return undefined;
+    // Reject NaN/Infinity (they corrupt viewport math downstream).
+    // Floats are kept: map coordinates may be fractional.
+    if (!Number.isFinite(value[0]) || !Number.isFinite(value[1])) return undefined;
+    return [value[0], value[1]];
+}
+
+/**
+ * String caps for legend entries (truncate with slice, code-point safe):
+ * - symbol: 64 raw chars max — a symbol is one glyph, optionally wrapped in
+ *   ANSI escapes, so the cap applies to the raw string including escapes.
+ * - desc: 256 chars max.
+ */
+export const MAX_LEGEND_SYMBOL_LENGTH = 64;
+export const MAX_LEGEND_DESC_LENGTH = 256;
+
+function truncateText(value: string, maxLength: number): string {
+    if (value.length <= maxLength) return value;
+    return [...value].slice(0, maxLength).join('');
 }
 
 export function asLegend(value: unknown): MapPayload['legend'] {
@@ -27,7 +45,7 @@ export function asLegend(value: unknown): MapPayload['legend'] {
             const desc = typeof rawDesc === 'string' ? rawDesc : rawDesc == null ? '' : null;
             if (desc === null) return [];
             const coords = asPosition(entry[2]);
-            return [{ symbol: entry[0], desc, coords }];
+            return [{ symbol: truncateText(entry[0], MAX_LEGEND_SYMBOL_LENGTH), desc: truncateText(desc, MAX_LEGEND_DESC_LENGTH), coords }];
         }
         if (typeof entry === 'object' && entry !== null &&
             typeof (entry as { symbol?: unknown }).symbol === 'string') {
@@ -37,7 +55,7 @@ export function asLegend(value: unknown): MapPayload['legend'] {
             if (typeof rawDesc === 'string') desc = rawDesc;
             else if (rawDesc == null) desc = '';
             else return [];
-            return [{ symbol: raw.symbol, desc, coords: asPosition(raw.coords) }];
+            return [{ symbol: truncateText(raw.symbol, MAX_LEGEND_SYMBOL_LENGTH), desc: truncateText(desc, MAX_LEGEND_DESC_LENGTH), coords: asPosition(raw.coords) }];
         }
         return [];
     });
@@ -65,8 +83,8 @@ export function asMapPayload(value: unknown): MapPayload {
         pos: asPosition(data.pos),
         symbol: typeof data.symbol === 'string' ? data.symbol : undefined,
         legend: asLegend(data.legend),
-        min_x: typeof data.min_x === 'number' ? data.min_x : 0,
-        max_y: typeof data.max_y === 'number' ? data.max_y : 0,
+        min_x: typeof data.min_x === 'number' && Number.isFinite(data.min_x) ? data.min_x : 0,
+        max_y: typeof data.max_y === 'number' && Number.isFinite(data.max_y) ? data.max_y : 0,
         area: typeof data.area === 'string' ? data.area : undefined,
         show_legend: normalizeShowLegend(data.show_legend),
         background: parseBackground(data.background),

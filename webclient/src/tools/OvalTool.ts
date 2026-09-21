@@ -24,7 +24,9 @@ export class OvalTool implements Tool {
         if (!this.anchor) return;
         this.currentTarget = cell;
 
-        const cells = this.getOvalCells(ctx, this.anchor, this.currentTarget);
+        // Clip here (not in getOvalCells, which stays pure for preview):
+        // commits must never write overflowCells.
+        const cells = this.clipToCanvas(ctx, this.getOvalCells(ctx, this.anchor, this.currentTarget));
 
         // Only record undo when at least one cell actually changes.
         if (cells.some(u => {
@@ -63,6 +65,17 @@ export class OvalTool implements Tool {
         if (!this.anchor || !this.currentTarget) return;
         const cells = this.getOvalCells(ctx, this.anchor, this.currentTarget);
         ctx.renderer.setPreview(cells);
+    }
+
+    private isInBounds(ctx: ToolContext, x: number, y: number): boolean {
+        return x >= 0 && x < ctx.state.width && y >= 0 && y < ctx.state.height;
+    }
+
+    // Clip tool output to the canvas so commits never write overflowCells.
+    private clipToCanvas(ctx: ToolContext, cells: {col: number, row: number, cell: Cell}[]): {col: number, row: number, cell: Cell}[] {
+        const w = ctx.state.width;
+        const h = ctx.state.height;
+        return cells.filter(u => u.col >= 0 && u.col < w && u.row >= 0 && u.row < h);
     }
 
     private getOvalCells(ctx: ToolContext, from: Point, to: Point): {col: number, row: number, cell: Cell}[] {
@@ -163,9 +176,13 @@ export class OvalTool implements Tool {
                         mode === 'heavy' ? HEAVY_BOX :
                         LIGHT_BOX;
 
-        // First map all points for quick neighbor lookups
+        // First map all points for quick neighbor lookups. Only in-bounds
+        // points vote: an out-of-bounds neighbor must not flip a visible
+        // endpoint into a corner/tee piece.
         const pMap = new Set<string>();
-        for (const p of points) pMap.add(`${p.x},${p.y}`);
+        for (const p of points) {
+            if (this.isInBounds(ctx, p.x, p.y)) pMap.add(`${p.x},${p.y}`);
+        }
 
         for (const p of points) {
             let charToDraw = selected;

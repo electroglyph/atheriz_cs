@@ -1,5 +1,27 @@
 export class GlyphScanner {
     private static cache: Map<string, number[]> = new Map();
+    /** Max cached fonts; oldest entries are evicted first (insertion order). */
+    static readonly MAX_CACHE_ENTRIES = 500;
+    /** Bumped by cancel(): in-flight scans observe the mismatch and stop. */
+    private static generation = 0;
+
+    /**
+     * Cancels in-flight scans. Chunk callbacks already scheduled check the
+     * generation and resolve early instead of burning frames on stale work.
+     */
+    static cancel(): void {
+        this.generation++;
+    }
+
+    private static storeInCache(fontFamily: string, glyphs: number[]): void {
+        this.cache.delete(fontFamily);
+        while (this.cache.size >= this.MAX_CACHE_ENTRIES) {
+            const oldest = this.cache.keys().next();
+            if (oldest.done) break;
+            this.cache.delete(oldest.value);
+        }
+        this.cache.set(fontFamily, glyphs);
+    }
 
     // Only scan ranges that are actually useful for a drawing app.
     // This avoids all the obscure historical scripts, unassigned blocks, and speeds up scanning 100x.
@@ -73,7 +95,14 @@ export class GlyphScanner {
         let codesProcessed = 0;
 
         return new Promise((resolve) => {
+            const generation = GlyphScanner.generation;
             const processChunk = () => {
+                if (generation !== GlyphScanner.generation) {
+                    // Cancelled (or superseded): stop scheduling frames and
+                    // hand back whatever was collected so far.
+                    resolve(validGlyphs);
+                    return;
+                }
                 let chunkProcessed = 0;
 
                 while (chunkProcessed < CHUNK_SIZE && rangeIdx < this.VALID_RANGES.length) {
@@ -124,7 +153,7 @@ export class GlyphScanner {
                 if (rangeIdx >= this.VALID_RANGES.length) {
                     // Never cache fallback-font metrics under the real name;
                     // a later open (once the font loads) rescans correctly.
-                    if (fontReady) this.cache.set(fontFamily, validGlyphs);
+                    if (fontReady) this.storeInCache(fontFamily, validGlyphs);
                     resolve(validGlyphs);
                 } else {
                     onProgress(Math.floor((codesProcessed / totalCodes) * 100));

@@ -74,7 +74,9 @@ export function detectAnsiDimensions(ansiString: string): { width: number; heigh
     // Our exporter always starts with \x1b[8;<rows>;<cols>t
     const sizeMatch = ansiString.match(/^\x1b\[8;(\d+);(\d+)t/);
     if (sizeMatch) {
-        return { width: parseInt(sizeMatch[2], 10), height: parseInt(sizeMatch[1], 10) };
+        // The header is untrusted input: clamp it so a corrupt or hostile
+        // size cannot make us construct a giant xterm Terminal (OOM).
+        return { width: clampAnsiDim(parseInt(sizeMatch[2], 10)), height: clampAnsiDim(parseInt(sizeMatch[1], 10)) };
     }
 
     // Fallback: strip ANSI escapes and measure the plain-text content
@@ -90,8 +92,24 @@ export function detectAnsiDimensions(ansiString: string): { width: number; heigh
 export const DEFAULT_FG: Color = [204, 204, 204];
 export const TRANSPARENT: Color = [-1, -1, -1];
 
+// Broadcast cap for canvas dimensions parsed from untrusted ANSI input.
+const MAX_ANSI_DIM = 500;
+
+function clampAnsiDim(value: number): number {
+    if (!Number.isFinite(value)) return 1;
+    return Math.min(MAX_ANSI_DIM, Math.max(1, Math.floor(value)));
+}
+
+function clampByte(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.min(255, Math.max(0, Math.floor(value)));
+}
+
+const ANSI_CSI_BROAD = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const ANSI_OSC = /\x1b\][^\x07]*(?:\x07|\x1b\\)/g;
+
 export function stripAnsi(s: string): string {
-    return s.replace(/\x1b\[[0-9;]*m/g, '');
+    return s.replace(ANSI_OSC, '').replace(ANSI_CSI_BROAD, '').replace(/\x1b/g, '');
 }
 
 export function wrapLegendSymbol(char: string, fg: Color, bg: Color): string {
@@ -169,7 +187,7 @@ export function parseAnsiSymbol(symbol: string): Cell {
                     const isFg = code === 38;
                     const mode = Number(parts[i + 1]);
                     if (mode === 2 && i + 4 < parts.length) {
-                        const rgb: Color = [Number(parts[i + 2]), Number(parts[i + 3]), Number(parts[i + 4])];
+                        const rgb: Color = [clampByte(Number(parts[i + 2])), clampByte(Number(parts[i + 3])), clampByte(Number(parts[i + 4]))];
                         if (isFg) {
                             fg = rgb;
                         } else {
@@ -178,7 +196,8 @@ export function parseAnsiSymbol(symbol: string): Cell {
                         }
                         i += 5;
                     } else if (mode === 5 && i + 2 < parts.length) {
-                        const rgb = ansi256ToRgb(Number(parts[i + 2]));
+                        const paletteIndex = Number(parts[i + 2]);
+                        const rgb = ansi256ToRgb(Number.isFinite(paletteIndex) ? Math.floor(paletteIndex) : 0);
                         if (isFg) {
                             fg = rgb;
                         } else {
@@ -209,42 +228,53 @@ export function parseAnsiSymbol(symbol: string): Cell {
 }
 
 export async function parseAnsiToCells(ansiString: string, canvasWidth: number, canvasHeight?: number): Promise<Cell[]> {
-    const rows = canvasHeight ?? Math.max(1, Math.ceil(ansiString.length / canvasWidth));
-    const term = new Terminal({ cols: canvasWidth, rows, scrollback: 0, allowProposedApi: true });
-    const normalized = ansiString.replace(/(?<!\r)\n/g, '\r\n');
-    await writeSync(term, normalized);
+    // A zero/negative/NaN width would divide by zero below (Infinity rows) and
+    // hand xterm a degenerate terminal; clamp to the same bounded range as
+    // detectAnsiDimensions.
+    const safeWidth = clampAnsiDim(canvasWidth);
+    const rows = canvasHeight === undefined
+        ? Math.max(1, Math.ceil(ansiString.length / safeWidth))
+        : clampAnsiDim(canvasHeight);
+    const term = new Terminal({ cols: safeWidth, rows, scrollback: 0, allowProposedApi: true });
+    try {
+        const normalized = ansiString.replace(/(?<!\r)\n/g, '\r\n');
+        await writeSync(term, normalized);
 
-    const buf = term.buffer.active;
-    const cells: Cell[] = [];
-    const nullCell = buf.getNullCell();
+        const buf = term.buffer.active;
+        const cells: Cell[] = [];
+        const nullCell = buf.getNullCell();
 
-    for (let y = 0; y < rows; y++) {
-        const line = buf.getLine(y);
-        for (let x = 0; x < canvasWidth; x++) {
-            const c = line?.getCell(x, nullCell);
-            if (!c) {
-                cells.push({ char: '', fg: [204, 204, 204], bg: [0, 0, 0] });
-                continue;
+        for (let y = 0; y < rows; y++) {
+            const line = buf.getLine(y);
+            for (let x = 0; x < safeWidth; x++) {
+                const c = line?.getCell(x, nullCell);
+                if (!c) {
+                    cells.push({ char: '', fg: [204, 204, 204], bg: [0, 0, 0] });
+                    continue;
+                }
+                const ch = c.getChars();
+                const { fg, bg } = extractCellColors(c);
+                cells.push({
+                    char: ch === ' ' ? '' : ch,
+                    fg,
+                    bg,
+                    bold: !!c.isBold() || undefined,
+                    italic: !!c.isItalic() || undefined,
+                    underline: !!c.isUnderline() || undefined,
+                });
             }
-            const ch = c.getChars();
-            const { fg, bg } = extractCellColors(c);
-            cells.push({
-                char: ch === ' ' ? '' : ch,
-                fg,
-                bg,
-                bold: !!c.isBold() || undefined,
-                italic: !!c.isItalic() || undefined,
-                underline: !!c.isUnderline() || undefined,
-            });
         }
-    }
 
-    term.dispose();
-    return cells;
+        return cells;
+    } finally {
+        term.dispose();
+    }
 }
 
 export async function parseAnsiToState(ansiString: string, width: number, height: number): Promise<CanvasState> {
-    const state = new CanvasState(width, height, false);
+    const safeWidth = clampAnsiDim(width);
+    const safeHeight = clampAnsiDim(height);
+    const state = new CanvasState(safeWidth, safeHeight, false);
     state.layers = [];
     state.layerIdCounter = 0;
     state.addLayer('Background', true);
@@ -260,34 +290,39 @@ export async function parseAnsiToState(ansiString: string, width: number, height
 
         const chunk = layerChunks[li];
         const normalizedChunk = chunk.replace(/(?<!\r)\n/g, '\r\n');
-        const term = new Terminal({ cols: width, rows: height, scrollback: 0, allowProposedApi: true });
-        await writeSync(term, normalizedChunk);
+        // NB: the terminal and the loops must use the clamped dims, not the
+        // raw header values — otherwise a hostile size writes out of bounds
+        // of the (clamped) layer grid and leaks an oversized terminal.
+        const term = new Terminal({ cols: safeWidth, rows: safeHeight, scrollback: 0, allowProposedApi: true });
+        try {
+            await writeSync(term, normalizedChunk);
 
-        const buf = term.buffer.active;
-        const layer = state.layers[li];
-        const nullCell = buf.getNullCell();
-        const defaultBg: Color = li === 0 ? [0, 0, 0] : [-1, -1, -1];
+            const buf = term.buffer.active;
+            const layer = state.layers[li];
+            const nullCell = buf.getNullCell();
+            const defaultBg: Color = li === 0 ? [0, 0, 0] : [-1, -1, -1];
 
-        for (let y = 0; y < height; y++) {
-            const line = buf.getLine(y);
-            for (let x = 0; x < width; x++) {
-                const c = line?.getCell(x, nullCell);
-                if (!c) continue;
-                const ch = c.getChars();
-                const { fg, bg: rawBg } = extractCellColors(c);
-                const bg = c.isBgDefault() ? [...defaultBg] as Color : rawBg;
-                layer.cells[y][x] = {
-                    char: ch === ' ' ? '' : ch,
-                    fg,
-                    bg,
-                    bold: !!c.isBold() || undefined,
-                    italic: !!c.isItalic() || undefined,
-                    underline: !!c.isUnderline() || undefined,
-                };
+            for (let y = 0; y < safeHeight; y++) {
+                const line = buf.getLine(y);
+                for (let x = 0; x < safeWidth; x++) {
+                    const c = line?.getCell(x, nullCell);
+                    if (!c) continue;
+                    const ch = c.getChars();
+                    const { fg, bg: rawBg } = extractCellColors(c);
+                    const bg = c.isBgDefault() ? [...defaultBg] as Color : rawBg;
+                    layer.cells[y][x] = {
+                        char: ch === ' ' ? '' : ch,
+                        fg,
+                        bg,
+                        bold: !!c.isBold() || undefined,
+                        italic: !!c.isItalic() || undefined,
+                        underline: !!c.isUnderline() || undefined,
+                    };
+                }
             }
+        } finally {
+            term.dispose();
         }
-
-        term.dispose();
     }
 
     state.activeLayerIndex = 0;

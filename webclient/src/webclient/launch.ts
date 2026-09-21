@@ -36,6 +36,11 @@ export function launchDraw(key?: string, payload?: unknown): boolean {
         return true;
     }
 
+    // Popup blocked: reuse a single fallback div (max 1) instead of
+    // appending a new one on every blocked attempt.
+    if (document.querySelector('.popup-fallback')) {
+        return false;
+    }
     const link = document.createElement('a');
     link.href = drawUrl;
     link.target = '_blank';
@@ -51,9 +56,16 @@ export function launchDraw(key?: string, payload?: unknown): boolean {
 }
 
 export function readDrawGrant(): DrawGrant | null {
-    const raw = localStorage.getItem(GRANT_KEY);
+    let raw: string | null;
+    let tsRaw: string | null;
+    try {
+        raw = localStorage.getItem(GRANT_KEY);
+        tsRaw = localStorage.getItem(GRANT_TS_KEY);
+    } catch {
+        // Storage may throw (blocked third-party storage, security policy).
+        return null;
+    }
     if (!raw) return null;
-    const tsRaw = localStorage.getItem(GRANT_TS_KEY);
     if (tsRaw === null || Number.isNaN(Number(tsRaw)) || Date.now() - Number(tsRaw) > GRANT_TTL_MS) {
         clearDrawGrant();
         return null;
@@ -72,8 +84,12 @@ export function readDrawGrant(): DrawGrant | null {
 }
 
 export function clearDrawGrant(): void {
-    localStorage.removeItem(GRANT_KEY);
-    localStorage.removeItem(GRANT_TS_KEY);
+    try {
+        localStorage.removeItem(GRANT_KEY);
+        localStorage.removeItem(GRANT_TS_KEY);
+    } catch {
+        // Storage is optional; clearing must never throw.
+    }
 }
 
 function isDrawGrant(value: unknown): value is DrawGrant {

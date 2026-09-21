@@ -1,5 +1,6 @@
 import { ChafaConfig, DEFAULT_CHAFA_OPTIONS } from '../utils/chafaDefaults';
 import { closeOtherModals } from './modalHelper';
+import { parseCanvasDim, CANVAS_DIM_MAX } from './NewCanvasDialog';
 
 export class ImageImportDialog {
     private modal: HTMLElement;
@@ -17,6 +18,10 @@ export class ImageImportDialog {
     private origWidth: number = 1;
     private origHeight: number = 1;
     private userConfig: ChafaConfig;
+    // Guards the async file-load pipeline: a second file picked while the
+    // first image is still decoding must not let the stale onload win.
+    private loadGeneration = 0;
+    private pendingObjectUrl: string | null = null;
 
     private onConfirmCallback: (buffer: ArrayBuffer, width: number, height: number, config: ChafaConfig) => void;
 
@@ -118,7 +123,13 @@ export class ImageImportDialog {
                 input.style.borderRadius = '4px';
                 input.style.fontSize = '12px';
                 input.addEventListener('change', () => {
-                    (this.userConfig[key] as number) = parseFloat(input.value) || 0;
+                    const parsed = parseFloat(input.value);
+                    if (Number.isFinite(parsed)) {
+                        (this.userConfig[key] as number) = parsed;
+                    } else {
+                        // Reject non-numeric input: restore the last good value.
+                        input.value = String(this.userConfig[key]);
+                    }
                 });
                 control = input;
             } else {
@@ -171,18 +182,44 @@ export class ImageImportDialog {
         }
     }
 
+    private revokePendingUrl(): void {
+        if (this.pendingObjectUrl !== null) {
+            URL.revokeObjectURL(this.pendingObjectUrl);
+            this.pendingObjectUrl = null;
+        }
+    }
+
     private bindEvents() {
         this.fileInput.addEventListener('change', async () => {
             const file = this.fileInput.files?.[0];
             if (!file) return;
 
-            this.currentBuffer = await file.arrayBuffer();
+            const generation = ++this.loadGeneration;
+            // A previous load still in flight is now stale: drop its URL.
+            this.revokePendingUrl();
+
+            try {
+                this.currentBuffer = await file.arrayBuffer();
+            } catch {
+                if (generation !== this.loadGeneration) return;
+                this.currentBuffer = null;
+                this.showError(`Could not read "${file.name}". The file may be unreadable or the read was aborted.`);
+                return;
+            }
             this.fileInput.value = ''; // reset so we can load it again if needed
             this.clearError();
 
             const url = URL.createObjectURL(new Blob([this.currentBuffer]));
+            this.pendingObjectUrl = url;
             const img = new Image();
             img.onload = () => {
+                if (generation !== this.loadGeneration) {
+                    // Stale decode: release the URL, leave current state alone.
+                    URL.revokeObjectURL(url);
+                    if (this.pendingObjectUrl === url) this.pendingObjectUrl = null;
+                    return;
+                }
+                this.pendingObjectUrl = null;
                 this.origWidth = img.naturalWidth || 1;
                 this.origHeight = img.naturalHeight || 1;
                 this.computeDims();
@@ -192,23 +229,31 @@ export class ImageImportDialog {
             };
             img.onerror = () => {
                 URL.revokeObjectURL(url);
+                if (this.pendingObjectUrl === url) this.pendingObjectUrl = null;
+                if (generation !== this.loadGeneration) return;
                 this.currentBuffer = null;
                 this.showError(`Could not load "${file.name}" as an image. The file may be corrupt or in an unsupported format.`);
             };
             img.src = url;
-            
+
         });
 
         this.btnCancel.addEventListener('click', () => {
+            this.loadGeneration++;
+            this.revokePendingUrl();
             this.modal.classList.add('hidden');
             this.currentBuffer = null;
         });
 
         this.btnConfirm.addEventListener('click', () => {
             if (!this.currentBuffer) return;
-            const w = parseInt(this.inputW.value) || 1;
-            const h = parseInt(this.inputH.value) || 1;
-            
+            const w = parseCanvasDim(this.inputW.value);
+            const h = parseCanvasDim(this.inputH.value);
+            if (w === null || h === null) {
+                this.showError(`Width and height must be whole numbers from 1 to ${CANVAS_DIM_MAX}.`);
+                return;
+            }
+
             this.onConfirmCallback(this.currentBuffer, w, h, this.userConfig);
             this.modal.classList.add('hidden');
             this.currentBuffer = null;
@@ -225,9 +270,9 @@ export class ImageImportDialog {
     private handleDimensionChange(source: 'width' | 'height') {
         const mode = Array.from(this.radios).find(r => r.checked)?.value || 'maxWidth';
         if (mode === 'custom') return;
-        
-        let w = parseInt(this.inputW.value) || 1;
-        let h = parseInt(this.inputH.value) || 1;
+
+        const w = parseCanvasDim(this.inputW.value) ?? 1;
+        const h = parseCanvasDim(this.inputH.value) ?? 1;
         
         // Console aspects are typically 1 char wide, 2 chars tall (0.5 ratio)
         // To preserve image visually, `gridWidth / gridHeight` should approach `origW / (origH / 2)` = `(origW / origH) * 2`

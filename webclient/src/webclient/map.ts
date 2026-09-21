@@ -1,4 +1,5 @@
 import { MapBackground, MapLegendEntry, MapPayload } from './types';
+import { stripAnsiBroad, stripNonSgrAnsi } from './text';
 
 const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const RESET = '\x1b[0m';
@@ -78,9 +79,19 @@ function applyBackground(lines: string[], payload: MapPayload): void {
 }
 
 function buildLegend(payload: MapPayload, entries: MapLegendEntry[], columns: number, rows: number): string[] {
+    // Server strings are measured for width elsewhere but never sanitized:
+    // drop cursor/clear control sequences and OSC before concatenating so a
+    // hostile desc cannot drive the terminal. SGR colors on symbols are
+    // intentional (see processLegend) and survive; descs and the area title
+    // are plain prose, so all escapes go.
+    const cleanEntries = entries.map((entry) => ({
+        ...entry,
+        symbol: stripNonSgrAnsi(entry.symbol),
+        desc: stripAnsiBroad(entry.desc),
+    }));
     let legendValues = payload.symbol
-        ? [{ symbol: stylePlayerSymbol(payload.symbol), desc: 'You' }, ...entries]
-        : [...entries];
+        ? [{ symbol: stylePlayerSymbol(stripNonSgrAnsi(payload.symbol)), desc: 'You' }, ...cleanEntries]
+        : [...cleanEntries];
     if (legendValues.length === 0) return [];
     const availableHeight = Math.max(5, Math.floor(rows / 3));
     const maxRows = Math.max(1, availableHeight - 2);
@@ -103,7 +114,7 @@ function buildLegend(payload: MapPayload, entries: MapLegendEntry[], columns: nu
         rowCount = Math.ceil(legendValues.length / chosenColumns);
         columnWidths = calculateLegendWidths(legendValues, chosenColumns, maxWidth);
     }
-    const title = payload.area ?? 'Legend';
+    const title = stripAnsiBroad(payload.area ?? 'Legend');
     const minHeaderWidth = visibleLength(title) + 6;
     let totalWidth = legendWidth(columnWidths, chosenColumns);
     if (totalWidth < minHeaderWidth) {

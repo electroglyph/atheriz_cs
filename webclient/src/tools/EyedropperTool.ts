@@ -26,8 +26,20 @@ export class EyedropperTool implements Tool {
                 pickedColor = targetCell.fg;
                 isSavingToFg = (appState.eyedropperTarget === 'fg-fg');
             } else if (appState.eyedropperTarget === 'bg-fg' || appState.eyedropperTarget === 'bg-bg') {
-                if (targetCell.bg[0] !== -1) {
-                    pickedColor = targetCell.bg;
+                // Transparency must be read from the ACTIVE LAYER cell, not
+                // the composite: getCompositeCell resolves a missing bg to
+                // opaque black, so a composite bg check for [-1,-1,-1] can
+                // never be true (dead check) and transparent cells picked
+                // the wrong color.
+                const activeLayer = ctx.state.layers[ctx.state.activeLayerIndex];
+                const direct = activeLayer
+                    && cell.y >= 0 && cell.y < activeLayer.cells.length
+                    && cell.x >= 0 && cell.x < activeLayer.cells[cell.y].length
+                    ? activeLayer.cells[cell.y][cell.x]
+                    : null;
+                const bg = direct ? direct.bg : targetCell.bg;
+                if (bg[0] !== -1) {
+                    pickedColor = bg;
                 } else {
                     pickedColor = [0, 0, 0]; // default back to black if no bg found in composite
                 }

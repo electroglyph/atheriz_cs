@@ -1,5 +1,6 @@
 import { GOOGLE_FONTS, GOOGLE_FONT_CATEGORIES, GoogleFontCategory } from '../data/googleFonts';
 import { loadFontPreview, preloadManifest } from '../utils/googleFontLoader';
+import { sanitizeFontFamily } from '../utils/cssFont';
 import { closeOtherModals, visibleModalIds } from './modalHelper';
 
 const PAGE_SIZE = 40;
@@ -10,7 +11,14 @@ function escapeCss(value: string): string {
     if (typeof CSS !== 'undefined' && typeof (CSS as unknown as { escape?: (s: string) => string }).escape === 'function') {
         return (CSS as unknown as { escape: (s: string) => string }).escape(value);
     }
-    return value.replace(/[^a-zA-Z0-9_-]/g, (ch) => `\\${ch}`);
+    // Fallback when CSS.escape is unavailable: escape every character outside
+    // the safe set as `\XXXXXX ` (codepoint hex + trailing space). A bare
+    // backslash prefix is NOT enough inside a quoted attribute selector:
+    // `"`, `]` and whitespace would still terminate or split the selector.
+    return value.replace(/[^a-zA-Z0-9_-]/g, (ch) => {
+        const cp = ch.codePointAt(0) ?? 0;
+        return `\\${cp.toString(16).padStart(6, '0')} `;
+    });
 }
 
 const CATEGORY_TABS: { label: string; category: GoogleFontCategory | 'all' }[] = [
@@ -44,6 +52,8 @@ export class GoogleFontPicker {
     /** Queue of font families waiting to be preview-loaded */
     private previewQueue: string[] = [];
     private previewInFlight = 0;
+    private searchDebounce: ReturnType<typeof setTimeout> | null = null;
+    private destroyed = false;
 
     private boundDocumentKeyDown = (e: KeyboardEvent) => {
         if (this.modal.classList.contains('hidden')) return;
@@ -125,10 +135,10 @@ export class GoogleFontPicker {
         this.btnCancel.addEventListener('click', () => this.close());
         this.btnOk.addEventListener('click', () => this.confirm());
 
-        let debounce: ReturnType<typeof setTimeout> | null = null;
         this.searchInput.addEventListener('input', () => {
-            if (debounce) clearTimeout(debounce);
-            debounce = setTimeout(() => {
+            if (this.searchDebounce) clearTimeout(this.searchDebounce);
+            this.searchDebounce = setTimeout(() => {
+                this.searchDebounce = null;
                 this.searchQuery = this.searchInput.value.toLowerCase().trim();
                 this.applyFilter();
             }, 150);
@@ -142,7 +152,16 @@ export class GoogleFontPicker {
     }
 
     public destroy() {
+        if (this.destroyed) return;
+        this.destroyed = true;
         document.removeEventListener('keydown', this.boundDocumentKeyDown);
+        if (this.searchDebounce) {
+            clearTimeout(this.searchDebounce);
+            this.searchDebounce = null;
+        }
+        this.observer.disconnect();
+        this.fontObserver.disconnect();
+        this.previewQueue.length = 0;
     }
 
     private applyFilter() {
@@ -254,9 +273,11 @@ export class GoogleFontPicker {
             // to yield back to the browser between loads.
             Promise.resolve().then(() => {
                 loadFontPreview(family);
-                // Once the stylesheet is injected, apply fontFamily to the item element
+                // Once the stylesheet is injected, apply fontFamily to the item element.
+                // The family is sanitized first: it flows into a style string
+                // where quotes or semicolons could break out of the value.
                 const item = this.listContainer.querySelector(`[data-family="${escapeCss(family)}"]`) as HTMLElement | null;
-                if (item) item.style.fontFamily = `"${family}", sans-serif`;
+                if (item) item.style.fontFamily = `"${sanitizeFontFamily(family)}", sans-serif`;
             }).finally(() => {
                 this.previewInFlight--;
                 this.drainPreviewQueue();

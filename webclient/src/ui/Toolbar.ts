@@ -1,6 +1,7 @@
 import { AppState, RectMode, OvalMode, LineMode, GradientTarget, TypeStyle, SelectMode, RotateMode, FillMode, EyedropperTarget } from '../types';
 import { UndoStack } from '../state/UndoStack';
 import { CanvasState } from '../state/CanvasState';
+import { sanitizeFontList } from '../utils/cssFont';
 
 export class Toolbar {
     private appState: AppState;
@@ -242,7 +243,10 @@ export class Toolbar {
         this.btnExport.addEventListener('click', () => this.exportCallback());
 
         this.fontSelect.addEventListener('change', (e) => {
-            const family = (e.target as HTMLSelectElement).value;
+            const raw = (e.target as HTMLSelectElement).value;
+            // Sanitize segment-by-segment (option values may be CSS fallback
+            // lists): a hostile value must not smuggle CSS out of the family.
+            const family = sanitizeFontList(raw, 'monospace');
             this.appState.fontFamily = family;
             this.fontChangeCallback(family);
         });

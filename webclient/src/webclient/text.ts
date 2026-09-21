@@ -1,4 +1,14 @@
 const ANSI_COLOR = /\x1B\[[0-9;]+m/g;
+// Broad CSI matcher (cursor moves, clears, scrolls — same shape as map.ts).
+// Used for measuring visible text: non-SGR sequences occupy no columns.
+const ANSI_CSI_BROAD = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+// OSC sequences (hyperlinks, window titles, clipboard) terminated by BEL or ST.
+const ANSI_OSC = /\x1B\][^\x07]*(?:\x07|\x1B\\)/g;
+const ANSI_SGR_SINGLE = /\x1B\[[0-9;]+m/;
+const LONE_ESC = /\x1B/g;
+// An ESC that does not open a CSI sequence. Removed before the CSI pass so
+// the ESC bytes of preserved SGR sequences are never eaten.
+const LONE_ESC_BEFORE_CSI = /\x1B(?!\[[0-?]*[ -/]*[@-~])/g;
 const ESC = '\x1B';
 const RESET = `${ESC}[0m`;
 const WHITE = `${ESC}[37m`;
@@ -7,6 +17,28 @@ const WHITE_BRIGHT_BLACK = `${ESC}[90m`;
 
 export const DEFAULT_TEXT_COLOR = `${ESC}[38;2;190;190;190m`;
 export const DEFAULT_TEXT_RESET = `${RESET}${DEFAULT_TEXT_COLOR}`;
+
+/**
+ * Strip every ANSI escape: broad CSI (SGR colors AND cursor/clear/scroll
+ * sequences), OSC sequences, and any leftover lone ESC byte. Server text is
+ * measured and compared with this so control sequences never count as
+ * visible columns and never leak into echoes or length math.
+ */
+export function stripAnsiBroad(value: string): string {
+    return value.replace(ANSI_OSC, '').replace(ANSI_CSI_BROAD, '').replace(LONE_ESC, '');
+}
+
+/**
+ * Strip every ANSI escape except SGR colors/styles, which are preserved so
+ * intentional coloring survives. Use for values rendered with their colors
+ * intact (legend symbols) where cursor movements and OSC must still go.
+ */
+export function stripNonSgrAnsi(value: string): string {
+    return value
+        .replace(ANSI_OSC, '')
+        .replace(LONE_ESC_BEFORE_CSI, '')
+        .replace(ANSI_CSI_BROAD, (match) => (ANSI_SGR_SINGLE.test(match) ? match : ''));
+}
 
 export function normalizeServerText(input: string, width: number, screenReader: boolean): string {
     if (screenReader) return input;
@@ -36,11 +68,13 @@ export function formatPrompt(prompt: string, oldPrompt: string, promptPrinted: b
 }
 
 export function promptVisibleLength(value: string): number {
-    return [...stripAnsi(value)].length;
+    return [...stripAnsiBroad(value)].length;
 }
 
 export function wrapText(text: string, width: number): string {
-    if (!text || width <= 0) return text;
+    // `!(width > 0)` also catches NaN (NaN <= 0 is false, so `width <= 0`
+    // would let NaN through into the wrapping math). Infinity still wraps.
+    if (!text || !(width > 0)) return text;
     let result = '';
     let currentLineLength = 0;
     let currentColor = '';
@@ -63,7 +97,7 @@ export function wrapText(text: string, width: number): string {
                     currentLineLength = 0;
                 }
                 if (!part) continue;
-                const visiblePart = part.replace(ANSI_COLOR, '');
+                const visiblePart = stripAnsiBroad(part);
                 const partLen = [...visiblePart].length;
                 const isWhitespacePart = /^\s*$/.test(visiblePart);
                 if (currentLineLength + partLen > width) {
@@ -89,7 +123,7 @@ export function wrapText(text: string, width: number): string {
             continue;
         }
 
-        const visibleWord = word.replace(ANSI_COLOR, '');
+        const visibleWord = stripAnsiBroad(word);
         const wordLength = [...visibleWord].length;
         const isWhitespace = /^\s+$/.test(visibleWord);
         if (currentLineLength + wordLength > width) {
@@ -113,8 +147,4 @@ export function wrapText(text: string, width: number): string {
         currentColor = nextColor;
     }
     return result;
-}
-
-function stripAnsi(value: string): string {
-    return value.replace(ANSI_COLOR, '');
 }

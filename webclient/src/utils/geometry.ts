@@ -10,6 +10,12 @@ export function getLinePoints(p0: Point, p1: Point): Point[] {
     const x1 = Math.floor(p1.x);
     const y1 = Math.floor(p1.y);
 
+    // The Bresenham loop below only terminates when the cursor reaches
+    // (x1, y1); a NaN/Infinity endpoint would spin forever, so bail out.
+    if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) {
+        return [];
+    }
+
     const dx = Math.abs(x1 - x0);
     const dy = Math.abs(y1 - y0);
     const sx = x0 < x1 ? 1 : -1;
@@ -36,6 +42,11 @@ export function getLinePoints(p0: Point, p1: Point): Point[] {
  * Midpoint ellipse algorithm to get perimeter points
  */
 export function getEllipsePerimeter(x0: number, y0: number, x1: number, y1: number, make4Connected: boolean = false): Point[] {
+    // Non-finite bounds would poison the midpoint arithmetic below into NaN
+    // loop guards and unbounded point spam; there is nothing to draw.
+    if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) {
+        return [];
+    }
     const points: Point[] = [];
     
     const a = Math.abs(x1 - x0) / 2;

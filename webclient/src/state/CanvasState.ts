@@ -1,4 +1,5 @@
 import { Cell, Layer } from '../types';
+import { parseCellKey } from '../utils/cellKeys';
 
 export class CanvasState {
     width: number;
@@ -8,9 +9,20 @@ export class CanvasState {
     private changeListeners: Set<() => void> = new Set();
     layerIdCounter: number = 0;
 
+    /** Largest allowed canvas dimension (bounds memory: dims are floored, min 1). */
+    public static readonly MAX_DIMENSION = 2048;
+
+    /** Coerce a dimension to an integer in [1, MAX_DIMENSION]; throws on non-finite. */
+    private static sanitizeDimension(value: number, name: string): number {
+        if (!Number.isFinite(value)) {
+            throw new RangeError(`CanvasState ${name} must be a finite number, got ${value}`);
+        }
+        return Math.min(CanvasState.MAX_DIMENSION, Math.max(1, Math.floor(value)));
+    }
+
     constructor(width: number, height: number, initializeBlack: boolean = true) {
-        this.width = width;
-        this.height = height;
+        this.width = CanvasState.sanitizeDimension(width, 'width');
+        this.height = CanvasState.sanitizeDimension(height, 'height');
         this.layers = [];
         this.activeLayerIndex = 0;
         this.addLayer("Background", initializeBlack);
@@ -41,6 +53,14 @@ export class CanvasState {
     }
 
     public getActiveLayer(): Layer {
+        // Lazily recreate the background layer if everything was removed, and
+        // clamp a stale index instead of returning undefined.
+        if (this.layers.length === 0) {
+            this.addLayer("Background", true);
+            return this.layers[this.layers.length - 1];
+        }
+        if (this.activeLayerIndex < 0) this.activeLayerIndex = 0;
+        else if (this.activeLayerIndex >= this.layers.length) this.activeLayerIndex = this.layers.length - 1;
         return this.layers[this.activeLayerIndex];
     }
 
@@ -202,6 +222,8 @@ export class CanvasState {
     }
 
     public resize(newWidth: number, newHeight: number) {
+        newWidth = CanvasState.sanitizeDimension(newWidth, 'width');
+        newHeight = CanvasState.sanitizeDimension(newHeight, 'height');
         if (newWidth === this.width && newHeight === this.height) return;
 
         for (let i = 0; i < this.layers.length; i++) {
@@ -238,9 +260,13 @@ export class CanvasState {
 
             if (layer.overflowCells) {
                 for (const [key, cell] of layer.overflowCells.entries()) {
-                    const [cStr, rStr] = key.split(',');
-                    const c = Number(cStr);
-                    const r = Number(rStr);
+                    const parsed = parseCellKey(key);
+                    if (!parsed) {
+                        layer.overflowCells.delete(key);
+                        continue;
+                    }
+                    const c = parsed.col;
+                    const r = parsed.row;
                     if (c >= 0 && c < newWidth && r >= 0 && r < newHeight) {
                         newCells[r][c] = {
                             char: cell.char,

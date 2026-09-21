@@ -157,6 +157,9 @@ async function initApp() {
         context.state = canvasState;
         undoStack.setCurrentState(canvasState);
         renderer.updateState(canvasState);
+        // The dialog swaps in a fresh canvas: keep the mapedit session on
+        // the live object or save would diff a discarded one.
+        mapEditSession?.rebindCanvas(canvasState);
     }, () => metrics, undoStack);
 
     const toolManager = new ToolManager(context);
@@ -261,6 +264,9 @@ async function initApp() {
                 context.state = restored;
                 renderer.updateState(restored);
                 layerManager.updateState(restored);
+                // Undo restored a different canvas object: rebind the
+                // session so save diffs the restored map, not the denied one.
+                mapEditSession?.rebindCanvas(restored);
             }
             if (roomCellSet && mapEditOrigin) {
                 for (const m of event.moves) {
@@ -297,6 +303,8 @@ async function initApp() {
         context.state = canvasState;
         renderer.updateState(canvasState);
         layerManager.updateState(canvasState);
+        // Undo/redo swaps the canvas object: keep the session bound to it.
+        mapEditSession?.rebindCanvas(canvasState);
     }, async (fontFamily: string) => {
         if (document.fonts) {
             const fam = toCssFontFamily(fontFamily);
@@ -372,6 +380,10 @@ async function initApp() {
         }, w, h);
         canvasState = created.state;
         roomCellSet = created.roomCells;
+        // New is a deliberate clear: keep the old baseline so the next
+        // save expresses the wipe as deletions (a re-baseline here would
+        // make the cleared map unsendable).
+        mapEditSession?.rebindCanvas(created.state, { keepBaseline: true });
     });
 
     new ResizeCanvasDialog(() => canvasState, (w, h) => {
@@ -405,6 +417,8 @@ async function initApp() {
             }
             canvasState.applyBatch(batch);
             renderer.updateState(canvasState);
+            // Image import replaces the canvas object: rebind the session.
+            mapEditSession?.rebindCanvas(canvasState);
         } catch (e) {
             console.error("Failed to load image:", e);
         }
@@ -448,6 +462,8 @@ async function initApp() {
                 undoStack.setCurrentState(canvasState);
                 renderer.updateState(canvasState);
                 layerManager.updateState(canvasState);
+                // ANSI load replaces the canvas object: rebind the session.
+                mapEditSession?.rebindCanvas(canvasState);
             } catch (err) {
                 console.error('Failed to load ANSI file:', err);
             }
@@ -504,6 +520,8 @@ async function initApp() {
             undoStack.setCurrentState(canvasState);
             renderer.updateState(canvasState);
             layerManager.updateState(canvasState);
+            // Color-adjust apply swaps in the preview clone: rebind it.
+            mapEditSession?.rebindCanvas(canvasState);
         },
         () => {
             previewState = null;

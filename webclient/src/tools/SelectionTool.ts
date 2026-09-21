@@ -1,8 +1,10 @@
 import { Tool, ToolContext, SelectionSync } from './Tool';
-import { Point, Cell, Color } from '../types';
+import { Point, Cell, Color, SelectMode } from '../types';
+import { cellEquals } from '../utils/colors';
 import { LIGHT_CHARS, ROUNDED_CHARS, DOUBLE_CHARS, HEAVY_CHARS } from '../utils/characters';
 import { GridRenderer } from '../canvas/GridRenderer';
 import { getLinePoints } from '../utils/geometry';
+import { parseCellKey } from '../utils/cellKeys';
 
 function luminance(c: Color): number {
     return (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) / 255;
@@ -34,24 +36,6 @@ function key(col: number, row: number): string {
 
 const LIGHT_ROUNDED_CHARS = new Set([...LIGHT_CHARS, ...ROUNDED_CHARS]);
 
-let selectionEscapeBound = false;
-let activeSelection: SelectionTool | null = null;
-
-function bindSelectionEscapeHandler(): void {
-    if (selectionEscapeBound) return;
-    selectionEscapeBound = true;
-    window.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-            const tool = activeSelection;
-            if (tool && tool.hasSelection) {
-                tool.clearSelection();
-                e.preventDefault();
-                e.stopPropagation();
-            }
-        }
-    });
-}
-
 export class SelectionTool implements Tool, SelectionSync {
     private selectedCells: Set<string> = new Set();
     private clipboard: {
@@ -64,10 +48,46 @@ export class SelectionTool implements Tool, SelectionSync {
     private anchor: Point | null = null;
     private lassoPath: Point[] = [];
     private lastRenderer: GridRenderer | null = null;
+    // Mode captured at mousedown and reused for the whole gesture, so
+    // switching rect/lasso mid-drag cannot crash on a mismatched path.
+    private pendingMode: SelectMode | null = null;
+    // Per-instance ESC listener (registered on construction, removed on
+    // destroy) so discarding a SelectionTool never leaves a stale handler
+    // behind and two live tools never fight over one global slot.
+    private escapeHandler: ((e: KeyboardEvent) => void) | null = null;
 
     constructor() {
-        activeSelection = this;
-        bindSelectionEscapeHandler();
+        this.attachEscapeHandler();
+    }
+
+    private attachEscapeHandler(): void {
+        if (this.escapeHandler) return;
+        if (typeof window === 'undefined') return;
+        this.escapeHandler = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && this.hasSelection) {
+                this.anchor = null;
+                this.lassoPath = [];
+                this.pendingMode = null;
+                this.clearSelection();
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        };
+        window.addEventListener('keydown', this.escapeHandler);
+    }
+
+    /**
+     * Detach the ESC listener and drop transient gesture state. Call when
+     * the tool is discarded so no window handler or anchor lingers.
+     */
+    public destroy(): void {
+        if (this.escapeHandler && typeof window !== 'undefined') {
+            window.removeEventListener('keydown', this.escapeHandler);
+        }
+        this.escapeHandler = null;
+        this.anchor = null;
+        this.lassoPath = [];
+        this.pendingMode = null;
     }
 
     public get hasSelection(): boolean {
@@ -102,6 +122,7 @@ export class SelectionTool implements Tool, SelectionSync {
     onMouseDown(ctx: ToolContext, cell: Point): void {
         this.lastRenderer = ctx.renderer;
         const mode = ctx.appState.selectMode;
+        this.pendingMode = mode;
 
         if (mode === 'single') {
             this.applyModifiers(ctx, new Set([key(cell.x, cell.y)]));
@@ -139,7 +160,10 @@ export class SelectionTool implements Tool, SelectionSync {
     }
 
     onDrag(ctx: ToolContext, _from: Point, to: Point): void {
-        const mode = ctx.appState.selectMode;
+        // Reuse the mousedown mode: the live appState mode may have changed
+        // mid-gesture (e.g. a toolbar click), which must not reinterpret an
+        // in-progress rectangle as a lasso or vice versa.
+        const mode = this.pendingMode ?? ctx.appState.selectMode;
         if (!this.anchor) return;
 
         if (mode === 'rectangle') {
@@ -147,7 +171,11 @@ export class SelectionTool implements Tool, SelectionSync {
             ctx.renderer.setSelection(cells);
         } else if (mode === 'lasso') {
             const last = this.lassoPath[this.lassoPath.length - 1];
-            if (to.x !== last.x || to.y !== last.y) {
+            if (!last) {
+                // Defensive: path lost while the gesture is live — restart
+                // it here instead of dereferencing undefined.
+                this.lassoPath = [to];
+            } else if (to.x !== last.x || to.y !== last.y) {
                 const seg = getLinePoints(last, to);
                 for (let i = 1; i < seg.length; i++) {
                     this.lassoPath.push(seg[i]);
@@ -162,39 +190,52 @@ export class SelectionTool implements Tool, SelectionSync {
     }
 
     onMouseUp(ctx: ToolContext, cell: Point): void {
-        const mode = ctx.appState.selectMode;
-        if (!this.anchor) return;
+        // See onDrag: the mousedown mode wins over a mid-gesture switch.
+        const mode = this.pendingMode ?? ctx.appState.selectMode;
+        this.pendingMode = null;
+        const anchor = this.anchor;
+        if (!anchor) return;
 
         if (mode === 'rectangle') {
-            if (cell.x === this.anchor.x && cell.y === this.anchor.y) {
+            if (cell.x === anchor.x && cell.y === anchor.y) {
                 if (!ctx.modifiers.ctrlKey && !ctx.modifiers.altKey) {
                     this.clearSelection(ctx);
                 }
             } else {
-                const raw = this.getRectCells(this.anchor, cell);
+                const raw = this.getRectCells(anchor, cell);
                 const filtered = this.filterNonEmpty(ctx, raw);
                 this.applyModifiers(ctx, filtered);
             }
             this.anchor = null;
         } else if (mode === 'lasso') {
-            const last = this.lassoPath[this.lassoPath.length - 1];
-            if (cell.x !== last.x || cell.y !== last.y) {
-                const seg = getLinePoints(last, cell);
-                for (let i = 1; i < seg.length; i++) {
-                    this.lassoPath.push(seg[i]);
+            if (this.lassoPath.length === 0) {
+                // No path (e.g. the mode changed between mousedown and
+                // mouseup before pendingMode existed): fall back to a
+                // rectangle from the anchor so we never dereference
+                // lassoPath[0].x on undefined.
+                const raw = this.getRectCells(anchor, cell);
+                const filtered = this.filterNonEmpty(ctx, raw);
+                this.applyModifiers(ctx, filtered);
+            } else {
+                const last = this.lassoPath[this.lassoPath.length - 1];
+                if (last && (cell.x !== last.x || cell.y !== last.y)) {
+                    const seg = getLinePoints(last, cell);
+                    for (let i = 1; i < seg.length; i++) {
+                        this.lassoPath.push(seg[i]);
+                    }
                 }
-            }
-            const first = this.lassoPath[0];
-            const end = this.lassoPath[this.lassoPath.length - 1];
-            if (first.x !== end.x || first.y !== end.y) {
-                const closing = getLinePoints(end, first);
-                for (let i = 1; i < closing.length; i++) {
-                    this.lassoPath.push(closing[i]);
+                const first = this.lassoPath[0];
+                const end = this.lassoPath[this.lassoPath.length - 1];
+                if (first && end && (first.x !== end.x || first.y !== end.y)) {
+                    const closing = getLinePoints(end, first);
+                    for (let i = 1; i < closing.length; i++) {
+                        this.lassoPath.push(closing[i]);
+                    }
                 }
+                const raw = this.scanlineFill(this.lassoPath);
+                const filtered = this.filterNonEmpty(ctx, raw);
+                this.applyModifiers(ctx, filtered);
             }
-            const raw = this.scanlineFill(this.lassoPath);
-            const filtered = this.filterNonEmpty(ctx, raw);
-            this.applyModifiers(ctx, filtered);
             this.anchor = null;
             this.lassoPath = [];
         }
@@ -206,6 +247,10 @@ export class SelectionTool implements Tool, SelectionSync {
 
     onKeyDown(ctx: ToolContext, keyStr: string): boolean {
         if (keyStr === 'Escape') {
+            // ESC aborts the in-progress gesture as well as the selection.
+            this.anchor = null;
+            this.lassoPath = [];
+            this.pendingMode = null;
             this.clearSelection(ctx);
             return true;
         }
@@ -230,8 +275,9 @@ export class SelectionTool implements Tool, SelectionSync {
                 result.add(k);
                 continue;
             }
-            const [col, row] = k.split(',').map(Number);
-            const cell = ctx.state.getCell(col, row);
+            const parsed = parseCellKey(k);
+            if (!parsed) continue;
+            const cell = ctx.state.getCell(parsed.col, parsed.row);
             if (cell && ((cell.char && cell.char.trim() !== '') || (cell.bg[0] !== -1 && !(cell.bg[0] === 0 && cell.bg[1] === 0 && cell.bg[2] === 0)))) {
                 result.add(k);
             }
@@ -450,17 +496,33 @@ export class SelectionTool implements Tool, SelectionSync {
 
     private deleteSelected(ctx: ToolContext): boolean {
         if (this.selectedCells.size === 0) return false;
-        ctx.undoStack.push(ctx.state);
         const layer = ctx.state.getActiveLayer();
+        // The background layer has no transparency: clear it to opaque black
+        // instead of the transparent sentinel so the base raster stays solid.
+        const clearBg: Color = ctx.state.activeLayerIndex === 0 ? [0, 0, 0] : [-1, -1, -1];
+        // Noop guard: only cells that actually differ from the cleared state
+        // are rewritten, and an already-empty selection pushes no undo entry.
+        const targets: { col: number; row: number }[] = [];
         for (const k of this.selectedCells) {
-            const [col, row] = k.split(',').map(Number);
+            const parsed = parseCellKey(k);
+            if (!parsed) continue;
+            const col = parsed.col;
+            const row = parsed.row;
             if (col >= 0 && col < ctx.state.width && row >= 0 && row < ctx.state.height) {
-                layer.cells[row][col] = {
-                    char: '',
-                    fg: [204, 204, 204] as Color,
-                    bg: [-1, -1, -1] as Color
-                };
+                const cleared: Cell = { char: '', fg: [204, 204, 204], bg: [...clearBg] as Color };
+                if (!cellEquals(layer.cells[row][col], cleared)) {
+                    targets.push({ col, row });
+                }
             }
+        }
+        if (targets.length === 0) return false;
+        ctx.undoStack.push(ctx.state);
+        for (const t of targets) {
+            layer.cells[t.row][t.col] = {
+                char: '',
+                fg: [204, 204, 204] as Color,
+                bg: [...clearBg] as Color
+            };
         }
         this.clearSelection(ctx);
         ctx.state.notify();
@@ -473,7 +535,10 @@ export class SelectionTool implements Tool, SelectionSync {
         let minCol = Infinity, minRow = Infinity;
         let maxCol = -Infinity, maxRow = -Infinity;
         for (const k of this.selectedCells) {
-            const [col, row] = k.split(',').map(Number);
+            const parsed = parseCellKey(k);
+            if (!parsed) continue;
+            const col = parsed.col;
+            const row = parsed.row;
             if (col < minCol) minCol = col;
             if (col > maxCol) maxCol = col;
             if (row < minRow) minRow = row;
@@ -482,7 +547,10 @@ export class SelectionTool implements Tool, SelectionSync {
 
         const cells: { col: number; row: number; cell: Cell }[] = [];
         for (const k of this.selectedCells) {
-            const [col, row] = k.split(',').map(Number);
+            const parsed = parseCellKey(k);
+            if (!parsed) continue;
+            const col = parsed.col;
+            const row = parsed.row;
             const composite = _ctx.state.getCell(col, row);
             if (composite) {
                 cells.push({
@@ -506,11 +574,21 @@ export class SelectionTool implements Tool, SelectionSync {
 
     private pasteClipboard(ctx: ToolContext): boolean {
         if (!this.clipboard) return false;
+        this.lastRenderer = ctx.renderer;
         ctx.undoStack.push(ctx.state);
 
-        ctx.state.addLayer('Pasted');
+        // Reuse the top layer when it is already a paste target instead of
+        // stacking a new 'Pasted' layer per paste.
+        const layers = ctx.state.layers;
+        const top = layers[layers.length - 1];
+        if (!top || top.name !== 'Pasted') {
+            ctx.state.addLayer('Pasted');
+        } else {
+            ctx.state.activeLayerIndex = layers.length - 1;
+        }
         const layer = ctx.state.getActiveLayer();
 
+        const pasted = new Set<string>();
         for (const item of this.clipboard.cells) {
             const col = item.col;
             const row = item.row;
@@ -523,10 +601,18 @@ export class SelectionTool implements Tool, SelectionSync {
                     italic: item.cell.italic,
                     underline: item.cell.underline
                 };
+                pasted.add(key(col, row));
             }
         }
 
-        this.clearSelection(ctx);
+        // Keep absolute coords, but select the pasted content afterwards so
+        // a follow-up move/delete acts on it instead of stale cells.
+        if (pasted.size > 0) {
+            this.selectedCells = pasted;
+            ctx.renderer.setSelection(this.selectedCells);
+        } else {
+            this.clearSelection(ctx);
+        }
         ctx.state.notify();
         return true;
     }

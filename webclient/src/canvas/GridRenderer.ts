@@ -1,6 +1,7 @@
 import { CanvasState } from '../state/CanvasState';
 import { CellMetrics } from '../utils/fontMetrics';
-import { Cell } from '../types';
+import { parseCellKey } from '../utils/cellKeys';
+import { Cell, Color } from '../types';
 
 export class GridRenderer {
     private canvas: HTMLCanvasElement;
@@ -72,7 +73,9 @@ export class GridRenderer {
     }
 
     public setSelection(cells: Set<string>) {
-        this.selectedCells = cells;
+        // Defensive copy: callers keep mutating their set after handing it
+        // over, which would otherwise poison the renderer's outline state.
+        this.selectedCells = new Set(cells);
         this.render();
     }
 
@@ -117,6 +120,8 @@ export class GridRenderer {
         const underlines: {x: number, y: number, w: number, color: string}[] = [];
 
         const addBg = (col: number, row: number, r: number, g: number, b: number) => {
+            // Transparent markers and plain black both show the cleared canvas.
+            if (r < 0 || g < 0 || b < 0) return;
             if (r === 0 && g === 0 && b === 0) return;
             const key = `rgb(${r},${g},${b})`;
             let path = bgColors.get(key);
@@ -155,7 +160,11 @@ export class GridRenderer {
                 const cell = previewCell ?? baseCell;
                 const opacity = previewCell ? 0.7 : 1.0;
 
-                addBg(col, row, cell.bg[0], cell.bg[1], cell.bg[2]);
+                // Resolve the transparent-background marker on the preview path
+                // exactly like getCompositeCell does, so a raw transparent
+                // preview cell never emits invalid CSS such as rgb(-1,-1,-1).
+                const bg: Color = cell.bg[0] === -1 ? [0, 0, 0] : cell.bg;
+                addBg(col, row, bg[0], bg[1], bg[2]);
                 addChar(col, row, cell.char, cell.fg[0], cell.fg[1], cell.fg[2], opacity, cell.bold, cell.italic, cell.underline);
             }
         }
@@ -182,9 +191,10 @@ export class GridRenderer {
         const strokeCellOutlines = (cells: Set<string>) => {
             this.ctx.beginPath();
             for (const key of cells) {
-                const parts = key.split(',');
-                const col = parseInt(parts[0]);
-                const row = parseInt(parts[1]);
+                const parsed = parseCellKey(key);
+                if (!parsed) continue;
+                const col = parsed.col;
+                const row = parsed.row;
                 const x = col * width;
                 const y = row * height;
                 this.ctx.moveTo(x, y);

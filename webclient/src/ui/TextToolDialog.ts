@@ -6,8 +6,18 @@ import { ChafaConfig, DEFAULT_CHAFA_OPTIONS } from '../utils/chafaDefaults';
 import { CellMetrics } from '../utils/fontMetrics';
 import { GoogleFontPicker } from './GoogleFontPicker';
 import { loadFontFull, fontNameToCSS } from '../utils/googleFontLoader';
+import { sanitizeFontList } from '../utils/cssFont';
 import { FEATURED_GOOGLE_FONTS } from '../data/featuredGoogleFonts';
 import { closeOtherModals } from './modalHelper';
+
+/** Upper bound for waiting on document.fonts before previewing anyway. */
+export const TEXT_PREVIEW_FONTS_TIMEOUT_MS = 5000;
+
+/** Font styles offered by the #text-tool-style select; anything else is rejected. */
+const ALLOWED_FONT_STYLES = new Set(['normal', 'bold', 'italic', 'bold italic']);
+
+/** Text alignments offered by the #text-tool-align select. */
+const ALLOWED_TEXT_ALIGNS: CanvasTextAlign[] = ['left', 'center', 'right'];
 
 export class TextToolDialog {
     private modal: HTMLElement;
@@ -81,7 +91,7 @@ export class TextToolDialog {
                 return;
             }
             let maxWidth = parseInt(this.maxWidthInput.value, 10);
-            if (isNaN(maxWidth) || maxWidth < 1) maxWidth = 80;
+            if (!Number.isFinite(maxWidth) || maxWidth < 1) maxWidth = 80;
             
             this.btnConfirm.disabled = true;
             this.btnConfirm.innerText = 'Converting...';
@@ -163,19 +173,40 @@ export class TextToolDialog {
                 return;
             }
 
-            const fontFamilies = this.fontSelect.value || 'Arial';
-            const fontStyle = this.styleSelect.value || 'normal';
-            const align = (this.alignSelect.value || 'left') as CanvasTextAlign;
+            const rawFamilies = this.fontSelect.value || 'Arial';
+            // Sanitize the family list before embedding it in a canvas font
+            // string: a hostile option value must not break out of the style.
+            const fontFamilies = sanitizeFontList(rawFamilies, 'Arial');
+            const rawStyle = this.styleSelect.value || 'normal';
+            const fontStyle = ALLOWED_FONT_STYLES.has(rawStyle) ? rawStyle : 'normal';
+            const rawAlign = this.alignSelect.value || 'left';
+            const align: CanvasTextAlign = (ALLOWED_TEXT_ALIGNS as string[]).includes(rawAlign)
+                ? rawAlign as CanvasTextAlign
+                : 'left';
             let stretch = parseInt(this.stretchInput.value, 10) / 100;
-            if (isNaN(stretch) || stretch <= 0) stretch = 1;
+            if (!Number.isFinite(stretch) || stretch <= 0) stretch = 1;
 
             const fontSize = 96;
             const fontStr = fontStyle === 'normal'
                 ? `${fontSize}px ${fontFamilies}`
                 : `${fontStyle} ${fontSize}px ${fontFamilies}`;
 
-            try { await document.fonts.load(fontStr, text); } catch (_) {}
-            await document.fonts.ready;
+            try {
+                await document.fonts.load(fontStr, text);
+            } catch (err) {
+                console.warn('TextToolDialog: preview font load failed, using fallback rendering', err);
+            }
+            try {
+                await Promise.race([
+                    document.fonts.ready,
+                    new Promise((_, reject) => setTimeout(
+                        () => reject(new Error('document.fonts.ready timeout')),
+                        TEXT_PREVIEW_FONTS_TIMEOUT_MS,
+                    )),
+                ]);
+            } catch (err) {
+                console.warn('TextToolDialog: fonts.ready timed out, previewing with available fonts', err);
+            }
 
             // Split into lines so multi-line input renders as stacked rows
             const lines = text.split('\n');
@@ -185,7 +216,11 @@ export class TextToolDialog {
 
             this.previewCanvas.width = canvasW;
             this.previewCanvas.height = canvasH;
-            const ctx = this.previewCanvas.getContext('2d')!;
+            const ctx = this.previewCanvas.getContext('2d');
+            if (!ctx) {
+                console.warn('TextToolDialog: 2d preview context unavailable');
+                return;
+            }
 
             const bgColor = `rgb(${this.appState.bgColor[0]},${this.appState.bgColor[1]},${this.appState.bgColor[2]})`;
             const fgColor = `rgb(${this.appState.fgColor[0]},${this.appState.fgColor[1]},${this.appState.fgColor[2]})`;
@@ -358,7 +393,19 @@ export class TextToolDialog {
     }
 
     public close() {
+        if (this.previewTimer !== null) {
+            clearTimeout(this.previewTimer);
+            this.previewTimer = null;
+        }
         this.modal.classList.add('hidden');
+    }
+
+    public destroy(): void {
+        if (this.previewTimer !== null) {
+            clearTimeout(this.previewTimer);
+            this.previewTimer = null;
+        }
+        this.googleFontPicker.destroy();
     }
 
     private buildOptionsUI() {
@@ -444,7 +491,12 @@ export class TextToolDialog {
                 input.style.borderRadius = '4px';
                 input.style.fontSize = '12px';
                 input.addEventListener('change', () => {
-                    (this.userConfig[key] as number) = parseFloat(input.value) || 0;
+                    const parsed = parseFloat(input.value);
+                    if (Number.isFinite(parsed)) {
+                        (this.userConfig[key] as number) = parsed;
+                    } else {
+                        input.value = String(this.userConfig[key]);
+                    }
                 });
                 control = input;
             } else {

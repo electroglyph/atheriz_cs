@@ -39,6 +39,19 @@ function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
     return [h, s, v];
 }
 
+/**
+ * Parses a single 0-255 color channel from a text input. Returns null when
+ * the value is not a finite integer in range, so callers can ignore the
+ * commit instead of clamping garbage into state.
+ */
+export function parseModalColorChannel(value: string): number | null {
+    if (!/^-?\d+$/.test(value.trim())) return null;
+    const n = Number(value.trim());
+    if (!Number.isSafeInteger(n)) return null;
+    if (n < 0 || n > 255) return null;
+    return n;
+}
+
 export class ColorPickerModal {
     static instance: ColorPickerModal | null = null;
 
@@ -186,8 +199,15 @@ export class ColorPickerModal {
         ctx.fillRect(0, 0, w, h);
 
         const px = (this.hue / 360) * w;
-        ctx.beginPath();
-        ctx.roundRect(px - 3, 0, 6, h, 2);
+        if (typeof ctx.roundRect === 'function') {
+            ctx.beginPath();
+            ctx.roundRect(px - 3, 0, 6, h, 2);
+        } else {
+            // Older canvas implementations lack roundRect: fall back to a
+            // plain rect marker so the hue indicator still renders.
+            ctx.beginPath();
+            ctx.rect(px - 3, 0, 6, h);
+        }
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.stroke();
@@ -205,9 +225,13 @@ export class ColorPickerModal {
     }
 
     private updateFromRgb() {
-        const r = parseInt(this.rInput.value) || 0;
-        const g = parseInt(this.gInput.value) || 0;
-        const b = parseInt(this.bInput.value) || 0;
+        const r = parseModalColorChannel(this.rInput.value);
+        const g = parseModalColorChannel(this.gInput.value);
+        const b = parseModalColorChannel(this.bInput.value);
+        if (r === null || g === null || b === null) {
+            this.syncInputs();
+            return;
+        }
         const [h, s, v] = rgbToHsv(r, g, b);
         this.hue = h;
         this.sat = s;
@@ -218,6 +242,11 @@ export class ColorPickerModal {
 
     private updateFromHex() {
         const c = hexToRgb(this.hexInput.value);
+        if (!c) {
+            // Invalid hex: keep the old color, restore the input display.
+            this.syncInputs();
+            return;
+        }
         const [h, s, v] = rgbToHsv(c[0], c[1], c[2]);
         this.hue = h;
         this.sat = s;
@@ -248,6 +277,7 @@ export class ColorPickerModal {
 
     private pickSv(e: MouseEvent) {
         const rect = this.svCanvas.getBoundingClientRect();
+        if (!(rect.width > 0) || !(rect.height > 0)) return;
         const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
         const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
         this.sat = (x / rect.width) * 100;
@@ -258,6 +288,7 @@ export class ColorPickerModal {
 
     private pickHue(e: MouseEvent) {
         const rect = this.hueCanvas.getBoundingClientRect();
+        if (!(rect.width > 0)) return;
         const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
         this.hue = (x / rect.width) * 360;
         this.drawAll();

@@ -19,6 +19,13 @@ export class BrushTool implements Tool {
         this.paintedCells.clear();
         this.undoPushed = false;
 
+        // Clip to the canvas: out-of-bounds points must never reach setCell,
+        // which would stash them in overflowCells instead of dropping them.
+        if (cell.x < 0 || cell.x >= ctx.state.width || cell.y < 0 || cell.y >= ctx.state.height) {
+            this.paintedCells.add(`${cell.x},${cell.y}`);
+            return;
+        }
+
         const cellData = this.getPreviewCell(ctx);
         const current = ctx.state.getCell(cell.x, cell.y);
         if (!current || !cellEquals(current, cellData)) {
@@ -38,6 +45,9 @@ export class BrushTool implements Tool {
             const key = `${p.x},${p.y}`;
             if (this.paintedCells.has(key)) continue;
             this.paintedCells.add(key);
+
+            // Clip: drop out-of-bounds points instead of writing overflowCells.
+            if (p.x < 0 || p.x >= ctx.state.width || p.y < 0 || p.y >= ctx.state.height) continue;
 
             const current = ctx.state.getCell(p.x, p.y);
             if (!current || !cellEquals(current, cellData)) {

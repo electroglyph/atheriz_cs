@@ -10,6 +10,14 @@ export class AnsiExporter {
     public static export(state: CanvasState): string {
         const { width, height, layers } = state;
 
+        // Empty guard: a canvas with no layers (e.g. all layers deleted)
+        // exports a bare reset instead of throwing on layers[0].
+        // Note: only the in-bounds grid is exported. overflowCells
+        // (out-of-bounds writes) are intentionally dropped, not serialized.
+        if (!layers || layers.length === 0) {
+            return '\x1b[0m';
+        }
+
         let out = `\x1b[8;${height};${width}t\x1b[2J\x1b[H`;
 
         const emitStyle = (cell: { bold?: boolean; italic?: boolean; underline?: boolean }, current: { bold: boolean; italic: boolean; underline: boolean }): { bold: boolean; italic: boolean; underline: boolean } => {
@@ -67,9 +75,22 @@ export class AnsiExporter {
         // Overlay Layers: Exported sparsely.
         // To minimize file size and avoid overwriting lower layers unnecessarily,
         // we only emit cursor jumps and ANSI sequences for non-transparent cells.
+        // Layers with no visible content emit no boundary marker at all, so an
+        // empty overlay round-trips to zero bytes instead of a stray marker.
         for (let li = 1; li < layers.length; li++) {
             const layer = layers[li];
             if (!layer.visible) continue;
+            let hasContent = false;
+            for (let r = 0; r < height && !hasContent; r++) {
+                for (let c = 0; c < width; c++) {
+                    const cell = layer.cells[r][c];
+                    if ((cell.char && cell.char.trim() !== '') || cell.bg[0] !== -1) {
+                        hasContent = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasContent) continue;
             out += LAYER_BOUNDARY_MARKER;
 
             currentFg = null;
@@ -111,7 +132,11 @@ export class AnsiExporter {
             }
         }
 
-        out += `\x1b[0m\n`;
+        // Trailing-newline convention (pinned): the export ends with a bare
+        // reset and NO trailing newline, matching buildCompositeAnsiPreview.
+        // detectAnsiDimensions already ignores trailing blank lines, so files
+        // saved either way still measure identically.
+        out += `\x1b[0m`;
         return out;
     }
 

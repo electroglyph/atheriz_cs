@@ -32,23 +32,49 @@ export class LineTool implements Tool {
     private currentEnd: Point | null = null;
     private isFirstClick = true;
     private pushedForStroke = false;
-    private toastEl: HTMLDivElement | null = null;
     private committedPoints: Point[] = [];
 
+    // One toast node shared by all LineTool instances so creating tools
+    // (e.g. on every editor boot) never leaks a div per instance. The set
+    // tracks which instances currently want it visible; destroy() releases.
+    private static sharedToast: HTMLDivElement | null = null;
+    private static toastOwners: Set<LineTool> = new Set();
+
     private showToast() {
-        if (!this.toastEl) {
-            this.toastEl = document.createElement('div');
-            this.toastEl.className = 'line-tool-toast';
-            this.toastEl.textContent = 'ESC: cancel';
-            document.body.appendChild(this.toastEl);
+        if (typeof document === 'undefined') return;
+        LineTool.toastOwners.add(this);
+        if (!LineTool.sharedToast) {
+            LineTool.sharedToast = document.createElement('div');
+            LineTool.sharedToast.className = 'line-tool-toast';
+            LineTool.sharedToast.textContent = 'ESC: cancel';
+            document.body.appendChild(LineTool.sharedToast);
         }
-        this.toastEl.classList.add('visible');
+        LineTool.sharedToast.classList.add('visible');
     }
 
     private hideToast() {
-        if (this.toastEl) {
-            this.toastEl.classList.remove('visible');
+        LineTool.toastOwners.delete(this);
+        if (LineTool.toastOwners.size === 0) {
+            LineTool.sharedToast?.classList.remove('visible');
         }
+    }
+
+    /**
+     * Release the shared toast and reset gesture state. Call when the tool
+     * is discarded so no toast node or preview lingers.
+     */
+    public destroy(ctx?: ToolContext): void {
+        LineTool.toastOwners.delete(this);
+        if (LineTool.toastOwners.size === 0 && LineTool.sharedToast) {
+            LineTool.sharedToast.remove();
+            LineTool.sharedToast = null;
+        }
+        this.anchor = null;
+        this.currentEnd = null;
+        this.isFirstClick = true;
+        this.pushedForStroke = false;
+        this.committedPoints = [];
+        if (ctx) ctx.renderer.clearPreview();
     }
 
     onMouseDown(ctx: ToolContext, cell: Point): void {
@@ -64,7 +90,8 @@ export class LineTool implements Tool {
         }
 
         if (this.anchor && (cell.x !== this.anchor.x || cell.y !== this.anchor.y)) {
-            this.commitSegment(ctx, this.anchor, cell);
+            this.currentEnd = cell;
+            this.commitPending(ctx);
         }
         this.anchor = cell;
         this.currentEnd = cell;
@@ -77,7 +104,17 @@ export class LineTool implements Tool {
         this.renderPreview(ctx);
     }
 
-    onMouseUp(_ctx: ToolContext, _cell: Point): void {
+    onMouseUp(ctx: ToolContext, _cell: Point): void {
+        // A drag-release commits the pending anchor→cursor segment so a
+        // drawn-then-released line lands on the canvas without requiring a
+        // second click. Zero-length pending segments are skipped by
+        // commitPending; the gesture stays open for chaining until ESC.
+        if (this.isFirstClick) return;
+        this.commitPending(ctx);
+        if (this.currentEnd) {
+            this.anchor = { ...this.currentEnd };
+        }
+        this.renderPreview(ctx);
     }
 
     onHover(ctx: ToolContext, cell: Point): void {
@@ -106,6 +143,10 @@ export class LineTool implements Tool {
     onKeyDown(ctx: ToolContext, key: string): boolean {
         if (key === 'Escape') {
             if (this.isFirstClick) return false;
+            // ESC discards the pending preview without committing it. When
+            // this gesture already painted a segment, one undo reverts the
+            // whole gesture (a single entry covers it via pushedForStroke).
+            const hadCommittedStroke = this.pushedForStroke;
             this.anchor = null;
             this.currentEnd = null;
             this.isFirstClick = true;
@@ -113,16 +154,34 @@ export class LineTool implements Tool {
             this.committedPoints = [];
             this.hideToast();
             ctx.renderer.clearPreview();
+            if (hadCommittedStroke) {
+                ctx.undoStack.undo();
+            }
             return true;
         }
         return false;
+    }
+
+    /**
+     * Commit the pending anchor→currentEnd segment, if any. Shared by the
+     * next-segment mousedown and the drag-release mouseup so preview and
+     * paint can never disagree about what "pending" means. Zero-length
+     * (isolated point) pending segments are intentionally skipped: a bare
+     * click-release paints nothing, matching the pre-drag-release behavior.
+     */
+    private commitPending(ctx: ToolContext): void {
+        if (!this.anchor || !this.currentEnd) return;
+        if (this.anchor.x === this.currentEnd.x && this.anchor.y === this.currentEnd.y) return;
+        this.commitSegment(ctx, this.anchor, this.currentEnd);
     }
 
     private commitSegment(ctx: ToolContext, from: Point, to: Point): void {
         const useDiagonal = ctx.appState.lineDiagonal;
         const newPoints = connectedLine(from.x, from.y, to.x, to.y, useDiagonal);
         const allPoints = [...this.committedPoints, ...newPoints];
-        const cells = this.buildCells(ctx, allPoints);
+        // Clip here (not in buildCells, which stays pure for preview and
+        // junction computation): commits must never write overflowCells.
+        const cells = this.clipToCanvas(ctx, this.buildCells(ctx, allPoints));
         if (cells.length > 0) {
             if (!this.pushedForStroke) {
                 ctx.undoStack.push(ctx.state);
@@ -144,10 +203,14 @@ export class LineTool implements Tool {
                     cell: { char: ctx.appState.selectedChar, fg: ctx.appState.fgColor, bg: ctx.appState.bgColor }
                 }]);
             } else {
+                // Isolated-point choice: draw 'h' (horizontal), matching both
+                // the commit path (buildCells falls through to charMap.h when
+                // a point has no neighbors) and RectangleTool's single-point
+                // behavior, so preview === commit for a lone click.
                 ctx.renderer.setPreview([{
                     col: this.anchor.x,
                     row: this.anchor.y,
-                    cell: { char: this.getCharMap(mode).v, fg: ctx.appState.fgColor, bg: ctx.appState.bgColor }
+                    cell: { char: this.getCharMap(mode).h, fg: ctx.appState.fgColor, bg: ctx.appState.bgColor }
                 }]);
             }
             return;
@@ -164,6 +227,17 @@ export class LineTool implements Tool {
                mode === 'rounded' ? ROUNDED_BOX :
                mode === 'heavy' ? HEAVY_BOX :
                LIGHT_BOX;
+    }
+
+    private isInBounds(ctx: ToolContext, x: number, y: number): boolean {
+        return x >= 0 && x < ctx.state.width && y >= 0 && y < ctx.state.height;
+    }
+
+    // Clip tool output to the canvas so commits never write overflowCells.
+    private clipToCanvas(ctx: ToolContext, cells: { col: number; row: number; cell: Cell }[]): { col: number; row: number; cell: Cell }[] {
+        const w = ctx.state.width;
+        const h = ctx.state.height;
+        return cells.filter(u => u.col >= 0 && u.col < w && u.row >= 0 && u.row < h);
     }
 
     private buildCells(ctx: ToolContext, points: Point[]): { col: number; row: number; cell: Cell }[] {
@@ -191,7 +265,11 @@ export class LineTool implements Tool {
         // to determine if the current cell should be a straight line, a corner, or an intersection piece.
         if (!ctx.appState.lineDiagonal) {
             const pSet = new Set<string>();
-            for (const p of points) pSet.add(`${p.x},${p.y}`);
+            // Only in-bounds points vote for corners/tees: an out-of-bounds
+            // neighbor must not flip a visible endpoint into a corner piece.
+            for (const p of points) {
+                if (this.isInBounds(ctx, p.x, p.y)) pSet.add(`${p.x},${p.y}`);
+            }
             const seen = new Set<string>();
             const updates: { col: number; row: number; cell: Cell }[] = [];
             for (const p of points) {

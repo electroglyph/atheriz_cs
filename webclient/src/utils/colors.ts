@@ -1,18 +1,29 @@
 import { Color, Cell } from '../types';
 
-export function rgbToHex(color: Color): string {
-    const [r, g, b] = color;
-    const toHex = (c: number) => c.toString(16).padStart(2, '0');
-    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+/** Clamp an arbitrary number to a valid 0-255 channel (non-finite -> 0). */
+function clampChannel(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.min(255, Math.max(0, Math.round(value)));
 }
 
-export function hexToRgb(hex: string): Color {
-    hex = hex.replace(/^#/, '');
-    if (hex.length === 3) {
-        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-    }
-    const num = parseInt(hex, 16);
-    return [num >> 16, (num >> 8) & 255, num & 255];
+export function rgbToHex(color: Color): string {
+    const toHex = (c: number) => clampChannel(c).toString(16).padStart(2, '0');
+    return `#${toHex(color[0])}${toHex(color[1])}${toHex(color[2])}`;
+}
+
+/**
+ * Strictly parse `#rgb`, `#rrggbb`, or the same forms without `#`.
+ * Returns `null` for anything else (wrong length, non-hex digits,
+ * 8-digit alpha forms included) so callers can keep the previous color.
+ */
+export function hexToRgb(hex: string): Color | null {
+    const raw = hex.startsWith('#') ? hex.slice(1) : hex;
+    const expanded = raw.length === 3
+        ? `${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`
+        : raw;
+    if (expanded.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(expanded)) return null;
+    const num = parseInt(expanded, 16);
+    return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
 }
 
 export function colorEquals(c1: Color, c2: Color): boolean {
@@ -29,22 +40,23 @@ export function cellEquals(a: Cell, b: Cell): boolean {
 }
 
 export function cssColor(color: Color): string {
-    return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+    return `rgb(${clampChannel(color[0])}, ${clampChannel(color[1])}, ${clampChannel(color[2])})`;
 }
 
 export function lerpColor(a: Color, b: Color, t: number): Color {
-    return [
-        Math.round(a[0] + (b[0] - a[0]) * t),
-        Math.round(a[1] + (b[1] - a[1]) * t),
-        Math.round(a[2] + (b[2] - a[2]) * t),
-    ];
+    const k = Number.isFinite(t) ? t : 0;
+    const mix = (x: number, y: number) => clampChannel(x + (y - x) * k);
+    return [mix(a[0], b[0]), mix(a[1], b[1]), mix(a[2], b[2])];
 }
 
 export function sampleGradient(stops: Color[], t: number): Color {
     if (stops.length === 0) return [0, 0, 0];
-    if (stops.length === 1) return [...stops[0]];
-    t = Math.max(0, Math.min(1, t));
-    const segment = t * (stops.length - 1);
+    if (stops.length === 1) {
+        const only = stops[0];
+        return [clampChannel(only[0]), clampChannel(only[1]), clampChannel(only[2])];
+    }
+    const k = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0;
+    const segment = k * (stops.length - 1);
     const index = Math.min(Math.floor(segment), stops.length - 2);
     const localT = segment - index;
     return lerpColor(stops[index], stops[index + 1], localT);

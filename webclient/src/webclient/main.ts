@@ -14,7 +14,7 @@ import { SessionRecorder } from './recorder';
 import { MAP_CLEAR_SEQUENCE, mergeBackgrounds, parseBackground, renderMap as renderMapText } from './map';
 import { mapLayout, recordingDividerPct, resizeWidth } from './layout';
 import { inputHeight, shouldClearSubmittedInput, shouldNavigateHistory, submissionFeedback } from './input';
-import { formatPrompt, formatTextOutput } from './text';
+import { formatPrompt, formatTextOutput, stripAnsiBroad } from './text';
 import { BUFFER_FINAL_SEQUENCE, SequentialWriter } from './buffer';
 import { playAudio as playAudioElement } from './audio';
 import { screenReaderFeedback, settingFeedback } from './feedback';
@@ -268,7 +268,7 @@ function installInputHandlers(): void {
             history.reset();
             updateHint();
             if (handled) return;
-            write(`\r\nUnknown command: ${trimmed.split(/\s+/)[0]}\r\nEnter :help for a list of commands.\r\n`);
+            write(`\r\nUnknown command: ${stripAnsiBroad(trimmed.split(/\s+/)[0])}\r\nEnter :help for a list of commands.\r\n`);
             return;
         }
         const feedback = submissionFeedback(connection.send('text', [trimmed]));
@@ -368,7 +368,7 @@ function write(text: string): void {
 }
 
 function writeSelf(text: string): void {
-    write(`\x1b[38;5;220m${text}\x1b[0m\r\n`);
+    write(`\x1b[38;5;220m${stripAnsiBroad(text)}\x1b[0m\r\n`);
 }
 
 function handleMessage(message: WireMessage): void {
@@ -475,7 +475,7 @@ function handleMessage(message: WireMessage): void {
             }
             break;
         default:
-            write(`\r\nUnknown server command: ${message.command}\r\n`);
+            write(`\r\nUnknown server command: ${stripAnsiBroad(message.command)}\r\n`);
     }
 }
 

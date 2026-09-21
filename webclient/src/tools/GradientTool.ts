@@ -69,7 +69,10 @@ export class GradientTool implements Tool {
         const width = ctx.state.width;
         const height = ctx.state.height;
         const target = ctx.appState.gradientTarget;
-        const stops = ctx.appState.gradientStops || [[0,0,0], [255,255,255]];
+        // `|| default` misses an explicitly empty array (truthy), so check length.
+        const stops: Color[] = ctx.appState.gradientStops.length > 0
+            ? ctx.appState.gradientStops
+            : [[0, 0, 0], [255, 255, 255]];
         
         for (let r = 0; r < height; r++) {
             for (let c = 0; c < width; c++) {
@@ -103,14 +106,16 @@ export class GradientTool implements Tool {
                     bg: existingCell.bg
                 };
                 
-                if (target === 'foreground' || target === 'both') {
+                if (target === 'both') {
+                    newCell.fg = gColor;
+                    newCell.bg = gColor;
+                } else if (target === 'foreground') {
                     if (inkIsBg) {
                         newCell.bg = gColor;
                     } else {
                         newCell.fg = gColor;
                     }
-                }
-                if (target === 'background' || target === 'both') {
+                } else if (target === 'background') {
                     if (!inkIsBg) {
                         newCell.bg = gColor;
                     }

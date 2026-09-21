@@ -77,15 +77,18 @@ export async function renderTextToAnsiLayer(
 ): Promise<TextRenderResult | null> {
   const fontRatio = cellMetrics.width / cellMetrics.height;
 
-  const ctx = sourceCanvas.getContext("2d")!;
+  const ctx = sourceCanvas.getContext("2d");
+  if (!ctx) throw new Error("TextToANSI: source canvas 2d context unavailable");
   const w = sourceCanvas.width;
   const h = sourceCanvas.height;
 
    ctx.font = previewFontString(cellMetrics.font);
    const textMetrics = ctx.measureText("M");
    const metricsExt = textMetrics as unknown as { actualBoundingBoxAscent?: number; actualBoundingBoxDescent?: number };
-   const ascent = metricsExt.actualBoundingBoxAscent ?? 80;
-   const descent = metricsExt.actualBoundingBoxDescent ?? 20;
+   const rawAscent = metricsExt.actualBoundingBoxAscent;
+   const rawDescent = metricsExt.actualBoundingBoxDescent;
+   const ascent = typeof rawAscent === "number" && Number.isFinite(rawAscent) ? rawAscent : 80;
+   const descent = typeof rawDescent === "number" && Number.isFinite(rawDescent) ? rawDescent : 20;
 
   const pixels = ctx.getImageData(0, 0, w, h).data;
 
@@ -129,7 +132,8 @@ export async function renderTextToAnsiLayer(
   const cropCanvas = document.createElement("canvas");
   cropCanvas.width = cropW;
   cropCanvas.height = cropH;
-  const cropCtx = cropCanvas.getContext("2d")!;
+  const cropCtx = cropCanvas.getContext("2d");
+  if (!cropCtx) throw new Error("TextToANSI: crop canvas 2d context unavailable");
   cropCtx.fillStyle = "#000000";
   cropCtx.fillRect(0, 0, cropW, cropH);
   cropCtx.drawImage(

@@ -2,6 +2,28 @@ import { Color, AppState } from '../types';
 import { rgbToHex, hexToRgb, colorEquals, cssColor } from '../utils/colors';
 import { ColorPickerModal } from './ColorPickerModal';
 
+/** Min/max for an 8-bit color channel. */
+export const COLOR_CHANNEL_MIN = 0;
+export const COLOR_CHANNEL_MAX = 255;
+
+/**
+ * Parses a single 0-255 color channel from a text input. Returns null when
+ * the value is not a finite integer in range, so callers can ignore the
+ * commit instead of clamping garbage into state.
+ */
+export function parseColorChannel(value: string): number | null {
+    if (!/^-?\d+$/.test(value.trim())) return null;
+    const n = Number(value.trim());
+    if (!Number.isSafeInteger(n)) return null;
+    if (n < COLOR_CHANNEL_MIN || n > COLOR_CHANNEL_MAX) return null;
+    return n;
+}
+
+/** True when every channel of the tuple is a finite 0-255 integer. */
+export function isValidColor(c: Color): boolean {
+    return c.length === 3 && c.every((v) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 255);
+}
+
 export class ColorPicker {
     private appState: AppState;
     private isForeground: boolean;
@@ -101,9 +123,15 @@ export class ColorPicker {
         });
 
         const updateFromRGB = () => {
-            const r = parseInt(this.rInput.value) || 0;
-            const g = parseInt(this.gInput.value) || 0;
-            const b = parseInt(this.bInput.value) || 0;
+            const r = parseColorChannel(this.rInput.value);
+            const g = parseColorChannel(this.gInput.value);
+            const b = parseColorChannel(this.bInput.value);
+            if (r === null || g === null || b === null) {
+                // Out-of-range or non-numeric input: ignore the commit and
+                // restore the displayed values instead of clamping garbage.
+                this.updateUI();
+                return;
+            }
             const c: Color = [r, g, b];
             this.setColor(c);
             this.commitToHistory(c);
@@ -115,6 +143,11 @@ export class ColorPicker {
 
         this.hexInput.addEventListener('change', () => {
             const c = hexToRgb(this.hexInput.value);
+            if (!c || !isValidColor(c)) {
+                // Invalid hex: keep the old color, restore the input display.
+                this.updateUI();
+                return;
+            }
             this.setColor(c);
             this.commitToHistory(c);
         });

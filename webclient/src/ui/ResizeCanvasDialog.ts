@@ -1,5 +1,6 @@
 import { CanvasState } from '../state/CanvasState';
 import { closeOtherModals } from './modalHelper';
+import { parseCanvasDim } from './NewCanvasDialog';
 
 export class ResizeCanvasDialog {
     private modal: HTMLElement;
@@ -43,9 +44,9 @@ export class ResizeCanvasDialog {
         });
 
         this.btnConfirm.addEventListener('click', () => {
-            const w = parseInt(this.inputW.value);
-            const h = parseInt(this.inputH.value);
-            if (w > 0 && h > 0) {
+            const w = parseCanvasDim(this.inputW.value);
+            const h = parseCanvasDim(this.inputH.value);
+            if (w !== null && h !== null) {
                 this.onConfirmCallback(w, h);
                 this.modal.classList.add('hidden');
             }

@@ -1,6 +1,7 @@
 import { Tool, ToolContext } from './Tool';
 import { Point, Cell, Color } from '../types';
 import { sampleGradient, lerpColor } from '../utils/colors';
+import { parseCellKey } from '../utils/cellKeys';
 
 function luminance(c: Color): number {
     return (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) / 255;
@@ -13,7 +14,9 @@ export class FillTool implements Tool {
 
     private isEmptyCell(cell: Cell): boolean {
         const hasChar = cell.char && cell.char.trim() !== '';
-        const hasBg = cell.bg[0] !== -1 && !(cell.bg[0] === 0 && cell.bg[1] === 0 && cell.bg[2] === 0);
+        // Only the transparent marker counts as "no background": an opaque
+        // black bg is ink (matches GradientTool/CanvasState.setCell).
+        const hasBg = cell.bg[0] !== -1;
         return !hasChar && !hasBg;
     }
 
@@ -163,9 +166,10 @@ export class FillTool implements Tool {
         const updates: { col: number, row: number, cell: Cell }[] = [];
 
         for (const k of targets) {
-            const [cs, rs] = k.split(',');
-            const col = parseInt(cs);
-            const row = parseInt(rs);
+            const parsed = parseCellKey(k);
+            if (!parsed) continue;
+            const col = parsed.col;
+            const row = parsed.row;
             if (col < 0 || col >= ctx.state.width || row < 0 || row >= ctx.state.height) continue;
 
             const existing = layer.cells[row][col];
@@ -200,12 +204,16 @@ export class FillTool implements Tool {
         const lenSq = vx * vx + vy * vy;
 
         const target = ctx.appState.gradientTarget;
-        const stops = ctx.appState.gradientStops || [[0, 0, 0], [255, 255, 255]];
+        // `|| default` misses an explicitly empty array (truthy), so check length.
+        const stops: Color[] = ctx.appState.gradientStops.length > 0
+            ? ctx.appState.gradientStops
+            : [[0, 0, 0], [255, 255, 255]];
 
         for (const k of this.fillCells) {
-            const [cs, rs] = k.split(',');
-            const col = parseInt(cs);
-            const row = parseInt(rs);
+            const parsed = parseCellKey(k);
+            if (!parsed) continue;
+            const col = parsed.col;
+            const row = parsed.row;
             if (col < 0 || col >= ctx.state.width || row < 0 || row >= ctx.state.height) continue;
 
             const existing = layer.cells[row][col];
@@ -232,14 +240,16 @@ export class FillTool implements Tool {
             const inkIsBg = hasBg && (!hasChar || bgLum > fgLum);
             const inkLum = inkIsBg ? bgLum : fgLum;
 
-            if (target === 'foreground' || target === 'both') {
+            if (target === 'both') {
+                newCell.fg = gColor;
+                newCell.bg = gColor;
+            } else if (target === 'foreground') {
                 if (inkIsBg) {
                     newCell.bg = gColor;
                 } else {
                     newCell.fg = gColor;
                 }
-            }
-            if (target === 'background' || target === 'both') {
+            } else if (target === 'background') {
                 if (!inkIsBg) {
                     newCell.bg = gColor;
                 }

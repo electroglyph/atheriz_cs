@@ -86,7 +86,9 @@ export class GradientPicker {
     private onBarClick(e: MouseEvent) {
         const rect = this.previewBar.getBoundingClientRect();
         const x = e.clientX - rect.left;
-        const t = Math.max(0, Math.min(1, x / rect.width));
+        // Guard a zero-width bar: x / 0 would be NaN/Infinity and poison
+        // the gradient sampling below.
+        const t = rect.width <= 0 ? 0 : Math.max(0, Math.min(1, x / rect.width));
 
         const stops = this.stops;
         const newColor = sampleGradient(stops, t);

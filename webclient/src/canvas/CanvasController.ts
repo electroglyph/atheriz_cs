@@ -59,6 +59,9 @@ export class CanvasController {
 
     private onMouseDown(e: MouseEvent) {
         if (e.button !== 0) return; // Only left click for now
+        // Refresh modifiers on mousedown too: a shift/alt/ctrl held before
+        // the press would otherwise be invisible until the next mousemove.
+        this.toolManager.updateModifiers(e.shiftKey, e.altKey, e.ctrlKey);
         this.isDragging = true;
         const cell = this.getCellCoord(e);
         this.lastCell = cell;
@@ -97,7 +100,10 @@ export class CanvasController {
     }
 
     private onMouseUp(e: MouseEvent) {
-        if (e.button !== 0 || !this.isDragging) return;
+        // End the drag on ANY mouseup: a release with a different button
+        // (or a button value lost across window blur) must not leave the
+        // controller stuck in isDragging. Only mousedown filters by button.
+        if (!this.isDragging) return;
         this.isDragging = false;
         const cell = this.getCellCoord(e);
         this.lastCell = null;
@@ -118,11 +124,16 @@ export class CanvasController {
 
         let keyToPass: string | null = null;
         
-        if (e.key === 'Escape' || e.key === 'Enter' || e.key === 'Delete') {
+        // Enter is intentionally NOT forwarded: no tool handles it, and
+        // passing it through risks colliding with dialog/button activation.
+        if (e.key === 'Escape' || e.key === 'Delete') {
             keyToPass = e.key;
-        } else if (e.ctrlKey && !e.shiftKey) {
+        } else if (e.ctrlKey) {
+            // Normalize ctrl+shift variants down to ctrl+<key> and include
+            // ctrl+x (cut) so tools see them; tools that ignore a combo
+            // return false and the event is left alone (no preventDefault).
             const k = e.key.toLowerCase();
-            if (k === 'c' || k === 'v') {
+            if (k === 'c' || k === 'v' || k === 'x') {
                 keyToPass = `ctrl+${k}`;
             }
         }

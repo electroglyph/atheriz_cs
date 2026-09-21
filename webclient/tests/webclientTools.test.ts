@@ -96,7 +96,10 @@ describe('selection flood uses index queue not shift', () => {
 
 describe('fill flood performance and correctness', () => {
     it('fills enclosed room and fills outside when border open', () => {
-        const state = new CanvasState(5, 5);
+        // Pinned convention: only the transparent marker is "empty" — an
+        // opaque black bg counts as ink. The canvases below therefore start
+        // transparent (initializeBlack=false) so open space is floodable.
+        const state = new CanvasState(5, 5, false);
         for (let x = 0; x < 5; x++) { state.setCell(x, 0, { char: '#', fg: [255, 255, 255], bg: [-1, -1, -1] }); state.setCell(x, 4, { char: '#', fg: [255, 255, 255], bg: [-1, -1, -1] }); }
         for (let y = 0; y < 5; y++) { state.setCell(0, y, { char: '#', fg: [255, 255, 255], bg: [-1, -1, -1] }); state.setCell(4, y, { char: '#', fg: [255, 255, 255], bg: [-1, -1, -1] }); }
         const ctx = makeCtx(state, { fillMode: 'brush' });
@@ -104,7 +107,7 @@ describe('fill flood performance and correctness', () => {
         const inside = tool.floodFill(ctx as never, { x: 2, y: 2 } as never);
         expect(inside.size).toBe(9);
         const outsideTool = new FillTool() as unknown as { getOutsideEmptyCells: (ctx: unknown) => Set<string> };
-        const stateOpen = new CanvasState(5, 5);
+        const stateOpen = new CanvasState(5, 5, false);
         const ctxOpen = makeCtx(stateOpen);
         const outside = outsideTool.getOutsideEmptyCells(ctxOpen as never);
         expect(outside.size).toBe(25);

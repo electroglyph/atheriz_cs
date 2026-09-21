@@ -1,6 +1,13 @@
 import { ColorAdjustOptions } from '../utils/colors';
 import { closeOtherModals } from './modalHelper';
 
+/** Parses a slider value with radix 10, falling back to 0 for non-integer input. */
+export function parseSliderInt(value: string): number {
+    if (!/^-?\d+$/.test(value.trim())) return 0;
+    const n = Number(value.trim());
+    return Number.isSafeInteger(n) ? n : 0;
+}
+
 export class ColorAdjustDialog {
     private modal: HTMLElement;
     
@@ -167,10 +174,10 @@ export class ColorAdjustDialog {
 
     private getCurrentOptions(): ColorAdjustOptions {
         return {
-            brightness: parseInt(this.brightnessSlider.value, 10),
-            contrast: parseInt(this.contrastSlider.value, 10),
-            hue: parseInt(this.hueSlider.value, 10),
-            saturation: parseInt(this.saturationSlider.value, 10),
+            brightness: parseSliderInt(this.brightnessSlider.value),
+            contrast: parseSliderInt(this.contrastSlider.value),
+            hue: parseSliderInt(this.hueSlider.value),
+            saturation: parseSliderInt(this.saturationSlider.value),
         };
     }
 

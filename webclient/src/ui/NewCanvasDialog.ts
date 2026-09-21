@@ -1,5 +1,22 @@
 import { closeOtherModals } from './modalHelper';
 
+/** Bounds for canvas dimensions: 1..2048 integer cells. */
+export const CANVAS_DIM_MIN = 1;
+export const CANVAS_DIM_MAX = 2048;
+
+/**
+ * Parses a canvas dimension from a text input. Returns null unless the
+ * value is a finite integer in [1, 2048], so callers ignore the commit
+ * instead of creating degenerate canvases.
+ */
+export function parseCanvasDim(value: string): number | null {
+    if (!/^-?\d+$/.test(value.trim())) return null;
+    const n = Number(value.trim());
+    if (!Number.isSafeInteger(n)) return null;
+    if (n < CANVAS_DIM_MIN || n > CANVAS_DIM_MAX) return null;
+    return n;
+}
+
 export class NewCanvasDialog {
     private modal: HTMLElement;
     private btnNew: HTMLButtonElement;
@@ -37,9 +54,9 @@ export class NewCanvasDialog {
         });
 
         this.btnConfirm.addEventListener('click', () => {
-            const w = parseInt(this.inputW.value);
-            const h = parseInt(this.inputH.value);
-            if (w > 0 && h > 0) {
+            const w = parseCanvasDim(this.inputW.value);
+            const h = parseCanvasDim(this.inputH.value);
+            if (w !== null && h !== null) {
                 this.onConfirmCallback(w, h);
                 this.modal.classList.add('hidden');
             }

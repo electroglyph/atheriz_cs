@@ -18,6 +18,10 @@ export function pickPreviewFontSize(
     let firstFit = -1;
     for (let fs = PREVIEW_MAX_FONT_SIZE; fs >= PREVIEW_MIN_FONT_SIZE; fs--) {
         const m = measure(fs);
+        // Non-finite metrics (NaN from a failed measure) must never count
+        // as fitting: comparisons against NaN are false, so without this
+        // guard a broken measure would select an arbitrary size.
+        if (!Number.isFinite(m.width) || !Number.isFinite(m.height)) continue;
         if (m.width * width > availW || m.height * height > availH) continue;
         if (Number.isInteger(m.advance)) return fs;
         if (firstFit === -1) firstFit = fs;
@@ -70,6 +74,15 @@ export class PreviewWindow {
         if (e.key === 'Escape' && this.isOpen()) this.close();
     };
 
+    private boundCloseClick = () => this.close();
+    private boundBackdropClick = (e: MouseEvent) => {
+        if (e.target === this.modal) this.close();
+    };
+    private boundTitleMouseDown = (e: MouseEvent) => {
+        this.onTitleMouseDown(e);
+    };
+    private closeBtn: HTMLButtonElement | null = null;
+
     constructor(getState: () => CanvasState, getFont: () => string) {
         this.getState = getState;
         this.getFont = getFont;
@@ -81,6 +94,14 @@ export class PreviewWindow {
         window.removeEventListener('mousemove', this.boundWindowMouseMove);
         window.removeEventListener('mouseup', this.boundWindowMouseUp);
         window.removeEventListener('keydown', this.boundWindowKeyDown);
+        if (this.closeBtn) this.closeBtn.removeEventListener('click', this.boundCloseClick);
+        this.titleBar.removeEventListener('mousedown', this.boundTitleMouseDown);
+        this.modal.removeEventListener('click', this.boundBackdropClick);
+        if (this.terminal) {
+            this.terminal.dispose();
+            this.terminal = null;
+        }
+        this.modal.remove();
     }
 
     private buildModal(): HTMLElement {
@@ -136,39 +157,14 @@ export class PreviewWindow {
         `;
         closeBtn.onmouseenter = () => closeBtn.style.color = '#fff';
         closeBtn.onmouseleave = () => closeBtn.style.color = '#888';
-        closeBtn.addEventListener('click', () => this.close());
+        closeBtn.addEventListener('click', this.boundCloseClick);
+        this.closeBtn = closeBtn;
 
         titleBar.appendChild(title);
         titleBar.appendChild(closeBtn);
 
         // Drag-to-move
-        titleBar.addEventListener('mousedown', (e) => {
-            if (e.target === closeBtn) return;
-            this.dragging = true;
-
-            // 1. Capture the current rendered position FIRST
-            const rect = win.getBoundingClientRect();
-            this.winW = rect.width;
-            this.winH = rect.height;
-            this.winStartLeft = rect.left;
-            this.winStartTop = rect.top;
-
-            // 2. Now switch to absolute positioning and remove flex centering.
-            // This prevents the window from jumping to the top-left before we capture it.
-            modal.style.alignItems = 'flex-start';
-            modal.style.justifyContent = 'flex-start';
-
-            win.style.position = 'absolute';
-            win.style.left = this.winStartLeft + 'px';
-            win.style.top = this.winStartTop + 'px';
-            win.style.margin = '0';
-
-            this.dragStartX = e.clientX;
-            this.dragStartY = e.clientY;
-
-            titleBar.style.cursor = 'grabbing';
-            e.preventDefault();
-        });
+        titleBar.addEventListener('mousedown', this.boundTitleMouseDown);
 
         this.win = win;
         this.titleBar = titleBar;
@@ -185,14 +181,40 @@ export class PreviewWindow {
         modal.appendChild(win);
 
         // Close on backdrop click
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) this.close();
-        });
+        modal.addEventListener('click', this.boundBackdropClick);
 
         // Close on Escape
         window.addEventListener('keydown', this.boundWindowKeyDown);
 
         return modal;
+    }
+
+    private onTitleMouseDown(e: MouseEvent) {
+        if (this.closeBtn && e.target === this.closeBtn) return;
+        this.dragging = true;
+
+        // 1. Capture the current rendered position FIRST
+        const rect = this.win.getBoundingClientRect();
+        this.winW = rect.width;
+        this.winH = rect.height;
+        this.winStartLeft = rect.left;
+        this.winStartTop = rect.top;
+
+        // 2. Now switch to absolute positioning and remove flex centering.
+        // This prevents the window from jumping to the top-left before we capture it.
+        this.modal.style.alignItems = 'flex-start';
+        this.modal.style.justifyContent = 'flex-start';
+
+        this.win.style.position = 'absolute';
+        this.win.style.left = this.winStartLeft + 'px';
+        this.win.style.top = this.winStartTop + 'px';
+        this.win.style.margin = '0';
+
+        this.dragStartX = e.clientX;
+        this.dragStartY = e.clientY;
+
+        this.titleBar.style.cursor = 'grabbing';
+        e.preventDefault();
     }
 
     private isOpen(): boolean {

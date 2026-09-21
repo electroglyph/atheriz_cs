@@ -1,11 +1,32 @@
 import { GlyphScanner } from '../utils/GlyphScanner';
 import { closeOtherModals } from './modalHelper';
 
-function escapeCss(value: string): string {
+export function escapeCss(value: string): string {
     if (typeof CSS !== 'undefined' && typeof (CSS as unknown as { escape?: (s: string) => string }).escape === 'function') {
         return (CSS as unknown as { escape: (s: string) => string }).escape(value);
     }
-    return value.replace(/[^a-zA-Z0-9_-]/g, (ch) => `\\${ch}`);
+    // Fallback when CSS.escape is unavailable: escape every character outside
+    // the safe set as `\XXXXXX ` (codepoint hex + trailing space). A bare
+    // backslash prefix is NOT enough inside a quoted attribute selector:
+    // `"`, `]` and whitespace would still terminate or split the selector.
+    return value.replace(/[^a-zA-Z0-9_-]/g, (ch) => {
+        const cp = ch.codePointAt(0) ?? 0;
+        return `\\${cp.toString(16).padStart(6, '0')} `;
+    });
+}
+
+function requireElement(id: string): HTMLElement {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`CharMapDialog: missing element #${id}`);
+    return el;
+}
+
+export const CHAR_MAP_FALLBACK_FONT = 'monospace';
+
+export function normalizeCharMapFont(fontFamily: unknown): string {
+    return typeof fontFamily === 'string' && fontFamily.trim().length > 0
+        ? fontFamily
+        : CHAR_MAP_FALLBACK_FONT;
 }
 
 export class CharMapDialog {
@@ -15,12 +36,12 @@ export class CharMapDialog {
     private selectedPreview: HTMLElement;
     private cancelBtn: HTMLElement;
     private confirmBtn: HTMLElement;
-    
+
     private selectedChars: Set<string> = new Set();
     private onConfirm: (chars: string[]) => void;
     private oneShotConfirm: ((chars: string[]) => void) | null = null;
     private onCloseOnce: (() => void) | null = null;
-    
+
     private readonly COLS = 16;
     private readonly ROW_HEIGHT = 32;
     private totalRows: number = 0;
@@ -28,42 +49,59 @@ export class CharMapDialog {
     // Guards against a slow earlier scan overwriting a newer font's grid
     // when the dialog is rapidly reopened with a different font.
     private scanGeneration = 0;
-    
+    private destroyed = false;
+
     // A cache of currently rendered row elements to recycle or replace
     private activeRows: Map<number, HTMLElement> = new Map();
 
+    private boundScroll = () => this.handleScroll();
+    private boundCancel = () => this.close();
+    private boundConfirm = () => {
+        const chars = Array.from(this.selectedChars);
+        const cb = this.oneShotConfirm;
+        if (cb) {
+            this.oneShotConfirm = null;
+            const oc = this.onCloseOnce;
+            this.onCloseOnce = null;
+            cb(chars);
+            this.close();
+            if (oc) oc();
+        } else {
+            this.onConfirm(chars);
+            this.close();
+        }
+    };
+    private boundBackdropClick = (e: MouseEvent) => {
+        if (e.target === this.modal) this.close();
+    };
+
     constructor(onConfirm: (chars: string[]) => void) {
         this.onConfirm = onConfirm;
-        
-        this.modal = document.getElementById('char-map-modal')!;
-        this.scrollContainer = document.getElementById('char-map-scroll-container')!;
-        this.innerContainer = document.getElementById('char-map-inner')!;
-        this.selectedPreview = document.getElementById('char-map-selection')!;
-        this.cancelBtn = document.getElementById('btn-char-cancel')!;
-        this.confirmBtn = document.getElementById('btn-char-confirm')!;
-        
-        this.scrollContainer.addEventListener('scroll', () => this.handleScroll());
-        this.cancelBtn.addEventListener('click', () => this.close());
-        this.confirmBtn.addEventListener('click', () => {
-            const chars = Array.from(this.selectedChars);
-            const cb = this.oneShotConfirm;
-            if (cb) {
-                this.oneShotConfirm = null;
-                const oc = this.onCloseOnce;
-                this.onCloseOnce = null;
-                cb(chars);
-                this.close();
-                if (oc) oc();
-            } else {
-                this.onConfirm(chars);
-                this.close();
-            }
-        });
-        
+
+        this.modal = requireElement('char-map-modal');
+        this.scrollContainer = requireElement('char-map-scroll-container');
+        this.innerContainer = requireElement('char-map-inner');
+        this.selectedPreview = requireElement('char-map-selection');
+        this.cancelBtn = requireElement('btn-char-cancel');
+        this.confirmBtn = requireElement('btn-char-confirm');
+
+        this.scrollContainer.addEventListener('scroll', this.boundScroll);
+        this.cancelBtn.addEventListener('click', this.boundCancel);
+        this.confirmBtn.addEventListener('click', this.boundConfirm);
+
         // Close on clicking outside
-        this.modal.addEventListener('click', (e) => {
-            if (e.target === this.modal) this.close();
-        });
+        this.modal.addEventListener('click', this.boundBackdropClick);
+    }
+
+    public destroy(): void {
+        if (this.destroyed) return;
+        this.destroyed = true;
+        // Invalidate any in-flight scan so its continuation is a no-op.
+        this.scanGeneration++;
+        this.scrollContainer.removeEventListener('scroll', this.boundScroll);
+        this.cancelBtn.removeEventListener('click', this.boundCancel);
+        this.confirmBtn.removeEventListener('click', this.boundConfirm);
+        this.modal.removeEventListener('click', this.boundBackdropClick);
     }
 
     public async open(fontFamily: string, onConfirm?: (chars: string[]) => void, onClose?: () => void) {
@@ -73,6 +111,11 @@ export class CharMapDialog {
         this.selectedChars.clear();
         this.updatePreview();
         this.modal.classList.remove('hidden');
+
+        // Fall back to a known font when the caller passes an empty or
+        // non-string family; scanning with '' would measure the default font
+        // and mislabel the results.
+        const family = normalizeCharMapFont(fontFamily);
 
         // Show scanning UI
         const scanStatus = document.getElementById('char-scan-status');
@@ -89,7 +132,7 @@ export class CharMapDialog {
 
         const generation = ++this.scanGeneration;
         try {
-            const glyphs = await GlyphScanner.scanFont(fontFamily, (pct) => {
+            const glyphs = await GlyphScanner.scanFont(family, (pct) => {
                 if (generation !== this.scanGeneration) return;
                 if (scanStatus) scanStatus.textContent = `Scanning... ${pct}%`;
             });
@@ -117,10 +160,10 @@ export class CharMapDialog {
     private handleScroll() {
         const scrollTop = this.scrollContainer.scrollTop;
         const viewportHeight = this.scrollContainer.clientHeight;
-        
+
         const startRow = Math.max(0, Math.floor(scrollTop / this.ROW_HEIGHT) - 2);
         const endRow = Math.min(this.totalRows - 1, Math.ceil((scrollTop + viewportHeight) / this.ROW_HEIGHT) + 2);
-        
+
         // Remove out of bounds rows
         for (const [rowIndex, el] of this.activeRows.entries()) {
             if (rowIndex < startRow || rowIndex > endRow) {
@@ -128,7 +171,7 @@ export class CharMapDialog {
                 this.activeRows.delete(rowIndex);
             }
         }
-        
+
         // Add visible rows that aren't rendered yet
         for (let r = startRow; r <= endRow; r++) {
             if (!this.activeRows.has(r)) {
@@ -141,26 +184,26 @@ export class CharMapDialog {
         const rowEl = document.createElement('div');
         rowEl.className = 'char-map-row';
         rowEl.style.top = `${rowIndex * this.ROW_HEIGHT}px`;
-        
+
         const startIdx = rowIndex * this.COLS;
-        
+
         for (let c = 0; c < this.COLS; c++) {
             const arrIdx = startIdx + c;
-            
+
             const cellEl = document.createElement('div');
             cellEl.className = 'char-map-cell';
-            
+
             if (arrIdx < this.validGlyphs.length) {
                 const codePoint = this.validGlyphs[arrIdx];
                 try {
                     const char = String.fromCodePoint(codePoint);
                     cellEl.textContent = char;
                     cellEl.dataset.char = char;
-                    
+
                     if (this.selectedChars.has(char)) {
                         cellEl.classList.add('selected');
                     }
-                    
+
                     cellEl.addEventListener('click', () => {
                         if (this.selectedChars.has(char)) {
                             this.selectedChars.delete(char);
@@ -171,22 +214,22 @@ export class CharMapDialog {
                         }
                         this.updatePreview();
                     });
-                    
+
                     cellEl.title = `U+${codePoint.toString(16).toUpperCase().padStart(4, '0')}`;
-                } catch (e) {
-                     cellEl.classList.add('empty');
+                } catch {
+                      cellEl.classList.add('empty');
                 }
             } else {
                 cellEl.classList.add('empty');
             }
-            
+
             rowEl.appendChild(cellEl);
         }
-        
+
         this.innerContainer.appendChild(rowEl);
         this.activeRows.set(rowIndex, rowEl);
     }
-    
+
     private updatePreview() {
         this.selectedPreview.innerHTML = '';
         if (this.selectedChars.size === 0) {
@@ -194,7 +237,7 @@ export class CharMapDialog {
             this.selectedPreview.style.color = '#777';
             return;
         }
-        
+
         this.selectedPreview.style.color = '#fff';
         for (const char of this.selectedChars) {
             const badge = document.createElement('span');

@@ -192,6 +192,27 @@ export class MapEditSession {
         this.listener = listener;
     }
 
+    /** Rebind the session to the live canvas after a host-side swap
+     * (TextTool/undo/redo/New/import/ANSI load/color-adjust). Cheap and
+     * idempotent: swaps the reference and reconciles the baseline so
+     * computeDiff/saveToServer read the live object, never a discarded
+     * one. Plain swaps re-baseline; pass `{ keepBaseline: true }` for a
+     * deliberate clear (New) so the next diff expresses the wipe as
+     * deletions against the old baseline — otherwise the cleared map
+     * would never reach the server. */
+    public rebindCanvas(canvas: CanvasState, opts?: { keepBaseline?: boolean }): void {
+        this.canvas = canvas;
+        if (opts?.keepBaseline) return;
+        this.baseline.clear();
+        this.snapshotBaseline();
+    }
+
+    /** Update the world origin (rare; room tracking is untouched). */
+    public setOrigin(origin: MapEditOrigin): void {
+        this.originX = origin.originX;
+        this.originY = origin.originY;
+    }
+
     public scheduleSync(): void {
         if (this.stopped || this.syncTimer !== null) return;
         this.syncTimer = setTimeout(() => {
@@ -217,10 +238,13 @@ export class MapEditSession {
         const context = this.pendingMoves.slice();
         for (const move of moves) {
             if (!known.has(coordKey(move.fromX, move.fromY))) continue;
+            // Unfold the full chain back to the original server-side coord,
+            // consuming each prior hop so save sends one op per room.
             let fromX = move.fromX;
             let fromY = move.fromY;
-            const prior = this.pendingMoves.find((p) => p.toX === move.fromX && p.toY === move.fromY);
-            if (prior) {
+            for (;;) {
+                const prior = this.pendingMoves.find((p) => p.toX === fromX && p.toY === fromY);
+                if (!prior) break;
                 fromX = prior.fromX;
                 fromY = prior.fromY;
                 this.pendingMoves = this.pendingMoves.filter((p) => p !== prior);
@@ -228,6 +252,10 @@ export class MapEditSession {
             clientMoves.push(move);
             serverMoves.push({ fromX, fromY, toX: move.toX, toY: move.toY });
             this.pendingMoves.push({ fromX, fromY, toX: move.toX, toY: move.toY });
+            // Track client-side occupancy within the batch so chained moves
+            // (A->B, B->C in one stroke) fold instead of dropping the second.
+            known.delete(coordKey(move.fromX, move.fromY));
+            known.add(coordKey(move.toX, move.toY));
         }
         if (clientMoves.length === 0) return;
         this.queue.push({ kind: 'validate', serverMoves, clientMoves, context });
@@ -328,18 +356,32 @@ export class MapEditSession {
         const item = this.queue.shift()!;
         this.inFlight = { seq: this.seq, item };
         this.seq += 1;
+        if (!this.sendItem(this.inFlight.seq, item)) {
+            // The socket dropped between the state check and the send, so
+            // the bytes never hit the wire. Requeue at the front and release
+            // inFlight so a later flush/reconnect resends it. The consumed
+            // seq is kept (never sent, so no ack can collide with it).
+            this.queue.unshift(item);
+            this.inFlight = null;
+            return;
+        }
+    }
+
+    /** Serialize one queue item onto the wire. Returns conn.send()'s
+     * boolean so callers can requeue when the socket is no longer open. */
+    private sendItem(seq: number, item: QueueItem): boolean {
         if (item.kind === 'validate') {
-            this.conn.send(
+            return this.conn.send(
                 'map_validate_moves',
                 [
                     this.key,
-                    this.inFlight.seq,
+                    seq,
                     item.serverMoves.map((m) => [m.fromX, m.fromY, m.toX, m.toY]),
                     item.context.map((m) => [m.fromX, m.fromY, m.toX, m.toY]),
                 ]
             );
         } else if (item.kind === 'legend') {
-            this.conn.send('map_edit_legend', [this.key, this.inFlight.seq, item.legend.map((e) => {
+            return this.conn.send('map_edit_legend', [this.key, seq, item.legend.map((e) => {
                 const fg = (Array.isArray(e.fg) && e.fg.length === 3 ? e.fg as Color : DEFAULT_FG);
                 const bg = (Array.isArray(e.bg) && e.bg.length === 3 ? e.bg as Color : TRANSPARENT);
                 const vis = stripAnsi(e.symbol ?? '');
@@ -355,7 +397,7 @@ export class MapEditSession {
                 };
             })]);
         } else {
-            this.conn.send('map_edit', [this.key, this.inFlight.seq, item.cells]);
+            return this.conn.send('map_edit', [this.key, seq, item.cells]);
         }
     }
 
@@ -364,37 +406,17 @@ export class MapEditSession {
             if (!this.handshakeSent) {
                 this.handshakeSent = true;
                 this.inFlight = { seq: 0, item: { kind: 'edit', cells: [], isSave: false } };
-                this.conn.send('map_edit', [this.key, 0, []]);
+                if (!this.sendItem(0, this.inFlight.item)) {
+                    this.queue.unshift(this.inFlight.item);
+                    this.inFlight = null;
+                }
             } else if (this.inFlight) {
                 const { seq, item } = this.inFlight;
-                if (item.kind === 'validate') {
-                    this.conn.send(
-                        'map_validate_moves',
-                        [
-                            this.key,
-                            seq,
-                            item.serverMoves.map((m) => [m.fromX, m.fromY, m.toX, m.toY]),
-                            item.context.map((m) => [m.fromX, m.fromY, m.toX, m.toY]),
-                        ]
-                    );
-                } else if (item.kind === 'legend') {
-                    this.conn.send('map_edit_legend', [this.key, seq, item.legend.map((e) => {
-                        const fg = (Array.isArray(e.fg) && e.fg.length === 3 ? e.fg as Color : DEFAULT_FG);
-                        const bg = (Array.isArray(e.bg) && e.bg.length === 3 ? e.bg as Color : TRANSPARENT);
-                        const vis = stripAnsi(e.symbol ?? '');
-                        const ch = vis || e.symbol || 'X';
-                        const wrapped = wrapLegendSymbol(ch, fg, bg);
-                        return {
-                            symbol: wrapped,
-                            desc: e.desc,
-                            coord: e.coord ? [...e.coord] : null,
-                            show: e.show,
-                            fg: null,
-                            bg: null,
-                        };
-                    })]);
-                } else {
-                    this.conn.send('map_edit', [this.key, seq, item.cells]);
+                if (!this.sendItem(seq, item)) {
+                    // Resend never hit the wire: requeue at the front and
+                    // release inFlight so a later open flushes it. Not dropped.
+                    this.queue.unshift(item);
+                    this.inFlight = null;
                 }
             } else {
                 this.flush();
@@ -452,7 +474,14 @@ export class MapEditSession {
                         }
                     }
                     if (original === null) original = coordKey(move.fromX, move.fromY);
-                    this.roomPositions.set(original, coordKey(move.toX, move.toY));
+                    const dest = coordKey(move.toX, move.toY);
+                    // Keep values unique: drop any other entry already
+                    // pointing at the destination so overlapping acks cannot
+                    // leave two rooms on one coord.
+                    for (const [orig, current] of Array.from(this.roomPositions.entries())) {
+                        if (orig !== original && current === dest) this.roomPositions.delete(orig);
+                    }
+                    this.roomPositions.set(original, dest);
                 }
                 this.listener?.({ type: 'moves_accepted' });
                 this.flush();

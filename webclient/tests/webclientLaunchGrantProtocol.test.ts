@@ -144,7 +144,7 @@ describe('websocket binary frames and URL handling', () => {
         expect(decodeWireData({})).toBeNull();
         expect(decodeWireData(null)).toBeNull();
     });
-    it('WebSocketConnection handles ArrayBuffer message via decodeWireData', () => {
+    it('WebSocketConnection decodes Blob frames via the async path', async () => {
         const socket = new FakeSocket();
         const messages: string[] = [];
         const invalid: number[] = [];
@@ -159,11 +159,14 @@ describe('websocket binary frames and URL handling', () => {
         socket.deliver(buf);
         expect(messages).toEqual(['text']);
         expect(invalid).toEqual([]);
-        // Blob should trigger invalid, not throw
+        // Blob frames decode asynchronously instead of being dropped.
         const blob = new Blob(['["text", ["hello"], {}]']);
         socket.deliver(blob);
-        expect(invalid).toHaveLength(1);
-        expect(messages).toHaveLength(1);
+        await vi.waitFor(() => {
+            expect(messages).toEqual(['text', 'text']);
+        });
+        expect(invalid).toEqual([]);
+        conn.close();
     });
     it('rejects empty command string', () => {
         expect(parseWireMessage('["", [], {}]')).toBeNull();

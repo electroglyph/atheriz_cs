@@ -1,7 +1,9 @@
+/** Max characters kept per history entry; longer entries are truncated. */
+export const MAX_ENTRY_SIZE = 4096;
+
 export class CommandHistory {
     private readonly storageKey: string;
-    private readonly maxSize: number;
-    private history: string[];
+    private readonly maxSize: number;    private history: string[];
     private index = -1;
     private currentInput = '';
     private playerCommands: string[] = [];
@@ -15,7 +17,8 @@ export class CommandHistory {
 
     add(value: string): void {
         if (!value) return;
-        this.history = [value, ...this.history.filter((item) => item !== value)].slice(0, this.maxSize);
+        const capped = value.length > MAX_ENTRY_SIZE ? value.slice(0, MAX_ENTRY_SIZE) : value;
+        this.history = [capped, ...this.history.filter((item) => item !== capped)].slice(0, this.maxSize);
         this.save();
         this.reset();
     }
@@ -75,7 +78,13 @@ export class CommandHistory {
         try {
             const saved = window.localStorage.getItem(this.storageKey);
             const parsed: unknown = saved ? JSON.parse(saved) : [];
-            return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+            if (!Array.isArray(parsed)) return [];
+            // Cap entry count and truncate oversized entries so a bloated or
+            // hostile stored blob cannot exhaust memory on startup.
+            return parsed
+                .filter((item): item is string => typeof item === 'string')
+                .slice(0, this.maxSize)
+                .map((item) => (item.length > MAX_ENTRY_SIZE ? item.slice(0, MAX_ENTRY_SIZE) : item));
         } catch {
             return [];
         }

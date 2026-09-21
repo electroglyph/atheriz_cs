@@ -4,9 +4,17 @@ import { Color } from '../types';
 /**
  * Generates a flat ANSI/VT100 string that represents the *composited* view of the canvas
  * (all visible layers merged), suitable for feeding into xterm.js.
+ *
+ * Conventions (pinned): a layer-less canvas yields a bare reset (never throws);
+ * only the in-bounds grid is rendered (overflowCells are dropped, like the
+ * exporter); output ends with a bare reset and NO trailing newline, matching
+ * AnsiExporter.
  */
 export function buildCompositeAnsiPreview(state: CanvasState): string {
     const { width, height } = state;
+    if (!state.layers || state.layers.length === 0) {
+        return '\x1b[0m';
+    }
     let out = '';
 
     let currentFg: Color | null = null;

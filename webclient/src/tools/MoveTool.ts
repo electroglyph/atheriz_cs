@@ -1,5 +1,7 @@
 import { Tool, ToolContext } from './Tool';
 import { Point, Cell } from '../types';
+import { cellEquals } from '../utils/colors';
+import { parseCellKey } from '../utils/cellKeys';
 
 export class MoveTool implements Tool {
     private anchor: Point | null = null;
@@ -18,7 +20,10 @@ export class MoveTool implements Tool {
             // ones — so room coords (which sit on glyph-less interior cells)
             // are reported to onCellsMoved and their outlines move with them
             for (const key of selected) {
-                const [col, row] = key.split(',').map(Number);
+                const parsed = parseCellKey(key);
+                if (!parsed) continue;
+                const col = parsed.col;
+                const row = parsed.row;
                 const cell = ctx.state.getCell(col, row);
                 const originCell = cell
                     ? {
@@ -50,8 +55,11 @@ export class MoveTool implements Tool {
             }
             if (activeLayer.overflowCells) {
                  for (const [key, c] of activeLayer.overflowCells.entries()) {
-                     const [col, row] = key.split(',').map(Number);
-                     const originCell = { 
+                      const parsed = parseCellKey(key);
+                      if (!parsed) continue;
+                      const col = parsed.col;
+                      const row = parsed.row;
+                      const originCell = { 
                          char: c.char, fg: [...c.fg] as [number, number, number], bg: [...c.bg] as [number, number, number],
                          bold: c.bold, italic: c.italic, underline: c.underline
                      };
@@ -107,19 +115,51 @@ export class MoveTool implements Tool {
             return;
         }
 
+        // Noop guard: nothing collected (e.g. a whole-layer move on an empty
+        // layer) pushes no undo entry and changes nothing.
+        if (this.movingCells.length === 0) {
+            this.anchor = null;
+            return;
+        }
+
+        const inBounds = (c: number, r: number): boolean =>
+            c >= 0 && c < ctx.state.width && r >= 0 && r < ctx.state.height;
+
+        // Out-of-bounds destinations are clipped (dropped) instead of being
+        // written to overflowCells; out-of-bounds origins are left alone.
+        const clearUpdates = this.movingCells
+            .filter(mc => inBounds(mc.col, mc.row))
+            .map(mc => ({
+                col: mc.col, row: mc.row, cell: { char: '', fg: [204, 204, 204] as [number, number, number], bg: [-1, -1, -1] as [number, number, number] }
+            }));
+
+        const placeUpdates = this.movingCells
+            .map(mc => ({
+                col: mc.col + dx, row: mc.row + dy, cell: mc.originCell
+            }))
+            .filter(u => inBounds(u.col, u.row));
+
+        // Merge with placements winning over clears on overlap, then drop
+        // writes that would not actually change the cell. A fully clipped
+        // or content-identical move pushes no undo entry.
+        const merged = new Map<string, { col: number; row: number; cell: Cell }>();
+        for (const u of [...clearUpdates, ...placeUpdates]) {
+            merged.set(`${u.col},${u.row}`, { col: u.col, row: u.row, cell: u.cell });
+        }
+        const batch = [...merged.values()].filter(u => {
+            const current = ctx.state.getCell(u.col, u.row);
+            return !current || !cellEquals(current, u.cell);
+        });
+        if (batch.length === 0) {
+            this.anchor = null;
+            this.movingCells = [];
+            return;
+        }
+
         // Push state for undo
         ctx.undoStack.push(ctx.state);
-        
-        // 1. & 2. Apply clear and place in a single batch
-        const clearUpdates = this.movingCells.map(mc => ({ 
-            col: mc.col, row: mc.row, cell: { char: '', fg: [204, 204, 204] as [number, number, number], bg: [-1, -1, -1] as [number, number, number] }
-        }));
-        
-        const placeUpdates = this.movingCells.map(mc => ({
-            col: mc.col + dx, row: mc.row + dy, cell: mc.originCell
-        }));
 
-        ctx.state.applyBatch([...clearUpdates, ...placeUpdates]);
+        ctx.state.applyBatch(batch);
 
         if (ctx.onCellsMoved) {
             ctx.onCellsMoved(
@@ -137,8 +177,9 @@ export class MoveTool implements Tool {
         if (selected && selected.size > 0) {
             const newSel = new Set<string>();
             for (const key of selected) {
-                const [c, r] = key.split(',').map(Number);
-                newSel.add(`${c + dx},${r + dy}`);
+                const parsed = parseCellKey(key);
+                if (!parsed) continue;
+                newSel.add(`${parsed.col + dx},${parsed.row + dy}`);
             }
             ctx.renderer.setSelection(newSel);
             ctx.selectionSync?.setSelection(newSel);

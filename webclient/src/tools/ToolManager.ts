@@ -6,6 +6,9 @@ import { EraserTool } from './EraserTool';
 export class ToolManager {
     private tools: Record<string, Tool> = {};
     private context: ToolContext;
+    // Unknown tool ids warn once each instead of failing silently, so a
+    // miswired toolbar button is visible in the console without spamming it.
+    private warnedUnknownTools: Set<string> = new Set();
 
     constructor(context: ToolContext) {
         this.context = context;
@@ -31,7 +34,16 @@ export class ToolManager {
     }
 
     private getActiveTool(): Tool | null {
-        return this.tools[this.context.appState.activeToolId] || null;
+        const id = this.context.appState.activeToolId;
+        const tool = this.tools[id];
+        if (!tool) {
+            if (!this.warnedUnknownTools.has(id)) {
+                this.warnedUnknownTools.add(id);
+                console.warn(`ToolManager: unknown tool id "${id}" — ignoring input.`);
+            }
+            return null;
+        }
+        return tool;
     }
 
     public onMouseDown(cell: Point) {
