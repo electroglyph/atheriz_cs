@@ -116,4 +116,54 @@ public class PluginBootLoadTests
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
+
+    [Fact]
+    public void BootLoad_NewerObjAndTestSources_StillDiscoversDll()
+    {
+        // Live-boot regression: generated outputs (obj/bin) and test sources
+        // never feed the game dll, so newer stamps there must not mark it
+        // stale (which booted engine-only with zero game code, unhealable by
+        // an incremental game-only rebuild).
+        using var env = GlobalTestEnv.Enter();
+        var dir = StageFakeGame();
+        try
+        {
+            var objDir = Path.Combine(dir, "obj", "Release", "net10.0");
+            Directory.CreateDirectory(objDir);
+            File.WriteAllText(Path.Combine(objDir, "bootgame.AssemblyInfo.cs"), "// generated");
+            var testsDir = Path.Combine(dir, "bootgametests");
+            Directory.CreateDirectory(testsDir);
+            File.WriteAllText(Path.Combine(testsDir, "ProbeTests.cs"), "// test");
+            foreach (var f in Directory.GetFiles(objDir, "*.cs"))
+                File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddMinutes(5));
+            foreach (var f in Directory.GetFiles(testsDir, "*.cs"))
+                File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddMinutes(5));
+            var o = new GameObject();
+            ObjectRegistry.AddObject(o);
+            var settings = new AtherizSettings { SavePath = Path.Combine(dir, "save") };
+            var patched = PluginReloader.LoadGameAssembliesAtBoot(settings);
+            Assert.True(patched >= 1);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void BootLoad_NewerGameSource_SkipsStaleDll()
+    {
+        // The other direction stays loud: a genuinely newer GAME source still
+        // marks the dll stale instead of loading outdated game code.
+        using var env = GlobalTestEnv.Enter();
+        var dir = StageFakeGame();
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "GameCode.cs"), "// game");
+            var o = new GameObject();
+            ObjectRegistry.AddObject(o);
+            var settings = new AtherizSettings { SavePath = Path.Combine(dir, "save") };
+            var patched = PluginReloader.LoadGameAssembliesAtBoot(settings);
+            Assert.Equal(0, patched);
+            Assert.Contains(o, ObjectRegistry.FilterBy(x => ReferenceEquals(x, o)));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
 }

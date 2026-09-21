@@ -64,6 +64,31 @@ public static class InitialSetup
         GameObject.RegisterPersistedSubtype(typeof(Commands.LoggedIn.WanderCommand.WandererNpc).FullName!, typeof(Commands.LoggedIn.WanderCommand.WandererNpc), () => new Commands.LoggedIn.WanderCommand.WandererNpc());
     }
 
+    /// <summary>
+    /// Game override for CLI world setup (<c>reset</c>/<c>new</c>); null (the
+    /// default) selects the engine template. Set by the game plugin itself on
+    /// load — the engine never names game types.
+    /// </summary>
+    public static IGameSetup? GameSetup { get; set; }
+
+    /// <summary>
+    /// World-creation dispatch shared by <c>reset</c> and <c>new</c>: runs the
+    /// registered game setup when present, else the engine template. Without
+    /// this every game resets into the template world instead of its own.
+    /// </summary>
+    public static void RunSetup(string savePath, string? username = null, string? password = null, string? secretPath = null, bool prompt = true)
+    {
+        var game = GameSetup;
+        if (game is not null)
+        {
+            Console.Error.WriteLine("[Setup] Running game world setup.");
+            game.DoSetup(savePath, username, password, secretPath, prompt);
+            return;
+        }
+        Console.Error.WriteLine("[Setup] Running template world setup.");
+        DoSetup(savePath, username, password, secretPath, prompt);
+    }
+
     public static void DoSetup(string savePath, string? username = null, string? password = null, string? secretPath = null, bool prompt = true, TextReader? input = null)
     {
         // Port of initial_setup.py:49 logger.info — not duplicated to stdout (new.py:740 already prints)

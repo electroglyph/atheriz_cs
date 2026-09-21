@@ -86,7 +86,8 @@ public static class ResetHandler
 
         try { Atheriz.Core.Persistence.AtherizDbContextFactory.CloseDatabase(); } catch { }
 
-        Console.WriteLine("Deleting game data...");
+        var absSave = Path.GetFullPath(savePath);
+        Console.WriteLine($"Deleting game data at {absSave}...");
         // Nothing to wipe (fresh folder): skip the world-membership gate —
         // GuardWipePath demands markers precisely so a live/foreign dir is
         // never deleted, but an absent dir needs no protection.
@@ -102,8 +103,26 @@ public static class ResetHandler
         try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); CliExitCode.Set(1); return; }
         Directory.CreateDirectory(savePath);
         Atheriz.Core.Utils.FsUtil.TryChmod0700(savePath);
+        // Fail closed: never run setup over a half-wiped world — a failed
+        // delete above (or a concurrent writer) must abort loudly instead of
+        // layering a fresh world on top of surviving data.
+        try
+        {
+            if (Directory.EnumerateFileSystemEntries(savePath).Any())
+            {
+                Console.WriteLine($"Wipe incomplete, entries remain under {absSave}; aborting before setup.");
+                CliExitCode.Set(1);
+                return;
+            }
+        }
+        catch (Exception ex) { Console.WriteLine($"Could not verify wipe of {absSave}: {ex.Message}"); CliExitCode.Set(1); return; }
 
         try { Atheriz.Core.Persistence.AtherizDbContextFactory.ReopenDatabase(); } catch { }
+
+        // Load the game (if any) so setup below dispatches to it; best-effort
+        // and never fatal — without a game the template setup still runs.
+        try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings); }
+        catch (Exception ex) { Console.Error.WriteLine($"[reset] Game load failed ({ex.Message}); using template setup."); }
 
         Console.WriteLine("Setting up new world...");
         try
@@ -111,7 +130,7 @@ public static class ResetHandler
             // Port of atheriz.py reset: local initial_setup.do_setup() with no superuser (limbo world only).
             // Explicit no-prompt creds : reset must never interactively
             // ask for a superuser mid-wipe; env creds still apply when set.
-            Atheriz.Core.InitialSetup.DoSetup(savePath, prompt: false);
+            Atheriz.Core.InitialSetup.RunSetup(savePath, prompt: false);
             Console.WriteLine("Success! New world created.");
         }
         catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); CliExitCode.Set(1); return; }

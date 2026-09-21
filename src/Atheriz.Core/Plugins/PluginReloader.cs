@@ -70,6 +70,30 @@ public static class PluginReloader
         return false;
     }
     private static bool IsExcluded(string p) => IsExcludedAssembly(p);
+    // True for .cs files that can never feed the game dll, so they must not
+    // count toward staleness: generated outputs under obj/bin segments, and
+    // test sources (any ancestor dir named test/tests or ending in Tests, e.g.
+    // Grotto.Tests/). Pure path-string check, no IO. Convention cost: game
+    // code must not live under such names (a change there would load a stale
+    // dll instead of skipping loudly).
+    private static bool IsNonGameSource(string gameDir, string file)
+    {
+        try
+        {
+            var rel = Path.GetRelativePath(gameDir, file);
+            foreach (var seg in rel.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]))
+            {
+                if (seg.Equals("obj", StringComparison.OrdinalIgnoreCase) ||
+                    seg.Equals("bin", StringComparison.OrdinalIgnoreCase) ||
+                    seg.Equals("test", StringComparison.OrdinalIgnoreCase) ||
+                    seg.Equals("tests", StringComparison.OrdinalIgnoreCase) ||
+                    seg.EndsWith("Tests", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch (Exception ex) { Suppress("DiscoverGameAssembly", ex); }
+        return false;
+    }
     // Shared suppressed-log helper: the op string is preserved verbatim so
     // the emitted text stays byte-identical to the inlined LogDebug calls.
     private static void Suppress(string op, Exception ex) => AtherizLogger.LogDebug("Suppressed PluginReloader." + op + ": " + ex.Message, "PluginReloader");
@@ -475,10 +499,18 @@ public static class PluginReloader
                         var csprojTime = File.GetLastWriteTimeUtc(csproj);
                         var dllTime = File.GetLastWriteTimeUtc(dll!);
                         if (csprojTime > dllTime) needBuild = true;
-                        // also if any *.cs newer (recursive: subdirectory
-                        // edits must not look "up to date")
+                        // also if any game *.cs newer (recursive: subdirectory
+                        // edits must not look "up to date") — but only sources
+                        // that can feed the game dll. Generated outputs
+                        // (obj/bin) and test projects never do: counting them
+                        // bricks every boot into engine-only after any test
+                        // build/edit, which build.sh (game project only,
+                        // incremental) can never heal.
                         foreach (var cs in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
+                        {
+                            if (IsNonGameSource(dir, cs)) continue;
                             if (File.GetLastWriteTimeUtc(cs) > dllTime) { needBuild = true; break; }
+                        }
                     }
                     catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
                 }
