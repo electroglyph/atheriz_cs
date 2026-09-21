@@ -87,6 +87,9 @@ left.loadAddon(new Unicode11Addon());
 right.loadAddon(new Unicode11Addon());
 left.open(elements.leftTerminal);
 right.open(elements.rightTerminal);
+// TEMP-DEBUG-LOGIN-SCROLL (revert before commit): expose left terminal
+// so an automated repro can sample buffer.active viewportY/baseY.
+(window as unknown as { __leftTerm?: unknown }).__leftTerm = left;
 installWebgl(left);
 installWebgl(right);
 write('\x1b[1;97mxtermia3\x1b[0m terminal emulator (made with xterm.js)\n');
@@ -765,6 +768,8 @@ function recordLayout(): void {
 }
 
 function installWebgl(terminal: Terminal): void {
+    // TEMP-DEBUG-LOGIN-SCROLL (revert before commit): force DOM renderer.
+    if ((window as unknown as { __noWebgl?: unknown }).__noWebgl !== false) return;
     const attach = (): void => {
         let addon: WebglAddon | null = null;
         try {

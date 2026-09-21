@@ -108,6 +108,17 @@ public static class StartStop
             }
             catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetAsyncTicker failed:\n{ex}"); }
 
+            // Boot-time game load: discover + load the game assembly and patch
+            // the freshly loaded world to its types (same discover→load→patch
+            // as a hot reload). Without this the server boots engine-only and
+            // game verbs stay unregistered until the first manual reload.
+            // Never throws: failures log and boot continues engine-only.
+            try
+            {
+                Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings);
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"DoStartup game load failed:\n{ex}"); }
+
             // Port of startstop.py:39-42 server_events.at_server_start()
             try
             {

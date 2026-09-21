@@ -184,12 +184,28 @@ public static class PluginReloader
         try{
             try{lk.EnterWriteLock(); taken=true;}catch{taken=false;}
             GameObject newObj; try{newObj=(GameObject)RuntimeHelpers.GetUninitializedObject(newType);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] GetUninitializedObject {newType.Name}: {ex.Message}"); return false;}
-            var newByName=GetAllFields(newType).GroupBy(f=>f.Name).ToDictionary(g=>g.Key,g=>g.First(),StringComparer.Ordinal);
+            var newByName=GetAllFields(newType).GroupBy(f=>f.Name).ToDictionary(g=>g.Key,g=>g.ToList(),StringComparer.Ordinal);
             foreach(var fOld in oldFields){
                 if(_transientFields.Contains(fOld.Name)) continue;
-                if(!newByName.TryGetValue(fOld.Name,out var fNew)) continue;
-                if(fNew.IsInitOnly) continue;
-                try{ var v=fOld.GetValue(oldObj); if(v is null||fNew.FieldType.IsAssignableFrom(v.GetType())||fNew.FieldType.IsAssignableFrom(fOld.FieldType)||fNew.FieldType==typeof(object)) fNew.SetValue(newObj,v); else try{fNew.SetValue(newObj,v);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
+                if(!newByName.TryGetValue(fOld.Name,out var fNews)) continue;
+                object? v;
+                try { v=fOld.GetValue(oldObj); } catch (Exception logEx) { Suppress("PatchSingleObject", logEx); continue; }
+                foreach(var fNew in fNews){
+                    if(fNew.IsInitOnly) continue;
+                    // Pair by name AND assignability: a derived type may shadow
+                    // a base field with an incompatible type (same name, new
+                    // meaning). Writing the old value into that slot corrupts
+                    // it and starves the true slot (reads keep hitting the
+                    // unset base slot). Copy only to slots accepting the value.
+                    try{
+                        if(v is null){
+                            if(!fNew.FieldType.IsValueType||Nullable.GetUnderlyingType(fNew.FieldType) is not null) fNew.SetValue(newObj,null);
+                        }
+                        else if(fNew.FieldType.IsAssignableFrom(v.GetType())||fNew.FieldType.IsAssignableFrom(fOld.FieldType)||fNew.FieldType==typeof(object)) fNew.SetValue(newObj,v);
+                        // else: same-name shadow with an incompatible type and
+                        // different meaning — leave the slot at its default.
+                    }catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
+                }
             }
             foreach(var kv in saved){ var fNew=FindField(newType,kv.Key); if(fNew is not null&&!fNew.IsInitOnly) try{fNew.SetValue(newObj,kv.Value);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); } }
             // GetUninitializedObject skips field initializers, so readonly fields (e.g. _flags)
@@ -197,16 +213,22 @@ public static class PluginReloader
             // old instance (shared refs are safe: the old instance is detached after rewire).
             foreach (var fOld in oldFields)
             {
-                if (!newByName.TryGetValue(fOld.Name, out var fNew) || !fNew.IsInitOnly) continue;
-                try
+                if (!newByName.TryGetValue(fOld.Name, out var fNews)) continue;
+                object? v;
+                try { v = fOld.GetValue(oldObj); } catch (Exception logEx) { Suppress("PatchSingleObject", logEx); continue; }
+                if (v is null) continue;
+                foreach (var fNew in fNews)
                 {
-                    if (fNew.GetValue(newObj) is null)
+                    if (!fNew.IsInitOnly) continue;
+                    // Same name+assignability pairing as the main loop above:
+                    // an incompatible shadow must not swallow the backfill.
+                    if (!(fNew.FieldType.IsAssignableFrom(v.GetType()) || fNew.FieldType.IsAssignableFrom(fOld.FieldType))) continue;
+                    try
                     {
-                        var v = fOld.GetValue(oldObj);
-                        if (v is not null) fNew.SetValue(newObj, v);
+                        if (fNew.GetValue(newObj) is null) fNew.SetValue(newObj, v);
                     }
+                    catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
                 }
-                catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
             }
             var lf=FindField(newType,"_lock");
             if(lf is not null) try{ var cur=lf.GetValue(newObj); if(cur is null) lf.SetValue(newObj,saved.TryGetValue("_lock",out var v)?v:new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion)); }catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
@@ -471,4 +493,52 @@ public static class PluginReloader
     }
     public static Task<string> ReloadGameLogicAsync(AsyncTicker ticker, AtherizSettings settings)=>ReloadGameLogicAsync(ticker,GlobalServices.GetAsyncThreadPool(),settings);
     public static Task<string> ReloadGameLogicAsync(AtherizSettings settings)=>ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(),GlobalServices.GetAsyncThreadPool(),settings);
+    // Boot-time game load: same discover→load→patch as a hot reload, minus the
+    // async reload orchestration (ticker reregistration, map-edit clearing),
+    // which only makes sense for an already-running world. Runs synchronously;
+    // the caller (StartStop.DoStartup) holds WorldLock, which is re-entrant.
+    // Never throws: every failure is logged and boot continues engine-only.
+    // Returns the patched live-object count (0 when no game assembly exists).
+    public static int LoadGameAssembliesAtBoot(AtherizSettings? settings = null)
+    {
+        settings ??= AtherizSettings.Global;
+        if (!TryEnterGate()) { Console.Error.WriteLine("[Boot] Game load already in progress; skipping."); return 0; }
+        try
+        {
+            List<string> cands = [];
+            try { DiscoverGameAssembly(settings, cands); } catch (Exception ex) { Suppress("LoadGameAssembliesAtBoot.Discover", ex); }
+            try { DiscoverNewPluginModules(settings, cands); } catch (Exception ex) { Suppress("LoadGameAssembliesAtBoot.Discover", ex); }
+            cands = cands.Where(p => !IsExcluded(p) && File.Exists(p)).Distinct().ToList();
+            if (cands.Count == 0)
+            {
+                Console.Error.WriteLine("[Boot] No game assembly discovered — running engine-only. Build the game project first (dotnet build) so its dll is discoverable next to the game folder.");
+                return 0;
+            }
+            Console.Error.WriteLine($"[Boot] Found {cands.Count} game assemblies.");
+            int patched = 0;
+            foreach (var p in cands)
+            {
+                try
+                {
+                    var full = Path.GetFullPath(p);
+                    if (_loader is not null) { try { _loader.Unload(); } catch (Exception logEx) { Suppress("LoadGameAssembliesAtBoot", logEx); } _loader = null; GC.Collect(); }
+                    _loader = new PluginLoader();
+                    try { _loader.Load(full); } catch (Exception ex) { Console.Error.WriteLine($"[Boot] Load failed: {ex.Message}"); continue; }
+                    Console.Error.WriteLine($"[Boot] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
+                    lock (StartStop.WorldLock)
+                    {
+                        foreach (var kv in _loader.Replacements.ToList())
+                        {
+                            try { patched += PatchLiveObjects(kv.Key, kv.Value); }
+                            catch (Exception ex) { Console.Error.WriteLine($"[Boot] Patch {kv.Key.Name}->{kv.Value.Name}: {ex.Message}"); }
+                        }
+                    }
+                }
+                catch (Exception ex) { Console.Error.WriteLine($"[Boot] Failed {p}: {ex.Message}"); }
+            }
+            Console.Error.WriteLine($"[Boot] Game load patched {patched} of {ObjectRegistry.Count} objects.");
+            return patched;
+        }
+        finally { ExitGate(); }
+    }
 }
