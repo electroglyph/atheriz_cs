@@ -108,6 +108,26 @@ public static class PluginReloader
         if (evicted > 0) Console.Error.WriteLine($"[HotReload] Evicted {evicted} stale commands.");
         return evicted;
     }
+    // True when live objects already carry a previous load's replacement
+    // types: plugin-defined (non-Core assembly) instances deriving a pair
+    // base. Exact-match patching is blind to those, so converting again
+    // would match nothing. Internal for direct unit tests.
+    internal static bool WorldAlreadyConverted(Dictionary<Type, Type> replacements)
+    {
+        if (replacements is null || replacements.Count == 0) return false;
+        var coreAsm = typeof(GameObject).Assembly;
+        try
+        {
+            foreach (var kv in replacements)
+            {
+                if (kv.Key is null) continue;
+                foreach (var o in ObjectRegistry.FilterBy(x => x is not null && x.GetType().Assembly != coreAsm && kv.Key.IsAssignableFrom(x.GetType())))
+                    return true;
+            }
+        }
+        catch (Exception ex) { Suppress("WorldAlreadyConverted", ex); }
+        return false;
+    }
     public static async Task<bool> ReloadAsync(string assemblyPath, AsyncTicker ticker, AsyncThreadPool pool)
     {
         if (string.IsNullOrWhiteSpace(assemblyPath)) return false;
@@ -123,6 +143,16 @@ public static class PluginReloader
             _loader = new PluginLoader();
             try { _loader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
             Console.Error.WriteLine($"[HotReload] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
+            // A previous load already converted the world when live instances
+            // carry plugin types (non-Core assembly deriving a pair base):
+            // exact-match patching can't see them, so a second conversion
+            // would patch nothing while eviction destroyed the working
+            // commands. Skip both loudly instead (restart picks up new code).
+            if (WorldAlreadyConverted(_loader.Replacements))
+            {
+                Console.Error.WriteLine("[HotReload] World already converted by a previous load; skipping object patch and command eviction (restart to pick up new code).");
+                return true;
+            }
             int patched=0;
             // Patch under the shared world lock (port of _SHARED_WORLD_LOCK): patch
             // takes per-object write + handler read locks, same outermost direction

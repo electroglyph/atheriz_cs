@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Runtime.Loader;
 using Atheriz.Core.Commands;
+using Atheriz.Core.Globals;
+using Atheriz.Core.Objects;
 using Atheriz.Core.Plugins;
 using Atheriz.Core.Tests;
 
@@ -85,5 +87,38 @@ public class PluginCommandRefreshTests
         set.Add(cmd);
         Assert.Equal(0, PluginReloader.EvictStaleCommands(null, set));
         Assert.Same(cmd, set.Get("keeper"));
+    }
+
+    [Fact]
+    public void WorldAlreadyConverted_EngineWorld_ReturnsFalse()
+    {
+        using var env = GlobalTestEnv.Enter();
+        ObjectRegistry.AddObject(new GameObject());
+        var map = new Dictionary<Type, Type> { [typeof(GameObject)] = typeof(GameObject) };
+        Assert.False(PluginReloader.WorldAlreadyConverted(map));
+        Assert.False(PluginReloader.WorldAlreadyConverted(new Dictionary<Type, Type>()));
+    }
+
+    [Fact]
+    public void WorldAlreadyConverted_PatchedWorld_ReturnsTrue()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var copy = CopyTestAssembly();
+        AssemblyLoadContext? alc = null;
+        try
+        {
+            alc = new AssemblyLoadContext("convprobe-" + Guid.NewGuid().ToString("N"), isCollectible: true);
+            var asm = alc.LoadFromAssemblyPath(copy);
+            var t = asm.GetType(typeof(GoodProbeReplacement).FullName!);
+            Assert.NotNull(t);
+            ObjectRegistry.AddObject((GameObject)Activator.CreateInstance(t)!);
+            var map = new Dictionary<Type, Type> { [typeof(GameObject)] = typeof(GoodProbeReplacement) };
+            Assert.True(PluginReloader.WorldAlreadyConverted(map));
+        }
+        finally
+        {
+            try { alc?.Unload(); } catch { }
+            try { File.Delete(copy); } catch { }
+        }
     }
 }
