@@ -57,6 +57,13 @@ public sealed class PluginLoader : IDisposable
     public bool IsLoaded => _loaded is not null;
 
     /// <summary>
+    /// The currently loaded plugin assembly (null after <see cref="Unload"/>).
+    /// Lets reload callers identify instances rooted in a replaced load —
+    /// e.g. evicting stale command registrations whose types died with it.
+    /// </summary>
+    public Assembly? LoadedAssembly => _loaded;
+
+    /// <summary>
     /// Port of <c>reloader._discover_new_game_modules + _reload_game_folder_modules</c> + <c>setup_game_folder</c> injection loop.
     /// Creates collectible ALC, loads assembly, scans for <see cref="EntityReplacementAttribute"/>, registers.
     /// Logs via Console.Error mirroring <c>logger.info("[HotReload] ...")</c>.

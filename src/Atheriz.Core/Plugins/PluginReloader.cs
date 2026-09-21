@@ -77,6 +77,37 @@ public static class PluginReloader
     // (The old pass1 scan-ALC existed only to count forward refs, then unloaded with
     // a stop-the-world triple GC while the gate was held; PluginLoader.Load scans
     // identically, so pass1 was deleted — one ALC, one load, one post-unload GC.)
+    // Evicts live global-registry commands whose types died with a replaced
+    // plugin load. Without this a reload patches world objects but keeps the
+    // previous load's command INSTANCES (registry Add throws on duplicates,
+    // so game reinstalls keep the stale ones): new command code never runs
+    // until a restart, and the dead instances root the old ALC forever.
+    // Pairing is by defining-assembly identity — fully generic, no game
+    // knowledge. The game's own installer re-adds fresh instances right
+    // after (patched objects run AtInit → reinstall). Per-object
+    // InternalCmdSets are untouched (exits/channels rebuild on re-resolve).
+    // Returns the evicted count. Never throws.
+    public static int EvictStaleCommands(System.Reflection.Assembly? oldAssembly)
+        => EvictStaleCommands(oldAssembly, CommandRegistry.LoggedIn, CommandRegistry.UnloggedIn);
+    public static int EvictStaleCommands(System.Reflection.Assembly? oldAssembly, params CmdSet[] sets)
+    {
+        if (oldAssembly is null || sets is null || sets.Length == 0) return 0;
+        int evicted = 0;
+        foreach (var set in sets)
+        {
+            if (set is null) continue;
+            List<Command> doomed;
+            try { doomed = set.GetAll().Where(c => c is not null && ReferenceEquals(c.GetType().Assembly, oldAssembly)).ToList(); }
+            catch (Exception ex) { Suppress("EvictStaleCommands", ex); continue; }
+            foreach (var c in doomed)
+            {
+                try { set.Remove(c); evicted++; }
+                catch (Exception ex) { Suppress("EvictStaleCommands", ex); }
+            }
+        }
+        if (evicted > 0) Console.Error.WriteLine($"[HotReload] Evicted {evicted} stale commands.");
+        return evicted;
+    }
     public static async Task<bool> ReloadAsync(string assemblyPath, AsyncTicker ticker, AsyncThreadPool pool)
     {
         if (string.IsNullOrWhiteSpace(assemblyPath)) return false;
@@ -87,6 +118,7 @@ public static class PluginReloader
             await Task.Yield();
             var full = Path.GetFullPath(assemblyPath);
             if (!File.Exists(full)) { Console.Error.WriteLine($"[HotReload] Not found: {full}"); return false; }
+            var oldAsm = _loader?.LoadedAssembly;
             if (_loader is not null) { try{_loader.Unload();}catch (Exception logEx) { Suppress("ReloadAsync", logEx); } _loader=null; GC.Collect(); }
             _loader = new PluginLoader();
             try { _loader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
@@ -97,6 +129,10 @@ public static class PluginReloader
             // as DoShutdown, so no ABBA. Load/scan stay outside (I/O, no locks held).
             lock (StartStop.WorldLock)
             {
+                // Stale command instances first, so the reinstall that patched
+                // objects trigger via AtInit re-adds fresh ones instead of
+                // colliding with (and keeping) the dead ones.
+                try { EvictStaleCommands(oldAsm); } catch (Exception ex) { Suppress("ReloadAsync", ex); }
                 foreach(var kv in _loader.Replacements.ToList()){ try{patched+=PatchLiveObjects(kv.Key,kv.Value);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] Patch {kv.Key.Name}->{kv.Value.Name}: {ex.Message}");} }
                 try{ReregisterTicks(ticker);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] ReregisterTicks: {ex.Message}");}
             }
