@@ -53,6 +53,17 @@ public static class StartStop
             // be registered before rows convert, or they reload as their base
             // kind without their overrides.
             InitialSetup.RegisterPersistedSubtypes();
+            // Boot-time game load BEFORE the world loads: game assemblies
+            // register their own persisted subtypes (and IGameSetup entry) on
+            // load, so rows convert directly to game types. Loading the world
+            // first would convert every game row to its base kind with a loud
+            // "Unknown __object_type" log and only patch it up afterwards.
+            // Never throws: failures log and boot continues engine-only.
+            try
+            {
+                Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings);
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"DoStartup game load failed:\n{ex}"); }
             // Port of startstop.py:34 load_objects()
             try
             {
@@ -107,17 +118,6 @@ public static class StartStop
                 ticker ??= GlobalServices.GetAsyncTicker();
             }
             catch (Exception ex) { Console.Error.WriteLine($"DoStartup GetAsyncTicker failed:\n{ex}"); }
-
-            // Boot-time game load: discover + load the game assembly and patch
-            // the freshly loaded world to its types (same discover→load→patch
-            // as a hot reload). Without this the server boots engine-only and
-            // game verbs stay unregistered until the first manual reload.
-            // Never throws: failures log and boot continues engine-only.
-            try
-            {
-                Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings);
-            }
-            catch (Exception ex) { Console.Error.WriteLine($"DoStartup game load failed:\n{ex}"); }
 
             // Port of startstop.py:39-42 server_events.at_server_start()
             try

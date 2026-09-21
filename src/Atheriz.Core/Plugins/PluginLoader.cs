@@ -146,8 +146,11 @@ public sealed class PluginLoader : IDisposable
                 }
                 // Game-setup entry for CLI world creation (reset/new): a public
                 // non-abstract class implementing IGameSetup. Collected in the
-                // same discovery pass, instantiated once below.
-                if (gameSetupType is null && type.IsClass && !type.IsAbstract && typeof(IGameSetup).IsAssignableFrom(type))
+                // same discovery pass, instantiated once below. Visibility is
+                // enforced here: without it a private nested IGameSetup helper
+                // would win the scan by declaration order and get instantiated
+                // through its implicit constructor, hijacking world setup.
+                if (gameSetupType is null && type.IsClass && !type.IsAbstract && (type.IsPublic || type.IsNestedPublic) && typeof(IGameSetup).IsAssignableFrom(type))
                     gameSetupType = type;
             }
             // Assembly-level attributes
