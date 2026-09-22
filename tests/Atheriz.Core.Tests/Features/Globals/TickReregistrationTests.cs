@@ -1,6 +1,7 @@
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Plugins;
 using Atheriz.Core.Settings;
 using Atheriz.Core.Tests;
 
@@ -47,5 +48,30 @@ public class TickReregistrationTests
             StartStop.Reset();
             Reset();
         }
+    }
+
+    private sealed class TickProbe : GameObject { }
+
+    private static int CountCoros(AsyncTicker ticker) => ticker.Slots.Values.Sum(s => s.Coros.Count);
+
+    [Fact]
+    public void ReregisterTicks_EvictsDelegateTargetingDeletedTickable()
+    {
+        // A tick delegate targeting a deleted object is a zombie — the sweep
+        // evicts it even though its id matches no live tickable.
+        using var env = GlobalTestEnv.Enter();
+        using var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 100, reliefLimit: 0);
+        var ticker = new AsyncTicker(pool);
+        try
+        {
+            var o = new TickProbe { IsTickable = true, TickSeconds = 60 };
+            ObjectRegistry.AddObject(o);
+            PluginReloader.ReregisterTicks(ticker);
+            Assert.Equal(1, CountCoros(ticker));
+            ObjectRegistry.RemoveObject(o);
+            PluginReloader.ReregisterTicks(ticker);
+            Assert.Equal(0, CountCoros(ticker));
+        }
+        finally { ticker.Clear(); pool.Stop(); }
     }
 }

@@ -69,4 +69,21 @@ public class DisplayNameTests
         }
         finally { ObjectRegistry.ClearAll(); }
     }
+
+    [Fact]
+    public void GetDisplayName_ViewDeniedOffline_DoesNotLeakName()
+    {
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var target = GameObject.Create("f4hidden", isPc: true);
+            var looker = GameObject.Create("f4looker", isPc: true);
+            ObjectRegistry.AddObject(target);
+            ObjectRegistry.AddObject(looker);
+            Assert.False(target.IsConnected);
+            Assert.False(target.Access(looker, "view"));
+            Assert.Equal("Someone", target.GetDisplayName(looker));
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
 }

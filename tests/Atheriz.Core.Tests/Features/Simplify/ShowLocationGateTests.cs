@@ -31,7 +31,7 @@ public sealed class ShowLocationGateTests
     }
 
     [Fact]
-    public void Look_Nowhere_ShowsNowhere_EvenWithDesc()
+    public void Look_NullLocationWithDesc_ReportsNowhere()
     {
         using var env = GlobalTestEnv.Enter();
         var p = MakePuppet(null, "A drifter.");
@@ -41,7 +41,7 @@ public sealed class ShowLocationGateTests
     }
 
     [Fact]
-    public void Look_Nowhere_ShowsNowhere_WhenNoDesc()
+    public void Look_NullLocationWithoutDesc_ReportsNowhere()
     {
         using var env = GlobalTestEnv.Enter();
         var p = MakePuppet(null);

@@ -1,5 +1,6 @@
 using Atheriz.Core;
 using Atheriz.Core.Commands;
+using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Tests;
@@ -49,5 +50,81 @@ public class SetCommandTests
             Assert.Equal(1.0, builder.TickSeconds);
         }
         finally { ObjectRegistry.ClearAll(); }
+    }
+
+    private static GameObject MakePlayer(string name, bool isPc = false)
+    {
+        var c = GameObject.Create(name, "", isPc: isPc, privilege: Privilege.Player);
+        ObjectRegistry.AddObject(c);
+        c.ClearMessages();
+        return c;
+    }
+
+    private static GameObject MakeSuperuser(string name = "Root")
+    {
+        var c = GameObject.Create(name, privilege: Privilege.Admin);
+        ObjectRegistry.AddObject(c);
+        c.ClearMessages();
+        return c;
+    }
+
+    [Fact]
+    public void Set_Name_DuplicateBlockedForSuperuser()
+    {
+        // Superuser rename to a taken character name is refused.
+        using var env = GlobalTestEnv.Enter();
+        var root = MakeSuperuser();
+        var taken = GameObject.Create("TakenName", "", isPc: true, privilege: Privilege.Player);
+        ObjectRegistry.AddObject(taken);
+        var target = GameObject.Create("Target", "", isPc: true, privilege: Privilege.Player);
+        ObjectRegistry.AddObject(target);
+        var cmd = new SetCommand();
+        cmd.Run(root, cmd.Parser!.ParseArgs(["#" + target.Id, "name", "TakenName"]));
+        Assert.Contains(root.PeekMessages(), m => m == "Character with this name (TakenName) already exists.");
+        Assert.Equal("Target", target.Name);
+    }
+
+    [Fact]
+    public void Set_Name_SameNameAllowed()
+    {
+        // Rename to the target's own current name is not a collision.
+        using var env = GlobalTestEnv.Enter();
+        var root = MakeSuperuser();
+        var target = GameObject.Create("TargetSelf", "", isPc: true, privilege: Privilege.Player);
+        ObjectRegistry.AddObject(target);
+        var cmd = new SetCommand();
+        cmd.Run(root, cmd.Parser!.ParseArgs(["#" + target.Id, "name", "TargetSelf"]));
+        Assert.Contains(root.PeekMessages(), m => m == "Set TargetSelf.name = 'TargetSelf'");
+        Assert.Equal("TargetSelf", target.Name);
+    }
+
+    [Fact]
+    public void Set_Name_ReservedWordRejected()
+    {
+        // Reserved words are rejected on rename (shares the reserved-word
+        // validation).
+        using var env = GlobalTestEnv.Enter();
+        var root = MakeSuperuser();
+        var target = GameObject.Create("TargetR", "", isPc: true, privilege: Privilege.Player);
+        ObjectRegistry.AddObject(target);
+        var cmd = new SetCommand();
+        cmd.Run(root, cmd.Parser!.ParseArgs(["#" + target.Id, "name", "here"]));
+        Assert.Contains(root.PeekMessages(), m => m == "That name is reserved.");
+        Assert.Equal("TargetR", target.Name);
+    }
+
+    [Fact]
+    public void Set_Name_AsBuilder_HitsProtectedGate()
+    {
+        // Non-superusers still hit the protected gate before validation.
+        using var env = GlobalTestEnv.Enter();
+        var bob = MakePlayer("Bob");
+        bob.PrivilegeLevel = Privilege.Builder;
+        var target = MakePlayer("TargetB");
+        target.PrivilegeLevel = Privilege.Player;
+        var cmd = new SetCommand();
+        cmd.Run(bob, cmd.Parser!.ParseArgs(["#" + target.Id, "name", "NewName"]));
+        Assert.Contains(bob.PeekMessages(), m => m == "'name' is protected and cannot be set.");
+        Assert.Equal("TargetB", target.Name);
     }
 }

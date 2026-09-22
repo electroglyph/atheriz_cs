@@ -340,4 +340,16 @@ public sealed class ValidationTests
         s.SecretPath = Path.Combine(Path.GetTempPath(), "atheriz_shouldbe_secret");
         return s;
     }
+
+    [Theory]
+    // "me" (2 chars) is rejected earlier by the length check; the reserved
+    // gate pins the words that clear it.
+    [InlineData("here")]
+    [InlineData("all")]
+    [InlineData("Here")]
+    [InlineData("ALL")]
+    public void ValidateCharacterName_ReservedWords_Rejected(string name)
+    {
+        Assert.Equal("That name is reserved.", Validation.ValidateCharacterName(name));
+    }
 }

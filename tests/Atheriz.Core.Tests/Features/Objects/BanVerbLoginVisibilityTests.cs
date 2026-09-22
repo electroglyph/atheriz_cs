@@ -95,7 +95,7 @@ public class BanVerbLoginVisibilityTests
     // world lives in memory; the journal is honored at save), so there is
     // no DB failure to roll back and nothing that can mask an original.
     [Fact]
-    public void AccountDelete_PerformsNoDbWrite()
+    public void DeleteImmediate_DeletedAccount_PerformsNoDbWrite()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
         var region = SourceScan.Region(src, "DeleteImmediate(");

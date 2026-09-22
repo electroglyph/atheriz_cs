@@ -1,3 +1,4 @@
+using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence.Dto;
 
@@ -38,5 +39,48 @@ public class LockRestoreTests
         Assert.False(o.Access(plain, "get"));
         var back = RoundTrip(o);
         Assert.True(back.Access(plain, "get"));
+    }
+
+    private static GameObject MakePlayer(string name)
+    {
+        var c = GameObject.Create(name, "", isPc: false, privilege: Privilege.Player);
+        ObjectRegistry.AddObject(c);
+        c.ClearMessages();
+        return c;
+    }
+
+    [Fact]
+    public void ApplyDtoFields_UnknownPolicy_DeniesAccess()
+    {
+        // An unresolvable lock policy must deny (fail closed), never vanish.
+        using var env = GlobalTestEnv.Enter();
+        var obj = MakePlayer("locktest");
+        var caller = MakePlayer("caller");
+        var dto = new GameObjectDto
+        {
+            Id = obj.Id,
+            Name = "locktest",
+            Locks = [new LockDefDto { Name = "view", Policy = "frobnicate_policy" }],
+        };
+        GameObject.ApplyDtoFields(obj, dto, null);
+        Assert.False(obj.Access(caller, "view"));
+    }
+
+    [Fact]
+    public void ApplyDtoFields_CustomPolicy_DroppedWithAllow()
+    {
+        // The ad-hoc 'custom' lambda was never persistable — still dropped
+        // (allowed), loudly.
+        using var env = GlobalTestEnv.Enter();
+        var obj = MakePlayer("locktest2");
+        var caller = MakePlayer("caller2");
+        var dto = new GameObjectDto
+        {
+            Id = obj.Id,
+            Name = "locktest2",
+            Locks = [new LockDefDto { Name = "view", Policy = "custom" }],
+        };
+        GameObject.ApplyDtoFields(obj, dto, null);
+        Assert.True(obj.Access(caller, "view"));
     }
 }

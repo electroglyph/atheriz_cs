@@ -1,6 +1,7 @@
 using Atheriz.Core.Commands;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
@@ -29,5 +30,66 @@ public class GroupCommandTests
             Assert.Contains("Group channel not found", string.Join("\n", hero.PeekMessages()));
         }
         finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
+    public void GroupAdd_MultiWordName_JoinsRemainder()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var nh = new NodeHandler(autoLoad: false);
+        NodeHandler.SetCurrent(nh);
+        try
+        {
+            var room = new Node(new Coord("f1room", 0, 0, 0));
+            ObjectRegistry.AddObject(room);
+            var hero = GameObject.Create("hero", isPc: true);
+            var bob = GameObject.Create("Big Bob", isNpc: true);
+            ObjectRegistry.AddObject(hero);
+            ObjectRegistry.AddObject(bob);
+            Assert.True(hero.MoveTo(room));
+            Assert.True(bob.MoveTo(room));
+            hero.AddFollower(bob.Id);
+            hero.ClearMessages();
+
+            var job = CommandDispatcher.DispatchLoggedIn(hero, "group add Big Bob", immediate: true);
+            Assert.NotNull(job);
+            job!.Func(job.Caller, job.Args);
+
+            var text = string.Join("\n", hero.PeekMessages());
+            Assert.Contains("added Big Bob", text);
+            Assert.DoesNotContain("Could not find", text);
+        }
+        finally { NodeHandler.SetCurrent(null); }
+    }
+
+    [Fact]
+    public void GroupKick_MultiWordName_JoinsRemainder()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var nh = new NodeHandler(autoLoad: false);
+        NodeHandler.SetCurrent(nh);
+        try
+        {
+            var room = new Node(new Coord("f1kroom", 0, 0, 0));
+            ObjectRegistry.AddObject(room);
+            var hero = GameObject.Create("hero", isPc: true);
+            var bob = GameObject.Create("Big Bob", isNpc: true);
+            ObjectRegistry.AddObject(hero);
+            ObjectRegistry.AddObject(bob);
+            Assert.True(hero.MoveTo(room));
+            Assert.True(bob.MoveTo(room));
+            hero.AddFollower(bob.Id);
+            var add = CommandDispatcher.DispatchLoggedIn(hero, "group add Big Bob", immediate: true);
+            add!.Func(add.Caller, add.Args);
+            hero.ClearMessages();
+
+            var kick = CommandDispatcher.DispatchLoggedIn(hero, "group kick Big Bob", immediate: true);
+            Assert.NotNull(kick);
+            kick!.Func(kick.Caller, kick.Args);
+
+            var text = string.Join("\n", hero.PeekMessages());
+            Assert.Contains("kicked Big Bob", text);
+        }
+        finally { NodeHandler.SetCurrent(null); }
     }
 }

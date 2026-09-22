@@ -66,4 +66,27 @@ public sealed class ReturnAppearanceConcatTests
 
         Assert.Equal("You see nothing here.", room.ReturnAppearance(null));
     }
+
+    private sealed class AppearanceMarker
+    {
+        [After]
+        public string Hook(GameObject? looker, string result) => result + "[hooked]";
+    }
+
+    [Fact]
+    public void NodeReturnAppearance_AfterHook_Fires()
+    {
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var node = new Node(new Coord("f12room", 0, 0, 0));
+            var looker = GameObject.Create("f12looker", isPc: true);
+            ObjectRegistry.AddObject(node);
+            ObjectRegistry.AddObject(looker);
+            node.InstallHook("return_appearance", new Func<GameObject?, string, string>(new AppearanceMarker().Hook));
+
+            Assert.Contains("[hooked]", node.ReturnAppearance(looker));
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
 }

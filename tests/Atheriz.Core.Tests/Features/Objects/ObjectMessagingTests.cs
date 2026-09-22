@@ -190,4 +190,34 @@ public class ObjectMessagingTests
         Assert.True(d.Closed);
         Assert.True(d.TryClose(caller));
     }
+
+    private sealed class FromCapturingObject : GameObject
+    {
+        public GameObject? SeenFrom;
+        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null)
+        {
+            SeenFrom = fromObj;
+            base.Msg(text, fromObj, mapping, raiseErrors, msgType);
+        }
+    }
+
+    [Fact]
+    public void ChannelMsg_ForwardsSender_ToListeners()
+    {
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var sender = GameObject.Create("f6sender", isPc: true);
+            var probe = new FromCapturingObject();
+            ObjectRegistry.AddObject(sender);
+            ObjectRegistry.AddObject(probe);
+            var channel = Channel.Create("f6channel", sender);
+            channel.AddListener(probe);
+
+            channel.Msg("hello", sender);
+
+            Assert.Same(sender, probe.SeenFrom);
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
 }

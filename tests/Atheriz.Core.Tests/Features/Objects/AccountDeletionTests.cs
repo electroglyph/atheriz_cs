@@ -49,4 +49,33 @@ public class AccountDeletionTests
             Assert.Null(db.Objects.Find(accBase.Id));
         }
     }
+
+    private static GameObject MakePlayer(string name)
+    {
+        var c = GameObject.Create(name, "", isPc: false, privilege: Privilege.Player);
+        ObjectRegistry.AddObject(c);
+        c.ClearMessages();
+        return c;
+    }
+
+    [Fact]
+    public void Account_Delete_JournalsAndTearsDown()
+    {
+        // Account delete journals the row for the next checkpoint and runs
+        // the shared teardown, with no mid-game DB write.
+        using var env = GlobalTestEnv.Enter();
+        var acc = new Account();
+        ObjectRegistry.AddObject(acc);
+        var follower = MakePlayer("follower");
+        follower.Following = acc.Id;
+        acc.AddFollower(follower.Id);
+        var ch = Channel.Create("f15chan");
+        acc.Subscribe(ch);
+        Assert.True(acc.Delete(null));
+        Assert.True(acc.IsDeleted);
+        Assert.Empty(ObjectRegistry.Get(acc.Id));
+        // Shared teardown ran: follows detached, channel memberships gone.
+        Assert.Null(follower.Following);
+        Assert.Empty(acc.ChannelsSnapshot);
+    }
 }

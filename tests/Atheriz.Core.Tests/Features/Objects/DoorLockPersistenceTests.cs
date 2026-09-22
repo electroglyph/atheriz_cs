@@ -1,4 +1,5 @@
 using Atheriz.Core;
+using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Objects;
@@ -50,5 +51,42 @@ public class DoorLockPersistenceTests
         var back = Door.FromDto(door.ToDto());
         Assert.False(back.Access(other, "open"));
         Assert.Contains("not-self", string.Join(";", back.ToDto().Locks));
+    }
+
+    [Fact]
+    public void Door_KeyedLock_RequiresKeyInContents()
+    {
+        // Locking/unlocking a keyed door without the key refuses; carrying
+        // the key (in contents) allows both. Null KeyId doors are unaffected
+        // (pinned by the existing announce tests).
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var room = GameObject.Create("room", isContainer: true);
+            ObjectRegistry.AddObject(room);
+            var caller = GameObject.Create("caller");
+            ObjectRegistry.AddObject(caller);
+            room.AddObject(caller);
+            var stranger = GameObject.Create("stranger");
+            ObjectRegistry.AddObject(stranger);
+            room.AddObject(stranger);
+            var key = GameObject.Create("brass key");
+            ObjectRegistry.AddObject(key);
+            var door = new Door(new Coord("limbo", 0, 0, 0), new Coord("limbo", 0, 1, 0), "north", "south")
+            {
+                KeyId = key.Id,
+            };
+
+            Assert.False(door.TryLock(caller));
+            Assert.False(door.Locked);
+            caller.AddObject(key);
+            Assert.True(door.TryLock(caller));
+            Assert.True(door.Locked);
+            Assert.False(door.TryUnlock(stranger));
+            Assert.True(door.Locked);
+            Assert.True(door.TryUnlock(caller));
+            Assert.False(door.Locked);
+        }
+        finally { ObjectRegistry.ClearAll(); }
     }
 }

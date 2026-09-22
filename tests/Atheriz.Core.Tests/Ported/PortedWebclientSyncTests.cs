@@ -1,4 +1,7 @@
 // Port of atheriz/tests/test_webclient_sync.py:1
+using Atheriz.Core.Settings;
+using Atheriz.Server.Infrastructure;
+
 namespace Atheriz.Core.Tests.Ported;
 
 [Collection("Ported")]
@@ -403,5 +406,61 @@ public class PortedWebclientSyncTests
             Assert.Contains($"game --web-root \"{Path.Combine(game, "web")}\"", msg);
         }
         finally { try{Directory.Delete(tmp,true);}catch{} }
+    }
+
+    // Engine baseline is always passed explicitly (never bare-resolved):
+    // CWD is process-global and parallel tests repark it, so bare
+    // ResolveEngineWeb can pick up a scaffolded game dir's web/ tree.
+    // A nonexistent override mirrors exactly what the resolver returns in
+    // the C# layout (contentRoot/web), exercising the same fork.
+    private static readonly string NonExistentWeb = Path.Combine(Path.GetTempPath(), "atheriz_no_such_web_xyz");
+
+    [Fact]
+    public void CheckSync_WwwrootBaseline_ComparesStaticInsteadOfClean()
+    {
+        // C# layout: engine webclient under contentRoot/wwwroot, no web/ tree.
+        // The static area must be compared against it, not reported clean.
+        using var env = GlobalTestEnv.Enter();
+        var game = Path.Combine(env.TempPath, "game");
+        Directory.CreateDirectory(Path.Combine(game, "web", "static", "webclient"));
+        Directory.CreateDirectory(Path.Combine(game, "web", "templates", "webclient"));
+        File.WriteAllText(Path.Combine(game, "web", "static", "webclient", "app.js"), "game-v1");
+        File.WriteAllText(Path.Combine(game, "web", "templates", "webclient", "extra.js"), "game-only");
+        Directory.CreateDirectory(Path.Combine(env.TempPath, "wwwroot", "webclient"));
+        File.WriteAllText(Path.Combine(env.TempPath, "wwwroot", "webclient", "app.js"), "engine-v1");
+        var on = new AtherizSettings { WebclientSyncCheck = true };
+        var summary = WebclientSyncChecker.CheckSync(game, env.TempPath, NonExistentWeb, on);
+        Assert.NotNull(summary);
+        Assert.Contains("app.js", summary!["static"]["different"]);
+        // No web/ baseline: game templates have nothing to judge them against,
+        // so they must not be reported as extra.
+        Assert.Empty(summary["templates"]["extra"]);
+    }
+
+    [Fact]
+    public void CheckSync_WwwrootBaseline_IdenticalIsClean()
+    {
+        // Same layout with identical bytes stays clean (null).
+        using var env = GlobalTestEnv.Enter();
+        var game = Path.Combine(env.TempPath, "game");
+        Directory.CreateDirectory(Path.Combine(game, "web", "static", "webclient"));
+        File.WriteAllText(Path.Combine(game, "web", "static", "webclient", "app.js"), "same");
+        Directory.CreateDirectory(Path.Combine(env.TempPath, "wwwroot", "webclient"));
+        File.WriteAllText(Path.Combine(env.TempPath, "wwwroot", "webclient", "app.js"), "same");
+        var on = new AtherizSettings { WebclientSyncCheck = true };
+        Assert.Null(WebclientSyncChecker.CheckSync(game, env.TempPath, NonExistentWeb, on));
+    }
+
+    [Fact]
+    public void CheckSync_NoBaselineAtAll_ReturnsClean()
+    {
+        // Game web/ exists but there is no web/ baseline and no wwwroot
+        // baseline anywhere: still clean (unchanged behavior).
+        using var env = GlobalTestEnv.Enter();
+        var game = Path.Combine(env.TempPath, "game");
+        Directory.CreateDirectory(Path.Combine(game, "web", "static", "webclient"));
+        File.WriteAllText(Path.Combine(game, "web", "static", "webclient", "app.js"), "game-v1");
+        var on = new AtherizSettings { WebclientSyncCheck = true };
+        Assert.Null(WebclientSyncChecker.CheckSync(game, env.TempPath, NonExistentWeb, on));
     }
 }

@@ -44,4 +44,53 @@ public class SoundPreHookTests
         }
         finally { ObjectRegistry.ClearAll(); }
     }
+
+    [Fact]
+    public void AtHear_HearingNonPc_ReceivesSound()
+    {
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var room = new Node(new Coord("f5room", 0, 0, 0));
+            ObjectRegistry.AddObject(room);
+            var npc = GameObject.Create("f5listener", isNpc: true);
+            var emitter = GameObject.Create("f5emitter", isNpc: true);
+            ObjectRegistry.AddObject(npc);
+            ObjectRegistry.AddObject(emitter);
+            Assert.True(npc.MoveTo(room));
+            Assert.True(emitter.MoveTo(room));
+            Assert.False(npc.IsPc);
+            Assert.True(npc.CanHear);
+            npc.ClearMessages();
+
+            npc.AtHear(emitter, "a clang", "", 50.0, false);
+
+            Assert.Contains("You hear something", string.Join("\n", npc.PeekMessages()));
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
+    public void AtHear_DeafNonPc_HearsNothing()
+    {
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var room = new Node(new Coord("f5droom", 0, 0, 0));
+            ObjectRegistry.AddObject(room);
+            var npc = GameObject.Create("f5deaf", isNpc: true);
+            var emitter = GameObject.Create("f5demitter", isNpc: true);
+            ObjectRegistry.AddObject(npc);
+            ObjectRegistry.AddObject(emitter);
+            Assert.True(npc.MoveTo(room));
+            Assert.True(emitter.MoveTo(room));
+            npc.CanHear = false;
+            npc.ClearMessages();
+
+            npc.AtHear(emitter, "a clang", "", 50.0, false);
+
+            Assert.Empty(npc.PeekMessages());
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
 }
