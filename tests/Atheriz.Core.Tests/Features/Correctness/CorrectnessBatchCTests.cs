@@ -20,10 +20,10 @@ public sealed class CorrectnessBatchCTests
         PathGuards.DenyRoot(nested); // must not throw (also covers non-existent paths)
     }
 
-    // --force inside a game folder waives markers only for targets
-    // inside that folder; a foreign absolute path still requires markers.
+    // Markers are always required: inside a game folder a markerless
+    // target (foreign or contained) refuses; only markers pass.
     [Fact]
-    public void GuardWipePath_ForceInGameFolder_StillRejectsForeignAbsolutePath()
+    public void GuardWipePath_InGameFolder_StillRejectsMarkerlessPaths()
     {
         var game = Path.Combine(Path.GetTempPath(), "pin-game-" + Guid.NewGuid().ToString("N"));
         var foreign = Path.Combine(Path.GetTempPath(), "pin-foreign-" + Guid.NewGuid().ToString("N"));
@@ -36,13 +36,14 @@ public sealed class CorrectnessBatchCTests
         {
             Directory.SetCurrentDirectory(game);
             Assert.True(GameUtils.IsInGameFolder());
-            Assert.Throws<InvalidOperationException>(() => PathGuards.GuardWipePath(foreign, true));
-            Assert.Throws<InvalidOperationException>(() => PathGuards.GuardWipePath(foreign, false));
-            // Contained target under the game folder keeps the force override.
+            Assert.Throws<InvalidOperationException>(() => PathGuards.GuardWipePath(foreign));
+            // A contained but markerless target refuses too — no override.
             var inner = Path.Combine(game, "save");
             Directory.CreateDirectory(inner);
-            PathGuards.GuardWipePath(inner, true);
-            Assert.Throws<InvalidOperationException>(() => PathGuards.GuardWipePath(inner, false));
+            Assert.Throws<InvalidOperationException>(() => PathGuards.GuardWipePath(inner));
+            // Markers restore the pass.
+            File.WriteAllText(Path.Combine(inner, "database.sqlite3"), "x");
+            PathGuards.GuardWipePath(inner);
         }
         finally
         {

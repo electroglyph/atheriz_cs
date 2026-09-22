@@ -25,6 +25,23 @@ public sealed class CreationHelperRegressionTests
     }
 
     [Fact]
+    public void Create_PasswordDoubleSpace_PreservedRaw()
+    {
+        using var env = GlobalTestEnv.Enter();
+        SaltProvider.SetSalt("testsalt");
+        try
+        {
+            var conn = new FakeConnection();
+            new CreateAccountCommand().Run(conn, "dframe password  123");
+            var acc = ObjectRegistry.FilterBy(o => o.IsAccount && o.Name == "dframe").FirstOrDefault() as Account;
+            Assert.NotNull(acc);
+            Assert.True(acc!.CheckPassword("password  123"));
+            Assert.False(acc.CheckPassword("password 123"));
+        }
+        finally { SaltProvider.Clear(); }
+    }
+
+    [Fact]
     public void Create_ValidationFailure_ClearsCooldown()
     {
         using var env = GlobalTestEnv.Enter();
@@ -63,6 +80,25 @@ public sealed class CreationHelperRegressionTests
             var ch = ObjectRegistry.FilterBy(o => o.Name == "Hobbis").FirstOrDefault() as GameObject;
             Assert.NotNull(ch);
             Assert.Equal("A tall figure", ch!.Desc);
+        }
+        finally { SaltProvider.Clear(); }
+    }
+
+    [Fact]
+    public void New_DescDoubleSpace_PreservedRaw()
+    {
+        using var env = GlobalTestEnv.Enter();
+        SaltProvider.SetSalt("testsalt");
+        try
+        {
+            var acc = Account.Create("aliceraw", "secret");
+            ObjectRegistry.AddObject(acc);
+            var conn = new FakeConnection();
+            conn.Session.Account = acc;
+            new NewCharacterCommand().Run(conn, "HobbisRaw M A  tall  figure");
+            var ch = ObjectRegistry.FilterBy(o => o.Name == "HobbisRaw").FirstOrDefault() as GameObject;
+            Assert.NotNull(ch);
+            Assert.Equal("A  tall  figure", ch!.Desc);
         }
         finally { SaltProvider.Clear(); }
     }

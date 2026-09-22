@@ -6,7 +6,9 @@ public static class ResetHandler
 {
     public static async Task HandleResetAsync(string[] a)
     {
-        bool force = ArgumentParser.HasAnyFlag(a, "--force", "-f", "--yes", "-y");
+        // reset always confirms: there is no --force/--yes skip. The prompt
+        // is the operator guard; the port checks, server stop, and
+        // world-marker wipe gate below are the non-interactive containment.
         var settings = StopHandler.EffectiveSettingsValue;
         var port = ArgumentParser.ParsePort(a) ?? settings.WebserverPort;
         var host = ArgumentParser.ParseHost(a);
@@ -19,14 +21,11 @@ public static class ResetHandler
             pid = readPid;
             isRunning = Infrastructure.PidFile.IsServerProcess(readPid);
         }
-        if (!force)
-        {
-            Console.WriteLine("WARNING: This will delete ALL game data. This action cannot be undone.");
-            if (isRunning) Console.WriteLine("The server is currently running and will be stopped.");
-            Console.Write("Are you sure you want to continue? [y/N] ");
-            var resp = Console.ReadLine();
-            if (!string.Equals(resp, "y", StringComparison.OrdinalIgnoreCase)) { Console.WriteLine("Aborted."); CliExitCode.Set(1); return; }
-        }
+        Console.WriteLine("WARNING: This will delete ALL game data. This action cannot be undone.");
+        if (isRunning) Console.WriteLine("The server is currently running and will be stopped.");
+        Console.Write("Are you sure you want to continue? [y/N] ");
+        var resp = Console.ReadLine();
+        if (!string.Equals(resp, "y", StringComparison.OrdinalIgnoreCase)) { Console.WriteLine("Aborted."); CliExitCode.Set(1); return; }
         // Ports that must be free before the wipe: the CLI override plus the
         // configured ports, so a mismatched --port cannot blind the guard
         // to the running server's real listeners.
@@ -93,7 +92,7 @@ public static class ResetHandler
         // never deleted, but an absent dir needs no protection.
         if (Directory.Exists(savePath))
         {
-            try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath, force); } catch (Exception ex) { Console.WriteLine(ex.Message); CliExitCode.Set(1); return; }
+            try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); CliExitCode.Set(1); return; }
             try
             {
                 Directory.Delete(savePath, recursive: true);

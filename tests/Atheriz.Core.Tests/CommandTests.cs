@@ -121,8 +121,9 @@ public sealed class CommandTests
         Assert.NotNull(job);
         Assert.True(job!.Args is GameArgumentParser.ParsedArgs pa && pa.CmdString == "look");
         job.Func(job.Caller, job.Args);
-        // look should msg desc
-        Assert.Contains("hero stands", puppet.PeekMessages().Last().ToLower());
+        // look runs through the alias; the location-less puppet is nowhere
+        // (look echoes no Desc fallback since the nowhere gate).
+        Assert.Contains("you are nowhere", puppet.PeekMessages().Last().ToLower());
         CommandRegistry.Reset();
     }
 

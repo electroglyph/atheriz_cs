@@ -31,8 +31,16 @@ public sealed class CreateAccountCommand : Command
             return;
         }
         string name = parts[0];
-        // Passwords may contain spaces (Python prompts the whole line) — join, don't truncate.
-        string password = string.Join(" ", parts.Skip(1));
+        // Passwords may contain spaces (Python prompts the whole line): take
+        // the raw remainder after the name, not re-joined tokens, so interior
+        // spacing survives exactly as the async prompt line keeps it.
+        string password = Command.RemainderAfterTokens(text, 1);
+        if (password.Length == 0)
+        {
+            CreationCooldownHelper.Clear(caller);
+            caller.Msg("Usage: create <account_name> <password> (interactive prompts in real server).");
+            return;
+        }
         var err = ValidateInputs(name, password);
         if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         try

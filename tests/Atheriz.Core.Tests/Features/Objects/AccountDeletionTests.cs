@@ -6,17 +6,16 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
-// Deleting an account must behave the same regardless of static type: the
-// bool Delete hides base Delete, so a GameObject-typed reference converges
-// only at next save while the bool path deletes the row immediately
-// (Account.cs:42-46 vs GameObject.Puppet.cs:394).
+// Deleting an account must behave the same regardless of static type: both
+// the bool Delete and a GameObject-typed reference journal the delete and
+// converge at the next save (DB discipline: no mid-game DB writes).
 [Collection("Ported")]
 public class AccountDeletionTests
 {
     [Fact]
     public void Delete_ViaGameObjectRef_DeletesRowLikeBoolPath()
     {
-        // Correct: both static types delete the DB row immediately and report it.
+        // Correct: both static types journal the delete; the row goes at save.
         using var env = GlobalTestEnv.Enter();
         var caller = GameObject.Create("admin", privilege: Privilege.Admin);
         ObjectRegistry.AddObject(caller);
@@ -40,6 +39,10 @@ public class AccountDeletionTests
         var res = asBase.Delete(caller, recursive: false);
         Assert.NotNull(res);
 
+        using (var dbSave = new AtherizDbContext(path))
+        {
+            ObjectRegistry.SaveObjects(dbSave, force: true);
+        }
         using (var db = new AtherizDbContext(path))
         {
             Assert.Null(db.Objects.Find(accBool.Id));

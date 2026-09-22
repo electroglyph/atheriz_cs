@@ -75,7 +75,7 @@ public sealed class ChannelPermissionMessageTests
     }
 
     [Fact]
-    public void ChannelCommand_SubscribeWithoutViewPermission_ReportsViewDenied()
+    public void ChannelCommand_SubscribeWithoutViewPermission_ReportsNotFound()
     {
         using var env = GlobalTestEnv.Enter();
         ChannelCommand.ClearCache();
@@ -85,7 +85,7 @@ public sealed class ChannelPermissionMessageTests
             chan.AddLock("view", _ => false);
             var caller = MakePc("b20a_subber");
             new ChannelCommand().Run(caller, ChannelArgs("b20asub", subscribe: true));
-            Assert.Contains("You do not have permission to view this channel.", caller.PeekMessages());
+            Assert.Contains("Channel b20asub not found.", caller.PeekMessages());
         }
         finally { ChannelCommand.ClearCache(); }
     }

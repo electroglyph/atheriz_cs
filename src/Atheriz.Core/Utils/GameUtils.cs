@@ -116,7 +116,12 @@ public static class GameUtils
         return result;
     }
 
-    public static double DiceRollAverage(int rolls, int faces) => rolls * ((faces + 1) / 2.0);
+    public static double DiceRollAverage(int rolls, int faces)
+    {
+        if (faces < 1) throw new ArgumentOutOfRangeException(nameof(faces));
+        // Long math: faces + 1 overflows int at int.MaxValue faces.
+        return rolls * ((faces + 1L) / 2.0);
+    }
 
     public static T Clamp<T>(T min, T value, T max) where T : IComparable<T>
     {

@@ -52,20 +52,22 @@ public class LimiterTickerReliefTests
         Assert.Equal(0, lim.PendingCount);
     }
 
-    // Tick-delegate removal builds the id set once per sweep and matches by
-    // id (same instance shares the id; a pre-patch delegate shares the
-    // replacement's id but never the reference).
+    // Tick-delegate removal evicts delegates targeting ANY game object, not
+    // just live tickables: ReregisterTicks re-adds a fresh delegate for
+    // every live tickable right after, so every pre-existing object delegate
+    // is stale — a pre-patch delegate targets the OLD instance (shares the
+    // replacement's id but never the reference) and a deleted object's
+    // delegate targets a dead id. Matching by live-id set kept both zombies
+    // ticking on dead state.
     [Fact]
-    public void PluginReloader_TickSweep_BuildsIdSetOnce()
+    public void PluginReloader_TickSweep_EvictsAnyGameObjectTarget()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Plugins", "PluginReloader.cs");
         var region = SourceScan.Region(src, "private static void RemoveTickDelegatesFor(");
-        // Built once before the per-delegate walk, not once per delegate.
-        Assert.True(region.IndexOf("new HashSet<int>()", StringComparison.Ordinal)
-            < region.IndexOf("foreach (var d in coros.ToList())", StringComparison.Ordinal));
-        Assert.Contains("TargetsTickable(d.Target, tickableIds)", region);
-        Assert.Contains("if (target is GameObject self && tickableIds.Contains(self.Id)) return true;",
-            SourceScan.Region(src, "private static bool TargetsTickable("));
+        Assert.Contains("TargetsGameObject(d.Target)", region);
+        Assert.DoesNotContain("tickableIds", region);
+        Assert.Contains("if (target is GameObject) return true;",
+            SourceScan.Region(src, "private static bool TargetsGameObject("));
     }
 
     // Timer loop faults are logged where they happen instead of dying in an

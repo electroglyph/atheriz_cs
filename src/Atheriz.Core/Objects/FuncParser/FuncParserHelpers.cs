@@ -220,27 +220,29 @@ public static class FuncParserHelpers
         }
         private double ParseMulDiv()
         {
-            var left = ParsePow();
+            // Unary binds looser than power (so -2**2 == -(2**2)), hence
+            // operands parse via ParseUnary, not ParsePow.
+            var left = ParseUnary();
             while (true)
             {
                 Skip(); if (_pos >= _s.Length) break;
-                if (_pos + 1 < _s.Length && _s[_pos] == '/' && _s[_pos+1] == '/') { _pos+=2; var r=ParsePow(); if (r == 0) throw new InvalidOperationException("integer division by zero"); left = Math.Floor(left / r); }
+                if (_pos + 1 < _s.Length && _s[_pos] == '/' && _s[_pos+1] == '/') { _pos+=2; var r=ParseUnary(); if (r == 0) throw new InvalidOperationException("integer division by zero"); left = Math.Floor(left / r); }
                 else if (_pos + 1 < _s.Length && _s[_pos] == '*' && _s[_pos+1] == '*') break; // handled in pow
-                else if (_s[_pos] == '*') { _pos++; var r=ParsePow(); left = left * r; }
-                else if (_s[_pos] == '/') { _pos++; var r=ParsePow(); if (r == 0) throw new InvalidOperationException("division by zero"); left = left / r; }
-                else if (_s[_pos] == '%') { _pos++; var r=ParsePow(); if (r == 0) throw new InvalidOperationException("modulo by zero"); left = left % r; }
+                else if (_s[_pos] == '*') { _pos++; var r=ParseUnary(); left = left * r; }
+                else if (_s[_pos] == '/') { _pos++; var r=ParseUnary(); if (r == 0) throw new InvalidOperationException("division by zero"); left = left / r; }
+                else if (_s[_pos] == '%') { _pos++; var r=ParseUnary(); if (r == 0) throw new InvalidOperationException("modulo by zero"); left = ((left % r) + r) % r; }
                 else break;
             }
             return left;
         }
         private double ParsePow()
         {
-            var left = ParseUnary();
+            var left = ParsePrimary();
             Skip();
             if (_pos + 1 < _s.Length && _s[_pos] == '*' && _s[_pos+1] == '*')
             {
                 _pos+=2;
-                var right = ParsePow(); // right-associative
+                var right = ParseUnary(); // right-associative; unary allows negative exponents
                 // guard
                 if (right > _MAX_POW_EXPONENT) throw new InvalidOperationException($"exponent {right} exceeds safe limit {_MAX_POW_EXPONENT}");
                 // digit estimate: log10(|left|) * right +1 > _MAX_POW_DIGITS
@@ -260,7 +262,7 @@ public static class FuncParserHelpers
         private double ParseUnary()
         {
             Skip(); if (_pos < _s.Length && (_s[_pos] == '+' || _s[_pos] == '-')) { char op=_s[_pos++]; var v=ParseUnary(); return op=='-' ? -v : v; }
-            return ParsePrimary();
+            return ParsePow();
         }
         private double ParsePrimary()
         {

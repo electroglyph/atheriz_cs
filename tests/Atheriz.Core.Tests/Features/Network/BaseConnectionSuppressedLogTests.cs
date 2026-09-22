@@ -11,7 +11,7 @@ namespace Atheriz.Core.Tests.Features.Network;
 public sealed class BaseConnectionSuppressedLogTests
 {
     [Fact]
-    public void EnqueueInput_StoppedPool_SendsBusyNotification()
+    public void EnqueueInput_StoppedPool_SendsQueuedRetryNotification()
     {
         using var env = GlobalTestEnv.Enter();
         var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 10);
@@ -23,11 +23,13 @@ public sealed class BaseConnectionSuppressedLogTests
         {
             Action<BaseConnection, List<object?>, Dictionary<string, object?>> handler = (_, _, _) => { };
             conn.EnqueueInput(handler, [], []);
-            // Msg appends \r\n (pre-existing connection.py:192-198 tail), so
-            // match by containment, not equality.
+            // The message is queued with a retry armed (not dropped), so the
+            // drain-failure path reports queued/retrying. Msg appends \r\n
+            // (pre-existing connection.py:192-198 tail), so match by
+            // containment, not equality.
             Assert.True(PortedHelpers.WaitFor(
-                () => conn.Sent.Exists(s => s.Args.Exists(a => (a?.ToString() ?? "").Contains("Server busy; input dropped."))), 5000),
-                "busy notification was not sent on pool failure");
+                () => conn.Sent.Exists(s => s.Args.Exists(a => (a?.ToString() ?? "").Contains("Server busy; input queued; retrying."))), 5000),
+                "queued/retrying notification was not sent on pool failure");
         }
         finally
         {

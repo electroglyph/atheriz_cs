@@ -94,8 +94,8 @@ public static class PathGuards
     /// <summary>
     /// Containment for destructive wipes (<c>reset</c>).
     /// The target must be a previously-initialized world (<c>server.pid</c> /
-    //  <c>database.sqlite3*</c> markers); anything else needs an explicit
-    /// <c>--force</c> inside a game folder. A bare <c>save</c> leaf is NOT
+    //  <c>database.sqlite3*</c> markers); anything else refuses, no override.
+    /// A bare <c>save</c> leaf is NOT
     /// sufficient on its own : <c>new /tmp --overwrite</c> must not
     /// wipe <c>/tmp/save</c> contents. Overwrite scaffolding (<c>new</c>)
     /// performs its own confined save-leaf wipe with explicit operator intent
@@ -105,7 +105,7 @@ public static class PathGuards
     // not allocate a fresh array (contents are fixed; callers only enumerate).
     private static readonly string[] WipeMarkers = ["database.sqlite3", "database.sqlite3-wal", "database.sqlite3-shm", "database.sqlite3.journal"];
 
-    public static void GuardWipePath(string path, bool force)
+    public static void GuardWipePath(string path)
     {
         DenyRoot(path);
         var full = Path.GetFullPath(path);
@@ -115,24 +115,10 @@ public static class PathGuards
             foreach (var marker in WipeMarkers)
                 if (File.Exists(Path.Combine(full, marker))) return;
         }
-        // Contained override only: --force waives the marker check for a
-        // target inside the game folder we stand in. A foreign absolute
-        // path (SavePath bound from config/env) keeps the marker
-        // requirement — otherwise `reset --force` from inside a game
-        // folder recursively deletes an arbitrary configured path.
-        // Fail closed: an undeterminable CWD refuses.
-        if (force && GameUtils.IsInGameFolder())
-        {
-            try
-            {
-                var cwd = Path.GetFullPath(Directory.GetCurrentDirectory());
-                var rel = Path.GetRelativePath(cwd, full);
-                if (!rel.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(rel))
-                    return;
-            }
-            catch { }
-        }
+        // No override: a markerless target refuses even inside a game
+        // folder. The operator already confirmed at the reset prompt; a
+        // missing world is a misconfiguration, never a force-through.
         throw new InvalidOperationException(
-            $"Refusing to wipe '{path}': not an initialized world (expected world markers). Pass --force inside a game folder to override.");
+            $"Refusing to wipe '{path}': not an initialized world (expected world markers).");
     }
 }

@@ -133,8 +133,10 @@ public partial class Node
         if (id == -1) return;
         var objs = ObjectRegistry.Get(id);
         if (objs.Count == 0) return;
-        if (objs[0] is Script s) s.InstallHooks(this);
-        AddScriptId(id);
+        // The id joins the scripts set only for a real Script: recording a
+        // non-script (or missing) id would persist a junk entry that
+        // RemoveScript can never unhook.
+        if (objs[0] is Script s) { s.InstallHooks(this); AddScriptId(id); }
     }
     // Port of nodes.py:632
     public void RemoveScript(object script)
@@ -381,9 +383,14 @@ public partial class Node
     public override string ReturnAppearance(GameObject? looker = null)
     {
         if (looker is null) return "You see nothing here.";
-        // Parts concatenate with no separators; each part emits literally, so
-        // a placeholder token inside user-controlled text (e.g. "{desc}" in a
-        // name) stays as-is instead of being swallowed by a later pass.
-        return string.Concat(GetDisplayName(looker), GetDisplayDesc(looker), GetDisplayDoors(looker), GetDisplayExits(looker), GetDisplayCharacters(looker), GetDisplayThings(looker));
+        // Hookable like the base: game code overriding return_appearance must
+        // see node renders too.
+        return Hookable("return_appearance", () =>
+        {
+            // Parts concatenate with no separators; each part emits literally, so
+            // a placeholder token inside user-controlled text (e.g. "{desc}" in a
+            // name) stays as-is instead of being swallowed by a later pass.
+            return string.Concat(GetDisplayName(looker), GetDisplayDesc(looker), GetDisplayDoors(looker), GetDisplayExits(looker), GetDisplayCharacters(looker), GetDisplayThings(looker));
+        }, looker);
     }
 }

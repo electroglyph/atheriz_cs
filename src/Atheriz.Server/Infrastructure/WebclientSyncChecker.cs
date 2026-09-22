@@ -60,11 +60,30 @@ public static class WebclientSyncChecker
         if (!Directory.Exists(gameWeb)) return null;
 
         string? engineWeb = engineWebOverride ?? ResolveEngineWeb(contentRoot);
-        if (engineWeb is null || !Directory.Exists(engineWeb)) return null;
+        // The C# layout ships the engine webclient under wwwroot/webclient,
+        // not web/: ResolveEngineWeb then names a nonexistent web/ dir. Report
+        // clean only when no wwwroot baseline exists either — otherwise compare
+        // the static area against it below instead of returning clean.
+        bool hasWebBaseline = engineWeb is not null && Directory.Exists(engineWeb);
+        if (!hasWebBaseline && !WwwWebclientExists(contentRoot)) return null;
+        engineWeb ??= contentRoot;
 
         var summary = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.Ordinal);
         foreach (var area in new[] { "templates", "static" })
         {
+            // Without a web/ baseline there is nothing to judge game templates
+            // against (the wwwroot layout ships no templates tree) — compare
+            // static only instead of reporting game files as extra.
+            if (!hasWebBaseline && area == "templates")
+            {
+                summary[area] = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+                {
+                    ["missing"] = new(),
+                    ["different"] = new(),
+                    ["extra"] = new(),
+                };
+                continue;
+            }
             // Try engineWeb/area/webclient; fallback for C# static at wwwroot/webclient
             var engineAreaRoot = Path.Combine(engineWeb, area, "webclient");
             var gameAreaRoot = Path.Combine(gameWeb, area, "webclient");
@@ -152,6 +171,14 @@ public static class WebclientSyncChecker
             Path.Combine(engineWeb, "static", "atheriz_draw", "index.html"),
         };
         return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private static bool WwwWebclientExists(string contentRoot)
+    {
+        // Same two probes as the static-area fallback in CheckSync: the engine
+        // webclient may live at wwwroot/webclient instead of web/.
+        return Directory.Exists(Path.Combine(contentRoot, "wwwroot", "webclient"))
+            || Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot", "webclient"));
     }
 
     private static string? ResolveEngineWeb(string contentRoot)

@@ -66,8 +66,7 @@ public sealed class LookCommand : Command
         var loc = puppet.ResolveLocationObject();
         if (loc is null)
         {
-            if (!string.IsNullOrEmpty(puppet.Desc)) puppet.Msg(puppet.Desc);
-            else CommandHelpers.MsgNowhere(puppet);
+            CommandHelpers.MsgNowhere(puppet);
             return;
         }
         // Single shared gate + render for Node and non-Node locations alike.

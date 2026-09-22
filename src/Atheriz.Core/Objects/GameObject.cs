@@ -752,7 +752,23 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     {
                         o.AddLockRestored(ld.Name, pred, pol);
                     }
-                    else AtherizLogger.LogError($"Unknown lock policy '{pol}' on lock '{ld.Name}' for object {dto.Id}; lock dropped.");
+                    else if (pol == LockPolicies.Custom)
+                    {
+                        // Ad-hoc lambda: no declarative policy was ever
+                        // persisted — dropped with a loud log, never executed
+                        // (mirrors Door.FromDto).
+                        AtherizLogger.LogError($"Dropping unpersistable 'custom' lambda on lock '{ld.Name}' for object {dto.Id}; access allowed.");
+                    }
+                    else
+                    {
+                        // Fail closed (mirrors Door.FromDto): Access returns
+                        // true for missing entries, so dropping an
+                        // unresolvable policy would escalate to allow. Deny
+                        // and preserve the policy name so a re-save keeps the
+                        // entry (still denying).
+                        AtherizLogger.LogError($"Unknown lock policy '{pol}' on lock '{ld.Name}' for object {dto.Id}; denying access.");
+                        o.AddLockRestored(ld.Name, _ => false, pol);
+                    }
                 }
             }
         }
@@ -808,7 +824,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         if (isPc)
         {
             // Port of base_obj.py:164 — tests only the *target's* connection.
-            obj.AddLock("view", _ => obj.IsConnected, LockPolicies.PcView);
+            // Builders and above keep sight of offline PCs (room lists,
+            // search, examine); regular players fail view and never see them.
+            obj.AddLock("view", accessing => obj.IsConnected || accessing.IsBuilder, LockPolicies.PcView);
         }
         // One "get" entry for pc and/or npc: duplicate Builder entries decide
         // identically, so a second call would only double the persisted policy

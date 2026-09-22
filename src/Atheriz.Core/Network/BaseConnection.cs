@@ -181,11 +181,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // Port of connection.py:67-117 enqueue_input — throttling now via ThrottleWindow (1s window)
     // Queues one input handler for serialized execution on the game threadpool.
     // When queue >= CONNECTION_INPUT_QUEUE_LIMIT, newest message is dropped and
-    // client gets throttled busy reply (1s window) — see #32.
+    // client gets throttled busy reply (1s window) — see #32. When the drain
+    // task cannot be submitted the message stays queued with a retry armed, and
+    // the client is told it is queued — never "dropped".
     public void EnqueueInput(Delegate handler, List<object?> args, Dictionary<string, object?> kwargs)
     {
         if (_disposed) return;
         bool notifyBusy = false;
+        bool notifyRetry = false;
         bool needsDrain = false;
         int pendingCount = 0;
         lock (Lock)
@@ -218,7 +221,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
                 var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
                 if (ThrottleWindow.ShouldLog(ref _lastInputBusy, InputBusyWindowSeconds, now))
                 {
-                    notifyBusy = true;
+                    notifyRetry = true;
                 }
             }
             try
@@ -230,8 +233,15 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         }
         if (notifyBusy) // port of connection.py:111-116
         {
-            ConnectionManager.NetWarn($"[Network] Input queue submission rejected (pool full); {pendingCount} message(s) pending retry");
+            ConnectionManager.NetWarn($"[Network] Input queue full; input dropped; {pendingCount} message(s) pending");
             Msg("Server busy; input dropped.");
+        }
+        if (notifyRetry)
+        {
+            // Drain submission failed but the message is queued and a retry is
+            // armed: report queued/retrying, not dropped.
+            ConnectionManager.NetWarn($"[Network] Input queue submission rejected (pool full); {pendingCount} message(s) pending retry");
+            Msg("Server busy; input queued; retrying.");
         }
     }
 

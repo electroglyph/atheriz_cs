@@ -1198,7 +1198,7 @@ public class ConnectionManager
     internal static void NetError(string message)
     { try { AtherizLogger.LogError(message); } catch { Console.Error.WriteLine(message); } }
     private static void LogMalformed(string host, string rawMessage) // port of manager.py:196-199
-    { if (ShouldLogMalformed(host)) NetWarn($"[Network] Invalid message format from {host} ({rawMessage.Length} bytes): {SummarizeRaw(rawMessage)}"); }
+    { if (ShouldLogMalformed(host)) NetWarn($"[Network] Invalid message format from {host} ({System.Text.Encoding.UTF8.GetByteCount(rawMessage)} bytes): {SummarizeRaw(rawMessage)}"); }
 
     // Port of manager.py:185-215 handle_command
     public virtual void HandleCommand(BaseConnection connection, string rawMessage)
@@ -1212,11 +1212,12 @@ public class ConnectionManager
             // Byte budget, not char count: Length is only a fast prefilter
             // (bytes always >= chars, so Length-over already refuses); a
             // short multibyte string can still carry 4x the nominal bytes.
-            if (rawMessage.Length > maxMessageSize || System.Text.Encoding.UTF8.GetByteCount(rawMessage) > maxMessageSize)
+            int byteCount = System.Text.Encoding.UTF8.GetByteCount(rawMessage);
+            if (rawMessage.Length > maxMessageSize || byteCount > maxMessageSize)
             {
                 var oversizeHost = connection.ClientHost ?? "?";
                 if (ShouldLogOversize(oversizeHost))
-                    NetWarn($"[Network] Message too large from {oversizeHost} ({rawMessage.Length} bytes > {maxMessageSize} bytes)");
+                    NetWarn($"[Network] Message too large from {oversizeHost} ({byteCount} bytes > {maxMessageSize} bytes)");
                 return;
             }
             using var doc = JsonDocument.Parse(rawMessage);

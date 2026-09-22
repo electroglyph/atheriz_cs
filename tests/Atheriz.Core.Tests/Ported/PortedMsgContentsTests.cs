@@ -30,7 +30,12 @@ public class PortedMsgContentsTests
         var node = new Node(new Coord("test",0,0,0));
         ObjectRegistry.AddObject(node);
         var speaker = GameObject.Create("speaker", isPc:true);
-        var receiver = GameObject.Create("listener");
+        // Placeholder names render through the view gate: clear the default
+        // deny so the pin asserts substitution, not the Someone fallback.
+        // (The receiver is a builder because offline-PC names render only
+        // for builders and above.)
+        speaker.ClearLocksByName("view");
+        var receiver = GameObject.Create("listener", privilege: Privilege.Builder);
         ObjectRegistry.AddObject(speaker); ObjectRegistry.AddObject(receiver);
         receiver.Location = new Persistence.Dto.LocationRef.CoordLocation(node.Coord);
         speaker.Location = new Persistence.Dto.LocationRef.CoordLocation(node.Coord);

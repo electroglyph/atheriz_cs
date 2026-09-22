@@ -135,6 +135,34 @@ public abstract class Command
         catch (ArgumentException) { return text.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries).ToList(); }
     }
 
+    // Raw-remainder splitter for the creation stubs (create/new-character):
+    // skips `count` leading tokens, strips only the following separator run,
+    // and returns the rest verbatim. Token spans mirror SplitArgs (quotes
+    // delimit, whitespace separates) so the remainder starts exactly where
+    // the skipped tokens end; interior spacing is preserved, matching the
+    // async prompt lines which are consumed whole.
+    internal static string RemainderAfterTokens(string text, int count)
+    {
+        int i = 0;
+        for (int t = 0; t < count; t++)
+        {
+            while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
+            if (i >= text.Length) return "";
+            if (text[i] == '"' || text[i] == '\'')
+            {
+                char q = text[i++];
+                while (i < text.Length && text[i] != q) i++;
+                if (i < text.Length) i++;
+            }
+            else
+            {
+                while (i < text.Length && !char.IsWhiteSpace(text[i])) i++;
+            }
+        }
+        while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
+        return i < text.Length ? text[i..] : "";
+    }
+
     // Lag gate global hook — mirrors grotto/lag_gate.py monkey-patch of BaseCommand.execute
     // Install sets this via typed delegate, no reflection. Execute wraps returned func with gate check.
     public static Func<IMessageTarget, bool>? GlobalLagCheck { get; set; }

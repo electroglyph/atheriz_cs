@@ -31,12 +31,13 @@ public sealed class ShowLocationGateTests
     }
 
     [Fact]
-    public void Look_Nowhere_ShowsDesc_WhenPresent()
+    public void Look_Nowhere_ShowsNowhere_EvenWithDesc()
     {
         using var env = GlobalTestEnv.Enter();
         var p = MakePuppet(null, "A drifter.");
         new LookCommand().Run(p, new LookCommand().Parser!.ParseArgs([]));
-        Assert.Contains(p.PeekMessages(), m => m == "A drifter.");
+        Assert.Contains(p.PeekMessages(), m => m == "You are nowhere.");
+        Assert.DoesNotContain(p.PeekMessages(), m => m == "A drifter.");
     }
 
     [Fact]

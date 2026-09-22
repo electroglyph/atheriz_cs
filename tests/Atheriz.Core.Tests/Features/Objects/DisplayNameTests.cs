@@ -9,7 +9,7 @@ namespace Atheriz.Core.Tests.Features.Objects;
 public class DisplayNameTests
 {
     [Fact]
-    public void OfflinePc_ShowsOfflineSuffix()
+    public void OfflinePc_RegularViewerSeesSomeone()
     {
         ObjectRegistry.ClearAll();
         try
@@ -17,10 +17,32 @@ public class DisplayNameTests
             var pc = GameObject.Create("hero", isPc: true);
             ObjectRegistry.AddObject(pc);
             pc.IsConnected = false;
+            // Even with view passing (locks cleared), a regular player must
+            // not learn the name or online state of an offline PC.
+            pc.ClearLocksByName("view");
             var viewer = GameObject.Create("viewer", isPc: true);
             ObjectRegistry.AddObject(viewer);
             viewer.IsConnected = true;
-            Assert.Equal("hero (offline)", pc.GetDisplayName(viewer));
+            Assert.Equal("Someone", pc.GetDisplayName(viewer));
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
+    public void OfflinePc_BuilderViewerSeesOfflineSuffix()
+    {
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var pc = GameObject.Create("hero", isPc: true);
+            ObjectRegistry.AddObject(pc);
+            pc.IsConnected = false;
+            // Stock locks deny everyone sight of offline PCs; builders pass
+            // view and see the name with the offline suffix.
+            var builder = GameObject.Create("builder", isPc: true, privilege: Privilege.Builder);
+            ObjectRegistry.AddObject(builder);
+            builder.IsConnected = true;
+            Assert.Equal("hero (offline)", pc.GetDisplayName(builder));
         }
         finally { ObjectRegistry.ClearAll(); }
     }

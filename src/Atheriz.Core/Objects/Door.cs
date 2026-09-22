@@ -200,9 +200,14 @@ public class Door
         using (ReadScope())
         {
             var status = _closed ? "A closed" : "An open";
-            if (fromCoord.Equals(_fromCoord)) return $"{status} door leading {_fromExit}";
-            if (fromCoord.Equals(_toCoord)) return $"{status} door leading {_toExit}";
-            return "Door desc: unexpected coord.";
+            string text;
+            if (fromCoord.Equals(_fromCoord)) text = $"{status} door leading {_fromExit}";
+            else if (fromCoord.Equals(_toCoord)) text = $"{status} door leading {_toExit}";
+            else return "Door desc: unexpected coord.";
+            // DoorDesc is builder flavor persisted with the door (never
+            // rendered until now): appended verbatim when set.
+            if (!string.IsNullOrEmpty(_doorDesc)) text += " " + _doorDesc;
+            return text;
         }
     }
 
@@ -355,11 +360,16 @@ public class Door
         var loc = caller.ResolveLocationObject();
         // Access predicates run before the door write lock (see TryOpen).
         bool canAccess = Access(caller, "lock");
+        // A keyed door needs its key on the caller: null KeyId means no key.
+        int? keyId;
+        using (ReadScope()) { keyId = _keyId; }
+        bool hasKey = keyId is null || caller.ContentsSnapshot.Contains(keyId.Value);
         string status;
         _lock.EnterWriteLock();
         try
         {
             if (!canAccess) status = "no_access";
+            else if (!hasKey) status = "no_key";
             else if (!Closed) status = "not_closed";
             else if (Locked) status = "already_locked";
             else { _locked = true; status = "locked"; }
@@ -372,6 +382,11 @@ public class Door
         if (status == "no_access")
         {
             loc?.MsgContents($"$You(target) $conj(try) to lock the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
+            return false;
+        }
+        if (status == "no_key")
+        {
+            loc?.MsgContents($"$You(target) $conj(try) to lock the door, but you lack the key.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
         if (status == "not_closed")
@@ -396,11 +411,16 @@ public class Door
         var loc = caller.ResolveLocationObject();
         // Access predicates run before the door write lock (see TryOpen).
         bool canAccess = Access(caller, "unlock");
+        // Same key gate as TryLock: unlocking a keyed door needs its key.
+        int? keyId;
+        using (ReadScope()) { keyId = _keyId; }
+        bool hasKey = keyId is null || caller.ContentsSnapshot.Contains(keyId.Value);
         string status;
         _lock.EnterWriteLock();
         try
         {
             if (!canAccess) status = "no_access";
+            else if (!hasKey) status = "no_key";
             else if (_locked) { _locked = false; status = "unlocked"; }
             else status = "already_unlocked";
         }
@@ -412,6 +432,11 @@ public class Door
         if (status == "no_access")
         {
             loc?.MsgContents($"$You(target) $conj(try) to unlock the door, but an unknown force prevents it.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
+            return false;
+        }
+        if (status == "no_key")
+        {
+            loc?.MsgContents($"$You(target) $conj(try) to unlock the door, but you lack the key.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
         if (status == "unlocked")

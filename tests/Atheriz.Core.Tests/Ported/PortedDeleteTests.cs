@@ -170,6 +170,11 @@ public class PortedDeleteTests
         Assert.True(res);
         Assert.True(acc.IsDeleted);
         Assert.DoesNotContain(acc.Id, ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));
+        // Deletes journal only; the row goes away at the next save checkpoint.
+        using (var dbSave = new AtherizDbContext(path))
+        {
+            ObjectRegistry.SaveObjects(dbSave, force: true);
+        }
         using var db2 = new AtherizDbContext(path);
         var row = db2.Objects.Find(acc.Id);
         Assert.Null(row);

@@ -352,10 +352,13 @@ public class GameTime
     // Guards check-then-act on Started and remembers the ticker the coro was
     // registered on: concurrent Start() used to double-register OnTick (2x
     // ticks), and Stop() resolving a different ticker orphaned the coro.
-    // The live-settings interval is kept verbatim (time.py start/stop both use
-    // settings.TIME_UPDATE_SECONDS at call time).
+    // The interval is cached (validated/clamped) at Start and reused at Stop:
+    // both calls used to read live settings, so a mid-run config change
+    // orphaned the coro on the old interval's slot while removing a
+    // never-registered one on the new interval.
     private readonly Lock _startLock = new();
     private AsyncTicker? _runningTicker;
+    private double _runningInterval;
     // Owned fallbacks: created once and reused (never per-start/per-tick),
     // stopped when this instance stops. Singletons/overrides are never owned.
     // B-THR-4 (see also B-NET-7): lock-guarded init so concurrent first starts
@@ -378,8 +381,11 @@ public class GameTime
         lock (_startLock)
         {
             if (Started) return;
-            ticker.AddCoro(OnTick, _settings.TimeUpdateSeconds);
+            double iv = _settings.TimeUpdateSeconds;
+            if (double.IsNaN(iv) || double.IsInfinity(iv) || iv <= 0) iv = 1;
+            ticker.AddCoro(OnTick, iv);
             _runningTicker = ticker;
+            _runningInterval = iv;
             Started = true;
         }
     }
@@ -387,13 +393,16 @@ public class GameTime
     public void Stop()
     {
         AsyncTicker? ticker;
+        double iv;
         lock (_startLock)
         {
             ticker = _tickerOverride ?? _runningTicker ?? GlobalServices.TryGetTicker();
+            iv = _runningInterval > 0 ? _runningInterval : _settings.TimeUpdateSeconds;
             _runningTicker = null;
+            _runningInterval = 0;
             Started = false;
         }
-        ticker?.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
+        ticker?.RemoveCoro(OnTick, iv);
         StopOwnedFallbacks();
         // see Stop(ticker) above — settings path, not ambient.
         try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, LogScope); }
@@ -404,12 +413,14 @@ public class GameTime
         // the ticker this instance runs on, so concurrent Start(t)/Stop(other)
         // cannot orphan the coro.
         bool ours;
+        double iv;
         lock (_startLock)
         {
             ours = _runningTicker is null || ReferenceEquals(_runningTicker, ticker);
-            if (ours) { _runningTicker = null; Started = false; }
+            iv = _runningInterval > 0 ? _runningInterval : _settings.TimeUpdateSeconds;
+            if (ours) { _runningTicker = null; _runningInterval = 0; Started = false; }
         }
-        if (ours) ticker.RemoveCoro(OnTick, _settings.TimeUpdateSeconds);
+        if (ours) ticker.RemoveCoro(OnTick, iv);
         // owned fallbacks die only with our own run. A foreign
         // Stop (or a concurrent Start/OnTick) must not destroy the live pool
         // out from under this instance.
@@ -593,34 +604,36 @@ public class GameTime
 
         string season;
         long dayInSeason = 0;
-        if (3 <= finalMonth && finalMonth <= 5)
+        // Season boundaries derive from MonthsPerYear: each season starts at
+        // a twelfth-fraction of the year, so custom calendars get
+        // proportional seasons. For the default 12-month calendar the
+        // boundaries land exactly on months 3/6/9/12 as before.
+        long daysPerYear = _settings.DaysPerYear;
+        long springStart = daysPerYear * 2 / 12;
+        long summerStart = daysPerYear * 5 / 12;
+        long autumnStart = daysPerYear * 8 / 12;
+        long winterStart = daysPerYear * 11 / 12;
+        if (dayOfYear >= springStart && dayOfYear < summerStart)
         {
             season = "spring";
-            long start = (3 - 1) * _settings.DaysPerMonth;
-            dayInSeason = dayOfYear - start;
+            dayInSeason = dayOfYear - springStart;
         }
-        else if (6 <= finalMonth && finalMonth <= 8)
+        else if (dayOfYear >= summerStart && dayOfYear < autumnStart)
         {
             season = "summer";
-            long start = (6 - 1) * _settings.DaysPerMonth;
-            dayInSeason = dayOfYear - start;
+            dayInSeason = dayOfYear - summerStart;
         }
-        else if (9 <= finalMonth && finalMonth <= 11)
+        else if (dayOfYear >= autumnStart && dayOfYear < winterStart)
         {
             season = "autumn";
-            long start = (9 - 1) * _settings.DaysPerMonth;
-            dayInSeason = dayOfYear - start;
+            dayInSeason = dayOfYear - autumnStart;
         }
         else
         {
             season = "winter";
-            long winterStart = (12 - 1) * _settings.DaysPerMonth;
-            if (finalMonth == 12) dayInSeason = dayOfYear - winterStart;
-            else
-            {
-                long daysInWinterLastYear = _settings.DaysPerYear - winterStart;
-                dayInSeason = daysInWinterLastYear + dayOfYear;
-            }
+            dayInSeason = dayOfYear >= winterStart
+                ? dayOfYear - winterStart
+                : (daysPerYear - winterStart) + dayOfYear;
         }
 
         int weekOfSeason = (int)(dayInSeason / _settings.DaysPerWeek) + 1;
@@ -628,7 +641,8 @@ public class GameTime
         string OrdinalDay(int d)
         {
             string suffix = "th";
-            if (d < 11 || d > 13)
+            // Teen check is on the last two digits (111th, not 111st).
+            if (d % 100 < 11 || d % 100 > 13)
             {
                 int last = d % 10;
                 if (last == 1) suffix = "st";

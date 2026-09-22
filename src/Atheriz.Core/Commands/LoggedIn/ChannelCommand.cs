@@ -100,12 +100,17 @@ public sealed class ChannelCommand : Command
         }
         else if (pa.GetBool("subscribe"))
         {
-            if (!channel.Access(go, "view")) { CommandHelpers.MsgChannelViewDenied(go); return; }
+            // View-denied reads as not-found (same message as an unknown
+            // name) so probing names via -s cannot distinguish "view-locked"
+            // from "nonexistent" — same spoofing as the -u branch above.
+            if (!channel.Access(go, "view")) { go.Msg($"Channel {chName} not found."); return; }
             go.Subscribe(channel);
         }
         else if (pa.GetBool("replay"))
         {
-            if (!channel.Access(go, "view")) { CommandHelpers.MsgChannelViewDenied(go); return; }
+            // Same not-found spoofing as -u/-s: a view-denied history probe
+            // must not answer differently from an unknown channel name.
+            if (!channel.Access(go, "view")) { go.Msg($"Channel {chName} not found."); return; }
             var h = channel.GetHistory();
             if (!string.IsNullOrEmpty(h)) go.Msg(h);
             else CommandHelpers.MsgNoChannelHistory(go);
@@ -117,6 +122,10 @@ public sealed class ChannelCommand : Command
             // Port of channel.py:122 elif args.message — an empty message
             // list is falsy and falls through silently (no help text).
             if (string.IsNullOrWhiteSpace(message)) return;
+            // Sending requires view AND send: a view-denied channel reads as
+            // not-found (no send-denied oracle), while a viewable channel
+            // without send keeps the send-denied message.
+            if (!channel.Access(go, "view")) { go.Msg($"Channel {chName} not found."); return; }
             if (!channel.Access(go, "send")) { CommandHelpers.MsgChannelSendDenied(go); return; }
             channel.Send(message, go);
         }

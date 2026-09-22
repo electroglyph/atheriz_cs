@@ -22,8 +22,7 @@ public class ResetContainmentTests
     [Fact]
     public void GuardWipePath_RejectsFilesystemRoot()
     {
-        Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath("/", false));
-        Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath("/", true));
+        Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath("/"));
     }
 
     [Fact]
@@ -31,17 +30,17 @@ public class ResetContainmentTests
     {
         // a bare `save` leaf is NOT sufficient — `new /tmp
         // --overwrite` must not wipe /tmp/save. Only initialized worlds
-        // (markers) or --force inside a game folder pass.
+        // (markers) pass; there is no force override.
         var dir = Path.Combine(Path.GetTempPath(), "atheriz_wipe_" + Guid.NewGuid().ToString("N"));
         try
         {
             // Need not exist to probe: absent and marker-less leaves refuse.
-            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(Path.Combine(dir, "save"), false));
+            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(Path.Combine(dir, "save")));
             Directory.CreateDirectory(Path.Combine(dir, "save"));
-            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(Path.Combine(dir, "save"), false));
+            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(Path.Combine(dir, "save")));
             // Markers restore the pass.
             File.WriteAllText(Path.Combine(dir, "save", "database.sqlite3"), "x");
-            CorePathGuards.GuardWipePath(Path.Combine(dir, "save"), false);
+            CorePathGuards.GuardWipePath(Path.Combine(dir, "save"));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
@@ -56,17 +55,17 @@ public class ResetContainmentTests
             var pidDir = Path.Combine(dir, "w1");
             Directory.CreateDirectory(pidDir);
             File.WriteAllText(Path.Combine(pidDir, "server.pid"), "1234");
-            CorePathGuards.GuardWipePath(pidDir, false);
+            CorePathGuards.GuardWipePath(pidDir);
             var dbDir = Path.Combine(dir, "w2");
             Directory.CreateDirectory(dbDir);
             File.WriteAllText(Path.Combine(dbDir, "database.sqlite3"), "x");
-            CorePathGuards.GuardWipePath(dbDir, false);
+            CorePathGuards.GuardWipePath(dbDir);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
     [Fact]
-    public void GuardWipePath_RejectsForeignDir_ForceNeedsGameFolder()
+    public void GuardWipePath_RejectsForeignDir_RequiresMarkers()
     {
         var root = Path.Combine(Path.GetTempPath(), "atheriz_wipef_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -75,15 +74,17 @@ public class ResetContainmentTests
         var origCwd = Directory.GetCurrentDirectory();
         try
         {
-            // Outside any game folder: even --force must refuse a foreign dir.
+            // Outside any game folder: a markerless dir refuses.
             Directory.SetCurrentDirectory(root);
-            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(foreign, false));
-            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(foreign, true));
-            // Inside a game folder: --force is an explicit operator override.
+            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(foreign));
+            // Inside a game folder: still refuses without markers — there
+            // is no force override anymore.
             File.WriteAllText(Path.Combine(root, "settings.py"), "");
             File.WriteAllText(Path.Combine(root, "__init__.py"), "");
-            CorePathGuards.GuardWipePath(foreign, true);
-            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(foreign, false));
+            Assert.Throws<InvalidOperationException>(() => CorePathGuards.GuardWipePath(foreign));
+            // Markers restore the pass.
+            File.WriteAllText(Path.Combine(foreign, "database.sqlite3"), "x");
+            CorePathGuards.GuardWipePath(foreign);
         }
         finally
         {
@@ -93,7 +94,7 @@ public class ResetContainmentTests
     }
 
     [Fact]
-    public async Task ResetHandler_ForceOnForeignSavePath_RefusesWithoutDeleting()
+    public async Task ResetHandler_ForeignSavePath_RefusesWithoutDeleting()
     {
         var root = Path.Combine(Path.GetTempPath(), "atheriz_resetf_" + Guid.NewGuid().ToString("N"));
         var foreign = Path.Combine(root, "foreign");
@@ -107,14 +108,17 @@ public class ResetContainmentTests
         SetEffectiveSettings(settings);
         var sb = new StringWriter();
         var origOut = Console.Out;
+        var origIn = Console.In;
         Console.SetOut(sb);
+        Console.SetIn(new StringReader("y" + Environment.NewLine));
         try
         {
-            await ResetHandler.HandleResetAsync(new[] { "--force" });
+            await ResetHandler.HandleResetAsync(Array.Empty<string>());
         }
         finally
         {
             Console.SetOut(origOut);
+            Console.SetIn(origIn);
             SetEffectiveSettings(null);
             try { AtherizDbContext.ReopenDatabase(); } catch { }
             try { AtherizDbContextFactory.ReopenDatabase(); } catch { }

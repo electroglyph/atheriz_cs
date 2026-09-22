@@ -139,7 +139,7 @@ public class ServerRegressionTests
     public void WipeGuard_RequiresWorldMarkers()
     {
         var leaf = Path.Combine(Path.GetTempPath(), "atheriz_reg_" + Guid.NewGuid().ToString("N"), "save");
-        Assert.Throws<InvalidOperationException>(() => PathGuards.GuardWipePath(leaf, false));
+        Assert.Throws<InvalidOperationException>(() => PathGuards.GuardWipePath(leaf));
     }
 
     // loopback TLS bypass must inspect errors / pin the cert.

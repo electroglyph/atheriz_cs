@@ -549,7 +549,7 @@ public class PortedIntentTests
         var pa=new GameArgumentParser.ParsedArgs();
         pa["channel"]="public"; pa["subscribe"]=true; pa["unsubscribe"]=false; pa["replay"]=false; pa["list"]=false; pa["message"]=new List<string>();
         cmd.Run(c, pa);
-        Assert.Contains(c.PeekMessages(), m=>m=="You do not have permission to view this channel.");
+        Assert.Contains(c.PeekMessages(), m=>m=="Channel public not found.");
     }
     [Fact] public void Channel_ReplayNoViewPermission()
     {
@@ -563,7 +563,7 @@ public class PortedIntentTests
         var pa=new GameArgumentParser.ParsedArgs();
         pa["channel"]="public"; pa["replay"]=true; pa["subscribe"]=false; pa["unsubscribe"]=false; pa["list"]=false; pa["message"]=new List<string>();
         cmd.Run(c, pa);
-        Assert.Contains(c.PeekMessages(), m=>m=="You do not have permission to view this channel.");
+        Assert.Contains(c.PeekMessages(), m=>m=="Channel public not found.");
     }
     [Fact] public void Channel_SendNoSendPermission()
     {

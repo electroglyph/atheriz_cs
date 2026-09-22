@@ -21,25 +21,26 @@ public sealed class NoneCommand : Command
         else text = (args as string ?? "").Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; } // none.py:25
         var ignored = Atheriz.Core.Settings.AtherizSettings.Global.AutoAliasIgnoredKeys;
-        // Port of none.py:28-36: internal + global keys, ignored-only filter
-        // (no Hide/Access gate — hidden commands are suggested upstream too).
+        // Port of none.py:28-36: internal + global keys, gated like help —
+        // hidden or inaccessible commands are never suggested (otherwise a
+        // typo oracle leaks their names to callers who cannot use them).
         List<string> choices = [];
         // Order-preserving dedup (set for membership, list for order):
         // insertion order feeds BestMatch's stable tie-breaks.
         HashSet<string> seen = new(StringComparer.Ordinal);
         if (caller is Objects.GameObject go && go.InternalCmdSet is not null)
-            foreach (var k in go.InternalCmdSet.GetKeys())
-                if (!ignored.Contains(k)) CommandHelpers.TryAddChoice(choices, seen, k);
-        foreach (var k in CommandRegistry.LoggedIn.GetKeys())
-            if (!ignored.Contains(k)) CommandHelpers.TryAddChoice(choices, seen, k);
+            foreach (var c in go.InternalCmdSet.GetAll())
+                if (!ignored.Contains(c.Key) && !c.Hide && c.Access(caller)) CommandHelpers.TryAddChoice(choices, seen, c.Key);
+        foreach (var c in CommandRegistry.LoggedIn.GetAll())
+            if (!ignored.Contains(c.Key) && !c.Hide && c.Access(caller)) CommandHelpers.TryAddChoice(choices, seen, c.Key);
         // Port of none.py:37-54: external verbs from location + inventory.
         if (caller is Objects.GameObject go2)
         {
             try
             {
                 foreach (var set in CommandHelpers.LocalVerbSets(go2))
-                    foreach (var k in set.GetKeys())
-                        if (!ignored.Contains(k)) CommandHelpers.TryAddChoice(choices, seen, k);
+                    foreach (var c in set.GetAll())
+                        if (!ignored.Contains(c.Key) && !c.Hide && c.Access(go2)) CommandHelpers.TryAddChoice(choices, seen, c.Key);
             }
             catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed NoneCommand externals: " + logEx.Message, "NoneCommand"); }
         }

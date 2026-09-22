@@ -29,7 +29,15 @@ public sealed class DoorCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
-        bool north = pa.GetBool("north"), south = pa.GetBool("south"), east = pa.GetBool("east"), west = pa.GetBool("west"), up = pa.GetBool("up"), down = pa.GetBool("down");
+        // Bare direction words ride in the args carrier (like DoorDirectionCommand):
+        // `door north`, `door n`, etc. work with or without a dash flag.
+        var lower = pa.GetList("args").Select(a => a.ToLowerInvariant()).ToList();
+        bool north = pa.GetBool("north") || lower.Contains("n") || lower.Contains("north"),
+            south = pa.GetBool("south") || lower.Contains("s") || lower.Contains("south"),
+            east = pa.GetBool("east") || lower.Contains("e") || lower.Contains("east"),
+            west = pa.GetBool("west") || lower.Contains("w") || lower.Contains("west"),
+            up = pa.GetBool("up") || lower.Contains("u") || lower.Contains("up"),
+            down = pa.GetBool("down") || lower.Contains("d") || lower.Contains("down");
         bool remove = pa.GetBool("remove"), auto = pa.GetBool("auto");
         if (!remove && !(north||south||east||west||up||down))
         {

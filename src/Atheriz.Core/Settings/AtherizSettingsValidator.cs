@@ -136,8 +136,10 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
                 }
             }
         }
-        else if (!string.IsNullOrEmpty(options.SslKeyFile) && !File.Exists(options.SslKeyFile))
-            failures.Add($"SslKeyFile not found: {options.SslKeyFile}");
+        else if (!string.IsNullOrEmpty(options.SslKeyFile))
+            // A key without a certificate can never be used: fail even when
+            // the key file exists (the old check only caught a missing file).
+            failures.Add("SslKeyFile is set but SslCertFile is empty; a key without a certificate cannot be used.");
         if (options.TelnetEnabled)
         {
             if (options.TelnetPort < 1 || options.TelnetPort > 65535)
@@ -171,6 +173,8 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
             $"LogLevel must be one of debug/info/warning/error/critical (was '{options.LogLevel}').");
         FailWhen(options.SecondsPerMinute <= 0,
             $"SecondsPerMinute must be >0 (was {options.SecondsPerMinute}).");
+        FailWhen(options.TimeUpdateSeconds <= 0,
+            $"TimeUpdateSeconds must be >0 (was {options.TimeUpdateSeconds}).");
 
         return failures.Count == 0
             ? ValidateOptionsResult.Success

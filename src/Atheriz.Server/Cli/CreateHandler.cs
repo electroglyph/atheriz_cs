@@ -30,9 +30,12 @@ public static class CreateHandler
                 var status = resp.GetStatus("error");
                 var msg = resp.GetMessage();
                 Console.WriteLine(msg);
-                if (status == "ok" || status == "error") { CliExitCode.Set(0); return; }
+                // A live server answered: its verdict is the exit code
+                // (ok->0, anything else->1), mirroring reload.
+                CliExitCode.Set(status == "ok" ? 0 : 1);
+                return;
             }
-            catch { Console.WriteLine(resp.Body); CliExitCode.Set(0); return; }
+            catch { Console.WriteLine(resp.Body); CliExitCode.Set(1); return; }
         }
         Console.WriteLine("No running server detected; creating directly against the database.");
         Console.WriteLine("Loading existing data...");

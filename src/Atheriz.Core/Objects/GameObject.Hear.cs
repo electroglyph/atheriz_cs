@@ -50,7 +50,7 @@ public partial class GameObject
     {
         return Hookable("at_hear", () =>
         {
-            if (!IsPc) return 0.0;
+            if (!CanHear) return 0.0;
         var loc = ResolveLocationObject();
         if (loc is null) return 0;
         string adj = " deafening";

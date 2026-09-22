@@ -788,13 +788,14 @@ public class CommandRegressionTests
         Assert.True(region.IndexOf("GetServerChannel()", StringComparison.Ordinal) > region.IndexOf("try", StringComparison.Ordinal));
     }
 
-    // unknown-command suggestions mirror none.py: ignored-only filter
-    // (no Hide/Access gate) and the verbatim "Command ... not found" shape.
+    // unknown-command suggestions mirror help: candidates pass the Hide/Access
+    // gate (no hidden/off-limits oracle) with the verbatim "Command ... not found" shape.
     [Fact]
     public void Suggestions_MatchNonePy()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "NoneCommand.cs");
-        Assert.DoesNotContain("!c.Hide", src);
+        Assert.Contains("!c.Hide", src);
+        Assert.Contains("c.Access(", src);
         Assert.DoesNotContain("Huh?", src);
         Assert.Contains("did you mean:", src);
         var unlogged = SourceScan.Read("src", "Atheriz.Core", "Commands", "UnloggedIn", "NoneCommand.cs");

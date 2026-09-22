@@ -228,6 +228,11 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
         {
             var text = args?.FirstOrDefault()?.ToString() ?? "";
             if (string.IsNullOrEmpty(text)) return;
+            // Reserve what OffloopWrite will actually emit: it normalizes
+            // lone LF to CRLF first, so measure post-normalization bytes
+            // (same serialize-then-measure accounting as the websocket path).
+            // Re-normalizing inside OffloopWrite is idempotent.
+            text = TelnetText(text);
             var nb = Encoding.UTF8.GetByteCount(text);
             // No top buffer check here: OffloopWrite self-checks before AND after
             // the write (pinned by OffloopWriteChecksBufferBefore/AfterWrite);
@@ -247,6 +252,9 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
         else if (cmd == "prompt_masked")
         {
             var text = args?.FirstOrDefault()?.ToString() ?? "";
+            // Same normalize-then-measure as text/prompt above: the IAC-text
+            // write normalizes before emitting.
+            text = TelnetText(text);
             var nb = !string.IsNullOrEmpty(text) ? Encoding.UTF8.GetByteCount(text) : 0;
             if (CheckWriteBufferExceeded()) return;
             if (nb != 0)

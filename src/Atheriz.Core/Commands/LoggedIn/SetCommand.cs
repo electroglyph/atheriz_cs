@@ -1,4 +1,5 @@
 // Port of atheriz/commands/loggedin/set.py:243
+using Atheriz.Core.Commands.UnloggedIn;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -168,6 +169,19 @@ public sealed class SetCommand : Command
         if (SetHelper.MoveGate.Contains(attr)) { go.Msg($"'{attr}' cannot be set directly; use move/teleport instead."); return; }
         bool had = SetHelper.HasAttr(target, attr);
         if (!had) go.Msg($"Warning: '{attr}' is a new attribute on {target.Name}.");
+        // `set <target> name <value>` renames: mirror the guest/new-verb
+        // checks so a rename cannot take an illegal name or collide with an
+        // existing character (a rename to the target's own current name is
+        // not a collision). Only the exact spellings that resolve to the
+        // Name setter are gated; junk-case variants land in extras as before.
+        if (attr is "Name" or "name" or "_name" && value is not null)
+        {
+            string newName = value as string ?? value.ToString() ?? "";
+            var nameErr = Validation.ValidateCharacterName(newName);
+            if (nameErr is not null) { go.Msg(nameErr); return; }
+            bool sameAsSelf = target.IsPc && target.Name.Equals(newName, StringComparison.OrdinalIgnoreCase);
+            if (!sameAsSelf && CreationValidation.PcNameExists(newName)) { go.Msg($"Character with this name ({newName}) already exists."); return; }
+        }
         try
         {
             SetHelper.SetAttr(target, attr, value);

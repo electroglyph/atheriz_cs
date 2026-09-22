@@ -48,6 +48,13 @@ public sealed class PuppetCommand : Command
             if (!CommandHelpers.TryParseIdRef(query, out var id)) return (null, "Invalid ID format. Use #<number>.");
             var found = ObjectRegistry.GetSingle(id);
             if (found is null) return (null, $"No object found with ID {id}.");
+            // Deleted objects are never puppetable; report unavailability here
+            // so a stale #id cannot reach the puppet-lock branch (which names
+            // the target). No view gate on this path: disconnected player
+            // characters deny view to everyone while offline, and builders
+            // must stay able to puppet them by #id — the puppet lock below
+            // stays the authorization gate.
+            if (found.IsDeleted) return (null, $"{found.Name} is not available.");
             return (found, null);
         }
         var matches = CommandHelpers.SearchWithFallback(caller, query);

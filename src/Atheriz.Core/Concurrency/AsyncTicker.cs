@@ -111,10 +111,20 @@ public sealed class AsyncTicker
         private readonly TimeSpan _interval;
         private readonly AsyncThreadPool _pool;
         private readonly HashSet<Delegate> _coros = new();
-        private readonly HashSet<Delegate> _pending = new();
+        // Pending holds are timestamped (monotonic seconds at hold time): a
+        // never-completing async coro used to pin its delegate here forever,
+        // silencing that coro on every later tick with no evidence. Holds
+        // older than PendingHoldTimeout are force-released with a loud warn.
+        private readonly Dictionary<Delegate, double> _pending = new();
         private bool _running;
         private Task? _future;
         private CancellationTokenSource? _cts;
+
+        /// <summary>
+        /// Maximum age of a pending hold before it is force-released with a
+        /// warn so the slot can tick the coro again. Settable for tests.
+        /// </summary>
+        public TimeSpan PendingHoldTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
         // Python parity: slot.coros set and slot.running
         public IReadOnlySet<Delegate> Coros { get { lock (_lock) return new HashSet<Delegate>(_coros); } }
@@ -165,6 +175,25 @@ public sealed class AsyncTicker
         }
 
         private void Release(Delegate coro) { lock (_lock) _pending.Remove(coro); }
+
+        // Force-release pending holds older than PendingHoldTimeout (call
+        // with _lock held). Returns the evicted coro names for the warn,
+        // which the caller emits after releasing the lock.
+        private List<string> EvictStalePendingLocked()
+        {
+            List<string> stale = [];
+            if (_pending.Count == 0) return stale;
+            double limit = PendingHoldTimeout.TotalSeconds;
+            if (!(limit > 0)) return stale;
+            double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            foreach (var kv in _pending.ToList())
+            {
+                if (now - kv.Value < limit) continue;
+                _pending.Remove(kv.Key);
+                stale.Add(kv.Key.Method.Name);
+            }
+            return stale;
+        }
 
         // Single fault-write for TickOnce. The deferred async release is
         // load-bearing for pending-dedup (no overlapping ticks), so it stays:
@@ -229,12 +258,17 @@ public sealed class AsyncTicker
                         nextTick = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
                     }
                     List<Delegate> batch;
+                    List<string> stale;
                     lock (_lock)
                     {
                         if (!_running) break;
-                        batch = _coros.Where(c => !_pending.Contains(c)).ToList();
-                        foreach (var c in batch) _pending.Add(c);
+                        stale = EvictStalePendingLocked();
+                        batch = _coros.Where(c => !_pending.ContainsKey(c)).ToList();
+                        double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                        foreach (var c in batch) _pending[c] = now;
                     }
+                    foreach (var name in stale)
+                        Console.Error.WriteLine($"[AsyncTicker] Pending hold expired; released '{name}' so its slot can tick again.");
                     foreach (var c in batch)
                     {
                         lock (_lock)

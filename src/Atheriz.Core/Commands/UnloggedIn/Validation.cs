@@ -19,6 +19,12 @@ public static class Validation
         if (!NameRe.IsMatch(stripped)) return "Name may only contain letters, digits, spaces, hyphens, underscores and apostrophes.";
         if (!stripped.Any(char.IsLetter)) return "Name must contain at least one letter.";
         if (stripped.Contains("  ")) return "Name cannot contain consecutive spaces.";
+        // Search pronouns are resolved by the lookup path: letting a character
+        // claim one would make `me`/`here`/`all` self-target or mis-target.
+        if (stripped.Equals("me", StringComparison.OrdinalIgnoreCase)
+            || stripped.Equals("here", StringComparison.OrdinalIgnoreCase)
+            || stripped.Equals("all", StringComparison.OrdinalIgnoreCase))
+            return "That name is reserved.";
         return null;
     }
     public static string? ValidateAccountName(string? name) => ValidateName(name, AtherizSettings.Global.MaxAccountNameLength);

@@ -326,6 +326,46 @@ public partial class NodeHandler
             if (maxNodeId > IdGenerator.GetId())
                 IdGenerator.SetId(maxNodeId);
         }
+        // Room contents restore: node contents are runtime-only (areas rows
+        // carry no contents list), so a fresh load leaves every room empty
+        // while objects still point at their coords. Never throws: failures
+        // log and the world stays usable, just unrestored as before.
+        try { RestoreRoomContents(); } catch (Exception ex) { try { AtherizLogger.LogDebug("Suppressed NodeHandler.Load room contents restore: " + ex.Message, "NodeHandler"); } catch (Exception) { } }
+    }
+
+    /// <summary>
+    /// Re-seats every coord-located object into its node's contents.
+    /// Node contents are runtime-only (never persisted), so this runs at
+    /// the end of every load — without it rooms render empty after each
+    /// restart (no Characters/items listed) despite objects pointing at
+    /// their coords. Additive and membership-checked: never removes,
+    /// never dirties already-seated nodes, silently skips coords with no
+    /// node. The registry snapshot is released before any node write lock
+    /// is taken, so no lock nesting.
+    /// </summary>
+    public void RestoreRoomContents()
+    {
+        List<(int Id, Coord Coord)> placed = [];
+        foreach (var o in ObjectRegistry.FilterBy(static _ => true))
+        {
+            int id;
+            LocationRef loc;
+            try { id = o.Id; loc = o.Location; }
+            catch (Exception logEx) { try { AtherizLogger.LogDebug("Suppressed NodeHandler.RestoreRoomContents: skipping object, could not read its id/location: " + logEx.Message, "NodeHandler"); } catch (Exception) { } continue; }
+            if (loc is LocationRef.CoordLocation cl) placed.Add((id, cl.Coord));
+        }
+        foreach (var (id, coord) in placed)
+        {
+            Node? node;
+            try { node = TryGetNodeAt(coord); }
+            catch (Exception logEx) { try { AtherizLogger.LogDebug("Suppressed NodeHandler.RestoreRoomContents: skipping room lookup at " + coord + ": " + logEx.Message, "NodeHandler"); } catch (Exception) { } continue; }
+            if (node is null) continue;
+            try
+            {
+                if (!node.ContentsSnapshot.Contains(id)) node.AddContent(id);
+            }
+            catch (Exception logEx) { try { AtherizLogger.LogDebug("Suppressed NodeHandler.RestoreRoomContents: could not return object " + id + " to its room: " + logEx.Message, "NodeHandler"); } catch (Exception) { } }
+        }
     }
 
     // Read-lock scan for a dirty area subtree (area/grid/node flags).

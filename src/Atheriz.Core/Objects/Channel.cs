@@ -233,8 +233,9 @@ public class Channel : GameObject
         foreach (var listener in listeners)
         {
             // FormatMessage is a pure function of (timestamp, sender, text), so
-            // format once instead of once per listener.
-            try { listener.Msg(formatted); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Msg: " + logEx.Message, "Channel"); }
+            // format once instead of once per listener. The sender rides along
+            // so per-receiver hooks (at_msg_receive) keep provenance.
+            try { listener.Msg(formatted, from); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Msg: " + logEx.Message, "Channel"); }
         }
     }
 

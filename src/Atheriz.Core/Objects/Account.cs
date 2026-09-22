@@ -48,41 +48,20 @@ public class Account : GameObject
     // Shared immediate-delete core for both static types .
     internal (int count, List<object> ops)? DeleteImmediate(GameObject? caller)
     {
-        // Port of base_account.py:53 delete.
+        // Port of base_account.py:53 delete: journal-only, never a mid-game
+        // DB write — the world lives in memory after startup and the DB is
+        // written only on save checkpoints (mirrors Node.delete). The shared
+        // teardown leaves no dangling follows, channel memberships,
+        // sessions, or tick slots.
         if (!AtDelete(caller)) return null;
-        List<(string Sql, object[] Params)> ops = [];
-        if (!IsTemporary) ops.Add(GetDelOps());
-        // Mark deleted and unregister BEFORE the DB delete so a concurrent
+        // Mark deleted and unregister BEFORE journaling so a concurrent
         // checkpoint cannot resurrect the row. Mirrors Node.delete.
         SyncRoot.EnterWriteLock();
         try { IsDeleted = true; } finally { SyncRoot.ExitWriteLock(); }
+        if (!IsTemporary) ObjectRegistry.NoteDeleted(Id);
         ObjectRegistry.RemoveObject(this);
-        if (ops.Count > 0)
-        {
-            try
-            {
-                // Shared save-path resolution via the factory (same as ObjectRegistry.SaveObjects()):
-                // ATHERIZ_SAVE_PATH override, else configured SavePath.
-                var savePath = AtherizDbContextFactory.ResolveSavePath(Settings.AtherizSettings.Global);
-                using var db = new Persistence.AtherizDbContext(savePath);
-                db.Database.EnsureCreated();
-                ObjectRegistry.DeleteObjects(db, ops.Select(o => Convert.ToInt32(o.Params[0])).ToList());
-            }
-            catch
-            {
-                // DB failure: roll back so the account stays live (base_account.py:78-82).
-                SyncRoot.EnterWriteLock();
-                try { IsDeleted = false; } finally { SyncRoot.ExitWriteLock(); }
-                // The rollback re-add must not mask the original DB failure:
-                // a duplicate-id throw here would replace the real error.
-                try { ObjectRegistry.AddObject(this); }
-                catch (Exception rbEx) { AtherizLogger.LogDebug("Suppressed Account.DeleteImmediate rollback: " + rbEx.Message, "Account"); }
-                throw;
-            }
-        }
-        var boxed = new List<object>(ops.Count);
-        foreach (var op in ops) boxed.Add(op);
-        return (1, boxed);
+        TeardownDeleted(this);
+        return (1, new List<object>());
     }
 
     public string PasswordHash

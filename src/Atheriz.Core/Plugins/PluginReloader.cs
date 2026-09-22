@@ -368,18 +368,20 @@ public static class PluginReloader
         IReadOnlyDictionary<double, AsyncTicker.TimeSlot> slots;
         try { slots = ticker.Slots; }
         catch (Exception ex) { Console.Error.WriteLine($"[HotReload] RemoveTickDelegates: {ex.Message}"); return; }
-        // One id set per sweep, not per slot: the set is slot-invariant, so
-        // rebuilding it inside the per-slot loop was O(slots x tickables).
-        // (Explicit construction: the sweep-once pin scans for this spelling.)
-        HashSet<int> tickableIds = new HashSet<int>();
-        foreach (var obj in tickables) tickableIds.Add(obj.Id);
+        // Zombie sweep: evict delegates targeting ANY game object, not just
+        // live tickables. ReregisterTicks re-adds a fresh delegate for every
+        // live tickable right after, so every pre-existing object-targeting
+        // delegate is stale by construction: a pre-patch delegate targets
+        // the OLD instance (shares the replacement's registry id but never
+        // the reference), and a deleted object's delegate targets a dead id.
+        // Matching by live-id set kept both zombies ticking on dead state.
         foreach (var kv in slots.ToList())
         {
             IReadOnlySet<Delegate> coros;
             try { coros = kv.Value.Coros; } catch { continue; }
             foreach (var d in coros.ToList())
             {
-                if (!TargetsTickable(d.Target, tickableIds)) continue;
+                if (!TargetsGameObject(d.Target)) continue;
                 try
                 {
                     var iv = TimeSpan.FromSeconds(kv.Key);
@@ -397,15 +399,13 @@ public static class PluginReloader
         public int GetHashCode(object obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
     }
 
-    private static bool TargetsTickable(object? target, HashSet<int> tickableIds)
+    private static bool TargetsGameObject(object? target)
     {
         if (target is null) return false;
-        // Same instance shares the id, and a pre-patch delegate targets the
-        // OLD instance, which shares the replacement's registry id but never
-        // the reference — one id check covers both.
-        if (target is GameObject self && tickableIds.Contains(self.Id)) return true;
-        // Id match : a pre-patch delegate targets the OLD instance,
-        // which shares the replacement's registry id but never the reference.
+        // Any game object, live or dead: the re-add loop below covers every
+        // live tickable with a fresh delegate, so a pre-existing delegate
+        // targeting an object is stale however its id resolves.
+        if (target is GameObject) return true;
         // Closure walk: Release builds one display class holding the tickable
         // directly; Debug splits captures across linked display classes
         // (CS$<>8__locals) — recurse through compiler-generated frames.
@@ -419,11 +419,7 @@ public static class PluginReloader
             for (int i = 0; i < n; i++)
             {
                 var cur = queue.Dequeue();
-                if (cur is GameObject go)
-                {
-                    if (tickableIds.Contains(go.Id)) return true;
-                    continue; // never walk live game objects' fields
-                }
+                if (cur is GameObject) return true;
                 if (!IsCompilerGenerated(cur.GetType())) continue;
                 FieldInfo[] fields;
                 try { fields = cur.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); }

@@ -91,15 +91,18 @@ public class BanVerbLoginVisibilityTests
         Assert.DoesNotContain("&& CryptographicOperations.FixedTimeEquals", region);
     }
 
-    // A failing rollback re-add is logged, never thrown in place of the
-    // original DB failure.
+    // DeleteImmediate performs no mid-game DB write (DB discipline: the
+    // world lives in memory; the journal is honored at save), so there is
+    // no DB failure to roll back and nothing that can mask an original.
     [Fact]
-    public void AccountDelete_RollbackFailure_DoesNotMaskOriginal()
+    public void AccountDelete_PerformsNoDbWrite()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
-        var region = SourceScan.Region(src, "DB failure: roll back so the account stays live");
-        Assert.Contains("ObjectRegistry.AddObject(this);", region);
-        Assert.Contains("Suppressed Account.DeleteImmediate rollback", region);
+        var region = SourceScan.Region(src, "DeleteImmediate(");
+        Assert.DoesNotContain("AtherizDbContext", region);
+        Assert.DoesNotContain("EnsureCreated", region);
+        Assert.DoesNotContain("DeleteObjects", region);
+        Assert.DoesNotContain("GetDelOps", region);
     }
 
     // The null-looker filter returns a copy: mutating the result leaves the

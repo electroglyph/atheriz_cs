@@ -49,7 +49,9 @@ public static class LockPolicies
                 return true;
             case PcView:
                 // Port of base_obj.py:164 — tests only the *target's* connection.
-                predicate = accessing => !target.IsPc || target.IsConnected;
+                // Builders and above keep sight of offline PCs (room lists,
+                // search, examine); regular players fail view and never see them.
+                predicate = accessing => !target.IsPc || target.IsConnected || accessing.IsBuilder;
                 return true;
             case NotSelf:
                 predicate = accessing => accessing.Id != target.Id;

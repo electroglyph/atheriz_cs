@@ -31,7 +31,7 @@ public sealed class GroupCommand : Command
             // check leader (typed: Channel.CreatedBy, F001)
             int createdBy = channel.CreatedBy;
             if (createdBy != go.Id) { go.Msg("You are not the leader of this group."); return; }
-            var targetName = list[1];
+            var targetName = string.Join(" ", list.Skip(1));
             var tgt = ResolveMember(go, targetName, "You can't kick yourself!");
             if (tgt is null) return;
             channel.Msg($"{go.GetDisplayName(null)} kicked {tgt.GetDisplayName(null)} from the group.");
@@ -61,7 +61,7 @@ public sealed class GroupCommand : Command
         if (sub == "add")
         {
             if (list.Count < 2) { go.Msg("Usage: group add <name>"); return; }
-            var targetName = list[1];
+            var targetName = string.Join(" ", list.Skip(1));
             var tgt = ResolveMember(go, targetName, "You can't add yourself!");
             if (tgt is null) return;
             if (!go.FollowersSnapshot.Contains(tgt.Id)) { go.Msg($"{tgt.GetDisplayName(go)} is not following you."); return; }

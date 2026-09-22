@@ -70,8 +70,12 @@ public class PortedPersistenceTests
         Assert.Equal(1, RowCount(account.Id, env.TempPath));
         Assert.True(account.Delete(caller));
         Assert.Empty(ObjectRegistry.Get(account.Id));
-        Assert.Equal(0, RowCount(account.Id, env.TempPath));
         Assert.True(account.IsDeleted);
+        // The row death is journaled, not written mid-game (DB discipline:
+        // writes happen on save checkpoints only) — the next save removes
+        // the row and no later load resurrects it.
+        using (var db2 = new AtherizDbContext(env.TempPath)) { db2.Database.EnsureCreated(); ObjectRegistry.SaveObjects(db2); }
+        Assert.Equal(0, RowCount(account.Id, env.TempPath));
     }
     [Fact] public void ChannelDeletePersistsAndNoResurrectionOnFailure()
     {

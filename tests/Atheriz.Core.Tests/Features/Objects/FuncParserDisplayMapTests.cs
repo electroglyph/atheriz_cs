@@ -11,7 +11,12 @@ public class FuncParserDisplayMapTests
     public void Parse_DirectorWithReceiver_UsesDisplayName()
     {
         var hero = GameObject.Create("Hero", isPc: true);
-        var looker = GameObject.Create("Looker");
+        var looker = GameObject.Create("Looker", privilege: Privilege.Builder);
+        // Display names are view-gated: clear the default deny so these pins
+        // assert director-stance rendering, not the Someone fallback.
+        // (The looker is a builder because offline-PC names render only
+        // for builders and above.)
+        hero.ClearLocksByName("view");
         var mapping = new Dictionary<string, object?> { ["hero"] = hero };
 
         var result = FuncParser.Parse("{hero} arrives.", null, looker, mapping, false);
@@ -64,7 +69,12 @@ public class FuncParserDisplayMapTests
     public void Parse_DirectorMixedMap_RendersEachByKind()
     {
         var hero = GameObject.Create("Hero", isPc: true);
-        var looker = GameObject.Create("Looker");
+        var looker = GameObject.Create("Looker", privilege: Privilege.Builder);
+        // Display names are view-gated: clear the default deny so these pins
+        // assert director-stance rendering, not the Someone fallback.
+        // (The looker is a builder because offline-PC names render only
+        // for builders and above.)
+        hero.ClearLocksByName("view");
         var mapping = new Dictionary<string, object?>
         {
             ["hero"] = hero,

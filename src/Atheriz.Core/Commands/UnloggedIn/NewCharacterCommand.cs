@@ -34,8 +34,10 @@ public sealed class NewCharacterCommand : Command
         {
             if (acc.Characters.Count >= settings.MaxCharacters) { CreationCooldownHelper.Clear(caller); caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
             if (CreationValidation.PcNameExists(name)) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
-            // Desc is the remainder after name+gender (was dropped as "" before).
-            string desc = parts.Count > 2 ? string.Join(" ", parts.Skip(2)) : "";
+            // Desc is the raw remainder after name+gender (was re-joined
+            // tokens, which collapsed interior spacing the async prompt
+            // line keeps verbatim).
+            string desc = parts.Count > 2 ? Command.RemainderAfterTokens(text, 2) : "";
             var character = GameObject.Create(name, desc, isPc: true);
             character.Gender = parts.Count > 1 ? parts[1] : "neutral";
             try

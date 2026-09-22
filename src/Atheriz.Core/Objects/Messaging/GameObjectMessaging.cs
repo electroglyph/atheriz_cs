@@ -176,10 +176,15 @@ public partial class GameObject
     // Port of base_obj.py:1428-1437 get_display_name.
     public virtual string GetDisplayName(GameObject? looker)
     {
-        if (IsPc && !IsConnected) return $"{Name} (offline)";
         if (looker is null) return Name;
-        if (Access(looker, "view")) return Name;
-        return IsPc || IsNpc ? "Someone" : "Something";
+        // The view gate runs before the offline suffix: a looker denied view
+        // must not learn the name (nor its online state) from the suffix.
+        if (!Access(looker, "view")) return IsPc || IsNpc ? "Someone" : "Something";
+        // Offline PCs are invisible to regular players: only builders and
+        // above see the name with the offline suffix. (A regular passing
+        // view via a custom lock still gets Someone, never the name.)
+        if (IsPc && !IsConnected) return looker.IsBuilder ? $"{Name} (offline)" : "Someone";
+        return Name;
     }
 
     /// <summary>

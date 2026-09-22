@@ -43,7 +43,8 @@ public class CliSettingsTemplateTests
         Assert.Contains("[--overwrite|--force]", newSrc);
         var prog = SourceScan.Read("src", "Atheriz.Server", "Program.cs");
         Assert.Contains("[--overwrite|--force]", prog);
-        Assert.Contains("--yes", prog);
+        // No --yes assertion: no command accepts --yes (reset always
+        // confirms), so there is no usage line to document it in.
     }
 
     // AtherizSettings.Default is shared-mutable with zero mutating

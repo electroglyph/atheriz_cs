@@ -49,10 +49,9 @@ void PrintCommandHelp(string cmd)
         ["stop"] = stopRow,
         ["reload"] = stopRow,
         ["reset"] = new CommandHelpRow(
-            _ => "Usage: Atheriz.Server reset [-f|--force|--yes|-y] [--port N] [--host HOST]",
-            _ => "  Delete all game data and start fresh",
-            ["  -f, --force         Skip confirmation prompt",
-             $"  --port N            Override default port (default: {defPort})",
+            _ => "Usage: Atheriz.Server reset [--port N] [--host HOST]",
+            _ => "  Delete all game data and start fresh (asks for confirmation)",
+            [$"  --port N            Override default port (default: {defPort})",
              "  --host HOST         Override the host interface to bind to"]),
         ["create"] = new CommandHelpRow(
             _ => "Usage: Atheriz.Server create <accountname> <charactername> <password> [--port N]",
