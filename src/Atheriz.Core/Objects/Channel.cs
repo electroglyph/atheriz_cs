@@ -131,7 +131,9 @@ public class Channel : GameObject
         }
     }
 
-    public Atheriz.Core.Commands.Command? Command => _command;
+    // Live view: re-resolves on rename instead of returning the cached
+    // instance, so readers never observe a stale key/desc pair.
+    public Atheriz.Core.Commands.Command? Command => GetCommand();
     private string? _commandKey;
     private string? _commandDesc;
 

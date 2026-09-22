@@ -22,7 +22,7 @@ public sealed class MapCoordResolutionTests
     {
         var mi = new MapInfo();
         foreach (var o in placed)
-            mi.Objects[o.Id] = o;
+            mi.AddMapable(o, false);
         var listener = new LegendListener { Id = 77 };
         mi.AddListener(listener);
         mi.RenderLegend();

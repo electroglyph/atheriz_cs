@@ -52,7 +52,7 @@ public class PortedWanderNofollowDeleteTests
         var caller=GameObject.Create("Builder", isPc:true); caller.PrivilegeLevel=Privilege.Builder; ObjectRegistry.AddObject(caller); caller.MoveTo(n1); caller.ClearMessages();
         var beforeIds=new HashSet<int>(ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));
         // Make grid empty to force GetRandomNode null
-        grid.Lock.EnterWriteLock(); try{ grid.Nodes.Clear(); } finally{ grid.Lock.ExitWriteLock();}
+        grid.Clear();
         new WanderCommand().Run(caller, new GameArgumentParser.ParsedArgs{ ["count"]=3 });
         var afterIds=new HashSet<int>(ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));
         var newIds=afterIds.Except(beforeIds).ToList();
@@ -64,7 +64,7 @@ public class PortedWanderNofollowDeleteTests
         using var env=GlobalTestEnv.Enter();
         var (nh,n1,n2,area,grid)=MakeWanderHandler("M7A2");
         var caller=GameObject.Create("Builder2", isPc:true); caller.PrivilegeLevel=Privilege.Builder; ObjectRegistry.AddObject(caller); caller.MoveTo(n1);
-        grid.Lock.EnterWriteLock(); try{ grid.Nodes.Clear(); } finally{ grid.Lock.ExitWriteLock();}
+        grid.Clear();
         var before=ObjectRegistry.FilterBy(o=>o.Name.StartsWith("Wanderer")).Count;
         new WanderCommand().Run(caller, new GameArgumentParser.ParsedArgs{ ["count"]=5 });
         var after=ObjectRegistry.FilterBy(o=>o.Name.StartsWith("Wanderer")).Count;
@@ -75,7 +75,7 @@ public class PortedWanderNofollowDeleteTests
         using var env=GlobalTestEnv.Enter();
         var (nh,n1,n2,area,grid)=MakeWanderHandler("M7A3");
         var caller=GameObject.Create("Builder3", isPc:true); caller.PrivilegeLevel=Privilege.Builder; ObjectRegistry.AddObject(caller); caller.MoveTo(n1);
-        grid.Lock.EnterWriteLock(); try{ grid.Nodes.Clear(); } finally{ grid.Lock.ExitWriteLock();}
+        grid.Clear();
         var ticker=GlobalServices.GetAsyncTicker();
         int before=ticker.Slots.Values.Sum(s=>s.CoroCount);
         new WanderCommand().Run(caller, new GameArgumentParser.ParsedArgs{ ["count"]=4 });

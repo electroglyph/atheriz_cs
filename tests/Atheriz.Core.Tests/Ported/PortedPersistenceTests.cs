@@ -463,7 +463,7 @@ public class PortedPersistenceTests
         using var env=GlobalTestEnv.Enter();
         var mh=GlobalServices.GetMapHandler();
         var mi=new MapInfo("test_area");
-        mi.Lock.EnterWriteLock(); try{ mi.PreGrid[(0,0)]="X"; mi.PostGrid[(0,0)]="X"; mi.MapChanged=true; } finally{ mi.Lock.ExitWriteLock(); }
+        mi.SetPreCell((0,0), "X"); mi.SetPostCell((0,0), "X"); mi.MapChanged=true;
         // Inject into handler
         mh.SetMapInfo("test_area",0, mi);
         // Cause failure via closed DB which triggers restoration path

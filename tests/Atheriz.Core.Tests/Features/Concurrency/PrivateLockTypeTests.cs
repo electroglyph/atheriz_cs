@@ -96,9 +96,15 @@ public sealed class PrivateLockTypeTests
     }
 
     [Fact]
-    public void WebSocketHandler_OversizeThrottle_IsHolder()
+    public void WebSocketHandler_OversizeThrottle_UsesManagerBudget()
     {
-        AssertPrivateHolderIsThrottledLog(typeof(WebSocketHandler), "_wsOversizeLog");
+        // The static entry point holds no throttle of its own: per-host
+        // oversize suppression shares the registering manager's
+        // world-scoped budget (pinned by
+        // ConnectionManager_OversizeThrottle_IsHolder).
+        var field = typeof(WebSocketHandler).GetField(
+            "_wsOversizeLog", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+        Assert.Null(field);
     }
 
     [Fact]
@@ -114,9 +120,9 @@ public sealed class PrivateLockTypeTests
     }
 
     [Fact]
-    public void TelnetProtocol_OverlongDropThrottle_IsHolder()
+    public void TelnetConnection_OverlongDropThrottle_IsHolder()
     {
-        AssertPrivateHolderIsThrottledLog(typeof(TelnetProtocol), "_overlongDropLog");
+        AssertPrivateHolderIsThrottledLog(typeof(TelnetConnection), "_overlongDropLog");
     }
 
     [Fact]

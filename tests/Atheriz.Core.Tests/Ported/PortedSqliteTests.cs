@@ -119,7 +119,7 @@ public class PortedSqliteTests
         {
             var area = new NodeArea(name);
             var grid = new NodeGrid(name, 0);
-            grid.Nodes[(0, 0)] = new Node(new Coord(name, 0, 0, 0), desc: "plain");
+            grid.AddNode(new Node(new Coord(name, 0, 0, 0), desc: "plain"));
             area.AddGrid(grid);
             nh.AddArea(area);
         }
@@ -141,7 +141,7 @@ public class PortedSqliteTests
         var nh = new RecordingNodeHandler();
         var area = new NodeArea("AreaT");
         var grid = new NodeGrid("AreaT", 0);
-        grid.Nodes[(0, 0)] = new Node(new Coord("AreaT", 0, 0, 0));
+        grid.AddNode(new Node(new Coord("AreaT", 0, 0, 0)));
         area.AddGrid(grid);
         nh.AddArea(area);
         var t1 = new Transition(new Coord("AreaT", 0, 0, 0), new Coord("AreaT", 1, 1, 0), "path");

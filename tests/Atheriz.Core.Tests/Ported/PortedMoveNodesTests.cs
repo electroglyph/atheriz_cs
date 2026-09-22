@@ -32,7 +32,7 @@ public class PortedMoveNodesTests
         NodeHandler.SetCurrent(nh);
         GlobalServices.SetMapHandler(new MapHandler(autoLoad:false));
         var grid = new NodeGrid("TestArea",0);
-        foreach(var n in nodes) grid.Nodes[(n.Coord.X, n.Coord.Y)]=n;
+        foreach(var n in nodes) grid.AddNode(n);
         // Need to ensure we also have an Area to hold grid? For ApplyMoves doors/transitions, handler not needed for grid nodes but for remap we need handler set.
         // We do not add grid to area, but ApplyMoves will use NodeHandler.SetCurrent for remap.
         // However NodeGrid.ApplyMoves expects NodeHandler to remap doors; we set current.
@@ -42,7 +42,7 @@ public class PortedMoveNodesTests
     private static (NodeGrid grid, object nh) MakeGrid(params Node[] nodes)
     {
         var grid = new NodeGrid("TestArea",0);
-        foreach(var n in nodes) grid.Nodes[(n.Coord.X, n.Coord.Y)]=n;
+        foreach(var n in nodes) grid.AddNode(n);
         return (grid, new object());
     }
 
@@ -54,7 +54,7 @@ public class PortedMoveNodesTests
     {
         using var env=GlobalTestEnv.Enter();
         var a=new Node(new Coord("TestArea",0,0,0)); a.Desc="A"; var b=new Node(new Coord("TestArea",1,0,0)); b.Desc="B";
-        b.Links.Add(new NodeLink("West", new Coord("TestArea",0,0,0)));
+        b.AddLink(new NodeLink("West", new Coord("TestArea",0,0,0)));
         var (grid,_)=MakeGrid(a,b);
         NodeHandler.SetCurrent(new NodeHandler(autoLoad:false));
         var failed=grid.ApplyMoves(new List<((int,int),(int,int))>{((0,0),(5,0))});
@@ -71,7 +71,7 @@ public class PortedMoveNodesTests
     {
         using var env=GlobalTestEnv.Enter();
         var a=new Node(new Coord("TestArea",0,0,0)); var b=new Node(new Coord("TestArea",1,0,0));
-        a.Links.Add(new NodeLink("East", new Coord("TestArea",1,0,0))); b.Links.Add(new NodeLink("West", new Coord("TestArea",0,0,0)));
+        a.AddLink(new NodeLink("East", new Coord("TestArea",1,0,0))); b.AddLink(new NodeLink("West", new Coord("TestArea",0,0,0)));
         var (grid,_)=MakeGrid(a,b);
         NodeHandler.SetCurrent(new NodeHandler(autoLoad:false));
         var failed=grid.ApplyMoves(new List<((int,int),(int,int))>{((0,0),(1,0)),((1,0),(0,0))});
@@ -138,7 +138,7 @@ public class PortedMoveNodesTests
     {
         using var env=GlobalTestEnv.Enter();
         var a = new Node(new Coord("TestArea",0,0,0));
-        a.Links.Add(new NodeLink("Portal", new Coord("OtherArea",0,0,0)));
+        a.AddLink(new NodeLink("Portal", new Coord("OtherArea",0,0,0)));
         var (grid, nh) = MakeGridWithHandler(a);
         // Need to ensure transition exists via AddNode side-effect: node.AddLink creates transition; but we built grid manually without AddNode.
         // Manually add transition
@@ -163,7 +163,7 @@ public class PortedMoveNodesTests
     {
         using var env=GlobalTestEnv.Enter();
         var a = new Node(new Coord("TestArea",0,0,0));
-        a.Links.Add(new NodeLink("East", new Coord("TestArea",1,0,0)));
+        a.AddLink(new NodeLink("East", new Coord("TestArea",1,0,0)));
         var (grid, nh) = MakeGridWithHandler(a);
         var occupant = GameObject.Create("occupant");
         occupant.InternalCmdSet = new TrackingCmdSet();
@@ -202,7 +202,7 @@ public class PortedMoveNodesTests
         using var env=GlobalTestEnv.Enter();
         var a = new Node(new Coord("TestArea",0,0,0));
         var b = new Node(new Coord("TestArea",1,0,0));
-        b.Links.Add(new NodeLink("West", new Coord("TestArea",0,0,0)));
+        b.AddLink(new NodeLink("West", new Coord("TestArea",0,0,0)));
         var (grid, nh) = MakeGridWithHandler(a,b);
         var neighborOccupant = GameObject.Create("neighbor");
         neighborOccupant.InternalCmdSet = new TrackingCmdSet();

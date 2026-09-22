@@ -24,12 +24,12 @@ public sealed class PathfindZeroingRemovalTests
         var detour = new Node(new Coord("B22Path", 0, 1, 0));
         var detour2 = new Node(new Coord("B22Path", 1, 1, 0));
         var detour3 = new Node(new Coord("B22Path", 2, 1, 0));
-        grid.Nodes[(0, 0)] = a;
-        grid.Nodes[(1, 0)] = b;
-        grid.Nodes[(2, 0)] = c;
-        grid.Nodes[(0, 1)] = detour;
-        grid.Nodes[(1, 1)] = detour2;
-        grid.Nodes[(2, 1)] = detour3;
+        grid.AddNode(a);
+        grid.AddNode(b);
+        grid.AddNode(c);
+        grid.AddNode(detour);
+        grid.AddNode(detour2);
+        grid.AddNode(detour3);
         a.AddLink(new NodeLink("east", b.Coord, ["e"]));
         b.AddLink(new NodeLink("west", a.Coord, ["w"]));
         b.AddLink(new NodeLink("east", c.Coord, ["e"]));

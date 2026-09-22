@@ -29,6 +29,12 @@ public class TelnetConnection : BaseConnection
     // Close flag (with _limiter.IsClosing forms IsClosing). Pending-byte
     // accounting lives solely in PendingLimiter — no mirrors.
     private bool _closing;
+    // Per-connection 5s throttle for the overlong-input-drop warning.
+    // The holder lives here (not on TelnetProtocol, whose session pump is
+    // static) so one connection's burst never silences another's warning.
+    private readonly ThrottledLog _overlongDropLog = new(5.0);
+
+    internal bool ShouldLogOverlongDrop(string host) => _overlongDropLog.ShouldLog(host);
 
     public TelnetConnection(object reader, object writer, string? sessionId = null, AtherizSettings? settings = null) : base(sessionId)
     {
@@ -339,8 +345,6 @@ public interface ITelnetApp
 
 public sealed class TelnetProtocol : BaseProtocol
 {
-    // Per-IP 5s throttle for the overlong-input-drop warning (WS parity via ThrottleWindow).
-    private static readonly ThrottledLog _overlongDropLog = new(5.0);
     private const int TELNET_INPUT_CHUNK = 4096; // port of telnet.py:45
 
     public static (int rows, int cols) ClampNaws(int rows, int cols)
@@ -765,7 +769,7 @@ public sealed class TelnetProtocol : BaseProtocol
         try { writer.Write("\r\n\x1b[1;1H\x1b[2J"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.HandleSessionAsync: " + logEx.Message, "TelnetProtocol"); }
         ApplyNaws(writer, connection, settings);
         manager.Dispatch(connection, "client_ready", [], []);
-        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine).ConfigureAwait(false)) { if (rawLine is null) { if (_overlongDropLog.ShouldLog(host)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Session text is already negotiation-decoded, but keep the stray-IAC guard: a peer can still emit bare 0xFF, which decodes as U+FFFD.
+        try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine).ConfigureAwait(false)) { if (rawLine is null) { if (connection.ShouldLogOverlongDrop(host)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Session text is already negotiation-decoded, but keep the stray-IAC guard: a peer can still emit bare 0xFF, which decodes as U+FFFD.
             if (line.Length > 0 && (line[0] == '\uFFFD' || line[0] == (char)255 || line.Contains("\uFFFD"))) {
                 // Strip leading IAC sequences: find first alphabetic char of actual command
                 int start = 0;

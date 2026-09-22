@@ -84,8 +84,10 @@ public class InputFuncs
             // Check-and-clear must be atomic: prompt owner and disconnect cleanup both touch input_future
             TaskCompletionSource<string>? future = null;
             bool masked = false;
+            bool closed;
             lock (session.Lock)
             {
+                closed = session.Closed;
                 future = session.InputFuture;
                 masked = session.InputMasked;
                 if (future is not null && !future.Task.IsCompleted)
@@ -99,6 +101,10 @@ public class InputFuncs
                     masked = false;
                 }
             }
+            // A session past AtDisconnect dispatches nothing: its puppet is
+            // unwound and its teardown already ran, so late input is dropped
+            // (mirrors DrainInput refusing closed sessions).
+            if (closed) return;
             if (future is not null)
             {
                 if (masked)
@@ -528,55 +534,50 @@ public class InputFuncs
         {
             using (mi.BatchUpdate())
             {
-                mi.Lock.EnterWriteLock();
-                try
+                foreach (var cell in parsed)
                 {
-                    foreach (var cell in parsed)
+                    if (cell.IsRoom) continue;
+                    int x = cell.X; int y = cell.Y;
+                    string sym = cell.Symbol;
+                    if (sym=="") mi.RemovePreCell((x,y));
+                    else if (!cell.HasStyle) mi.SetPreCell((x,y), sym);
+                    else
                     {
-                        if (cell.IsRoom) continue;
-                        int x = cell.X; int y = cell.Y;
-                        string sym = cell.Symbol;
-                        if (sym=="") mi.PreGrid.Remove((x,y));
-                        else if (!cell.HasStyle) mi.PreGrid[(x,y)] = sym;
-                        else
+                        var fg = cell.Fg; var bg = cell.Bg; var attrs = cell.Attrs;
+                        // decode fg/bg
+                        (byte R,byte G,byte B)? fgT=null; (byte R,byte G,byte B)? bgT=null;
+                        List<object?> fgList = ToList(fg); List<object?> bgList = ToList(bg);
+                        bool fgTrans = fgList.Count==3;
+                        if (fgTrans)
                         {
-                            var fg = cell.Fg; var bg = cell.Bg; var attrs = cell.Attrs;
-                            // decode fg/bg
-                            (byte R,byte G,byte B)? fgT=null; (byte R,byte G,byte B)? bgT=null;
-                            List<object?> fgList = ToList(fg); List<object?> bgList = ToList(bg);
-                            bool fgTrans = fgList.Count==3;
-                            if (fgTrans)
+                            foreach (var e in fgList)
                             {
-                                foreach (var e in fgList)
-                                {
-                                    if (ToInt(e)!=-1) { fgTrans = false; break; }
-                                }
+                                if (ToInt(e)!=-1) { fgTrans = false; break; }
                             }
-                            bool bgTrans = bgList.Count==3;
-                            if (bgTrans)
-                            {
-                                foreach (var e in bgList)
-                                {
-                                    if (ToInt(e)!=-1) { bgTrans = false; break; }
-                                }
-                            }
-                            if (!fgTrans && fgList.Count==3) fgT = ((byte)ToInt(fgList[0]), (byte)ToInt(fgList[1]), (byte)ToInt(fgList[2]));
-                            if (!bgTrans && bgList.Count==3) bgT = ((byte)ToInt(bgList[0]), (byte)ToInt(bgList[1]), (byte)ToInt(bgList[2]));
-                            var attrList = ToList(attrs);
-                            bool bold = false, italic = false, underline = false;
-                            foreach (var a in attrList)
-                            {
-                                if ((a is string s && s=="bold") || (a is System.Text.Json.JsonElement je && je.GetString()=="bold")) bold = true;
-                                if ((a is string s2 && s2=="italic") || (a is System.Text.Json.JsonElement je2 && je2.GetString()=="italic")) italic = true;
-                                if ((a is string s3 && s3=="underline") || (a is System.Text.Json.JsonElement je3 && je3.GetString()=="underline")) underline = true;
-                            }
-                            string wrapped = GameUtils.WrapRgb(sym, fgT, bgT, bold, italic, underline);
-                            mi.PreGrid[(x,y)] = wrapped;
                         }
+                        bool bgTrans = bgList.Count==3;
+                        if (bgTrans)
+                        {
+                            foreach (var e in bgList)
+                            {
+                                if (ToInt(e)!=-1) { bgTrans = false; break; }
+                            }
+                        }
+                        if (!fgTrans && fgList.Count==3) fgT = ((byte)ToInt(fgList[0]), (byte)ToInt(fgList[1]), (byte)ToInt(fgList[2]));
+                        if (!bgTrans && bgList.Count==3) bgT = ((byte)ToInt(bgList[0]), (byte)ToInt(bgList[1]), (byte)ToInt(bgList[2]));
+                        var attrList = ToList(attrs);
+                        bool bold = false, italic = false, underline = false;
+                        foreach (var a in attrList)
+                        {
+                            if ((a is string s && s=="bold") || (a is System.Text.Json.JsonElement je && je.GetString()=="bold")) bold = true;
+                            if ((a is string s2 && s2=="italic") || (a is System.Text.Json.JsonElement je2 && je2.GetString()=="italic")) italic = true;
+                            if ((a is string s3 && s3=="underline") || (a is System.Text.Json.JsonElement je3 && je3.GetString()=="underline")) underline = true;
+                        }
+                        string wrapped = GameUtils.WrapRgb(sym, fgT, bgT, bold, italic, underline);
+                        mi.SetPreCell((x,y), wrapped);
                     }
-                    mi.MapChanged = true;
                 }
-                finally { mi.Lock.ExitWriteLock(); }
+                mi.MapChanged = true;
             }
         }
         List<((int X,int Y) src,(int X,int Y) dst)> roomMoves = [];
@@ -764,9 +765,7 @@ public class InputFuncs
             }
             newEntries.Add(le);
         }
-        mi.Lock.EnterWriteLock();
-        try { mi.LegendEntries.Clear(); mi.LegendEntries.AddRange(newEntries); mi.MapChanged=true; }
-        finally { mi.Lock.ExitWriteLock(); }
+        mi.ReplaceLegendEntries(newEntries);
         mi.RenderLegend();
         connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
         connection.SendCommand("legend_ok", new List<object?>{ seq, result.NewKey }, []);
@@ -778,8 +777,10 @@ public class InputFuncs
 /// </summary>
 public class ConnectionManager
 {
-    // Port of manager.py:10-24 malformed throttling — now via ThrottleWindow
-    private static readonly ThrottledLog _malformedLog = new(MalformedWindow);
+    // Port of manager.py:10-24 malformed throttling — now via ThrottleWindow.
+    // Per-manager state: a static holder would share per-host suppression
+    // across test and game worlds, so a burst in one silences another.
+    private readonly ThrottledLog _malformedLog = new(MalformedWindow);
     private const double MalformedWindow = 5.0; // port of manager.py:12
 
     private static string SummarizeRaw(string rawMessage, int limit = 80) // port of manager.py:14-15
@@ -789,14 +790,19 @@ public class ConnectionManager
         return JsonSerializer.Serialize(sub);
     }
 
-    private static bool ShouldLogMalformed(string host) // port of manager.py:17-24
+    private bool ShouldLogMalformed(string host) // port of manager.py:17-24
         => _malformedLog.ShouldLog(host);
 
     // Port of websocket.py:15-27 oversize throttling (per-host 5s window),
     // for the shared HandleCommand size cap .
-    private static readonly ThrottledLog _oversizeLog = new(OversizeWindow);
+    private readonly ThrottledLog _oversizeLog = new(OversizeWindow);
     private const double OversizeWindow = 5.0; // port of websocket.py:13
-    private static bool ShouldLogOversize(string host)
+    /// <summary>
+    /// Per-host 5s oversize-log throttle for this manager's world. Public so
+    /// the hosting layer (one static entry point, no instance of its own)
+    /// shares this world's budget instead of a process-wide static.
+    /// </summary>
+    public bool ShouldLogOversize(string host)
         => _oversizeLog.ShouldLog(host);
 
     // Reference equality comparer — mirrors id(connection) at manager.py:52,113,125
@@ -1046,10 +1052,15 @@ public class ConnectionManager
     public virtual void Disconnect(BaseConnection connection)
     {
         string? connId = null;
-        var host = HostOf(connection); // port of manager.py:123
+        // Host snapshot belongs inside the write lock: RegisteredHost is
+        // rewritten by RegisterConnection under the same lock, so reading it
+        // outside can pair this disconnect's counter decrement with the next
+        // connection's host.
+        string host = "?";
         _lock.EnterWriteLock();
         try
         {
+            host = HostOf(connection); // port of manager.py:123
             if (_connToId.TryGetValue(connection, out var id))
             {
                 connId = id;
@@ -1197,7 +1208,7 @@ public class ConnectionManager
     { try { AtherizLogger.LogWarning(message); } catch { Console.Error.WriteLine(message); } }
     internal static void NetError(string message)
     { try { AtherizLogger.LogError(message); } catch { Console.Error.WriteLine(message); } }
-    private static void LogMalformed(string host, string rawMessage) // port of manager.py:196-199
+    private void LogMalformed(string host, string rawMessage) // port of manager.py:196-199
     { if (ShouldLogMalformed(host)) NetWarn($"[Network] Invalid message format from {host} ({System.Text.Encoding.UTF8.GetByteCount(rawMessage)} bytes): {SummarizeRaw(rawMessage)}"); }
 
     // Port of manager.py:185-215 handle_command

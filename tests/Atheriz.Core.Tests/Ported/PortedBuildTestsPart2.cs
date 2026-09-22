@@ -19,7 +19,7 @@ public class PortedBuildTestsPart2
         var area = new NodeArea("TestArea");
         var grid = new NodeGrid("TestArea", 0);
         var start = new Node(new Coord("TestArea", 0, 0, 0), desc: "Start");
-        grid.Nodes[(0,0)] = start;
+        grid.AddNode(start);
         ObjectRegistry.AddObject(start); // Explicit registration: the constructor does not publish.
         area.AddGrid(grid);
         nh.AddArea(area);

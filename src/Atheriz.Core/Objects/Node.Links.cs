@@ -10,7 +10,7 @@ public partial class Node
         {
             // No case-variant hunt: the OrdinalIgnoreCase dict cannot hold two
             // keys differing only by case, and the indexer overwrites anyway.
-            Nouns[key.ToLowerInvariant()] = desc;
+            _nouns[key.ToLowerInvariant()] = desc;
             IsModified = true;
         }
         finally { SyncRoot.ExitWriteLock(); }
@@ -27,8 +27,8 @@ public partial class Node
         try
         {
             var lowered = key.ToLowerInvariant();
-            if (Nouns.ContainsKey(lowered)) return false;
-            Nouns[lowered] = desc;
+            if (_nouns.ContainsKey(lowered)) return false;
+            _nouns[lowered] = desc;
             IsModified = true;
             return true;
         }
@@ -40,7 +40,7 @@ public partial class Node
         SyncRoot.EnterWriteLock();
         try
         {
-            Nouns.Remove(key.ToLowerInvariant());
+            _nouns.Remove(key.ToLowerInvariant());
             IsModified = true;
         }
         finally { SyncRoot.ExitWriteLock(); }
@@ -51,7 +51,7 @@ public partial class Node
         SyncRoot.EnterReadLock();
         try
         {
-            if (Nouns.TryGetValue(key.ToLowerInvariant(), out var v)) return v;
+            if (_nouns.TryGetValue(key.ToLowerInvariant(), out var v)) return v;
             // the OrdinalIgnoreCase dict makes a post-TryGetValue
             // manual scan unreachable — deleted.
             return null;
@@ -68,7 +68,7 @@ public partial class Node
     public List<NodeLink> GetLinks()
     {
         SyncRoot.EnterReadLock();
-        try { return Links.ToList(); }
+        try { return _links.ToList(); }
         finally { SyncRoot.ExitReadLock(); }
     }
     // Port of nodes.py:579. Case-insensitive like GetLinkByName :
@@ -82,13 +82,13 @@ public partial class Node
     private NodeLink? FindLink(string name)
     {
         SyncRoot.EnterReadLock();
-        try { return Links.FirstOrDefault(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || l.Aliases.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase))); }
+        try { return _links.FirstOrDefault(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || l.Aliases.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase))); }
         finally { SyncRoot.ExitReadLock(); }
     }
     // Name-only guard shared by the two AddLinkIfAbsent checks (same lock-held
     // shape, no alias matching).
     private bool HasLinkNameNoLock(string name)
-        => Links.Any(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        => _links.Any(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
     public NodeLink? GetLink(string name) => GetLinkByName(name);
     // Look-command noun/link fallback (moved out of LookCommand.Run intact):
     // noun text first, then the linked node's appearance. Null when neither
@@ -151,19 +151,36 @@ public partial class Node
     public NodeLink? GetRandomLink()
     {
         SyncRoot.EnterReadLock();
-        try { return Links.Count == 0 ? null : Links[Random.Shared.Next(Links.Count)]; }
+        try { return _links.Count == 0 ? null : _links[Random.Shared.Next(_links.Count)]; }
         finally { SyncRoot.ExitReadLock(); }
     }
     // Port of nodes.py:657 add_link
     // Insert core shared with AddLinkIfAbsent: caller holds the write lock.
     private bool AddLinkRawNoLock(NodeLink link)
     {
-        if (Links.Count > 0 && Links.Contains(link)) return false;
-        if (Links.Count > 0 && HasLinkNameNoLock(link.Name)) return false;
-        if (Links.Count == 0) Links = [link];
-        else Links.Add(link);
+        if (_links.Count > 0 && _links.Contains(link)) return false;
+        if (_links.Count > 0 && HasLinkNameNoLock(link.Name)) return false;
+        if (_links.Count == 0) _links = [link];
+        else _links.Add(link);
         IsModified = true;
         return true;
+    }
+    // Coordinate rewrite core for NodeGrid.ApplyMoves: caller holds the node
+    // write lock. Rewrites each link Coord through oldToNew in one pass and
+    // marks modified when anything moved.
+    internal bool RemapLinkCoordsNoLock(Dictionary<Coord, Coord> oldToNew)
+    {
+        bool changed = false;
+        foreach (var l in _links)
+        {
+            if (oldToNew.TryGetValue(l.Coord, out var nc) && !nc.Equals(l.Coord))
+            {
+                l.Coord = nc;
+                changed = true;
+            }
+        }
+        if (changed) IsModified = true;
+        return changed;
     }
     // Publish tail shared with AddLinkIfAbsent: runs lock-free after release.
     // logContext keeps the per-caller label.
@@ -217,8 +234,8 @@ public partial class Node
         {
             // RemoveLink folds case like the lookups — RemoveLink("NORTH") must
             // find the "north" that GetLinkByName finds.
-            var idx = Links.FindIndex(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            if (idx >= 0) { found = Links[idx]; Links.RemoveAt(idx); IsModified = true; }
+            var idx = _links.FindIndex(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0) { found = _links[idx]; _links.RemoveAt(idx); IsModified = true; }
         }
         finally { SyncRoot.ExitWriteLock(); }
         if (found is not null && Coord.Area != found.Coord.Area)
@@ -237,7 +254,7 @@ public partial class Node
         obj.InternalCmdSet?.RemoveByTag("exits");
         List<NodeLink> snap;
         SyncRoot.EnterReadLock();
-        try { snap = Links.ToList(); }
+        try { snap = _links.ToList(); }
         finally { SyncRoot.ExitReadLock(); }
         if (snap.Count == 0) return;
         List<Command> cmds = [];
@@ -337,7 +354,7 @@ public partial class Node
     {
         string names;
         SyncRoot.EnterReadLock();
-        try { names = string.Join(", ", Links.Select(l => l.Name)); }
+        try { names = string.Join(", ", _links.Select(l => l.Name)); }
         finally { SyncRoot.ExitReadLock(); }
         return !string.IsNullOrEmpty(names) ? $"{GameUtils.WrapXterm256("Exits:", fg: 15, bold: true)} {names}\n" : "";
     }

@@ -19,7 +19,7 @@ public class PortedPathfindTests
         for(int x=0;x<3;x++) for(int y=0;y<2;y++){
             var n = new Node(new Coord("PathArea", x, y, 0));
             nodes[(x,y)] = n;
-            grid.Nodes[(x,y)] = n;
+            grid.AddNode(n);
         }
         nodes[(0,0)].AddLink(new NodeLink("east", new Coord("PathArea",1,0,0), new List<string>{"e"}));
         nodes[(1,0)].AddLink(new NodeLink("west", new Coord("PathArea",0,0,0), new List<string>{"w"}));
@@ -172,7 +172,7 @@ public class PortedPathfindTests
         foreach(var coord in new[]{(0,0),(1,1),(1,0),(2,0)}){
             var n = new Node(new Coord("U8Area", coord.Item1, coord.Item2, 0));
             nodes[coord] = n;
-            grid.Nodes[coord] = n;
+            grid.AddNode(n);
         }
         nodes[(0,0)].AddLink(new NodeLink("n", new Coord("U8Area",1,1,0), new List<string>{"n"}));
         nodes[(1,1)].AddLink(new NodeLink("s", new Coord("U8Area",0,0,0), new List<string>{"s"}));
@@ -205,7 +205,7 @@ public class PortedPathfindTests
         for(int x=0;x<size;x++){
             var n = new Node(new Coord("StaleArea", x,0,0));
             nodes[(x,0)] = n;
-            grid.Nodes[(x,0)] = n;
+            grid.AddNode(n);
         }
         for(int x=0;x<size-1;x++){
             nodes[(x,0)].AddLink(new NodeLink($"e{x}", new Coord("StaleArea", x+1,0,0), new List<string>{"e"}));
@@ -235,7 +235,7 @@ public class PortedPathfindTests
         for(int x=0;x<size;x++) for(int y=0;y<size;y++){
             var n = new Node(new Coord("BigArea", x,y,0));
             nodes[(x,y)] = n;
-            grid.Nodes[(x,y)] = n;
+            grid.AddNode(n);
         }
         for(int x=0;x<size;x++) for(int y=0;y<size;y++){
             if (x+1<size) nodes[(x,y)].AddLink(new NodeLink("east", new Coord("BigArea", x+1,y,0), new List<string>{"e"}));

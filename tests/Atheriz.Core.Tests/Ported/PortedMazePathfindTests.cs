@@ -138,7 +138,7 @@ public class PortedMazePathfindTests
         var area = new NodeArea("PathArea");
         var grid = new NodeGrid("PathArea",0);
         var nodes = new Dictionary<(int,int), Node>();
-        for(int x=0;x<3;x++) for(int y=0;y<2;y++){ var n=new Node(new Coord("PathArea",x,y,0)); nodes[(x,y)]=n; grid.Nodes[(x,y)]=n; }
+        for(int x=0;x<3;x++) for(int y=0;y<2;y++){ var n=new Node(new Coord("PathArea",x,y,0)); nodes[(x,y)]=n; grid.AddNode(n); }
         nodes[(0,0)].AddLink(new NodeLink("east", new Coord("PathArea",1,0,0), new List<string>{"e"}));
         nodes[(1,0)].AddLink(new NodeLink("west", new Coord("PathArea",0,0,0), new List<string>{"w"}));
         nodes[(1,0)].AddLink(new NodeLink("east", new Coord("PathArea",2,0,0), new List<string>{"e"}));

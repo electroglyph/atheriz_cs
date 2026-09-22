@@ -180,7 +180,11 @@ public static class CommandDispatcher
         }
         var (func, caller, eargs) = cmd.Execute(puppet, cmdArgs, matchedAlias);
         if (func is null) return null;
-        if (LagCheck is not null && caller is not null && LagCheck(caller)) return null;
+        // Snapshot the gate: separate null-check and invoke reads race a
+        // concurrent LagCheck swap (stale non-null invoke after a null swap
+        // throws; a missed swap dispatches under the wrong gate).
+        var lagCheck = LagCheck;
+        if (lagCheck is not null && caller is not null && lagCheck(caller)) return null;
         if (immediate) return new Job(func, caller!, eargs);
         // queue
         var pool = _pool;

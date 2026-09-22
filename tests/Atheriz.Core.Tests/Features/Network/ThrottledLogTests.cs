@@ -87,10 +87,17 @@ public sealed class ThrottledLogTests
     [Fact]
     public void ShouldLogMalformed_FreshHost_AcceptsThenSuppresses()
     {
-        var method = typeof(ConnectionManager).GetMethod(
-            "ShouldLogMalformed", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var host = "throttle-pin-" + Guid.NewGuid().ToString("N");
-        Assert.True((bool)method.Invoke(null, [host])!);
-        Assert.False((bool)method.Invoke(null, [host])!);
+        // Per-manager holder: a fresh manager accepts a host no other
+        // manager has seen, then suppresses the repeat within the window.
+        var mgr = new ConnectionManager();
+        try
+        {
+            var method = typeof(ConnectionManager).GetMethod(
+                "ShouldLogMalformed", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            var host = "throttle-pin-" + Guid.NewGuid().ToString("N");
+            Assert.True((bool)method.Invoke(mgr, [host])!);
+            Assert.False((bool)method.Invoke(mgr, [host])!);
+        }
+        finally { mgr.Atp.Stop(wait: false); }
     }
 }

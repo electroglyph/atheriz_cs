@@ -94,6 +94,11 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     public double ConnTime; // Port of session.py:35 conn_time = 0.0 (Unix seconds)
     public TaskCompletionSource<string>? InputFuture; // Port of session.py:36 input_future: asyncio.Future | None
     public bool InputMasked; // Port of session.py:37 _input_masked (bool)
+    // True once AtDisconnect runs, until the next AtConnect. Input arriving
+    // after teardown must not attach puppets or dispatch commands on a dead
+    // session — checked under Lock in the puppet-attach and text paths.
+    // Written only under Lock (set in AtDisconnect, cleared in AtConnect).
+    public bool Closed { get; private set; }
     public DateTime ConnectedAt; // Spec extra: wall clock for C# convenience (mirrors ConnTime)
     public double SecondsPlayed; // Spec extra: accumulated seconds (mirrors GameObject._seconds_played but session tracks)
 
@@ -116,6 +121,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     {
         ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); // Port of session.py:40 self.conn_time = time.time()
         ConnectedAt = DateTime.UtcNow;
+        lock (Lock) { Closed = false; }
     }
 
     // Spec variant: AtConnect(Connection) for callers passing connection explicitly
@@ -139,6 +145,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             InputFuture = null; // Port of session.py:45 self.input_future = None
             masked = InputMasked; // Port of session.py:46 masked = self._input_masked
             InputMasked = false; // Port of session.py:47 self._input_masked = False
+            Closed = true;
             stack = new List<(GameObject? Prev, GameObject Target)>(_puppetStack); // Port of session.py:48 stack, self.puppet_stack = self.puppet_stack, []
             ClearPuppetEntries();
             puppet = Puppet; // Port of session.py:49 puppet = self.puppet
@@ -277,6 +284,18 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     /// </summary>
     public async Task<string> Prompt(string text, bool mask = false)
     {
+        var (task, _) = PromptWithToken(text, mask);
+        return await task.ConfigureAwait(false); // Port of session.py:202 return await future
+    }
+
+    /// <summary>
+    /// Starts a prompt and atomically returns its task plus the token owning the
+    /// <see cref="InputFuture"/> slot, so a racing timeout cancels exactly this
+    /// prompt via <see cref="CancelPrompt(object?)"/> instead of re-reading the
+    /// slot and cancelling whatever prompt happens to own it then.
+    /// </summary>
+    public (Task<string> Task, object Token) PromptWithToken(string text, bool mask = false)
+    {
         TaskCompletionSource<string>? prev = null;
         bool prevMasked = false;
         bool needRestore = false;
@@ -316,7 +335,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         {
             try { Msg(text); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.Prompt: " + logEx.Message, "Session"); }
         }
-        return await future.Task.ConfigureAwait(false); // Port of session.py:202 return await future
+        return (future.Task, future);
     }
 
     /// <summary>

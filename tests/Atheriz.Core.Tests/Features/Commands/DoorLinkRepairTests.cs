@@ -22,10 +22,10 @@ public sealed class DoorLinkRepairTests
             var area = new NodeArea("doorrepair");
             var grid = new NodeGrid("doorrepair", 0);
             var start = new Node(new Coord("doorrepair", 0, 0, 0));
-            grid.Nodes[(0, 0)] = start;
+            grid.AddNode(start);
             ObjectRegistry.AddObject(start);
             var dest = new Node(new Coord("doorrepair", 2, 0, 0));
-            grid.Nodes[(2, 0)] = dest;
+            grid.AddNode(dest);
             ObjectRegistry.AddObject(dest);
             area.AddGrid(grid);
             nh.AddArea(area);

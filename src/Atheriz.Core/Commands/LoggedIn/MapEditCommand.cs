@@ -66,10 +66,8 @@ public sealed class DrawCommand : Command
         {
             mi.PreRender();
         }
-        List<KeyValuePair<(int X,int Y), string>> gridSnap;
-        mi.Lock.EnterReadLock();
-        try { gridSnap = mi.PostGrid.ToList(); }
-        finally { mi.Lock.ExitReadLock(); }
+        // Snapshot copy under the info read lock — safe to enumerate lock-free.
+        List<KeyValuePair<(int X,int Y), string>> gridSnap = mi.PostGrid.ToList();
         NodeHandler? nh = null;
         try { nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler(); } catch (Exception) { }
         NodeArea? areaObj = nh?.GetArea(area);
@@ -113,25 +111,16 @@ public sealed class DrawCommand : Command
         }
         if (nodeGrid is not null)
         {
-            nodeGrid.Lock.EnterReadLock();
+            // Snapshot copy under the grid read lock — safe to enumerate lock-free.
             List<( (int X,int Y) coord, Node node)> extra = new();
-            try
-            {
-                foreach (var kv in nodeGrid.Nodes)
-                    if (!seen.Contains(kv.Key)) extra.Add((kv.Key, kv.Value));
-            }
-            finally { nodeGrid.Lock.ExitReadLock(); }
+            foreach (var kv in nodeGrid.Nodes)
+                if (!seen.Contains(kv.Key)) extra.Add((kv.Key, kv.Value));
             foreach (var (coord, node) in extra)
                 roomsList.Add(RoomPayload(node));
         }
-        mi.Lock.EnterReadLock();
-        try
-        {
-            var legendList = (List<Dictionary<string, object?>>)payload["legend"]!;
-            foreach (var e in mi.LegendEntries)
-                legendList.Add(e.ToPayload());
-        }
-        finally { mi.Lock.ExitReadLock(); }
+        var legendList = (List<Dictionary<string, object?>>)payload["legend"]!;
+        foreach (var e in mi.LegendEntries)
+            legendList.Add(e.ToPayload());
 
         try
         {

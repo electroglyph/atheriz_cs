@@ -113,15 +113,13 @@ public sealed class BuildCommand : Command
         {
             var settings = AtherizSettings.Global;
             bool nn=false, ss=false, ee=false, ww=false;
-            mi.Lock.EnterReadLock();
-            try
-            {
-                if (mi.PreGrid.TryGetValue((coord.X, coord.Y+1), out var v) && v == settings.RoomPlaceholder) nn=true;
-                if (mi.PreGrid.TryGetValue((coord.X, coord.Y-1), out v) && v == settings.RoomPlaceholder) ss=true;
-                if (mi.PreGrid.TryGetValue((coord.X+1, coord.Y), out v) && v == settings.RoomPlaceholder) ee=true;
-                if (mi.PreGrid.TryGetValue((coord.X-1, coord.Y), out v) && v == settings.RoomPlaceholder) ww=true;
-            }
-            finally { mi.Lock.ExitReadLock(); }
+            // Single snapshot under the info read lock (a second access
+            // would re-enter the NoRecursion lock).
+            var pre = mi.PreGrid;
+            if (pre.TryGetValue((coord.X, coord.Y+1), out var v) && v == settings.RoomPlaceholder) nn=true;
+            if (pre.TryGetValue((coord.X, coord.Y-1), out v) && v == settings.RoomPlaceholder) ss=true;
+            if (pre.TryGetValue((coord.X+1, coord.Y), out v) && v == settings.RoomPlaceholder) ee=true;
+            if (pre.TryGetValue((coord.X-1, coord.Y), out v) && v == settings.RoomPlaceholder) ww=true;
             return (nn, ss, ee, ww);
         }
         void EnsureLinks(Node node, bool nn,bool ss,bool ee,bool ww)
@@ -177,7 +175,10 @@ public sealed class BuildCommand : Command
                 grid.Lock.EnterWriteLock();
                 try
                 {
-                    if (grid.Nodes.TryGetValue((newCoord.X, newCoord.Y), out var existing) && existing is not null)
+                    // Locked lookup (the grid lock is already held,
+                    // SupportsRecursion) instead of touching the live dict.
+                    var existing = grid.GetNode(newCoord.X, newCoord.Y);
+                    if (existing is not null)
                     {
                         newNode = existing;
                         if (desc is not null) newNode.Desc = desc;
@@ -273,7 +274,7 @@ public sealed class BuildCommand : Command
     }
     public bool HasLink(Node node, string linkName)
     {
-        if (node.Links is null) return false;
+        // The Links getter never returns null (empty list when linkless).
         foreach (var l in node.GetLinks()) if (l.Name == linkName) return true;
         return false;
     }

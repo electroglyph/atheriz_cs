@@ -345,9 +345,9 @@ public class PortedConnectionTestsPart2
         var mgr = MakeMgr();
         var c = new FakeConnection(); c.ClientHost="1.2.3.4";
         var longRaw = new string('x', 200) + "{ bad json";
-        // Clear malformed state via reflection (the holder owns the host map now)
-        var logField = typeof(ConnectionManager).GetField("_malformedLog", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static)!;
-        var log = logField.GetValue(null)!;
+        // Clear malformed state via reflection (the per-manager holder owns the host map now)
+        var logField = typeof(ConnectionManager).GetField("_malformedLog", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
+        var log = logField.GetValue(mgr)!;
         var lastField = typeof(ThrottledLog).GetField("_last", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
         var lastDict = (System.Collections.IDictionary)lastField.GetValue(log)!;
         lastDict.Clear();
@@ -370,8 +370,8 @@ public class PortedConnectionTestsPart2
         Assert.Equal(lenBefore, log2.Length);
         var summarized2 = (string)summarizeMethod.Invoke(null, new object[]{longRaw, 80})!;
         Assert.Equal(summarized, summarized2);
-        var shouldLogMethod = typeof(ConnectionManager).GetMethod("ShouldLogMalformed", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static)!;
-        var should = (bool)shouldLogMethod.Invoke(null, new object[]{"1.2.3.4"})!;
+        var shouldLogMethod = typeof(ConnectionManager).GetMethod("ShouldLogMalformed", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
+        var should = (bool)shouldLogMethod.Invoke(mgr, new object[]{"1.2.3.4"})!;
         Assert.False(should);
         mgr.Atp.Stop(wait:false);
     }
@@ -393,6 +393,22 @@ public class PortedConnectionTestsPart2
         Assert.DoesNotContain("for cid, conn in self._connections", txt);
         Assert.Contains("_connToId", txt);
         var mgr = MakeMgr(); mgr.Atp.Stop(wait:false);
+    }
+    [Fact] public void ManagerDisconnectReadsHostInsideWriteLock()
+    {
+        // The disconnect host snapshot must sit under the manager write
+        // lock: RegisterConnection rewrites RegisteredHost under the same
+        // lock, so an outside read can pair the counter decrement with the
+        // next connection's host.
+        var txt = System.IO.File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Core/Network/ConnectionManager.cs");
+        var start = txt.IndexOf("public virtual void Disconnect(BaseConnection connection)", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var end = txt.IndexOf("private void DoSessionDisconnect", StringComparison.Ordinal);
+        Assert.True(end > start);
+        var body = txt.Substring(start, end - start);
+        var enter = body.IndexOf("EnterWriteLock()", StringComparison.Ordinal);
+        var host = body.IndexOf("HostOf(connection)", StringComparison.Ordinal);
+        Assert.True(enter >= 0 && host >= 0 && enter < host);
     }
 
     // ----- per-IP limit -----

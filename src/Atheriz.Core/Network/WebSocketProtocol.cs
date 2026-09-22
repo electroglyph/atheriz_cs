@@ -225,11 +225,13 @@ public interface IWebSocketDisconnect { }
 
 public sealed class WebSocketProtocol : BaseProtocol
 {
-    // Oversize throttling — port of websocket.py:15-27 (now via ThrottleWindow)
-    private static readonly ThrottledLog _oversizeLog = new(OversizeWindow);
+    // Oversize throttling — port of websocket.py:15-27 (now via ThrottleWindow).
+    // Per-protocol state: a static holder would share per-host suppression
+    // across test and game worlds, so a burst in one silences another.
+    private readonly ThrottledLog _oversizeLog = new(OversizeWindow);
     private const double OversizeWindow = 5.0; // port of websocket.py:17
 
-    private static bool ShouldLogOversize(string host) // port of websocket.py:20-27
+    private bool ShouldLogOversize(string host) // port of websocket.py:20-27
         => _oversizeLog.ShouldLog(host);
 
     // Port of websocket.py:153-199 WebSocketProtocol.setup.

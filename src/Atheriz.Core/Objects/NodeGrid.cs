@@ -9,8 +9,20 @@ public sealed class NodeGrid
     public string Area { get; set; }
     public int Z { get; set; }
     public bool IsModified { get; set; } = true;
-    public Dictionary<(int X, int Y), Node> Nodes { get; } = new();
-    public Dictionary<string, System.Text.Json.JsonElement> Data { get; set; } = new();
+    // Snapshot copies: the getter returns a copy under the read lock, so a
+    // reader enumerating the copy never races a concurrent mutator. Lock-held
+    // internals below touch _nodes/_data directly.
+    private Dictionary<(int X, int Y), Node> _nodes = new();
+    public Dictionary<(int X, int Y), Node> Nodes
+    {
+        get { Lock.EnterReadLock(); try { return new Dictionary<(int X, int Y), Node>(_nodes); } finally { Lock.ExitReadLock(); } }
+    }
+    private Dictionary<string, System.Text.Json.JsonElement> _data = new();
+    public Dictionary<string, System.Text.Json.JsonElement> Data
+    {
+        get { Lock.EnterReadLock(); try { return new Dictionary<string, System.Text.Json.JsonElement>(_data); } finally { Lock.ExitReadLock(); } }
+        set { Lock.EnterWriteLock(); try { _data = value is null ? new() : new Dictionary<string, System.Text.Json.JsonElement>(value); IsModified = true; } finally { Lock.ExitWriteLock(); } }
+    }
 
     // Port of nodes.py:971
     public NodeGrid(string area, int z, Dictionary<string, System.Text.Json.JsonElement>? data = null)
@@ -28,11 +40,16 @@ public sealed class NodeGrid
     {
         if (obj is not NodeGrid o) return false;
         if (Area != o.Area || Z != o.Z) return false;
-        if (Nodes.Count != o.Nodes.Count || Data.Count != o.Data.Count) return false;
-        foreach (var kv in Nodes)
-            if (!o.Nodes.TryGetValue(kv.Key, out var n) || !kv.Value.Equals(n)) return false;
-        foreach (var kv in Data)
-            if (!o.Data.TryGetValue(kv.Key, out var je) || kv.Value.GetRawText() != je.GetRawText()) return false;
+        // Snapshot each side under its own read lock (taking both grid locks
+        // here would order them arbitrarily).
+        var myNodes = Nodes; var otherNodes = o.Nodes;
+        if (myNodes.Count != otherNodes.Count) return false;
+        var myData = Data; var otherData = o.Data;
+        if (myData.Count != otherData.Count) return false;
+        foreach (var kv in myNodes)
+            if (!otherNodes.TryGetValue(kv.Key, out var n) || !kv.Value.Equals(n)) return false;
+        foreach (var kv in myData)
+            if (!otherData.TryGetValue(kv.Key, out var je) || kv.Value.GetRawText() != je.GetRawText()) return false;
         return true;
     }
     public override int GetHashCode()
@@ -40,12 +57,13 @@ public sealed class NodeGrid
         var h = new HashCode();
         h.Add(Area);
         h.Add(Z);
-        foreach (var k in Nodes.Keys.OrderBy(k => k)) { h.Add(k); h.Add(Nodes[k]); }
-        foreach (var k in Data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(Data[k].GetRawText()); }
+        var nodes = Nodes; var data = Data;
+        foreach (var k in nodes.Keys.OrderBy(k => k)) { h.Add(k); h.Add(nodes[k]); }
+        foreach (var k in data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(data[k].GetRawText()); }
         return h.ToHashCode();
     }
     // Port of nodes.py:987
-    public int Count { get { Lock.EnterReadLock(); try { return Nodes.Count; } finally { Lock.ExitReadLock(); } } }
+    public int Count { get { Lock.EnterReadLock(); try { return _nodes.Count; } finally { Lock.ExitReadLock(); } } }
     /// <summary>
     /// Hot-reload rewire: swap a stale node instance for its replacement (matched
     /// by id, kept at its coord key). Python's __class__ swap preserves identity;
@@ -60,9 +78,9 @@ public sealed class NodeGrid
             // the dictionary version, so enumerating Keys directly would throw
             // InvalidOperationException. Only the double lookup collapses via
             // TryGetValue.
-            foreach (var k in Nodes.Keys.ToList())
-                if (Nodes.TryGetValue(k, out var cur) && cur is not null && cur.Id == replacement.Id && !ReferenceEquals(cur, replacement))
-                    Nodes[k] = replacement;
+            foreach (var k in _nodes.Keys.ToList())
+                if (_nodes.TryGetValue(k, out var cur) && cur is not null && cur.Id == replacement.Id && !ReferenceEquals(cur, replacement))
+                    _nodes[k] = replacement;
         }
         finally { Lock.ExitWriteLock(); }
     }
@@ -70,14 +88,14 @@ public sealed class NodeGrid
     public void SetData(string key, System.Text.Json.JsonElement value)
     {
         Lock.EnterWriteLock();
-        try { Data[key] = value; IsModified = true; }
+        try { _data[key] = value; IsModified = true; }
         finally { Lock.ExitWriteLock(); }
     }
     // Port of nodes.py:996
     public System.Text.Json.JsonElement? GetData(string key)
     {
         Lock.EnterReadLock();
-        try { return Data.TryGetValue(key, out var v) ? v : null; }
+        try { return _data.TryGetValue(key, out var v) ? v : null; }
         finally { Lock.ExitReadLock(); }
     }
     // Port of nodes.py:1001
@@ -87,7 +105,7 @@ public sealed class NodeGrid
         Lock.EnterReadLock();
         try
         {
-            foreach (var v in Nodes.Values) res.AddRange(ContentUtils.FilterVisible(v.GetContents(), null).Where(pred));
+            foreach (var v in _nodes.Values) res.AddRange(ContentUtils.FilterVisible(v.GetContents(), null).Where(pred));
         }
         finally { Lock.ExitReadLock(); }
         return res;
@@ -98,23 +116,22 @@ public sealed class NodeGrid
         Lock.EnterReadLock();
         try
         {
-            if (Nodes.Count == 0) return null;
-            var keys = Nodes.Keys.ToList();
-            return Nodes[keys[Random.Shared.Next(keys.Count)]];
+            if (_nodes.Count == 0) return null;
+            var keys = _nodes.Keys.ToList();
+            return _nodes[keys[Random.Shared.Next(keys.Count)]];
         }
         finally { Lock.ExitReadLock(); }
     }
     // Port of nodes.py:1015
     public void AddNode(Node node)
-    {
-        Node? old = null;
+    {        Node? old = null;
         List<NodeLink> linksSnap = [];
         Coord coordSnap = default;
         Lock.EnterWriteLock();
         try
         {
-            Nodes.TryGetValue((node.Coord.X, node.Coord.Y), out old);
-            Nodes[(node.Coord.X, node.Coord.Y)] = node;
+            _nodes.TryGetValue((node.Coord.X, node.Coord.Y), out old);
+            _nodes[(node.Coord.X, node.Coord.Y)] = node;
             IsModified = true;
             // Snapshot through the node-locked getter — reading the raw list here
             // (grid lock only) raced a concurrent AddLink into
@@ -133,12 +150,20 @@ public sealed class NodeGrid
         }
         SyncCrossAreaTransitions(linksSnap, coordSnap, isAdd: true);
     }
+    // Lock-free insert for load/hydrate/seed paths that already hold the grid
+    // write lock (or run single-threaded at startup): plain dict insert, no
+    // overwrite bookkeeping, no transition publish — the caller owns all that.
+    internal void AddNodeRaw(Node node)
+    {
+        _nodes[(node.Coord.X, node.Coord.Y)] = node;
+        IsModified = true;
+    }
     // Port of nodes.py:1044
     public void RemoveNode((int X, int Y) coord)
     {
         Node? node = null;
         Lock.EnterWriteLock();
-        try { Nodes.Remove(coord, out node); IsModified = true; }
+        try { _nodes.Remove(coord, out node); IsModified = true; }
         finally { Lock.ExitWriteLock(); }
         // Enumerate a node-locked snapshot — the raw list used to be walked here
         // with no lock at all.
@@ -166,7 +191,7 @@ public sealed class NodeGrid
     public Node? GetNode((int X, int Y) coord)
     {
         Lock.EnterReadLock();
-        try { return Nodes.TryGetValue(coord, out var n) ? n : null; }
+        try { return _nodes.TryGetValue(coord, out var n) ? n : null; }
         finally { Lock.ExitReadLock(); }
     }
     public Node? GetNode(int x, int y) => GetNode((x, y));
@@ -212,7 +237,7 @@ public sealed class NodeGrid
         Lock.EnterReadLock();
         try
         {
-            var occupied = new HashSet<(int, int)>(Nodes.Keys);
+            var occupied = new HashSet<(int, int)>(_nodes.Keys);
             if (context is not null)
                 foreach (var (cs, cd) in context) { occupied.Remove(cs); occupied.Add(cd); }
             return ValidateMoves(moves, occupied);
@@ -231,14 +256,14 @@ public sealed class NodeGrid
         Lock.EnterWriteLock();
         try
         {
-            var occupied = new HashSet<(int, int)>(Nodes.Keys);
+            var occupied = new HashSet<(int, int)>(_nodes.Keys);
             foreach (var i in ValidateMoves(moves, occupied)) failed.Add(i);
             var applied = moves.Where((_, i) => !failed.Contains(i)).ToList();
             if (applied.Count == 0) return failed.ToList();
             foreach (var (src, dst) in applied)
             {
-                var node = Nodes[src];
-                Nodes.Remove(src);
+                var node = _nodes[src];
+                _nodes.Remove(src);
                 moved.Add((node, dst));
                 remap[src] = dst;
             }
@@ -249,7 +274,7 @@ public sealed class NodeGrid
                 var newCoord = new Coord(Area, dst.X, dst.Y, Z);
                 oldToNewFull[oldCoord] = newCoord;
                 node.Coord = newCoord;
-                Nodes[dst] = node;
+                _nodes[dst] = node;
                 // Members ride the node — their CoordLocation still names
                 // the old cell, so lookups by the new coord ghost them (empty
                 // look, stale exits). Remap exact-old-coord members to the new
@@ -274,23 +299,11 @@ public sealed class NodeGrid
             affected = moved.ToDictionary(m => m.node.Id, m => m.node);
             // Direct enumeration: the loop rewrites node internals under node
             // locks and never mutates the grid dict, so no snapshot is needed.
-            foreach (var other in Nodes.Values)
+            foreach (var other in _nodes.Values)
             {
-                bool rewritten = false;
+                bool rewritten;
                 other.NodeLock.EnterWriteLock();
-                try
-                {
-                    for (int i = 0; i < other.Links.Count; i++)
-                    {
-                        var link = other.Links[i];
-                        if (oldToNewFull.TryGetValue(link.Coord, out var hit))
-                        {
-                            other.Links[i] = new NodeLink(link.Name, hit, link.Aliases);
-                            rewritten = true;
-                        }
-                    }
-                    if (rewritten) other.IsModified = true;
-                }
+                try { rewritten = other.RemapLinkCoordsNoLock(oldToNewFull); }
                 finally { other.NodeLock.ExitWriteLock(); }
                 if (rewritten) affected[other.Id] = other;
             }
@@ -314,7 +327,7 @@ public sealed class NodeGrid
             // here (grid lock only) raced a concurrent AddLink into
             // InvalidOperationException mid-enumeration. Grid → node-read
             // nests the same way AddNode does, so no new lock order.
-            foreach (var node in Nodes.Values)
+            foreach (var node in _nodes.Values)
                 foreach (var link in node.GetLinks())
                     if (link.Coord.Area != Area) crossLinks.Add((node, link));
         }
@@ -334,7 +347,7 @@ public sealed class NodeGrid
     public void Clear()
     {
         Lock.EnterWriteLock();
-        try { Nodes.Clear(); IsModified = true; }
+        try { _nodes.Clear(); IsModified = true; }
         finally { Lock.ExitWriteLock(); }
     }
 }

@@ -123,14 +123,17 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     private static readonly TimeSpan RetryDrainDelay = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan RetryDrainRearmDelay = TimeSpan.FromMilliseconds(250);
     private const double InputBusyWindowSeconds = 1.0;
-    private static readonly ThrottledLog _retryDrainDropLog = new(RetryDrainDropWindowSeconds);
+    // Per-connection state: a static holder would share the fixed-key
+    // suppression across connections, so one connection's full backlog
+    // silences every other's drop warning.
+    private readonly ThrottledLog _retryDrainDropLog = new(RetryDrainDropWindowSeconds);
 
     private static bool TryScheduleRetryDrain(BaseConnection self)
     {
         if (Interlocked.Increment(ref _outstandingRetryDrains) > MaxOutstandingRetryDrains)
         {
             Interlocked.Decrement(ref _outstandingRetryDrains);
-            if (_retryDrainDropLog.ShouldLog("retry-drain"))
+            if (self._retryDrainDropLog.ShouldLog("retry-drain"))
                 try { Atheriz.Core.AtherizLogger.LogWarning("[Network] retry-drain backlog full; dropping retry"); } catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.TryScheduleRetryDrain: " + logEx.Message, "BaseConnection"); }
             return false;
         }

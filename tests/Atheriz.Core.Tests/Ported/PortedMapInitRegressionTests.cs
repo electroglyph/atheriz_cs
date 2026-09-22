@@ -113,7 +113,7 @@ public class PortedMapInitRegressionTests
         var s = AtherizSettings.Default;
         for (int x = 0; x < 9; x++) for (int y = 0; y < 9; y++)
         {
-            mi.PreGrid[(x, y)] = s.RoomPlaceholder;
+            mi.SetPreCell((x, y), s.RoomPlaceholder);
             mi.PlaceWalls((x, y), s.SingleWallPlaceholder);
         }
         mi.PreRender();
@@ -167,7 +167,7 @@ public class PortedMapInitRegressionTests
         var s = AtherizSettings.Default;
         for (int x = 0; x < 9; x++) for (int y = 0; y < 9; y++)
         {
-            mi.PreGrid[(x, y)] = s.RoomPlaceholder;
+            mi.SetPreCell((x, y), s.RoomPlaceholder);
             mi.PlaceWalls((x, y), s.SingleWallPlaceholder);
         }
         mi.PreRender();
@@ -213,7 +213,7 @@ public class PortedMapInitRegressionTests
             for (int x = 0; x < 9; x++) for (int y = 0; y < 9; y++)
             {
                 var coord = new Coord("limbo", x, y, z);
-                grid.Nodes[(x, y)] = new Node(coord, desc: "void");
+                grid.AddNode(new Node(coord, desc: "void"));
             }
             area.AddGrid(grid);
         }
@@ -224,7 +224,7 @@ public class PortedMapInitRegressionTests
         var s = AtherizSettings.Default;
         for (int x = 0; x < 9; x++) for (int y = 0; y < 9; y++)
         {
-            mi.PreGrid[(x, y)] = s.RoomPlaceholder;
+            mi.SetPreCell((x, y), s.RoomPlaceholder);
             mi.PlaceWalls((x, y), s.SingleWallPlaceholder);
         }
         mi.PreRender();

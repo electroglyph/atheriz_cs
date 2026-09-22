@@ -220,6 +220,31 @@ public class WriteGateTests
     }
 
     [Fact]
+    public void TryEnter_ForkedFlowWhileHeld_Refuses()
+    {
+        // A forked flow inherits the AsyncLocal count but never ownership:
+        // TryEnter(Zero) refuses while the holder is live instead of running
+        // beside it, and the parent hold unwinds exactly once.
+        DbWriteGate.Enter();
+        try
+        {
+            bool admitted = Task.Run(() => DbWriteGate.TryEnter(TimeSpan.Zero)).GetAwaiter().GetResult();
+            Assert.False(admitted);
+            Assert.Equal(0, DbWriteGate.Semaphore.CurrentCount);
+            Assert.True(DbWriteGate.IsHeld);
+        }
+        finally
+        {
+            DbWriteGate.Exit();
+        }
+        Assert.Equal(1, DbWriteGate.Semaphore.CurrentCount);
+        Assert.False(DbWriteGate.IsHeld);
+        // Repair a leaked permit if the shape ever regresses, so later tests
+        // see a balanced gate; a no-op when balanced (never double-release).
+        if (DbWriteGate.Semaphore.CurrentCount == 0) DbWriteGate.Semaphore.Release();
+    }
+
+    [Fact]
     public void Exit_WithoutEnter_Throws()
     {
         Assert.False(DbWriteGate.IsHeld);

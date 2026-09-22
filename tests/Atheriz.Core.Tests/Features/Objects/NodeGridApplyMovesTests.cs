@@ -20,7 +20,7 @@ public sealed class NodeGridApplyMovesTests
         var grid = new NodeGrid("applyarea", 0);
         var nodeA = new Node(new Coord("applyarea", 0, 0, 0));
         try { ObjectRegistry.AddObject(nodeA); } catch { }
-        grid.Nodes[(0, 0)] = nodeA;
+        grid.AddNode(nodeA);
         var member = PortedHelpers.MakeCaller("applym");
         Assert.True(member.MoveTo(nodeA, force: true));
         var failed = grid.ApplyMoves([((0, 0), (1, 1))]);

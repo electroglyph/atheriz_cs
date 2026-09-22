@@ -38,7 +38,7 @@ public class MenuPromptSingleTimerTests
         var src = SourceScan.Read("src", "Atheriz.Core", "MenuPrompt.cs");
         var region = SourceScan.Region(src, "public static async Task<string?> PromptWithTimeoutAsync(");
         Assert.DoesNotContain("new CancellationTokenSource(timeout)", region);
-        Assert.Contains("session.CancelPrompt(pending)", region);
+        Assert.Contains("session.CancelPrompt(token)", region);
         Assert.Contains("CancelAsync()", region);
     }
 }

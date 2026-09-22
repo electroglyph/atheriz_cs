@@ -53,6 +53,15 @@ public static class DbWriteGate
     private static bool IsOwnerFlow() =>
         _recursion.Value > 0 && Environment.CurrentManagedThreadId == Volatile.Read(ref _holderThreadId);
 
+    /// <summary>
+    /// Blocking take. Never await while holding a sync <see cref="Enter"/>:
+    /// the continuation may resume on another pool thread, where
+    /// <see cref="Exit"/> throws fail-fast instead of releasing and the
+    /// permit leaks — async flows must use <see cref="EnterAsync"/> and
+    /// dispose the returned lease. Re-entrant on the owning flow; forked
+    /// flows inherit the count but never ownership (see
+    /// <see cref="TryEnter"/>).
+    /// </summary>
     public static void Enter()
     {
         // Deliberately count-based, NOT thread-checked 

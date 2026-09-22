@@ -61,7 +61,7 @@ public class PortedMapMoveRegressionTests
             var mi = new MapInfo("limbo") { Settings = AtherizSettings.Default };
             for (int x = 0; x < 9; x++) for (int y = 0; y < 9; y++)
             {
-                mi.PreGrid[(x, y)] = s.RoomPlaceholder;
+                mi.SetPreCell((x, y), s.RoomPlaceholder);
                 mi.PlaceWalls((x, y), s.SingleWallPlaceholder);
             }
             mi.PreRender();
@@ -86,7 +86,7 @@ public class PortedMapMoveRegressionTests
                 if (x < 8) node.AddLink(new NodeLink("east", new Coord("limbo", x + 1, y, z), new List<string> { "e" }));
                 if (y > 0) node.AddLink(new NodeLink("south", new Coord("limbo", x, y - 1, z), new List<string> { "s" }));
                 if (y < 8) node.AddLink(new NodeLink("north", new Coord("limbo", x, y + 1, z), new List<string> { "n" }));
-                grid.Nodes[(x, y)] = node;
+                grid.AddNode(node);
             }
             area.AddGrid(grid);
         }
@@ -157,14 +157,14 @@ public class PortedMapMoveRegressionTests
         var grid1 = new NodeGrid("maze1", 0);
         var n1 = new Node(new Coord("maze1", 0, 0, 0), "maze1 start");
         n1.AddLink(new NodeLink("down", new Coord("maze2", 0, 0, 0), new List<string> { "d" }));
-        grid1.Nodes[(0, 0)] = n1;
+        grid1.AddNode(n1);
         var area1 = new NodeArea("maze1");
         area1.AddGrid(grid1);
         // maze2 grid
         var grid2 = new NodeGrid("maze2", 0);
         var n2 = new Node(new Coord("maze2", 0, 0, 0), "maze2 start");
         n2.AddLink(new NodeLink("up", new Coord("maze1", 0, 0, 0), new List<string> { "u" }));
-        grid2.Nodes[(0, 0)] = n2;
+        grid2.AddNode(n2);
         var area2 = new NodeArea("maze2");
         area2.AddGrid(grid2);
         nh.AddArea(area1);
@@ -180,7 +180,7 @@ public class PortedMapMoveRegressionTests
             var mi = new MapInfo(name) { Settings = s };
             for (int x = 0; x < 4; x++) for (int y = 0; y < 4; y++)
             {
-                mi.PreGrid[(x, y)] = s.RoomPlaceholder;
+                mi.SetPreCell((x, y), s.RoomPlaceholder);
                 mi.PlaceWalls((x, y), s.SingleWallPlaceholder);
             }
             mi.PreRender();
@@ -312,7 +312,7 @@ public class PortedMapMoveRegressionTests
         for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++)
         {
             var node = new Node(new Coord("limbo", x, y, 4), "void");
-            grid.Nodes[(x, y)] = node;
+            grid.AddNode(node);
         }
         area.AddGrid(grid);
         nh.AddArea(area);
@@ -324,7 +324,7 @@ public class PortedMapMoveRegressionTests
         var mi = new MapInfo("limbo") { Settings = s };
         for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++)
         {
-            mi.PreGrid[(x, y)] = s.RoomPlaceholder;
+            mi.SetPreCell((x, y), s.RoomPlaceholder);
             mi.PlaceWalls((x, y), s.SingleWallPlaceholder);
         }
         mi.PreRender();

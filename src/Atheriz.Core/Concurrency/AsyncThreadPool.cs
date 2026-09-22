@@ -600,9 +600,17 @@ public class AsyncThreadPool : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) { DisposeWatchdog(); return; }
+        // Set-first-then-work under the lock: concurrent Dispose calls agree
+        // on exactly one worker, and a late Dispose never resurrects the pool.
+        bool first;
+        lock (_lock)
+        {
+            first = !_disposed;
+            _disposed = true;
+        }
+        if (!first) { DisposeWatchdog(); return; }
         Stop(wait: true);
         _stopEvent.Dispose();
-        _disposed = true;
+        // _disposed stays true: Stop's already-stopped path keeps the pool down.
     }
 }

@@ -139,7 +139,15 @@ public class CorrectnessBatchDTests
         {
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", oldU);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", oldP);
-            try { Directory.Delete(root, true); } catch { }
+            // Retry: a single swallowed delete leaks the whole ~400MB scaffold
+            // into /tmp; repeated leaks fill the tmpfs until unrelated SQLite
+            // tests fail with "disk is full".
+            try
+            {
+                for (int attempt = 0; attempt < 3 && Directory.Exists(root); attempt++)
+                    try { Directory.Delete(root, true); } catch { }
+            }
+            catch { }
         }
     }
 }

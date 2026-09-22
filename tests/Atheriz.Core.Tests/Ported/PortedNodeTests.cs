@@ -84,7 +84,7 @@ public class PortedNodeTests
         var area = $"test_area_{Guid.NewGuid():N}";
         var grid = new NodeGrid(area,0);
         var node = new Node(new Coord(area,1,2,0));
-        grid.Nodes[(1,2)] = node;
+        grid.AddNode(node);
         Assert.Equal(1, grid.Count);
         Assert.Same(node, grid.GetNode((1,2)));
         Assert.Null(grid.GetNode((0,0)));
@@ -93,8 +93,8 @@ public class PortedNodeTests
     {
         var area = $"test_area_{Guid.NewGuid():N}";
         var grid = new NodeGrid(area,0);
-        grid.Nodes[(0,0)] = new Node(new Coord(area,0,0,0));
-        grid.Nodes[(1,1)] = new Node(new Coord(area,1,1,0));
+        grid.AddNode(new Node(new Coord(area,0,0,0)));
+        grid.AddNode(new Node(new Coord(area,1,1,0)));
         Assert.Equal(2, grid.Count);
         grid.Clear(); Assert.Equal(0, grid.Count);
     }
@@ -142,7 +142,7 @@ public class PortedNodeTests
         var grid = new NodeGrid("TestArea",0);
         var n1 = new Node(new Coord("TestArea",0,0,0));
         var n2 = new Node(new Coord("TestArea",1,1,0));
-        grid.Nodes[(0,0)]=n1; grid.Nodes[(1,1)]=n2;
+        grid.AddNode(n1); grid.AddNode(n2);
         area.AddGrid(grid);
         var nodes = area.GetNodes(new List<(int,int,int)>{(0,0,0),(1,1,0),(99,99,0)});
         Assert.Equal(2, nodes.Count); Assert.Contains(n1, nodes); Assert.Contains(n2, nodes);
@@ -196,7 +196,7 @@ public class PortedNodeTests
         var area = new NodeArea("TestArea");
         var grid = new NodeGrid("TestArea",0);
         var node = new Node(new Coord("TestArea",5,10,0));
-        grid.Nodes[(5,10)]=node;
+        grid.AddNode(node);
         area.AddGrid(grid);
         handler.AddArea(area);
         var res = handler.GetNode(new Coord("TestArea",5,10,0));
@@ -212,7 +212,7 @@ public class PortedNodeTests
         var grid = new NodeGrid("TestArea",0);
         var n1 = new Node(new Coord("TestArea",0,0,0));
         var n2 = new Node(new Coord("TestArea",1,1,0));
-        grid.Nodes[(0,0)]=n1; grid.Nodes[(1,1)]=n2;
+        grid.AddNode(n1); grid.AddNode(n2);
         area.AddGrid(grid); handler.AddArea(area);
         var nodes = handler.GetNodes(new List<Coord>{new Coord("TestArea",0,0,0), new Coord("TestArea",1,1,0)});
         Assert.Equal(2, nodes.Count);
@@ -526,7 +526,7 @@ public class PortedNodeTests
         {
             var area = new NodeArea(name);
             var grid = new NodeGrid(name, 0);
-            grid.Nodes[(0, 0)] = new Node(coord, desc: "g" + g);
+            grid.AddNode(new Node(coord, desc: "g" + g));
             area.AddGrid(grid);
             nh.AddArea(area);
         }

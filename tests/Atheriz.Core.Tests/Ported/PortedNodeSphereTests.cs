@@ -15,7 +15,7 @@ public class PortedNodeSphereTests
         {
             var grid = new NodeGrid(name, z);
             for(int x=0;x<25;x+=3) for(int y=0;y<25;y+=3)
-                grid.Nodes[(x,y)] = new Node(new Coord(name, x, y, z));
+                grid.AddNode(new Node(new Coord(name, x, y, z)));
             area.AddGrid(grid);
         }
         return area;
@@ -71,8 +71,8 @@ public class PortedNodeSphereTests
     {
         var area = new NodeArea("CenterTest");
         var grid = new NodeGrid("CenterTest", 0);
-        grid.Nodes[(0,0)] = new Node(new Coord("CenterTest",0,0,0));
-        grid.Nodes[(1,0)] = new Node(new Coord("CenterTest",1,0,0));
+        grid.AddNode(new Node(new Coord("CenterTest",0,0,0)));
+        grid.AddNode(new Node(new Coord("CenterTest",1,0,0)));
         area.AddGrid(grid);
         var withCenter = area.GetNodesInSphere((0,0,0), 2);
         var withoutCenter = area.GetNodesInSphere((0,0,0), 2, ignoreCenter:true);
@@ -93,9 +93,9 @@ public class PortedNodeSphereTests
     {
         var area = new NodeArea("CenterRayTest");
         var grid = new NodeGrid("CenterRayTest", 0);
-        grid.Nodes[(0,0)] = new Node(new Coord("CenterRayTest",0,0,0));
-        grid.Nodes[(1,0)] = new Node(new Coord("CenterRayTest",1,0,0));
-        grid.Nodes[(0,1)] = new Node(new Coord("CenterRayTest",0,1,0));
+        grid.AddNode(new Node(new Coord("CenterRayTest",0,0,0)));
+        grid.AddNode(new Node(new Coord("CenterRayTest",1,0,0)));
+        grid.AddNode(new Node(new Coord("CenterRayTest",0,1,0)));
         area.AddGrid(grid);
         var rays = area.GetRaysInSphere((0,0,0), 2, ignoreCenter:false);
         var flat = rays.SelectMany(r=>r).ToList();

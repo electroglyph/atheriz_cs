@@ -27,7 +27,7 @@ public class PortedMapEditTestsPart2
         new InputFuncs().MapEditHandler(conn, new List<object?>{key,0,new List<object?>()}, new Dictionary<string,object?>());
         return ((FakeConn2)conn).Sent.Last().Args[1] as string ?? throw new Exception("no handshake");
     }
-    private static MapInfo MakeMi(Dictionary<(int,int),string>? grid=null){ var mi=new MapInfo("TestArea"); if(grid!=null) foreach(var kv in grid) mi.PreGrid[kv.Key]=kv.Value; return mi; }
+    private static MapInfo MakeMi(Dictionary<(int,int),string>? grid=null){ var mi=new MapInfo("TestArea"); if(grid!=null) foreach(var kv in grid) mi.SetPreCell(kv.Key, kv.Value); return mi; }
     private static NodeGrid GridOf(NodeHandler nh) => nh.GetArea("TestArea")!.GetGrid(0)!;
 
     [Fact] public void MapEditHandshake()
@@ -157,7 +157,7 @@ public class PortedMapEditTestsPart2
         Reset();
         var room = new Node(new Coord("TestArea",0,0,0), desc:"A room.");
         var neighbor = new Node(new Coord("TestArea",1,0,0)); neighbor.AddLink(new NodeLink("West", new Coord("TestArea",0,0,0)));
-        var grid = new NodeGrid("TestArea",0); grid.Nodes[(0,0)]=room; grid.Nodes[(1,0)]=neighbor;
+        var grid = new NodeGrid("TestArea",0); grid.AddNode(room); grid.AddNode(neighbor);
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         var mh = GlobalServices.GetMapHandler(); var mi = MakeMi(new Dictionary<(int,int),string>{}); mh.SetMapInfo("TestArea",0,mi);
@@ -178,7 +178,7 @@ public class PortedMapEditTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
-        var grid = new NodeGrid("TestArea",0); grid.Nodes[(3,3)]=new Node(new Coord("TestArea",3,3,0));
+        var grid = new NodeGrid("TestArea",0); grid.AddNode(new Node(new Coord("TestArea",3,3,0)));
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         InputFuncs.NodeHandlerFactory = () => nh;
@@ -196,7 +196,7 @@ public class PortedMapEditTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
-        var grid = new NodeGrid("TestArea",0); grid.Nodes[(3,3)]=new Node(new Coord("TestArea",3,3,0)); grid.Nodes[(4,3)]=new Node(new Coord("TestArea",4,3,0));
+        var grid = new NodeGrid("TestArea",0); grid.AddNode(new Node(new Coord("TestArea",3,3,0))); grid.AddNode(new Node(new Coord("TestArea",4,3,0)));
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         InputFuncs.NodeHandlerFactory = () => nh;
@@ -224,7 +224,7 @@ public class PortedMapEditTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
-        var grid = new NodeGrid("TestArea",0); grid.Nodes[(3,3)]=new Node(new Coord("TestArea",3,3,0)); grid.Nodes[(4,3)]=new Node(new Coord("TestArea",4,3,0));
+        var grid = new NodeGrid("TestArea",0); grid.AddNode(new Node(new Coord("TestArea",3,3,0))); grid.AddNode(new Node(new Coord("TestArea",4,3,0)));
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         InputFuncs.NodeHandlerFactory = () => nh;
@@ -259,7 +259,7 @@ public class PortedMapEditTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
-        var grid = new NodeGrid("TestArea",0); grid.Nodes[(0,0)]=new Node(new Coord("TestArea",0,0,0)); grid.Nodes[(1,0)]=new Node(new Coord("TestArea",1,0,0));
+        var grid = new NodeGrid("TestArea",0); grid.AddNode(new Node(new Coord("TestArea",0,0,0))); grid.AddNode(new Node(new Coord("TestArea",1,0,0)));
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         InputFuncs.NodeHandlerFactory = () => nh;
@@ -276,7 +276,7 @@ public class PortedMapEditTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
-        var grid = new NodeGrid("TestArea",0); grid.Nodes[(0,0)]=new Node(new Coord("TestArea",0,0,0)); grid.Nodes[(1,0)]=new Node(new Coord("TestArea",1,0,0));
+        var grid = new NodeGrid("TestArea",0); grid.AddNode(new Node(new Coord("TestArea",0,0,0))); grid.AddNode(new Node(new Coord("TestArea",1,0,0)));
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         InputFuncs.NodeHandlerFactory = () => nh;
@@ -293,7 +293,7 @@ public class PortedMapEditTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
-        var grid = new NodeGrid("TestArea",0); grid.Nodes[(3,3)]=new Node(new Coord("TestArea",3,3,0));
+        var grid = new NodeGrid("TestArea",0); grid.AddNode(new Node(new Coord("TestArea",3,3,0)));
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         InputFuncs.NodeHandlerFactory = () => nh;
@@ -319,7 +319,7 @@ public class PortedMapEditTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
-        var grid = new NodeGrid("TestArea",0); grid.Nodes[(0,0)]=new Node(new Coord("TestArea",0,0,0)); grid.Nodes[(1,0)]=new Node(new Coord("TestArea",1,0,0));
+        var grid = new NodeGrid("TestArea",0); grid.AddNode(new Node(new Coord("TestArea",0,0,0))); grid.AddNode(new Node(new Coord("TestArea",1,0,0)));
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         InputFuncs.NodeHandlerFactory = () => nh;

@@ -21,7 +21,7 @@ public class PortedBuildTests
         var area = new NodeArea("TestArea");
         var grid = new NodeGrid("TestArea", 0);
         var start = new Node(new Coord("TestArea", 0, 0, 0), desc: "Start");
-        grid.Nodes[(0,0)] = start;
+        grid.AddNode(start);
         ObjectRegistry.AddObject(start); // Explicit registration: the constructor does not publish.
         area.AddGrid(grid);
         nh.AddArea(area);
@@ -209,7 +209,7 @@ public class PortedBuildTests
         using var env = GlobalTestEnv.Enter();
         var (nh,_,area,grid,_,caller) = Setup();
         var north = new Node(new Coord("TestArea",0,1,0), desc:"Old desc");
-        grid.Nodes[(0,1)] = north;
+        grid.AddNode(north);
         var cmd = new BuildCommand();
         cmd.Run(caller, MakeArgs(n:true, room:true, desc:"New desc"));
         Assert.Equal("New desc", north.Desc);

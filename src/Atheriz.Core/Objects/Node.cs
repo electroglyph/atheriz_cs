@@ -11,7 +11,14 @@ public sealed class NodeLink
 {
     public string Name { get; set; } = "";
     public Coord Coord { get; set; }
-    public List<string> Aliases { get; set; } = [];
+    // Snapshot copy: readers mutate the copy freely (AddExits hands the list
+    // to ExitCommand), never the link's live list.
+    private List<string> _aliases = [];
+    public List<string> Aliases
+    {
+        get => new List<string>(_aliases);
+        set => _aliases = value is null ? [] : new List<string>(value);
+    }
     public NodeLink() { }
     public NodeLink(string name, Coord coord, List<string>? aliases = null)
     {
@@ -53,14 +60,32 @@ public partial class Node : GameObject
     }
     public string Theme { get; set; } = "";
     public string? LegendDesc { get; set; }
+    // Snapshot copies (same shape as GameObject.Aliases): the getter returns
+    // a copy under the read lock, the setter copies under the write lock and
+    // marks modified. Callers holding the node lock touch _links/_nouns
+    // directly (re-entering the write lock would be safe but wasteful).
     // Null assignment is a bug at the single write point — fail loud pointing
     // at the culprit instead of letting readers null-check per call.
+    private List<NodeLink> _links = [];
     public List<NodeLink> Links
     {
-        get => field;
-        set => field = value ?? throw new ArgumentNullException(nameof(value));
-    } = [];
-    public Dictionary<string, string> Nouns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        get => Read(() => new List<NodeLink>(_links));
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            Write(() => { _links = new List<NodeLink>(value); IsModified = true; });
+        }
+    }
+    private Dictionary<string, string> _nouns = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> Nouns
+    {
+        get => Read(() => new Dictionary<string, string>(_nouns, _nouns.Comparer));
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            Write(() => { _nouns = new Dictionary<string, string>(value, value.Comparer); IsModified = true; });
+        }
+    }
     public double OpenAttenuation { get; set; } = 10.0; // Port of nodes.py:134 DEFAULT_OPEN_SOUND_ATTENUATION
     public double EnclosedAttenuation { get; set; } = 20.0; // Port of nodes.py:135 DEFAULT_ENCLOSED_SOUND_ATTENUATION
     public double AmbientSoundLevel { get; set; } = 5.0; // Port of nodes.py:136
@@ -502,9 +527,11 @@ public sealed class ExitCommand : Command
     public override string Key => _key;
     public string ExitName { get; set; } = "";
     private List<string> _aliases = [];
-    public override IReadOnlyList<string> Aliases => _aliases;
+    public override IReadOnlyList<string> Aliases => new List<string>(_aliases);
     public void SetKey(string k) { _key = k; ExitName = k; }
-    public void SetAliases(List<string> a) => _aliases = a ?? [];
+    // Copies: the caller (Node.AddExits) passes a live-list snapshot it keeps
+    // mutating, so the command must own its list.
+    public void SetAliases(List<string> a) => _aliases = a is null ? [] : new List<string>(a);
     public override bool UseParser => false;
     public override void Run(IMessageTarget caller, object? args)
     {

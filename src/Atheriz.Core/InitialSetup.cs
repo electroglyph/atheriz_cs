@@ -134,7 +134,7 @@ public static class InitialSetup
                 {
                     var coord = new Coord(LIMBO_AREA, x, y, z);
                     var node = new Node(coord, desc: LIMBO_DESC);
-                    grid.Nodes[(x, y)] = node;
+                    grid.AddNodeRaw(node);
                     // the Node ctor no longer publishes to the
                     // registry — register explicitly so ResolveLocationObject
                     // finds limbo nodes.
@@ -156,14 +156,14 @@ public static class InitialSetup
             for (int x = 0; x < LIMBO_GRID; x++)
                 for (int y = 0; y < LIMBO_GRID; y++)
                 {
-                    if (!grid.Nodes.TryGetValue((x, y), out var node)) continue;
+                    if (grid.GetNode(x, y) is not { } node) continue;
                     foreach (var d in dirs)
                     {
                         int nx = x + d.dx, ny = y + d.dy, nz = z + d.dz;
                         if (nx < 0 || nx >= LIMBO_GRID || ny < 0 || ny >= LIMBO_GRID || nz < 0 || nz >= LIMBO_GRID) continue;
                         var ng = d.dz == 0 ? grid : area.GetGrid(nz);
                         if (ng is null) continue;
-                        if (!ng.Nodes.TryGetValue((nx, ny), out var neighbor)) continue;
+                        if (ng.GetNode(nx, ny) is not { } neighbor) continue;
                         // add_link both directions (mirrors Python double add_link)
                         node.AddLink(new NodeLink(d.name, new Coord(LIMBO_AREA, nx, ny, nz), new List<string>{d.alias}));
                         neighbor.AddLink(new NodeLink(d.revName, new Coord(LIMBO_AREA, x, y, z), new List<string>{d.revAlias}));
@@ -179,7 +179,7 @@ public static class InitialSetup
             for (int x = 0; x < LIMBO_GRID; x++)
                 for (int y = 0; y < LIMBO_GRID; y++)
                 {
-                    mi.PreGrid[(x, y)] = settings.RoomPlaceholder;
+                    mi.SetPreCell((x, y), settings.RoomPlaceholder);
                     mi.PlaceWalls((x, y), settings.SingleWallPlaceholder);
                 }
             mi.PreRender();
@@ -299,8 +299,7 @@ public static class InitialSetup
             var node = nh.GetNode(coord);
             if (node is null)
             {
-                var g = area.GetGrid(coord.Z);
-                g?.Nodes.TryGetValue((coord.X, coord.Y), out node);
+                node = area.GetGrid(coord.Z)?.GetNode(coord.X, coord.Y);
             }
             return node;
         }

@@ -49,6 +49,45 @@ public class TransactionRollbackQuietTests
     }
 
     [Fact]
+    public void WithGateAndTransaction_AmbientThrow_InvokesOnRollbackAndRethrows()
+    {
+        using var env = GlobalTestEnv.Enter();
+        using var db = AtherizDbContextFactory.CreateForTests();
+        db.Database.EnsureCreated();
+        using var outer = db.Database.BeginTransaction();
+        bool rolledBack = false;
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            DbTransactionHelper.WithGateAndTransaction(db,
+                d =>
+                {
+                    d.GameTime.Add(new GameTimeRow { Id = 0, Data = "{}" });
+                    throw new InvalidOperationException("ambient boom");
+                },
+                onRollback: () => rolledBack = true));
+        Assert.Equal("ambient boom", ex.Message);
+        Assert.True(rolledBack);
+        Assert.False(DbWriteGate.IsHeld);
+        outer.Rollback();
+    }
+
+    [Fact]
+    public void WithGateAndTransaction_AmbientSuccess_SkipsOnRollback()
+    {
+        using var env = GlobalTestEnv.Enter();
+        using var db = AtherizDbContextFactory.CreateForTests();
+        db.Database.EnsureCreated();
+        using var outer = db.Database.BeginTransaction();
+        bool rolledBack = false;
+        DbTransactionHelper.WithGateAndTransaction(db,
+            d => d.GameTime.Add(new GameTimeRow { Id = 0, Data = "{}" }),
+            onRollback: () => rolledBack = true);
+        Assert.False(rolledBack);
+        Assert.NotNull(db.GameTime.Find(0));
+        Assert.False(DbWriteGate.IsHeld);
+        outer.Rollback();
+    }
+
+    [Fact]
     public void RollbackQuiet_SingleSwallowSite_RetryOnlyClear()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Persistence", "DbTransactionHelper.cs");

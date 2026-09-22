@@ -22,14 +22,12 @@ public static class MenuPrompt
             // CancellationTokenSource(timeout) armed a second one). The
             // source is cancelled on the success path to release the delay.
             using var cts = new CancellationTokenSource();
-            var promptTask = session.Prompt(display);
-            // Capture the live future so the timeout path can cancel it (no orphaned
-            // InputFuture). Prompt's synchronous prefix runs to completion on call, so the
-            // field is already set. Mirrors asyncio.wait_for cancelling the prompt coroutine.
-            var pending = session.InputFuture;
+            // Atomic capture: the token owns exactly this prompt, so the timeout
+            // path cancels it even if a newer prompt has since taken the slot.
+            var (promptTask, token) = session.PromptWithToken(display);
             var delayTask = Task.Delay(timeout, cts.Token);
             var done = await Task.WhenAny(promptTask, delayTask).ConfigureAwait(false);
-            if (done != promptTask) { try { session.CancelPrompt(pending); } catch { } return null; }
+            if (done != promptTask) { try { session.CancelPrompt(token); } catch { } return null; }
             try { await cts.CancelAsync().ConfigureAwait(false); } catch { }
             return await promptTask.ConfigureAwait(false);
         }

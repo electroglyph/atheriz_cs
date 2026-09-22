@@ -257,8 +257,8 @@ public class PortedBehavioralRegressionsTests
         var nodeB = new Node(coordB);
         nodeA.Links = new List<NodeLink> { new NodeLink("east", coordB) };
         nodeB.Links = new List<NodeLink> { new NodeLink("west", coordA) };
-        grid.Nodes[(0, 0)] = nodeA;
-        grid.Nodes[(1, 0)] = nodeB;
+        grid.AddNode(nodeA);
+        grid.AddNode(nodeB);
         area.AddGrid(grid);
         var nh = new NodeHandler();
         NodeHandler.SetCurrent(nh);
@@ -347,7 +347,7 @@ public class PortedBehavioralRegressionsTests
         var grid = new NodeGrid(area: "DoorA", z: 0);
         var room = new Node(from, desc: "room");
         ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
-        grid.Nodes[(0, 0)] = room;
+        grid.AddNode(room);
         area.AddGrid(grid);
         nh.AddArea(area);
         var caller = GameObject.Create("DoorCaller");
@@ -381,7 +381,7 @@ public class PortedBehavioralRegressionsTests
         var grid = new NodeGrid(area: "DoorB", z: 0);
         var room = new Node(from);
         ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
-        grid.Nodes[(0, 0)] = room;
+        grid.AddNode(room);
         area.AddGrid(grid);
         nh.AddArea(area);
         var caller = GameObject.Create("DoorCaller2");

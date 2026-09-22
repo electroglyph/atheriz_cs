@@ -207,8 +207,8 @@ public class PortedSerializationTests
         {
             var area = new NodeArea("test_area");
             var grid = new NodeGrid("test_area", 1);
-            grid.Nodes[(1,1)] = navNode;
-            area.Grids[1] = grid;
+            grid.AddNode(navNode);
+            area.AddGrid(grid);
             nh.AddArea(area);
         }
         var source = GameObject.Create("Source"); source.Id = 502; source.Location = new LocationRef.CoordLocation(navNode.Coord); source.Home = new LocationRef.ObjectLocation(target.Id);
@@ -305,8 +305,8 @@ public class PortedSerializationTests
     {
         using var env=GlobalTestEnv.Enter();
         var grid=new NodeGrid("forest",0);
-        var node=new Node(new Coord("forest",0,0,0)); grid.Nodes[(0,0)]=node;
-        grid.Data["custom"]=System.Text.Json.JsonDocument.Parse("\"grid_data\"").RootElement.Clone();
+        var node=new Node(new Coord("forest",0,0,0)); grid.AddNode(node);
+        grid.SetData("custom", System.Text.Json.JsonDocument.Parse("\"grid_data\"").RootElement.Clone());
         // Use real DTO JSON roundtrip (not manual copy) — surrogate handles ValueTuple keys via string
         Assert.Equal("forest", grid.Area);
         Assert.True(grid.Nodes.ContainsKey((0,0)));
@@ -323,9 +323,7 @@ public class PortedSerializationTests
         var desGrid = new NodeGrid(surrogate2.Area, surrogate2.Z, surrogate2.Data);
         foreach (var kv in surrogate2.Nodes)
         {
-            var parts = kv.Key.Split(',');
-            var key = (int.Parse(parts[0]), int.Parse(parts[1]));
-            desGrid.Nodes[key] = kv.Value;
+            desGrid.AddNodeRaw(kv.Value);
         }
         Assert.Equal("forest", desGrid.Area);
         Assert.True(desGrid.Nodes.ContainsKey((0,0)));
@@ -337,8 +335,8 @@ public class PortedSerializationTests
     [Fact] public void NodeAreaSerialization()
     {
         var area=new NodeArea("forest");
-        var grid=new NodeGrid("forest",0); area.Grids[0]=grid;
-        area.Data["custom"]=System.Text.Json.JsonDocument.Parse("\"area_data\"").RootElement.Clone();
+        var grid=new NodeGrid("forest",0); area.AddGrid(grid);
+        area.SetData("custom", System.Text.Json.JsonDocument.Parse("\"area_data\"").RootElement.Clone());
         // Use real JSON roundtrip via surrogate DTO (not anonymous object simulation)
         var surrogate = new NodeAreaSurrogate
         {
@@ -363,9 +361,9 @@ public class PortedSerializationTests
             foreach (var nkv in kv.Value.Nodes)
             {
                 var parts = nkv.Key.Split(',');
-                g.Nodes[(int.Parse(parts[0]), int.Parse(parts[1]))] = nkv.Value;
+                g.AddNodeRaw(nkv.Value);
             }
-            desArea.Grids[kv.Key] = g;
+            desArea.AddGridRaw(g);
         }
         Assert.Equal("forest", desArea.Name);
         Assert.True(desArea.Grids.ContainsKey(0));
@@ -406,8 +404,8 @@ public class PortedSerializationTests
     [Fact] public void MapInfoSerialization()
     {
         var mi=new MapInfo("The Forest");
-        mi.PreGrid[(0,0)]="T";
-        mi.LegendEntries.Add(new LegendEntry("T","Tree"));
+        mi.SetPreCell((0,0), "T");
+        mi.AddLegendEntry(new LegendEntry("T","Tree"));
         var dto=MapInfo.MapInfoPersistDto.FromDomain(mi);
         Assert.Equal("The Forest", dto.Name);
         Assert.True(dto.PreGrid.ContainsKey("0,0"));

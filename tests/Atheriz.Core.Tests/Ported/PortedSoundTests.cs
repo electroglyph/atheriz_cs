@@ -46,7 +46,7 @@ public class PortedSoundTests
         {
             var g = new NodeGrid(name,z);
             // Explicit registration: the constructor does not publish.
-            for(int x=0;x<grid;x++) for(int y=0;y<grid;y++) { var tn = new TrackingNode(new Coord(name,x,y,z)); g.Nodes[(x,y)] = tn; ObjectRegistry.AddObject(tn); }
+            for(int x=0;x<grid;x++) for(int y=0;y<grid;y++) { var tn = new TrackingNode(new Coord(name,x,y,z)); g.AddNode(tn); ObjectRegistry.AddObject(tn); }
             area.AddGrid(g);
         }
         nh.AddArea(area);
@@ -149,7 +149,7 @@ public class PortedSoundTests
         var src=new TrackingNode(new Coord("bfs_block_test",0,0,0));
         var blocker=new BlockingNode(new Coord("bfs_block_test",1,0,0));
         var beyond=new TrackingNode(new Coord("bfs_block_test",2,0,0));
-        grid.Nodes[(0,0)]=src; grid.Nodes[(1,0)]=blocker; grid.Nodes[(2,0)]=beyond;
+        grid.AddNode(src); grid.AddNode(blocker); grid.AddNode(beyond);
         ObjectRegistry.AddObject(src); ObjectRegistry.AddObject(blocker); ObjectRegistry.AddObject(beyond); // Explicit registration: the constructor does not publish.
         area.AddGrid(grid); nh.AddArea(area);
         var emitter=new TrackingObject(); emitter.Name="Emitter"; emitter.IsNpc=true; emitter.CanHear=true; emitter.Id=IdGenerator.GetUniqueId(); ObjectRegistry.AddObject(emitter);
@@ -214,7 +214,7 @@ public class PortedSoundTests
     private static NodeArea BuildSparse(string name="SphereTest")
     {
         var area=new NodeArea(name);
-        foreach(var z in new[]{0,10}){ var g=new NodeGrid(name,z); for(int x=0;x<25;x+=3) for(int y=0;y<25;y+=3) g.Nodes[(x,y)]=new Node(new Coord(name,x,y,z)); area.AddGrid(g); }
+        foreach(var z in new[]{0,10}){ var g=new NodeGrid(name,z); for(int x=0;x<25;x+=3) for(int y=0;y<25;y+=3) g.AddNode(new Node(new Coord(name,x,y,z))); area.AddGrid(g); }
         return area;
     }
     [Fact] public void GetNodesInSphereCorrectness()
@@ -245,8 +245,8 @@ public class PortedSoundTests
     {
         var area=new NodeArea("CenterTest");
         var g=new NodeGrid("CenterTest",0);
-        g.Nodes[(0,0)]=new Node(new Coord("CenterTest",0,0,0));
-        g.Nodes[(1,0)]=new Node(new Coord("CenterTest",1,0,0));
+        g.AddNode(new Node(new Coord("CenterTest",0,0,0)));
+        g.AddNode(new Node(new Coord("CenterTest",1,0,0)));
         area.AddGrid(g);
         Assert.Equal(2, area.GetNodesInSphere((0,0,0),2).Count);
         Assert.Single(area.GetNodesInSphere((0,0,0),2,true));

@@ -132,7 +132,7 @@ public class PortedRegressionIssuesTests
         var n = new Node(new Coord("area1",0,0,0));
         ObjectRegistry.AddObject(n);
         n.IsModified = false;
-        n.Nouns["statue"] = "A statue";
+        n.AddNoun("statue", "A statue");
         // In C# Node.Nouns dict mutation doesn't auto-mark? We set explicit
         n.IsModified = true;
         Assert.True(n.IsModified);
@@ -260,12 +260,12 @@ public class PortedRegressionIssuesTests
         using var env = GlobalTestEnv.Enter();
         var n = new Node(new Coord("area1",0,0,0));
         n.IsModified = false;
-        n.Nouns["statue"]="A statue";
+        n.AddNoun("statue", "A statue");
         // Node Nouns mutation in C# requires explicit IsModified; we set true to simulate
         n.IsModified = true;
         Assert.True(n.IsModified);
         n.IsModified = false;
-        n.Nouns.Remove("statue");
+        n.RemoveNoun("statue");
         n.IsModified = true;
         Assert.True(n.IsModified);
         n.IsModified = false;
@@ -321,12 +321,12 @@ public class PortedRegressionIssuesTests
     {
         using var env = GlobalTestEnv.Enter();
         var mh = GlobalServices.GetMapHandler();
-        var mi = new MapInfo("concurrent_test"); mi.PreGrid[(0,0)]="X"; mi.MapChanged=true;
+        var mi = new MapInfo("concurrent_test"); mi.SetPreCell((0,0), "X"); mi.MapChanged=true;
         mh.SetMapInfo("concurrent_test",0,mi);
         var barrier = new System.Threading.Barrier(2);
         List<string> errors=new();
         void Saver(){ try{ barrier.SignalAndWait(); mh.Save(force:true);} catch(Exception ex){ lock(errors) errors.Add($"saver {ex.Message}"); } }
-        void Updater(){ try{ barrier.SignalAndWait(); System.Threading.Thread.Sleep(50); lock(mi.Lock){ mi.PreGrid[(1,1)]="Y"; mi.MapChanged=true; } } catch(Exception ex){ lock(errors) errors.Add($"updater {ex.Message}"); } }
+        void Updater(){ try{ barrier.SignalAndWait(); System.Threading.Thread.Sleep(50); lock(mi.Lock){ mi.SetPreCell((1,1), "Y"); mi.MapChanged=true; } } catch(Exception ex){ lock(errors) errors.Add($"updater {ex.Message}"); } }
         var t1=new System.Threading.Thread(Saver); var t2=new System.Threading.Thread(Updater);
         t1.Start(); t2.Start(); t1.Join(5000); t2.Join(5000);
         Assert.Empty(errors);
@@ -340,7 +340,7 @@ public class PortedRegressionIssuesTests
         var grid = new NodeGrid("testgrid",0);
         var n1 = new Node(new Coord("testgrid",0,0,0)); n1.Name="n1";
         var n2 = new Node(new Coord("testgrid",1,0,0)); n2.Name="n2";
-        n1.Links.Add(new NodeLink("east", new Coord("testgrid",1,0,0)));
+        n1.AddLink(new NodeLink("east", new Coord("testgrid",1,0,0)));
         n1.IsModified=false; n2.IsModified=false;
         grid.AddNode(n1); grid.AddNode(n2);
         n1.IsModified=false; n2.IsModified=false; grid.IsModified=false;

@@ -77,9 +77,9 @@ internal sealed class NodeAreaDto
                     node = Node.CreateForLoad(nd.Coord);
                     HydrateNode(node, nd);
                 }
-                grid.Nodes[(nd.Coord.X, nd.Coord.Y)] = node;
+                grid.AddNodeRaw(node);
             }
-            area.Grids[z]=grid;
+            area.AddGridRaw(grid);
         }
         return area;
     }

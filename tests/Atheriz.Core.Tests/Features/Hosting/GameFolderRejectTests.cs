@@ -232,7 +232,8 @@ public class GameFolderRejectTests
                     try { System.Diagnostics.Process.GetProcessById(pid).Kill(); } catch { }
             }
             catch { }
-            try { await RunProcessAsync("bash", $"rm -rf \"{tmp}\"", null, null, 5000); } catch { }
+            try { await RunProcessAsync("bash", $"rm -rf \"{tmp}\"", null, null, 60000); } catch { }
+            try { if (Directory.Exists(tmp)) await RunProcessAsync("bash", $"rm -rf \"{tmp}\"", null, null, 60000); } catch { }
         }
     }
 }

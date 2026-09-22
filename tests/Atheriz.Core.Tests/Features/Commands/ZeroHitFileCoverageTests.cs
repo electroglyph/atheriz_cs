@@ -119,7 +119,7 @@ public sealed class ZeroHitFileCoverageTests
         {
             var area = new NodeArea("ZeroHit");
             var grid = new NodeGrid("ZeroHit", 0);
-            grid.Nodes[(0, 0)] = new Node(new Coord("ZeroHit", 0, 0, 0));
+            grid.AddNode(new Node(new Coord("ZeroHit", 0, 0, 0)));
             ObjectRegistry.AddObject((Node)grid.Nodes[(0, 0)]); // Explicit registration: the constructor does not publish.
             area.AddGrid(grid);
             nh.AddArea(area);

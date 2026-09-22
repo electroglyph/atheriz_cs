@@ -94,9 +94,7 @@ public partial class NodeHandler
         if (area is null) return null;
         var grid = area.GetGrid(coord.Z);
         if (grid is null) return null;
-        grid.Lock.EnterReadLock();
-        try { return grid.Nodes.TryGetValue((coord.X, coord.Y), out var n) ? n : null; }
-        finally { grid.Lock.ExitReadLock(); }
+        return grid.GetNode(coord.X, coord.Y);
     }
 
     // ctors never touch the process-global current — constructing a
@@ -163,7 +161,7 @@ public partial class NodeHandler
                                                 // in-memory edits — evicting here
                                                 // destroyed newer in-memory edits. It stays
                                                 // IsModified, so the next save persists it.
-                                                ng.Nodes[(n.Coord.X, n.Coord.Y)] = n; grafted = true;
+                                                ng.AddNodeRaw(n); grafted = true;
                                             }
                                             finally { ng.Lock.ExitWriteLock(); }
                                         }
@@ -177,14 +175,8 @@ public partial class NodeHandler
                                             // lock beyond the fresh grid's own is needed.
                                             var fresh = new NodeGrid(na.Name, n.Coord.Z);
                                             na.AddGrid(fresh);
-                                            fresh.Lock.EnterWriteLock();
-                                            try
-                                            {
-                                                fresh.Nodes[(n.Coord.X, n.Coord.Y)] = n;
-                                                fresh.IsModified = true;
-                                                grafted = true;
-                                            }
-                                            finally { fresh.Lock.ExitWriteLock(); }
+                                            fresh.AddNodeRaw(n);
+                                            grafted = true;
                                         }
                                     }
                                 }
@@ -511,8 +503,8 @@ public partial class NodeHandler
                 try
                 {
                     wasArea = a.IsModified;
-                    gridsSnap = new Dictionary<int, NodeGrid>(a.Grids);
-                    dataCopy = new Dictionary<string, JsonElement>(a.Data);
+                    gridsSnap = a.Grids;
+                    dataCopy = a.Data;
                     name = a.Name;
                     theme = a.Theme ?? "";
                     linked = a.LinkedAreas is not null ? new HashSet<string>(a.LinkedAreas) : null;
@@ -532,8 +524,8 @@ public partial class NodeHandler
                     try
                     {
                         wasGrid = g.IsModified;
-                        nodesSnap = new Dictionary<(int,int), Node>(g.Nodes);
-                        gData = new Dictionary<string, JsonElement>(g.Data);
+                        nodesSnap = g.Nodes;
+                        gData = g.Data;
                         if (wasGrid) { g.IsModified = false; localGrids.Add(g); }
                     }
                     finally { g.Lock.ExitWriteLock(); }
@@ -571,7 +563,7 @@ public partial class NodeHandler
                                 Symbol = n.Symbol,
                                 LegendDesc = n.LegendDesc,
                                 Links = n.GetLinks(),
-                                Nouns = new Dictionary<string,string>(n.Nouns),
+                                Nouns = n.Nouns,
                                 Id = n.Id,
                                 Scripts = scriptsSnap,
                                 ObjectType = objType,

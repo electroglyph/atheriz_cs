@@ -77,7 +77,7 @@ public sealed class CorrectnessBatchCTests
     {
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo("pin-area");
-        mi.LegendEntries.Add(new LegendEntry("ok", "fine", (1, 2)));
+        mi.AddLegendEntry(new LegendEntry("ok", "fine", (1, 2)));
         var dto = MapInfo.MapInfoPersistDto.FromDomain(mi);
         dto.LegendEntries.Add(new MapInfo.LegendEntryDto { Symbol = "bad", Coord = [1, 2, 3] });
         dto.LegendEntries.Add(new MapInfo.LegendEntryDto { Symbol = "short", Coord = [5] });

@@ -101,8 +101,21 @@ public static class DbTransactionHelper
         // transaction owns atomicity; SaveChanges joins it. (Caller must EnsureCreated.)
         if (db.Database.CurrentTransaction is not null)
         {
-            work(db);
-            db.SaveChanges();
+            // A throwing work must still invoke onRollback (cleared save
+            // flags / tombstones are restored by the hook) — same contract
+            // as the owned-transaction path below. The hook is idempotent
+            // (re-marking dirty flags), so an outer onRollback re-running
+            // it is harmless. Rethrow preserves the failure.
+            try
+            {
+                work(db);
+                db.SaveChanges();
+            }
+            catch
+            {
+                try { onRollback?.Invoke(); } catch (Exception) { }
+                throw;
+            }
             return;
         }
         // Bounded take: a stuck holder fails loud instead of hanging all saves forever.

@@ -167,11 +167,37 @@ public class MapInfo
         set { if (value) System.Threading.Interlocked.Increment(ref _mapGen); _mapChanged = value; }
     }
     public bool IsModified { get; set; } = false; // for parity with Python getattr is_modified
-    public Dictionary<(int X, int Y), string> PreGrid { get; } = new();
-    public Dictionary<(int X, int Y), string> PostGrid { get; } = new();
-    public List<LegendEntry> LegendEntries { get; } = new();
-    public Dictionary<int, GameObject> Objects { get; } = new();
-    public Dictionary<int, GameObject> Listeners { get; } = new();
+    // Snapshot copies: the getters return copies under the read lock, so a
+    // reader enumerating the copy never races a concurrent mutator. The lock
+    // is NoRecursion, so lock-held internals below touch _preGrid/_postGrid/
+    // _legendEntries/_objects/_listeners directly, and external callers that
+    // used to mutate the live dict under their own mi scope use the locked
+    // cell mutators (SetPreCell/RemovePreCell/SetPostCell/...) instead.
+    private Dictionary<(int X, int Y), string> _preGrid = new();
+    public Dictionary<(int X, int Y), string> PreGrid
+    {
+        get { using (ReadScope()) return new Dictionary<(int X, int Y), string>(_preGrid); }
+    }
+    private Dictionary<(int X, int Y), string> _postGrid = new();
+    public Dictionary<(int X, int Y), string> PostGrid
+    {
+        get { using (ReadScope()) return new Dictionary<(int X, int Y), string>(_postGrid); }
+    }
+    private List<LegendEntry> _legendEntries = new();
+    public List<LegendEntry> LegendEntries
+    {
+        get { using (ReadScope()) return new List<LegendEntry>(_legendEntries); }
+    }
+    private Dictionary<int, GameObject> _objects = new();
+    public Dictionary<int, GameObject> Objects
+    {
+        get { using (ReadScope()) return new Dictionary<int, GameObject>(_objects); }
+    }
+    private Dictionary<int, GameObject> _listeners = new();
+    public Dictionary<int, GameObject> Listeners
+    {
+        get { using (ReadScope()) return new Dictionary<int, GameObject>(_listeners); }
+    }
     // Lock uses NoRecursion (no re-entrant path; snapshots used)
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     public ReaderWriterLockSlim SyncRoot => _lock;
@@ -192,25 +218,31 @@ public class MapInfo
     {
         Name = name;
         Settings = settings ?? AtherizSettings.Global;
-        if (preGrid is not null) foreach (var kv in preGrid) PreGrid[kv.Key] = kv.Value;
-        if (postGrid is not null) foreach (var kv in postGrid) PostGrid[kv.Key] = kv.Value;
-        if (legendEntries is not null) LegendEntries.AddRange(legendEntries);
+        if (preGrid is not null) foreach (var kv in preGrid) _preGrid[kv.Key] = kv.Value;
+        if (postGrid is not null) foreach (var kv in postGrid) _postGrid[kv.Key] = kv.Value;
+        if (legendEntries is not null) _legendEntries.AddRange(legendEntries);
     }
 
     private bool IsOverLegendCap()
     {
-        return (Objects.Count + LegendEntries.Count) > Settings.MaxObjectsPerLegend;
+        return (_objects.Count + _legendEntries.Count) > Settings.MaxObjectsPerLegend;
     }
 
     public bool Equals(MapInfo? other)
     {
         if (other is null) return false;
         if (Name != other.Name) return false;
-        if (PreGrid.Count != other.PreGrid.Count || PostGrid.Count != other.PostGrid.Count) return false;
-        if (!PreGrid.OrderBy(kv => kv.Key).SequenceEqual(other.PreGrid.OrderBy(kv => kv.Key))) return false;
-        if (!PostGrid.OrderBy(kv => kv.Key).SequenceEqual(other.PostGrid.OrderBy(kv => kv.Key))) return false;
-        if (LegendEntries.Count != other.LegendEntries.Count) return false;
-        for (int i = 0; i < LegendEntries.Count; i++) if (!LegendEntries[i].Equals(other.LegendEntries[i])) return false;
+        // Snapshot each side under its own read lock (taking both info locks
+        // here would order them arbitrarily).
+        var myPre = PreGrid; var otherPre = other.PreGrid;
+        if (myPre.Count != otherPre.Count) return false;
+        var myPost = PostGrid; var otherPost = other.PostGrid;
+        if (myPost.Count != otherPost.Count) return false;
+        if (!myPre.OrderBy(kv => kv.Key).SequenceEqual(otherPre.OrderBy(kv => kv.Key))) return false;
+        if (!myPost.OrderBy(kv => kv.Key).SequenceEqual(otherPost.OrderBy(kv => kv.Key))) return false;
+        var myLegend = LegendEntries; var otherLegend = other.LegendEntries;
+        if (myLegend.Count != otherLegend.Count) return false;
+        for (int i = 0; i < myLegend.Count; i++) if (!myLegend[i].Equals(otherLegend[i])) return false;
         return true;
     }
 
@@ -226,9 +258,9 @@ public class MapInfo
                 {
                     if (dx == 0 && dy == 0) continue;
                     var key = (cx + dx, cy + dy);
-                    if (PreGrid.TryGetValue(key, out var existing) && existing == Settings.RoomPlaceholder)
+                    if (_preGrid.TryGetValue(key, out var existing) && existing == Settings.RoomPlaceholder)
                         continue;
-                    PreGrid[key] = ch;
+                    _preGrid[key] = ch;
                 }
             MapChanged = true;
             IsModified = true;
@@ -342,11 +374,11 @@ public class MapInfo
             // never pollute neighbor reads. The style table stays per-call:
             // placeholders and symbols are per-Settings-instance.
             Dictionary<(int, int), string> toPlace = [];
-            foreach (var kv in PreGrid)
+            foreach (var kv in _preGrid)
             {
                 if (placeholderStyles.TryGetValue(kv.Value, out var style))
                 {
-                    var (n, s, e, w) = GetDirs(PreGrid, kv.Key, allSymbols);
+                    var (n, s, e, w) = GetDirs(_preGrid, kv.Key, allSymbols);
                     toPlace[kv.Key] = ResolveChar(n, s, e, w, style);
                 }
                 else if (kv.Value == Settings.RoomPlaceholder)
@@ -354,9 +386,9 @@ public class MapInfo
                     toPlace[kv.Key] = " ";
                 }
             }
-            PostGrid.Clear();
-            PostGrid.EnsureCapacity(PreGrid.Count);
-            foreach (var kv in PreGrid) PostGrid[kv.Key] = toPlace.TryGetValue(kv.Key, out var resolved) ? resolved : kv.Value;
+            _postGrid.Clear();
+            _postGrid.EnsureCapacity(_preGrid.Count);
+            foreach (var kv in _preGrid) _postGrid[kv.Key] = toPlace.TryGetValue(kv.Key, out var resolved) ? resolved : kv.Value;
         }
     }
 
@@ -365,7 +397,7 @@ public class MapInfo
         bool shouldRender;
         using (WriteScope())
         {
-            PreGrid[coord] = newSymbol;
+            _preGrid[coord] = newSymbol;
             MapChanged = true;
             IsModified = true;
             shouldRender = _batchUpdate == 0;
@@ -378,9 +410,9 @@ public class MapInfo
         using (WriteScope())
         {
             _batchUpdate++;
-            if (PreGrid.Count == 0 && PostGrid.Count > 0)
+            if (_preGrid.Count == 0 && _postGrid.Count > 0)
             {
-                foreach (var kv in PostGrid) PreGrid[kv.Key] = kv.Value;
+                foreach (var kv in _postGrid) _preGrid[kv.Key] = kv.Value;
             }
         }
         return new BatchScope(this);
@@ -509,7 +541,7 @@ public class MapInfo
         using (WriteScope())
         {
             isOver = IsOverLegendCap();
-            listenersSnapshot = Listeners.Values.ToList();
+            listenersSnapshot = _listeners.Values.ToList();
             wasSuppressed = _legendSuppressed;
             if (isOver)
             {
@@ -519,8 +551,8 @@ public class MapInfo
             else
             {
                 if (wasSuppressed) _legendSuppressed = false;
-                objectsSnapshot = Objects.Values.ToList();
-                staticSnapshot = LegendEntries.ToList();
+                objectsSnapshot = _objects.Values.ToList();
+                staticSnapshot = _legendEntries.ToList();
             }
         }
 
@@ -552,7 +584,7 @@ public class MapInfo
     {
         bool needsPre;
         long gen;
-        using (ReadScope()) { needsPre = (force || MapChanged) && PreGrid.Count > 0; gen = _mapGen; }
+        using (ReadScope()) { needsPre = (force || MapChanged) && _preGrid.Count > 0; gen = _mapGen; }
         if (needsPre) PreRender();
         using (WriteScope()) { if (_mapGen == gen) MapChanged = false; }
 
@@ -564,10 +596,10 @@ public class MapInfo
         using (ReadScope())
         {
             showLegend = !IsOverLegendCap();
-            listeners = Listeners.Values.ToList();
-            objectsSnapshot = Objects.Values.ToList();
-            staticSnapshot = LegendEntries.ToList();
-            gridSnapshot = new Dictionary<(int X, int Y), string>(PostGrid);
+            listeners = _listeners.Values.ToList();
+            objectsSnapshot = _objects.Values.ToList();
+            staticSnapshot = _legendEntries.ToList();
+            gridSnapshot = new Dictionary<(int X, int Y), string>(_postGrid);
         }
 
         var (objEntries, staticEntries) = BuildEntries(objectsSnapshot, staticSnapshot);
@@ -597,43 +629,99 @@ public class MapInfo
 
     public virtual void AddLegendEntry(LegendEntry entry)
     {
-        using (WriteScope()) { LegendEntries.Add(entry); MapChanged = true; IsModified = true; }
+        using (WriteScope()) { _legendEntries.Add(entry); MapChanged = true; IsModified = true; }
         RenderLegend();
     }
 
     public virtual void RemoveLegendEntry(LegendEntry entry)
     {
-        using (WriteScope()) { LegendEntries.Remove(entry); MapChanged = true; IsModified = true; }
+        using (WriteScope()) { _legendEntries.Remove(entry); MapChanged = true; IsModified = true; }
         RenderLegend();
     }
 
     public virtual void AddListener(GameObject listener, bool notify = false)
     {
-        using (WriteScope()) { Listeners[listener.Id] = listener; }
+        using (WriteScope()) { _listeners[listener.Id] = listener; }
         if (notify) Render(true);
     }
 
     public virtual void RemoveListener(GameObject listener)
     {
-        using (WriteScope()) { Listeners.Remove(listener.Id); }
+        using (WriteScope()) { _listeners.Remove(listener.Id); }
     }
 
     public virtual void AddMapable(GameObject mapable, bool notify = true)
     {
-        using (WriteScope()) { Objects[mapable.Id] = mapable; }
+        using (WriteScope()) { _objects[mapable.Id] = mapable; }
         if (notify) RenderLegend();
     }
 
     public virtual void RemoveMapable(GameObject mapable)
     {
-        using (WriteScope()) { Objects.Remove(mapable.Id); }
+        using (WriteScope()) { _objects.Remove(mapable.Id); }
         RenderLegend();
     }
 
     public virtual void AddMapableList(IEnumerable<GameObject> mapables, bool notify = true)
     {
-        using (WriteScope()) { foreach (var m in mapables) Objects[m.Id] = m; }
+        using (WriteScope()) { foreach (var m in mapables) _objects[m.Id] = m; }
         if (notify) RenderLegend();
+    }
+
+    // Locked cell mutators for external writers that used to mutate the live
+    // grid dicts under their own mi scope (a snapshot getter cannot serve
+    // them: the NoRecursion lock forbids re-entry). Each takes its own scope;
+    // flag semantics match the old direct writes (none — render scheduling
+    // and dirty tracking stay with the caller, as before).
+    public void SetPreCell((int X, int Y) coord, string symbol)
+    {
+        using (WriteScope()) { _preGrid[coord] = symbol; }
+    }
+    public void RemovePreCell((int X, int Y) coord)
+    {
+        using (WriteScope()) { _preGrid.Remove(coord); }
+    }
+    public void SetPostCell((int X, int Y) coord, string symbol)
+    {
+        using (WriteScope()) { _postGrid[coord] = symbol; }
+    }
+    // Door glyph repaint: post cell always, pre cell only when the pre grid
+    // is populated, plus map-dirty. One scope — the old manual mi.Lock block
+    // read PreGrid.Count inside it, which a snapshot getter cannot do on a
+    // NoRecursion lock.
+    public void PaintSymbol((int X, int Y) coord, string glyph)
+    {
+        using (WriteScope())
+        {
+            _postGrid[coord] = glyph;
+            if (_preGrid.Count > 0) { _preGrid[coord] = glyph; MapChanged = true; }
+        }
+    }
+    // Legend bulk replace for the network legend-update path: swaps the whole
+    // list and marks map-dirty under one scope (no render — the caller renders).
+    public void ReplaceLegendEntries(List<LegendEntry> newEntries)
+    {
+        ArgumentNullException.ThrowIfNull(newEntries);
+        using (WriteScope()) { _legendEntries.Clear(); _legendEntries.AddRange(newEntries); MapChanged = true; }
+    }
+    // Hot-reload rewire core: swap stale listener/mapable instances for the
+    // replacement (same id) under one scope.
+    public void ReplaceEntry(int id, GameObject replacement)
+    {
+        ArgumentNullException.ThrowIfNull(replacement);
+        using (WriteScope())
+        {
+            if (_listeners.TryGetValue(id, out var l) && !ReferenceEquals(l, replacement))
+                _listeners[id] = replacement;
+            if (_objects.TryGetValue(id, out var o) && !ReferenceEquals(o, replacement))
+                _objects[id] = replacement;
+        }
+    }
+    // Same-map move core: listener + mapable land under one scope.
+    public void AddListenerAndMapable(GameObject obj)
+    {
+        ArgumentNullException.ThrowIfNull(obj);
+        using (WriteScope()) { _listeners[obj.Id] = obj; _objects[obj.Id] = obj; }
     }
 
     // DTO for JSON persistence
@@ -651,9 +739,9 @@ public class MapInfo
                 return new MapInfoPersistDto
                 {
                     Name = mi.Name,
-                    PreGrid = mi.PreGrid.ToDictionary(kv => $"{kv.Key.X},{kv.Key.Y}", kv => kv.Value),
-                    PostGrid = mi.PostGrid.ToDictionary(kv => $"{kv.Key.X},{kv.Key.Y}", kv => kv.Value),
-                    LegendEntries = mi.LegendEntries.Select(LegendEntryDto.FromDomain).ToList(),
+                    PreGrid = mi._preGrid.ToDictionary(kv => $"{kv.Key.X},{kv.Key.Y}", kv => kv.Value),
+                    PostGrid = mi._postGrid.ToDictionary(kv => $"{kv.Key.X},{kv.Key.Y}", kv => kv.Value),
+                    LegendEntries = mi._legendEntries.Select(LegendEntryDto.FromDomain).ToList(),
                 };
             }
         }
@@ -665,7 +753,7 @@ public class MapInfo
             {
                 var parts = kv.Key.Split(',');
                 if (parts.Length == 2 && int.TryParse(parts[0], out var x) && int.TryParse(parts[1], out var y))
-                    mi.PreGrid[(x, y)] = kv.Value;
+                    mi._preGrid[(x, y)] = kv.Value;
                 // malformed persisted grid keys warn, not vanish silently.
                 else AtherizLogger.LogWarning($"[Load] skipping malformed pre-grid key '{kv.Key}' in area '{Name}'.");
             }
@@ -673,7 +761,7 @@ public class MapInfo
             {
                 var parts = kv.Key.Split(',');
                 if (parts.Length == 2 && int.TryParse(parts[0], out var x) && int.TryParse(parts[1], out var y))
-                    mi.PostGrid[(x, y)] = kv.Value;
+                    mi._postGrid[(x, y)] = kv.Value;
                 else AtherizLogger.LogWarning($"[Load] skipping malformed post-grid key '{kv.Key}' in area '{Name}'.");
             }
             foreach (var le in LegendEntries)
@@ -681,7 +769,7 @@ public class MapInfo
                 // Malformed persisted entries warn, not vanish silently —
                 // and must not abort the whole area load (same convention
                 // as the malformed grid keys above).
-                try { mi.LegendEntries.Add(le.ToDomain()); }
+                try { mi._legendEntries.Add(le.ToDomain()); }
                 catch (Exception ex) { AtherizLogger.LogWarning($"[Load] skipping malformed legend entry in area '{Name}': {ex.Message}"); }
             }
             mi.MapChanged = false;
@@ -992,15 +1080,7 @@ public class MapHandler
         List<MapInfo> infos;
         using (ReadScope()) infos = _data.Values.ToList();
         foreach (var mi in infos)
-        {
-            using (mi.WriteScope())
-            {
-                if (mi.Listeners.TryGetValue(id, out var l) && !ReferenceEquals(l, replacement))
-                    mi.Listeners[id] = replacement;
-                if (mi.Objects.TryGetValue(id, out var o) && !ReferenceEquals(o, replacement))
-                    mi.Objects[id] = replacement;
-            }
-        }
+            mi.ReplaceEntry(id, replacement);
     }
 
     private MapInfo GetOrCreate(string area, int z)
@@ -1121,11 +1201,7 @@ public class MapHandler
         if (fromCoord is not null && fromCoord.Value.Area == toCoord.Area && fromCoord.Value.Z == toCoord.Z)
         {
             var cur = GetOrCreate(toCoord.Area, toCoord.Z);
-            using (cur.WriteScope())
-            {
-                cur.Listeners[obj.Id] = obj;
-                cur.Objects[obj.Id] = obj;
-            }
+            cur.AddListenerAndMapable(obj);
             cur.RenderLegend();
             cur.Render(true);
             return;

@@ -23,7 +23,7 @@ public sealed class BuildEnsureLinksTests
         var area = new NodeArea("buildlinks");
         var grid = new NodeGrid("buildlinks", 0);
         var start = new Node(new Coord("buildlinks", 0, 0, 0), desc: "Start");
-        grid.Nodes[(0, 0)] = start;
+        grid.AddNode(start);
         ObjectRegistry.AddObject(start);
         area.AddGrid(grid);
         nh.AddArea(area);
@@ -33,9 +33,7 @@ public sealed class BuildEnsureLinksTests
             // Seed an east neighbor placeholder so the EnsureLinks table takes
             // the east row for the new room (forward link even with no node).
             var mi = mh.EnsureMapInfo("buildlinks", 0);
-            mi.Lock.EnterWriteLock();
-            try { mi.PreGrid[(1, 1)] = AtherizSettings.Global.RoomPlaceholder; }
-            finally { mi.Lock.ExitWriteLock(); }
+            mi.SetPreCell((1, 1), AtherizSettings.Global.RoomPlaceholder);
             var caller = GameObject.Create("build_linksbuilder", isPc: true, privilege: Privilege.Builder);
             ObjectRegistry.AddObject(caller);
             caller.Location = new LocationRef.CoordLocation(start.Coord);

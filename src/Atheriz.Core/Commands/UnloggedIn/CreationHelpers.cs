@@ -51,25 +51,33 @@ public static class SessionPuppetHelper
     public static bool TryAttach(BaseConnection conn, GameObject character)
     {
         if (conn.Session is null) { conn.Msg("This character is not available."); return false; }
+        var session = conn.Session;
         bool notAvailable = false;
         character.SyncRoot.EnterReadLock();
         try { if (character.Session is not null || character.IsDeleted) notAvailable = true; }
         finally { character.SyncRoot.ExitReadLock(); }
         if (notAvailable) { conn.Msg("This character is not available."); return false; }
-        lock (conn.Session.Lock)
+        lock (session.Lock)
         {
-            character.SyncRoot.EnterWriteLock();
-            try
+            // A session past AtDisconnect accepts no new puppet: the teardown
+            // already unwound the old one, so attaching here would orphan the
+            // character on a dead session.
+            if (session.Closed) notAvailable = true;
+            else
             {
-                if (character.Session is not null || character.IsDeleted) notAvailable = true;
-                else
+                character.SyncRoot.EnterWriteLock();
+                try
                 {
-                    conn.Session.Puppet = character;
-                    character.Session = conn.Session;
-                    conn.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    if (character.Session is not null || character.IsDeleted) notAvailable = true;
+                    else
+                    {
+                        session.Puppet = character;
+                        character.Session = session;
+                        session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    }
                 }
+                finally { character.SyncRoot.ExitWriteLock(); }
             }
-            finally { character.SyncRoot.ExitWriteLock(); }
         }
         if (notAvailable) { conn.Msg("This character is not available."); return false; }
         return true;

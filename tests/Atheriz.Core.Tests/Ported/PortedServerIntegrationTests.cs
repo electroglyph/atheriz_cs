@@ -175,8 +175,13 @@ public class PortedServerIntegrationTests
                     await Task.Delay(1000);
                 }
             } catch { }
-            // Use rm -rf via bash to avoid AccessViolation from FileSystem.RemoveDirectoryRecursive on locked files
-            try { await RunProcessAsync("bash", $"rm -rf \"{tmp}\"", null, null, 5000); } catch { }
+            // Use rm -rf via bash to avoid AccessViolation from FileSystem.RemoveDirectoryRecursive on locked files.
+            // 60s budget with an existence-checked retry: a 5s cap times out
+            // deleting ~660MB game scaffolds under parallel-suite IO load,
+            // leaking whole game dirs into /tmp until the tmpfs fills and
+            // unrelated SQLite tests fail with "disk is full".
+            try { await RunProcessAsync("bash", $"rm -rf \"{tmp}\"", null, null, 60000); } catch { }
+            try { if (Directory.Exists(tmp)) await RunProcessAsync("bash", $"rm -rf \"{tmp}\"", null, null, 60000); } catch { }
             try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch (Exception ex) { Console.WriteLine($"Cleanup delete failed: {ex.Message}"); }
         }
     }
@@ -254,7 +259,8 @@ public class PortedServerIntegrationTests
         {
             try { await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", tmpRoot, null, 5000); } catch { }
             try { await Task.Delay(1000); } catch { }
-            try { await RunProcessAsync("bash", $"rm -rf \"{tmpRoot}\"", null, null, 5000); } catch { }
+            try { await RunProcessAsync("bash", $"rm -rf \"{tmpRoot}\"", null, null, 60000); } catch { }
+            try { if (Directory.Exists(tmpRoot)) await RunProcessAsync("bash", $"rm -rf \"{tmpRoot}\"", null, null, 60000); } catch { }
             try { if (Directory.Exists(tmpRoot)) Directory.Delete(tmpRoot, true); } catch { }
         }
     }

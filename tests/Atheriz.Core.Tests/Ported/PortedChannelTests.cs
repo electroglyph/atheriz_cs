@@ -152,7 +152,23 @@ public class PortedChannelTests
         Assert.Equal("", chan.Desc);
         Assert.NotEqual(-1, chan.Id); // instances own a registry id from birth
         Assert.Equal(-1, chan.CreatedBy);
-        Assert.Null(chan.Command);
+        // Command is a live view: a fresh channel already reports a command
+        // for its current (empty) name instead of a null cache.
+        Assert.NotNull(chan.Command);
+        Assert.Equal("", chan.Command!.Key);
+    }
+
+    [Fact] public void Command_AfterRename_ReflectsNewKeyWithoutGetCommand()
+    {
+        // The cached command must not go stale across a rename: Command
+        // re-resolves, so readers see the new key even if GetCommand is
+        // never called after Rename.
+        using var env = GlobalTestEnv.Enter();
+        var chan = Channel.Create("Old");
+        Assert.Equal("old", chan.Command!.Key);
+        chan.Rename("New", "new desc");
+        Assert.Equal("new", chan.Command!.Key);
+        Assert.Equal("new desc", chan.Command!.Desc);
     }
 
     // test_channel.py:168 test_init_creates_rlock

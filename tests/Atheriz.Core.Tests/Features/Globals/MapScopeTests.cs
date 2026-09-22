@@ -133,7 +133,7 @@ public sealed class MapScopeTests
         {
             var mh = new MapHandler(autoLoad: false);
             var mi = new MapInfo { Name = "b25a-saved" };
-            mi.PreGrid[(0, 0)] = "#";
+            mi.SetPreCell((0, 0), "#");
             mh.SetMapInfo("b25a-saved", 0, mi);
             using (var db = new AtherizDbContext(env.TempPath))
             {

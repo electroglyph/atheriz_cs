@@ -472,13 +472,7 @@ public class Door
             var mi = mh.GetMapInfo(coord.Area, coord.Z);
             if (mi is not null)
             {
-                mi.Lock.EnterWriteLock();
-                try
-                {
-                    mi.PostGrid[SymbolCoord.Value] = SelectGlyph(preset, settings, closed);
-                    if (mi.PreGrid.Count > 0) { mi.PreGrid[SymbolCoord.Value] = SelectGlyph(preset, settings, closed); mi.MapChanged = true; }
-                }
-                finally { mi.Lock.ExitWriteLock(); }
+                mi.PaintSymbol(SymbolCoord.Value, SelectGlyph(preset, settings, closed));
                 mi.Render(true);
             }
         }

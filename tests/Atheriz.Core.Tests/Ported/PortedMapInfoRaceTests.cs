@@ -55,7 +55,7 @@ public class PortedMapInfoRaceTests
         using var env = GlobalTestEnv.Enter();
         var handler = new MapHandler(autoLoad:false);
         var mi = new MapInfo("existing");
-        mi.PreGrid[(0,0)]="#"; mi.PostGrid[(0,0)]="+";
+        mi.SetPreCell((0,0), "#"); mi.SetPostCell((0,0), "+");
         handler.SetMapInfo("existing",3, mi);
         var got = handler.EnsureMapInfo("existing",3);
         Assert.Same(mi, got);

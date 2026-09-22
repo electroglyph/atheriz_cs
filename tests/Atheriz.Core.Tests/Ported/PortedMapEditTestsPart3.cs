@@ -72,13 +72,13 @@ public class PortedMapEditTestsPart3
         using var env = GlobalTestEnv.Enter();
         Reset();
         var mh = GlobalServices.GetMapHandler();
-        var mi = new MapInfo("TestArea"); mi.PreGrid[(0,0)]="X";
-        mi.LegendEntries.Add(new LegendEntry("★","shrine",(2,3)){ Show=true, Fg=170.0, Bg=null });
+        var mi = new MapInfo("TestArea"); mi.SetPreCell((0,0), "X");
+        mi.AddLegendEntry(new LegendEntry("★","shrine",(2,3)){ Show=true, Fg=170.0, Bg=null });
         mh.SetMapInfo("TestArea",0,mi);
         var node = new Node(new Coord("TestArea",0,0,0));
         ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
-        grid.Nodes[(0,0)]=node;
+        grid.AddNode(node);
         var conn = new FakeC();
         var caller = GameObject.Create("Caller", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
         caller.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(node.Coord);
@@ -107,12 +107,12 @@ public class PortedMapEditTestsPart3
         Reset();
         var mh = GlobalServices.GetMapHandler();
         var mi = new MapInfo("TestArea");
-        mi.LegendEntries.Add(new LegendEntry("X","test",null));
+        mi.AddLegendEntry(new LegendEntry("X","test",null));
         mh.SetMapInfo("TestArea",0,mi);
         var node = new Node(new Coord("TestArea",0,0,0));
         ObjectRegistry.AddObject(node); // Explicit registration: the constructor does not publish.
         var nh = GlobalServices.GetNodeHandler(); var area=new NodeArea("TestArea"); var grid=new NodeGrid("TestArea",0); area.AddGrid(grid); nh.AddArea(area); NodeHandler.SetCurrent(nh);
-        grid.Nodes[(0,0)]=node;
+        grid.AddNode(node);
         var conn = new FakeC();
         var caller = GameObject.Create("Caller", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
         caller.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(node.Coord);
@@ -203,7 +203,7 @@ public class PortedMapEditTestsPart3
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
-        var grid = new NodeGrid("TestArea",0); grid.Nodes[(3,3)]=new Node(new Coord("TestArea",3,3,0));
+        var grid = new NodeGrid("TestArea",0); grid.AddNode(new Node(new Coord("TestArea",3,3,0)));
         var area = new NodeArea("TestArea"); area.AddGrid(grid);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         InputFuncs.NodeHandlerFactory = () => nh;
@@ -327,7 +327,7 @@ public class PortedMapEditTestsPart3
         using var env = GlobalTestEnv.Enter();
         Reset();
         var mi = MakeMi();
-        mi.LegendEntries.Add(new LegendEntry("OLD","old",(0,0)));
+        mi.AddLegendEntry(new LegendEntry("OLD","old",(0,0)));
         var mh = GlobalServices.GetMapHandler(); mh.SetMapInfo("TestArea",0,mi);
         var key = MapEdit.Grant("10.0.0.1","TestArea",0);
         var conn = MakeConn();

@@ -37,7 +37,7 @@ public class PortedDoorTests
         var area = new NodeArea("TestArea");
         var grid = new NodeGrid("TestArea", 0);
         var startNode = new Node(new Coord("TestArea", 0, 0, 0));
-        grid.Nodes[(0, 0)] = startNode;
+        grid.AddNode(startNode);
         // Explicit registration: the constructor does not publish.
         ObjectRegistry.AddObject(startNode);
         area.AddGrid(grid);
@@ -187,7 +187,7 @@ public class PortedDoorTests
         using var env = GlobalTestEnv.Enter();
         var (nh, area, grid, startNode) = SetupArea();
         var destNode = new Node(new Coord("TestArea", 0, 2, 0));
-        grid.Nodes[(0, 2)] = destNode;
+        grid.AddNode(destNode);
         // also register destNode in handler via AddNode? But grid direct is enough, GetNode will find via area/grid
         ObjectRegistry.AddObject(destNode);
         var caller = MakeCaller(startNode);
@@ -205,10 +205,10 @@ public class PortedDoorTests
         using var env = GlobalTestEnv.Enter();
         var (nh, area, grid, startNode) = SetupArea();
         var doorCoordNode = new Node(new Coord("TestArea", 0, 1, 0));
-        grid.Nodes[(0, 1)] = doorCoordNode;
+        grid.AddNode(doorCoordNode);
         ObjectRegistry.AddObject(doorCoordNode);
         var destNode = new Node(new Coord("TestArea", 0, 2, 0));
-        grid.Nodes[(0, 2)] = destNode;
+        grid.AddNode(destNode);
         ObjectRegistry.AddObject(destNode);
         var caller = MakeCaller(startNode);
         var cmd = new DoorCommand();

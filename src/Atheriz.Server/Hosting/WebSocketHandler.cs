@@ -4,7 +4,10 @@ namespace Atheriz.Server.Hosting;
 
 public static class WebSocketHandler
 {
-    private static readonly ThrottledLog _wsOversizeLog = new(5.0);
+    // No throttle holder here: this class is a static entry point with no
+    // instance, so per-host oversize suppression shares the registering
+    // manager's world-scoped budget (manager.ShouldLogOversize) instead of a
+    // process-wide static that one world's burst uses to silence another's.
 
     public static async Task HandleAsync(HttpContext context, AtherizSettings settings)
     {
@@ -95,7 +98,7 @@ public static class WebSocketHandler
                 if (isClose) break;
                 if (tooBig)
                 {
-                    bool shouldLog = _wsOversizeLog.ShouldLog(clientHost);
+                    bool shouldLog = manager.ShouldLogOversize(clientHost);
                     if (shouldLog)
                     {
                         var msg = $"[WebSocket] Message too large from {clientHost} (over {maxMessageSize} bytes)";

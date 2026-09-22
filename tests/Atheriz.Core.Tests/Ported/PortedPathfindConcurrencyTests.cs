@@ -50,7 +50,7 @@ public class PortedPathfindConcurrencyTests
         var grid = new NodeGrid("RaceArea", 0);
         foreach(var (x,y) in new[]{(0,0),(1,0),(2,0)}){
             var node = new Node(new Coord("RaceArea", x, y, 0));
-            grid.Nodes[(x,y)] = node;
+            grid.AddNode(node);
         }
         area.AddGrid(grid);
         nh.AddArea(area);

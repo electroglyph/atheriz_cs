@@ -8,8 +8,20 @@ public sealed class NodeArea
     public string Name { get; set; }
     public string? Theme { get; set; }
     public bool IsModified { get; set; } = true;
-    public Dictionary<int, NodeGrid> Grids { get; } = new();
-    public Dictionary<string, JsonElement> Data { get; set; } = new();
+    // Snapshot copies: the getters return copies under the read lock, so a
+    // reader enumerating the copy never races a concurrent mutator. Lock-held
+    // internals below touch _grids/_data directly.
+    private Dictionary<int, NodeGrid> _grids = new();
+    public Dictionary<int, NodeGrid> Grids
+    {
+        get { Lock.EnterReadLock(); try { return new Dictionary<int, NodeGrid>(_grids); } finally { Lock.ExitReadLock(); } }
+    }
+    private Dictionary<string, JsonElement> _data = new();
+    public Dictionary<string, JsonElement> Data
+    {
+        get { Lock.EnterReadLock(); try { return new Dictionary<string, JsonElement>(_data); } finally { Lock.ExitReadLock(); } }
+        set { Lock.EnterWriteLock(); try { _data = value is null ? new() : new Dictionary<string, JsonElement>(value); IsModified = true; } finally { Lock.ExitWriteLock(); } }
+    }
     public HashSet<string>? LinkedAreas { get; set; }
 
     // Port of nodes.py:1231
@@ -18,14 +30,14 @@ public sealed class NodeArea
         Name = name;
         Theme = theme;
     }
-    public int Count { get { Lock.EnterReadLock(); try { return Grids.Count; } finally { Lock.ExitReadLock(); } } }
+    public int Count { get { Lock.EnterReadLock(); try { return _grids.Count; } finally { Lock.ExitReadLock(); } } }
     // Port of nodes.py:1242
     public override string ToString()
     {
         Lock.EnterReadLock();
         try
         {
-            var grids = string.Join(", ", Grids.Select(kv => $"Grid(z={kv.Key}, len={kv.Value.Count})"));
+            var grids = string.Join(", ", _grids.Select(kv => $"Grid(z={kv.Key}, len={kv.Value.Count})"));
             return $"Area {Name}: {grids}";
         }
         finally { Lock.ExitReadLock(); }
@@ -37,11 +49,16 @@ public sealed class NodeArea
     {
         if (obj is not NodeArea o) return false;
         if (Name != o.Name || Theme != o.Theme) return false;
-        if (Grids.Count != o.Grids.Count || Data.Count != o.Data.Count) return false;
-        foreach (var kv in Grids)
-            if (!o.Grids.TryGetValue(kv.Key, out var g) || !kv.Value.Equals(g)) return false;
-        foreach (var kv in Data)
-            if (!o.Data.TryGetValue(kv.Key, out var je) || kv.Value.GetRawText() != je.GetRawText()) return false;
+        // Snapshot each side under its own read lock (taking both area locks
+        // here would order them arbitrarily).
+        var myGrids = Grids; var otherGrids = o.Grids;
+        if (myGrids.Count != otherGrids.Count) return false;
+        var myData = Data; var otherData = o.Data;
+        if (myData.Count != otherData.Count) return false;
+        foreach (var kv in myGrids)
+            if (!otherGrids.TryGetValue(kv.Key, out var g) || !kv.Value.Equals(g)) return false;
+        foreach (var kv in myData)
+            if (!otherData.TryGetValue(kv.Key, out var je) || kv.Value.GetRawText() != je.GetRawText()) return false;
         return (LinkedAreas is null && o.LinkedAreas is null) || (LinkedAreas is not null && o.LinkedAreas is not null && LinkedAreas.SetEquals(o.LinkedAreas));
     }
     public override int GetHashCode()
@@ -49,8 +66,9 @@ public sealed class NodeArea
         var h = new HashCode();
         h.Add(Name);
         h.Add(Theme);
-        foreach (var k in Grids.Keys.OrderBy(k => k)) { h.Add(k); h.Add(Grids[k]); }
-        foreach (var k in Data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(Data[k].GetRawText()); }
+        var grids = Grids; var data = Data;
+        foreach (var k in grids.Keys.OrderBy(k => k)) { h.Add(k); h.Add(grids[k]); }
+        foreach (var k in data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(data[k].GetRawText()); }
         if (LinkedAreas is not null) foreach (var a in LinkedAreas.OrderBy(a => a, StringComparer.Ordinal)) h.Add(a);
         return h.ToHashCode();
     }
@@ -64,7 +82,7 @@ public sealed class NodeArea
         {
             foreach (var (x, y, z) in coords)
             {
-                if (Grids.TryGetValue(z, out var g))
+                if (_grids.TryGetValue(z, out var g))
                 {
                     var n = g.GetNode(x, y);
                     if (n is not null) res.Add(n);
@@ -95,7 +113,7 @@ public sealed class NodeArea
             for (int z = cz - ri; z <= cz + ri; z++)
             {
                 int dz = z - cz; if ((double)dz * dz > r2) continue;
-                if (!Grids.TryGetValue(z, out var g)) continue;
+                if (!_grids.TryGetValue(z, out var g)) continue;
                 double maxDxy2 = r2 - dz * dz;
                 int maxDxy = (int)Math.Sqrt(maxDxy2);
                 g.Lock.EnterReadLock();
@@ -110,7 +128,9 @@ public sealed class NodeArea
                         for (int y = cy - maxDy; y <= cy + maxDy; y++)
                         {
                             if (ignoreCenter && x == cx && y == cy && z == cz) continue;
-                            if (g.Nodes.TryGetValue((x, y), out var n)) result.Add(n);
+                            // Locked GetNode (the grid lock is already held,
+                            // SupportsRecursion) instead of touching the live dict.
+                            if (g.GetNode(x, y) is { } n) result.Add(n);
                         }
                     }
                 }
@@ -168,7 +188,7 @@ public sealed class NodeArea
         {
             foreach (var (dx, dy, dz) in NeighborOffsets)
             {
-                if (Grids.TryGetValue(z + dz, out var g))
+                if (_grids.TryGetValue(z + dz, out var g))
                 {
                     var n = g.GetNode(x + dx, y + dy);
                     if (n is not null) neighbors.Add(n);
@@ -184,21 +204,21 @@ public sealed class NodeArea
     public void SetData(string key, JsonElement value)
     {
         Lock.EnterWriteLock();
-        try { Data[key] = value; IsModified = true; }
+        try { _data[key] = value; IsModified = true; }
         finally { Lock.ExitWriteLock(); }
     }
     // Port of nodes.py:1352
     public JsonElement? GetData(string key)
     {
         Lock.EnterReadLock();
-        try { return Data.TryGetValue(key, out var v) ? v : null; }
+        try { return _data.TryGetValue(key, out var v) ? v : null; }
         finally { Lock.ExitReadLock(); }
     }
     // Port of nodes.py:1357
     public void RemoveData(string key)
     {
         Lock.EnterWriteLock();
-        try { Data.Remove(key); IsModified = true; }
+        try { _data.Remove(key); IsModified = true; }
         finally { Lock.ExitWriteLock(); }
     }
     // Port of nodes.py:1362 remove_linked_area
@@ -246,14 +266,23 @@ public sealed class NodeArea
     {
         grid.Area = Name;
         Lock.EnterWriteLock();
-        try { Grids[grid.Z] = grid; IsModified = true; }
+        try { _grids[grid.Z] = grid; IsModified = true; }
         finally { Lock.ExitWriteLock(); }
+    }
+    // Lock-free insert for load/hydrate paths that already hold the area
+    // write lock (or run single-threaded at startup): sets the back-pointer
+    // and inserts, no locking.
+    internal void AddGridRaw(NodeGrid grid)
+    {
+        grid.Area = Name;
+        _grids[grid.Z] = grid;
+        IsModified = true;
     }
     // Port of nodes.py:1398 get_grid
     public NodeGrid? GetGrid(int z)
     {
         Lock.EnterReadLock();
-        try { return Grids.TryGetValue(z, out var g) ? g : null; }
+        try { return _grids.TryGetValue(z, out var g) ? g : null; }
         finally { Lock.ExitReadLock(); }
     }
     public NodeGrid GetOrCreateGrid(int z)
@@ -261,15 +290,15 @@ public sealed class NodeArea
         Lock.EnterUpgradeableReadLock();
         try
         {
-            if (!Grids.TryGetValue(z, out var g))
+            if (!_grids.TryGetValue(z, out var g))
             {
                 Lock.EnterWriteLock();
                 try
                 {
-                    if (!Grids.TryGetValue(z, out g))
+                    if (!_grids.TryGetValue(z, out g))
                     {
                         g = new NodeGrid(Name, z);
-                        Grids[z] = g;
+                        _grids[z] = g;
                         IsModified = true;
                     }
                 }
@@ -286,7 +315,7 @@ public sealed class NodeArea
         Lock.EnterWriteLock();
         try
         {
-            if (Grids.Remove(z, out var m)) m.Clear();
+            if (_grids.Remove(z, out var m)) m.Clear();
             IsModified = true;
         }
         finally { Lock.ExitWriteLock(); }
@@ -297,8 +326,8 @@ public sealed class NodeArea
         Lock.EnterWriteLock();
         try
         {
-            foreach (var v in Grids.Values) v.Clear();
-            Grids.Clear();
+            foreach (var v in _grids.Values) v.Clear();
+            _grids.Clear();
             IsModified = true;
         }
         finally { Lock.ExitWriteLock(); }

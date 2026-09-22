@@ -51,9 +51,9 @@ public sealed class LegendSharedEntriesTests
             ObjectRegistry.ClearAll();
             var mi = new MapInfo { Settings = new Atheriz.Core.Settings.AtherizSettings() };
             var placed = MakePlaced("placed", 1, "legendA");
-            mi.Objects[placed.Id] = placed;
-            mi.LegendEntries.Add(new LegendEntry("@", "tree", (1, 2)));
-            mi.LegendEntries.Add(new LegendEntry("?", "hidden", null));
+            mi.AddMapable(placed, false);
+            mi.AddLegendEntry(new LegendEntry("@", "tree", (1, 2)));
+            mi.AddLegendEntry(new LegendEntry("?", "hidden", null));
             var first = new RecLegendListener { Id = 101 };
             var second = new RecLegendListener { Id = 102 };
             mi.AddListener(first);
@@ -83,7 +83,7 @@ public sealed class LegendSharedEntriesTests
             ObjectRegistry.ClearAll();
             var mi = new MapInfo { Settings = new Atheriz.Core.Settings.AtherizSettings() };
             var placed = MakePlaced("placedself", 7, "legendB");
-            mi.Objects[placed.Id] = placed;
+            mi.AddMapable(placed, false);
             var self = new RecLegendListener { Id = 7 };
             var other = new RecLegendListener { Id = 103 };
             mi.AddListener(self);
@@ -112,7 +112,7 @@ public sealed class LegendSharedEntriesTests
             ObjectRegistry.ClearAll();
             var mi = new MapInfo { Settings = new Atheriz.Core.Settings.AtherizSettings() };
             var placed = MakePlaced("placed", 11, "legendC");
-            mi.Objects[placed.Id] = placed;
+            mi.AddMapable(placed, false);
             var mutator = new MutatingLegendListener { Id = 201 };
             var observer = new ObservingLegendListener { Id = 202 };
             mi.AddListener(mutator);

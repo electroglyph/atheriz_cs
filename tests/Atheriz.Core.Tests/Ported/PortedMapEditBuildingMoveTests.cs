@@ -42,13 +42,13 @@ public class PortedMapEditBuildingMoveTests
     {
         var grid = MakeBuildingGrid();
         var mi = new MapInfo(AREA);
-        foreach(var kv in grid) mi.PostGrid[kv.Key]=kv.Value;
+        foreach(var kv in grid) mi.SetPostCell(kv.Key, kv.Value);
         // pre_grid stays empty
         var upper = new Node(new Coord(AREA,5,2,Z));
         var lower = new Node(new Coord(AREA,5,4,Z));
         var gridObj = new NodeGrid(AREA, Z);
-        gridObj.Nodes[(upper.Coord.X, upper.Coord.Y)] = upper;
-        gridObj.Nodes[(lower.Coord.X, lower.Coord.Y)] = lower;
+        gridObj.AddNode(upper);
+        gridObj.AddNode(lower);
         var area = new NodeArea(AREA);
         area.AddGrid(gridObj);
         var nh = new NodeHandler(autoLoad:false);
@@ -167,7 +167,7 @@ public class PortedMapEditBuildingMoveTests
     {
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo(AREA);
-        mi.PostGrid[(0,0)]="X"; mi.PostGrid[(1,0)]="─";
+        mi.SetPostCell((0,0), "X"); mi.SetPostCell((1,0), "─");
         Assert.Empty(mi.PreGrid);
         using (mi.BatchUpdate()) { }
         Assert.Equal(2, mi.PreGrid.Count);
@@ -183,11 +183,11 @@ public class PortedMapEditBuildingMoveTests
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo(AREA);
         var grid = MakeBuildingGrid();
-        foreach(var kv in grid) mi.PostGrid[kv.Key]=kv.Value;
+        foreach(var kv in grid) mi.SetPostCell(kv.Key, kv.Value);
         var upper = new Node(new Coord(AREA,5,2,Z));
         var lower = new Node(new Coord(AREA,5,4,Z));
         var gridObj = new NodeGrid(AREA, Z);
-        gridObj.Nodes[(5,2)]=upper; gridObj.Nodes[(5,4)]=lower;
+        gridObj.AddNode(upper); gridObj.AddNode(lower);
         var area = new NodeArea(AREA); area.AddGrid(gridObj);
         var nh = new NodeHandler(autoLoad:false); nh.AddArea(area); NodeHandler.SetCurrent(nh);
         var mh = new MapHandler(autoLoad:false); mh.SetMapInfo(AREA,Z,mi); GlobalServices.SetMapHandler(mh);

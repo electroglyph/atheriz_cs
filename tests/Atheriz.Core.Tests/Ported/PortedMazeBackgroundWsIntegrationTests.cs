@@ -206,7 +206,8 @@ public class PortedMazeBackgroundWsIntegrationTests
             try{ await Run("bash",$"{repoRoot}/atheriz.sh stop --port {port}",repoRoot,null,5000);}catch{}
             await Task.Delay(800);
             try{ if(await IsListening(port)){ var pf=Path.Combine(game,"save","server.pid"); if(File.Exists(pf)&&int.TryParse(File.ReadAllText(pf).Trim(),out var pid)) try{ Process.GetProcessById(pid).Kill(); }catch{} } }catch{}
-            try{ await Run("bash",$"rm -rf \"{tmp}\"",null,null,5000);}catch{}
+            try{ await Run("bash",$"rm -rf \"{tmp}\"",null,null,60000);}catch{}
+            try{ if(Directory.Exists(tmp)) await Run("bash",$"rm -rf \"{tmp}\"",null,null,60000);}catch{}
             try{ if(Directory.Exists(tmp)) Directory.Delete(tmp,true);}catch{}
         }
     }

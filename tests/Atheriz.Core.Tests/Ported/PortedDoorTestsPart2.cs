@@ -24,7 +24,7 @@ public class PortedDoorTestsPart2
         var area = new NodeArea("TestArea");
         var grid = new NodeGrid("TestArea", 0);
         var startNode = new Node(new Coord("TestArea", 0, 0, 0));
-        grid.Nodes[(0,0)] = startNode;
+        grid.AddNode(startNode);
         // Explicit registration: the constructor does not publish.
         ObjectRegistry.AddObject(startNode);
         area.AddGrid(grid);
@@ -138,7 +138,7 @@ public class PortedDoorTestsPart2
         var wrongLink = new NodeLink("north", new Coord("TestArea", 99, 99, 0), new List<string>{"n"});
         startNode.AddLink(wrongLink);
         var destNode = new Node(new Coord("TestArea", 0, 2, 0));
-        grid.Nodes[(0,2)] = destNode;
+        grid.AddNode(destNode);
         ObjectRegistry.AddObject(destNode);
         var caller = MakeCaller(startNode);
         new DoorCommand().Run(caller, MakeArgs(north:true));
@@ -507,7 +507,7 @@ public class PortedDoorTestsPart2
         {
             var a = new NodeArea(area);
             var g = new NodeGrid(area, 0);
-            g.Nodes[(0,0)] = n1; g.Nodes[(0,1)] = n2;
+            g.AddNode(n1); g.AddNode(n2);
             a.AddGrid(g); nh.AddArea(a);
         }
         AddArea("A", Track("A", 0), Track("A", 1));

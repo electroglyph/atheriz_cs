@@ -156,7 +156,7 @@ public class PortedMapTests
     [Fact] public void MapInfo_GetStateKeepsGrids()
     {
         using var env = GlobalTestEnv.Enter();
-        var mi = new MapInfo(); mi.PreGrid[(0,0)]="#"; mi.PostGrid[(0,0)]="#";
+        var mi = new MapInfo(); mi.SetPreCell((0,0), "#"); mi.SetPostCell((0,0), "#");
         var dto = MapInfo.MapInfoPersistDto.FromDomain(mi);
         Assert.True(dto.PreGrid.ContainsKey("0,0")); Assert.Equal("#", dto.PreGrid["0,0"]);
         Assert.True(dto.PostGrid.ContainsKey("0,0"));
@@ -200,7 +200,7 @@ public class PortedMapTests
     [Fact] public void MapInfo_EqDifferentLegend()
     {
         var a = new MapInfo("x"); var b = new MapInfo("x");
-        a.LegendEntries.Add(new LegendEntry("a"));
+        a.AddLegendEntry(new LegendEntry("a"));
         Assert.False(a.Equals(b));
     }
 
@@ -223,7 +223,7 @@ public class PortedMapTests
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo();
         var s = new AtherizSettings();
-        mi.PreGrid[(4,5)] = s.RoomPlaceholder;
+        mi.SetPreCell((4,5), s.RoomPlaceholder);
         mi.PlaceWalls((5,5),"#");
         Assert.Equal(s.RoomPlaceholder, mi.PreGrid[(4,5)]);
     }
@@ -347,7 +347,7 @@ public class PortedMapTests
     {
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo(); var s = new AtherizSettings();
-        mi.PreGrid[(0,0)] = s.SingleWallPlaceholder;
+        mi.SetPreCell((0,0), s.SingleWallPlaceholder);
         mi.PreRender();
         Assert.NotEqual(s.SingleWallPlaceholder, mi.PostGrid[(0,0)]);
     }
@@ -355,7 +355,7 @@ public class PortedMapTests
     {
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo(); var s = new AtherizSettings();
-        mi.PreGrid[(0,0)] = s.DoubleWallPlaceholder;
+        mi.SetPreCell((0,0), s.DoubleWallPlaceholder);
         mi.PreRender();
         Assert.NotEqual(s.DoubleWallPlaceholder, mi.PostGrid[(0,0)]);
     }
@@ -363,14 +363,14 @@ public class PortedMapTests
     {
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo(); var s = new AtherizSettings();
-        mi.PreGrid[(0,0)] = s.RoomPlaceholder;
+        mi.SetPreCell((0,0), s.RoomPlaceholder);
         mi.PreRender();
         Assert.Equal(" ", mi.PostGrid[(0,0)]);
     }
     [Fact] public void PreRender_UnrelatedCharPassesThrough()
     {
         using var env = GlobalTestEnv.Enter();
-        var mi = new MapInfo(); mi.PreGrid[(0,0)]="X"; mi.PreRender();
+        var mi = new MapInfo(); mi.SetPreCell((0,0), "X"); mi.PreRender();
         Assert.Equal("X", mi.PostGrid[(0,0)]);
     }
     [Fact] public void PreRender_ResolvesJunctionWithAnsiWrappedNeighbors()
@@ -378,11 +378,11 @@ public class PortedMapTests
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo(); var s = new AtherizSettings();
         string ansiWall = $"\x1b[48;2;0;0;0m\x1b[38;2;255;255;255m{s.SingleWallPlaceholder}\x1b[0m";
-        mi.PreGrid[(0,0)] = s.SingleWallPlaceholder;
-        mi.PreGrid[(1,0)] = ansiWall;
-        mi.PreGrid[(-1,0)] = ansiWall;
-        mi.PreGrid[(0,1)] = ansiWall;
-        mi.PreGrid[(0,-1)] = ansiWall;
+        mi.SetPreCell((0,0), s.SingleWallPlaceholder);
+        mi.SetPreCell((1,0), ansiWall);
+        mi.SetPreCell((-1,0), ansiWall);
+        mi.SetPreCell((0,1), ansiWall);
+        mi.SetPreCell((0,-1), ansiWall);
         mi.PreRender();
         Assert.Equal("┼", mi.PostGrid[(0,0)]);
         Assert.Equal(ansiWall, mi.PostGrid[(1,0)]);
@@ -418,7 +418,7 @@ public class PortedMapTests
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo();
         var s = new AtherizSettings();
-        for(int i=0;i<s.MaxObjectsPerLegend+1;i++) mi.Objects[i]=GameObject.Create($"o{i}");
+        for(int i=0;i<s.MaxObjectsPerLegend+1;i++) mi.AddMapable(GameObject.Create($"o{i}"), false);
         var listener = new FakeListener(); listener.Id=999;
         mi.AddListener(listener);
         mi.RenderLegend();
@@ -460,7 +460,7 @@ public class PortedMapTests
         // Also add fake? Instead use obj itself as listener: need GameObject with AtLegendUpdate – but GameObject doesn't have it.
         // So we test via FakeListener that has id 1
         var fake = new FakeListener(); fake.Id=1;
-        mi.Listeners.Clear(); mi.Listeners[1]=fake;
+        mi.RemoveListener(obj); mi.AddListener(fake, false);
         mi.RenderLegend();
         Assert.Equal(1, fake.AtLegendUpdateCount);
         // filtered self: entries should not contain fake's own entry
@@ -473,7 +473,7 @@ public class PortedMapTests
     [Fact] public void Render_CallsAtMapUpdateForListeners()
     {
         using var env = GlobalTestEnv.Enter();
-        var mi = new MapInfo(); mi.PreGrid[(0,0)]="X"; mi.PreRender();
+        var mi = new MapInfo(); mi.SetPreCell((0,0), "X"); mi.PreRender();
         var listener = new FakeListener(); listener.Id=99; listener.LastMapTime=0; listener.MapEnabled=true; listener.AtPreMapRenderImpl = g=>g;
         mi.AddListener(listener);
         mi.Render(force:true);
@@ -487,7 +487,7 @@ public class PortedMapTests
     [Fact] public void Render_SkipsListenerWithinFpsLimit()
     {
         using var env = GlobalTestEnv.Enter();
-        var mi = new MapInfo(); mi.PreGrid[(0,0)]="X"; mi.PreRender();
+        var mi = new MapInfo(); mi.SetPreCell((0,0), "X"); mi.PreRender();
         var listener = new FakeListener(); listener.Id=99; listener.LastMapTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds()); listener.MapEnabled=true; listener.AtPreMapRenderImpl=g=>g;
         mi.AddListener(listener);
         // Don't force – should be skipped if within fps limit (MAP_FPS_LIMIT=5 => fps_limit=0.2s)
@@ -506,7 +506,7 @@ public class PortedMapTests
     [Fact] public void Render_RendersWhenMapChanged()
     {
         using var env = GlobalTestEnv.Enter();
-        var mi = new MapInfo(); mi.PreGrid[(0,0)]="X";
+        var mi = new MapInfo(); mi.SetPreCell((0,0), "X");
         var listener = new FakeListener(); listener.Id=99; listener.LastMapTime=0; listener.MapEnabled=true; listener.AtPreMapRenderImpl=g=>g;
         mi.AddListener(listener);
         // map_changed defaults to true
@@ -652,7 +652,7 @@ public class PortedMapTests
     [Fact] public void Render_RendersSkipsDisabledListeners()
     {
         using var env = GlobalTestEnv.Enter();
-        var mi = new MapInfo(); mi.PreGrid[(0,0)]="X"; mi.PreRender();
+        var mi = new MapInfo(); mi.SetPreCell((0,0), "X"); mi.PreRender();
         var enabled = new FakeListener(); enabled.Id=1; enabled.LastMapTime=0; enabled.MapEnabled=true; enabled.AtPreMapRenderImpl=g=>g;
         var disabled = new FakeListener(); disabled.Id=2; disabled.LastMapTime=0; disabled.MapEnabled=false; disabled.AtPreMapRenderImpl=g=>g;
         mi.AddListener(enabled); mi.AddListener(disabled);
@@ -727,7 +727,7 @@ public class PortedMapTests
     {
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo("area1");
-        mi.PreGrid[(0,0)]="#";
+        mi.SetPreCell((0,0), "#");
         var handler = new MapHandler(autoLoad:false);
         handler.SetMapInfo("area1",0,mi);
         handler.Save(force:true);
@@ -775,7 +775,7 @@ public class PortedMapTests
     {
         using var env = GlobalTestEnv.Enter();
         var handler = new MapHandler(autoLoad:false);
-        var mi = new MapInfo("x"); mi.PreGrid[(0,0)]="#";
+        var mi = new MapInfo("x"); mi.SetPreCell((0,0), "#");
         handler.SetMapInfo("x",0,mi);
         handler.Save(force:true);
         using var db = AtherizDbContextFactory.Create(env.TempPath);
@@ -787,7 +787,7 @@ public class PortedMapTests
     {
         using var env = GlobalTestEnv.Enter();
         var handler = new MapHandler(autoLoad:false);
-        var mi = new MapInfo("x"); mi.PreGrid[(0,0)]="#"; mi.MapChanged=true;
+        var mi = new MapInfo("x"); mi.SetPreCell((0,0), "#"); mi.MapChanged=true;
         handler.SetMapInfo("x",0,mi);
         // Simulate error by using a MapInfo that will throw during serialization – we force by making Save use a bad DTO?
         // Instead we test that Save does not throw and restores flag on simulated failure via manual flag manipulation
@@ -915,20 +915,20 @@ public class PortedMapTests
     {
         using var env = GlobalTestEnv.Enter();
         var handler = new MapHandler(autoLoad:false);
-        var mi = new MapInfo("SnapTest"); mi.PreGrid[(0,0)]="#";
+        var mi = new MapInfo("SnapTest"); mi.SetPreCell((0,0), "#");
         handler.SetMapInfo("SnapTest",0,mi);
         // Simulate snapshot independence: dto snapshot should be deep copy
         var dto = MapInfo.MapInfoPersistDto.FromDomain(mi);
-        mi.PreGrid[(1,1)]=".";
+        mi.SetPreCell((1,1), ".");
         // dto should still have only 1 entry
         Assert.Single(dto.PreGrid);
         Assert.True(dto.PreGrid.ContainsKey("0,0"));
         // Also test via Save: after Save, mutating original shouldn't affect DB
         handler = new MapHandler(autoLoad:false);
-        mi = new MapInfo("SnapTest2"); mi.PreGrid[(0,0)]="#";
+        mi = new MapInfo("SnapTest2"); mi.SetPreCell((0,0), "#");
         handler.SetMapInfo("SnapTest2",0,mi);
         handler.Save(force:true);
-        mi.PreGrid[(1,1)]=".";
+        mi.SetPreCell((1,1), ".");
         using var db = AtherizDbContextFactory.Create(env.TempPath);
         var row = db.MapData.Find("SnapTest2",0);
         var loadedDto = System.Text.Json.JsonSerializer.Deserialize<MapInfo.MapInfoPersistDto>(row!.Data, JsonOptions.Default)!;
@@ -942,7 +942,7 @@ public class PortedMapTests
         var orig = AtherizSettings.Global.MapFpsLimit;
         try {
             AtherizSettings.Global.MapFpsLimit = 0;
-            var mi = new MapInfo(); mi.PreGrid[(0,0)]="X"; mi.PreRender();
+            var mi = new MapInfo(); mi.SetPreCell((0,0), "X"); mi.PreRender();
             var listener = new FakeListener(); listener.Id=99; listener.LastMapTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); listener.MapEnabled=true; listener.AtPreMapRenderImpl=g=>g;
             mi.AddListener(listener);
             var ex = Record.Exception(()=> mi.Render(force:true));
@@ -954,7 +954,7 @@ public class PortedMapTests
     {
         using var env = GlobalTestEnv.Enter();
         var mi = new MapInfo(); mi.Settings = new AtherizSettings { MapFpsLimit = 0 };
-        mi.PreGrid[(0,0)]="X"; mi.PreRender();
+        mi.SetPreCell((0,0), "X"); mi.PreRender();
         var listener = new FakeListener(); listener.Id=99; listener.LastMapTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); listener.MapEnabled=true; listener.AtPreMapRenderImpl=g=>g;
         mi.AddListener(listener);
         mi.Render(force:false);
@@ -966,7 +966,7 @@ public class PortedMapTests
         var orig = AtherizSettings.Global.MapFpsLimit;
         try {
             AtherizSettings.Global.MapFpsLimit = 1;
-            var mi = new MapInfo(); mi.PreGrid[(0,0)]="X"; mi.PreRender();
+            var mi = new MapInfo(); mi.SetPreCell((0,0), "X"); mi.PreRender();
             var listener = new FakeListener(); listener.Id=99; listener.LastMapTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); listener.MapEnabled=true; listener.AtPreMapRenderImpl=g=>g;
             mi.AddListener(listener);
             mi.Render(force:false);
@@ -980,7 +980,7 @@ public class PortedMapTests
         try {
             AtherizSettings.Global.MapFpsLimit = 1;
             var mi = new MapInfo(); mi.Settings = new AtherizSettings { MapFpsLimit = 0 };
-            mi.PreGrid[(0,0)]="X"; mi.PreRender();
+            mi.SetPreCell((0,0), "X"); mi.PreRender();
             var listener = new FakeListener(); listener.Id=99; listener.LastMapTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); listener.MapEnabled=true; listener.AtPreMapRenderImpl=g=>g;
             mi.AddListener(listener);
             mi.Render(force:false);
@@ -1001,8 +1001,8 @@ public class PortedMapTests
         Assert.IsType<System.Threading.ReaderWriterLockSlim>(clone.Lock);
         // Also test direct clone via DTO copy
         var mi2 = new MapInfo("area2");
-        mi2.PreGrid[(0,0)] = mi.PreGrid[(0,0)];
-        mi2.PostGrid[(0,0)] = mi.PostGrid[(0,0)];
+        mi2.SetPreCell((0,0), mi.PreGrid[(0,0)]);
+        mi2.SetPostCell((0,0), mi.PostGrid[(0,0)]);
         Assert.Equal("*", mi2.PreGrid[(0,0)]);
     }
 
@@ -1010,12 +1010,12 @@ public class PortedMapTests
     [Fact] public void MapRender_SkipsObjectWithoutLocation()
     {
         using var env = GlobalTestEnv.Enter();
-        var mi = new MapInfo("test"); mi.PreGrid[(0,0)]="#"; mi.MapChanged=true;
+        var mi = new MapInfo("test"); mi.SetPreCell((0,0), "#"); mi.MapChanged=true;
         var listener = new FakeListener(); listener.Id=1; listener.MapEnabled=true; listener.LastMapTime=0; listener.AtPreMapRenderImpl=g=>g;
         mi.AddListener(listener);
         var stray = GameObject.Create("stray", isMapable:true); stray.Id=999; stray.Symbol="S";
         stray.Location = Atheriz.Core.Persistence.Dto.LocationRef.NullLocation.Instance;
-        mi.Objects[stray.Id]=stray;
+        mi.AddMapable(stray, false);
         var ex = Record.Exception(()=> mi.Render(force:true));
         Assert.Null(ex);
         Assert.Equal(1, listener.AtMapUpdateCount);
@@ -1028,7 +1028,7 @@ public class PortedMapTests
         mi.AddListener(listener);
         var stray = GameObject.Create("stray", isMapable:true); stray.Id=999; stray.Symbol="S";
         stray.Location = Atheriz.Core.Persistence.Dto.LocationRef.NullLocation.Instance;
-        mi.Objects[stray.Id]=stray;
+        mi.AddMapable(stray, false);
         var ex = Record.Exception(()=> mi.RenderLegend());
         Assert.Null(ex);
         Assert.Equal(1, listener.AtLegendUpdateCount);
@@ -1059,7 +1059,7 @@ public class PortedMapTests
         using var env = GlobalTestEnv.Enter();
         var handler = new MapHandler(autoLoad:false);
         var mi = new MapInfo("tomb");
-        mi.PreGrid[(0,0)]="#";
+        mi.SetPreCell((0,0), "#");
         handler.SetMapInfo("tomb",0,mi);
         using (var db = AtherizDbContextFactory.Create(env.TempPath))
             handler.Save(db, force:true);
