@@ -1,10 +1,10 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Diagnostics;
 using Atheriz.Core.Concurrency;
 
 namespace Atheriz.Core.Network;
 
-// Port of atheriz/network/manager.py:1-229
 // Manages all connections and orchestrates message handling across protocols.
 // Replaces older WebSocketManager to be protocol-agnostic.
 // Line-number comments reference manager.py original.
@@ -30,7 +30,6 @@ public class InputFuncs
     public static Func<MapHandler> MapHandlerFactory = () => GlobalServices.GetMapHandler();
     public static Func<NodeHandler> NodeHandlerFactory = () => NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();
 
-    // Port of inputfuncs.py:224-238 get_handlers
     public Dictionary<string, Delegate> GetHandlers()
     {
         // Single case-insensitive registry: each handler is stored under its
@@ -72,13 +71,12 @@ public class InputFuncs
     {
     }
 
-    // Port of inputfuncs.py:240-301 text handler — core command dispatch
+// core command dispatch
     public void Text(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         try
         {
             var text = args.FirstOrDefault()?.ToString() ?? "";
-            // port of inputfuncs.py:258 session handling + future check
             var session = connection.Session;
             // In Python, atp is get_async_threadpool(); here we use ConnectionManager's pool via global
             // Check-and-clear must be atomic: prompt owner and disconnect cleanup both touch input_future
@@ -111,11 +109,10 @@ public class InputFuncs
                 {
                     try { connection.SendCommand("echo_on"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InputFuncs.Text: " + logEx.Message, "InputFuncs"); }
                 }
-                // port of inputfuncs.py:277 atp.loop.call_soon_threadsafe(future.set_result, text)
                 try { future.TrySetResult(text); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InputFuncs.Text: " + logEx.Message, "InputFuncs"); }
                 return;
             }
-            if (string.IsNullOrEmpty(text)) return; // port of inputfuncs.py:280
+            if (string.IsNullOrEmpty(text)) return;
 
             // snapshot puppet once — inputfuncs.py:284-286
             Atheriz.Core.Objects.GameObject? puppet = null;
@@ -123,18 +120,15 @@ public class InputFuncs
 
             if (puppet is not null)
             {
-                // port of inputfuncs.py:290 dispatch_loggedin immediate
                 var job = Atheriz.Core.Commands.CommandDispatcher.DispatchLoggedIn(puppet, text, immediate: true);
                 if (job is not null)
                 {
                     // already on game worker via connection drain — execute inline instead of queueing second task
-                    // port of inputfuncs.py:295-297 atp.run(*job)
                     try { job.Func(job.Caller, job.Args); } catch (Exception ex) { try { Atheriz.Core.AtherizLogger.LogError($"Exception in text handler: {ex}"); } catch { Console.Error.WriteLine(ex); } }
                 }
             }
             else
             {
-                // port of inputfuncs.py:293 _resolve_unloggedin
                 var job = Atheriz.Core.Commands.CommandDispatcher.ResolveUnloggedIn(connection, text);
                 if (job is not null)
                 {
@@ -148,7 +142,6 @@ public class InputFuncs
         }
     }
 
-    // Port of inputfuncs.py:302-320 term_size
     public void TermSize(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         var settings = AtherizSettings.Global;
@@ -157,7 +150,6 @@ public class InputFuncs
         connection.Session.TermHeight = h;
     }
 
-    // Port of inputfuncs.py:322-340 map_size
     public void MapSize(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         var settings = AtherizSettings.Global;
@@ -199,7 +191,6 @@ public class InputFuncs
         return 0 < w && w <= maxW && 0 < h && h <= maxH;
     }
 
-    // Port of inputfuncs.py:342-360 screenreader
     public void Screenreader(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         if (args.Count > 0)
@@ -214,17 +205,14 @@ public class InputFuncs
         }
     }
 
-    // Port of inputfuncs.py:362-374 client_ready — prompt welcome screen
-    // Port of atheriz/connection_screen.py:95 via ConnectionScreen.Render
+// prompt welcome screen
     public void ClientReady(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
-        // Port of inputfuncs.py:399-401 render(connection.session) + msg + prompt
-        var welcome = ConnectionScreen.Render(connection.Session); // Port of connection_screen.py:79 render
+        var welcome = ConnectionScreen.Render(connection.Session);
         connection.Msg(welcome);
         connection.SendCommand("prompt", new List<object?> { ">" }, []);
     }
 
-    // Port of inputfuncs.py:18-90 helpers
     private static bool IsColor(object? v)
     {
         if (v is List<object?> lst && lst.Count==3)
@@ -499,7 +487,6 @@ public class InputFuncs
         return true;
     }
 
-    // Port of inputfuncs.py:376-489 map_edit
     public void MapEditHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         if (args.Count < 3) return;
@@ -596,7 +583,6 @@ public class InputFuncs
             if (grid is not null)
             {
                 var failed = grid.ApplyMoves(roomMoves);
-                // Port of mapedit.py apply: surface refused moves (the client
                 // already validated — a refusal here means a cross-message
                 // validate->apply TOCTOU or a stale chain, worth one line).
                 if (failed.Count > 0)
@@ -773,30 +759,28 @@ public class InputFuncs
 }
 
 /// <summary>
-/// Port of atheriz/network/manager.py:41-229 ConnectionManager.
 /// </summary>
 public class ConnectionManager
 {
-    // Port of manager.py:10-24 malformed throttling — now via ThrottleWindow.
+// now via ThrottleWindow.
     // Per-manager state: a static holder would share per-host suppression
     // across test and game worlds, so a burst in one silences another.
     private readonly ThrottledLog _malformedLog = new(MalformedWindow);
-    private const double MalformedWindow = 5.0; // port of manager.py:12
+    private const double MalformedWindow = 5.0;
 
-    private static string SummarizeRaw(string rawMessage, int limit = 80) // port of manager.py:14-15
+    private static string SummarizeRaw(string rawMessage, int limit = 80)
     {
         var sub = rawMessage.Length > limit ? rawMessage.Substring(0, limit) : rawMessage;
         // Approximation of Python repr(sub) — quoted string with escapes
         return JsonSerializer.Serialize(sub);
     }
 
-    private bool ShouldLogMalformed(string host) // port of manager.py:17-24
+    private bool ShouldLogMalformed(string host)
         => _malformedLog.ShouldLog(host);
 
-    // Port of websocket.py:15-27 oversize throttling (per-host 5s window),
     // for the shared HandleCommand size cap .
     private readonly ThrottledLog _oversizeLog = new(OversizeWindow);
-    private const double OversizeWindow = 5.0; // port of websocket.py:13
+    private const double OversizeWindow = 5.0;
     /// <summary>
     /// Per-host 5s oversize-log throttle for this manager's world. Public so
     /// the hosting layer (one static entry point, no instance of its own)
@@ -805,28 +789,21 @@ public class ConnectionManager
     public bool ShouldLogOversize(string host)
         => _oversizeLog.ShouldLog(host);
 
-    // Reference equality comparer — mirrors id(connection) at manager.py:52,113,125
-    private sealed class ReferenceEqualityComparer : IEqualityComparer<BaseConnection>
-    {
-        public static readonly ReferenceEqualityComparer Instance = new();
-        public bool Equals(BaseConnection? x, BaseConnection? y) => ReferenceEquals(x, y);
-        public int GetHashCode(BaseConnection obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
-    }
-
-    // Port of manager.py:47-63 __init__
-    private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion); // port of manager.py:54 RLock
-    private readonly Dictionary<string, BaseConnection> _connections = new(); // port of manager.py:51
-    private readonly Dictionary<BaseConnection, string> _connToId = new(ReferenceEqualityComparer.Instance); // port of manager.py:52
-    private readonly Dictionary<string, int> _perIpCounts = new(); // port of manager.py:53
+    private readonly Lock _lock = new();
+    private readonly Dictionary<string, BaseConnection> _connections = new();
+    // Reverse index keyed by reference: BaseConnection does not override
+    // Equals, so the default comparer is already reference equality.
+    private readonly ConcurrentDictionary<BaseConnection, string> _connToId = new();
+    private readonly Dictionary<string, int> _perIpCounts = new();
     // orphan-sweep timer (started lazily on first registration).
     // Reaping rides a 60s wall-clock cadence, not registration traffic.
     private System.Threading.Timer? _orphanSweepTimer;
     private int _sweepStarted;
-    private readonly Dictionary<string, Delegate> _messageHandlers = new(StringComparer.OrdinalIgnoreCase); // port of manager.py:55
-    private int _connectionCounter; // port of manager.py:56
+    private readonly Dictionary<string, Delegate> _messageHandlers = new(StringComparer.OrdinalIgnoreCase);
+    private int _connectionCounter;
 
-    public AsyncThreadPool Atp { get; } // port of manager.py:57
-    public InputFuncs InputFuncs { get; } // port of manager.py:59
+    public AsyncThreadPool Atp { get; }
+    public InputFuncs InputFuncs { get; }
     private readonly AtherizSettings _settings;
 
     // Global singleton — mirrors get_connection_manager() at globals/get.py:79-86
@@ -848,14 +825,12 @@ public class ConnectionManager
             watchdogSeconds: TimeSpan.FromSeconds(_settings.ThreadpoolWatchdogSeconds),
             watchdogInterval: TimeSpan.FromSeconds(_settings.ThreadpoolWatchdogInterval));
         InputFuncs = inputFuncs ?? new InputFuncs();
-        // port of manager.py:62-63 Register handlers from InputFuncs
         foreach (var kv in InputFuncs.GetHandlers())
             RegisterHandler(kv.Key, kv.Value);
 
         lock (_globalLock) _globalInstance ??= this;
     }
 
-    // Port of manager.py:65-68 generate_connection_id. A bare counter needs
     // no manager lock: Interlocked owns the increment.
     public virtual string GenerateConnectionId()
     {
@@ -871,8 +846,7 @@ public class ConnectionManager
     public bool ShouldRefusePreSpawn(string host)
     {
         if (ObjectRegistry.IsIpBanned(host)) return true;
-        _lock.EnterReadLock();
-        try
+        lock (_lock)
         {
             var limit = _settings.MaxConnectionsPerIp;
             if (limit > 0 && host != "?" && _perIpCounts.TryGetValue(host, out var cnt) && cnt >= limit)
@@ -881,7 +855,6 @@ public class ConnectionManager
                 return true;
             return false;
         }
-        finally { _lock.ExitReadLock(); }
     }
 
     // Registration-time host for per-IP accounting and disconnect: the
@@ -891,14 +864,12 @@ public class ConnectionManager
     // refusal teardown runs outside the manager write lock (see
     // RefuseConnection). Close() does task/socket work that used to stall
     // every register/disconnect/count op while the lock was held.
-    // Port of manager.py:70-119 register_connection
     public virtual bool RegisterConnection(string connId, BaseConnection connection)
     {
-        var host = connection.ClientHost ?? "?"; // port of manager.py:76
-        var limit = _settings.MaxConnectionsPerIp; // port of manager.py:77
+        var host = connection.ClientHost ?? "?";
+        var limit = _settings.MaxConnectionsPerIp;
         string? refusal = null;
-        _lock.EnterWriteLock();
-        try
+        lock (_lock)
         {
             // Same object re-registering under a new id: its stale id must be
             // evicted, or one socket holds two slots (double per-IP count and
@@ -911,12 +882,12 @@ public class ConnectionManager
                 && _connections.TryGetValue(prevId, out var prevStored) && ReferenceEquals(prevStored, connection))
                 evictId = prevId;
             var evictHost = evictId is not null ? (connection.RegisteredHost ?? host) : null;
-            if (ObjectRegistry.IsIpBanned(host)) // port of manager.py:79-85
+            if (ObjectRegistry.IsIpBanned(host))
                 refusal = $"[Network] Refusing connection from banned host {host}";
-            else if (limit > 0 && host != "?") // port of manager.py:86-101
+            else if (limit > 0 && host != "?")
             {
                 var sameHost = _perIpCounts.TryGetValue(host, out var cnt) ? cnt : 0;
-                // if overwriting same conn_id, don't count itself twice — manager.py:88-91
+                // if overwriting same conn_id, don't count itself twice
                 if (_connections.TryGetValue(connId, out var existing) && HostOf(existing) == host)
                     sameHost--;
                 // the pending eviction frees one same-host slot on admission
@@ -942,13 +913,13 @@ public class ConnectionManager
                     if (evictCnt <= 0) _perIpCounts.Remove(evictHost);
                     else _perIpCounts[evictHost] = evictCnt;
                 }
-                _connToId.Remove(connection);
+                _connToId.TryRemove(connection, out _);
             }
             // Re-registering the same conn id from the same host replaces the same
             // registration, so it must not increment the per-IP counter again —
             // double-counting leaks the bucket toward a false limit refusal.
             var sameHostReregister = false;
-            // handle overwrite: adjust old host count — manager.py:102-113
+            // handle overwrite: adjust old host count
             if (_connections.TryGetValue(connId, out var old))
             {
                 var oldHost = HostOf(old);
@@ -959,21 +930,20 @@ public class ConnectionManager
                     if (cnt <= 0) _perIpCounts.Remove(oldHost);
                     else _perIpCounts[oldHost] = cnt;
                 }
-                _connToId.Remove(old);
+                _connToId.TryRemove(old, out _);
             }
-            _connections[connId] = connection; // port of manager.py:114
-            _connToId[connection] = connId; // port of manager.py:115
-            if (host != "?" && !sameHostReregister) // port of manager.py:116-117
+            _connections[connId] = connection;
+            _connToId[connection] = connId;
+            if (host != "?" && !sameHostReregister)
                 _perIpCounts[host] = _perIpCounts.TryGetValue(host, out var v) ? v + 1 : 1;
             }
         }
-        finally { _lock.ExitWriteLock(); }
         if (refusal is not null)
         {
             RefuseConnection(connection, refusal);
             return false;
         }
-        try { Atheriz.Core.AtherizLogger.LogInformation($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); } catch { Console.Error.WriteLine($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); } // port of manager.py:118
+        try { Atheriz.Core.AtherizLogger.LogInformation($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); } catch { Console.Error.WriteLine($"[Network] Connection opened: {connId} (total: {ConnectionCount})"); }
         // timer-driven orphan sweep. The old every-50th-registration
         // amortization never reaped on a low-traffic server; the WS receive
         // path has no idle timeout of its own, so this 60s cadence covers
@@ -1048,23 +1018,21 @@ public class ConnectionManager
         return swept;
     }
 
-    // Port of manager.py:121-153 disconnect
     public virtual void Disconnect(BaseConnection connection)
     {
         string? connId = null;
-        // Host snapshot belongs inside the write lock: RegisteredHost is
+        // Host snapshot belongs inside the manager lock: RegisteredHost is
         // rewritten by RegisterConnection under the same lock, so reading it
         // outside can pair this disconnect's counter decrement with the next
         // connection's host.
         string host = "?";
-        _lock.EnterWriteLock();
-        try
+        lock (_lock)
         {
-            host = HostOf(connection); // port of manager.py:123
+            host = HostOf(connection);
             if (_connToId.TryGetValue(connection, out var id))
             {
                 connId = id;
-                _connToId.Remove(connection);
+                _connToId.TryRemove(connection, out _);
                 if (_connections.TryGetValue(connId, out var stored) && ReferenceEquals(stored, connection))
                 {
                     _connections.Remove(connId);
@@ -1100,17 +1068,15 @@ public class ConnectionManager
                 }
             }
         }
-        finally { _lock.ExitWriteLock(); }
 
-        if (string.IsNullOrEmpty(connId)) return; // port of manager.py:138
+        if (string.IsNullOrEmpty(connId)) return;
 
         // SetDisconnected locks internally; no outer connection lock needed.
-        connection.SetDisconnected(true); // port of manager.py:139-140
-        connection.ClearPendingInput(); // port of manager.py:141
-        var session = connection.Session; // port of manager.py:142
+        connection.SetDisconnected(true);
+        connection.ClearPendingInput();
+        var session = connection.Session;
         if (session is not null)
         {
-            // port of manager.py:144-148 run session teardown on game threadpool.
             // Fire-and-forget by design: disconnect() executes on the network
             // event loop and must not block on teardown (pinned by
             // DisconnectDoesNotBlockOnSlowTeardown: 0.5s teardown, <0.5s return).
@@ -1137,65 +1103,61 @@ public class ConnectionManager
                 }
             }
         }
-        try { connection.Close(); } // port of manager.py:149-152
+        try { connection.Close(); }
         catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Connection cleanup failed: {e}"); } catch { Console.Error.WriteLine($"[Network] Connection cleanup failed: {e}"); } }
-        try { (connection as IDisposable)?.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ReferenceEqualityComparer.Disconnect: " + logEx.Message, "ReferenceEqualityComparer"); }
-        try { Atheriz.Core.AtherizLogger.LogInformation($"[Network] Connection closed: {connId} (total: {ConnectionCount})"); } catch { Console.Error.WriteLine($"[Network] Connection closed: {connId} (total: {ConnectionCount})"); } // port of manager.py:153
+        try { (connection as IDisposable)?.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.Disconnect: " + logEx.Message, "ConnectionManager"); }
+        try { Atheriz.Core.AtherizLogger.LogInformation($"[Network] Connection closed: {connId} (total: {ConnectionCount})"); } catch { Console.Error.WriteLine($"[Network] Connection closed: {connId} (total: {ConnectionCount})"); }
     }
 
-    // Port of manager.py:155-162 _do_session_disconnect
     private void DoSessionDisconnect(Session session)
     {
         try { session.AtDisconnect(); }
         catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Session teardown failed: {e}"); } catch { Console.Error.WriteLine($"[Network] Session teardown failed: {e}"); } }
     }
 
-    // Port of manager.py:164-167 connection_count property
     public int ConnectionCount
     {
-        get { _lock.EnterReadLock(); try { return _connections.Count; } finally { _lock.ExitReadLock(); } }
+        get { lock (_lock) return _connections.Count; }
     }
 
-    // Port of manager.py:169-171 get_all_connections
     public List<BaseConnection> GetAllConnections()
     {
-        _lock.EnterReadLock();
-        try { return _connections.Values.ToList(); }
-        finally { _lock.ExitReadLock(); }
-    }
-
-    // Port of manager.py:173-179 broadcast
-    public void Broadcast(string text)
-    {
-        var connections = GetAllConnections(); // port of manager.py:174
-        foreach (var conn in connections)
+        lock (_lock)
         {
-            try { conn.Msg(text); } // port of manager.py:177
-            catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Broadcast error: {e}"); } catch { Console.Error.WriteLine($"[Network] Broadcast error: {e}"); } } // port of manager.py:178-179
+            return _connections.Values.ToList();
         }
     }
 
-    // Port of manager.py:181-183 register_handler
-    public void RegisterHandler(string messageType, Delegate handler)
+    public void Broadcast(string text)
     {
-    // Port of manager.py:181-183 register_handler — exact match only.
-        _lock.EnterWriteLock();
-        try { _messageHandlers[messageType] = handler; } // port of manager.py:183
-        finally { _lock.ExitWriteLock(); }
+        var connections = GetAllConnections();
+        foreach (var conn in connections)
+        {
+            try { conn.Msg(text); }
+            catch (Exception e) { try { Atheriz.Core.AtherizLogger.LogError($"[Network] Broadcast error: {e}"); } catch { Console.Error.WriteLine($"[Network] Broadcast error: {e}"); } }
+        }
     }
 
-    // Helper for strip — port of manager.py:31-38 _strip_input_value
+    public void RegisterHandler(string messageType, Delegate handler)
+    {
+// exact match only.
+        lock (_lock)
+        {
+            _messageHandlers[messageType] = handler;
+        }
+    }
+
     private static object? StripInputValue(object? value)
     {
-        if (value is string s) return GameUtils.StripTerminalEscapes(s); // port of manager.py:32-33
-        if (value is List<object?> lst) // port of manager.py:34-35
+        if (value is string s) return GameUtils.StripTerminalEscapes(s);
+        if (value is List<object?> lst)
         {
             var stripped = new List<object?>(lst.Count);
             foreach (var item in lst)
                 stripped.Add(StripInputValue(item));
             return stripped;
         }
-        if (value is Dictionary<string, object?> dict) // port of manager.py:36-37
+        if (value is Dictionary<string, object?> dict)
         {
             Dictionary<string, object?> res = [];
             foreach (var kv in dict) res[kv.Key] = StripInputValue(kv.Value);
@@ -1208,10 +1170,9 @@ public class ConnectionManager
     { try { AtherizLogger.LogWarning(message); } catch { Console.Error.WriteLine(message); } }
     internal static void NetError(string message)
     { try { AtherizLogger.LogError(message); } catch { Console.Error.WriteLine(message); } }
-    private void LogMalformed(string host, string rawMessage) // port of manager.py:196-199
+    private void LogMalformed(string host, string rawMessage)
     { if (ShouldLogMalformed(host)) NetWarn($"[Network] Invalid message format from {host} ({System.Text.Encoding.UTF8.GetByteCount(rawMessage)} bytes): {SummarizeRaw(rawMessage)}"); }
 
-    // Port of manager.py:185-215 handle_command
     public virtual void HandleCommand(BaseConnection connection, string rawMessage)
     {
         try
@@ -1233,14 +1194,13 @@ public class ConnectionManager
             }
             using var doc = JsonDocument.Parse(rawMessage);
             var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 1) // port of manager.py:194
+            if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 1)
             {
-                var host = connection.ClientHost ?? "?"; // port of manager.py:195
-                LogMalformed(host, rawMessage); // port of manager.py:196-199
+                var host = connection.ClientHost ?? "?";
+                LogMalformed(host, rawMessage);
                 return;
             }
             var cmdElement = root[0];
-            // Non-string commands are malformed input (port of manager.py:194):
             // GetString() would throw for numbers/arrays, routing them to the
             // error path instead of the malformed path. Reject them cleanly.
             if (cmdElement.ValueKind != JsonValueKind.String)
@@ -1249,49 +1209,49 @@ public class ConnectionManager
                 return;
             }
             var cmd = cmdElement.GetString()!;
-            List<object?> args = new(); // port of manager.py:203
-            Dictionary<string, object?> kwargs = new(); // port of manager.py:204
+            List<object?> args = new();
+            Dictionary<string, object?> kwargs = new();
             if (root.GetArrayLength() > 1) args = JsonElementToObject(root[1]) as List<object?> ?? new();
             if (root.GetArrayLength() > 2) kwargs = JsonElementToObject(root[2]) as Dictionary<string, object?> ?? new();
 
-            Dispatch(connection, cmd, args, kwargs); // port of manager.py:206
+            Dispatch(connection, cmd, args, kwargs);
         }
-        catch (JsonException exc) // port of manager.py:208
+        catch (JsonException exc)
         {
-            var host = connection.ClientHost ?? "?"; // port of manager.py:209
-            if (ShouldLogMalformed(host)) // port of manager.py:210
-                NetWarn($"[Network] Error decoding JSON from {host} ({rawMessage.Length} bytes): {exc.Message} at position {exc.BytePositionInLine}: {SummarizeRaw(rawMessage)}"); // port of manager.py:211-213
+            var host = connection.ClientHost ?? "?";
+            if (ShouldLogMalformed(host))
+                NetWarn($"[Network] Error decoding JSON from {host} ({rawMessage.Length} bytes): {exc.Message} at position {exc.BytePositionInLine}: {SummarizeRaw(rawMessage)}");
         }
-        catch (Exception e) // port of manager.py:214-215
+        catch (Exception e)
         {
             NetError($"[Network] Error handling message: {e}");
         }
     }
 
-    // Port of manager.py:217-229 dispatch
     public void Dispatch(BaseConnection connection, string cmd, List<object?> args, Dictionary<string, object?> kwargs)
     {
         // Handlers run on game threadpool via connection's serialized input queue — manager.py:218-221
-        if (_settings.StripInputEscapeSequences) // port of manager.py:222
+        if (_settings.StripInputEscapeSequences)
         {
             var strippedArgs = new List<object?>(args.Count);
             foreach (var item in args)
                 strippedArgs.Add(StripInputValue(item));
-            args = strippedArgs; // port of manager.py:223
+            args = strippedArgs;
             var boxed = StripInputValue(kwargs);
             if (boxed is Dictionary<string, object?> d) kwargs = d;
         }
         Delegate? handler = null;
-        _lock.EnterReadLock();
-        try { _messageHandlers.TryGetValue(cmd, out handler); } // port of manager.py:225 exact .get(cmd)
-        finally { _lock.ExitReadLock(); }
-        if (handler is not null) // port of manager.py:226-227
+        lock (_lock)
+        {
+            _messageHandlers.TryGetValue(cmd, out handler);
+        }
+        if (handler is not null)
         {
             connection.EnqueueInput(handler, args, kwargs);
         }
         else
         {
-            try { Atheriz.Core.AtherizLogger.LogDebug($"Unknown command: {cmd}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ReferenceEqualityComparer.Dispatch: " + logEx.Message, "ReferenceEqualityComparer"); } // port of manager.py:229 (logger.debug)
+            try { Atheriz.Core.AtherizLogger.LogDebug($"Unknown command: {cmd}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.Dispatch: " + logEx.Message, "ConnectionManager"); }
         }
     }
 
@@ -1341,6 +1301,6 @@ public class ConnectionManager
     // For tests / introspection — expose internal state counts similar to Python's _connections
     public IReadOnlyDictionary<string, BaseConnection> ConnectionsSnapshot
     {
-        get { _lock.EnterReadLock(); try { return new Dictionary<string, BaseConnection>(_connections); } finally { _lock.ExitReadLock(); } }
+        get { lock (_lock) return new Dictionary<string, BaseConnection>(_connections); }
     }
 }

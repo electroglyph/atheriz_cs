@@ -2,7 +2,6 @@
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Faithful port of <c>atheriz/objects/nodes.py:Node</c> + <c>NodeGrid</c> + <c>NodeArea</c> + <c>Transition</c>.
 /// Core semantics: per-entity ReaderWriterLockSlim, IsModified dirty flag, tick support, link management,
 /// with on-disk JSON replacing dill.
 /// </summary>
@@ -26,7 +25,6 @@ public sealed class NodeLink
         Coord = coord;
         Aliases = aliases ?? [];
     }
-    // Port of nodes.py:63-66 __eq__: name+coord only (aliases excluded).
     public override bool Equals(object? obj) => obj is NodeLink o && Name == o.Name && Coord.Equals(o.Coord);
     public override int GetHashCode()
     {
@@ -38,7 +36,6 @@ public sealed class NodeLink
     public override string ToString() => $"NodeLink: {Name}, [{string.Join(",", Aliases)}], {Coord}";
 }
 
-// Port of atheriz/objects/nodes.py:79
 public partial class Node : GameObject
 {
     internal new static bool _is_thread_safe = true;
@@ -48,7 +45,6 @@ public partial class Node : GameObject
     public ReaderWriterLockSlim NodeLock => SyncRoot;
     public ReaderWriterLockSlim Lock => SyncRoot;
 
-    // Port of atheriz/objects/nodes.py:122. Lock-guarded : ApplyMoves
     // rewrites Coord under the grid lock while AtHear/GetDisplayName readers
     // run concurrently. Coord is an immutable struct so a locked reference
     // swap is sufficient — no torn coordinates.
@@ -86,9 +82,9 @@ public partial class Node : GameObject
             Write(() => { _nouns = new Dictionary<string, string>(value, value.Comparer); IsModified = true; });
         }
     }
-    public double OpenAttenuation { get; set; } = 10.0; // Port of nodes.py:134 DEFAULT_OPEN_SOUND_ATTENUATION
-    public double EnclosedAttenuation { get; set; } = 20.0; // Port of nodes.py:135 DEFAULT_ENCLOSED_SOUND_ATTENUATION
-    public double AmbientSoundLevel { get; set; } = 5.0; // Port of nodes.py:136
+    public double OpenAttenuation { get; set; } = 10.0;
+    public double EnclosedAttenuation { get; set; } = 20.0;
+    public double AmbientSoundLevel { get; set; } = 5.0;
 
     // Tick/script state lives in base storage (atheriz/objects/nodes.py shares
     // _tick_seconds/_is_tickable/scripts with Object); Node only adds coro wiring.
@@ -203,7 +199,6 @@ public partial class Node : GameObject
         IsModified = true;
         // leave Id == -1, do not AddObject
     }
-    // Port of nodes.py:122
     public Node(Coord coord, string name = "room", string desc = "", string? theme = null, string? symbol = null, string? legendDesc = null, List<NodeLink>? links = null, double tickSeconds = 1.0)
     {
         Coord = coord;
@@ -228,12 +223,9 @@ public partial class Node : GameObject
 
     // Identity (id equality) lives on GameObject once; see base Equals/GetHashCode.
 
-    // Port of nodes.py:95
-    public override void AtDesc(GameObject? looker = null) => Hookable("at_desc", () => 0, looker);
-    // Port of nodes.py:101
-    public override void AtTick() => Hookable("at_tick", () => 0);
+    public override void AtDesc(GameObject? looker = null) => Hookable(HookNames.AtDesc, () => 0, looker);
+    public override void AtTick() => Hookable(HookNames.AtTick, () => 0);
 
-    // Port of nodes.py:108
     public List<GameObject> GetContents()
     {
         // ContentsSnapshot already snapshots under SyncRoot; resolve outside the lock.
@@ -242,7 +234,6 @@ public partial class Node : GameObject
         return ObjectRegistry.Get(ContentsSnapshot);
     }
 
-    // Port of nodes.py:113
     public void ForContents(Action<GameObject> func, IEnumerable<GameObject>? exclude = null)
     {
         var contents = GetContents();
@@ -254,7 +245,6 @@ public partial class Node : GameObject
         }
     }
 
-    // Port of nodes.py:189
     public override void ResolveRelations()
     {
         // Same containment as the base (GameObject.ResolveRelations wraps AddCoro,
@@ -275,7 +265,6 @@ public partial class Node : GameObject
         try { AtInit(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
     }
 
-    // Port of nodes.py:206 (state in base storage; Node adds ticker swap)
     public override double TickSeconds
     {
         get => base.TickSeconds;
@@ -302,7 +291,6 @@ public partial class Node : GameObject
         }
     }
 
-    // Port of nodes.py:227 (state in base storage; Node adds ticker add/remove)
     public override bool IsTickable
     {
         get => base.IsTickable;
@@ -323,18 +311,16 @@ public partial class Node : GameObject
         }
     }
 
-    // Port of nodes.py:252 at_pre_emit_sound
     public override (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) AtPreEmitSound(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
         => Hookable<(bool, GameObject, string, string, double, bool)>("at_pre_emit_sound", () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay);
 
-    // Port of nodes.py:271 at_pre_hear
     public override (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) AtPreHear(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
         => Hookable<(bool, GameObject, string, string, double, bool)>("at_pre_hear", () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay);
 
-    // Port of nodes.py:293 at_hear — Node propagation, overrides GameObject.AtHear (player hearing is separate)
+// Node propagation, overrides GameObject.AtHear (player hearing is separate)
     public override double AtHear(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
-        return Hookable("at_hear", () =>
+        return Hookable(HookNames.AtHear, () =>
         {
             var (allow, em2, sd2, sm2, loud2, isSay2) = AtPreHear(emitter, soundDesc, soundMsg, loudness, isSay);
         bool open = false;
@@ -364,30 +350,24 @@ public partial class Node : GameObject
         }, emitter, soundDesc, soundMsg, loudness, isSay);
     }
 
-    // Port of nodes.py:332
     public override bool AtPreObjectLeave(GameObject? destination, string? toExit = null)
     {
-        return Hookable("at_pre_object_leave", () => true, destination, toExit);
+        return Hookable(HookNames.AtPreObjectLeave, () => true, destination, toExit);
     }
-    // Port of nodes.py:348
     public override void AtObjectLeave(GameObject? destination, string? toExit = null)
     {
-        Hookable("at_object_leave", () => 0, destination, toExit);
+        Hookable(HookNames.AtObjectLeave, () => 0, destination, toExit);
     }
-    // Port of nodes.py:359
     public override bool AtPreObjectReceive(GameObject? source, string? fromExit = null)
     {
-        return Hookable("at_pre_object_receive", () => true, source, fromExit);
+        return Hookable(HookNames.AtPreObjectReceive, () => true, source, fromExit);
     }
-    // Port of nodes.py:374
     public override void AtObjectReceive(GameObject? source, string? fromExit = null)
     {
-        Hookable("at_object_receive", () => 0, source, fromExit);
+        Hookable(HookNames.AtObjectReceive, () => 0, source, fromExit);
     }
-    // Port of nodes.py:386
-    public override void AtInit() => Hookable("at_init", () => 0);
+    public override void AtInit() => Hookable(HookNames.AtInit, () => 0);
 
-    // Port of nodes.py:394 delete
     public override (int count, List<object> ops)? Delete(GameObject? caller, bool recursive = false)
     {
         (List<object> ops, int count) execDeleteRecursive(Node obj)
@@ -492,10 +472,9 @@ public partial class Node : GameObject
         return (1 + kids, ops);
     }
 
-    // Port of nodes.py:479
     public override bool AtDelete(GameObject? caller)
     {
-        return Hookable("at_delete", () =>
+        return Hookable(HookNames.AtDelete, () =>
         {
             if (!Access(caller, "delete"))
             {
@@ -517,7 +496,6 @@ internal static class GlobalTickerHolder
     public static void Set(Atheriz.Core.Concurrency.AsyncTicker ticker) { lock (_lock) _instance = ticker; }
 }
 
-/// <summary>Minimal ExitCommand port of atheriz/commands/loggedin/exit.py:ExitCommand</summary>
 public sealed class ExitCommand : Command
 {
     public int CallerId { get; set; }
@@ -540,7 +518,6 @@ public sealed class ExitCommand : Command
             var dest = NodeHandler.GetCurrent()?.GetNode(Destination);
             if (dest is not null)
             {
-                // Port of exit.py:95-103 via the shared helper: moving
                 // through an exit breaks following like any other move.
                 try { Commands.LoggedIn.LoggedInExitCommand.ClearFollowing(go); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ExitCommand.Run: " + logEx.Message, "ExitCommand"); }
                 go.MoveTo(dest);

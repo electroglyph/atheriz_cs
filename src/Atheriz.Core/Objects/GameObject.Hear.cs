@@ -1,10 +1,8 @@
-// Port of atheriz/objects/base_obj.py:1776 at_hear and related
 
 namespace Atheriz.Core.Objects;
 
 public partial class GameObject
 {
-    // Port of settings.LOUDNESS_LEVELS
     private static readonly (double threshold, string desc)[] LoudnessLevels = new (double, string)[]
     {
         (20, " nearly inaudible"),
@@ -14,7 +12,6 @@ public partial class GameObject
         (100, " very loud"),
         (120, " extremely loud"),
     };
-    // Port of settings.REPLACE_LEVELS
     private static readonly (double threshold, double pct)[] ReplaceLevels = new (double, double)[]
     {
         (1, 95.0),
@@ -45,10 +42,10 @@ public partial class GameObject
         return RunPreHook("at_pre_emit_sound", emitter, soundDesc, soundMsg, loudness, isSay);
     }
 
-    // Port of base_obj.py:1776 at_hear — base returns void in Python, but for uniformity return double like Node
+// base returns void in Python, but for uniformity return double like Node
     public virtual double AtHear(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
-        return Hookable("at_hear", () =>
+        return Hookable(HookNames.AtHear, () =>
         {
             if (!CanHear) return 0.0;
         var loc = ResolveLocationObject();
@@ -187,7 +184,6 @@ public partial class GameObject
             {
                 if (!pool.AddTask(() => AtEmitSound(soundDesc, soundMsg, loudness, isSay)))
                 {
-                    // Port of base_obj.py emit_sound reject path.
                     AtherizLogger.LogWarning($"[Sound] Task queue full; sound from {this} dropped.");
                 }
                 return;

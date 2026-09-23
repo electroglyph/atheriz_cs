@@ -1,7 +1,6 @@
 
 namespace Atheriz.Core.Objects;
 
-// Port of atheriz/objects/nodes.py:1229 NodeArea
 public sealed class NodeArea
 {
     public readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.SupportsRecursion);
@@ -24,14 +23,12 @@ public sealed class NodeArea
     }
     public HashSet<string>? LinkedAreas { get; set; }
 
-    // Port of nodes.py:1231
     public NodeArea(string name, string? theme = null)
     {
         Name = name;
         Theme = theme;
     }
     public int Count { get { Lock.EnterReadLock(); try { return _grids.Count; } finally { Lock.ExitReadLock(); } } }
-    // Port of nodes.py:1242
     public override string ToString()
     {
         Lock.EnterReadLock();
@@ -42,7 +39,7 @@ public sealed class NodeArea
         }
         finally { Lock.ExitReadLock(); }
     }
-    // Port of nodes.py:1261 — Python dict == is order-insensitive; JsonElement has no
+// Python dict == is order-insensitive; JsonElement has no
     // value equality in C#, so data compares by canonical raw text. Hash combines the
     // same components in sorted order so equal areas hash equal.
     public override bool Equals(object? obj)
@@ -73,7 +70,6 @@ public sealed class NodeArea
         return h.ToHashCode();
     }
 
-    // Port of nodes.py:1258 get_nodes
     public List<Node> GetNodes(List<(int X, int Y, int Z)> coords)
     {
         List<Node> res = [];
@@ -98,7 +94,6 @@ public sealed class NodeArea
         return GetNodes(list);
     }
 
-    // Port of nodes.py:1271 get_nodes_in_sphere
     public List<Node> GetNodesInSphere((int X, int Y, int Z) center, double radius, bool ignoreCenter = false)
     {
         const int maxR = 100;
@@ -143,7 +138,6 @@ public sealed class NodeArea
     public List<Node> GetNodesInSphere(Coord center, int radius, bool ignoreCenter = false)
         => GetNodesInSphere((center.X, center.Y, center.Z), radius, ignoreCenter);
 
-    // Port of nodes.py:1308 get_rays_in_sphere
     public List<List<Node>> GetRaysInSphere((int X, int Y, int Z) center, double radius, bool ignoreCenter = true)
     {
         var nodes = GetNodesInSphere(center, radius, ignoreCenter);
@@ -178,7 +172,6 @@ public sealed class NodeArea
     // so no caller can observe or mutate the table.
     private static readonly (int Dx, int Dy, int Dz)[] NeighborOffsets = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
 
-    // Port of nodes.py:1333 get_neighbors
     public List<Node> GetNeighbors((int X, int Y, int Z) coord)
     {
         var (x, y, z) = coord;
@@ -200,28 +193,24 @@ public sealed class NodeArea
     }
     public List<Node> GetNeighbors(Coord coord) => GetNeighbors((coord.X, coord.Y, coord.Z));
 
-    // Port of nodes.py:1346 set_data
     public void SetData(string key, JsonElement value)
     {
         Lock.EnterWriteLock();
         try { _data[key] = value; IsModified = true; }
         finally { Lock.ExitWriteLock(); }
     }
-    // Port of nodes.py:1352
     public JsonElement? GetData(string key)
     {
         Lock.EnterReadLock();
         try { return _data.TryGetValue(key, out var v) ? v : null; }
         finally { Lock.ExitReadLock(); }
     }
-    // Port of nodes.py:1357
     public void RemoveData(string key)
     {
         Lock.EnterWriteLock();
         try { _data.Remove(key); IsModified = true; }
         finally { Lock.ExitWriteLock(); }
     }
-    // Port of nodes.py:1362 remove_linked_area
     public void RemoveLinkedArea(string area)
     {
         bool removed = false;
@@ -243,7 +232,6 @@ public sealed class NodeArea
             a?.RemoveLinkedArea(Name);
         }
     }
-    // Port of nodes.py:1375 add_linked_area
     public void AddLinkedArea(string area)
     {
         bool added = false;
@@ -261,7 +249,6 @@ public sealed class NodeArea
             a?.AddLinkedArea(Name);
         }
     }
-    // Port of nodes.py:1392 add_grid
     public void AddGrid(NodeGrid grid)
     {
         grid.Area = Name;
@@ -278,7 +265,6 @@ public sealed class NodeArea
         _grids[grid.Z] = grid;
         IsModified = true;
     }
-    // Port of nodes.py:1398 get_grid
     public NodeGrid? GetGrid(int z)
     {
         Lock.EnterReadLock();
@@ -309,7 +295,6 @@ public sealed class NodeArea
         finally { Lock.ExitUpgradeableReadLock(); }
     }
     public NodeGrid GetOrAddGrid(int z) => GetOrCreateGrid(z);
-    // Port of nodes.py:1402 remove_grid
     public void RemoveGrid(int z)
     {
         Lock.EnterWriteLock();
@@ -320,7 +305,6 @@ public sealed class NodeArea
         }
         finally { Lock.ExitWriteLock(); }
     }
-    // Port of nodes.py:1409 clear
     public void Clear()
     {
         Lock.EnterWriteLock();

@@ -6,7 +6,6 @@ using Atheriz.Core.Persistence.Dto;
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Port of <c>atheriz/objects/base_account.py:Account</c>.
 /// Inherits GameObject flags (is_account) but adds Account-specific state.
 /// </summary>
 public class Account : GameObject
@@ -33,9 +32,9 @@ public class Account : GameObject
     {
         // Unconditional true (test_account.py:88 — not access-gated like the base),
         // routed through the hook pipeline so game code can veto via at_delete hooks.
-        return Hookable("at_delete", () => true, caller);
+        return Hookable(HookNames.AtDelete, () => true, caller);
     }
-    public virtual bool AtPrePuppet(GameObject character) => Hookable("at_pre_puppet", () => true, character); // Fix for test_account.py:408 port of base_account.py:76 at_pre_puppet
+    public virtual bool AtPrePuppet(GameObject character) => Hookable(HookNames.AtPrePuppet, () => true, character);
     // Account-specific Delete returns bool (Python) — hides GameObject tuple version.
     // NOTE: C# cannot override with a different return type, so a GameObject-typed
     // reference dispatches to the base tuple Delete. That path converges via
@@ -48,7 +47,6 @@ public class Account : GameObject
     // Shared immediate-delete core for both static types .
     internal (int count, List<object> ops)? DeleteImmediate(GameObject? caller)
     {
-        // Port of base_account.py:53 delete: journal-only, never a mid-game
         // DB write — the world lives in memory after startup and the DB is
         // written only on save checkpoints (mirrors Node.delete). The shared
         // teardown leaves no dangling follows, channel memberships,
@@ -196,7 +194,6 @@ public class Account : GameObject
         // base_account.py:45 is unguarded, but this matches
         // the C# GameObject.Create containment.)
         try { acc.AtCreate(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Account.Create: " + logEx.Message, "Account"); }
-        // Atomic register — mirrors add_object_unique for race safety (port of test_duplicate_create_race.py)
         ObjectRegistry.AddObjectUnique(acc, o => o is Account a && string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase), $"Account with this name ({name}) already exists.");
         return acc;
     }

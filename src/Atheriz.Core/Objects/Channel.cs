@@ -3,14 +3,12 @@ using Atheriz.Core.Persistence.Dto;
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Port of <c>atheriz/objects/base_channel.py:Channel</c>.
 /// Persistent channel with listeners + bounded history.
 /// </summary>
 public class Channel : GameObject
 {
     internal new static bool _is_thread_safe = true;
     private readonly Lock _histLock = new();
-    // Port of base_channel.py history entries: (timestamp, sender, message)
     // tuples. Listeners receive the FormatMessage form; History projects the
     // raw messages; GetHistory formats on replay — so replay matches live.
     private readonly LinkedList<ChannelHistoryEntry> _history = [];
@@ -53,7 +51,7 @@ public class Channel : GameObject
         using (WriteScope()) { Name = name; Desc = desc; }
     }
 
-    public override void AtCreate() => Hookable("at_create", () => 0);    public override bool AtDelete(GameObject? caller) => Hookable("at_delete", () => true, caller);
+    public override void AtCreate() => Hookable(HookNames.AtCreate, () => 0);    public override bool AtDelete(GameObject? caller) => Hookable(HookNames.AtDelete, () => true, caller);
 
     public override bool IsDeleted
     {
@@ -215,7 +213,7 @@ public class Channel : GameObject
     {
         string senderName = from?.Name ?? "";
         long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        // Port of base_channel.py:262-264 — history keeps the
+// history keeps the
         // (timestamp, sender, message) entry; listeners receive the formatted
         // form, and GetHistory re-formats on replay so both match.
         var entry = new ChannelHistoryEntry(timestamp, senderName, text);
@@ -335,7 +333,6 @@ public class Channel : GameObject
 }
 
 /// <summary>
-/// One channel history entry: port of the
 /// <c>(timestamp, sender, message)</c> tuples in
 /// <c>atheriz/objects/base_channel.py</c>.
 /// </summary>

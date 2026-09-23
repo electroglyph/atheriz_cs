@@ -1,28 +1,29 @@
 using Atheriz.Core.Concurrency;
-using Atheriz.Core.Objects; // Port of atheriz/objects/session.py:202 — Session now in Objects.Session (standalone)
+using Atheriz.Core.Objects; // Session now in Objects.Session (standalone)
 
 namespace Atheriz.Core.Network;
 
-// Port of atheriz/network/connection.py:16-207
-// Faithful C# port of BaseConnection — abstract interface for all network
+// abstract interface for all network
 // connections. Specific protocol implementations (WebSocket, Telnet, etc)
 // inherit from this and implement SendCommand and Close.
-// See connection.py:16-207 for original semantics.
-// Session is now standalone in Objects.Session — Port of atheriz/objects/session.py:202 (see Objects/Session.cs)
 
 /// <summary>
-/// Abstract interface for all network connections. Mirrors <c>atheriz/network/connection.py:BaseConnection</c> (207 LOC).
+/// Abstract interface for all network connections.
 /// Thread-safe FIFO input pipeline via _inputQueue, bounded by CONNECTION_INPUT_QUEUE_LIMIT (100).
 /// </summary>
-public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Atheriz.Core.Commands.ISessionProvider, IDisposable
+public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Atheriz.Core.Commands.ISessionProvider, IDisposable, IAsyncDisposable
 {
-    // port of connection.py:23-40 __init__
     public string? SessionId { get; }
     public Session Session { get; }
-    public int ThreadId { get; } // port of connection.py:31 threading.get_ident()
-    public readonly object Lock = new(); // port of connection.py:32 RLock
-    public int FailedLoginAttempts; // port of connection.py:33
+    public int ThreadId { get; }
+    public readonly object Lock = new();
+    public int FailedLoginAttempts;
     private bool _disposed;
+    // Lifetime for the awaited retry/re-arm loops below: cancelled on
+    // Dispose so a pending Task.Delay dies quietly instead of firing into a
+    // cleared queue. Never disposed (Token must stay readable post-cancel).
+    private readonly CancellationTokenSource _retryCts = new();
+    internal CancellationToken RetryLifetimeToken => _retryCts.Token;
 
     /// <summary>Releases owned resources (queues/sessions; subclasses add
     /// sockets/semaphores).</summary>
@@ -32,23 +33,12 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         GC.SuppressFinalize(this);
     }
 
-    // Suppressed-log wrappers: each preserves its call site's outer
-    // catch(Exception) + inner catch{} shape, with message strings kept
-    // byte-for-byte at the callers. The helpers take no lock — all call
-    // sites log outside Lock today.
-    private static void LogDebugSuppressed(string message, string category)
+    /// <summary>Async dispose: cancels pending retry loops, then releases.
+    /// Subclasses with I/O joins override to await them first.</summary>
+    public virtual ValueTask DisposeAsync()
     {
-        try { Atheriz.Core.AtherizLogger.LogDebug(message, category); } catch { }
-    }
-
-    private static void LogWarningSuppressed(string message)
-    {
-        try { Atheriz.Core.AtherizLogger.LogWarning(message); } catch { }
-    }
-
-    private static void LogErrorSuppressed(string message)
-    {
-        try { Atheriz.Core.AtherizLogger.LogError(message); } catch { }
+        Dispose();
+        return ValueTask.CompletedTask;
     }
 
     protected virtual void Dispose(bool disposing)
@@ -56,42 +46,41 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         if (disposing)
         {
             _disposed = true;
-            try { ClearPendingInput(); } catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.Dispose: " + logEx.Message, "BaseConnection"); }
+            try { _retryCts.Cancel(); } catch { }
+            try { ClearPendingInput(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.Dispose: " + logEx.Message, "BaseConnection"); }
         }
     }
 
     protected bool IsDisposed => _disposed;
 
-    // Per-connection input pipeline (issue #31) — connection.py:34-40
-    private readonly Queue<(Delegate Handler, List<object?> Args, Dictionary<string, object?> Kwargs)> _inputQueue = new();
-    private bool _inputRunning; // port of connection.py:38
-    private double _lastInputBusy = double.NegativeInfinity; // port of connection.py:39 ("never", like AsyncThreadPool._lastFullLogSeconds — 0.0 is a real timestamp, not "never")
-    private bool _disconnected; // port of connection.py:40
-    public string ClientHost { get; set; } = "?"; // set by subclasses; mirrors Python's client_host fallback "?"
+    // Per-connection input pipeline (issue #31)
+    // Nominal input item (was a value tuple): the handler triple keeps its
+    // Handler/Args/Kwargs member names, now on a compiler-checked type.
+    private sealed record QueuedInput(Delegate Handler, List<object?> Args, Dictionary<string, object?> Kwargs);
+    private readonly Queue<QueuedInput> _inputQueue = new();
+    private bool _inputRunning;
+    private double _lastInputBusy = double.NegativeInfinity; // 0.0 is a real timestamp, not "never".
+    private bool _disconnected;
+    public string ClientHost { get; set; } = "?"; // set by subclasses; defaults to "?".
     /// <summary>UTC creation time; drives the orphan-sweep for never-logged-in sockets.</summary>
     public DateTime ConnectedAtUtc { get; } = DateTime.UtcNow;
 
-    // Async threadpool resolution — mirrors connection.py:42-65 _resolve_loop / _is_on_loop_thread
-    // In C# we use AsyncThreadPool instead of asyncio loop; IsOnLoopThread checks ThreadId.
+    // Async threadpool resolution via AsyncThreadPool; IsOnLoopThread checks ThreadId.
 
     protected BaseConnection(string? sessionId = null)
     {
         SessionId = sessionId;
         Session = new Session(connection: this);
         ThreadId = Environment.CurrentManagedThreadId;
-        // Try capture running loop if any — not applicable in C#, keep for parity comment
-        // port of connection.py:27-30 loop capture omitted; ThreadId used instead
     }
 
-    // Port of connection.py:28-30 loop capture — faithful null outside async context
+// faithful null outside async context
     public object? Loop => null;
-    // Port of connection.py:53-65 _is_on_loop_thread
     public bool IsOnLoopThread()
     {
         return Environment.CurrentManagedThreadId == ThreadId;
     }
 
-    // Settings helper — mirrors settings.CONNECTION_INPUT_QUEUE_LIMIT at settings.py:81
     private static AtherizSettings DefaultSettings => AtherizSettings.Global;
     private static int ConnectionInputQueueLimit => DefaultSettings.ConnectionInputQueueLimit;
     private static readonly Lazy<AsyncThreadPool> _fallbackPool = new(() => new AsyncThreadPool());
@@ -102,14 +91,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // background anyway; this is belt-and-braces for hosted test runners).
     static BaseConnection()
     {
-        try { AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { ShutdownFallbackPool(); } catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.ProcessExit: " + logEx.Message, "BaseConnection"); } }; }
-        catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.cctor: " + logEx.Message, "BaseConnection"); }
+        try { AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { ShutdownFallbackPool(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.ProcessExit: " + logEx.Message, "BaseConnection"); } }; }
+        catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.cctor: " + logEx.Message, "BaseConnection"); }
     }
 
     public static void ShutdownFallbackPool()
     {
         try { if (_fallbackPool.IsValueCreated) _fallbackPool.Value.Stop(false); }
-        catch (Exception e) { LogErrorSuppressed($"[Network] fallback pool shutdown failed: {e}"); }
+        catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Network] fallback pool shutdown failed: {e}"); }
     }
 
     // Aggregate cap on RetryDrain chains. One chain per connection is
@@ -134,20 +123,48 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         {
             Interlocked.Decrement(ref _outstandingRetryDrains);
             if (self._retryDrainDropLog.ShouldLog("retry-drain"))
-                try { Atheriz.Core.AtherizLogger.LogWarning("[Network] retry-drain backlog full; dropping retry"); } catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.TryScheduleRetryDrain: " + logEx.Message, "BaseConnection"); }
+                Atheriz.Core.AtherizLogger.LogWarning("[Network] retry-drain backlog full; dropping retry");
             return false;
         }
         try
         {
-            _ = Task.Delay(RetryDrainDelay).ContinueWith(_ => { try { self.RetryDrain(); } finally { Interlocked.Decrement(ref _outstandingRetryDrains); } });
+            _ = RetryLoopAsync(self, RetryDrainDelay, self._retryCts.Token);
             return true;
         }
         catch (Exception logEx)
         {
             Interlocked.Decrement(ref _outstandingRetryDrains);
-            LogDebugSuppressed("Suppressed BaseConnection.TryScheduleRetryDrain: " + logEx.Message, "BaseConnection");
+            Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.TryScheduleRetryDrain: " + logEx.Message, "BaseConnection");
             return false;
         }
+    }
+
+    // Awaited retry loop: replaces the Task.Delay(...).ContinueWith chain.
+    // The delay honors the connection lifetime token, so shutdown/dispose
+    // cancels a pending retry instead of firing into a cleared queue; the
+    // gauge decrement rides the finally exactly as the continuation did.
+    private static async Task RetryLoopAsync(BaseConnection self, TimeSpan delay, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(delay, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { Interlocked.Decrement(ref _outstandingRetryDrains); return; }
+        try { self.RetryDrain(); }
+        finally { Interlocked.Decrement(ref _outstandingRetryDrains); }
+    }
+
+    // Awaited re-arm chain: one pending re-arm timer per stalled connection
+    // (chain, not fan-out), cancelled on dispose. The inner try/catch mirrors
+    // the old ContinueWith's swallow.
+    private static async Task RearmLoopAsync(BaseConnection self, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(RetryDrainRearmDelay, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { return; }
+        try { ScheduleRetryDrain(self); } catch { }
     }
 
     // Retry scheduler with re-arm: when the capped scheduler is full the retry
@@ -162,26 +179,22 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         {
             if (self._disposed || self._disconnected || self._inputQueue.Count == 0) return;
         }
-        _ = Task.Delay(RetryDrainRearmDelay).ContinueWith(_ =>
-        {
-            try { ScheduleRetryDrain(self); } catch { }
-        });
+        _ = RearmLoopAsync(self, self._retryCts.Token);
     }
 
     private AsyncThreadPool ResolvePool()
     {
-        // mirrors get_async_threadpool() import inside method at connection.py:80
         // Prefer ConnectionManager singleton's pool if available
         try
         {
             var mgr = ConnectionManager.GlobalInstance;
             if (mgr?.Atp is not null) return mgr.Atp;
         }
-        catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.ResolvePool: " + logEx.Message, "BaseConnection"); }
+        catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.ResolvePool: " + logEx.Message, "BaseConnection"); }
         return FallbackPool;
     }
 
-    // Port of connection.py:67-117 enqueue_input — throttling now via ThrottleWindow (1s window)
+// throttling now via ThrottleWindow (1s window)
     // Queues one input handler for serialized execution on the game threadpool.
     // When queue >= CONNECTION_INPUT_QUEUE_LIMIT, newest message is dropped and
     // client gets throttled busy reply (1s window) — see #32. When the drain
@@ -196,28 +209,28 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         int pendingCount = 0;
         lock (Lock)
         {
-            if (_disconnected || _disposed) return; // port of connection.py:84-85
-            if (_inputQueue.Count >= ConnectionInputQueueLimit) // port of connection.py:86
+            if (_disconnected || _disposed) return;
+            if (_inputQueue.Count >= ConnectionInputQueueLimit)
             {
-                var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds(); // port of connection.py:87
-                if (!ThrottleWindow.ShouldLog(ref _lastInputBusy, InputBusyWindowSeconds, now)) return; // port of connection.py:88-90 via ThrottleWindow
+                var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                if (!ThrottleWindow.ShouldLog(ref _lastInputBusy, InputBusyWindowSeconds, now)) return;
                 // The busy log below reports this count: capture the full
                 // queue size here, not just on the pool-failure path.
                 pendingCount = _inputQueue.Count;
-                notifyBusy = true; // port of connection.py:91
+                notifyBusy = true;
             }
             else
             {
-                _inputQueue.Enqueue((handler, args, kwargs)); // port of connection.py:93
-                if (_inputRunning) return; // port of connection.py:94-95
-                _inputRunning = true; // port of connection.py:96
-                needsDrain = true; // port of connection.py:97
+                _inputQueue.Enqueue(new QueuedInput(handler, args, kwargs));
+                if (_inputRunning) return;
+                _inputRunning = true;
+                needsDrain = true;
             }
         }
-        if (needsDrain) // port of connection.py:98-110
+        if (needsDrain)
         {
-            if (TryAddDrainTask()) return; // port of connection.py:99-100
-            lock (Lock) // port of connection.py:101-106
+            if (TryAddDrainTask()) return;
+            lock (Lock)
             {
                 _inputRunning = false;
                 pendingCount = _inputQueue.Count;
@@ -229,12 +242,11 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             }
             try
             {
-                // port of connection.py:108 threading.Timer(0.05, self._retry_drain).start()
                 ScheduleRetryDrain(this);
             }
-            catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.EnqueueInput: " + logEx.Message, "BaseConnection"); }
+            catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.EnqueueInput: " + logEx.Message, "BaseConnection"); }
         }
-        if (notifyBusy) // port of connection.py:111-116
+        if (notifyBusy)
         {
             ConnectionManager.NetWarn($"[Network] Input queue full; input dropped; {pendingCount} message(s) pending");
             Msg("Server busy; input dropped.");
@@ -251,21 +263,19 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     private bool TryAddDrainTask()
     {
         var pool = ResolvePool();
-        // port of connection.py:99 get_async_threadpool().add_task(self._drain_input)
         return pool.AddTask(DrainInput);
     }
 
-    // Port of connection.py:118-133 _retry_drain
     private void RetryDrain()
     {
         lock (Lock)
         {
-            if (_disconnected) return; // port of connection.py:121
-            if (_inputQueue.Count == 0 || _inputRunning) return; // port of connection.py:123
-            _inputRunning = true; // port of connection.py:125
+            if (_disconnected) return;
+            if (_inputQueue.Count == 0 || _inputRunning) return;
+            _inputRunning = true;
         }
-        if (TryAddDrainTask()) return; // port of connection.py:126-127
-        lock (Lock) { _inputRunning = false; } // port of connection.py:128-129
+        if (TryAddDrainTask()) return;
+        lock (Lock) { _inputRunning = false; }
         // Stopped pool: AddTask will never succeed again, so rescheduling
         // would spin a 50ms timer chain forever on a live connection with
         // queued input. Drop the retry (shutdown disconnects clear the
@@ -274,15 +284,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         {
             if (ResolvePool().IsStopped)
             {
-                try { Atheriz.Core.AtherizLogger.LogWarning("[Network] threadpool stopped; dropping input-drain retry"); } catch { }
+                Atheriz.Core.AtherizLogger.LogWarning("[Network] threadpool stopped; dropping input-drain retry");
                 return;
             }
         }
-        catch (Exception logEx) { LogDebugSuppressed("Suppressed BaseConnection.RetryDrain: " + logEx.Message, "BaseConnection"); }
-        ScheduleRetryDrain(this); // port of connection.py:131
+        catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.RetryDrain: " + logEx.Message, "BaseConnection"); }
+        ScheduleRetryDrain(this);
     }
 
-    // Port of connection.py:135-153 _drain_input
     // Worker-side: run queued input handlers FIFO until queue empties.
     private void DrainInput()
     {
@@ -293,9 +302,9 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             Dictionary<string, object?> kwargs;
             lock (Lock)
             {
-                if (_inputQueue.Count == 0) { _inputRunning = false; return; } // port of connection.py:139-141
-                if (_disconnected) { _inputQueue.Clear(); _inputRunning = false; return; } // port of connection.py:142-145
-                var item = _inputQueue.Dequeue(); // port of connection.py:146
+                if (_inputQueue.Count == 0) { _inputRunning = false; return; }
+                if (_disconnected) { _inputQueue.Clear(); _inputRunning = false; return; }
+                var item = _inputQueue.Dequeue();
                 handler = item.Handler;
                 args = item.Args;
                 kwargs = item.Kwargs;
@@ -314,18 +323,16 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             catch (Exception ex)
             {
                 var name = handler.Method.Name;
-                Atheriz.Core.AtherizLogger.LogError($"[Network] Input handler '{name}' failed: {ex}"); // port of connection.py:152-153
+                Atheriz.Core.AtherizLogger.LogError($"[Network] Input handler '{name}' failed: {ex}");
             }
         }
     }
 
-    // Port of connection.py:155-159 clear_pending_input
     public void ClearPendingInput()
     {
         lock (Lock) { _inputQueue.Clear(); _inputRunning = false; }
     }
 
-    // Port of connection.py:139-141 internal helper for Disconnect to set _disconnected
     internal void SetDisconnected(bool value)
     {
         lock (Lock) { _disconnected = value; }
@@ -341,7 +348,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // use the registration-time value.
     internal string? RegisteredHost { get; set; }
 
-    // Port of connection.py:162-167 send_command — must be implemented by child classes
+// must be implemented by child classes
     public abstract void SendCommand(string cmd, List<object?>? args = null, Dictionary<string, object?>? kwargs = null);
 
     // Convenience overload for variadic args (used by Msg)
@@ -350,13 +357,11 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         SendCommand(cmd, args?.ToList(), null);
     }
 
-    // Port of connection.py:169-171 launch_draw
     public virtual void LaunchDraw()
     {
         SendCommand("launch_draw", [], []);
     }
 
-    // Port of connection.py:173-199 msg
     // Maps simple messages to the robust send_command interface.
     // Also handles trailing \r\n and screenreader ANSI stripping.
     public void Msg(string text)
@@ -377,10 +382,9 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // For C# parity, we expose MsgInternal; callers needing kwargs can use SendCommand directly.
     private void MsgInternal(List<object?> args, Dictionary<string, object?> kwargs)
     {
-        // port of connection.py:173-199
         string cmd = "text";
         if ((args is null || args.Count == 0) && (kwargs is null || kwargs.Count == 0))
-            return; // port of connection.py:179-180
+            return;
 
         // Copy the caller's list: the text path mutates args[0] below and the
         // kwargs path re-roots args — neither may alias caller state.
@@ -388,14 +392,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
         // outgoing_kwargs = dict(kwargs) at connection.py:182
         var outgoingKwargs = kwargs is not null ? new Dictionary<string, object?>(kwargs) : [];
 
-        if (outgoingKwargs.Count > 0) // port of connection.py:183
+        if (outgoingKwargs.Count > 0)
         {
-            if (outgoingKwargs.TryGetValue("text", out var textVal) && textVal is string t && !string.IsNullOrEmpty(t)) // port of connection.py:184-186
+            if (outgoingKwargs.TryGetValue("text", out var textVal) && textVal is string t && !string.IsNullOrEmpty(t))
             {
                 outgoingKwargs.Remove("text");
                 args.Insert(0, t);
             }
-            else if (outgoingKwargs.Count > 0) // port of connection.py:187-190
+            else if (outgoingKwargs.Count > 0)
             {
                 // Python popitem() takes the LAST-inserted kwarg
                 // (dict LIFO); First() took the first — same arbitrariness,
@@ -409,14 +413,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             }
         }
 
-        if (cmd == "text" && args.Count > 0) // port of connection.py:192-198
+        if (cmd == "text" && args.Count > 0)
         {
             if (args[0] is not string)
                 args[0] = args[0]?.ToString() ?? "";
             var s = (string)args[0]!;
             if (!s.EndsWith("\r\n", StringComparison.Ordinal) && !s.EndsWith("\n", StringComparison.Ordinal))
                 s += "\r\n";
-            if (Session.ScreenReader) // port of connection.py:197-198
+            if (Session.ScreenReader)
                 s = GameUtils.StripAnsi(s);
             args[0] = s;
         }
@@ -426,6 +430,6 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // IMessageTarget implementation (explicit)
     void Atheriz.Core.Commands.IMessageTarget.Msg(string text) => Msg(text);
 
-    // Port of connection.py:201-207 close — must be implemented by child classes
+// must be implemented by child classes
     public abstract void Close();
 }

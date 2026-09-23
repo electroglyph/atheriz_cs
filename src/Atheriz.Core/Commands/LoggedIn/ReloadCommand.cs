@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/reload.py:43
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -29,7 +28,7 @@ public sealed class ReloadCommand : Command
         var capturedChannel = channel;
         try
         {
-            // Port of reloader.reload_game_logic() — use PluginReloader async API or ServerLifecycle.
+// use PluginReloader async API or ServerLifecycle.
             // Arguments evaluate here (not inside the async method) so a
             // throwing ticker fetch lands in this catch, as before.
             _ = FinishReloadAsync(

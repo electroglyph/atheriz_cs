@@ -1,10 +1,8 @@
-// Port of atheriz/commands/loggedin/get.py:87 + put.py:174 + drop.py:66
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
 public sealed class GetCommand : Command
 {
-    // Port of atheriz/commands/loggedin/get.py:10
     public override string Key => "get";
     public override string Desc => "Get an object.";
     protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument("target", nargs: "*", help: "object to get, optionally 'from <container>'"); }
@@ -109,7 +107,6 @@ public sealed class GetCommand : Command
 }
 public sealed class PutCommand : Command
 {
-    // Port of atheriz/commands/loggedin/put.py:10
     public override string Key => "put";
     public override string Desc => "Put an object somewhere.";
     protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument("args", nargs: "REMAINDER"); }
@@ -119,7 +116,7 @@ public sealed class PutCommand : Command
         List<GameObject> excludeSelf = [goCaller];
         string? objName = null;
         string? destName = null;
-        // Port of put.py:25-42 — live ParsedArgs carry the `args` list.
+// live ParsedArgs carry the `args` list.
         if (args is GameArgumentParser.ParsedArgs pa)
         {
             var tokens = pa.GetList("args");
@@ -198,7 +195,6 @@ public sealed class PutCommand : Command
 }
 public sealed class DropCommand : Command
 {
-    // Port of atheriz/commands/loggedin/drop.py:10
     public override string Key => "drop";
     public override string Desc => "Drop an object.";
     protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument("object", nargs: "REMAINDER", help: "object to drop or all"); }

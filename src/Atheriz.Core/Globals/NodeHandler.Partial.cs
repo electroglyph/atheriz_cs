@@ -28,13 +28,11 @@ public partial class NodeHandler
             _doorGen++;
         }
         finally { Lock3.ExitWriteLock(); }
-        // Port of node.py add_door map stamp (after releasing Lock3: no lock
         // nesting). MapClose/MapOpen already implement the post_grid (+pre_grid
         // if non-empty) stamp + render; the MapEnabled gate only skips render
         // work when maps are disabled.
         try { if (door.Closed) door.MapClose(); else door.MapOpen(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.AddDoor: " + logEx.Message, "NodeHandler"); }
     }
-    // Port of node.py remove_door: entries are removed by VALUE (v == door),
     // not by exit-name key.
     private static void RemoveDoorValue(Dictionary<string,Door> d, Door door)
     {
@@ -60,7 +58,6 @@ public partial class NodeHandler
         fromNode?.RemoveLink(door.FromExit);
         var toNode=GetNode(door.ToCoord);
         toNode?.RemoveLink(door.ToExit);
-        // Port of node.py remove_door map cleanup (update_grid(symbol," ") +
         // render per (area,z)); after releasing Lock3, no lock nesting.
         try
         {
@@ -134,7 +131,7 @@ public partial class NodeHandler
         Lock.EnterWriteLock();
         try { _areas.Remove(name,out area); _modified=true; _areaGen++; _removedAreas.Add(name); }
         finally { Lock.ExitWriteLock(); }
-        // Port of node.py:639-644 — pop + area.clear() only. Nodes stay
+// pop + area.clear() only. Nodes stay
         // registered (Python leaks them from _ALL_OBJECTS); only clear()
         // evicts, mirroring Python.
         area?.Clear();
@@ -285,7 +282,6 @@ public partial class NodeHandler
         if (!dst.TryAdd(key, value))
             try { AtherizLogger.LogWarning(warnMsg); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler." + logScope + ": " + logEx.Message, "NodeHandler"); }
     }
-    // Port of nodes.py:1147 door re-key for ApplyMoves
     public void RemapDoors(Dictionary<Coord, Coord> oldToNewFull, Dictionary<(int,int),(int,int)> remap)
     {
         Lock3.EnterWriteLock();
@@ -365,7 +361,6 @@ public partial class NodeHandler
     public void RemapDoors(Dictionary<Coord, Coord> oldToNewFull)
         => RemapDoors(oldToNewFull, []);
 
-    // Port of nodes.py:1194 transition remap
     public void RemapTransitions(Dictionary<Coord, Coord> oldToNewFull)
     {
         Lock2.EnterWriteLock();

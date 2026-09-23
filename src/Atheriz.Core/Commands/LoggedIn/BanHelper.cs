@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/ban.py:13-63 helpers (_resolve_target/_find_account/_target_ip)
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

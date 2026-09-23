@@ -1,4 +1,3 @@
-// Port of atheriz/database_setup.py:do_setup Data column (JSON string)
 namespace Atheriz.Core.Persistence;
 
 /// <summary>

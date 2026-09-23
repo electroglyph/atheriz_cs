@@ -1,4 +1,3 @@
-// Port of atheriz/network/manager.py:10-24 + websocket.py:15-27 + connection.py:87-89 throttling
 
 namespace Atheriz.Core.Network;
 

@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Atheriz.Server.Infrastructure;
 
-// Port of atheriz/logger.py:43 file handling + RotatingFileHandler 5M*5 for save/server.log
 // Minimal FileLogger for Server host — honors AtherizSettings.SavePath and LOG_LEVEL
 public sealed class FileLoggerProvider : ILoggerProvider
 {
@@ -79,7 +78,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
 public static class FileLoggerExtensions
 {
-    // Port of logger.py:43 AddFile/save/server.log 5M*5 equivalent — use AddProvider
+// use AddProvider
     public static ILoggingBuilder AddAtherizFileLogger(this ILoggingBuilder builder, string savePath, LogLevel minLevel = LogLevel.Information)
     {
         builder.AddProvider(new FileLoggerProvider(savePath, minLevel));

@@ -1,7 +1,6 @@
 namespace Atheriz.Core.Concurrency;
 
 /// <summary>
-/// Port of <c>atheriz/globals/asyncthreadpool.py:457</c> AsyncTicker + TimeSlot.
 /// Each interval has a slot that fires all coros every interval seconds.
 /// Pending dedup prevents overlapping ticks.
 /// </summary>
@@ -199,7 +198,7 @@ public sealed class AsyncTicker
         // load-bearing for pending-dedup (no overlapping ticks), so it stays:
         // still-running coros release only in their continuation, never in a
         // shared try/finally.
-        private static void WriteFault(Exception? ex) => Console.Error.WriteLine(ex?.ToString());
+        private static void WriteFault(Exception? ex) => AtherizLogger.LogError(ex?.ToString() ?? string.Empty);
 
         private void TickOnce(Delegate coro)
         {
@@ -268,7 +267,7 @@ public sealed class AsyncTicker
                         foreach (var c in batch) _pending[c] = now;
                     }
                     foreach (var name in stale)
-                        Console.Error.WriteLine($"[AsyncTicker] Pending hold expired; released '{name}' so its slot can tick again.");
+                        AtherizLogger.LogWarning($"[AsyncTicker] Pending hold expired; released '{name}' so its slot can tick again.");
                     foreach (var c in batch)
                     {
                         lock (_lock)

@@ -52,7 +52,6 @@ public class AsyncThreadPool : IDisposable
         _watchdogThreshold = watchdogSeconds ?? TimeSpan.FromSeconds(30);
         _watchdogInterval = watchdogInterval ?? TimeSpan.FromSeconds(5);
 
-        // Port of Python pool layout: threads[0] is the async thread and
         // threads[1:] are the fixed workers, so maxThreads counts the async
         // slot plus (maxThreads-1) workers.
         for (int i = 0; i < _maxThreads - 1; i++)
@@ -426,7 +425,6 @@ public class AsyncThreadPool : IDisposable
         return AddInternal(() => { bound(); return Task.CompletedTask; }, name);
     }
 
-    // Port of asyncthreadpool.py: run() executes sync inline and logs exceptions without raising
     public virtual void Run(Delegate del, params object?[] args)
     {
         try
@@ -454,7 +452,7 @@ public class AsyncThreadPool : IDisposable
                 if (now - _lastFullLogSeconds > TimeSpan.FromSeconds(10).TotalSeconds)
                 {
                     _lastFullLogSeconds = now;
-                    Console.Error.WriteLine("[AsyncThreadPool] task submitted after stop; discarded");
+                    AtherizLogger.LogError("[AsyncThreadPool] task submitted after stop; discarded");
                 }
                 return false;
             }
@@ -466,7 +464,7 @@ public class AsyncThreadPool : IDisposable
                     if (now - _lastFullLogSeconds > TimeSpan.FromSeconds(10).TotalSeconds)
                     {
                         _lastFullLogSeconds = now;
-                        Console.Error.WriteLine($"[AsyncThreadPool] task queue full ({_queueLimit}); dropping task");
+                        AtherizLogger.LogWarning($"[AsyncThreadPool] task queue full ({_queueLimit}); dropping task");
                     }
                     return false;
                 }
@@ -478,7 +476,6 @@ public class AsyncThreadPool : IDisposable
         return true;
     }
 
-    // Port of asyncthreadpool.py delay stale-pool guard: a reload that
     // swapped the global pool drops this pool's delayed tasks (a cleared
     // global — standalone/test pools — still fires).
     private bool IsStalePool()
@@ -589,7 +586,7 @@ public class AsyncThreadPool : IDisposable
                 var remaining = deadline - DateTime.UtcNow;
                 if (remaining <= TimeSpan.Zero) remaining = TimeSpan.FromMilliseconds(50);
                 if (!t.Join(remaining))
-                    Console.Error.WriteLine($"Thread {t.Name} did not stop within {to.TotalSeconds}s");
+                    AtherizLogger.LogError($"Thread {t.Name} did not stop within {to.TotalSeconds}s");
             }
             List<Thread> reliefSnap;
             lock (_lock) reliefSnap = new List<Thread>(_reliefThreads);

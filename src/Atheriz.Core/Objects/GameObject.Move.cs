@@ -2,57 +2,53 @@ using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Objects;
 
-// Partial for move/message/puppet — Port of atheriz/objects/base_obj.py:1054-1370 move_to + related hooks
 // Faithful to base_obj.py:2105 no invention. See Plan2 Phase 12 spec.
 public partial class GameObject
 {
     // --- hooks ---
-    // Port of base_obj.py:1054 at_pre_move — advisory hookable, returns bool gate (can abort)
+// advisory hookable, returns bool gate (can abort)
     // Spec: advisory before cannot abort except AtPreMove specialized — here AtPreMove itself is gate.
     public virtual bool AtPreMove(GameObject? destination, string? toExit = null)
     {
         // Hookable wrapper: before hooks advisory, replace hooks override
-        return Hookable("at_pre_move", () =>
+        return Hookable(HookNames.AtPreMove, () =>
         {
-            // Port of base_obj.py:1067-1071
             var locObj = ResolveLocationObject();
-            if (locObj is not null && !locObj.Access(this, "exit")) return false; // Port of base_obj.py:1067 if self.location and not self.location.access(self,"exit"): return False
-            if (destination is not null && !destination.Access(this, "enter")) return false; // Port of base_obj.py:1069 if destination and not destination.access(self,"enter"): return False
+            if (locObj is not null && !locObj.Access(this, "exit")) return false;
+            if (destination is not null && !destination.Access(this, "enter")) return false;
             return true;
         }, destination, toExit);
     }
 
-    // Port of base_obj.py:1074 at_post_move — advisory hookable
+// advisory hookable
     public virtual void AtPostMove(GameObject? destination, string? toExit = null)
     {
-        Hookable("at_post_move", () => 0, destination, toExit);
+        Hookable(HookNames.AtPostMove, () => 0, destination, toExit);
     }
 
-    // Port of nodes.py:332-357 / base_obj move handling for leaves/receive
     public virtual bool AtPreObjectLeave(GameObject? destination, string? toExit = null)
     {
-        return Hookable("at_pre_object_leave", () => true, destination, toExit);
+        return Hookable(HookNames.AtPreObjectLeave, () => true, destination, toExit);
     }
     public virtual void AtObjectLeave(GameObject? destination, string? toExit = null)
     {
-        Hookable("at_object_leave", () => 0, destination, toExit);
+        Hookable(HookNames.AtObjectLeave, () => 0, destination, toExit);
     }
     public virtual bool AtPreObjectReceive(GameObject? source, string? fromExit = null)
     {
-        return Hookable("at_pre_object_receive", () => true, source, fromExit);
+        return Hookable(HookNames.AtPreObjectReceive, () => true, source, fromExit);
     }
     public virtual void AtObjectReceive(GameObject? source, string? fromExit = null)
     {
-        Hookable("at_object_receive", () => 0, source, fromExit);
+        Hookable(HookNames.AtObjectReceive, () => 0, source, fromExit);
     }
 
     // For Node subclasses, override to provide proper at_pre_object_* checks
     // (Node.cs will override these virtuals)
 
     // --- content helpers ---
-    // Port of base_obj.py:823 add_object / remove_object (also ForContents already in main)
     // Keep existing AddContent/RemoveContent; add object overloads for API parity spec: AddObject(GameObject), RemoveObject, ForContents(Action)
-    public void AddObject(GameObject obj) // Port of base_obj.py:823 add_object
+    public void AddObject(GameObject obj)
     {
         if (obj is null) return;
         _lock.EnterWriteLock();
@@ -73,7 +69,7 @@ public partial class GameObject
         }
     }
 
-    public void RemoveObject(GameObject obj) // Port of base_obj.py:834 remove_object
+    public void RemoveObject(GameObject obj)
     {
         if (obj is null) return;
         _lock.EnterWriteLock();
@@ -95,7 +91,6 @@ public partial class GameObject
 
     /// <summary>
     /// Helper to resolve current LocationRef to live GameObject/Node via ObjectRegistry.
-    /// Port of base_obj.py location resolution via globals.objects.get
     /// </summary>
     public GameObject? ResolveLocationObject()
     {
@@ -112,12 +107,11 @@ public partial class GameObject
         return null;
     }
 
-    private int _lastTouchedBy = -1; // Port of base_obj.py:1251 last_touched_by
+    private int _lastTouchedBy = -1;
     public int LastTouchedBy { get => Read(() => _lastTouchedBy); set => Write(() => _lastTouchedBy = value); }
 
     // --- MoveTo ---
     /// <summary>
-    /// Port of <c>atheriz/objects/base_obj.py:1085 move_to</c> (2105 LOC file, 1110 core).
     /// Faithful: caller permission via Access("move") + at_pre_move gate (force bypass), cycle-into-self guard via contents recursion capped 100,
     /// sort_locks (NodeGrid→Node→GameObject), CheckMoves stub, _contents sets, Location, IsModified, MoveVerb, at_post_move, at_object_leave/receive,
     /// cross-node reverse_link, map MoveListener/MoveMapable, follow/wander invalidation stub, announce handling.
@@ -147,7 +141,6 @@ public partial class GameObject
             else if (locRef is LocationRef.NullLocation) destObj = null;
         }
 
-        // Port of base_obj.py:1107 if not force and not at_pre_move(...): return False
         // FollowScript.at_pre_move pushes one entry per AtPreMove call; every
         // veto return below (before AtPostMove) must pop its partner or the
         // stack leaks and later moves pair with stale entries. Force moves
@@ -165,7 +158,6 @@ public partial class GameObject
             if (!preOk) { FollowScript.CancelPendingPush(this); return false; }
         }
 
-        // Port of base_obj.py:1109-1117 if destination is None: remove from loc, location=None, at_post_move
         if (destObj is null)
         {
             GameObject? locObj = ResolveLocationObject();
@@ -203,7 +195,6 @@ public partial class GameObject
             return true;
         }
 
-        // Port of base_obj.py:1118-1130 if destination is not Node: cycle guard
         // Python: if dest is not Node: walk chain via location until Node or None checking self
         // Note: no depth limit — seen set prevents infinite, and deep chains beyond 100 must still be detected (test_containment:105)
         // Self/cycle guard also applies to Node destinations .
@@ -218,7 +209,7 @@ public partial class GameObject
             bool reachedNode = false;
             while (cur is not null)
             {
-                if (cur == this || cur.Id == this.Id) { if (followPushed) FollowScript.CancelPendingPush(this); return false; } // Port of base_obj.py:1122-1123
+                if (cur == this || cur.Id == this.Id) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
                 if (!seen.Add(cur.Id)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; } // cycle
                 // Get next location in chain
                 var next = cur.ResolveLocationObject();
@@ -263,7 +254,6 @@ public partial class GameObject
             oldLoc = ObjectRegistry.GetEver(olLoc.ObjectId);
 
         // --- lock order: NodeGrid before Node before GameObject (Id/Coord ordering) ---
-        // Port of base_obj.py:1134 sort_locks helper
         // In Python: def get_key(o): if is_node: return (0, o.coord) else (1, o.id)
         // At most two locks are ever taken, so order the pair directly — no
         // List/sort. (Grid locks would precede Node locks; NodeGrid locks are
@@ -272,7 +262,7 @@ public partial class GameObject
         {
             bool aNode = a.IsNode;
             bool bNode = b.IsNode;
-            if (aNode != bNode) return aNode ? -1 : 1; // Nodes (0) before Objects (1) — Port of base_obj.py:1139
+            if (aNode != bNode) return aNode ? -1 : 1;
             if (aNode)
             {
                 var ac = (a as Node)?.Coord;
@@ -361,13 +351,11 @@ public partial class GameObject
         bool installExits = false;
         try
         {
-            // Port of base_obj.py:1187-1206 checks inside _do_with_nodes
-            if (destObj.IsDeleted) { if (followPushed) FollowScript.CancelPendingPush(this); return false; } // Port of base_obj.py:1187 if is_deleted: return False
+            if (destObj.IsDeleted) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
             // No grid-presence probe here: the old probe's arms both fell through
             // to the move (dead block paying a registry lookup per move for no
             // decision), so unregistered-but-live nodes stay movable.
 
-            // Update _contents sets — Port of base_obj.py:1203-1206.
             // A move to the current location skips the remove/add churn: the
             // membership is already correct, and stamping both ends dirty
             // buys a checkpoint write for no state change.
@@ -396,14 +384,12 @@ public partial class GameObject
                 destObj.IsModified = true;
             }
 
-            // For Node-to-Node moves, Python calls destination.add_exits(self, internal=True) — Port of base_obj.py:1312.
             // Deferred until after both location locks release (see below):
             // AddExitsForObject nests node->object and must not extend the
             // two-lock hold .
             if (destObj.IsNode && oldLoc is not null)
                 installExits = true;
 
-            // Update our location and last_touched_by — Port of base_obj.py:1249-1252 / 1313-1315
             LocationRef newLocRef;
             if (destObj.IsNode && destObj is Node destNode2)
                 newLocRef = LocationRef.FromCoord(destNode2.Coord);
@@ -446,10 +432,8 @@ public partial class GameObject
         if (destObj.IsNode)
             destObj.AtObjectReceive(oldLoc, null);
 
-        // Trigger at_post_move — Port of base_obj.py:1253 / 1360
         AtPostMove(destObj, toExit);
 
-        // Announce handling — Port of base_obj.py:1339-1353
         if (announce && oldLoc is not null && oldLoc.IsNode && destObj.IsNode)
         {
             // cross-node announce: compute reverse_link (get_reverse_link) and call announce_move_to/from
@@ -473,7 +457,6 @@ public partial class GameObject
             AnnounceMoveFrom(destObj, reverseName);
         }
 
-        // Map handler updates — Port of base_obj.py:1354-1359
         if (destObj.IsNode && destObj is Node destNodeForMap)
         {
             try
@@ -505,7 +488,6 @@ public partial class GameObject
         // If this object is being followed, followers will be moved via FollowScript's at_post_move hook (already triggered above).
         // No additional handling required for faithful port; leaving as stub.
 
-        // For PC, show look — Port of base_obj.py:1365-1368 if is_pc: msg = at_look(destination); msg(msg)
         if (IsPc && destObj.IsNode)
         {
             try
@@ -521,7 +503,6 @@ public partial class GameObject
 
     private string? GetReverseLinkName(Node from, Node to)
     {
-        // Port of base_obj.py:1262 reverse_link = get_reverse_link(loc, destination)
         // Simplified: check if 'to' has a link back to 'from'
         try
         {
@@ -535,7 +516,7 @@ public partial class GameObject
         return null;
     }
 
-    public void AnnounceMoveFrom(GameObject destination, string? fromExit, List<GameObject>? exclude = null) // Port of base_obj.py:1514 announce_move_from
+    public void AnnounceMoveFrom(GameObject destination, string? fromExit, List<GameObject>? exclude = null)
     {
         if (destination is null) return;
         // Hoisted: an inline index-initializer mapping followed by further
@@ -565,7 +546,7 @@ public partial class GameObject
         }
     }
 
-    public void AnnounceMoveTo(GameObject sourceLocation, string? toExit, List<GameObject>? exclude = null) // Port of base_obj.py:1550 announce_move_to
+    public void AnnounceMoveTo(GameObject sourceLocation, string? toExit, List<GameObject>? exclude = null)
     {
         if (sourceLocation is null) return;
         var moveMapping = new Dictionary<string, object?> { ["mover"] = this };

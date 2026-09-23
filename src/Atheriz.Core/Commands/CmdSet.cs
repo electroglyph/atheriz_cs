@@ -1,11 +1,11 @@
 namespace Atheriz.Core.Commands;
 
 /// <summary>
-/// Thread-safe command set. Mirrors <c>atheriz/commands/base_cmdset.py:CmdSet</c> (139 LOC).
+/// Thread-safe command set.
 /// </summary>
 public class CmdSet
 {
-    private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.SupportsRecursion);
+    private readonly Lock _lock = new();
     private readonly Dictionary<string, Command> _commands = new(StringComparer.OrdinalIgnoreCase);
     // Ordinal-sorted key snapshot for the dispatch hot path (AutoAlias). The
     // cached list is replaced, never mutated, so a reader holding a previous
@@ -15,12 +15,13 @@ public class CmdSet
 
     public IReadOnlyList<Command> GetAll()
     {
-        _lock.EnterReadLock();
-        // one entry per command instance. The dict holds Key +
-        // every alias; without Distinct every caller must remember to
-        // dedupe (two HelpCommands do; the locals.AddRange path didn't).
-        try { return _commands.Values.Distinct().ToList(); }
-        finally { _lock.ExitReadLock(); }
+        lock (_lock)
+        {
+            // one entry per command instance. The dict holds Key +
+            // every alias; without Distinct every caller must remember to
+            // dedupe (two HelpCommands do; the locals.AddRange path didn't).
+            return _commands.Values.Distinct().ToList();
+        }
     }
 
     public void Add(Command command, string? tag = null) => Adds([command], tag);
@@ -29,8 +30,7 @@ public class CmdSet
     {
         var list = commands.ToList();
         if (tag is not null) foreach (var c in list) c.Tag = tag;
-        _lock.EnterWriteLock();
-        try
+        lock (_lock)
         {
             var claimed = new Dictionary<string, Command>(StringComparer.OrdinalIgnoreCase);
             foreach (var cmd in list)
@@ -45,7 +45,6 @@ public class CmdSet
             foreach (var cmd in list) Register(cmd);
             _sortedKeysCache = null;
         }
-        finally { _lock.ExitWriteLock(); }
     }
 
     // Single-name claim check shared by the Key + each alias (caller holds
@@ -63,8 +62,7 @@ public class CmdSet
 
     public void Remove(Command command)
     {
-        _lock.EnterWriteLock();
-        try
+        lock (_lock)
         {
             // remove by instance identity, not by current Key/Aliases.
             // Channel/exit commands are SetKey()-rekeyed after registration
@@ -78,24 +76,20 @@ public class CmdSet
             foreach (var k in doomed) _commands.Remove(k);
             _sortedKeysCache = null;
         }
-        finally { _lock.ExitWriteLock(); }
     }
 
     public virtual void RemoveByTag(string tag)
     {
         HashSet<string> toDel = new(StringComparer.OrdinalIgnoreCase);
-        _lock.EnterReadLock();
-        try
+        lock (_lock)
         {
             foreach (var kv in _commands) if (kv.Value.Tag == tag) toDel.Add(kv.Key);
         }
-        finally { _lock.ExitReadLock(); }
         if (toDel.Count == 0) return;
-        _lock.EnterWriteLock();
+        lock (_lock)
+        {
         // re-validate each tag under the write lock — a key collected
         // above may have been re-added with a different tag in between.
-        try
-        {
             bool removed = false;
             foreach (var kv in _commands.ToList())
                 if (toDel.Contains(kv.Key) && kv.Value.Tag == tag)
@@ -105,14 +99,15 @@ public class CmdSet
                 }
             if (removed) _sortedKeysCache = null;
         }
-        finally { _lock.ExitWriteLock(); }
     }
 
     public virtual Command? Get(string name)
     {
-        _lock.EnterReadLock();
-        try { _commands.TryGetValue(name, out var c); return c; }
-        finally { _lock.ExitReadLock(); }
+        lock (_lock)
+        {
+            _commands.TryGetValue(name, out var c);
+            return c;
+        }
     }
 
     private void Register(Command cmd)
@@ -123,9 +118,10 @@ public class CmdSet
 
     public virtual IReadOnlyList<string> GetKeys()
     {
-        _lock.EnterReadLock();
-        try { return _commands.Keys.ToList(); }
-        finally { _lock.ExitReadLock(); }
+        lock (_lock)
+        {
+            return _commands.Keys.ToList();
+        }
     }
 
     // Cached ordinal-sorted key snapshot for the dispatch hot path
@@ -135,11 +131,11 @@ public class CmdSet
     // clears it under the write lock.
     public virtual IReadOnlyList<string> GetSortedKeys()
     {
-        _lock.EnterReadLock();
-        try { if (_sortedKeysCache is not null) return _sortedKeysCache; }
-        finally { _lock.ExitReadLock(); }
-        _lock.EnterWriteLock();
-        try
+        lock (_lock)
+        {
+            if (_sortedKeysCache is not null) return _sortedKeysCache;
+        }
+        lock (_lock)
         {
             if (_sortedKeysCache is null)
             {
@@ -149,11 +145,10 @@ public class CmdSet
             }
             return _sortedKeysCache;
         }
-        finally { _lock.ExitWriteLock(); }
     }
 
     public int Count
     {
-        get { _lock.EnterReadLock(); try { return _commands.Count; } finally { _lock.ExitReadLock(); } }
+        get { lock (_lock) return _commands.Count; }
     }
 }

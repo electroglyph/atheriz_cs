@@ -2,7 +2,6 @@
 namespace Atheriz.Core.Globals;
 
 /// <summary>
-/// Port of <c>atheriz/globals/salt.py:get_salt</c>.
 /// Global static salt shared by all accounts (intentional wontfix).
 /// Uses absolute-path guard matching <c>database_setup.py:66</c>.
 /// </summary>
@@ -92,7 +91,6 @@ public static class SaltProvider
             }
             catch (UnauthorizedAccessException)
             {
-                // Port of salt.py:65-66 except OSError fallback: a non-race OS
                 // error (permissions/FS) falls back to a plain write rather
                 // than propagating. Read any peer-persisted salt
                 // BEFORE overwriting — a concurrent process may have created
@@ -155,7 +153,7 @@ public static class SaltProvider
     // of this game's salt.
     public static void ReseedForGame(string absSecret)
     {
-        try { GetSalt(absSecret); } catch (Exception ex) { Console.Error.WriteLine($"Salt re-seed warning: {ex.Message}"); }
-        try { SetSalt(GetSalt(absSecret)); } catch (Exception ex) { Console.Error.WriteLine($"Default salt seed warning: {ex.Message}"); }
+        try { GetSalt(absSecret); } catch (Exception ex) { AtherizLogger.LogWarning($"Salt re-seed warning: {ex.Message}"); }
+        try { SetSalt(GetSalt(absSecret)); } catch (Exception ex) { AtherizLogger.LogWarning($"Default salt seed warning: {ex.Message}"); }
     }
 }

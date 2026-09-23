@@ -2,7 +2,6 @@
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Port of atheriz/commands/loggedin/follow.py:FollowScript (before/after move hooks).
 /// </summary>
 public sealed class FollowScript : Script
 {

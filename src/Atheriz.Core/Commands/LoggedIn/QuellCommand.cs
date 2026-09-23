@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/quell.py:53
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

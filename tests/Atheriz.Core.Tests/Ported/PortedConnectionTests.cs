@@ -261,15 +261,14 @@ public class PortedConnectionTests
         Assert.Equal(0, mgr.ConnectionCount);
         try { mgr.Atp.Stop(wait:false); } catch {}
     }
-    [Fact] public void InitLockIsRlock()
+    [Fact] public void InitLockIsExclusiveLock()
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeManager();
         var f = typeof(ConnectionManager).GetField("_lock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         var l = f.GetValue(mgr)!;
-        Assert.IsType<System.Threading.ReaderWriterLockSlim>(l);
-        var rwl = (System.Threading.ReaderWriterLockSlim)l;
-        Assert.Equal(LockRecursionPolicy.SupportsRecursion, rwl.RecursionPolicy);
+        Assert.IsType<System.Threading.Lock>(l);
+        using (((System.Threading.Lock)l).EnterScope()) { }
         mgr.Atp.Stop(wait:false);
     }
     [Fact] public void InitRegistersHandlersFromInputFuncs()

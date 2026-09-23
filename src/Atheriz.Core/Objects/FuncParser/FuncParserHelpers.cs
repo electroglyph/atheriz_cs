@@ -1,4 +1,3 @@
-// Port of atheriz/objects/funcparser_helpers.py:1
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -7,7 +6,6 @@ using System.Text.RegularExpressions;
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Port of <c>atheriz/objects/funcparser_helpers.py</c> (504 LOC).
 /// Helpers for FuncParser: SafeFormatMap, pad/crop/justify/int2str and text width guards.
 /// Evennia BSD helpers adapted to C# (east_asian_width via Regex, no dill/simple_eval).
 /// </summary>
@@ -176,12 +174,10 @@ public static class FuncParserHelpers
     public static bool IsIter(object? o) => o is System.Collections.IEnumerable && o is not string;
     public static IEnumerable<object?> MakeIter(object? o) => IsIter(o) ? ((System.Collections.IEnumerable)o!).Cast<object?>() : new[] { o };
 
-    // Unified on GameUtils.CopyWordCase (verbatim port of utils.py:895
     // copy_word_case); the local variant had diverged subtly, so delegate to the single implementation.
     public static string CopyWordCase(string src, string dst) =>
         global::Atheriz.Core.Utils.GameUtils.CopyWordCase(src, dst);
 
-    // --- Safe arithmetic with exponent guard (port of funcparser_helpers._safe_arith_eval + _safe_pow) ---
     public static double SafeArithEval(string inp)
     {
         // mirrors Python _safe_arith_eval with _MAX_POW_EXPONENT and _MAX_POW_DIGITS guard

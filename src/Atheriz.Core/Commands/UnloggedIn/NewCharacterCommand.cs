@@ -1,4 +1,3 @@
-// Port of atheriz/commands/unloggedin/new.py:132
 using Atheriz.Core.Network;
 
 namespace Atheriz.Core.Commands.UnloggedIn;

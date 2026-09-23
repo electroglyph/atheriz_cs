@@ -24,7 +24,7 @@ public class PortedBaseCmdSetTests
         public override void Run(IMessageTarget caller, object? args) { }
     }
 
-    [Fact] public void CmdSet_Init_Empty() { using var env = GlobalTestEnv.Enter(); var cs = new CmdSet(); Assert.Empty(cs.GetKeys()); var f = typeof(CmdSet).GetField("_lock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance); var l = f!.GetValue(cs); Assert.IsType<ReaderWriterLockSlim>(l); }
+    [Fact] public void CmdSet_Init_Empty() { using var env = GlobalTestEnv.Enter(); var cs = new CmdSet(); Assert.Empty(cs.GetKeys()); var f = typeof(CmdSet).GetField("_lock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance); var l = f!.GetValue(cs); Assert.IsType<System.Threading.Lock>(l); }
     [Fact] public void GetAll_EmptyReturnsEmptyList() { using var env = GlobalTestEnv.Enter(); var cs = new CmdSet(); Assert.Empty(cs.GetAll()); }
     [Fact] public void GetAll_ReturnsList() { using var env = GlobalTestEnv.Enter(); var cs = new CmdSet(); cs.Add(new FakeCommand("a")); cs.Add(new FakeCommand("b")); var r = cs.GetAll(); Assert.IsType<List<Command>>(r); Assert.Equal(2, r.Count); }
     [Fact] public void GetAll_IncludesAliasesAsSameObject() { using var env = GlobalTestEnv.Enter(); var cs = new CmdSet(); var c = new FakeCommand("a", ["x","y"]); cs.Add(c); var r = cs.GetAll(); Assert.Single(r); Assert.Same(c, r[0]); Assert.Same(c, cs.Get("x")); Assert.Same(c, cs.Get("y")); }

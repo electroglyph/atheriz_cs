@@ -7,7 +7,6 @@ if (rawArgs.Length == 0) { command = "--help"; rest = Array.Empty<string>(); }
 else if (rawArgs.Length == 1 && (rawArgs[0] == "--help" || rawArgs[0] == "-h")) { command = "--help"; rest = Array.Empty<string>(); }
 else if (rawArgs[0].StartsWith("-", StringComparison.Ordinal)) { Console.Error.WriteLine($"atheriz: error: unrecognized arguments: {string.Join(' ', rawArgs)}"); Environment.Exit(2); }
 else { command = rawArgs[0]; rest = rawArgs.Skip(1).ToArray(); }
-// Port of atheriz.py:962 main() ArgumentParser: description + subcommands + env-var epilog.
 void PrintHelp()
 {
     Console.WriteLine("AtheriZ - Text-based multiplayer game server");
@@ -84,7 +83,6 @@ static void EnsureDirsOrExit(AtherizSettings s)
     Atheriz.Core.Utils.PathGuards.EnsureSecretDirectory(s.SecretPath);
 }
 if (rest.Contains("--help", StringComparer.Ordinal) || rest.Contains("-h", StringComparer.Ordinal)) { PrintCommandHelp(command); return; }
-// Port of argparse type=int for --port: non-int port is a usage error (exit 2).
 {
     var badPort = ArgumentParser.ParsePort(rest) is null ? ArgumentParser.InvalidPortValue(rest) : null;
     if (badPort is not null) { Console.Error.WriteLine($"atheriz: error: argument --port: invalid int value: '{badPort}'"); Environment.Exit(2); }
@@ -114,14 +112,12 @@ string? hostOverride = ArgumentParser.ParseHost(rest);
 bool foreground = ArgumentParser.HasFlag(rest, "--foreground", "-f");
 if (!foreground && command == "start")
 {
-    // Port of atheriz.py start default: daemonize unless --foreground (spawn_daemon).
     var effSpawn = StopHandler.EffectiveSettingsValue;
     EnsureDirsOrExit(effSpawn);
     int spawnPort = portOverride ?? effSpawn.WebserverPort;
     // Validate the host before claiming: an invalid --host fails the spawn
     // below, and must not leave a pid claim behind pointing at this CLI.
     if (hostOverride is not null && !DaemonSpawner.IsSafeHost(hostOverride)) { Console.Error.WriteLine($"Invalid --host value: {hostOverride}"); Environment.Exit(2); return; }
-    // atomic handoff — port of spawn_daemon's O_CREAT|O_EXCL claim
     // (atheriz.py:1330). The parent CLAIMS the pid file (naming this
     // short-lived process, like spawn_daemon writing os.getpid()) and exits
     // WITH IT HELD: the claim serializes concurrent starters (the loser's

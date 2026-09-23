@@ -5,8 +5,7 @@ using Atheriz.Core.Persistence.Dto;
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Core entity. Ports <c>atheriz/objects/base_obj.py:Object</c> merged with
-/// <c>base_flags.Flags</c>, <c>base_lock.AccessLock</c>, <c>base_db_ops.DbOps</c>.
+/// Core entity.
 /// Thread-safe via ReaderWriterLockSlim (SupportsRecursion) mirroring Python RLock.
 /// </summary>
 public partial class GameObject : IMessageTarget, ISessionProvider
@@ -21,8 +20,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     private readonly List<string> _msgLog = new();
 
     // Puppet snapshot — only is_pc/privilege_level per puppet.py:110 wontfix (quelled/can_hear/is_mapable not saved)
-    private Dictionary<string, object>? _puppetRestore; // Port of target._puppet_restore (Python) — transient, never persisted
-    private double _secondsPlayed; // Port of base_obj.py:103-104 _seconds_played + seconds_played property
+    private Dictionary<string, object>? _puppetRestore; // transient, never persisted
+    private double _secondsPlayed;
 
     // --- identity ---
     private int _id = -1;
@@ -186,27 +185,18 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public string Gender { get => Read(() => _gender); set => SetIfChanged(ref _gender, value); }
     public virtual double TickSeconds { get => Read(() => _tickSeconds); set => Write(() => { _tickSeconds = value; _flags.IsModified = true; }); }
 
-    // --- map hooks (port of base_obj.py:767 at_map_update, 750 at_legend_update, 805 at_pre_map_render) ---
     public virtual Dictionary<(int X, int Y), string> AtPreMapRender(Dictionary<(int X, int Y), string> grid)
     {
-        return Hookable("at_pre_map_render", () => grid, grid);
+        return Hookable(HookNames.AtPreMapRender, () => grid, grid);
     }
     // Legend projection shared by AtMapUpdate/AtLegendUpdate: the two Select
     // bodies were verified element-wise identical, so one helper emits both.
     internal static List<List<object?>> ProjectLegendEntries(List<(string sym, string desc, (int x, int y) coord)> entries)
         => entries.Select(e => new List<object?> { e.sym, e.desc, new List<int> { e.coord.x, e.coord.y } }).ToList();
-    // Session fetch shared by AtMapUpdate/AtLegendUpdate: preserves each
-    // caller's exact fallback (null session) and log context.
-    private Session? GetSessionQuiet(string hook)
-    {
-        try { return Session; }
-        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.{hook}: " + logEx.Message, "GameObject"); return null; }
-    }
     public virtual void AtMapUpdate(string mapStr, List<(string sym, string desc, (int x, int y) coord)> entries, int minX, int maxY, bool showLegend, string name)
     {
-        Hookable("at_map_update", () =>
+        Hookable(HookNames.AtMapUpdate, () =>
         {
-            // Port of base_obj.py:767-802 calculate pos then msg then last_map_time
             (int relX, int relY) pos = (0, 0);
             try
             {
@@ -226,7 +216,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             bool sent = false;
             try
             {
-                // Port of base_obj.py:790-801 self.msg(map={map, pos, symbol, legend, min_x, max_y, area, show_legend})
                 Dictionary<string, object?> payload = new()
                 {
                     ["map"] = mapStr,
@@ -238,12 +227,11 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     ["area"] = name,
                     ["show_legend"] = showLegend,
                 };
-                Session? sess = GetSessionQuiet(nameof(AtMapUpdate));
+                Session? sess = Session;
                 var conn = sess?.Connection;
-                // stamp LastMapTime only when delivery
-                // succeeded. Python (base_obj.py:813+) has no try/catch here,
-                // so a failed send raises before the stamp line; the C#
-                // swallow-then-stamp turned failures into success stamps.
+                // Stamp LastMapTime only when delivery succeeded: a failed
+                // send raises before the stamp line, so failures never
+                // become success stamps.
                 if (conn is not null)
                 {
                     conn.SendCommand("map", new List<object?> { payload }, null);
@@ -263,7 +251,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     public virtual void AtLegendUpdate(List<(string sym, string desc, (int x, int y) coord)> entries, bool show, string area)
     {
-        Hookable("at_legend_update", () =>
+        Hookable(HookNames.AtLegendUpdate, () =>
         {
             try
             {
@@ -273,7 +261,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     ["legend"] = ProjectLegendEntries(entries),
                     ["show_legend"] = show,
                 };
-                Session? sess = GetSessionQuiet(nameof(AtLegendUpdate));
+                Session? sess = Session;
                 var conn = sess?.Connection;
                 if (conn is not null)
                     conn.SendCommand("legend", new List<object?> { payload }, null);
@@ -282,13 +270,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             return 0;
         }, entries, show, area);
     }
-    public virtual void AtDesc(GameObject? looker = null) => Hookable("at_desc", () => 0, looker); // Port of base_obj.py:1621 at_desc
-    public virtual string AtPreSay(string message) => Hookable("at_pre_say", () => message, message); // Port of base_obj.py:1739 at_pre_say
+    public virtual void AtDesc(GameObject? looker = null) => Hookable(HookNames.AtDesc, () => 0, looker);
+    public virtual string AtPreSay(string message) => Hookable(HookNames.AtPreSay, () => message, message);
     public LocationRef Location { get => Read(() => _location); set => Write(() => { _location = value; _flags.IsModified = true; }); }
     public LocationRef Home { get => Read(() => _home); set => Write(() => { _home = value; _flags.IsModified = true; }); }
-    private Session? _session; // Port of base_obj.py:109 session: Session | None (excluded from pickle, not IsModified)
-    public Session? Session { get => Read(() => _session); set => Write(() => _session = value); } // Port of base_obj.py:109
-    // Port of base_obj.py:103-104 + 659-667 seconds_played (computed + elapsed)
+    private Session? _session;
+    public Session? Session { get => Read(() => _session); set => Write(() => _session = value); }
     public double SecondsPlayed
     {
         get => Read(() =>
@@ -297,7 +284,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             var sess = _session;
             if (sess is not null && sess.ConnTime > 0)
             {
-                double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - sess.ConnTime; // Port of base_obj.py:662 time.time() - session.conn_time
+                double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - sess.ConnTime;
                 if (elapsed > 0) baseVal += elapsed;
             }
             return baseVal;
@@ -349,7 +336,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         if (obj is GameObject o) return Id != -1 && Id == o.Id;
         return false;
     }
-    // Port of nodes.py:92 — hash by registry id, matching Equals above.
+// hash by registry id, matching Equals above.
     // Snapshot semantics (see _hashCache): the public Id setter never moves
     // the hash, so mutating Id after hash-container insertion keeps the
     // member findable. Same-Id instances arranged before first hashing
@@ -403,7 +390,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public void AddContent(int id) => Write(() => { _contents.Add(id); _flags.IsModified = true; });
     public void RemoveContent(int id) => Write(() => { _contents.Remove(id); _flags.IsModified = true; });
 
-    // --- channel subscription (port of base_obj.subscribe / unsubscribe) ---
     public void Subscribe(Channel channel)
     {
         if (channel is null) return;
@@ -446,7 +432,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         finally { _lock.ExitWriteLock(); }
         if (added)
         {
-            // Port of base_obj.py:762-763: subscribed channels install their
             // command on the internal cmdset (removed again on unsubscribe).
             try
             {
@@ -514,7 +499,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         finally { _lock.ExitWriteLock(); }
         if (removed)
         {
-            // Port of base_obj.py:775-777: drop the channel command again.
             // Channel locks only (see Subscribe) — never under the peer lock.
             try { var cmd = channel.GetCommand(); if (cmd is not null) InternalCmdSet?.Remove(cmd); }
             catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unsubscribe: " + logEx.Message, "GameObject"); }
@@ -545,6 +529,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     {
         Write(() => AddLockRestored(lockName, predicate, policy));
     }
+    // Typed authoring overload: maps the enum to its persisted name, so the
+    // stored "name: policy|policy" rows are identical to the string call.
+    public void AddLock(string lockName, Func<GameObject, bool> predicate, LockPolicies.LockPolicy policy)
+        => AddLock(lockName, predicate, LockPolicies.Name(policy));
     public void ClearLocksByName(string lockName) => Write(() => { _locks.Remove(lockName); _lockPolicies.Remove(lockName); });
 
     /// <summary>
@@ -573,7 +561,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         return true;
     }
 
-    // --- hooks (minimal port of hookable) ---
     public virtual void InstallHook(string funcName, Delegate hook)
     {
         Write(() =>
@@ -588,7 +575,6 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     public bool HasHook(string funcName) => Read(() => _hooks.TryGetValue(funcName, out var s) && s.Count > 0);
 
-    // --- script attachment (port of base_obj.add_script/remove_script/has_script_type/get_scripts_by_type) ---
     // Single-id fetch core for the GetSingle is Script shape repeated across
     // ResolveRelations/AddScript/RemoveScript/GetScriptsByType. A missing id
     // and a wrong-typed id both mean "absent" at every one of those sites
@@ -662,12 +648,11 @@ public partial class GameObject : IMessageTarget, ISessionProvider
 
     // --- display / messaging (Command parity) --- (implementation in Objects/Messaging/GameObjectMessaging.cs)
 
-    // Port of atheriz/objects/base_obj.py:733 search — delegate to ContentUtils.Search with ObjectRegistry resolver
+// delegate to ContentUtils.Search with ObjectRegistry resolver
     public virtual List<GameObject> Search(string query, bool recursive = true, GameObject? looker = null)
         => ContentUtils.Search(this, query, id => Globals.ObjectRegistry.Get(id).FirstOrDefault(), recursive, looker ?? this);
 
     /// <summary>
-    /// Port of <c>atheriz/objects/base_obj.py:581 resolve_relations</c>.
     /// Reconnects location/home already via LocationRef, re-registers tick, reinstalls script hooks, calls at_init.
     /// </summary>
     public virtual void ResolveRelations()
@@ -691,7 +676,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
 
     // --- DTO conversion (mirrors __getstate__/__setstate__) --- (persisted via Persistence/Converters/GameObjectDtoConverter.cs)
-    // Port of atheriz/objects/base_obj.py:493 __getstate__ — single BuildDto collapse (update.md 3.3)
+// single BuildDto collapse (update.md 3.3)
     // Faithful: if _puppetRestore present, use original is_pc/privilege_level for serialization (never persist puppeted state)
     private GameObjectDto BuildDto() => Persistence.Converters.GameObjectDtoConverter.BuildDto(this);
 
@@ -823,27 +808,26 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         // mirrors Python create locks
         if (isPc)
         {
-            // Port of base_obj.py:164 — tests only the *target's* connection.
+// tests only the *target's* connection.
             // Builders and above keep sight of offline PCs (room lists,
             // search, examine); regular players fail view and never see them.
-            obj.AddLock("view", accessing => obj.IsConnected || accessing.IsBuilder, LockPolicies.PcView);
+            obj.AddLock("view", accessing => obj.IsConnected || accessing.IsBuilder, LockPolicies.LockPolicy.PcView);
         }
         // One "get" entry for pc and/or npc: duplicate Builder entries decide
         // identically, so a second call would only double the persisted policy
         // ("Builder|Builder" vs "Builder"). Legacy rows with the doubled form
         // still load and decide the same; they converge on next save.
         if (isPc || isNpc)
-            obj.AddLock("get", accessing => accessing.IsBuilder, LockPolicies.Builder);
+            obj.AddLock("get", accessing => accessing.IsBuilder, LockPolicies.LockPolicy.Builder);
 
-        obj.AddLock("delete", accessing => accessing.Id != obj.Id, LockPolicies.NotSelf);
+        obj.AddLock("delete", accessing => accessing.Id != obj.Id, LockPolicies.LockPolicy.NotSelf);
         // puppet lock faithful to base_obj.py:185-193 — resolved from the
         // PuppetOwner policy (single spelling): the old inline lambda was
         // verified line-for-line identical to the policy body (obj ↔ target),
         // capturing no extra context, so the policy predicate replaces it.
-        _ = LockPolicies.TryResolve(LockPolicies.PuppetOwner, obj, out var puppetPred);
-        obj.AddLock("puppet", puppetPred, LockPolicies.PuppetOwner);
+        _ = LockPolicies.TryResolve(LockPolicies.LockPolicy.PuppetOwner, obj, out var puppetPred);
+        obj.AddLock("puppet", puppetPred, LockPolicies.LockPolicy.PuppetOwner);
 
-        // Port of base_obj.py:181-186 create tail: per-instance cmdsets and the
         // at_create hook. Registration stays explicit (AddObject/AddObjectUnique
         // at the call site — auto-adding here would double-register); ticker
         // enrolment mirrors get_async_ticker().add_coro for fresh tickables

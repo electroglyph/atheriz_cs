@@ -16,7 +16,7 @@ public static class WebSocketHandler
 
         if (ObjectRegistry.IsIpBanned(clientHost))
         {
-            Console.Error.WriteLine($"Host {clientHost} in temp ban list has tried to connect.");
+            Atheriz.Core.AtherizLogger.LogWarning($"Host {clientHost} in temp ban list has tried to connect.");
             try { context.Response.StatusCode = 403; } catch { }
             return;
         }

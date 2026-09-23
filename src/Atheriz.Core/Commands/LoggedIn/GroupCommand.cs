@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/group.py:222
 using System.Diagnostics.CodeAnalysis;
 
 namespace Atheriz.Core.Commands.LoggedIn;

@@ -1,4 +1,3 @@
-// Port of atheriz/objects/base_obj.py:1632 at_pre_get/at_get/at_pre_drop/at_drop/at_pre_put/at_put
 
 namespace Atheriz.Core.Objects;
 
@@ -6,36 +5,36 @@ public partial class GameObject
 {
     public virtual bool AtPreGet(GameObject getter)
     {
-        return Hookable("at_pre_get", () => Access(getter, "get"), getter);
+        return Hookable(HookNames.AtPreGet, () => Access(getter, "get"), getter);
     }
     public virtual void AtGet(GameObject getter)
     {
-        Hookable("at_get", () => 0, getter);
+        Hookable(HookNames.AtGet, () => 0, getter);
     }
     public virtual bool AtPreDrop(GameObject dropper)
     {
-        return Hookable("at_pre_drop", () => Access(dropper, "drop"), dropper);
+        return Hookable(HookNames.AtPreDrop, () => Access(dropper, "drop"), dropper);
     }
     public virtual void AtDrop(GameObject dropper)
     {
-        Hookable("at_drop", () => 0, dropper);
+        Hookable(HookNames.AtDrop, () => 0, dropper);
     }
     public virtual bool AtPrePut(GameObject putter, GameObject destination)
     {
-        return Hookable("at_pre_put", () => true, putter, destination);
+        return Hookable(HookNames.AtPrePut, () => true, putter, destination);
     }
     public virtual void AtPut(GameObject putter, GameObject destination)
     {
-        Hookable("at_put", () => 0, putter, destination);
+        Hookable(HookNames.AtPut, () => 0, putter, destination);
     }
     public virtual bool AtPreGive(GameObject giver, GameObject receiver)
     {
         // The actor is the giver (mirrors AtPreGet/AtPreDrop checking the
         // getter/dropper) — the receiver's "give" lock must not gate the giver.
-        return Hookable("at_pre_give", () => Access(giver, "give"), giver, receiver);
+        return Hookable(HookNames.AtPreGive, () => Access(giver, "give"), giver, receiver);
     }
     public virtual void AtGive(GameObject giver, GameObject receiver)
     {
-        Hookable("at_give", () => 0, giver, receiver);
+        Hookable(HookNames.AtGive, () => 0, giver, receiver);
     }
 }

@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/help.py + unloggedin/help.py table formatting (fixed -12 columns)
 using System.Text;
 
 namespace Atheriz.Core.Commands;

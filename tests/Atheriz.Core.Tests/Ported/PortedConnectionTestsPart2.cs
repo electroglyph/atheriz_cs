@@ -394,10 +394,10 @@ public class PortedConnectionTestsPart2
         Assert.Contains("_connToId", txt);
         var mgr = MakeMgr(); mgr.Atp.Stop(wait:false);
     }
-    [Fact] public void ManagerDisconnectReadsHostInsideWriteLock()
+    [Fact] public void ManagerDisconnectReadsHostInsideManagerLock()
     {
-        // The disconnect host snapshot must sit under the manager write
-        // lock: RegisterConnection rewrites RegisteredHost under the same
+        // The disconnect host snapshot must sit under the manager lock:
+        // RegisterConnection rewrites RegisteredHost under the same
         // lock, so an outside read can pair the counter decrement with the
         // next connection's host.
         var txt = System.IO.File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Core/Network/ConnectionManager.cs");
@@ -406,7 +406,7 @@ public class PortedConnectionTestsPart2
         var end = txt.IndexOf("private void DoSessionDisconnect", StringComparison.Ordinal);
         Assert.True(end > start);
         var body = txt.Substring(start, end - start);
-        var enter = body.IndexOf("EnterWriteLock()", StringComparison.Ordinal);
+        var enter = body.IndexOf("lock (_lock)", StringComparison.Ordinal);
         var host = body.IndexOf("HostOf(connection)", StringComparison.Ordinal);
         Assert.True(enter >= 0 && host >= 0 && enter < host);
     }

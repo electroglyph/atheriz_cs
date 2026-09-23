@@ -68,7 +68,6 @@ public sealed class LockDefDto
 public static class GameObjectDtoSerializer
 {
     private static JsonSerializerOptions JsonOpts => JsonOptions.Default;
-    // Test hooks for lock-held verification (port of dill.dumps/loads monkeypatch)
     public static Func<GameObjectDto, string>? ToJsonHook;
     public static Func<string, GameObjectDto>? FromJsonHook;
 

@@ -4,13 +4,12 @@ using System.Reflection;
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Port of <c>atheriz/objects/base_script.py:Script</c> (240 LOC).
 /// Scripts attach to GameObjects and install hooks (before/after/replace) via reflection.
 /// </summary>
 public class Script : GameObject
 {
     internal new static bool _is_thread_safe = true;
-    private GameObject? _child; // Port of base_script.py:76 child: Object | None
+    private GameObject? _child;
 
     public Script()
     {
@@ -39,11 +38,11 @@ public class Script : GameObject
     }
 
     /// <summary>
-    /// Port of <c>atheriz/objects/base_script.py:170 at_install</c> — called when script is installed on object.
+/// called when script is installed on object.
     /// </summary>
-    public virtual void AtInstall() // Port of base_script.py:170 at_install
+    public virtual void AtInstall()
     {
-        Hookable("at_install", () => 0);
+        Hookable(HookNames.AtInstall, () => 0);
     }
 
     /// <summary>
@@ -52,18 +51,15 @@ public class Script : GameObject
     /// </summary>
     public void InstallHooks(GameObject child)
     {
-        // Port of base_script.py:191-193 with self.lock: if self.child is not None and self.child is not child: raise ValueError
         using (WriteScope())
         {
             if (_child is not null && !ReferenceEquals(_child, child))
                 throw new InvalidOperationException($"Script {Id} already attached to {_child} cannot be attached to {child}");
             _child = child;
         }
-        // Port of base_script.py:194-203 at_funcs = [(d, getattr(self,d)) for d in dir(self) if d.startswith("at_") and (is_before or is_after or is_replace)]
         // marker classification cached per type (HookMarkerCache).
         var atFuncs = HookMarkerCache.ForType(GetType());
 
-        // Port of base_script.py:204-208 with child.lock: for name, func in at_funcs: s = child.hooks.get(name,set()); s.add(func); child.hooks[name]=s
                     foreach (var (name, method, _) in atFuncs)
         {
             // Bind a closed delegate to this script instance. The delegate's
@@ -90,12 +86,11 @@ public class Script : GameObject
             child.InstallHook(name, del);
         }
 
-        // Port of base_script.py:108-118 create handling of scripts set? For Script.attach, base_script install_hooks is called via GameObject.add_script which adds to scripts set.
         // Here we ensure child's Scripts set includes this script's Id (mirrors Python child.scripts.add(script.id))
         // Only mark modified if actually added (so resolve_relations after load does not dirty)
         child.AddScriptId(this.Id);
 
-        AtInstall(); // Port of base_script.py:209 self.at_install()
+        AtInstall();
     }
 
     private Delegate? CreateHookDelegate(MethodInfo method)
@@ -154,19 +149,16 @@ public class Script : GameObject
     }
 
     /// <summary>
-    /// Port of <c>atheriz/objects/base_script.py:211 remove_hooks</c>
     /// </summary>
     public void RemoveHooks(GameObject? child = null)
     {
-        // Port of base_script.py:219 child = self.child if child is None else child
         if (child is null)
         {
             using (ReadScope()) child = _child;
         }
-        if (child is null) return; // Port of base_script.py:220-222 if child is None: logger.error...
+        if (child is null) return;
         // marker classification cached per type (HookMarkerCache).
         var atFuncs = HookMarkerCache.ForType(GetType());
-        // Port of base_script.py:233-240 with child.lock: mutate the hook sets
         // under the child's write lock via the typed accessor (no reflection).
         {
             using (child.WriteScope())
@@ -185,7 +177,6 @@ public class Script : GameObject
                             // Id-equality, and same-Id distinct instances exist
                             // after hot-reload rewire — == would detach a
                             // replacement instance's hooks along with ours.
-                            // Port of base_script.py:237-239 s.difference_update([hook for hook in s if getattr(hook,"__self__",None) is self])
                             set.RemoveWhere(d => ReferenceEquals(d.Target, this));
                         }
                     }
@@ -197,7 +188,7 @@ public class Script : GameObject
 
         using (WriteScope())
         {
-            if (ReferenceEquals(_child, child)) _child = null; // Port of base_script.py:133 object.__setattr__(self, "child", None)
+            if (ReferenceEquals(_child, child)) _child = null;
         }
     }
 }

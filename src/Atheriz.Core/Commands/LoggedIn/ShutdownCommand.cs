@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/shutdown.py:79
 using System.Net.Http;
 
 namespace Atheriz.Core.Commands.LoggedIn;

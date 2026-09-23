@@ -12,7 +12,7 @@ public partial class GameObject
     // null (already-gone) instead.
     private int _deleteClaimed;
 
-    // Port of base_obj.py:467 delete + object deletion lifecycle — caller optional for Account parity
+// caller optional for Account parity
     public virtual (int count, List<object> ops)? Delete(GameObject? caller = null, bool recursive = false)
     {
         if (this is Account acc) return acc.DeleteImmediate(caller);
@@ -40,7 +40,6 @@ public partial class GameObject
 
         if (recursive)
         {
-            // faithful port of base_obj.delete _collect_recursive with MAX_SEARCH_DEPTH
             int maxDepth = MaxSearchDepth;
             HashSet<int> seen = [];
             var stack = new Stack<(GameObject obj, int depth)>();
@@ -341,7 +340,6 @@ public partial class GameObject
         }
     }
 
-    // Port of base_obj.py:349-426 _delete_object teardown: leave no dangling
     // follows, channel memberships, sessions, or tick slots. Shared by the
     // recursive walk above and the non-recursive self-delete tail, plus
     // Node.Delete's self teardown .

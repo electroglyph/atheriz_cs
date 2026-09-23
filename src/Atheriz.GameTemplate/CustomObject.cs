@@ -1,4 +1,3 @@
-// Port of atheriz/new.py:522 TEMPLATE_CONFIGS ("object","Object","atheriz.objects.base_obj")
 // Dynamically generated via get_class_hooks (atheriz/utils.py:701) — mirrors test/object.py full hook list
 #nullable enable
 namespace MyGame;

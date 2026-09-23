@@ -1,4 +1,3 @@
-// Port of atheriz/database_setup.py:Database.lock RLock scaffold + do_setup transaction
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 

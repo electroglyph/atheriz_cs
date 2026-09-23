@@ -1,4 +1,3 @@
-// Port of atheriz/network/telnet.py:121-324 + atheriz/network/websocket.py:29-114 pending limiter
 using System.Diagnostics;
 
 namespace Atheriz.Core.Network;

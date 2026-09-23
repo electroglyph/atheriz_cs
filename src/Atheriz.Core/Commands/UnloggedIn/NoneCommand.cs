@@ -7,7 +7,6 @@ public sealed class NoneCommand : Command
     public override bool Hide => true;
     public override string Desc => "None.";
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument("none", nargs: "*", help: "None."); }
-    // Port of atheriz/commands/unloggedin/none.py:NoneCommand (levenshtein
     // over the full text), gated like the logged-in twin and help: hidden
     // or inaccessible commands are never suggested (otherwise a typo oracle
     // leaks their names), aliases are not keys (GetAll, not GetKeys, so the

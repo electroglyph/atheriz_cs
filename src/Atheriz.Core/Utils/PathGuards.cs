@@ -1,4 +1,3 @@
-// Port of atheriz/database_setup.py:66-71 + atheriz/atheriz.py:508,559 guard logic
 namespace Atheriz.Core.Utils;
 
 /// <summary>

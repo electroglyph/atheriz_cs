@@ -1,8 +1,7 @@
-// Port of atheriz/commands/loggedin/channel.py:131
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
-/// <summary>Port of atheriz/commands/loggedin/channel.py:ChannelCommand — lazy _channel_cache wontfix.</summary>
+/// lazy _channel_cache wontfix.</summary>
 public sealed class ChannelCommand : Command
 {
     public override string Key => "channel";
@@ -90,7 +89,7 @@ public sealed class ChannelCommand : Command
         }
         if (pa.GetBool("unsubscribe"))
         {
-            // Port of channel.py:110-111 — silent, no confirmation message.
+// silent, no confirmation message.
             // View-gated like every other branch, and denied reads as
             // not-found (same message as an unknown name) so probing names
             // via -u cannot distinguish "view-locked" from "nonexistent".
@@ -119,7 +118,7 @@ public sealed class ChannelCommand : Command
         {
             var msgs = pa.GetList("message");
             var message = string.Join(" ", msgs);
-            // Port of channel.py:122 elif args.message — an empty message
+// an empty message
             // list is falsy and falls through silently (no help text).
             if (string.IsNullOrWhiteSpace(message)) return;
             // Sending requires view AND send: a view-denied channel reads as

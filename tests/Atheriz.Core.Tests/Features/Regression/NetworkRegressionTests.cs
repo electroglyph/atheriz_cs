@@ -106,7 +106,7 @@ public class NetworkRegressionTests
     public void PoolFullLog_UsesLockedCount()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Network", "BaseConnection.cs");
-        var region = SourceScan.Region(src, "lock (Lock) // port of connection.py:101-106");
+        var region = SourceScan.Region(src, "public void EnqueueInput(");
         Assert.Contains("pendingCount = _inputQueue.Count", region);
     }
 

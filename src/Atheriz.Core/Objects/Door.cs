@@ -2,7 +2,6 @@
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Faithful port of <c>atheriz/objects/base_door.py:Door</c>.
 /// Door is AccessLock-style via declarative Policy.
 /// Key fields preserved exactly: from_coord/to_coord/from_exit/to_exit/symbol_coord/closed_symbol/open_symbol/closed/locked.
 /// </summary>
@@ -108,9 +107,7 @@ public class Door
     private static Dictionary<string, object?> TargetMapping(GameObject caller)
         => new() { [TargetKey] = caller };
 
-    // Port of atheriz/objects/base_door.py:17
     public Door() { }
-    // Port of base_door.py:28
     public Door(Coord from, Coord to, string fromExit, string toExit,
         (int, int)? symbolCoord = null, string closedSymbol = "", string openSymbol = "",
         bool closed = true, bool locked = false)
@@ -123,7 +120,6 @@ public class Door
         _doorDesc = "";
     }
 
-    // Port of atheriz/objects/base_door.py:56 Door.create classmethod (verbatim)
     public static Door Create(Coord fromCoord, string fromExit, Coord toCoord, string toExit,
         (int, int)? symbolCoord = null, string closedSymbol = "", string openSymbol = "",
         bool closed = true, bool locked = false)
@@ -154,7 +150,6 @@ public class Door
     public bool IsClosed { get => Closed; set => Closed = value; }
     public bool IsLocked { get => Locked; set => Locked = value; }
 
-    // Port of base_lock AccessLock add_lock/access pattern
     public void AddLock(string name, Func<GameObject, bool> pred)
         => AddLock(name, pred, LockPolicies.Custom);
     public void AddLock(string name, Func<GameObject, bool> pred, string policy)
@@ -167,7 +162,6 @@ public class Door
             pols.Add(policy);
         }
     }
-    // Port of base_lock.py access
     public bool Access(GameObject? caller, string lockName)
     {
         if (caller is null) return false;
@@ -191,10 +185,8 @@ public class Door
     public bool CanLock(GameObject? caller) => Access(caller, "lock");
     public bool CanUnlock(GameObject? caller) => Access(caller, "unlock");
 
-    // Port of base_door.py:80
     public override string ToString() => $"Door({FromCoord}, 'from_exit':{FromExit}, 'to_coord':{ToCoord}, 'to_exit':{ToExit})";
 
-    // Port of base_door.py:86 desc
     public string Desc(Coord fromCoord)
     {
         using (ReadScope())
@@ -211,7 +203,6 @@ public class Door
         }
     }
 
-    // Port of base_door.py:96 get_nodes
     public (Node? fromNode, Node? toNode) GetNodes()
     {
         var nh = NodeHandler.GetCurrent();
@@ -230,7 +221,6 @@ public class Door
         return (fromNode, toNode);
     }
 
-    // Port of base_door.py:106 try_open
     public virtual bool TryOpen(GameObject caller)
     {
         var (fromNode, toNode) = GetNodes();
@@ -252,7 +242,6 @@ public class Door
         finally { _lock.ExitWriteLock(); }
         if (status == "opened")
         {
-            // Port of base_door.py:119-124 try/except around mark_doors_modified
             MarkNodeDoorsModified();
         }
         if (status == "already_open")
@@ -283,7 +272,6 @@ public class Door
         catch (Exception ex) { AtherizLogger.LogDebug("Suppressed Door.TryOpen post-open: " + ex.Message, "Door"); }
         return true;
     }
-    // Port of base_door.py:106 wrapper for spec.
     // A null caller bypasses access/map/hooks, so the fallback is an explicit
     // ForceOpen explicitly; the no-arg form stays for compat.
     public bool Open(GameObject? caller = null) => caller is not null ? TryOpen(caller) : ForceOpen();
@@ -299,7 +287,6 @@ public class Door
         return true;
     }
 
-    // Port of base_door.py:165 try_close
     public virtual bool TryClose(GameObject caller)
     {
         var (fromNode, toNode) = GetNodes();
@@ -355,7 +342,6 @@ public class Door
         return true;
     }
 
-    // Port of base_door.py:220 try_lock
     public virtual bool TryLock(GameObject caller)
     {
         var loc = caller.ResolveLocationObject();
@@ -405,7 +391,6 @@ public class Door
     }
     public bool LockDoor(GameObject? caller = null) => caller is not null ? TryLock(caller) : false;
 
-    // Port of base_door.py:271 try_unlock
     public virtual bool TryUnlock(GameObject caller)
     {
         var (fromNode, toNode) = GetNodes();
@@ -450,16 +435,13 @@ public class Door
     }
     public bool Unlock(GameObject? caller = null) => caller is not null ? TryUnlock(caller) : false;
 
-    // Port of base_door.py:313 map_close
     public virtual void MapClose() => MapPaint(ClosedSymbol, closed: true);
-    // Port of base_door.py:331 map_open
     public virtual void MapOpen() => MapPaint(OpenSymbol, closed: false);
 
     // Shared paint body for MapClose/MapOpen: the blocks differ only in the
     // preset symbol + closed flag under the same gate/seen/render shape.
     private void MapPaint(string preset, bool closed)
     {
-        // Port of base_door.py map_close/map_open gate: settings.MAP_ENABLED only.
         // (The old Default fallback + second Global check made the fallback dead.)
         var settings = AtherizSettings.Global;
         if (!settings.MapEnabled || SymbolCoord is null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;

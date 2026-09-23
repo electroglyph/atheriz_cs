@@ -22,16 +22,16 @@ public static class ProtocolBootstrap
                 BaseProtocol? inst = CreateKnown(protoPath);
                 if (inst is null)
                 {
-                    Console.WriteLine($"Failed to register protocol {protoPath}: type not found");
+                    AtherizLogger.LogError($"Failed to register protocol {protoPath}: type not found");
                     continue;
                 }
                 inst.Setup(app);
-                Console.WriteLine($"Registered network protocol: {inst.GetType().Name}");
+                AtherizLogger.LogInformation($"Registered network protocol: {inst.GetType().Name}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to register protocol {protoPath}: {ex.Message}");
-                Console.Error.WriteLine(ex.ToString());
+                AtherizLogger.LogError($"Failed to register protocol {protoPath}: {ex.Message}");
+                AtherizLogger.LogError(ex.ToString());
             }
         }
     }

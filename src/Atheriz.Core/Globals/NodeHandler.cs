@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore;
 namespace Atheriz.Core.Globals;
 
 /// <summary>
-/// Faithful port of <c>atheriz/globals/node.py:NodeHandler</c>.
 /// Three separate locks mirroring Python's lock/lock2/lock3, dirty flags per table,
 /// JSON persistence (replaces dill), and id collision handling via <see cref="ObjectRegistry"/>.
 /// </summary>
@@ -32,7 +31,6 @@ public partial class NodeHandler
     private readonly Dictionary<(Coord From, Coord To), Transition> _transitions = new();
     private readonly Dictionary<Coord, Dictionary<string, Door>> _doors = new();
     private bool _modified, _modified2, _modified3;
-    // Port of node.py:42-43 _trans_gen/_door_gen: mutation counters so Save
     // only clears _modified2/_modified3 when nothing changed since the snapshot.
     private long _transGen, _doorGen, _areaGen;
     // Tombstones (MapHandler parity): keys removed since the last successful
@@ -305,7 +303,7 @@ public partial class NodeHandler
                         }
                     }
                     ObjectRegistry.AddObject(node);
-                    // Port of node.py:84-86 node.resolve_relations() — reinstall script hooks, ticker, at_init
+// reinstall script hooks, ticker, at_init
                     try { node.ResolveRelations(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
                 }
             }

@@ -1,4 +1,3 @@
-// Port of atheriz/new.py:522 ("script","Script","atheriz.objects.base_script")
 #nullable enable
 namespace MyGame;
 /// <summary>Custom Script — mirrors test/script.py</summary>

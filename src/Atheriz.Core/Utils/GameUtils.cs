@@ -5,7 +5,6 @@ using System.Text.RegularExpressions;
 namespace Atheriz.Core.Utils;
 
 /// <summary>
-/// Port of <c>atheriz/utils.py</c> pure helpers (no global singleton access).
 /// </summary>
 public static class GameUtils
 {
@@ -15,7 +14,7 @@ public static class GameUtils
         @"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[^[A-Za-z0-9]|\x00",
         RegexOptions.Compiled);
 
-    // Port of utils.py:431 re_empty — narrowed to horizontal whitespace:
+// narrowed to horizontal whitespace:
     // \s* also ate newlines, collapsing every 3+-break run to exactly \n\n
     // before the parameterized pass ran (maxLinebreaks >= 3 was dead), so a
     // blank gap here is one break pair at most and never spans a run.
@@ -24,9 +23,9 @@ public static class GameUtils
 
     // --- ansi ---
 
-    public static string StripAnsi(string input) => AnsiRegex.Replace(input, ""); // Port of utils.py:312
+    public static string StripAnsi(string input) => AnsiRegex.Replace(input, "");
 
-    public static string StripTerminalEscapes(string input) => TerminalEscapeRegex.Replace(input, ""); // Port of utils.py:324
+    public static string StripTerminalEscapes(string input) => TerminalEscapeRegex.Replace(input, "");
 
     public static string WrapXterm256(
         string input, int? fg = null, int? bg = null,
@@ -128,7 +127,7 @@ public static class GameUtils
 
     public static T Clamp<T>(T min, T value, T max) where T : IComparable<T>
     {
-        // Port of atheriz/utils.py:340 return max(min(maximum, value), minimum) — faithful when min>max
+// faithful when min>max
         var tmp = value.CompareTo(max) <= 0 ? value : max;
         return tmp.CompareTo(min) >= 0 ? tmp : min;
     }
@@ -241,7 +240,6 @@ public static class GameUtils
         return points;
     }
 
-    // Port of atheriz/utils.py:47-61 is_in_game_folder (with Windows case-insensitive branch)
     // C# addition: also accepts C# game folder (any *.csproj at cwd, e.g. MyGame.csproj + GameSettings.cs from `new`) so that
     // `dotnet run --project src/Atheriz.Server -- new` + `create`/`start` work without Python settings.py.
     public static bool IsInGameFolder() => IsInGameFolder(OperatingSystem.IsWindows() ? "nt" : "posix");
@@ -262,7 +260,6 @@ public static class GameUtils
         var dir = cwd ?? Directory.GetCurrentDirectory();
         bool isNt = string.Equals(osName, "nt", StringComparison.OrdinalIgnoreCase);
         bool isPython;
-        // Port of utils.py:49-55 nt branch uses _exists_exact_str case-insensitive
         if (isNt)
         {
             isPython = ExistsExact(Path.Combine(dir, "settings.py"), "nt")
@@ -271,7 +268,7 @@ public static class GameUtils
         }
         else
         {
-            // Port of utils.py:56-61 posix branch — dir / "settings.py" exists etc (case-sensitive)
+// dir / "settings.py" exists etc (case-sensitive)
             isPython = File.Exists(Path.Combine(dir, "settings.py"))
                 && File.Exists(Path.Combine(dir, "__init__.py"))
                 && !File.Exists(Path.Combine(dir, "atheriz.py"));
@@ -311,10 +308,9 @@ public static class GameUtils
             bool isNt = string.Equals(osName, "nt", StringComparison.OrdinalIgnoreCase);
             if (isNt)
             {
-                // Port of utils.py:30 name.lower() in (n.lower() for n in os.listdir(parent))
                 return entries.Any(e => string.Equals(Path.GetFileName(e), name, StringComparison.OrdinalIgnoreCase));
             }
-            // Port of utils.py:31 return path.name in os.listdir(path.parent) — case-sensitive
+// case-sensitive
             return entries.Any(e => Path.GetFileName(e) == name);
         }
         catch { return Path.Exists(path); }
@@ -322,7 +318,6 @@ public static class GameUtils
 
     // --- Phase18: missing pure helpers ---
 
-    // Port of atheriz/utils.py:434 compress_whitespace
     //
     // Compiled-pattern cache keyed by (maxLinebreaks, maxSpacing): the key space
     // is tiny (small int pairs) and the method runs on broadcast paths, so sharing
@@ -348,7 +343,6 @@ public static class GameUtils
         return text;
     }
 
-    // Port of atheriz/utils.py:458 is_iter
     public static bool IsIter(object? obj)
     {
         if (obj is null) return false;
@@ -357,7 +351,6 @@ public static class GameUtils
         return obj is IEnumerable;
     }
 
-    // Port of atheriz/utils.py:483 make_iter
     public static IEnumerable<object?> MakeIter(object? obj)
     {
         if (!IsIter(obj)) return new object?[] { obj };
@@ -366,7 +359,6 @@ public static class GameUtils
         return new object?[] { obj };
     }
 
-    // Port of atheriz/utils.py:483 generic helper
     public static IEnumerable<T> MakeIter<T>(object? obj)
     {
         if (obj is IEnumerable<T> seq && obj is not string) return seq;
@@ -378,7 +370,6 @@ public static class GameUtils
         return Array.Empty<T>();
     }
 
-    // Port of atheriz/utils.py:498 copy_word_case
     public static string CopyWordCase(string baseWord, string newWord)
     {
         if (string.IsNullOrEmpty(baseWord) || string.IsNullOrEmpty(newWord)) return newWord ?? "";
@@ -397,7 +388,6 @@ public static class GameUtils
     private static bool IsUpper(string s) => s.Any(char.IsLetter) && s.All(c => !char.IsLower(c));
     private static string ToTitle(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s.Substring(1).ToLowerInvariant();
 
-    // Port of atheriz/utils.py:536 iter_to_str
     public static string IterToString(IEnumerable<object?>? iterable, string sep = ",", string endsep = ", and", bool addQuote = false)
     {
         if (iterable is null) return "";
@@ -424,18 +414,17 @@ public static class GameUtils
         return string.Join(normSep + " ", strs.Take(strs.Count - 1)) + normEnd + " " + strs[^1];
     }
 
-    // Port of atheriz/utils.py:141 detach — deepcopy via JSON roundtrip (mirrors dill roundtrip)
+// deepcopy via JSON roundtrip (mirrors dill roundtrip)
     public static T? Detach<T>(T value)
     {
         if (value is null) return default;
-        // Port of utils.py:538-550: raises if the value is not serializable
         // at all — never hand back the live original, and never a silent
         // blank that callers would mutate as if detached.
         var json = JsonSerializer.Serialize(value);
         return JsonSerializer.Deserialize<T>(json);
     }
 
-    // Port of atheriz/utils.py:74 ensure_thread_safe — in C# explicit RWLock, no patch needed
+// in C# explicit RWLock, no patch needed
     public static void EnsureThreadSafe(Type t)
     {
         // no-op stub: thread-safety in C# is explicit via ReaderWriterLockSlim on GameObject/Node etc.

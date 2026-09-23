@@ -1,5 +1,3 @@
-// Port of atheriz/reloader.py:14 _EXCLUDED_MODULES + 216 CLASS_INJECTIONS + 249 _apply_patch
-// Port of atheriz/atheriz.py:103 setup_game_folder (injection scanning)
 // Minimal faithful port using collectible AssemblyLoadContext — webclient sync off, no Windows ACL hardening.
 //
 // Reflection is confined to plugin discovery here (see SourceHygieneTests
@@ -34,12 +32,10 @@ public sealed class EntityReplacementAttribute : Attribute
 }
 
 /// <summary>
-/// Port of <c>reloader.py</c> hot-reload scanning + <c>setup_game_folder</c> CLASS_INJECTIONS re-application.
 /// Uses <c>AssemblyLoadContext(isCollectible:true)</c> to mirror importlib.reload + _apply_patch semantics.
 /// </summary>
 public sealed class PluginLoader : IDisposable
 {
-    // Single exclusion source: PluginReloader.IsExcludedAssembly (port of _EXCLUDED_MODULES).
     // Never reload core/server state; mirrors Python excluded set comments.
 
     private AssemblyLoadContext? _alc;
@@ -64,7 +60,6 @@ public sealed class PluginLoader : IDisposable
     public Assembly? LoadedAssembly => _loaded;
 
     /// <summary>
-    /// Port of <c>reloader._discover_new_game_modules + _reload_game_folder_modules</c> + <c>setup_game_folder</c> injection loop.
     /// Creates collectible ALC, loads assembly, scans for <see cref="EntityReplacementAttribute"/>, registers.
     /// Logs via Console.Error mirroring <c>logger.info("[HotReload] ...")</c>.
     /// FULL-TRUST LOADER BY DESIGN (mirrors Python importlib): loading executes

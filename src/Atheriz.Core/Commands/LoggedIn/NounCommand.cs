@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/noun.py:34
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/socials.py:131
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -77,7 +76,7 @@ public sealed class SocialsCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        // Port of socials.py:91-93 — getattr(args,'cmdstring',None); no verb
+// getattr(args,'cmdstring',None); no verb
         // means silent return . No Key fallback: Key is "socials",
         // which never hits SocialsDict, so the fallback only masked empty
         // CmdString on directly-constructed ParsedArgs.

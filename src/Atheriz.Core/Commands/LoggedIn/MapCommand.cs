@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/map.py:30
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

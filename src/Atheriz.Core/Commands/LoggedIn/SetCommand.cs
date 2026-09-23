@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/set.py:243
 using Atheriz.Core.Commands.UnloggedIn;
 
 namespace Atheriz.Core.Commands.LoggedIn;
@@ -130,7 +129,6 @@ public sealed class SetCommand : Command
                 }
                 catch { value = raw; }
             }
-            // Port of set.py:141-143 unconditional literal_eval: a leading
             // sign or dot still denotes a number (JSON parses "-5" natively;
             // "+5"/".5" are normalized first since JSON rejects them).
             else if (trimStart.StartsWith("\"", StringComparison.Ordinal) || trimStart.StartsWith("'", StringComparison.Ordinal) || trimmed == "True" || trimmed == "False" || trimmed == "None" || (trimmed.Length > 0 && (char.IsDigit(trimmed[0]) || trimmed[0] == '-' || trimmed[0] == '+' || trimmed[0] == '.')) || trimmed.StartsWith("[", StringComparison.Ordinal) || trimmed.StartsWith("{", StringComparison.Ordinal))
@@ -228,7 +226,7 @@ public sealed class UnsetCommand : Command
         var target = SetHelper.ResolveTarget(go, targetStr);
         if (target is null) return;
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }
-        // Port of unset.py:226 — only the shared protected set is checked.
+// only the shared protected set is checked.
         if (SetHelper.IsProtected(attr))
         {
             if (!go.IsSuperUser) { go.Msg($"'{attr}' is protected and cannot be removed."); return; }

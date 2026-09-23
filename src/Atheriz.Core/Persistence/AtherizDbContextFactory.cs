@@ -11,13 +11,13 @@ public static class AtherizDbContextFactory
 {
     public static bool IsClosed => AtherizDbContext.IsClosed;
 
-    // Port of database_setup.py:45 reopen_database() — clears _CLOSED for reset command (atheriz.py:1474)
+// clears _CLOSED for reset command (atheriz.py:1474)
     public static void ReopenDatabase() => AtherizDbContext.ReopenDatabase();
 
     // Alias for Python Database.close() marking closed
     public static void CloseDatabase() => AtherizDbContext.CloseDatabase();
 
-    // Port of database_setup.py:56 get_database() — creates context with guard and directory ensure.
+// creates context with guard and directory ensure.
     // Guard violations (bad save path) PROPAGATE: silently substituting an
     // ephemeral :memory: database makes writes succeed and go nowhere.
     // Tests needing memory use CreateForTests() explicitly.
@@ -41,7 +41,6 @@ public static class AtherizDbContextFactory
     public static AtherizDbContext CreateForSettings(AtherizSettings settings) =>
         Create(ResolveSavePath(settings));
 
-    // Port of test helper: in-memory or temp file context
     public static AtherizDbContext CreateForTests(string? savePath = null)
     {
         if (savePath is null)
@@ -55,7 +54,7 @@ public static class AtherizDbContextFactory
         return Create(savePath);
     }
 
-    // Port of database_setup.py:92 do_setup() — EnsureCreated + seed gametime id 0 if missing
+// EnsureCreated + seed gametime id 0 if missing
     public static void DoSetup(string savePath)
     {
         using var ctx = Create(savePath);

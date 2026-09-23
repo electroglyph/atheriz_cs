@@ -11,7 +11,6 @@ namespace Atheriz.Core.Globals;
 // ---------------------------------------------------------------------------
 
 /// <summary>
-/// Port of <c>atheriz/globals/map.py:LegendEntry</c>.
 /// Symbol/desc/coord/show/fg/bg faithful.
 /// </summary>
 public sealed class TupleCoordConverter : JsonConverter<(int X, int Y)?>
@@ -149,7 +148,6 @@ public sealed class LegendEntry : IEquatable<LegendEntry>
 // ---------------------------------------------------------------------------
 
 /// <summary>
-/// Port of <c>atheriz/globals/map.py:MapInfo</c>.
 /// Keeps public fields, locks, IsDirty/MapChanged semantics, BFS stubs.
 /// JSON persistence replaces dill.
 /// </summary>
@@ -827,7 +825,6 @@ public class MapInfo
 // ---------------------------------------------------------------------------
 
 /// <summary>
-/// Faithful port of <c>atheriz/globals/map.py:MapHandler</c>.
 /// Persistence via EF Core JSON (replaces dill). ReaderWriterLockSlim mirrors RLock.
 /// </summary>
 public class MapHandler

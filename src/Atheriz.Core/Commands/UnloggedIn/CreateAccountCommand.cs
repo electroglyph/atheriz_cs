@@ -1,4 +1,3 @@
-// Port of atheriz/commands/unloggedin/create.py:67
 using Atheriz.Core.Network;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
@@ -85,7 +84,7 @@ public sealed class CreateAccountCommand : Command
             if (settings.CharCreationEnabled)
             {
                 try { await ConnectCommand.CharSelectionAsync(caller, account).ConfigureAwait(false); }
-                catch (Exception ex) { Console.Error.WriteLine($"[Create] char_selection failed: {ex}"); }
+                catch (Exception ex) { AtherizLogger.LogError($"[Create] char_selection failed: {ex}"); }
             }
             else
             {

@@ -38,14 +38,31 @@ public sealed class TelnetCsWriter : ITelnetWriter, IDisposable
     public void Write(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
-        // Sync bridge over the session's async write: the ITelnetWriter contract is
+        // Sync bridge over the awaited core below: the ITelnetWriter contract is
         // synchronous (TelnetConnection.OffloopWrite runs inline on the loop thread),
         // the library awaits nothing that needs our SynchronizationContext (it uses
         // ConfigureAwait(false) throughout and the server runs context-free), and the
         // session serializes concurrent writers behind its send gate. Callers pass
         // TelnetText-normalized text; never re-normalize here (byte counts stay
         // single-sourced in TelnetConnection).
-        RunWrite(static (session, payload, token) => session.WriteAsync(payload, token), text);
+        WriteAsync(text).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Awaited write with a cancellation token: the token bounds the
+    /// send-gate wait and the socket write alongside <see cref="WriteTimeout"/>.
+    /// Prefer this over <see cref="Write"/> wherever the caller can await.</summary>
+    public Task WriteAsync(string text, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return RunWriteAsync(static (session, payload, token) => session.WriteAsync(payload, token), text, cancellationToken);
+    }
+
+    /// <summary>Awaited generic write over the session (echo toggles, fused
+    /// prompt frames) with a cancellation token.</summary>
+    public Task WriteAsync<T>(Func<ServerSession, T, CancellationToken, Task> write, T payload, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+        return RunWriteAsync(write, payload, cancellationToken);
     }
 
     public void Iac(byte cmd, byte opt)
@@ -54,7 +71,14 @@ public sealed class TelnetCsWriter : ITelnetWriter, IDisposable
         // else is a caller error. Repeats are idempotent in the RFC 1143 machine,
         // unlike the old always-send bytes.
         var suppress = ToSuppress(cmd, opt);
-        RunWrite(static (session, payload, token) => session.SetEchoAsync(payload, token), suppress);
+        IacAsync(cmd, opt).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Awaited echo-toggle write with a cancellation token.</summary>
+    public Task IacAsync(byte cmd, byte opt, CancellationToken cancellationToken = default)
+    {
+        var suppress = ToSuppress(cmd, opt);
+        return RunWriteAsync(static (session, payload, token) => session.SetEchoAsync(payload, token), suppress, cancellationToken);
     }
 
     public void IacWithText(byte cmd, byte opt, string text)
@@ -63,24 +87,34 @@ public sealed class TelnetCsWriter : ITelnetWriter, IDisposable
         // Fused single-frame toggle+prompt: no broadcast can slip between the
         // negotiation bytes and the prompt they govern (parity with the old
         // locked IacWithText write).
-        var suppress = ToSuppress(cmd, opt);
-        RunWrite(static (session, payload, token) => session.WriteWithEchoAsync(payload.Text, payload.Suppress, token), (Text: text, Suppress: suppress));
+        IacWithTextAsync(cmd, opt, text).GetAwaiter().GetResult();
     }
 
-    // Sync-over-async bridge with a deadline: the token bounds both the
+    /// <summary>Awaited fused toggle+prompt write with a cancellation token.</summary>
+    public Task IacWithTextAsync(byte cmd, byte opt, string text, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        var suppress = ToSuppress(cmd, opt);
+        return RunWriteAsync(static (session, payload, token) => session.WriteWithEchoAsync(payload.Text, payload.Suppress, token), (Text: text, Suppress: suppress), cancellationToken);
+    }
+
+    // Awaited write core with a deadline: the linked token bounds both the
     // send-gate wait and the socket write, so a wedged peer faults (as
     // IOException, below) instead of parking the calling thread past WriteTimeout.
+    // A caller-cancelled token surfaces OperationCanceledException (not the
+    // timeout IOException): only the deadline maps to a write failure.
     // Abandoned in-flight bytes keep the session send gate until they finish,
     // which preserves toggle+text ordering (later writes queue behind, each
     // with their own bound) while the failing connection is closed.
-    private void RunWrite<T>(Func<ServerSession, T, CancellationToken, Task> write, T payload)
+    private async Task RunWriteAsync<T>(Func<ServerSession, T, CancellationToken, Task> write, T payload, CancellationToken callerToken)
     {
         using var timeout = new CancellationTokenSource(WriteTimeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(callerToken, timeout.Token);
         try
         {
-            write(_session, payload, timeout.Token).GetAwaiter().GetResult();
+            await write(_session, payload, linked.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (timeout.IsCancellationRequested && !callerToken.IsCancellationRequested)
         {
             throw new IOException("telnet write timed out", ex);
         }

@@ -317,7 +317,11 @@ public sealed class TelnetCsWriterTests
             t.Start();
             t.Join();
             Assert.Equal("aloha", Encoding.UTF8.GetString(ReadExactly(peer, 5)));
-            Assert.Equal(0, conn.PendingBytes);
+            // The limiter release rides the write's finally on a pool thread:
+            // bytes on the wire do not imply the release has run yet (the
+            // awaited write core adds a continuation hop), so wait for it.
+            Assert.True(PortedHelpers.WaitFor(() => conn.PendingBytes == 0, 5000),
+                "limiter reservation was not released after the offloaded send");
         }
         finally
         {
@@ -446,5 +450,30 @@ public sealed class TelnetCsWriterTests
         writer.Dispose();
         writer.Dispose();
         writer.Close();
+    }
+
+    [Fact]
+    public async Task TelnetCsWriter_WriteAsync_DeliversBytes()
+    {
+        // Awaited write path with a cancellation token: same wire bytes as
+        // the sync contract, fully awaitable by callers that can await.
+        using var env = GlobalTestEnv.Enter();
+        var (peer, serverStream) = InMemoryPipe.Create();
+        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
+        var writer = new TelnetCsWriter(session, "1.2.3.4");
+        try
+        {
+            await writer.WriteAsync("hello", CancellationToken.None);
+            Assert.Equal("hello", Encoding.UTF8.GetString(ReadExactly(peer, 5)));
+            await writer.IacWithTextAsync(251, 1, "hi");
+            var prompt = Encoding.UTF8.GetBytes("hi");
+            var got = ReadExactly(peer, 3 + prompt.Length);
+            Assert.Equal(new byte[] { 255, 251, 1 }, got[..3]);
+            Assert.Equal(prompt, got[3..]);
+        }
+        finally
+        {
+            peer.Dispose();
+        }
     }
 }

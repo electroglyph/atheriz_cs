@@ -48,4 +48,22 @@ public sealed class RetryDrainTests
             ConnectionManager.GlobalInstance = prev;
         }
     }
+
+    [Fact]
+    public void RetryLifetime_CancelledOnDispose()
+    {
+        // The awaited retry/re-arm loops honor the connection lifetime token:
+        // Dispose must cancel it so a pending Task.Delay dies quietly instead
+        // of firing into a cleared queue.
+        using var env = GlobalTestEnv.Enter();
+        var field = typeof(BaseConnection).GetField("_retryCts",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(field);
+        var probe = new TestConnection("retry-cts-probe");
+        var cts = (CancellationTokenSource)field!.GetValue(probe)!;
+        Assert.NotNull(cts);
+        Assert.False(cts.IsCancellationRequested);
+        probe.Dispose();
+        Assert.True(cts.IsCancellationRequested);
+    }
 }

@@ -1,4 +1,3 @@
-// Port of atheriz/objects/verb_conjugation/conjugate.py:1
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,7 +5,6 @@ using System.Linq;
 namespace Atheriz.Core.Objects.VerbConjugation;
 
 /// <summary>
-/// Port of <c>atheriz/objects/verb_conjugation/conjugate.py</c> (413 LOC).
 /// Evennia-derived irregular table preserved via embedded <c>verbs.txt</c> subset.
 /// Covers be/have/do/go plus generic fallback (+s) for unknown verbs.
 /// </summary>
@@ -234,7 +232,7 @@ public static class Conjugate
     public static string? VerbTense(string verb)
     {
         var infinitive = VerbInfinitive(verb);
-        // Port of conjugate.py:259-262 — unknown verbs have no tense data,
+// unknown verbs have no tense data,
         // so None is returned (pinned by test_verb_conjugate.py:203).
         if (!VerbTenses.TryGetValue(infinitive, out var data)) return null;
         foreach (var kv in VerbTensesKeys)
@@ -307,12 +305,10 @@ public static class Conjugate
     }
 
     /// <summary>
-    /// Port of <c>verb_actor_stance_components</c>. Returns (2nd, 3rd) forms.
     /// </summary>
     public static (string second, string third) VerbActorStanceComponents(string verb, bool plural = false)
     {
         var tense = VerbTense(verb);
-        // Port of conjugate.py:399-401: unknown tense returns the verb
         // unchanged for both persons ("he florp", not "he florps").
         if (tense is null) return (verb, verb);
         var them = plural ? "*" : "3";

@@ -10,7 +10,6 @@ using telnet_cs.Server;
 
 namespace Atheriz.Core.Network;
 
-// Port of atheriz/network/telnet.py:1-446
 // Telnet protocol with TLS autodetect same-port, NAWS clamping, capped line reading.
 
 public class TelnetConnection : BaseConnection
@@ -24,6 +23,10 @@ public class TelnetConnection : BaseConnection
     // Dispose joins in-flight writes via this event instead of a
     // 250ms spin that loses to 2-5s write/TLS timeouts and aborts mid-write.
     private readonly ManualResetEventSlim _drained = new(true);
+    // Async twin of _drained for DisposeAsync: re-armed alongside the event
+    // so the async join observes the same signal without parking a thread.
+    private volatile TaskCompletionSource<bool> _drainTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _disposeManaged;
     // Bound covers the longest write/TLS timeouts above (2-5s) with headroom.
     private static readonly TimeSpan DisposeJoinTimeout = TimeSpan.FromSeconds(10);
     // Close flag (with _limiter.IsClosing forms IsClosing). Pending-byte
@@ -45,7 +48,6 @@ public class TelnetConnection : BaseConnection
         _limiter = new PendingLimiter(_settings.TelnetMaxPendingBytes, _settings.TelnetMaxPendingSends);
         try
         {
-            // Typed host resolution (port of telnet.py:130-133 peername):
             // writers expose GetPeerHost; anything else defaults to "?".
             if (writer is ITelnetWriter tw0) { ClientHost = tw0.GetPeerHost() ?? "?"; return; }
             ClientHost = "?";
@@ -59,14 +61,45 @@ public class TelnetConnection : BaseConnection
         {
             // Join in-flight offloaded writes (bounded) before disposing the writer.
             try { _drained.Wait(DisposeJoinTimeout); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
-            try { if (Writer is IDisposable wd) wd.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
-            try { if (Reader is System.IO.TextReader tr) tr.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
-            try { _drained.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
+            DisposeManaged();
         }
         base.Dispose(disposing);
     }
 
-    // Port of telnet.py:138-156 _get_write_buffer_size: consult each writer's
+    public override async ValueTask DisposeAsync()
+    {
+        // Async join: awaits the drain signal instead of parking the caller.
+        // A timeout proceeds past the bound, mirroring the sync Wait above.
+        try { await _drainTcs.Task.WaitAsync(DisposeJoinTimeout).ConfigureAwait(false); }
+        catch (TimeoutException) { }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.DisposeAsync: " + logEx.Message, "TelnetConnection"); }
+        DisposeManaged();
+        base.Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    // Writer/reader/event teardown shared by both dispose paths (idempotent:
+    // async and sync dispose may race, and Dispose may run twice).
+    private void DisposeManaged()
+    {
+        if (Interlocked.Exchange(ref _disposeManaged, 1) != 0) return;
+        try { if (Writer is IDisposable wd) wd.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
+        try { if (Reader is System.IO.TextReader tr) tr.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
+        try { _drained.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
+    }
+
+    private void ArmDrained()
+    {
+        try { _drained.Reset(); } catch (ObjectDisposedException) { /* Dispose already joined; write still runs below. */ }
+        _drainTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private void SignalDrained()
+    {
+        try { _drained.Set(); } catch (ObjectDisposedException) { }
+        _drainTcs.TrySetResult(true);
+    }
+
     // buffer sources in priority order (transport → writer → _transport).
     public virtual int? GetWriteBufferSize()
     {
@@ -85,7 +118,7 @@ public class TelnetConnection : BaseConnection
         return null;
     }
 
-    // Port of telnet.py:48-49 _telnet_text — single-pass span normalizer.
+// single-pass span normalizer.
     // Net effect matches the old double-Replace (lone \n → \r\n, existing
     // \r\n untouched, bare \r stays bare) with one scan and no intermediate.
     private static string TelnetText(string text)
@@ -152,16 +185,16 @@ public class TelnetConnection : BaseConnection
     {
         if (IsClosing) { if (nb != 0) _limiter.ReleaseSync(nb); return; }
         Interlocked.Increment(ref _inflight);
-        try { _drained.Reset(); } catch (ObjectDisposedException) { /* Dispose already joined; write still runs below. */ }
+        ArmDrained();
         try
         {
-            Task.Run(() => { try { write(); } finally { if (Interlocked.Decrement(ref _inflight) == 0) { try { _drained.Set(); } catch (ObjectDisposedException) { } } } })
+            Task.Run(() => { try { write(); } finally { if (Interlocked.Decrement(ref _inflight) == 0) SignalDrained(); } })
                 .ContinueWith(t => { AtherizLogger.LogError($"[Telnet] offloaded write task faulted for {ClientHost}", t.Exception!); },
                     TaskContinuationOptions.OnlyOnFaulted);
         }
         catch (Exception e)
         {
-            if (Interlocked.Decrement(ref _inflight) == 0) { try { _drained.Set(); } catch (ObjectDisposedException) { } }
+            if (Interlocked.Decrement(ref _inflight) == 0) SignalDrained();
             if (nb != 0) _limiter.ReleaseSync(nb);
             AtherizLogger.LogError($"[Telnet] failed to schedule write for {ClientHost}: {e}");
             Close();
@@ -192,7 +225,7 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
         }
     }
 
-    // Port of telnet.py:158-175 _offloop_write — now uses PendingLimiter with finally ReleaseSync (fix leak)
+// now uses PendingLimiter with finally ReleaseSync (fix leak)
     public void OffloopWrite(string text, int nb)
     {
         text = TelnetText(text);
@@ -224,7 +257,7 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
     // Expose limiter for testing / inspection (kept internal)
     internal PendingLimiter Limiter => _limiter;
 
-    // Port of telnet.py:188-324 send_command — now via PendingLimiter (fixes sync leak)
+// now via PendingLimiter (fixes sync leak)
     public override void SendCommand(string cmd, List<object?>? args = null, Dictionary<string, object?>? kwargs = null)
     {
         if (IsClosing) return;
@@ -309,7 +342,6 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
     }
 }
 
-/// <summary>Typed write-buffer source (port of telnet.py transport/get_write_buffer_size duck-typing).</summary>
 public interface ITelnetBufferSource
 {
     int? GetWriteBufferSize();
@@ -326,12 +358,10 @@ public interface ITelnetWriter : ITelnetBufferSource
     // writer overrides with one locked byte write so a broadcast cannot slip
     // between the IAC negotiation bytes and the prompt they govern.
     void IacWithText(byte cmd, byte opt, string text) { Iac(cmd, opt); Write(text); }
-    // Priority-ordered buffer-size sources (port of telnet.py:138-156
     // transport → writer → _transport chain). Default is just this writer.
     IReadOnlyList<ITelnetBufferSource> BufferSources => [this];
 }
 
-/// <summary>Typed router surface for lifespan composition (port of telnet.py:350-446).</summary>
 public interface ITelnetRouter
 {
     object? LifespanContext { get; set; }
@@ -345,7 +375,7 @@ public interface ITelnetApp
 
 public sealed class TelnetProtocol : BaseProtocol
 {
-    private const int TELNET_INPUT_CHUNK = 4096; // port of telnet.py:45
+    private const int TELNET_INPUT_CHUNK = 4096;
 
     public static (int rows, int cols) ClampNaws(int rows, int cols)
         => ClampNaws(rows, cols, AtherizSettings.Global);
@@ -460,20 +490,17 @@ public sealed class TelnetProtocol : BaseProtocol
         catch (Exception e) { Atheriz.Core.AtherizLogger.LogWarning($"WARNING: Could not load telnet TLS cert: {e}"); return null; }
     }
 
-    // Port of telnet.py:341-446 TelnetProtocol.setup
     // We support two app shapes to remain faithful to Python tests:
     // - FastAPI-style mock with app.router.lifespan_context (test_telnet.py:113-174)
     // - Real IHost/WebApplication via IServiceProvider + IHostApplicationLifetime
     public override void Setup(object app)
     {
-        // First, handle FastAPI-style router.lifespan_context composition — port of telnet.py:350-446.
         // Typed contract: test doubles expose ITelnetApp.Router (FakeApp2/FakeAppLifespan).
         try
         {
             if (app is ITelnetApp tapp && tapp.Router is { } router)
             {
                 var previous = router.LifespanContext;
-                // Capture settings for closure — port of telnet.py:351 server_task per-app (closure, not class attr)
                 var settingsForLifespan = AtherizSettings.Global;
                 if (app is IHost telnetHost)
                 {
@@ -483,7 +510,6 @@ public sealed class TelnetProtocol : BaseProtocol
                 if (settingsForLifespan.TelnetEnabled)
                 {
                     // Create composed lifespan wrapper — mirrors telnet.py:436-446.
-                    // If disabled, don't replace lifespan (port of telnet.py:347-348).
                     object composed = CreateComposedLifespan(previous, settingsForLifespan);
                     router.LifespanContext = composed;
                 }
@@ -523,31 +549,16 @@ public sealed class TelnetProtocol : BaseProtocol
         if (!settings.TelnetEnabled) return;
         manager ??= ConnectionManager.GlobalInstance ?? new ConnectionManager(settings: settings);
 
-        // port of telnet.py:402-433 run_telnet_server composition via lifespan
-        Task.Run(async () =>
-        {
-            TelnetServer? server = null;
-            try
-            {
-                var tlsCert = settings.TelnetTlsEnabled ? BuildTelnetSslContext(settings) : null;
-                if (tlsCert is not null) Atheriz.Core.AtherizLogger.LogInformation($"SSL is enabled for telnet (cert: {settings.SslCertFile}) with auto-detection for plaintext clients");
-                else if (settings.TelnetTlsEnabled) Atheriz.Core.AtherizLogger.LogWarning("TELNET_TLS_ENABLED is on but no usable cert — running plaintext");
-                var handoff = new ConcurrentQueue<string?>();
-                var filter = BuildAcceptFilter(manager, handoff);
-                var options = BuildServerOptions(settings, tlsCert, filter);
-                Atheriz.Core.AtherizLogger.LogInformation($"Starting Telnet Protocol on {settings.TelnetInterface}:{settings.TelnetPort}");
-                server = new TelnetServer(settings.TelnetPort, options);
-                server.Start();
-                var running = server;
-                using var reg = lifetime.ApplicationStopping.Register(() => { try { running.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); } });
-                await AcceptLoopAsync(server, handoff, manager, settings, lifetime.ApplicationStopping).ConfigureAwait(false);
-            }
-            catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] server failed: {ex}"); }
-            finally { try { server?.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); } Atheriz.Core.AtherizLogger.LogInformation("Telnet Protocol server stopped."); }
-        });
+        // Hosted-service kickoff (same non-blocking start the Task.Run gave):
+        // BackgroundService.StartAsync runs the loop and returns, so Setup
+        // still never blocks; faults stay inside ExecuteAsync's catch-all
+        // (same strings as the old inline body). The stop registration joins
+        // the loop instead of abandoning it at shutdown.
+        var service = new TelnetHostedService(manager, settings, lifetime);
+        _ = service.StartAsync(lifetime.ApplicationStopping);
+        lifetime.ApplicationStopping.Register(() => { _ = service.StopAsync(CancellationToken.None).ContinueWith(t => { if (t.IsFaulted && t.Exception is not null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] server failed: {t.Exception}"); }, TaskScheduler.Default); });
     }
 
-    // Helper to create composed lifespan for FastAPI-style app.router.lifespan_context — port of telnet.py:436-446
     private static object CreateComposedLifespan(object? previous, AtherizSettings settings)
     {
         // In Python, lifespan is an asynccontextmanager; in C# we simulate via Func<object, Task>

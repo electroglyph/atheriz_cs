@@ -2,7 +2,6 @@ using Atheriz.Core;
 
 namespace Atheriz.Core.Objects;
 
-// Port of atheriz/objects/nodes.py:969 NodeGrid
 public sealed class NodeGrid
 {
     public readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.SupportsRecursion);
@@ -24,16 +23,14 @@ public sealed class NodeGrid
         set { Lock.EnterWriteLock(); try { _data = value is null ? new() : new Dictionary<string, System.Text.Json.JsonElement>(value); IsModified = true; } finally { Lock.ExitWriteLock(); } }
     }
 
-    // Port of nodes.py:971
     public NodeGrid(string area, int z, Dictionary<string, System.Text.Json.JsonElement>? data = null)
     {
         Area = area;
         Z = z;
         if (data is not null) Data = data;
     }
-    // Port of nodes.py:979
     public override string ToString() => $"NodeGrid(z={Z}, area={Area})";
-    // Port of nodes.py:987 — Python dict == is order-insensitive; JsonElement has no
+// Python dict == is order-insensitive; JsonElement has no
     // value equality in C#, so data compares by canonical raw text. Hash combines the
     // same components in sorted order so equal grids hash equal.
     public override bool Equals(object? obj)
@@ -62,7 +59,6 @@ public sealed class NodeGrid
         foreach (var k in data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(data[k].GetRawText()); }
         return h.ToHashCode();
     }
-    // Port of nodes.py:987
     public int Count { get { Lock.EnterReadLock(); try { return _nodes.Count; } finally { Lock.ExitReadLock(); } } }
     /// <summary>
     /// Hot-reload rewire: swap a stale node instance for its replacement (matched
@@ -84,21 +80,18 @@ public sealed class NodeGrid
         }
         finally { Lock.ExitWriteLock(); }
     }
-    // Port of nodes.py:990
     public void SetData(string key, System.Text.Json.JsonElement value)
     {
         Lock.EnterWriteLock();
         try { _data[key] = value; IsModified = true; }
         finally { Lock.ExitWriteLock(); }
     }
-    // Port of nodes.py:996
     public System.Text.Json.JsonElement? GetData(string key)
     {
         Lock.EnterReadLock();
         try { return _data.TryGetValue(key, out var v) ? v : null; }
         finally { Lock.ExitReadLock(); }
     }
-    // Port of nodes.py:1001
     public List<GameObject> FilterContents(Func<GameObject, bool> pred)
     {
         List<GameObject> res = [];
@@ -110,7 +103,6 @@ public sealed class NodeGrid
         finally { Lock.ExitReadLock(); }
         return res;
     }
-    // Port of nodes.py:1008
     public Node? GetRandomNode()
     {
         Lock.EnterReadLock();
@@ -122,7 +114,6 @@ public sealed class NodeGrid
         }
         finally { Lock.ExitReadLock(); }
     }
-    // Port of nodes.py:1015
     public void AddNode(Node node)
     {        Node? old = null;
         List<NodeLink> linksSnap = [];
@@ -158,7 +149,6 @@ public sealed class NodeGrid
         _nodes[(node.Coord.X, node.Coord.Y)] = node;
         IsModified = true;
     }
-    // Port of nodes.py:1044
     public void RemoveNode((int X, int Y) coord)
     {
         Node? node = null;
@@ -187,7 +177,6 @@ public sealed class NodeGrid
                 else nh.RemoveTransition(l.Coord);
             }
     }
-    // Port of nodes.py:1055
     public Node? GetNode((int X, int Y) coord)
     {
         Lock.EnterReadLock();
@@ -231,7 +220,6 @@ public sealed class NodeGrid
         return failed;
     }
 
-    // Port of nodes.py:1059 check_moves
     public HashSet<int> CheckMoves(List<((int X, int Y) src, (int X, int Y) dst)> moves, List<((int X, int Y) src, (int X, int Y) dst)>? context = null)
     {
         Lock.EnterReadLock();
@@ -245,7 +233,6 @@ public sealed class NodeGrid
         finally { Lock.ExitReadLock(); }
     }
 
-    // Port of nodes.py:1095 apply_moves
     public List<int> ApplyMoves(List<((int X, int Y) src, (int X, int Y) dst)> moves)
     {
         Dictionary<(int, int), (int, int)> remap = new();
@@ -343,7 +330,6 @@ public sealed class NodeGrid
         return failed.ToList();
     }
 
-    // Port of nodes.py:1214
     public void Clear()
     {
         Lock.EnterWriteLock();
@@ -352,7 +338,6 @@ public sealed class NodeGrid
     }
 }
 
-// Port of atheriz/objects/nodes.py:1426 Transition (merged here per file-organization hygiene)
 public sealed class Transition
 {
     public Coord FromCoord { get; set; }
@@ -362,7 +347,6 @@ public sealed class Transition
     public readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.SupportsRecursion);
 
     public Transition() { }
-    // Port of nodes.py:1428
     public Transition(Coord from, Coord to, string name)
     {
         FromCoord = from;

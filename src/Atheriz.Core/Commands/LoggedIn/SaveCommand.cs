@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/save.py:32
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -15,7 +14,6 @@ public sealed class SaveCommand : Command
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         go.Msg("Saving...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        // Port of save.py:32 faithful order: save_objects() + map.save() + node.save(force=True) + gametime.save.
         // Uses the live singletons (never throwaway instances) and settings.SavePath (never hardcoded "save").
         // each save is guarded so one failure neither skips the
         // remaining saves nor leaves "Saving..." with no follow-up.

@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/wander.py:75
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

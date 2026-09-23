@@ -2,7 +2,6 @@
 namespace Atheriz.Core.Commands;
 
 /// <summary>
-/// Port of atheriz/objects/base_channel.py:BaseChannelCommand
 /// </summary>
 public class BaseChannelCommand : Command
 {
@@ -116,7 +115,6 @@ public class BaseChannelCommand : Command
         }
         if (pa.GetBool("unsubscribe"))
         {
-            // Port of channel.py:110-111 caller.unsubscribe(channel):
             // failures propagate, never swallowed.
             ch.RemoveListener(go);
             go.Unsubscribe(ch);

@@ -1,4 +1,3 @@
-// Port of atheriz/initial_setup.py:48 do_setup
 using Microsoft.EntityFrameworkCore;
 using Atheriz.Core.Commands.UnloggedIn;
 using Atheriz.Core.Persistence;
@@ -6,7 +5,6 @@ using Atheriz.Core.Persistence;
 namespace Atheriz.Core;
 
 /// <summary>
-/// Faithful port of <c>atheriz/initial_setup.py:do_setup</c>.
 /// Builds 9x9x9 limbo cube, map placeholders, alarm/dashboard, superuser account.
 /// Mirrors Python constants LIMBO_AREA=limbo, LIMBO_GRID=9, LIMBO_DESC etc.
 /// </summary>
@@ -17,7 +15,6 @@ public static class InitialSetup
     public static int LIMBO_CENTER => LIMBO_GRID / 2; // 4
     public const string LIMBO_DESC = "You are in a vast nothingness.";
 
-    // Port of initial_setup.py:20 PushCommand
     public sealed class PushCommand : Command
     {
         public override string Key => "push";
@@ -34,7 +31,6 @@ public static class InitialSetup
         }
     }
 
-    // Port of initial_setup.py:32 AlarmObject
     public sealed class AlarmObject : GameObject
     {
         public AlarmObject() { IsItem = true; }
@@ -81,24 +77,23 @@ public static class InitialSetup
         var game = GameSetup;
         if (game is not null)
         {
-            Console.Error.WriteLine("[Setup] Running game world setup.");
+            AtherizLogger.LogInformation("[Setup] Running game world setup.");
             game.DoSetup(savePath, username, password, secretPath, prompt);
             return;
         }
-        Console.Error.WriteLine("[Setup] Running template world setup.");
+        AtherizLogger.LogInformation("[Setup] Running template world setup.");
         DoSetup(savePath, username, password, secretPath, prompt);
     }
 
     public static void DoSetup(string savePath, string? username = null, string? password = null, string? secretPath = null, bool prompt = true, TextReader? input = null)
     {
-        // Port of initial_setup.py:49 logger.info — not duplicated to stdout (new.py:740 already prints)
+// not duplicated to stdout (new.py:740 already prints)
         // Ensure savePath absolute for guard
         var absSave = Path.GetFullPath(savePath);
         var absSecret = secretPath is not null ? Path.GetFullPath(secretPath) : Path.Combine(Path.GetDirectoryName(absSave) ?? ".", "secret");
         Directory.CreateDirectory(absSecret);
         Utils.FsUtil.TryChmod0700(absSecret);
 
-        // Port of initial_setup.py:50 do_db_setup()
         AtherizDbContextFactory.DoSetup(absSave);
         // Ensure salt exists in game's secret folder (mirrors Python SECRET_PATH override)
         try
@@ -106,13 +101,13 @@ public static class InitialSetup
             // Force salt creation with explicit path
             SaltProvider.GetSalt(absSecret);
         }
-        catch (Exception ex) { Console.Error.WriteLine($"Salt setup warning: {ex.Message}"); }
+        catch (Exception ex) { AtherizLogger.LogWarning($"Salt setup warning: {ex.Message}"); }
 
         // Reset registries for fresh world (mirrors globals cleared by conftest).
         // (ClearAll already resets the Id generator — no separate SetId.)
         ObjectRegistry.ClearAll();
         // Clear any existing node/map/time singletons that might cache old save path
-        try { Globals.GlobalServices.Reset(); } catch (Exception ex) { Console.Error.WriteLine($"Singleton reset warning: {ex.Message}"); }
+        try { Globals.GlobalServices.Reset(); } catch (Exception ex) { AtherizLogger.LogWarning($"Singleton reset warning: {ex.Message}"); }
         SaltProvider.Clear();
         // Re-seed salt after clear (default slot included — see ReseedForGame).
         SaltProvider.ReseedForGame(absSecret);
@@ -221,7 +216,6 @@ public static class InitialSetup
         if (string.IsNullOrWhiteSpace(u))
         {
             Console.Error.WriteLine("Error: Username cannot be empty.");
-            // Port of initial_setup.py: mh.save()/nh.save() precede the
             // credential prompts — limbo is durable even with no superuser.
             // (Committed below, after the gate/tx open.)
             skipSuperuser = true;
@@ -338,7 +332,7 @@ public static class InitialSetup
         Console.Out.WriteLine($"Creating character '{u!}'...");
         var character = GameObject.Create(u!, isPc: true);
         character.Desc = "";
-        // Port of Object.create add_object — faithful registry add before save
+// faithful registry add before save
         ObjectRegistry.AddObject(character);
         var homeCoord = settings.DefaultHome; // limbo 4,4,4
         var home = ResolveSeedNode(nh, area, homeCoord);
@@ -370,14 +364,14 @@ public static class InitialSetup
         if (!character.ChannelsSnapshot.Contains(chan.Id))
             character.Subscribe(chan);
 
-        // Port of initial_setup.py:171 save_objects() — default force=False:
+// default force=False:
         // persist only modified objects. Engine subtypes must be registered
         // first or they save as their base kind with a loud log.
         RegisterPersistedSubtypes();
         ObjectRegistry.SaveObjects(db, force: false);
         nh.Save(db);
         setupTx.Commit();
-        Console.Error.WriteLine("Initial world state set up.");
+        AtherizLogger.LogInformation("Initial world state set up.");
         }
         finally { Atheriz.Core.Persistence.DbWriteGate.Exit(); }
     }

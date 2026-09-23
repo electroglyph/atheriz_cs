@@ -50,6 +50,19 @@ public class SpawnerSafetyTests
     }
 
     [Fact]
+    public void SpawnDaemon_DrainsStderrWithBoundedAsyncWait()
+    {
+        // Structural pin: the pid-helper spawn drains the stderr redirect
+        // concurrently (a chatty bash would otherwise block on a full pipe
+        // while stdout is read) and waits with a bounded async wait instead
+        // of the blocking sync read.
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/DaemonSpawner.cs");
+        Assert.Contains("StandardError.ReadToEndAsync", src);
+        Assert.Contains("WaitForExitAsync", src);
+        Assert.DoesNotContain("proc.StandardOutput.ReadToEnd()", src);
+    }
+
+    [Fact]
     public void SpawnDaemon_DisplayUsesExplicitFlagsAndDefaults()
     {
         // Structural pin: the status lines derive from the explicit spawn

@@ -1,4 +1,3 @@
-// Port of atheriz/database_setup.py:Database.lock RLock (re-entrant)
 using System.Threading;
 
 namespace Atheriz.Core.Persistence;

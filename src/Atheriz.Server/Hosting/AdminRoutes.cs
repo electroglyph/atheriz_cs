@@ -25,7 +25,7 @@ public static class AdminRoutes
             return err is null;
         }
 
-        // Port of atheriz.py:348-350 — auth failures are HTTP 200 with
+// auth failures are HTTP 200 with
         // {status: error} so the CLI reads data.status (IsSuccess path).
         // Single guard-result shape shared by the three admin endpoints;
         // endpoints keep their own response shapes otherwise.
@@ -53,11 +53,11 @@ public static class AdminRoutes
                         var ticker = GlobalServices.GetAsyncTicker();
                         var pool = GlobalServices.GetAsyncThreadPool();
                         msg = await PluginReloader.ReloadGameLogicAsync(ticker, pool, settings).ConfigureAwait(false);
-                        try { ServerLifecycle.DoReload(settings); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] DoReload failed: {ex.Message}"); }
+                        try { ServerLifecycle.DoReload(settings); } catch (Exception ex) { AtherizLogger.LogError($"[HotReload] DoReload failed: {ex.Message}"); }
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine($"[HotReload] PluginReloader failed: {ex.Message}, falling back to DoReload");
+                        AtherizLogger.LogError($"[HotReload] PluginReloader failed: {ex.Message}, falling back to DoReload");
                         ServerLifecycle.DoReload(settings);
                         msg = "Reload completed (fallback).";
                     }
@@ -67,7 +67,7 @@ public static class AdminRoutes
                 var done = await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(60))).ConfigureAwait(false);
                 if (done != work)
                 {
-                    Console.Error.WriteLine("[HotReload] Reload exceeded 60s watchdog; continuing in background.");
+                    AtherizLogger.LogError("[HotReload] Reload exceeded 60s watchdog; continuing in background.");
                     return AdminError("Reload timed out after 60s; still running in background.");
                 }
                 return AdminOk(await work.ConfigureAwait(false));
@@ -85,7 +85,7 @@ public static class AdminRoutes
             if (IsBodyTooLarge(ctx))
                 return Results.Json(new { status = "error", message = "Request body too large." });
 
-            Console.Error.WriteLine("Internal shutdown request received. Running shutdown tasks...");
+            AtherizLogger.LogInformation("Internal shutdown request received. Running shutdown tasks...");
 
             // single thread-pool hop for shutdown. The watchdog is a
             // pure delay — a Timer, not a pooled thread. The shutdown work
@@ -93,7 +93,7 @@ public static class AdminRoutes
             // shape nested a second hop inside an async lambda).
             var watchdog = new System.Threading.Timer(_ =>
             {
-                Console.Error.WriteLine("Shutdown watchdog: forcing exit.");
+                AtherizLogger.LogError("Shutdown watchdog: forcing exit.");
                 lifetime.StopApplication();
             }, null, TimeSpan.FromSeconds(60), System.Threading.Timeout.InfiniteTimeSpan);
 
@@ -135,7 +135,6 @@ public static class AdminRoutes
 
             try
             {
-                // Port of atheriz.py create_account_endpoint: run at_char_create and
                 // return its printed output (StringWriter = redirect_stdout).
                 var sb = new StringBuilder();
                 using var sw = new StringWriter(sb);

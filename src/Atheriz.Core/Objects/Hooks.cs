@@ -100,7 +100,7 @@ public partial class GameObject
                 try { newResult = DelegateInvoker.Invoke(h, args); invoked = true; }
                 catch (TargetParameterCountException) { }
             }
-            // Port of base_obj.py:64-66 — an after-hook replaces the result
+// an after-hook replaces the result
             // unconditionally, including with null (reference types).
             if (invoked && (newResult is T t || (newResult is null && default(T) is null))) result = (T)newResult!;
         }

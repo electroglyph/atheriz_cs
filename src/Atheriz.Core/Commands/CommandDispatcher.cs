@@ -3,7 +3,6 @@ using Atheriz.Core.Concurrency;
 namespace Atheriz.Core.Commands;
 
 /// <summary>
-/// Faithful port of <c>atheriz/inputfuncs.py:dispatch_loggedin / _resolve_unloggedin</c>.
 /// </summary>
 public static class CommandDispatcher
 {
@@ -200,7 +199,6 @@ public static class CommandDispatcher
         return null;
     }
 
-    // Port of unloggedin/cmdset.py:14-26 conditionals, evaluated at dispatch
     // time so settings flips take effect without a registry reset. Single
     // effective source: a verb is gated off when EITHER the dispatch settings
     // (_settings, honored by the aliasing paths above) or the live Global

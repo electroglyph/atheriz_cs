@@ -1,8 +1,7 @@
-// Port of polyleven:levenshtein — atheriz/commands/loggedin/none.py:5 and atheriz/commands/unloggedin/none.py:5
+// atheriz/commands/loggedin/none.py:5 and atheriz/commands/unloggedin/none.py:5
 namespace Atheriz.Core.Utils;
 
 /// <summary>
-/// String distance helpers. Port of <c>polyleven:levenshtein</c> used in
 /// <c>atheriz/commands/loggedin/none.py:5</c> and <c>atheriz/commands/unloggedin/none.py:5</c>.
 /// </summary>
 public static class StringDistance

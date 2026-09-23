@@ -63,7 +63,6 @@ public static class CreateHandler
             Atheriz.Core.Globals.ObjectRegistry.LoadObjects(savePath);
         }
         catch (Exception ex) { Console.WriteLine($"Load failed: {ex.Message}"); CliExitCode.Set(1); return; }
-        // Port of atheriz.py:1456-1459 offline path: at_char_create against the database.
         ServerEvents.AtCharCreate(accName, charName, pw);
         CliExitCode.Set(0);
     }

@@ -1,4 +1,4 @@
-// Port of atheriz/globals/mapedit.py — MapEdit chain grant/consume with cap 256.
+// MapEdit chain grant/consume with cap 256.
 // Faithful to _chains/_previous, _evict, grant(issue key), consume(seq validation), retry/replay/gap.
 // No time-based expiry: a chain is valid while its owning session is open
 // (discarded on disconnect via DiscardSession); only the cap evicts.
@@ -9,40 +9,28 @@
 
 namespace Atheriz.Core.Globals;
 
-// Port of mapedit.py:9-12 constants
 public static class MapEditStatus
 {
-    public const string Processed = "processed"; // Port of mapedit.py:9 PROCESSED
-    public const string Retry = "retry"; // Port of mapedit.py:10 RETRY
-    public const string Reject = "reject"; // Port of mapedit.py:11 REJECT
+    public const string Processed = "processed";
+    public const string Retry = "retry";
+    public const string Reject = "reject";
 }
 
-// Port of mapedit.py:14-23 MapEditChain
 public sealed class MapEditChain
 {
-    // Port of mapedit.py:15 key
     public string Key { get; set; }
-    // Port of mapedit.py:16 previous_key
     public string PreviousKey { get; set; } = "";
-    // Port of mapedit.py:17 seq = -1
     public int Seq { get; set; } = -1;
-    // Port of mapedit.py:18 ip
     public string Ip { get; set; }
-    // Port of mapedit.py:19 area
     public string Area { get; set; }
-    // Port of mapedit.py:20 z
     public int Z { get; set; }
-    // Port of mapedit.py:21 validation: list[int] | None
     public List<int>? Validation { get; set; }
-    // Port of mapedit.py:23 created = time.monotonic()
     // In C# we keep both monotonic seconds and wall DateTime for spec's CreatedAt
     public double CreatedMonotonic { get; set; }
-    // Port of spec: DateTime CreatedAt
     public DateTime CreatedAt { get; set; }
     // Owning game session. A chain is valid for as long as this session is
     // open (see DiscardSession); null (e.g. tests) lives until cap eviction.
     public Session? Session { get; set; }
-    // Port of spec: List<Coord> chain
     public List<Coord> Chain { get; set; } = new();
 
     public MapEditChain(string key, string ip, string area, int z, Session? session = null)
@@ -68,7 +56,6 @@ public sealed class MapEditChain
     }
 }
 
-// Port of mapedit.py:26-33 MapEditResult
 public sealed class MapEditResult
 {
     public const string Processed = MapEditStatus.Processed;
@@ -89,17 +76,12 @@ public sealed class MapEditResult
     }
 }
 
-// Port of mapedit.py:36-108 module-level _chains/_previous/_lock + grant/consume
 public static class MapEdit
 {
-    // Port of settings.MAPEDIT_MAX_CHAINS = 256
-    public const int MaxChains = 256; // Port of mapedit.py cap = MAPEDIT_MAX_CHAINS
+    public const int MaxChains = 256;
 
-    // Port of mapedit.py:36 _chains: dict[str, MapEditChain]
     private static readonly Dictionary<string, MapEditChain> _chains = new();
-    // Port of mapedit.py:37 _previous: dict[str,str]
     private static readonly Dictionary<string, string> _previous = new();
-    // Port of mapedit.py:38 _lock = RLock()
     public static readonly ReaderWriterLockSlim Lock = new(LockRecursionPolicy.SupportsRecursion);
 
     // Snapshot copy of the live store (never the live dict itself): callers
@@ -127,11 +109,10 @@ public static class MapEdit
 
     private static string GenerateToken()
     {
-        // Port of mapedit.py:66 secrets.token_urlsafe(32) — 32 bytes => 43 char urlsafe base64
+// 32 bytes => 43 char urlsafe base64
         return CryptoRandom.UrlSafeToken(32);
     }
 
-    // Port of mapedit.py cap = MAPEDIT_MAX_CHAINS: read the ambient
     // global settings like Python reads module-level settings.
     internal static int EffectiveCap()
     {
@@ -157,7 +138,7 @@ public static class MapEdit
         foreach (var k in stale) { _previous.Remove(k); }
     }
 
-    // Port of mapedit.py _evict — no time-based expiry (valid while session
+// no time-based expiry (valid while session
     // open); only drops stale previous-key mappings and enforces the cap.
     // Bulk shape: one stale purge, one victim snapshot ordered oldest-first,
     // one removal pass — instead of rescanning all chains and re-purging
@@ -166,10 +147,8 @@ public static class MapEdit
     private static void EvictLocked()
     {
         int cap = EffectiveCap();
-        // Port of mapedit.py:50 stale = [p for p,cur in _previous if cur not in _chains]
         CollectStalePreviousLocked();
 
-        // Port of mapedit.py:53-60 while len(_chains) > cap: oldest = min by created
         int overflow = _chains.Count - cap;
         if (overflow <= 0) return;
         var victims = _chains
@@ -186,11 +165,9 @@ public static class MapEdit
             if (removed is not null && !string.IsNullOrEmpty(removed.PreviousKey))
                 _previous.Remove(removed.PreviousKey);
         }
-        // Port of mapedit.py:58-60 stale after eviction
         CollectStalePreviousLocked();
     }
 
-    // Port of mapedit.py:63-70 grant(ip,area,z) -> key
     public static string Grant(string ip, string area, int z, Session? session = null)
     {
         // first token candidate is generated OUTSIDE the write lock
@@ -211,7 +188,6 @@ public static class MapEdit
             _chains[key] = chain;
             if (_chains.Count > EffectiveCap())
             {
-                // Port of mapedit.py:68 if len > cap: _evict
                 EvictLocked();
             }
             // Also cap via settings cap (Evict already enforces)
@@ -253,7 +229,7 @@ public static class MapEdit
         CreatedMonotonic = c.CreatedMonotonic,
     };
 
-    // Port of inputfuncs.py:547 `result.chain.validation = denied` — Python
+// Python
     // consume returns the live stored chain, so the assignment persists for
     // RETRY resends. Our Consume hands out copies, so the verdict must be
     // written back explicitly (stored as a fresh copy to keep readers'
@@ -306,7 +282,6 @@ public static class MapEdit
         finally { Lock.ExitWriteLock(); }
     }
 
-    // Port of mapedit.py:73-108 consume(key,ip,seq) -> MapEditResult
     public static MapEditResult Consume(string key, string ip, int seq)
     {
         Lock.EnterWriteLock();
@@ -333,7 +308,6 @@ public static class MapEdit
             }
             if (seq == chain.Seq + 1)
             {
-                // Port of mapedit.py:96-105 rotate key
                 string newKey;
                 int attempts = 0;
                 do
@@ -355,7 +329,7 @@ public static class MapEdit
                 rotated.CreatedMonotonic = GetMonotonic();
                 _chains[newKey] = rotated;
                 _previous[oldKey] = newKey;
-                // Port of mapedit.py:96-105 — no grandparent repoint:
+// no grandparent repoint:
                 // entries still aimed at the retired key go stale and are
                 // dropped by EvictLocked, so a twice-rotated key resolves
                 // to nothing (fail-closed, as upstream).
@@ -368,7 +342,7 @@ public static class MapEdit
         finally { Lock.ExitWriteLock(); }
     }
 
-    // Port of spec: GetChain — returns a snapshot copy, never the live store
+// returns a snapshot copy, never the live store
     // reference, so holders cannot corrupt state or observe torn rotation.
     public static MapEditChain? GetChain(string key)
     {
@@ -381,7 +355,7 @@ public static class MapEdit
         finally { Lock.ExitReadLock(); }
     }
 
-    // Port of mapedit.discard_session — drop all chains owned by a closed session.
+// drop all chains owned by a closed session.
     public static void DiscardSession(Session? session)
     {
         if (session is null) return;
@@ -436,7 +410,6 @@ public static class MapEdit
         finally { Lock.ExitWriteLock(); }
     }
 
-    // Port of spec: RemoveChain
     public static bool RemoveChain(string key)
     {
         Lock.EnterWriteLock();

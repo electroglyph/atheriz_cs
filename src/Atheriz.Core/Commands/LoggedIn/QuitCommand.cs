@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/quit.py:20
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

@@ -24,18 +24,16 @@ public sealed class AtherizDbContext : DbContext
     // Shared write gate lives in DbWriteGate (re-entrant RLock semantics).
     // (An earlier per-class SemaphoreSlim was removed: zero uses, DbWriteGate only.)
 
-    // Port of database_setup.py:14-15 _CLOSED and _DATABASE global
     private static bool _closed = false;
     private static readonly Lock _initLock = new();
     public static bool IsClosed { get { lock (_initLock) return _closed; } }
 
-    // Port of database_setup.py:45 reopen_database() — clears _CLOSED flag for reset command (atheriz.py:1472)
+// clears _CLOSED flag for reset command (atheriz.py:1472)
     public static void ReopenDatabase()
     {
         lock (_initLock) _closed = false;
     }
 
-    // Port of database_setup.py:24 Database.close() marking _CLOSED
     public static void CloseDatabase()
     {
         lock (_initLock) _closed = true;

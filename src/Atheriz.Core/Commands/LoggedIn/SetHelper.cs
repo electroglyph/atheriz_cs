@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/set.py:11-243 helpers (PROTECTED_ATTRIBUTES + _resolve_target + FindProp)
 using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Commands.LoggedIn;
@@ -163,7 +162,6 @@ public static class SetHelper
     private static readonly HashSet<string> ProtectedIgnoreCase =
         new(Protected.Concat(ProtectedCanonical), StringComparer.OrdinalIgnoreCase);
 
-    // Port of set.py:75-76 _is_protected, hardened: the guard itself is
     // case-insensitive (frozen set is Ordinal like Python's frozenset, so
     // compare explicitly). Resolution stays case-sensitive (FindEntry): unknown
     // spellings fall through to extras like Python's setattr junk attribute.

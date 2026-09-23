@@ -1,4 +1,3 @@
-// Port of atheriz/atheriz.py:224-319 check_webclient_sync + format_webclient_sync_warning
 using System.Security.Cryptography;
 
 namespace Atheriz.Server.Infrastructure;

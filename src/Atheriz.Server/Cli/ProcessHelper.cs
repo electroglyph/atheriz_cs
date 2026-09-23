@@ -2,7 +2,6 @@ namespace Atheriz.Server.Cli;
 
 public static class ProcessHelper
 {
-    // Port of atheriz.py stop_server terminate() (SIGTERM) before kill() (SIGKILL):
     // signal first, escalate only when the process survives.
     // Process.Kill() sends SIGTERM on Unix (graceful first step) and
     // terminates on Windows; KillProcessWithDots escalates below when the

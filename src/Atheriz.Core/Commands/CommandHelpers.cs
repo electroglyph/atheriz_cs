@@ -1,4 +1,3 @@
-// Port of atheriz/objects/contents.py:search + atheriz/commands/loggedin/delete.py:47-65 + ban.py helpers (dedup)
 using System.Diagnostics.CodeAnalysis;
 
 namespace Atheriz.Core.Commands;
@@ -125,7 +124,6 @@ public static class CommandHelpers
         return true;
     }
     /// <summary>
-    /// Port of <c>atheriz/objects/contents.py:search</c> fallback + <c>delete.py:47-65</c> coord handling.
     /// Handles #id (global), "me", "here", coord "(area,x,y,z)", then caller search + loc fallback if view allowed.
     /// </summary>
     public static List<GameObject> SearchWithFallback(GameObject caller, string name)
@@ -171,7 +169,6 @@ public static class CommandHelpers
     }
 
     /// <summary>
-    /// Helper for searching within a specific container (loc). Port of loc.search fallback without caller search.
     /// </summary>
     public static List<GameObject> SearchIn(GameObject container, string query, GameObject? looker = null)
     {
@@ -180,7 +177,6 @@ public static class CommandHelpers
     }
 
     /// <summary>
-    /// Port of helper <c>ResolveTarget</c> pattern across Exam/Delete/Follow/Puppet/Give/Set.
     /// Returns single filtered object or null with messaging. Filter optional (e.g., IsPc).
     /// </summary>
     public static GameObject? ResolveObject(GameObject caller, string query, Func<GameObject, bool>? filter = null)

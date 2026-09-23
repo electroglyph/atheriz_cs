@@ -1,4 +1,4 @@
-// Port of atheriz/reloader.py:536 — faithful ALC single-load + _apply_patch + _reload_game_logic
+// faithful ALC single-load + _apply_patch + _reload_game_logic
 //
 // Reflection is confined to the live-patch field copy here (see
 // SourceHygieneTests exclusions): ctor-bypass is intrinsic to _apply_patch
@@ -13,10 +13,8 @@ using Atheriz.Core.Concurrency;
 namespace Atheriz.Core.Plugins;
 public static class PluginReloader
 {
-    // Port of atheriz/reloader.py:14 _EXCLUDED_MODULES
     public static readonly HashSet<string> ExcludedAssemblies = new(StringComparer.OrdinalIgnoreCase)
     { "Microsoft.*", "System.*", "Atheriz.Core", "netstandard", "xunit.*" };
-    // Port of atheriz/reloader.py:326 _reload_lock = _SHARED_WORLD_LOCK.
     // _gate serializes concurrent *reloads* only (TryEnter = skip when busy,
     // pinned by Reloads_AreSerialized_MaxOverlapOne — NOT a bounded wait, so a stuck
     // reload can never wedge admin threads). It does NOT exclude world mutation:
@@ -50,7 +48,6 @@ public static class PluginReloader
     private static bool TryEnterGate() => _gate.TryEnter();
     private static void ExitGate() => _gate.Exit();
     private static PluginLoader? _loader;
-    // Port of reloader.py:249 _apply_patch transient preserves. Bare
     // spellings (session/listeners/command) never matched a field — the port
     // renamed them _-prefixed — so only the resolving spellings are listed:
     // a rename that stops resolving is caught by the field-coverage test.
@@ -97,7 +94,7 @@ public static class PluginReloader
     // Shared suppressed-log helper: the op string is preserved verbatim so
     // the emitted text stays byte-identical to the inlined LogDebug calls.
     private static void Suppress(string op, Exception ex) => AtherizLogger.LogDebug("Suppressed PluginReloader." + op + ": " + ex.Message, "PluginReloader");
-    // Port of atheriz/reloader.py:340 _reload_game_logic — single load per assembly.
+// single load per assembly.
     // (The old pass1 scan-ALC existed only to count forward refs, then unloaded with
     // a stop-the-world triple GC while the gate was held; PluginLoader.Load scans
     // identically, so pass1 was deleted — one ALC, one load, one post-unload GC.)
@@ -178,7 +175,6 @@ public static class PluginReloader
                 return true;
             }
             int patched=0;
-            // Patch under the shared world lock (port of _SHARED_WORLD_LOCK): patch
             // takes per-object write + handler read locks, same outermost direction
             // as DoShutdown, so no ABBA. Load/scan stay outside (I/O, no locks held).
             lock (StartStop.WorldLock)
@@ -194,7 +190,6 @@ public static class PluginReloader
             return true;
         } finally { ExitGate(); }
     }
-    // Port of atheriz/reloader.py:249 _apply_patch preserves dict, skips __init__ side effects.
     // C# cannot swap __class__ in place: build the replacement via GetUninitializedObject
     // (bypasses ctor like Python skipping __init__), copy state, AddObject-replace by id,
     // then RewireReferences swaps instance-valued stores (channels/map/nodes/sessions).
@@ -340,7 +335,7 @@ public static class PluginReloader
     }
     private static FieldInfo? FindField(Type t,string n){ var cur=t; while(cur is not null&&cur!=typeof(object)){ var f=cur.GetField(n,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic); if(f is not null) return f; cur=cur.BaseType; } return null; }
     private static List<FieldInfo> GetAllFields(Type t){ List<FieldInfo> l = []; var cur=t; while(cur is not null&&cur!=typeof(object)){ l.AddRange(cur.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.DeclaredOnly)); cur=cur.BaseType; } return l; }
-    // Port of atheriz/reloader.py:339 _reload_game_logic + startstop.py:85 _reregister_ticks — Remove old + AddCoro(at_tick, TickSeconds)
+// Remove old + AddCoro(at_tick, TickSeconds)
     public static void ReregisterTicks(AsyncTicker ticker)
     {
         ArgumentNullException.ThrowIfNull(ticker);
@@ -450,7 +445,7 @@ public static class PluginReloader
         try { return (t.FullName ?? "").Contains("DisplayClass", StringComparison.Ordinal); }
         catch { return false; }
     }
-    // Port of atheriz/reloader.py:58 _discover_new_atheriz_modules + 93 _discover_new_game_modules — scan plugins + game project
+// scan plugins + game project
     // Game project discovery: look for already-built dlls near CWD / SavePath parent (mirrors Python game folder import).
     // Never builds: Python imports source (no build step); a dropped-in .csproj must not trigger compilation on reload.
     public static int DiscoverGameAssembly(AtherizSettings settings, List<string> outList)
@@ -559,11 +554,9 @@ public static class PluginReloader
         catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Discover failed: {ex.Message}"); }
         return discovered;
     }
-    // Port of atheriz/reloader.py:404 _patch_object channel-first then rest + 430 cmdset patch + 518 resolve_relations
     // NOTE: the old PatchChannelsFirstAndRest + ReinitGlobalCmdSets no-op shells were
     // deleted 2026-09-07 — channels are patched via the replacement loop above and
     // cmdsets need no re-init (C# commands reflect new types by construction).
-    // Port of atheriz/reloader.py:306 reload_game_logic orchestrates Unload→Load→Patch→Reregister→ MapEdit clear
     public static async Task<string> ReloadGameLogicAsync(AsyncTicker ticker, AsyncThreadPool pool, AtherizSettings settings)
     {
         settings??=AtherizSettings.Global; ticker??=GlobalServices.GetAsyncTicker(); pool??=GlobalServices.GetAsyncThreadPool();

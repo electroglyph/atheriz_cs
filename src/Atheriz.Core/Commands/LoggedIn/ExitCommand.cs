@@ -1,8 +1,7 @@
-// Port of atheriz/commands/loggedin/exit.py:104
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
-/// <summary>Port of atheriz/commands/loggedin/exit.py:ExitCommand (hidden) — NodeLinks metadata.</summary>
+/// NodeLinks metadata.</summary>
 /// <remarks>
 /// Key "exit" is the verbatim Python exit.py:15 class key, but live room-exit instances are always
 /// re-keyed per direction (Node.AddExits calls SetKey(link name)), and this type is never added to
@@ -41,7 +40,7 @@ public sealed class LoggedInExitCommand : Command
         }
     }
 
-    // Port of exit.py:31 do_move — verbatim faithful
+// verbatim faithful
     public void DoMove()
     {
         var nh = NodeHandler.GetCurrent();
@@ -49,19 +48,18 @@ public sealed class LoggedInExitCommand : Command
         GameObject? c = ObjectRegistry.GetSingle(CallerId);
         if (c is null)
         {
-            try { Console.Error.WriteLine($"Exit command with invalid caller. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}"); } catch (Exception) { }
+            AtherizLogger.LogError($"Exit command with invalid caller. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}");
             return;
         }
         if (Location is null || Destination is null)
         {
-            try { Console.Error.WriteLine($"invalid Exit command. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}"); } catch (Exception) { }
+            AtherizLogger.LogError($"invalid Exit command. id = {CallerId}, destination = {Destination}, location = {Location}, name = {ExitName}");
             return;
         }
         var dest = nh.GetNode(Destination.Value);
         if (dest is null)
         {
-            // Port of exit.py:43-45: log-only, no mover message.
-            try { Console.Error.WriteLine($"Error getting destination node for: {Destination}"); } catch (Exception) { }
+            AtherizLogger.LogError($"Error getting destination node for: {Destination}");
             return;
         }
         var doors = nh.GetDoors(Location.Value);
@@ -98,7 +96,6 @@ public sealed class LoggedInExitCommand : Command
                 }
                 else
                 {
-                    // Port of exit.py:92-93: silent return (TryOpen already
                     // broadcast the reason to the room when there is one).
                     return;
                 }
@@ -131,7 +128,6 @@ public sealed class LoggedInExitCommand : Command
     }
 
     // Shared with Objects.ExitCommand (exit objects move through the same
-    // follow-breaking rule): internal so both exit paths use one port of
     // exit.py:95-103.
     internal static void ClearFollowing(GameObject c)
     {
@@ -152,7 +148,7 @@ public sealed class LoggedInExitCommand : Command
                 finally { leader.SyncRoot.ExitWriteLock(); }
             }
             catch (Exception) { }
-            // Port of exit.py:100-103 — the leader's notice is gated on the
+// the leader's notice is gated on the
             // follower's view of the leader, and vice versa.
             try { FollowHelper.NotifyUnfollowedLeader(leader, c); } catch (Exception) { }
             try { if (leader.Access(c, "view")) c.Msg($"You are no longer following {leader.GetDisplayName(c)}."); } catch (Exception) { }

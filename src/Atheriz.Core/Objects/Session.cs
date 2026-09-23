@@ -4,22 +4,19 @@ using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Objects;
 
-// Port of atheriz/objects/session.py:1-202 (202 LOC)
 // Faithful: lock guards puppet/puppet_stack/input_future (issue #31 scalar fields atomic under GIL but we still guard).
 // Wontfix puppet snapshot incomplete: only is_pc/privilege_level saved (puppet.py:110,138-142). quelled/can_hear/is_mapable not restored by design.
 // Global static salt / other wontfixes not relevant here.
 
 /// <summary>
-/// Port of <c>atheriz/objects/session.py:Session</c> (202 LOC).
 /// Thread-safe via <see cref="Lock"/> (mirrors Python RLock) guarding Puppet / PuppetStack / InputFuture.
 /// Scalar fields Term/Map dims + ScreenReader are atomic (no lock required) but writes are lock-guarded for consistency.
 /// </summary>
 public class Session : Atheriz.Core.Commands.ISessionProvider
 {
-    // Port of session.py:16-38
     // Guards puppet / puppet_stack / input_future, which are written by game workers and read by per-connection input drain (#31).
     // Scalar fields (term/map dims, screenreader) are single atomic stores under the GIL and need no lock — we still guard writes.
-    public readonly object Lock = new(); // Port of session.py:21 lock = threading.RLock()
+    public readonly object Lock = new();
     public Account? Account
     {
         get => _account;
@@ -29,11 +26,10 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     }
     private Account? _account;
     public int? AccountId; // Spec extra: mirror Account.Id for quick lookup (Python stores object, C# stores both)
-    public BaseConnection? Connection; // Port of session.py:23 connection: Connection | None
-    public GameObject? LastPuppet; // Port of session.py:24 last_puppet
-    public GameObject? Puppet; // Port of session.py:25 puppet
+    public BaseConnection? Connection;
+    public GameObject? LastPuppet;
+    public GameObject? Puppet;
     // stack of (prev_puppet, target). Each target carries its own _puppet_restore manifest (excluded from pickling by __getstate__).
-    // Lives on the session (never pickled) so transient restore state stays off saved objects. Port of session.py:29 puppet_stack
     private readonly List<(GameObject? Prev, GameObject Target)> _puppetStack = new();
     // snapshot, not the live list — an escaped List lets any holder
     // mutate the unwind stack without session.Lock. Writers use the entry
@@ -85,15 +81,14 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         }
     }
     // Wontfix: puppet snapshot incomplete — only is_pc/privilege_level per puppet.py:110,138-142.
-    // Do NOT store quelled/can_hear/is_mapable; document here. Port of puppet.py:110 restore_snapshot = {"is_pc":..., "privilege_level":...}
-    public int TermWidth; // Port of session.py:30 term_width = settings.CLIENT_DEFAULT_WIDTH via settings.py:121
-    public int TermHeight; // Port of session.py:31 term_height
-    public int MapWidth; // Port of session.py:32 map_width
-    public int MapHeight; // Port of session.py:33 map_height
-    public bool ScreenReader; // Port of session.py:34 screenreader
-    public double ConnTime; // Port of session.py:35 conn_time = 0.0 (Unix seconds)
-    public TaskCompletionSource<string>? InputFuture; // Port of session.py:36 input_future: asyncio.Future | None
-    public bool InputMasked; // Port of session.py:37 _input_masked (bool)
+    public int TermWidth;
+    public int TermHeight;
+    public int MapWidth;
+    public int MapHeight;
+    public bool ScreenReader;
+    public double ConnTime;
+    public TaskCompletionSource<string>? InputFuture;
+    public bool InputMasked;
     // True once AtDisconnect runs, until the next AtConnect. Input arriving
     // after teardown must not attach puppets or dispatch commands on a dead
     // session — checked under Lock in the puppet-attach and text paths.
@@ -110,16 +105,15 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         Connection = connection;
         Account = account;
         if (account is not null) AccountId = account.Id;
-        TermWidth = 78; // Port of settings.CLIENT_DEFAULT_WIDTH via session.py:30-31 + settings.py:121-122
+        TermWidth = 78;
         TermHeight = 45;
-        ConnTime = 0.0; // Port of session.py:35 conn_time = 0.0
+        ConnTime = 0.0;
         ConnectedAt = DateTime.UtcNow;
     }
 
-    // Port of session.py:39-41 at_connect
     public virtual void AtConnect()
     {
-        ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); // Port of session.py:40 self.conn_time = time.time()
+        ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         ConnectedAt = DateTime.UtcNow;
         lock (Lock) { Closed = false; }
     }
@@ -131,27 +125,25 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         AtConnect();
     }
 
-    // Port of session.py:42-117 at_disconnect — faithful
+// faithful
     public virtual void AtDisconnect()
     {
-        // Port of session.py:43-52 with self.lock: capture future/masked/stack/puppet
         TaskCompletionSource<string>? future;
         bool masked;
         List<(GameObject? Prev, GameObject Target)> stack;
         GameObject? puppet;
         lock (Lock)
         {
-            future = InputFuture; // Port of session.py:44 future = self.input_future
-            InputFuture = null; // Port of session.py:45 self.input_future = None
-            masked = InputMasked; // Port of session.py:46 masked = self._input_masked
-            InputMasked = false; // Port of session.py:47 self._input_masked = False
+            future = InputFuture;
+            InputFuture = null;
+            masked = InputMasked;
+            InputMasked = false;
             Closed = true;
-            stack = new List<(GameObject? Prev, GameObject Target)>(_puppetStack); // Port of session.py:48 stack, self.puppet_stack = self.puppet_stack, []
+            stack = new List<(GameObject? Prev, GameObject Target)>(_puppetStack);
             ClearPuppetEntries();
-            puppet = Puppet; // Port of session.py:49 puppet = self.puppet
-            Puppet = null; // Port of session.py:50 self.puppet = None
-            if (puppet is not null) LastPuppet = puppet; // Port of session.py:51 self.last_puppet = puppet if puppet is not None else self.last_puppet
-            // Port of session.py:81-86 unwind any in-progress puppet chain.
+            puppet = Puppet;
+            Puppet = null;
+            if (puppet is not null) LastPuppet = puppet;
             // Runs INSIDE the lock : a Puppet landing between the
             // snapshot and the unwind would otherwise leak IsPc + privilege
             // on the NPC. Restore helpers take only the target's lock
@@ -160,7 +152,6 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             {
                 var (_, target) = stack[stack.Count - 1];
                 stack.RemoveAt(stack.Count - 1);
-                // Port of session.py:83-85 if restore := getattr(target, "_puppet_restore", None): target.__dict__.update(restore); del target._puppet_restore
                 // GameObject carries the snapshot as a typed internal member (same
                 // assembly) — no dynamic/reflection needed.
                 // Wontfix: only is_pc/privilege_level per puppet.py:110 — handled in GameObject.RestorePuppetSnapshot
@@ -179,12 +170,10 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                 }
             }
         }
-        // Port of session.py:52-56 if masked and self.connection is not None: send echo_on
         if (masked && Connection is not null)
         {
             try { Connection.SendCommand("echo_on"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
         }
-        // Port of session.py:57-79 if future is not None: try loop.call_soon_threadsafe(cancel)
         if (future is not null)
         {
             // C# equivalent of Python's asyncio loop.call_soon_threadsafe(_do_cancel)
@@ -193,24 +182,21 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
             future.TrySetCanceled();
             // If we had a captured SynchronizationContext/TaskScheduler, we could post, but TrySetCanceled is safe.
         }
-        // Port of session.py:81-86 unwind any in-progress puppet chain before autosave
         // (unwind itself runs inside the lock above).
-        // Port of session.py:86-114 if puppet: elapsed handling, puppet.session=None, seconds_played, at_disconnect, is_temporary cleanup
         if (puppet is not null)
         {
-            double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - ConnTime; // Port of session.py:87 elapsed = time.time() - self.conn_time
-            if (ConnTime > 0.0 && elapsed > 0) // Port of session.py:88 if self.conn_time >0 and elapsed>0
+            double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - ConnTime;
+            if (ConnTime > 0.0 && elapsed > 0)
             {
-                puppet.Session = null; // Port of session.py:89 puppet.session = None
+                puppet.Session = null;
                 // NOTE: Session is nulled first so the SecondsPlayed getter returns
                 // the stored base (no live elapsed), matching Python's += elapsed.
-                puppet.SecondsPlayed = puppet.SecondsPlayed + elapsed; // Port of session.py:90 puppet.seconds_played += elapsed
+                puppet.SecondsPlayed = puppet.SecondsPlayed + elapsed;
                 SecondsPlayed += elapsed;
             }
-            puppet.AtDisconnect(); // Port of session.py:91 puppet.at_disconnect()
-            if (puppet.IsTemporary) // Port of session.py:92 if getattr(puppet, "is_temporary", False)
+            puppet.AtDisconnect();
+            if (puppet.IsTemporary)
             {
-                // Port of session.py:93-114 temp PC cleanup: remove from location, remove_object, is_deleted
                 try
                 {
                     var locRef = puppet.Location;
@@ -255,19 +241,16 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                 try { puppet.IsDeleted = true; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
             }
         }
-        if (Account is not null) // Port of session.py:115-116 if self.account: self.account.at_disconnect()
+        if (Account is not null)
         {
             try { Account.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
         }
-        // Port of session.py at_disconnect mapedit discard: chains are valid
         // only while this session is open.
         try { Globals.MapEdit.DiscardSession(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
     }
 
-    // Port of session.py:118-119 msg
     public void Msg(string text) => Msg(text, null);
 
-    // Full msg overload. Port of session.msg(*args, **kwargs) -> connection.msg:
     // a msgType becomes the command (mirrors connection.py popping the kwarg key).
     public void Msg(string text, string? msgType = null)
     {
@@ -276,16 +259,14 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         else Connection.MsgKw(new Dictionary<string, object?> { [msgType] = text });
     }
 
-    // Port of session.py:121-202 async def prompt(text: str, mask: bool = False) -> str
     /// <summary>
-    /// Port of <c>atheriz/objects/session.py:121 prompt</c>.
     /// Sends <paramref name="text"/> and awaits response via <see cref="InputFuture"/>.
     /// Handles _input_masked echo logic (echo_on when switching mask) and prev future completion.
     /// </summary>
     public async Task<string> Prompt(string text, bool mask = false)
     {
         var (task, _) = PromptWithToken(text, mask);
-        return await task.ConfigureAwait(false); // Port of session.py:202 return await future
+        return await task.ConfigureAwait(false);
     }
 
     /// <summary>
@@ -300,33 +281,28 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         bool prevMasked = false;
         bool needRestore = false;
         TaskCompletionSource<string> future;
-        // Port of session.py:125-163 with self.lock: create future, swap
         lock (Lock)
         {
-            prev = InputFuture; // Port of session.py:129 prev = self.input_future
-            prevMasked = InputMasked; // Port of session.py:130 prev_masked = self._input_masked
-            // Port of session.py:131-156 try create_future via running loop else fallback to connection loop or threadpool loop
+            prev = InputFuture;
+            prevMasked = InputMasked;
             // In C# we always use TaskCompletionSource with RunContinuationsAsynchronously (thread-safe)
             future = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             if (prev?.Task.IsCompleted != false)
-                prev = null; // Port of session.py:161 prev = None (null or already done)
-            else if (prevMasked && !mask) // Port of session.py:158 if prev_masked and not mask:
-                needRestore = true; // Port of session.py:159 need_restore = True
-            InputFuture = future; // Port of session.py:162 self.input_future = future
-            InputMasked = mask; // Port of session.py:163 self._input_masked = mask
+                prev = null;
+            else if (prevMasked && !mask)
+                needRestore = true;
+            InputFuture = future;
+            InputMasked = mask;
         }
-        // Port of session.py:164-189 if prev is not None: loop.call_soon_threadsafe(set_result(""))
         if (prev is not null)
         {
             // Thread-safe completion with empty string (mirrors prev.set_result("")) — TrySetResult never throws.
             prev.TrySetResult("");
         }
-        // Port of session.py:190-194 if need_restore: connection.send_command("echo_on")
         if (needRestore)
         {
             try { Connection?.SendCommand("echo_on"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.Prompt: " + logEx.Message, "Session"); }
         }
-        // Port of session.py:195-202 if mask: connection.send_command("prompt_masked", text) else msg(text)
         if (mask)
         {
             try { Connection?.SendCommand("prompt_masked", text); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.Prompt: " + logEx.Message, "Session"); }

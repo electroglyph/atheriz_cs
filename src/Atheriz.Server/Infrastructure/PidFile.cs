@@ -3,7 +3,6 @@ using System.Net.NetworkInformation;
 namespace Atheriz.Server.Infrastructure;
 
 /// <summary>
-/// Faithful port of PID handling at <c>atheriz/atheriz.py:475-555</c> and <c>spawn_daemon:1154-1236</c>.
 /// Uses atomic <c>FileStream(FileMode.CreateNew)</c> mirroring <c>open(pid_file, "x")</c> / <c>os.open O_EXCL</c>,
 /// and <c>UnixFileMode 0o600</c> via <c>File.SetUnixFileMode</c> where platform supports.
 /// </summary>
@@ -123,7 +122,7 @@ public sealed class PidFile : IDisposable
         // Try lsof
         try
         {
-            var psi = new ProcessStartInfo { FileName = "lsof", UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true };
+            var psi = new ProcessStartInfo { FileName = "lsof", UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             psi.ArgumentList.Add("-i");
             psi.ArgumentList.Add($":{port}");
             psi.ArgumentList.Add("-sTCP:LISTEN");
@@ -147,7 +146,7 @@ public sealed class PidFile : IDisposable
         // Try ss
         try
         {
-            var psi2 = new ProcessStartInfo { FileName = "ss", UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true };
+            var psi2 = new ProcessStartInfo { FileName = "ss", UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             psi2.ArgumentList.Add("-lptn");
             psi2.ArgumentList.Add($"sport = :{port}");
             using var p2 = Process.Start(psi2);
@@ -264,9 +263,43 @@ public sealed class PidFile : IDisposable
         try
         {
             var read = p.StandardOutput.ReadToEndAsync();
+            // Drain stderr concurrently: an undrained pipe (lsof/ss warnings)
+            // deadlocks the helper once the 4K buffer fills, hanging `stop`.
+            Task? err = null;
+            try { if (p.StartInfo.RedirectStandardError) err = p.StandardError.ReadToEndAsync(); } catch { }
             if (!read.Wait(timeout)) { try { p.Kill(entireProcessTree: false); } catch { } }
             try { p.WaitForExit(1000); } catch { }
+            if (err is not null) { try { err.Wait(TimeSpan.FromSeconds(1)); } catch { } }
             return read.IsCompletedSuccessfully ? read.Result : "";
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// Async twin of <see cref="ReadHelperOutput"/>: awaits the helper's
+    /// stdout with <c>WaitAsync</c> and reaps via <c>WaitForExitAsync</c>,
+    /// so async callers never park a thread on a stalled helper.
+    /// Returns whatever was captured (possibly empty).
+    /// </summary>
+    public static async Task<string> ReadHelperOutputAsync(Process p, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(p);
+        try
+        {
+            Task<string> read;
+            try { read = p.StandardOutput.ReadToEndAsync(); }
+            catch { return ""; }
+            Task? err = null;
+            try { if (p.StartInfo.RedirectStandardError) err = p.StandardError.ReadToEndAsync(); } catch { }
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(timeout);
+            try { await read.WaitAsync(timeoutCts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { try { p.Kill(entireProcessTree: false); } catch { } }
+            using var exitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            exitCts.CancelAfter(TimeSpan.FromSeconds(1));
+            try { await p.WaitForExitAsync(exitCts.Token).ConfigureAwait(false); } catch { }
+            if (err is not null) { try { await err.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false); } catch { } }
+            return read.IsCompletedSuccessfully ? await read.ConfigureAwait(false) : "";
         }
         catch { return ""; }
     }
@@ -421,7 +454,7 @@ public sealed class PidFile : IDisposable
                 // Remove stale — atheriz.py:495. (No age/starting branch: the
                 // live-PID check above already returned for a server process, so
                 // any "just created" file reaching here is stale by definition.)
-                try { File.Delete(pidPath); Console.WriteLine("Removing stale PID file."); }
+                try { File.Delete(pidPath); AtherizLogger.LogInformation("Removing stale PID file."); }
                 catch (Exception ex) { reason = $"Failed to remove stale PID file: {ex.Message}"; return false; }
             }
 

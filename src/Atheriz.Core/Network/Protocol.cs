@@ -1,6 +1,5 @@
 namespace Atheriz.Core.Network;
 
-// Port of atheriz/network/protocol.py:4-17
 // Original BaseProtocol.setup(cls, app: FastAPI) is a classmethod that registers
 // endpoints/lifespan tasks with the FastAPI app. In ASP.NET Core the equivalent
 // is WebApplication, so we mirror as Setup(object app) where app is expected to be

@@ -41,7 +41,7 @@ public sealed class AtherizSettings
     public int TelnetNawsMaxCols { get; set; } = 1000;
     public int TelnetNawsMinRows { get; set; } = 5;
     public int TelnetNawsMaxRows { get; set; } = 200;
-    public int TelnetMaxLine { get; set; } = 65536; // port of telnet.py:388 getattr(settings,"TELNET_MAX_LINE",65536)
+    public int TelnetMaxLine { get; set; } = 65536;
     public bool StripInputEscapeSequences { get; set; } = true;
     public int TermSizeMaxWidth { get; set; } = 1000;
     public int TermSizeMaxHeight { get; set; } = 1000;

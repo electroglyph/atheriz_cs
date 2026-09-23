@@ -32,7 +32,7 @@ public class SetupChannelAliasTests
     public void StartStop_TickSweep_UsesSnapshottingAccessor()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "StartStop.cs");
-        var region = SourceScan.Region(src, "Port of startstop.py:103-122 node handler grids");
+        var region = SourceScan.Region(src, "private static void ReregisterTicks(");
         Assert.Contains("nh.GetAreas()", region);
         Assert.DoesNotContain("nh.Lock.EnterReadLock", region);
     }

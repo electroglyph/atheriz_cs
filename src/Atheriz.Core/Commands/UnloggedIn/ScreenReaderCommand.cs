@@ -1,4 +1,4 @@
-// Port of atheriz/commands/unloggedin/screenreader.py:19 — also used loggedin via loggedin/cmdset.py import (faithful reuse)
+// also used loggedin via loggedin/cmdset.py import (faithful reuse)
 
 namespace Atheriz.Core.Commands.UnloggedIn;
 

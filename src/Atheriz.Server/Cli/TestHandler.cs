@@ -3,7 +3,6 @@ namespace Atheriz.Server.Cli;
 
 public static class TestHandler
 {
-    // Port of atheriz.py test: leading 'core' selects the core suite (here: the solution tests).
     // Returns the process exit code; the host entry point applies it. Never Environment.Exit here.
     public static int HandleTest(string[] a)
     {

@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/time.py:17
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

@@ -1,4 +1,4 @@
-// Port of atheriz/commands/loggedin/puppet.py:192 — snapshot only is_pc/privilege_level wontfix
+// snapshot only is_pc/privilege_level wontfix
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -21,7 +21,7 @@ public sealed class PuppetCommand : Command
         if (err is not null) { go.Msg(err); return; }
         if (target == go) { go.Msg("You are already puppeting yourself."); return; }
         if (target!.IsAccount || target.IsChannel || target.IsNode) { go.Msg($"You cannot puppet {target.Name}."); return; }
-        // Port of puppet.py:94 before :101 — permission precedes occupancy
+// permission precedes occupancy
         // disclosure : unpermitted callers must not learn whether
         // the target is puppeted.
         if (!target.Access(go, "puppet")) { go.Msg($"You cannot puppet {target.Name}."); return; }

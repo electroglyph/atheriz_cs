@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/delete.py:111
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -23,7 +22,6 @@ public sealed class DeleteCommand : Command
         var target = CommandHelpers.ResolveObject(go, targetName);
         if (target is null) return;
         if (!target.Access(go, "delete")) { go.Msg("You do not have permission to delete that."); return; }
-        // Port of delete.py:92-94 _privilege_denied (set.py:58-70): self-exempt, target >= caller denied.
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot delete an object of equal or higher privilege."); return; }
         var fullName = target.GetDisplayName(go);
         var result = target.Delete(go, pa.GetBool("recursive"));

@@ -1,8 +1,6 @@
-// Port of atheriz/commands/loggedin/ban.py:279
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
-/// <summary>Port of atheriz/commands/loggedin/ban.py:BanCommand</summary>
 public sealed class BanCommand : Command
 {
     public override string Key => "ban";
@@ -72,7 +70,6 @@ public sealed class BanCommand : Command
     }
 }
 
-/// <summary>Port of atheriz/commands/loggedin/ban.py:UnbanCommand</summary>
 public sealed class UnbanCommand : Command
 {
     public override string Key => "unban";

@@ -3,7 +3,6 @@ namespace Atheriz.Server.Cli;
 
 public static class RestartHandler
 {
-    // Port of atheriz.py:1112-1161 restart: stop, wait for old PID, then start again.
     // Returns true when --foreground was given (caller falls through to foreground start).
     public static async Task<bool> HandleRestartAsync(string[] a)
     {

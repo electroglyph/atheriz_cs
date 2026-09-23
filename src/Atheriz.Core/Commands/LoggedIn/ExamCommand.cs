@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/exam.py:265
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

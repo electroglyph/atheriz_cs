@@ -21,7 +21,6 @@ public sealed class NoneCommand : Command
         else text = (args as string ?? "").Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; } // none.py:25
         var ignored = Atheriz.Core.Settings.AtherizSettings.Global.AutoAliasIgnoredKeys;
-        // Port of none.py:28-36: internal + global keys, gated like help —
         // hidden or inaccessible commands are never suggested (otherwise a
         // typo oracle leaks their names to callers who cannot use them).
         List<string> choices = [];
@@ -33,7 +32,6 @@ public sealed class NoneCommand : Command
                 if (!ignored.Contains(c.Key) && !c.Hide && c.Access(caller)) CommandHelpers.TryAddChoice(choices, seen, c.Key);
         foreach (var c in CommandRegistry.LoggedIn.GetAll())
             if (!ignored.Contains(c.Key) && !c.Hide && c.Access(caller)) CommandHelpers.TryAddChoice(choices, seen, c.Key);
-        // Port of none.py:37-54: external verbs from location + inventory.
         if (caller is Objects.GameObject go2)
         {
             try
@@ -46,7 +44,6 @@ public sealed class NoneCommand : Command
         }
         if (choices.Count > 0)
         {
-            // Port of none.py:56-60: levenshtein over the full text, case-sensitive.
             var best = StringDistance.BestMatch(text, choices);
             caller.Msg($"Command \"{text}\" not found, did you mean: \"{best}\"?");
         }

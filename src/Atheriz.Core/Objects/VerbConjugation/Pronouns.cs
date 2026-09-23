@@ -1,11 +1,9 @@
-// Port of atheriz/objects/verb_conjugation/pronouns.py:1
 using System.Collections.Generic;
 using System.Linq;
 
 namespace Atheriz.Core.Objects.VerbConjugation;
 
 /// <summary>
-/// Port of <c>atheriz/objects/verb_conjugation/pronouns.py</c> (299 LOC).
 /// Evennia BSD mapping 1st/2nd ↔ 3rd with viewpoint/pronoun_type/gender disambiguation.
 /// </summary>
 public static class Pronouns
@@ -120,7 +118,6 @@ public static class Pronouns
     };
 
     /// <summary>
-    /// Port of <c>pronoun_to_viewpoints</c>. Returns (1st/2nd, 3rd) tuple.
     /// </summary>
     public static (string firstSecond, string third) PronounToViewpoints(
         string pronoun,

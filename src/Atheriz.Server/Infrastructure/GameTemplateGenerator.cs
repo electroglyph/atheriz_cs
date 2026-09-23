@@ -1,4 +1,3 @@
-// Port of atheriz/new.py:541 create_game_folder + initial_setup.py:48
 using System.Text.RegularExpressions;
 namespace Atheriz.Server.Infrastructure;
 /// <summary>Generates game folder — C# analogue of <c>atheriz new my_game</c>. Mirrors <c>new.py:create_game_folder</c>.</summary>
@@ -147,7 +146,7 @@ public static class GameTemplateGenerator
         Console.WriteLine($"Creating game folder: {targetPath}");
         Directory.CreateDirectory(folderPath);
         try { Scaffold(folderPath, gName); } catch (Exception ex) { Console.Error.WriteLine($"Error scaffolding game folder: {ex.Message}"); return false; }
-        // Port of new.py:731 copy_web_folder — copy web (templates + static)
+// copy web (templates + static)
         try { CopyWebFolder(folderPath); } catch (Exception ex) { Console.Error.WriteLine($"Warning: could not copy web folder: {ex.Message}"); }
         var savePath = Path.Combine(folderPath, "save"); Directory.CreateDirectory(savePath);
         FsUtil.TryChmod0700(savePath);
@@ -291,7 +290,7 @@ public static class GameTemplateGenerator
         Atheriz.Core.Utils.FsUtil.TryChmod0755(Path.Combine(folderPath, "build.sh"));
         Console.WriteLine("  Copying web folder...");
     }
-    private static string GS(string ns) => $"// Port of atheriz/new.py:292\n// Port of atheriz/settings.py\nnamespace {ns};\nusing Atheriz.Core.Settings;\n/// <summary>Game settings — mirrors settings.py. See AtherizSettings.</summary>\npublic static class GameSettings\n{{\n    public const string SavePath = \"save\";\n    public const string SecretPath = \"secret\";\n    public const string ServerName = \"{ns}\";\n    public const bool WebclientSyncCheck = true;\n}}\n";
+    private static string GS(string ns) => $" // mirrors settings.py. See AtherizSettings.</summary>\npublic static class GameSettings\n{{\n    public const string SavePath = \"save\";\n    public const string SecretPath = \"secret\";\n    public const string ServerName = \"{ns}\";\n    public const bool WebclientSyncCheck = true;\n}}\n";
     // Dynamic generation via reflection — mirrors new.py:ClassInspector.get_override_methods -> get_class_hooks (utils.py:1098).
     // Python OVERRIDE_PATTERNS = ("at_", "access_", "format_", "pre_", "post_") + ALWAYS (setup_parser, run).
     // C# ports are PascalCase (AtPreMove ↔ at_pre_move), so the boundary rule is: the char after the stem
@@ -477,31 +476,31 @@ public static class GameTemplateGenerator
     ];
     private static string CO(string ns)
     {
-        var header = $"// Port of atheriz/new.py:522 TEMPLATE_CONFIGS (\"object\",\"Object\",\"atheriz.objects.base_obj\")\n// Dynamically generated via get_class_hooks (atheriz/utils.py:701) — mirrors test/object.py full hook list\n#nullable enable\nnamespace {ns};\nusing System.Text.Json;\nusing Atheriz.Core.Objects;\nusing Atheriz.Core;\nusing Atheriz.Core.Globals;\n/// <summary>Custom Object — mirrors test/object.py. Override methods below to customize behavior.</summary>\npublic class CustomObject : GameObject\n{{\n";
+        var header = $" // mirrors test/object.py full hook list\n#nullable enable\nnamespace {ns};\nusing System.Text.Json;\nusing Atheriz.Core.Objects;\nusing Atheriz.Core;\nusing Atheriz.Core.Globals;\n/// <summary>Custom Object — mirrors test/object.py. Override methods below to customize behavior.</summary>\npublic class CustomObject : GameObject\n{{\n";
         var ctor = "    public CustomObject() : base() { }\n    public CustomObject(string name, bool isPc = false) : base() { Name = name; IsPc = isPc; }\n\n";
         return GenCustom(ns, typeof(Atheriz.Core.Objects.GameObject), header, ctor);
     }
     private static string CN(string ns)
     {
-        var header = $"// Port of atheriz/new.py:522 (\"node\",\"Node\",\"atheriz.objects.nodes\")\n// Dynamically generated via get_class_hooks\n#nullable enable\nnamespace {ns};\nusing Atheriz.Core;\nusing Atheriz.Core.Objects;\n/// <summary>Custom Node — mirrors test/node.py</summary>\npublic class CustomNode : Node\n{{\n";
+        var header = $" // mirrors test/node.py</summary>\npublic class CustomNode : Node\n{{\n";
         var ctor = "    public CustomNode() : base() { }\n    public CustomNode(Coord coord, string name = \"room\", string desc = \"\") : base(coord, name, desc) { }\n\n";
         return GenCustom(ns, typeof(Atheriz.Core.Objects.Node), header, ctor);
     }
     private static string CA(string ns)
     {
-        var header = $"// Port of atheriz/new.py:522 (\"account\",\"Account\",\"atheriz.objects.base_account\")\n#nullable enable\nnamespace {ns};\nusing Atheriz.Core.Objects;\n/// <summary>Custom Account — mirrors test/account.py</summary>\npublic class CustomAccount : Account\n{{\n";
+        var header = $" // mirrors test/account.py</summary>\npublic class CustomAccount : Account\n{{\n";
         var ctor = "    public CustomAccount() : base() { }\n";
         return GenCustom(ns, typeof(Atheriz.Core.Objects.Account), header, ctor);
     }
     private static string CC(string ns)
     {
-        var header = $"// Port of atheriz/new.py:522 (\"channel\",\"Channel\",\"atheriz.objects.base_channel\")\n#nullable enable\nnamespace {ns};\nusing Atheriz.Core.Objects;\n/// <summary>Custom Channel — mirrors test/channel.py</summary>\npublic class CustomChannel : Channel\n{{\n";
+        var header = $" // mirrors test/channel.py</summary>\npublic class CustomChannel : Channel\n{{\n";
         var ctor = "    public CustomChannel(int historyLimit = 50) : base(historyLimit) { }\n";
         return GenCustom(ns, typeof(Atheriz.Core.Objects.Channel), header, ctor);
     }
     private static string CS(string ns)
     {
-        var header = $"// Port of atheriz/new.py:522 (\"script\",\"Script\",\"atheriz.objects.base_script\")\n#nullable enable\nnamespace {ns};\nusing Atheriz.Core.Objects;\n/// <summary>Custom Script — mirrors test/script.py</summary>\npublic class CustomScript : Script\n{{\n";
+        var header = $" // mirrors test/script.py</summary>\npublic class CustomScript : Script\n{{\n";
         var ctor = "    public CustomScript() : base() { }\n";
         return GenCustom(ns, typeof(Atheriz.Core.Objects.Script), header, ctor);
     }
@@ -717,7 +716,6 @@ public static class GameTemplateGenerator
         echo   --reload    reload the running server after a successful build
         exit /b 0
         """.Replace("__GAME_NAME__", gameName).Replace("__ATHERIZ_ENGINE_REL__", engineRel ?? "") + "\n";
-    // Port of atheriz/new.py:530 copy_web_folder
     public static void CopyWebFolder(string destination, string? webSrc = null)
     {
         if (webSrc is not null)

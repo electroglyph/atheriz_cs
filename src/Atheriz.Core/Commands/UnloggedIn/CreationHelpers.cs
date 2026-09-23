@@ -8,7 +8,7 @@ public static class CreationCooldownHelper
 {
     public static string RateKey(IMessageTarget caller)
     {
-        // Port of create.py:31 — host string when available, else id(caller).
+// host string when available, else id(caller).
         // Non-connection callers get identity keys : sharing the
         // "?" bucket bypassed throttling entirely via the early-true in
         // TryReserveCreationCooldown. Identity (not Id-hash) matches

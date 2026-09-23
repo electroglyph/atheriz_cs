@@ -3,11 +3,9 @@ using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Objects;
 
-// Partial for puppet handling — Port of atheriz/commands/loggedin/puppet.py:110,138-142
 // Wontfix document: snapshot only is_pc/privilege_level, quell/can_hear/is_mapable not part of snapshot by design.
 public partial class GameObject
 {
-    // Port of target._puppet_restore: transient dict with is_pc/privilege_level only
     // Wontfix: puppet.py:110 restore_snapshot = {"is_pc": target.is_pc, "privilege_level": target.privilege_level}
     // quelled/can_hear/is_mapable are not part of the snapshot by design — documented here per AGENTS.md.
     // Transient puppet-restore dict keys (in-memory only, never persisted).
@@ -86,17 +84,15 @@ public partial class GameObject
     }
 
     /// <summary>
-    /// Port of puppet handling: save snapshot (is_pc/privilege_level only) and wire session.
     /// Mirrors <c>atheriz/commands/loggedin/puppet.py:99-142</c> puppet command core.
     /// </summary>
     public bool Puppet(Session session, GameObject npc)
     {
         if (session is null || npc is null) return false;
-        // Port of puppet.py:84-110 checks (`target is caller` plus same-id
         // reload instances, which share identity through the registry).
         if (npc == this) return false;
-        if (npc.IsAccount || npc.IsChannel || npc.IsNode) return false; // Port of _puppetable
-        if (!npc.Access(this, "puppet")) return false; // Port of puppet.py:94
+        if (npc.IsAccount || npc.IsChannel || npc.IsNode) return false;
+        if (!npc.Access(this, "puppet")) return false;
         // Fast-path peek (unlocked, advisory only): skip work when the target
         // is obviously unavailable. Authoritative checks run inside the
         // single critical section below, with the caller's session intact.
@@ -111,7 +107,7 @@ public partial class GameObject
                 if (npc.Session is not null && npc.Session != session) return false; // already puppeted
                 if (npc.IsDeleted) return false;
                 if (!npc.Access(this, "puppet")) return false;
-                snapshot = new Dictionary<string, object> // Port of puppet.py:110
+                snapshot = new Dictionary<string, object>
                 {
                     [PuppetRestoreIsPcKey] = npc.IsPc,
                     [PuppetRestorePrivilegeKey] = npc.PrivilegeLevel
@@ -119,7 +115,7 @@ public partial class GameObject
                 callerPriv = this.PrivilegeLevel;
             }
             finally { npc.SyncRoot.ExitReadLock(); }
-            // Port of puppet.py:112 caller.at_disconnect() — state part runs
+// state part runs
             // here (session intact for the checks above); the game hook fires
             // after release below. Hooks must never run under session.Lock.
             IsConnected = false;
@@ -130,22 +126,20 @@ public partial class GameObject
                 if (npc.Session is not null && npc.Session != session) { ReattachCaller(session); return false; }
                 if (npc.IsDeleted) { ReattachCaller(session); return false; }
                 session.PushPuppetEntry(this, npc);
-                npc.SetPuppetRestore(snapshot); // Port of puppet.py:138 target._puppet_restore = restore_snapshot
-                npc.IsPc = true; // Port of puppet.py:139
-                npc.PrivilegeLevel = callerPriv; // Port of puppet.py:140
+                npc.SetPuppetRestore(snapshot);
+                npc.IsPc = true;
+                npc.PrivilegeLevel = callerPriv;
                 session.Puppet = npc;
-                npc.Session = session; // Port of puppet.py:142
+                npc.Session = session;
             }
             finally { npc.SyncRoot.ExitWriteLock(); }
         }
-        // Port of puppet.py:112 hook half (state already settled above).
         Suppress("Puppet", () => this.AtDisconnect());
         Suppress("Puppet", () => npc.AtPuppet(this));
         Suppress("AtPostPuppet", () => npc.AtPostPuppet());
         return true;
     }
 
-    // Port of puppet.py failure path: a failed puppet leaves the caller
     // attached (caller.session = session, is_connected True). Runs inside
     // the single session.Lock hold; property setters take the object lock
     // internally (session -> object order).
@@ -160,7 +154,7 @@ public partial class GameObject
     }
 
     /// <summary>
-    /// Port of unpuppet — mirrors <c>atheriz/commands/loggedin/puppet.py:164-192</c>.
+/// mirrors <c>atheriz/commands/loggedin/puppet.py:164-192</c>.
     /// </summary>
     public bool Unpuppet(Session session)
     {
@@ -240,17 +234,13 @@ public partial class GameObject
         return true;
     }
 
-    // Hook stubs for puppet lifecycle — Port of base_obj.py:1447-1512
     // at_post_puppet, at_puppet, at_unpuppet
-    public virtual void AtPostPuppet() // Port of base_obj.py:1447 at_post_puppet
+    public virtual void AtPostPuppet()
     {
-        // Port of base_obj.py:1447 at_post_puppet — verbatim faithful
-        Hookable("at_post_puppet", () => 0);
-        // Port of base_obj.py:1455 self.is_connected = True (outside lock per Python)
+// verbatim faithful
+        Hookable(HookNames.AtPostPuppet, () => 0);
         IsConnected = true;
-        // Port of base_obj.py:1456 self.session.connection.send_command("logged_in")
         Suppress("AtPostPuppet", () => SendSessionCommand("logged_in"));
-        // Port of base_obj.py:1457-1460 with self.lock: for c in self.channels: if channel := get(c): channel[0].add_listener(self)
         Suppress("AtPostPuppet", () =>
         {
             List<int> channelsCopy = ChannelsSnapshot;
@@ -269,7 +259,6 @@ public partial class GameObject
                 });
             }
         });
-        // Port of base_obj.py:1461-1462 if channel := get_server_channel(): channel.msg(f"{wrap_xterm256(self.name, fg=15, bold=True)} (#{self.id}) has logged in.")
         Suppress("AtPostPuppet", () =>
         {
             var serverChannel = GlobalServices.GetServerChannel();
@@ -279,7 +268,6 @@ public partial class GameObject
                 serverChannel.Msg($"{wrapped} (#{Id}) has logged in.");
             }
         });
-        // Port of base_obj.py:1463-1470 cs = get_loggedin_cmdset(); commands = [cmd.key for cmd in cs.get_all() if cmd.access(self) and not cmd.hide]; try: SOCIALS_DICT
         List<string> commands = new();
         Suppress("AtPostPuppet", () =>
         {
@@ -298,16 +286,12 @@ public partial class GameObject
             foreach (var key in SocialsCommand.SocialsDict.Keys)
                 commands.Add(key);
         });
-        // Port of base_obj.py:1471 self.msg(player_commands=commands)
-        // Port of self.msg(player_commands=commands) -> connection.send_command("player_commands", commands)
         Suppress("AtPostPuppet", () => SendSessionCommand("player_commands", new List<object?> { commands }, null));
-        // Port of base_obj.py:1472 self.msg(f"You become {wrap_xterm256(self.name, fg=15, bold=True)}.")
         Suppress("AtPostPuppet", () =>
         {
             var wrapped = GameUtils.WrapXterm256(Name ?? "", fg: 15, bold: true);
             Msg($"You become {wrapped}.");
         });
-        // Port of base_obj.py:1473-1485 if self.location: map handling + move_to + map_enable + render
         // Outermost guard is the same suppressed-log shape as the inner sites
         // (no locks held anywhere in AtPostPuppet), so it rides the helper too.
         Suppress("AtPostPuppet", () =>
@@ -316,7 +300,6 @@ public partial class GameObject
             bool hasLocation = locRef is not null && !(locRef is LocationRef.NullLocation);
             if (hasLocation)
             {
-                // Port of base_obj.py:1474-1478 if settings.MAP_ENABLED: mh.add_listener(self); if self.is_mapable: mh.add_mapable(self)
                 bool mapEnabledSettings = false;
                 Suppress("AtPostPuppet", () => { TryGetGlobalMapEnabled(out mapEnabledSettings); });
                 if (mapEnabledSettings)
@@ -333,7 +316,6 @@ public partial class GameObject
                         }
                     });
                 }
-                // Port of base_obj.py:1479 self.move_to(self.location, announce=False)
                 // (return value ignored upstream too; map_enable below is
                 // unconditional). MoveTo runs force:true so hooks fire
                 // exactly once (cf. FollowScript stack).
@@ -357,15 +339,12 @@ public partial class GameObject
                         MoveTo(destArg, force: true, announce: false);
                     }
                 });
-                // Port of base_obj.py:1480-1485 if settings.MAP_ENABLED and self.map_enabled: self.msg(map_enable=""); mh = get_map_handler(); mi = mh.get_mapinfo(...); if mi: mi.render(True)
                 bool mapEnabled2 = false;
                 bool selfMapEnabled = false;
                 TryGetGlobalMapEnabled(out mapEnabled2);
                 try { selfMapEnabled = MapEnabled; } catch { try { selfMapEnabled = IsMapable; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtPostPuppet: " + logEx.Message, "GameObject"); } }
-                // Port of base_obj.py:1480-1485 (unconditional once flags hold).
                 if (mapEnabled2 && selfMapEnabled)
                 {
-                    // Port of self.msg(map_enable="") -> connection.send_command("map_enable","")
                     Suppress("AtPostPuppet", () => SendSessionCommand("map_enable", new List<object?> { "" }, null));
                     Suppress("AtPostPuppet", () =>
                     {
@@ -401,36 +380,36 @@ public partial class GameObject
         });
     }
 
-    public virtual void AtPuppet(GameObject caller) // Port of base_obj.py:1488 at_puppet
+    public virtual void AtPuppet(GameObject caller)
     {
-        Hookable("at_puppet", () => 0, caller);
+        Hookable(HookNames.AtPuppet, () => 0, caller);
     }
 
-    public virtual void AtUnpuppet(GameObject caller) // Port of base_obj.py:1501 at_unpuppet
+    public virtual void AtUnpuppet(GameObject caller)
     {
-        Hookable("at_unpuppet", () => 0, caller);
+        Hookable(HookNames.AtUnpuppet, () => 0, caller);
     }
 
-    public virtual void AtDisconnect() // Port of base_obj.py:690 at_disconnect
+    public virtual void AtDisconnect()
     {
-        Hookable("at_disconnect", () => 0);
+        Hookable(HookNames.AtDisconnect, () => 0);
         IsConnected = false;
         Session = null;
     }
 
-    public virtual void AtCreate() // Port of base_obj.py:485 at_create
+    public virtual void AtCreate()
     {
-        Hookable("at_create", () => 0);
+        Hookable(HookNames.AtCreate, () => 0);
     }
 
-    public virtual bool AtDelete(GameObject? caller) // Port of base_obj.py:467 at_delete
+    public virtual bool AtDelete(GameObject? caller)
     {
-        return Hookable("at_delete", () => Access(caller, "delete"), caller);
+        return Hookable(HookNames.AtDelete, () => Access(caller, "delete"), caller);
     }
 
-    public virtual void AtTick() // Port of base_obj.py:676 at_tick
+    public virtual void AtTick()
     {
-        Hookable("at_tick", () => 0);
+        Hookable(HookNames.AtTick, () => 0);
     }
 
     // Server-event virtuals (replaces TryInvokeVirtual reflection): game-defined
@@ -441,22 +420,22 @@ public partial class GameObject
     public virtual void AtServerStop(object? sender) { }
     public virtual void AtServerReload(object? sender) { }
 
-    public virtual void AtSolarEvent(string message) // Port of time.py solar
+    public virtual void AtSolarEvent(string message)
     {
-        Hookable("at_solar_event", () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtSolarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
+        Hookable(HookNames.AtSolarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtSolarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
     }
-    public virtual void AtLunarEvent(string message) // Port of time.py lunar
+    public virtual void AtLunarEvent(string message)
     {
-        Hookable("at_lunar_event", () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLunarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
+        Hookable(HookNames.AtLunarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLunarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
     }
-    public virtual void AtAlarm(Globals.GameTime.GameTimeInfo time, Dictionary<string, System.Text.Json.JsonElement>? data) // Port of time.py alarm
+    public virtual void AtAlarm(Globals.GameTime.GameTimeInfo time, Dictionary<string, System.Text.Json.JsonElement>? data)
     {
-        Hookable("at_alarm", () => 0, time, data);
+        Hookable(HookNames.AtAlarm, () => 0, time, data);
     }
 
-    public virtual void AtInit() // Port of base_obj.py:669 at_init
+    public virtual void AtInit()
     {
-        Hookable("at_init", () => 0);
+        Hookable(HookNames.AtInit, () => 0);
     }
 
 }

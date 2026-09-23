@@ -2,7 +2,6 @@ namespace Atheriz.Core.Objects;
 
 public partial class Node
 {
-    // Port of nodes.py:499 add_noun
     public void AddNoun(string key, string desc)
     {
         SyncRoot.EnterWriteLock();
@@ -34,7 +33,6 @@ public partial class Node
         }
         finally { SyncRoot.ExitWriteLock(); }
     }
-    // Port of nodes.py:516 remove_noun
     public void RemoveNoun(string key)
     {
         SyncRoot.EnterWriteLock();
@@ -45,7 +43,6 @@ public partial class Node
         }
         finally { SyncRoot.ExitWriteLock(); }
     }
-    // Port of nodes.py:531 get_noun
     public string? GetNoun(string key)
     {
         SyncRoot.EnterReadLock();
@@ -58,23 +55,19 @@ public partial class Node
         }
         finally { SyncRoot.ExitReadLock(); }
     }
-    public override string ToString() => $"Node: {Coord}"; // Port of nodes.py:551
+    public override string ToString() => $"Node: {Coord}";
 
-    // Port of nodes.py:554 search
     public override List<GameObject> Search(string query, bool recursive = true, GameObject? looker = null)
         => ContentUtils.Search(this, query, id => ObjectRegistry.Get(id).FirstOrDefault(), recursive, looker ?? this);
 
-    // Port of nodes.py:569
     public List<NodeLink> GetLinks()
     {
         SyncRoot.EnterReadLock();
         try { return _links.ToList(); }
         finally { SyncRoot.ExitReadLock(); }
     }
-    // Port of nodes.py:579. Case-insensitive like GetLinkByName :
     // existence guards must agree with lookups.
     public bool HasLinkName(string name) => FindLink(name) is not null;
-    // Port of nodes.py:590
     public NodeLink? GetLinkByName(string name) => FindLink(name);
     // Shared alias-including lookup for HasLinkName/GetLinkByName only.
     // AddLinkIfAbsent guards stay name-only (alias collisions must NOT block
@@ -104,9 +97,7 @@ public partial class Node
         var ln = NodeHandler.GetCurrent()?.GetNode(link.Coord);
         return ln?.ReturnAppearance(looker);
     }
-    // Port of nodes.py:598
     public NodeArea? Area => NodeHandler.GetCurrent()?.GetArea(Coord.Area);
-    // Port of nodes.py:604
     public NodeGrid? Grid
     {
         get
@@ -116,7 +107,7 @@ public partial class Node
             return a?.GetGrid(Coord.Z);
         }
     }
-    // Port of nodes.py:611 name — coord-derived, read-only in Python (no setter).
+// coord-derived, read-only in Python (no setter).
     // Override (not new) so GameObject-typed refs see the same value as Node-typed refs.
     // The setter is intentionally a no-op: Python's __setstate__ raw-dict restore writes
     // 'name' into the instance dict where it is shadowed by the read-only data
@@ -125,7 +116,7 @@ public partial class Node
     // accepted and ignored (never observable via the getter).
     public override string Name { get => Coord.ToString(); set { } }
 
-    // Port of nodes.py:616 add_script — int | Script accepted (same as base AddScript
+// int | Script accepted (same as base AddScript
     // overloads); records into the shared base scripts set.
     public void AddScript(object script)
     {
@@ -138,7 +129,6 @@ public partial class Node
         // RemoveScript can never unhook.
         if (objs[0] is Script s) { s.InstallHooks(this); AddScriptId(id); }
     }
-    // Port of nodes.py:632
     public void RemoveScript(object script)
     {
         int id = script is int i ? i : script is GameObject go ? go.Id : -1;
@@ -147,14 +137,12 @@ public partial class Node
         if (objs.Count > 0 && objs[0] is Script s) s.RemoveHooks(this);
         RemoveScriptId(id);
     }
-    // Port of nodes.py:648
     public NodeLink? GetRandomLink()
     {
         SyncRoot.EnterReadLock();
         try { return _links.Count == 0 ? null : _links[Random.Shared.Next(_links.Count)]; }
         finally { SyncRoot.ExitReadLock(); }
     }
-    // Port of nodes.py:657 add_link
     // Insert core shared with AddLinkIfAbsent: caller holds the write lock.
     private bool AddLinkRawNoLock(NodeLink link)
     {
@@ -202,7 +190,6 @@ public partial class Node
         if (!added) return;
         PublishLinkAdded(link, "Node.AddLink");
     }
-    // Port of nodes.py:677
     public bool AddLinkIfAbsent(string name, Func<NodeLink> factory)
     {
         // Guards fold case like HasLinkName/GetLinkByName — ordinal guards let
@@ -225,7 +212,6 @@ public partial class Node
         PublishLinkAdded(link, "Node.AddLinkIfAbsent");
         return true;
     }
-    // Port of nodes.py:688
     public void RemoveLink(string name)
     {
         NodeLink? found = null;
@@ -248,7 +234,6 @@ public partial class Node
             foreach (var o in GetContents()) try { o.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveLink: " + logEx.Message, "Node"); }
     }
 
-    // Port of nodes.py:711 add_exits
     public void AddExits(GameObject obj)
     {
         obj.InternalCmdSet?.RemoveByTag("exits");
@@ -276,7 +261,6 @@ public partial class Node
     }
     public new void AddExitsForObject(GameObject obj) => AddExits(obj);
 
-    // Port of nodes.py:734 add_objects
     public void AddObjects(List<GameObject> objs)
     {
         SyncRoot.EnterWriteLock();
@@ -290,7 +274,6 @@ public partial class Node
         foreach (var o in objs) try { o.Location = Persistence.Dto.LocationRef.FromCoord(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObjects: " + logEx.Message, "Node"); }
         foreach (var o in objs) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObjects: " + logEx.Message, "Node"); }
     }
-    // Port of nodes.py:747 add_object
     public new void AddObject(GameObject obj)
     {
         SyncRoot.EnterWriteLock();
@@ -306,7 +289,6 @@ public partial class Node
         try { obj.Location = Persistence.Dto.LocationRef.FromCoord(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }
         try { AddExits(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }
     }
-    // Port of nodes.py:759 remove_object
     public new void RemoveObject(GameObject obj)
     {
         SyncRoot.EnterWriteLock();
@@ -321,7 +303,6 @@ public partial class Node
         try { obj.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveObject: " + logEx.Message, "Node"); }
     }
 
-    // Port of nodes.py:770 msg_contents
     // Broadcast loop shared with the base overload via
     // ContentUtils.EmitToContents; only the receiver source (live contents)
     // stays here. Node delivery keeps catch-all fallback semantics
@@ -332,7 +313,6 @@ public partial class Node
         ContentUtils.EmitToContents(GetContents(), this, text, fromObj, mapping, exclude, msgType, raiseErrors, nodeSemantics: true);
     }
 
-    // Port of nodes.py:828 get_display_things
     public override string GetDisplayThings(GameObject? looker = null)
     {
         var contents = GetContents();
@@ -340,7 +320,6 @@ public partial class Node
         var names = ContentUtils.GroupByName(things, looker);
         return !string.IsNullOrEmpty(names) ? $"{GameUtils.WrapXterm256("You see:", fg: 15, bold: true)} {names}\n" : "";
     }
-    // Port of nodes.py:843 get_display_characters
     public string GetDisplayCharacters(GameObject? looker = null)
     {
         if (looker is null) return "";
@@ -349,7 +328,6 @@ public partial class Node
         var names = ContentUtils.GroupByName(chars, looker);
         return !string.IsNullOrEmpty(names) ? $"{GameUtils.WrapXterm256("Characters:", fg: 15, bold: true)} {names}\n" : "";
     }
-    // Port of nodes.py:863 get_display_exits
     public string GetDisplayExits(GameObject? looker = null)
     {
         string names;
@@ -358,7 +336,6 @@ public partial class Node
         finally { SyncRoot.ExitReadLock(); }
         return !string.IsNullOrEmpty(names) ? $"{GameUtils.WrapXterm256("Exits:", fg: 15, bold: true)} {names}\n" : "";
     }
-    // Port of nodes.py:884 get_display_doors
     public string GetDisplayDoors(GameObject? looker = null)
     {
         var header = $"{GameUtils.WrapXterm256("Doors:", fg: 15, bold: true)} ";
@@ -376,14 +353,12 @@ public partial class Node
         }
         return header + string.Join(", ", parts) + "\n";
     }
-    // Port of nodes.py:912 get_display_desc
     public string GetDisplayDesc(GameObject? looker = null)
     {
         SyncRoot.EnterReadLock();
         try { return !string.IsNullOrEmpty(Desc) ? Desc + "\n" : "You see nothing special.\n"; }
         finally { SyncRoot.ExitReadLock(); }
     }
-    // Port of nodes.py:926 get_display_name
     public override string GetDisplayName(GameObject? looker = null)
     {
         // read the looker's flag BEFORE taking the node lock (self->looker
@@ -396,13 +371,12 @@ public partial class Node
         }
         finally { SyncRoot.ExitReadLock(); }
     }
-    // Port of nodes.py:945 return_appearance
     public override string ReturnAppearance(GameObject? looker = null)
     {
         if (looker is null) return "You see nothing here.";
         // Hookable like the base: game code overriding return_appearance must
         // see node renders too.
-        return Hookable("return_appearance", () =>
+        return Hookable(HookNames.ReturnAppearance, () =>
         {
             // Parts concatenate with no separators; each part emits literally, so
             // a placeholder token inside user-controlled text (e.g. "{desc}" in a

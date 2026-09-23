@@ -30,7 +30,6 @@ public static class DaemonSpawner
         return argList;
     }
 
-    // Port of atheriz.py:1285 spawn_daemon: Popen start --foreground with stdout/stderr to save/server.log.
     // Returns false when nothing was spawned (invalid args, spawn failure):
     // the caller holds the pid claim and must release it on false, or the
     // pid file points at a dead CLI.
@@ -89,8 +88,16 @@ public static class DaemonSpawner
                 using var proc = Process.Start(psi);
                 if (proc is not null)
                 {
-                    pidStr = proc.StandardOutput.ReadToEnd().Trim();
-                    proc.WaitForExit(2000);
+                    // Drain stderr concurrently: the redirect has no reader, so
+                    // a chatty bash (errors, warnings) would block on a full
+                    // pipe while we sit in the stdout read. The text is only
+                    // diagnostics; the pid parse below is the contract.
+                    var stderrTask = proc.StandardError.ReadToEndAsync();
+                    pidStr = (await proc.StandardOutput.ReadToEndAsync().ConfigureAwait(false)).Trim();
+                    using var exitCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    try { await proc.WaitForExitAsync(exitCts.Token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { }
+                    try { _ = await stderrTask.ConfigureAwait(false); } catch { }
                     var toks = pidStr.Split(PidSeparators, StringSplitOptions.RemoveEmptyEntries);
                     var last = toks.LastOrDefault() ?? "";
                     if (int.TryParse(last, out var p)) daemonPid = p;
@@ -139,7 +146,6 @@ public static class DaemonSpawner
             else Console.WriteLine("Failed to spawn server daemon.");
         }
         catch (Exception ex) { Console.Error.WriteLine($"Failed to spawn daemon: {ex.Message}"); }
-        await Task.CompletedTask.ConfigureAwait(false);
         return spawned;
     }
 }

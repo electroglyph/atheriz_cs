@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/follow.py:192
 
 namespace Atheriz.Core.Commands.LoggedIn;
 

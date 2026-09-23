@@ -4,7 +4,6 @@ using System.Collections.Frozen;
 namespace Atheriz.Core.Objects;
 
 /// <summary>
-/// Port of <c>atheriz/objects/contents.py</c>.
 /// </summary>
 public static class ContentUtils
 {
@@ -25,7 +24,7 @@ public static class ContentUtils
         "barracks","chassis","precis",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    // Port of settings.MAX_SEARCH_DEPTH — mutable for testing (mirrors monkeypatch in test_contents_search.py:340)
+// mutable for testing (mirrors monkeypatch in test_contents_search.py:340)
     public static int MaxSearchDepth = 100;
 
     // Lowered word set backing search matching, computed once per object per
@@ -113,7 +112,6 @@ public static class ContentUtils
     }
 
     /// <summary>
-    /// Port of <c>contents.search</c>. Returns list matching query.
     /// </summary>
     public static List<GameObject> Search(GameObject obj, string query, Func<int, GameObject?> resolver, bool recursive = true, GameObject? looker = null)
     {

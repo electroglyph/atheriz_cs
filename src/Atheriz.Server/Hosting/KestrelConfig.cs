@@ -57,8 +57,8 @@ public static class KestrelConfig
                 // cert that is not on disk must never silently serve plaintext.
                 ThrowIfNoFallbackOrWarn($"SSL cert configured but not found ({certFile}); refusing insecure fallback.", null, () =>
                 {
-                    Console.WriteLine($"WARNING: SSL cert file not found: {certFile}");
-                    Console.WriteLine("SSL is disabled (set SSL_CERTFILE to enable)");
+                    AtherizLogger.LogWarning($"WARNING: SSL cert file not found: {certFile}");
+                    AtherizLogger.LogWarning("SSL is disabled (set SSL_CERTFILE to enable)");
                 });
                 return;
             }
@@ -66,14 +66,14 @@ public static class KestrelConfig
             {
                 var cert = Atheriz.Core.Utils.TlsCertLoader.Load(certFile, keyFile);
                 listen.UseHttps(cert);
-                Console.WriteLine($"SSL is enabled (cert: {certFile})");
+                AtherizLogger.LogInformation($"SSL is enabled (cert: {certFile})");
             }
             catch (Exception ex)
             {
                 // Fail fast when the operator did not explicitly allow serving the
                 // admin token over plaintext after a cert failure.
                 ThrowIfNoFallbackOrWarn($"SSL cert configured but unloadable ({certFile}); refusing insecure fallback.", ex, () =>
-                    Console.WriteLine($"SSL load failed for {certFile}: {ex.Message}"));
+                    AtherizLogger.LogError($"SSL load failed for {certFile}: {ex.Message}"));
             }
         }
 

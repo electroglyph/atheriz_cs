@@ -126,7 +126,6 @@ public static class ResetHandler
         Console.WriteLine("Setting up new world...");
         try
         {
-            // Port of atheriz.py reset: local initial_setup.do_setup() with no superuser (limbo world only).
             // Explicit no-prompt creds : reset must never interactively
             // ask for a superuser mid-wipe; env creds still apply when set.
             Atheriz.Core.InitialSetup.RunSetup(savePath, prompt: false);
@@ -134,7 +133,6 @@ public static class ResetHandler
         }
         catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); CliExitCode.Set(1); return; }
 
-        // Port of atheriz.py:1629 reset always daemonizes after setup.
         // respawn preserves the CLI telnet-port override, else the
         // replacement silently binds the configured default instead.
         var resetTelnetPort = ArgumentParser.ParseTelnetPort(a);

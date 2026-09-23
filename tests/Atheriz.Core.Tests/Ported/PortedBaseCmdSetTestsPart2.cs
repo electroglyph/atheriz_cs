@@ -64,7 +64,7 @@ public class PortedBaseCmdSetTestsPart2
         Assert.NotNull(dict);
         Assert.True(dict!.Contains("a"));
         var lockObj = fLock!.GetValue(cs);
-        Assert.IsType<System.Threading.ReaderWriterLockSlim>(lockObj);
+        Assert.IsType<System.Threading.Lock>(lockObj);
         var cmd = dict["a"] as Command;
         Assert.Equal("a", cmd!.Key);
     }
@@ -74,15 +74,15 @@ public class PortedBaseCmdSetTestsPart2
         using var env = GlobalTestEnv.Enter();
         var cs = new CmdSet();
         var fLock = typeof(CmdSet).GetField("_lock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var lockObj = fLock!.GetValue(cs) as System.Threading.ReaderWriterLockSlim;
-        Assert.NotNull(lockObj);
-        // After simulated setstate (new instance), lock is fresh RLock equivalent
+        var lockObj = fLock!.GetValue(cs);
+        Assert.IsType<System.Threading.Lock>(lockObj);
+        // After simulated setstate (new instance), the lock is a fresh exclusive lock
         var cs2 = new CmdSet();
-        var lock2 = fLock.GetValue(cs2) as System.Threading.ReaderWriterLockSlim;
-        Assert.NotNull(lock2);
+        var lock2 = fLock.GetValue(cs2);
+        Assert.IsType<System.Threading.Lock>(lock2);
         Assert.NotSame(lockObj, lock2);
         // And can be acquired
-        lock2!.EnterWriteLock(); try { } finally { lock2.ExitWriteLock(); }
+        using (((System.Threading.Lock)lock2!).EnterScope()) { }
     }
     // Port of test_base_cmdset.py:388 test_setstate_restores_commands
     [Fact] public void SetStateRestoresCommands()
@@ -114,9 +114,9 @@ public class PortedBaseCmdSetTestsPart2
         var json = System.Text.Json.JsonSerializer.Serialize(new { keys = cs.GetKeys() });
         Assert.DoesNotContain("lock", json.ToLower());
         // Verify lock not serialized: reflect private field not in JSON
-        Assert.IsType<System.Threading.ReaderWriterLockSlim>(typeof(CmdSet).GetField("_lock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(cs));
-        // Document wontfix: C# does not fail on serialization; it excludes lock
-        Assert.True(true, "wontfix: C# CmdSet JSON serialization excludes RLock, unlike Python pickle which fails");
+        Assert.IsType<System.Threading.Lock>(typeof(CmdSet).GetField("_lock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(cs));
+        // Document wontfix: C# does not fail on serialization; it excludes the lock
+        Assert.True(true, "wontfix: C# CmdSet JSON serialization excludes the lock, unlike Python pickle which fails");
     }
     // Port of test_base_cmdset.py:408 test_pickle_with_command_added_also_fails
     [Fact] public void PickleWithCommandAddedAlsoFails_Wontfix()

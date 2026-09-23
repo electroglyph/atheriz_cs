@@ -1,4 +1,3 @@
-// Port of atheriz/commands/unloggedin/validation.py:38
 using System.Text.RegularExpressions;
 
 namespace Atheriz.Core.Commands.UnloggedIn;

@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/spam.py:78
 using System.IO;
 
 namespace Atheriz.Core.Commands.LoggedIn;

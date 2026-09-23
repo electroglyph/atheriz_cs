@@ -1,4 +1,3 @@
-// Port of atheriz/commands/unloggedin/connect.py:154
 using Atheriz.Core.Network;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
@@ -62,11 +61,11 @@ public sealed class ConnectCommand : Command
         {
             conn2.Session.Account = account;
             conn2.SendCommand("logged_in");
-            // Port of connect.py:154 await char_selection(caller, account) — fire-and-forget async
+// fire-and-forget async
             _ = Task.Run(async () =>
             {
                 try { await CharSelectionAsync(conn2, account).ConfigureAwait(false); }
-                catch (Exception ex) { Console.Error.WriteLine($"[Connect] char_selection failed: {ex}"); }
+                catch (Exception ex) { AtherizLogger.LogError($"[Connect] char_selection failed: {ex}"); }
             });
         }
         else
@@ -76,7 +75,6 @@ public sealed class ConnectCommand : Command
         }
     }
 
-    // Port of atheriz/commands/unloggedin/connect.py:21 char_selection
     internal static async Task CharSelectionAsync(BaseConnection caller, Account account)
     {
         var settings = AtherizSettings.Global;
@@ -121,7 +119,7 @@ public sealed class ConnectCommand : Command
             {
                 var newCmd = new NewCharacterCommand();
                 try { await newCmd.RunAsync(caller).ConfigureAwait(false); }
-                catch (Exception ex) { Console.Error.WriteLine($"[Connect] NewCharacter failed: {ex}"); caller.Msg("Character creation failed."); }
+                catch (Exception ex) { AtherizLogger.LogError($"[Connect] NewCharacter failed: {ex}"); caller.Msg("Character creation failed."); }
                 continue;
             }
             if (!int.TryParse(choice.Trim(), out var idx))
@@ -157,7 +155,7 @@ public sealed class ConnectCommand : Command
 
             if (!SessionPuppetHelper.TryAttach(caller, chosen)) continue;
             try { caller.Session.ConnectedAt = DateTime.UtcNow; } catch (Exception) { }
-            try { chosen.AtPostPuppet(); } catch (Exception ex) { Console.Error.WriteLine($"[Connect] AtPostPuppet failed: {ex}"); }
+            try { chosen.AtPostPuppet(); } catch (Exception ex) { AtherizLogger.LogError($"[Connect] AtPostPuppet failed: {ex}"); }
             // In Python, char_selection loop exits after successful puppet (while puppet is None)
             break;
         }

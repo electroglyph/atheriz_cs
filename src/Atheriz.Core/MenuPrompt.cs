@@ -1,9 +1,7 @@
-// Port of atheriz/menu.py:153-156 prompt timeout loop shared by Menu.Run and MenuRunner.RunMenuAsync
 
 namespace Atheriz.Core;
 
 /// <summary>
-/// Port of <c>atheriz/menu.py:153-156</c> prompt-with-timeout loop.
 /// Shared helper for <c>Menu.Run</c> and <c>MenuRunner.RunMenuAsync</c> to avoid duplication.
 /// Mirrors <c>using var cts=new CancellationTokenSource(Timeout); var t=session.Prompt(display);
 /// await Task.WhenAny(t, Task.Delay(Timeout, cts.Token))</c> with timeout → null.

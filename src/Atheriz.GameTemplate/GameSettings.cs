@@ -1,5 +1,3 @@
-// Port of atheriz/new.py:292 generate_settings_template
-// Port of atheriz/settings.py defaults
 namespace MyGame;
 
 
@@ -22,7 +20,6 @@ public static class GameSettings
     // Display — mirrors SERVERNAME="AtheriZ"
     public const string ServerName = "MyGame";
 
-    // Port of atheriz/settings.py:69 WEBCLIENT_SYNC_CHECK = True
     // Mirrors copy_web_folder — webclient now included, so keep sync check on.
     public const bool WebclientSyncCheck = true;
 

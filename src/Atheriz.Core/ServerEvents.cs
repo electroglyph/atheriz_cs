@@ -1,10 +1,8 @@
-// Port of atheriz/server_events.py:8-96
 using System.Reflection;
 using Atheriz.Core.Persistence;
 
 namespace Atheriz.Core;
 
-// Port of atheriz/server_events.py:8 static hook points
 public static class ServerEvents
 {
     // serializes concurrent AtCharCreate check-then-insert sequences so two
@@ -12,26 +10,20 @@ public static class ServerEvents
     // root lock (never taken elsewhere, always outermost); LostPcNameRace stays as the
     // deterministic tiebreak for non-AtCharCreate writers.
     private static readonly Lock _charCreateLock = new();
-    // Port of server_events.py:8 def at_server_start()
     public static void AtServerStart() => AtServerStart(null);
-    // Port of server_events.py:8 preserve hook signature at_server_start(sender).
     // Python is pass (silent); the hook walk stays as the game-code extension point.
     private static void Fire(string hookName, object? sender)
     {
-        if (sender is not null) InvokeHooks(hookName, sender); // Port of base_obj hookable iteration
+        if (sender is not null) InvokeHooks(hookName, sender);
         else InvokeHooks(hookName);
     }
     public static void AtServerStart(object? sender) => Fire("at_server_start", sender);
 
-    // Port of server_events.py:12 def at_server_stop()
     public static void AtServerStop() => AtServerStop(null);
-    // Port of server_events.py:12 preserve hook signature at_server_stop(sender)
     // Python is pass (silent); the hook walk stays as the game-code extension point.
     public static void AtServerStop(object? sender) => Fire("at_server_stop", sender);
 
-    // Port of server_events.py:16 def at_server_reload()
     public static void AtServerReload() => AtServerReload(null);
-    // Port of server_events.py:16 preserve hook signature at_server_reload(sender)
     // Python is pass (silent); the hook walk stays as the game-code extension point.
     public static void AtServerReload(object? sender) => Fire("at_server_reload", sender);
 
@@ -56,7 +48,6 @@ public static class ServerEvents
         return null;
     }
 
-    // Port of server_events.py:19 def at_char_create(account_name, char_name, password) CLI helper.
     // The optional output mirrors Python's redirect_stdout capture in the
     // /_internal/create_account endpoint: null keeps Console output (CLI/tests).
     // settingsOverride lets embedders pass explicit settings instead of the Global
@@ -64,7 +55,6 @@ public static class ServerEvents
     public static void AtCharCreate(string accountName, string charName, string password, TextWriter? output = null, AtherizSettings? settingsOverride = null)
     {
         void Out(string s) => (output ?? Console.Out).WriteLine(s);
-        // Port of server_events.py:19-96 faithful validation + creation, console output replaces print
         var err = Commands.UnloggedIn.Validation.ValidatePassword(password);
         if (err is not null) { Out(err); return; }
         err = Commands.UnloggedIn.Validation.ValidateCharacterName(charName);
@@ -80,7 +70,6 @@ public static class ServerEvents
         // do cold-start Load() disk I/O (server_events.py:47 has no creation
         // lock at all); serializing creators on I/O stalls every signup.
         var settings = settingsOverride ?? AtherizSettings.Global;
-        // Port of server_events.py:47 get_node_handler + DEFAULT_HOME (direct call, errors surface).
         // C# tests use real Nodes without handler indexing (no mocks), so also consult the live registry.
         Node? home = GlobalServices.GetNodeHandler().GetNode(settings.DefaultHome);
         home ??= ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(settings.DefaultHome)).FirstOrDefault() as Node;
@@ -123,7 +112,6 @@ public static class ServerEvents
                 return;
             }
             var character = GameObject.Create(charName, isPc: true);
-            // Port of create() auto-add: add-then-move (matches InitialSetup order).
             ObjectRegistry.AddObject(character);
             character.Home = Persistence.Dto.LocationRef.FromCoord(home.Coord);
             acc.AddCharacter(character);
@@ -174,20 +162,20 @@ public static class ServerEvents
             // must not take down the signup flow with an unhandled throw.
             try { ObjectRegistry.SaveObjects(AtherizDbContextFactory.ResolveSavePath(settings)); }
             catch (Exception saveEx) { string saveErr = "Save failed: " + saveEx.Message; Out(saveErr); return; }
-            doneAcc.IsModified = true; // Port of server_events.py object.__setattr__(account, "is_modified", True) after save
+            doneAcc.IsModified = true;
             Out(doneNewAccount ? "Success! Account and character created." : "Success! Character created.");
             // Pass the live objects (not a re-query of the registry).
             AtCharCreate(doneChar, doneAcc);
         }
     }
 
-    // Port of server_events.py:19 _lost_pc_name_race — lowest id wins so concurrent
+// lowest id wins so concurrent
     // creators converge deterministically no matter how the re-checks interleave.
     private static bool LostPcNameRace(string charNameLower, int myId)
         => RegistryExists(o => o.IsPc && (o.Name ?? "").ToLowerInvariant() == charNameLower && o.Id != myId && o.Id < myId);
 
     // Spec overload: AtCharCreate(GameObject character, Account account)
-    // Port of server_events.py:96 — Python only prints (the caller already
+// Python only prints (the caller already
     // printed "Success! …"); no broadcast, no hook fan-out.
     public static void AtCharCreate(GameObject character, Account account)
     {

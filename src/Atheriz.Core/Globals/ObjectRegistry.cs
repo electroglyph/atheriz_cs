@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 namespace Atheriz.Core.Globals;
 
 /// <summary>
-/// Port of <c>atheriz/globals/objects.py</c>.
 /// Global object registry + temp bans + creation cooldowns.
 /// All access guarded by ReaderWriterLockSlim (mirrors Python RLock).
 /// Persistence via <see cref="AtherizDbContext"/> + JSON (replaces dill).
@@ -282,7 +281,6 @@ public static class ObjectRegistry
 
     public static List<GameObject> GetByTag(object tag, bool all = false)
     {
-        // Port of objects.py:169 set(tag): non-string/non-iterable tags raise
         // (TypeError → ArgumentException per BCL convention) instead of
         // silently matching everything (empty-set subset is vacuously true).
         HashSet<string> tags = tag switch
@@ -521,7 +519,6 @@ public static class ObjectRegistry
                 IdGenerator.SetId(maxId);
         }
 
-        // second pass: resolve relations — port of objects.py:272-276 for obj in snapshot: obj.resolve_relations()
         List<GameObject> snap;
         AllLock.EnterReadLock();
         try { snap = AllObjects.Values.ToList(); }
@@ -660,7 +657,6 @@ public static class ObjectRegistry
             }
             catch (Exception)
             {
-                // Port of objects.py:save_objects serialization phase: a poison
                 // row aborts the whole checkpoint — nothing has been written yet,
                 // so restore every cleared flag and rethrow (the transaction
                 // below never runs).
@@ -709,7 +705,6 @@ public static class ObjectRegistry
         }
     }
 
-    // Port of save_objects() default path: settings.SAVE_PATH, honoring the
     // ATHERIZ_SAVE_PATH env override (tests point it at a temp dir, like conftest).
     public static void SaveObjects(bool force = false)
     {

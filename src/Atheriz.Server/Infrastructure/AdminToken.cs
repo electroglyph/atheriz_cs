@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 namespace Atheriz.Server.Infrastructure;
 
 /// <summary>
-/// Port of admin token handling at <c>atheriz/atheriz.py:556-602</c>.
 /// Mirrors:
 ///   <c>token = secrets.token_hex(32)</c> (32 bytes → 64 hex chars)
 ///   <c>secret_path.mkdir(parents=True, exist_ok=True); secret_path.chmod(0o700)</c>

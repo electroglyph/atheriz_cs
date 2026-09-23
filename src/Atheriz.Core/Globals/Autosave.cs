@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 namespace Atheriz.Core.Globals;
 
 /// <summary>
-/// Port of <c>atheriz/globals/autosave.py</c> (94 LOC).
 /// Keeps _autosave_started flag, start_autosave using AsyncTicker and save_objects etc.
 /// Persistence via EF Core JSON (replaces dill handling) — delegates to ObjectRegistry/NodeHandler/MapHandler/GameTime.
 /// </summary>
@@ -93,7 +92,6 @@ public static class Autosave
         // path already calls EnsureCreated, so this single call covers saves)
         SaveSection("objects", db => ObjectRegistry.SaveObjects(db), ensureCreated: true);
 
-        // map — Port of autosave.py:26 get_map_handler().save() singleton reuse
         SaveSection("map", db =>
         {
             // volatile read — written under _lock by Start/Stop on
@@ -107,7 +105,6 @@ public static class Autosave
             mh.Save(db);
         });
 
-        // node — Port of autosave.py:27 get_node_handler().save() singleton reuse
         SaveSection("node", db =>
         {
             var nh = Resolve(nodeHandler, ref _cachedNodes, GlobalServices.GetNodeHandler);
@@ -115,7 +112,6 @@ public static class Autosave
             nh.Save(db);
         });
 
-        // time — Port of autosave.py:34-38 get_game_time().save() singleton reuse
         if (settings.TimeSystemEnabled)
         {
             SaveSection("time", db =>
@@ -148,7 +144,6 @@ public static class Autosave
         lock (_lock)
         {
             settings ??= AtherizSettings.Global;
-            // Port of autosave.py `if not settings.AUTOSAVE_MINUTES`: falsy
             // covers 0 AND negatives — a negative interval must not register
             // a coro with a negative slot key.
             if (settings.AutosaveMinutes <= 0 || _autosaveStarted) return;

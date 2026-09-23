@@ -34,7 +34,6 @@ public static class ArgumentParser
     public static int? ParsePort(string[] a)
         => ParseIntOption(a, "--port", "-p", PortPrefix);
 
-    // Port of argparse type=int failure for --port (exit 2): raw value present but not an int.
     public static string? InvalidPortValue(string[] a)
         => InvalidIntOption(a, "--port", "-p", PortPrefix);
 
@@ -73,7 +72,6 @@ public static class ArgumentParser
         return v;
     }
 
-    // Port of argparse "expected one argument" for --host (exit 2): the flag
     // is present but carries no value (bare `--host` / `--host=`). Without
     // this the empty string leaks into per-command parsing (foreground binds
     // WebserverInterface="", create eats the flag as a positional).

@@ -3,7 +3,6 @@ using System.Text;
 namespace Atheriz.Core.Commands;
 
 /// <summary>
-/// Faithful port of <c>atheriz/commands/base_cmd.py:GameArgumentParser</c>.
 /// Throws <see cref="CommandError"/> instead of exiting.
 /// Subset of argparse sufficient for Atheriz commands (mirrors Python opts).
 /// </summary>
@@ -445,7 +444,6 @@ public sealed class GameArgumentParser
             }
             else if (tok.StartsWith("-", StringComparison.Ordinal) && tok.Length > 1)
             {
-                // Port of argparse negative-number handling: when no defined
                 // optional looks like a negative number, a "-5"/"-.5" token
                 // is positional (so `set me score -5` parses the value).
                 // (C# commands never define digit options, like Python's.)

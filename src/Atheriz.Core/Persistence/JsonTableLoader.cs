@@ -1,4 +1,3 @@
-// Port of atheriz/globals/* load pattern (AsNoTracking + Deserialize + lock)
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Persistence;

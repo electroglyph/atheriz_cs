@@ -29,7 +29,7 @@ public static class StaticFileConfig
         var templatesCandidate = AssetPathResolver.ResolveTemplates(app.Environment.ContentRootPath, AppContext.BaseDirectory);
         if (staticCandidate is not null)
         {
-            Console.WriteLine($"Serving static files from: {staticCandidate}");
+            AtherizLogger.LogInformation($"Serving static files from: {staticCandidate}");
             var contentTypeProvider = new FileExtensionContentTypeProvider();
             contentTypeProvider.Mappings[".wasm"] = "application/wasm";
             var physicalProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.GetFullPath(staticCandidate));
@@ -69,23 +69,23 @@ public static class StaticFileConfig
                 }
             });
             var drawEntrypoint = Path.Combine(staticCandidate, "atheriz_draw", "index.html");
-            if (File.Exists(drawEntrypoint)) Console.WriteLine("AtheriZ Draw available at /atheriz_draw/");
-            else Console.WriteLine("Warning: AtheriZ Draw build not found at /atheriz_draw/");
+            if (File.Exists(drawEntrypoint)) AtherizLogger.LogInformation("AtheriZ Draw available at /atheriz_draw/");
+            else AtherizLogger.LogWarning("Warning: AtheriZ Draw build not found at /atheriz_draw/");
             if (File.Exists(Path.Combine(staticCandidate, "webclient", "index.html")))
-                Console.WriteLine("Webclient available at /webclient/index.html");
+                AtherizLogger.LogInformation("Webclient available at /webclient/index.html");
             else
-                Console.WriteLine("Webclient available at /webclient/index.html (fallback template if compiled missing)");
+                AtherizLogger.LogInformation("Webclient available at /webclient/index.html (fallback template if compiled missing)");
             try
             {
                 var syncSummary = WebclientSyncChecker.CheckSync(Directory.GetCurrentDirectory(), app.Environment.ContentRootPath, null);
                 if (syncSummary is not null)
-                    Console.WriteLine(WebclientSyncChecker.FormatWarning(syncSummary, Directory.GetCurrentDirectory(), app.Environment.ContentRootPath, null, null));
+                    AtherizLogger.LogWarning(WebclientSyncChecker.FormatWarning(syncSummary, Directory.GetCurrentDirectory(), app.Environment.ContentRootPath, null, null));
             }
-            catch (Exception ex) { Console.Error.WriteLine($"Webclient sync check failed: {ex.Message}"); }
+            catch (Exception ex) { AtherizLogger.LogError($"Webclient sync check failed: {ex.Message}"); }
         }
         else
         {
-            Console.WriteLine($"Warning: Static directory not found: {Path.Combine(app.Environment.ContentRootPath, "wwwroot")}");
+            AtherizLogger.LogWarning($"Warning: Static directory not found: {Path.Combine(app.Environment.ContentRootPath, "wwwroot")}");
         }
 
         app.MapGet("/", (HttpContext ctx) =>

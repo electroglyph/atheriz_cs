@@ -3,12 +3,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Atheriz.Core;
 
-// Port of atheriz/logger.py:12 shared logger
 public static class AtherizLogger
 {
-    // Port of logger.py:16 logger = getLogger("atheriz")
     public const string DefaultCategory = "atheriz";
-    // Port of logger.py:17 FORMATTER = "%(levelname)s: %(name)s: %(message)s"
     private const string Formatter = "{Level}: {Category}: {Message}";
     private static readonly Lock _lock = new();
     // Dedicated file lock (F009): AppendToFile does check+rotate+append; without a lock
@@ -17,8 +14,7 @@ public static class AtherizLogger
     private static readonly Lock _fileLock = new();
     private static ILoggerFactory? _factory;
     private static ILogger? _cachedDefault;
-    private static LogLevel _level = LogLevel.Information; // Port of logger.py:28 default info
-    // Port of logger.py:21 level_map debug/info/warning/error/critical.
+    private static LogLevel _level = LogLevel.Information;
     // Built once (frozen, case-insensitive): ApplySettings runs on settings
     // change, but there is no reason to allocate the 5-entry map per call.
     // The lock takes in ApplySettings stay split (four separate holds):
@@ -43,17 +39,15 @@ public static class AtherizLogger
     // ticks are recorded lock-free for backoff/diagnostics; a healed directory
     // writes on the very next call (no cooldown skip).
     private static long _lastFileFailureTicks;
-    public const long MaxFileBytes = 5 * 1024 * 1024; // Port of RotatingFileHandler 5M
+    public const long MaxFileBytes = 5 * 1024 * 1024;
     public const int MaxFiles = 5;
 
     static AtherizLogger()
     {
-        // Port of logger.py:42 apply_settings() + _setup_logger()
         ApplySettings();
         SetupLogger();
     }
 
-    // Port of logger.py:19 apply_settings
     // LEVEL CONTRACT: debug/info/warning/error/critical map case-insensitively; anything else
     // falls back to Information here, but AtherizSettingsValidator rejects unknown LogLevel
     // strings at config load — so an unknown level can only arrive via direct assignment.
@@ -63,7 +57,6 @@ public static class AtherizLogger
         // Published with the level/factory state under one hold so a
         // concurrent ApplySettings cannot interleave path and level.
         lock (_lock) { _savePath = s.SavePath ?? "save"; }
-        // Port of logger.py:21 level_map debug/info/warning/error/critical
         lock (_lock)
         {
             _level = LevelMap.TryGetValue(s.LogLevel ?? "info", out var lv) ? lv : LogLevel.Information;
@@ -81,7 +74,6 @@ public static class AtherizLogger
         lock (_lock) { _appliedLevel = _level; }
     }
 
-    // Port of logger.py:31 _setup_logger
     private static void SetupLogger()
     {
         lock (_lock) SetupLoggerLocked();
@@ -121,7 +113,6 @@ public static class AtherizLogger
         lock (_lock) { _factory = factory; _cachedDefault = factory.CreateLogger(DefaultCategory); }
     }
 
-    // Port of logger.py:43 thin wrapper GetLogger(category)
     public static ILogger GetLogger(string category)
     {
         lock (_lock)
@@ -239,7 +230,6 @@ public static class AtherizLogger
     private static void Write(LogLevel level, string category, string message, Exception? ex = null)
     {
         // filtered levels are dropped — operators silencing via
-        // LogLevel must not pay debug IO on every call. (Port of
         // logger.py, where a below-level debug never reaches any handler.)
         if (level < _level) return;
         ILogger? logger = null;
@@ -255,7 +245,6 @@ public static class AtherizLogger
             }
             catch { }
         }
-        // Fallback Console.Error — Port of logger.py:37 StreamHandler
         EchoAndAppend(level, category, message, ex);
     }
 

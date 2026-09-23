@@ -7,7 +7,6 @@ public partial class GameObject
     public virtual void Msg(string text) => Msg(text, null, null, false, null);
 
     /// <summary>
-    /// Full Msg port of <c>atheriz/objects/base_obj.py:880</c>.
     /// When <paramref name="text"/> contains <c>$</c> or <c>{key}</c>, it is parsed via
     /// <see cref="FuncParser"/> using director stance (mapping) and actor stance (caller vs receiver).
     /// Mirrors Python's <c>at_msg_send</c>/<c>at_msg_receive</c> hooks (advisory, no abort).
@@ -66,12 +65,12 @@ public partial class GameObject
     /// </summary>
     public void Msg(string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, bool raiseErrors = false) => Msg(text ?? "", fromObj, mapping, raiseErrors, null);
 
-    public bool AtMsgReceive(string? text, GameObject? fromObj, string? msgType) => Hookable("at_msg_receive", () => true, text, fromObj, msgType);
-    public void AtMsgSend(string? text, GameObject? toObj, string? msgType) => Hookable("at_msg_send", () => 0, text, toObj, msgType);
+    public bool AtMsgReceive(string? text, GameObject? fromObj, string? msgType) => Hookable(HookNames.AtMsgReceive, () => true, text, fromObj, msgType);
+    public void AtMsgSend(string? text, GameObject? toObj, string? msgType) => Hookable(HookNames.AtMsgSend, () => 0, text, toObj, msgType);
 
     public virtual void AtSay(string text, bool msgSelf = true)
     {
-        Hookable("at_say", () =>
+        Hookable(HookNames.AtSay, () =>
         {
             AtSayFull(text, msgSelf);
             return 0;
@@ -79,14 +78,13 @@ public partial class GameObject
     }
 
     /// <summary>
-    /// Full port of <c>base_obj.py:1976-2115 at_say</c>: say/whisper modes,
     /// per-receiver mapping, location exclude of self+receivers, msg_type
     /// forwarding. The `(text, msgSelf)` override above is the
     /// backwards-compatible entry point (existing overrides keep working).
     /// </summary>
     public virtual void AtSayFull(string message, object? msgSelf = null, string? msgLocation = null, IEnumerable<GameObject>? receivers = null, string? msgReceivers = null, string? msgType = null, bool whisper = false, IDictionary<string, object?>? mapping = null)
     {
-        Hookable("at_say", () =>
+        Hookable(HookNames.AtSay, () =>
         {
             var recvList = receivers?.ToList();
             if (recvList is not null && recvList.Count == 0) recvList = null;
@@ -173,7 +171,6 @@ public partial class GameObject
         try { _msgLog.Clear(); }
         finally { _lock.ExitWriteLock(); }
     }
-    // Port of base_obj.py:1428-1437 get_display_name.
     public virtual string GetDisplayName(GameObject? looker)
     {
         if (looker is null) return Name;
@@ -188,7 +185,6 @@ public partial class GameObject
     }
 
     /// <summary>
-    /// Port of <c>atheriz/objects/base_obj.py:908</c> <c>for_contents</c>.
     /// Runs <paramref name="func"/> on every object contained within this one.
     /// </summary>
     public void ForContents(Action<GameObject> func, IEnumerable<GameObject>? exclude = null, Func<int, GameObject?>? resolver = null)
@@ -227,7 +223,6 @@ public partial class GameObject
     }
 
     /// <summary>
-    /// Port of <c>atheriz/objects/base_obj.py:934</c> <c>msg_contents</c>.
     /// Emits <paramref name="text"/> to all objects inside this, handling both actor-stance
     /// <c>$You/$you/$conj/$pron</c> via <see cref="FuncParser"/> and director <c>{key}</c> via
     /// <see cref="FuncParserHelpers.SafeFormatMap"/>.

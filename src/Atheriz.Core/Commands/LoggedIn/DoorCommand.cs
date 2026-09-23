@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/door.py:482
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -118,7 +117,6 @@ public sealed class DoorCommand : Command
             ReplaceNodeWithDoor(nh, doorCoord, go, loc);
             string oppLong = def.oppLong;
             string oppShort = def.oppShort;
-            // Port of door.py: to_node link handling (verbatim messages)
             var toLinks = toNode.GetLinks();
             bool needDestLink = true;
             foreach (var l in toLinks)

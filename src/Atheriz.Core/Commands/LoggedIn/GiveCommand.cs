@@ -1,4 +1,3 @@
-// Port of atheriz/commands/loggedin/give.py:189
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -59,7 +58,7 @@ public sealed class GiveCommand : Command
                     if (LocSearch(candTgt).Count > 0) { foundObj = candObj; foundTgt = candTgt; break; }
                     continue;
                 }
-                // Port of give.py:63 — caller.search is inventory-only.
+// caller.search is inventory-only.
                 if (InvSearch(candObj).Count > 0)
                 {
                     if (LocSearch(candTgt).Count > 0) { foundObj = candObj; foundTgt = candTgt; break; }
@@ -99,7 +98,7 @@ public sealed class GiveCommand : Command
         if (objName.Equals("all", StringComparison.OrdinalIgnoreCase)) objsToGive = ObjectRegistry.Get(inv);
         else
         {
-            // Port of give.py:162 — caller.search is inventory-only: room
+// caller.search is inventory-only: room
             // ground (or global #id) matches are NOT givable .
             // "You don't have that." is the verbatim refusal.
             objsToGive = InvSearch(objName);
@@ -115,7 +114,7 @@ public sealed class GiveCommand : Command
             // An item that IS the target cannot be moved into itself: report it
             // like the veto/move-fail paths instead of skipping silently.
             if (obj.Id == target.Id) { go.Msg($"You can't give {obj.Name} to itself."); continue; }
-            // Port of give.py:172-177 — a veto reports, then skips the item.
+// a veto reports, then skips the item.
             if (!obj.AtPreGive(go, target)) { go.Msg($"You can't give {obj.GetDisplayName(go)} to {target.GetDisplayName(go)}."); continue; }
             if (obj.MoveTo(target))
             {

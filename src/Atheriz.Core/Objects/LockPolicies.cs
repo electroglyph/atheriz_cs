@@ -2,7 +2,6 @@ namespace Atheriz.Core.Objects;
 
 /// <summary>
 /// Declarative lock-policy names persisted in save data (F004).
-/// Port of the Python lock-string convention (<c>obj.locks.add("view: ...")</c>): a lock is
 /// persisted as <c>name: policy|policy</c> and rebuilt on load via <see cref="TryResolve"/>,
 /// so loading save data never executes code derived from the save file itself.
 /// The <c>"custom"</c> policy marks predicates that cannot survive a round-trip
@@ -15,6 +14,40 @@ public static class LockPolicies
     public const string NotSelf = "not-self";
     public const string PuppetOwner = "puppet-owner";
     public const string Custom = "custom";
+
+    // Typed policy names for authoring sites: AddLock and TryResolve take the
+    // enum and map through Name, so a misspelled policy is a compile error.
+    // Persistence still stores the plain names above (Name maps 1:1), and the
+    // string overloads stay for save-load rebuilds and external game code.
+    public enum LockPolicy
+    {
+        Builder,
+        PcView,
+        NotSelf,
+        PuppetOwner,
+        Custom,
+    }
+
+    public static string Name(LockPolicy policy) => policy switch
+    {
+        LockPolicy.Builder => Builder,
+        LockPolicy.PcView => PcView,
+        LockPolicy.NotSelf => NotSelf,
+        LockPolicy.PuppetOwner => PuppetOwner,
+        _ => Custom,
+    };
+
+    public static bool TryParseName(string? raw, out LockPolicy policy)
+    {
+        var t = raw?.Trim();
+        if (string.Equals(t, Builder, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.Builder; return true; }
+        if (string.Equals(t, PcView, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.PcView; return true; }
+        if (string.Equals(t, NotSelf, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.NotSelf; return true; }
+        if (string.Equals(t, PuppetOwner, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.PuppetOwner; return true; }
+        if (string.Equals(t, Custom, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.Custom; return true; }
+        policy = LockPolicy.Custom;
+        return false;
+    }
 
     // Shared target-independent leaf for the Builder arms of both overloads:
     // both read only lock-guarded accessing.IsBuilder. Do NOT fold the 1-arg
@@ -36,6 +69,9 @@ public static class LockPolicies
         predicate = _ => false;
         return false;
     }
+
+    public static bool TryResolve(LockPolicy policy, out Func<GameObject, bool> predicate)
+        => TryResolve(Name(policy), out predicate);
     /// <summary>
     /// Resolves a persisted policy name to a predicate bound to <paramref name="target"/>.
     /// Returns false for unknown policies (caller must log loudly and skip).
@@ -48,7 +84,7 @@ public static class LockPolicies
                 predicate = IsBuilder;
                 return true;
             case PcView:
-                // Port of base_obj.py:164 — tests only the *target's* connection.
+// tests only the *target's* connection.
                 // Builders and above keep sight of offline PCs (room lists,
                 // search, examine); regular players fail view and never see them.
                 predicate = accessing => !target.IsPc || target.IsConnected || accessing.IsBuilder;
@@ -57,7 +93,7 @@ public static class LockPolicies
                 predicate = accessing => accessing.Id != target.Id;
                 return true;
             case PuppetOwner:
-                // Port of base_obj.py:185-193 puppet lock (typed; the old `as dynamic` fallback is gone — F001)
+// F001)
                 predicate = accessing =>
                 {
                     if (target.IsNpc) return true;
@@ -71,4 +107,7 @@ public static class LockPolicies
                 return false;
         }
     }
+
+    public static bool TryResolve(LockPolicy policy, GameObject target, out Func<GameObject, bool> predicate)
+        => TryResolve(Name(policy), target, out predicate);
 }

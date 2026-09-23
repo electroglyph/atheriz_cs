@@ -1,4 +1,4 @@
-// Port of atheriz/commands/loggedin/maze.py:17 — maze generation with legend and threadpool pathfind
+// maze generation with legend and threadpool pathfind
 using Atheriz.Core.Concurrency;
 
 namespace Atheriz.Core.Commands.LoggedIn;

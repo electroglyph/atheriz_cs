@@ -1,4 +1,3 @@
-// Port of atheriz/commands/unloggedin/guest.py:134
 using Atheriz.Core.Network;
 
 namespace Atheriz.Core.Commands.UnloggedIn;

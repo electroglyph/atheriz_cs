@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 namespace Atheriz.Core.Globals;
 
 /// <summary>
-/// Faithful port of <c>atheriz/globals/time.py:GameTime</c>.
 /// Keeps public fields, locks, IsDirty/Save/Load semantics, tick logic, SunUp,
 /// alarms with ? wildcard. Persistence via EF Core JSON in gametime id 0 (GameTimeRow).
 /// Replaces dill blobs with JSON.
@@ -499,7 +498,6 @@ public class GameTime
                     // ingress; a null payload stays null.
                     var capturedData = entry.Data?.ToDictionary(kv => kv.Key, kv => kv.Value.Clone());
                     var capturedAfter = after;
-                    // Direct virtual dispatch (single-lookup target, port of getattr(objs[0], "at_alarm")):
                     // every GameObject exposes AtAlarm, so no reflection is needed.
                     Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, LogScope); } };
                     if (!pool.AddTask(act, $"alarm:{entry.CallerId}"))
@@ -583,7 +581,6 @@ public class GameTime
 
         double tickDurationSeconds = _settings.TickMinutes * _settings.SecondsPerMinute;
         double totalSeconds = current * tickDurationSeconds;
-        // Port of time.py:390 // floor division: truncation differs for
         // negative ticks (C# (long)(a/b) rounds toward zero).
         long totalDays = (long)Math.Floor(totalSeconds / _settings.SecondsPerDay);
 
@@ -698,7 +695,6 @@ public class GameTime
         string lastWord = "ago";
         if (ticks < 0) { lastWord = "in the future"; ticks = -ticks; }
 
-        // Port of time.py Fraction(str(TICK_MINUTES)): unit math must be
         // EXACT, not double — a fractional TickMinutes like 0.1 makes
         // MinutesPerHour/TickMinutes non-representable in binary (60/0.1 =
         // 599.999...), silently shifting every (int) truncation by one.
