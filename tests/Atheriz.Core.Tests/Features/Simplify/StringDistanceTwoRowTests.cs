@@ -19,10 +19,33 @@ public class StringDistanceTwoRowTests
     }
 
     [Fact]
-    public void Levenshtein_OversizedInput_ReturnsCappedBound()
+    public void Levenshtein_OversizedInput_ComparesTruncatedPrefix()
     {
+        // Over-length inputs compare on their capped prefixes: the old
+        // content-blind constant returned Max(length) for every over-length
+        // pair, collapsing them all to the same value.
         var big = new string('x', StringDistance.MaxInputLength + 1);
-        Assert.Equal(big.Length, StringDistance.Levenshtein(big, "y"));
+        Assert.Equal(StringDistance.MaxInputLength, StringDistance.Levenshtein(big, "y"));
+    }
+
+    [Fact]
+    public void Levenshtein_OversizedInput_StillOrdersByContent()
+    {
+        // Equal-length over-cap inputs all collapsed to the same constant,
+        // so ordering (and BestMatch) degraded to first-candidate-wins.
+        var query = "abcdef" + new string('q', 1100);
+        var near = "abcdef" + new string('q', 1100);
+        var far = new string('f', query.Length);
+        Assert.True(StringDistance.Levenshtein(query, near) < StringDistance.Levenshtein(query, far));
+    }
+
+    [Fact]
+    public void BestMatch_OversizedInput_PicksClosestContent()
+    {
+        var query = "abcdef" + new string('q', 1100);
+        var near = "abcdef" + new string('q', 1100);
+        var far = new string('f', query.Length);
+        Assert.Equal(near, StringDistance.BestMatch(query, new[] { far, near }));
     }
 
     [Fact]

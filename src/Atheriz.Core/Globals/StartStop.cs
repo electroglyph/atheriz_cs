@@ -5,6 +5,7 @@ using System.Diagnostics;
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Network;
 using Atheriz.Core.Persistence;
+using Atheriz.Core.Plugins;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Globals;
@@ -329,11 +330,21 @@ public static class StartStop
             catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Failed to re-register tick for {label} {go.Id}:\n{ex}"); }
         }
         // Port of startstop.py:94-102 for obj in filter_by(_is_tickable): ticker.add_coro(at_tick, _tick_seconds)
+        //
+        // Gather-then-register: the registry sweep used to register every
+        // tickable inline and the grid sweep re-registered tickable nodes
+        // with no dedupe (nodes are AddObject'd — NodeHandler.AddNode), so
+        // one tickable node got two delegates and ticked twice per interval.
+        // Grid nodes already gathered are skipped by instance (not snapshot
+        // equality), mirroring the PluginReloader twin; the shared delegate
+        // sweep runs first so repeat reloads evict stale delegates instead
+        // of stacking new ones.
+        List<(GameObject Go, string Label)> tickables = [];
         try
         {
             foreach (var obj in ObjectRegistry.FilterBy(o => o.IsTickable))
             {
-                RegisterTick(obj, "object");
+                tickables.Add((obj, "object"));
             }
         }
         catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Tick re-registration failed (objects):\n{ex}"); }
@@ -342,31 +353,39 @@ public static class StartStop
         try
         {
             var nh = TryGetNodeHandler();
-            if (nh is null) return;
-            List<NodeArea> areas;
-            // GetAreas snapshots under its own read lock; wrapping it in
-            // another read here only works via lock recursion.
-            areas = nh.GetAreas();
-            foreach (var area in areas)
+            if (nh is not null)
             {
-                List<NodeGrid> grids;
-                area.Lock.EnterReadLock();
-                try { grids = area.Grids.Values.ToList(); }
-                finally { area.Lock.ExitReadLock(); }
-                foreach (var grid in grids)
+                List<NodeArea> areas;
+                // GetAreas snapshots under its own read lock; wrapping it in
+                // another read here only works via lock recursion.
+                areas = nh.GetAreas();
+                foreach (var area in areas)
                 {
-                    List<Node> nodes;
-                    grid.Lock.EnterReadLock();
-                    try { nodes = grid.Nodes.Values.Where(n => n.IsTickable).ToList(); }
-                    finally { grid.Lock.ExitReadLock(); }
-                    foreach (var node in nodes)
+                    List<NodeGrid> grids;
+                    area.Lock.EnterReadLock();
+                    try { grids = area.Grids.Values.ToList(); }
+                    finally { area.Lock.ExitReadLock(); }
+                    foreach (var grid in grids)
                     {
-                        RegisterTick(node, "node");
+                        List<Node> nodes;
+                        grid.Lock.EnterReadLock();
+                        try { nodes = grid.Nodes.Values.Where(n => n.IsTickable).ToList(); }
+                        finally { grid.Lock.ExitReadLock(); }
+                        foreach (var node in nodes)
+                        {
+                            if (!tickables.Any(t => ReferenceEquals(t.Go, node))) tickables.Add((node, "node"));
+                        }
                     }
                 }
             }
         }
         catch (Exception ex) { Atheriz.Core.AtherizLogger.LogError($"Node tick re-registration failed:\n{ex}"); }
+
+        PluginReloader.RemoveTickDelegatesFor(ticker, tickables.Select(t => t.Go).ToList());
+        foreach (var (go, label) in tickables)
+        {
+            RegisterTick(go, label);
+        }
     }
 
     private static Action? TryGetAtTick(object obj)

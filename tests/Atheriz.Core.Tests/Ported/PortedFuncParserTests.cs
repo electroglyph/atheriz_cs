@@ -500,6 +500,15 @@ public class PortedFuncParserTests
         Assert.Equal("Your", p.Parse("$Your()", alice, alice, null)?.ToString());
         Assert.Equal("your", p.Parse("$your()", alice, alice, null)?.ToString());
     }
+    [Fact] public void YourCapitalizeOne()
+    {
+        using var env=GlobalTestEnv.Enter();
+        var alice=GameObject.Create("Alice");
+        var p=new FuncParser(FuncParser.ActorStanceCallables);
+        Assert.Equal("Your", p.Parse("$your(x,capitalize=1)", alice, alice, null)?.ToString());
+        Assert.Equal("Your", p.Parse("$your(x,capitalize=true)", alice, alice, null)?.ToString());
+        Assert.Equal("You", p.Parse("$you(x,capitalize=1)", alice, alice, null)?.ToString());
+    }
     [Fact] public void ConjugateWithMapping()
     {
         using var env=GlobalTestEnv.Enter();

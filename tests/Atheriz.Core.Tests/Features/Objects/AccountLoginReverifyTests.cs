@@ -25,9 +25,22 @@ public sealed class AccountLoginReverifyTests
                 try { ObjectRegistry.AddObject(acc); } catch { }
             }
             Assert.True(acc.Login(name, "reverifypass"));
-            var task = Task.Run(() => acc.Login(name, "reverifypass"));
+            // Real Thread: the rename must land mid-PBKDF2. A pooled wait may
+            // inline the login sequentially ahead of the rename, which would
+            // fail loud (true instead of false) on pool timing luck.
+            bool? second = null;
+            using var done = new ManualResetEventSlim(false);
+            var thread = new Thread(() =>
+            {
+                try { second = acc.Login(name, "reverifypass"); }
+                finally { done.Set(); }
+            })
+            { IsBackground = true };
+            thread.Start();
             acc.Name = name + "_renamed";
-            Assert.False(task.Result);
+            Assert.True(done.Wait(TimeSpan.FromSeconds(30)));
+            Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+            Assert.False(second ?? true);
             Assert.False(acc.LoggedIn);
         }
     }

@@ -131,8 +131,13 @@ public class MenuLoggerServerEventsTests
         using var env = GlobalTestEnv.Enter();
         var home = new Node(AtherizSettings.Global.DefaultHome);
         ObjectRegistry.AddObject(home);
-        var t1 = Task.Run(() => ServerEvents.AtCharCreate("acc1", "Hero", "password123"));
-        var t2 = Task.Run(() => ServerEvents.AtCharCreate("acc1", "Hero", "password123"));
+        // Start barrier: both creates must genuinely contend. A pooled wait
+        // may inline the delegates sequentially (second sees the first's Hero
+        // and loses without racing), which would pass without exercising the
+        // lock narrowing.
+        using var start = new Barrier(2);
+        var t1 = Task.Run(() => { start.SignalAndWait(); ServerEvents.AtCharCreate("acc1", "Hero", "password123"); });
+        var t2 = Task.Run(() => { start.SignalAndWait(); ServerEvents.AtCharCreate("acc1", "Hero", "password123"); });
         Assert.True(Task.WaitAll(new[] { t1, t2 }, 15000), "concurrent AtCharCreate hung");
         Assert.Single(ObjectRegistry.FilterBy(o => o.IsPc && o.Name == "Hero"));
     }

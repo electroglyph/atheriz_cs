@@ -69,4 +69,32 @@ public class SpamCommandTests
         }
         finally { AtherizSettings.Global.SavePath = origSave; }
     }
+
+    [Fact]
+    public void Spam_TakenCharacterName_SkipsPairWithoutDuplicating()
+    {
+        // A pre-existing PC holding char{idx} skips the whole pair instead
+        // of forking a duplicate PC name (permanent Multiple-matches
+        // ambiguity on search).
+        using var env = GlobalTestEnv.Enter();
+        var origSave = AtherizSettings.Global.SavePath;
+        var tmp = Path.Combine(env.TempPath, "spamd_anim");
+        Directory.CreateDirectory(tmp);
+        AtherizSettings.Global.SavePath = tmp;
+        try
+        {
+            var admin = GameObject.Create("root", privilege: Privilege.Admin);
+            ObjectRegistry.AddObject(admin);
+            var squatter = GameObject.Create("char1", "", isPc: true);
+            ObjectRegistry.AddObject(squatter);
+            var pa = new GameArgumentParser.ParsedArgs();
+            pa["count"] = 2;
+            new SpamCommand().Run(admin, pa);
+            var msgs = string.Join("\n", admin.PeekMessages());
+            Assert.Contains("Character 'char1' already exists, skipping...", msgs);
+            Assert.Single(ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals("char1", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("Created 1", msgs);
+        }
+        finally { AtherizSettings.Global.SavePath = origSave; }
+    }
 }

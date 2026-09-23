@@ -61,12 +61,25 @@ public class CorrectnessBatchDTests
         for (int attempt = 0; attempt < 3; attempt++)
         {
             acc.SetPassword("oldpassword1", FixedSalt);
-            var task = Task.Run(() => acc.Login("pinuser", "oldpassword1", FixedSalt));
+            // Real Thread: the rotation must land mid-PBKDF2. A pooled wait
+            // may inline the login sequentially ahead of the rotation, which
+            // would fail loud (true instead of false) on pool timing luck.
+            bool? loginOk = null;
+            using var done = new ManualResetEventSlim(false);
+            var thread = new Thread(() =>
+            {
+                try { loginOk = acc.Login("pinuser", "oldpassword1", FixedSalt); }
+                finally { done.Set(); }
+            })
+            { IsBackground = true };
+            thread.Start();
             // Let Login snapshot and enter PBKDF2 (~100ms) before rotating:
             // the snapshot (microseconds) is done, the write-back is not.
             Thread.Sleep(15);
             field!.SetValue(acc, newHash);
-            Assert.False(task.Result);
+            Assert.True(done.Wait(TimeSpan.FromSeconds(30)));
+            Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+            Assert.False(loginOk ?? true);
             Assert.False(acc.LoggedIn);
         }
         // The rotated password still logs in; the old one does not.

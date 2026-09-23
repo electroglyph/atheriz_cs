@@ -8,6 +8,9 @@ namespace Atheriz.Core.Tests.Features.Utils;
 
 // Behavior specifications for validation and parsing helpers: each test asserts
 // the behavior the code should have. Pure functions only — no engine globals touched.
+// Sequential (Ported): the TimeProvider seam tests below swap the global Default,
+// which the static clocks now honor — they must not overlap parallel clock readers.
+[Collection("Ported")]
 public sealed class ValidationTests
 {
     // --- CryptoRandom: unpredictable decimal, URL-safe, and hex token generation ---
@@ -178,6 +181,26 @@ public sealed class ValidationTests
         var b = TimeProvider.MonotonicSeconds();
         Assert.True(b >= a);
         Assert.Equal(a, TimeProvider.Now(), precision: 3);
+    }
+
+    [Fact]
+    public void TimeProvider_StaticClocks_RouteThroughDefaultSeam()
+    {
+        // The statics must honor a swapped Default: a dead seam means fake
+        // clocks drive nothing and every static reader stays on wall time.
+        var orig = TimeProvider.Default;
+        try
+        {
+            TimeProvider.Default = new FakeClock { T = 1234.5 };
+            Assert.Equal(1234.5, TimeProvider.MonotonicSeconds());
+            Assert.Equal(1234.5, TimeProvider.Now());
+            Assert.Equal(1234500L, TimeProvider.MonotonicMilliseconds());
+        }
+        finally
+        {
+            TimeProvider.Default = orig;
+        }
+        Assert.NotEqual(1234.5, TimeProvider.MonotonicSeconds());
     }
 
     // --- Validators: single account and character-name ruleset (port of validation.py),

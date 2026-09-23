@@ -291,9 +291,19 @@ public class GameTime
     {
         using (WriteScope())
         {
-            foreach (var list in _alarms.Values)
+            // Drop emptied (hour, minute) keys: Load skips empty buckets, so
+            // leaving them in memory skews save vs load and grows the map
+            // with arbitrary-string keys that re-save as [].
+            List<(string, string)>? emptied = null;
+            foreach (var kv in _alarms)
+            {
+                var list = kv.Value;
                 for (int i = list.Count - 1; i >= 0; i--)
                     if (list[i].CallerId == callerId) list.RemoveAt(i);
+                if (list.Count == 0) (emptied ??= []).Add(kv.Key);
+            }
+            if (emptied is not null)
+                foreach (var key in emptied) _alarms.Remove(key);
         }
     }
 
@@ -308,6 +318,7 @@ public class GameTime
                 int idx = -1;
                 for (int i = 0; i < list.Count; i++) if (list[i].CallerId == callerId) { idx = i; break; }
                 if (idx >= 0) list.RemoveAt(idx);
+                if (list.Count == 0) _alarms.Remove((hour, minute));
             }
         }
     }
@@ -329,6 +340,7 @@ public class GameTime
             {
                 for (int i = 0; i < list.Count; i++)
                     if (ReferenceEquals(list[i], entry)) { list.RemoveAt(i); break; }
+                if (list.Count == 0) _alarms.Remove((hour, minute));
             }
         }
     }
@@ -728,7 +740,8 @@ public class GameTime
         {
             if (formatted != "") formatted += ", ";
             double leftoverMinutes = (double)(dleftover * tickMinutes);
-            formatted += $"{leftoverMinutes:0} minutes";
+            string minsText = $"{leftoverMinutes:0}";
+            formatted += minsText == "1" ? "1 minute" : $"{minsText} minutes";
         }
         int comma = formatted.LastIndexOf(',');
         string desc;

@@ -129,13 +129,27 @@ public class PortedFlagsTests
     {
         var o = NewFlags();
         o.SyncRoot.EnterWriteLock();
-        var task = Task.Run(() => o.AddTag("x"));
+        // Real Thread (not Task.Run + blocking wait): the pool inlines an
+        // unstarted task onto the waiting pool thread, which would
+        // self-deadlock on the held write lock instead of blocking on it.
+        Exception? workerError = null;
+        using var done = new ManualResetEventSlim(false);
+        var thread = new Thread(() =>
+        {
+            try { o.AddTag("x"); }
+            catch (Exception ex) { workerError = ex; }
+            finally { done.Set(); }
+        })
+        { IsBackground = true };
+        thread.Start();
         try
         {
-            Assert.False(task.Wait(TimeSpan.FromMilliseconds(300)), "AddTag completed without acquiring the write lock");
+            Assert.False(done.Wait(TimeSpan.FromMilliseconds(300)), "AddTag completed without acquiring the write lock");
         }
         finally { o.SyncRoot.ExitWriteLock(); }
-        Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "AddTag did not finish after the lock was released");
+        Assert.True(done.Wait(TimeSpan.FromSeconds(10)), "AddTag did not finish after the lock was released");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.Null(workerError);
         Assert.Contains("x", o.TagsSnapshot);
     }
 }

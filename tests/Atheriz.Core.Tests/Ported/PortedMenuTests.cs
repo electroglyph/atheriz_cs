@@ -13,6 +13,8 @@ public class PortedMenuTests
     private static (string, List<Choice>) NStay(MenuContext c){ void Cb(MenuContext x)=>x.State["toggled"]=true; return("Toggle", new List<Choice>{ new("1","Toggle", null, null, Cb, null, true)}); }
     private static (string, List<Choice>) NEmpty(MenuContext c)=>("Dead end", new List<Choice>());
     private static (string, List<Choice>) NHello(MenuContext c)=>("Hello", new List<Choice>{ new("1","One", null)});
+    private static (string, List<Choice>) NAsyncCb(MenuContext c)=>("Async!", new List<Choice>{ new("1","Go", null, null, null, ctx => Task.CompletedTask)});
+    [Fact] public void EngineHandleInputAsyncCallbackThrows(){ var e=new MenuEngine("player",NAsyncCb); var ex=Assert.Throws<InvalidOperationException>(()=>e.HandleInput("1")); Assert.Contains("async handle_input", ex.Message); }
 
     [Fact] public void MenuContextDefaults(){ using var env=GlobalTestEnv.Enter(); var ctx=new MenuContext("player"); Assert.Equal("player",ctx.Caller); Assert.Empty(ctx.State); }
     [Fact] public void ChoiceDefaults(){ var c=new Choice("1","Option"); Assert.Equal("1",c.Key); Assert.Null(c.GotoSync); }

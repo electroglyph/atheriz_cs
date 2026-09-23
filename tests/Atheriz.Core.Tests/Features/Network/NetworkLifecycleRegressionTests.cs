@@ -94,7 +94,9 @@ public class NetworkLifecycleRegressionTests
         var writer = new GateWriter();
         writer.Gate.Reset();
         var conn = new TelnetConnection(new object(), writer) { ClientHost = "10.13.37.1" };
-        Task? disposeTask = null;
+        ManualResetEventSlim? disposeDone = null;
+        Thread? disposeThread = null;
+        Exception? disposeError = null;
         try
         {
             // Send from a worker thread so the write is scheduled, not inline.
@@ -103,16 +105,28 @@ public class NetworkLifecycleRegressionTests
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
             Assert.True(SpinWait.SpinUntil(() => (int)inflight.GetValue(conn)! == 1, 5000),
                 "off-loop write must go inflight (blocked on the gate)");
-            disposeTask = Task.Run(() => conn.Dispose());
-            Assert.False(disposeTask.Wait(TimeSpan.FromMilliseconds(150)),
+            // Real Thread for Dispose: a pooled wait may inline it onto the
+            // waiting pool thread, collapsing the must-wait verdict.
+            disposeDone = new ManualResetEventSlim(false);
+            disposeThread = new Thread(() =>
+            {
+                try { conn.Dispose(); }
+                catch (Exception ex) { disposeError = ex; }
+                finally { disposeDone.Set(); }
+            })
+            { IsBackground = true };
+            disposeThread.Start();
+            Assert.False(disposeDone.Wait(TimeSpan.FromMilliseconds(150)),
                 "Dispose must wait for inflight writes instead of tearing down");
             writer.Gate.Set();
-            Assert.True(disposeTask.Wait(TimeSpan.FromSeconds(5)), "Dispose must finish after the write drains");
+            Assert.True(disposeDone.Wait(TimeSpan.FromSeconds(5)), "Dispose must finish after the write drains");
+            Assert.True(disposeThread.Join(TimeSpan.FromSeconds(5)));
+            Assert.Null(disposeError);
             Assert.True(sendTask.Wait(TimeSpan.FromSeconds(5)));
             lock (writer.Writes) Assert.Single(writer.Writes);
             Assert.Equal("drain-me", writer.Writes[0]);
         }
-        finally { writer.Gate.Set(); disposeTask?.Wait(TimeSpan.FromSeconds(5)); }
+        finally { writer.Gate.Set(); disposeDone?.Wait(TimeSpan.FromSeconds(5)); }
     }
 
     [Fact]

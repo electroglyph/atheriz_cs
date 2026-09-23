@@ -51,13 +51,20 @@ public class PortedDatabaseTests
     [Fact] public void DatabaseCheckSameThreadFalse()
     {
         using var env=GlobalTestEnv.Enter(nameof(DatabaseCheckSameThreadFalse));
-        var t=System.Threading.Tasks.Task.Run(()=>{
+        // Real Thread: the verdict IS thread separation (a pooled wait may
+        // inline the delegate onto the waiting thread).
+        Exception? workerError = null;
+        var thread = new System.Threading.Thread(() => {
+            try {
             using var db=new AtherizDbContext(env.TempPath);
             db.Database.EnsureCreated();
             var cnt=db.Objects.Count();
             Assert.True(cnt>=0);
-        });
-        t.Wait();
+            } catch (Exception ex) { workerError = ex; }
+        }) { IsBackground = true };
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+        Assert.Null(workerError);
     }
     [Fact] public void DatabaseCloseClearsSingleton()
     {
@@ -228,16 +235,28 @@ public class PortedDatabaseTests
     {
         // GetSaveOps serializes under the object's write lock — proven behaviorally:
         // a worker GetSaveOps blocks while this thread holds SyncRoot for write.
+        // Real Thread (not Task.Run + blocking wait): the pool inlines an
+        // unstarted task onto the waiting pool thread, which would
+        // self-deadlock on the held write lock instead of blocking on it.
         var obj = new DbHolder(); obj.Id = 1;
         obj.SyncRoot.EnterWriteLock();
         (string Sql, object[] Params)? result = null;
-        var task = Task.Run(() => { result = obj.GetSaveOps(); });
+        Exception? workerError = null;
+        using var done = new ManualResetEventSlim(false);
+        var thread = new System.Threading.Thread(() => {
+            try { result = obj.GetSaveOps(); }
+            catch (Exception ex) { workerError = ex; }
+            finally { done.Set(); }
+        }) { IsBackground = true };
+        thread.Start();
         try
         {
-            Assert.False(task.Wait(TimeSpan.FromMilliseconds(300)), "GetSaveOps completed without acquiring the write lock");
+            Assert.False(done.Wait(TimeSpan.FromMilliseconds(300)), "GetSaveOps completed without acquiring the write lock");
         }
         finally { obj.SyncRoot.ExitWriteLock(); }
-        Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "GetSaveOps did not finish after the lock was released");
+        Assert.True(done.Wait(TimeSpan.FromSeconds(10)), "GetSaveOps did not finish after the lock was released");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.Null(workerError);
         Assert.NotNull(result);
     }
     [Fact] public void FlagStaysDirtyAcrossRepeatedSaveOps()

@@ -44,6 +44,10 @@ public class PoolBoundTests
             // impls reach this. Slots must read busy while bodies are parked.
             Assert.True(twoStarted.Wait(TimeSpan.FromSeconds(30)), "not all async bodies started; pool dropped work");
             Assert.True(pool.Busy >= 2, "async bodies freed their slots; bound covers sync prefix only");
+            // Non-vacuity: both bodies must have overlapped (each parks in
+            // release.Wait until main sets it, so peak >= 2 is structural —
+            // without it the bound verdict below would prove nothing).
+            Assert.True(Volatile.Read(ref peak) >= 2, "bodies never overlapped; peak bound verdict would be vacuous");
             release.Set();
             Assert.True(finished.Wait(TimeSpan.FromSeconds(30)), "gated bodies did not finish after release");
             Assert.True(Volatile.Read(ref peak) <= pool.MaxThreads,

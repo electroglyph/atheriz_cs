@@ -85,14 +85,17 @@ public sealed class UtilsBatchRegressionTests
     }
 
     [Fact]
-    public void Levenshtein_OversizedInput_ReturnsCappedBoundWithoutTable()
+    public void Levenshtein_OversizedInput_ComparesCappedPrefixesWithoutTable()
     {
+        // Over-length inputs compare on their capped prefixes (not the old
+        // content-blind constant, which collapsed every over-length pair to
+        // the same value): the table stays bounded and fast.
         var a = new string('x', 2000);
         var b = new string('y', 2000);
         var sw = Stopwatch.StartNew();
         int d = StringDistance.Levenshtein(a, b);
         sw.Stop();
-        Assert.Equal(2000, d);
+        Assert.Equal(StringDistance.MaxInputLength, d);
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), $"took {sw.Elapsed}");
     }
 

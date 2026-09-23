@@ -61,6 +61,20 @@ public class PortedAutosaveTests
     }
 
     [Fact]
+    public void Reset_RemovesExplicitTickerRegistration()
+    {
+        Reset();
+        var s = new AtherizSettings{AutosaveMinutes=5};
+        var ticker = new AsyncTicker(new AsyncThreadPool(maxThreads:2, queueLimit:100));
+        Autosave.StartAutosave(ticker, s);
+        Assert.True(ticker.Slots.ContainsKey(300));
+        Autosave.Reset();
+        Assert.False(Autosave.AutosaveStarted);
+        Assert.DoesNotContain(ticker.Slots.SelectMany(kv=>kv.Value.Coros).ToList(), d=>d.Method.Name.Contains("AutosaveTick"));
+        ticker.Clear();
+    }
+
+    [Fact]
     public void NoDoubleStart()
     {
         Reset();

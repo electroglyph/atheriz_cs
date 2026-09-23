@@ -597,8 +597,12 @@ public class PortedChannelTests
         var cmd = chan.GetCommand();
         Assert.NotNull(cmd);
         Assert.Equal(chan.Id, ((Atheriz.Core.Commands.BaseChannelCommand)cmd!).Id);
+        // Start barrier: all 8 must genuinely overlap the renames. Sequential
+        // inlining would snapshot uncontended state and prove nothing.
+        using var start = new Barrier(8);
         var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
         {
+            start.SignalAndWait();
             for (int j = 0; j < 50; j++)
             {
                 chan.Name = "o3chan" + (j % 4);

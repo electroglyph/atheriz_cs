@@ -24,6 +24,21 @@ public class StringHelperCacheTests
         Assert.Equal("a\nb", GameUtils.CompressWhitespace("a\n\n\nb", maxLinebreaks: 1));
     }
 
+    // Defaults preserve a single blank line, and larger caps reach the
+    // parameterized pass: the old \s* pre-pass capped every run at 2 breaks
+    // first (maxLinebreaks >= 3 was dead) and the old default erased blanks.
+    [Fact]
+    public void CompressWhitespace_Default_PreservesSingleBlankLine()
+    {
+        Assert.Equal("a\n\nb", GameUtils.CompressWhitespace("a\n\nb"));
+    }
+
+    [Fact]
+    public void CompressWhitespace_MaxLinebreaks3_PreservesThreeBreaks()
+    {
+        Assert.Equal("a\n\n\nb", GameUtils.CompressWhitespace("a\n\n\n\n\nb", maxLinebreaks: 3));
+    }
+
     [Fact]
     public void IterToString_SinglePass_MatchesJoinTruncation()
     {

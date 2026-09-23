@@ -64,8 +64,12 @@ public sealed class RaceFixRegressionTests
             var peer = GameObject.Create("racepeer" + i, isPc: true);
             try { ObjectRegistry.AddObject(ch); } catch { }
             try { ObjectRegistry.AddObject(peer); } catch { }
-            var tA = Task.Run(() => peer.Subscribe(ch));
-            var tB = Task.Run(() => ch.Delete());
+            // Start barrier: the orphan window only opens under genuine
+            // overlap. A pooled wait may inline the delegates sequentially,
+            // which would pass all 3000 iterations without racing.
+            using var start = new Barrier(2);
+            var tA = Task.Run(() => { start.SignalAndWait(); peer.Subscribe(ch); });
+            var tB = Task.Run(() => { start.SignalAndWait(); ch.Delete(); });
             Assert.True(Task.WaitAll([tA, tB], TimeSpan.FromSeconds(30)));
             bool subscribed = peer.ChannelsSnapshot.Contains(ch.Id);
             bool hasCmd = peer.InternalCmdSet?.GetAll().Any(c => c.Key == "racechan" + i) == true;
@@ -113,8 +117,12 @@ public sealed class RaceFixRegressionTests
         var cmd = new SlowSetupCommand();
         var parser = cmd.Parser!;
         int ok = 0;
+        // Start barrier: all 8 must genuinely overlap for the sharing to
+        // mean anything. Sequential inlining would pass without contention.
+        using var start = new Barrier(8);
         var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
         {
+            start.SignalAndWait();
             for (int i = 0; i < 5000; i++) parser.ParseArgs(["x"]);
             Interlocked.Increment(ref ok);
         })).ToArray();

@@ -65,7 +65,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // Per-connection input pipeline (issue #31) — connection.py:34-40
     private readonly Queue<(Delegate Handler, List<object?> Args, Dictionary<string, object?> Kwargs)> _inputQueue = new();
     private bool _inputRunning; // port of connection.py:38
-    private double _lastInputBusy; // port of connection.py:39
+    private double _lastInputBusy = double.NegativeInfinity; // port of connection.py:39 ("never", like AsyncThreadPool._lastFullLogSeconds — 0.0 is a real timestamp, not "never")
     private bool _disconnected; // port of connection.py:40
     public string ClientHost { get; set; } = "?"; // set by subclasses; mirrors Python's client_host fallback "?"
     /// <summary>UTC creation time; drives the orphan-sweep for never-logged-in sockets.</summary>

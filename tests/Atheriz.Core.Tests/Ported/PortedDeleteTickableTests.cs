@@ -76,8 +76,13 @@ public class PortedDeleteTickableTests
         var ticker = GlobalServices.GetAsyncTicker();
         var node = new Node(new Coord("test_tickswap", 0, 0, 0));
         node.IsTickable = true;
+        // Start barrier: all 32 swaps must genuinely race. Sequential
+        // inlining would reduce this to last-writer-wins and never open the
+        // stale-interval window.
+        using var start = new Barrier(32);
         var tasks = Enumerable.Range(0, 32).Select(i => Task.Run(() =>
         {
+            start.SignalAndWait();
             node.TickSeconds = (i % 2 == 0) ? 2.0 : 3.0;
         })).ToArray();
         Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));

@@ -92,4 +92,53 @@ public class GroupCommandTests
         }
         finally { NodeHandler.SetCurrent(null); }
     }
+
+    [Fact]
+    public void GroupAdd_TargetAlreadyGrouped_RefusesWithoutDualMembership()
+    {
+        // Single-membership model: adding a target that already holds a
+        // group channel refuses instead of silently subscribing them to a
+        // second group's traffic (leave/list would only see the new group).
+        using var env = GlobalTestEnv.Enter();
+        var nh = new NodeHandler(autoLoad: false);
+        NodeHandler.SetCurrent(nh);
+        try
+        {
+            var room = new Node(new Coord("o5room", 0, 0, 0));
+            ObjectRegistry.AddObject(room);
+            var alice = GameObject.Create("alice", isPc: true);
+            var carol = GameObject.Create("carol", isPc: true);
+            var bob = GameObject.Create("bob", isPc: true);
+            ObjectRegistry.AddObject(alice);
+            ObjectRegistry.AddObject(carol);
+            ObjectRegistry.AddObject(bob);
+            // Group targets are online PCs: default PcView hides
+            // disconnected characters from room search.
+            bob.IsConnected = true;
+            Assert.True(alice.MoveTo(room));
+            Assert.True(carol.MoveTo(room));
+            Assert.True(bob.MoveTo(room));
+            alice.AddFollower(bob.Id);
+            carol.AddFollower(bob.Id);
+
+            var add = CommandDispatcher.DispatchLoggedIn(alice, "group add bob", immediate: true);
+            Assert.NotNull(add);
+            add!.Func(add.Caller, add.Args);
+            Assert.NotNull(alice.GroupChannel);
+            int aliceCh = alice.GroupChannel!.Value;
+
+            carol.ClearMessages();
+            var steal = CommandDispatcher.DispatchLoggedIn(carol, "group add bob", immediate: true);
+            Assert.NotNull(steal);
+            steal!.Func(steal.Caller, steal.Args);
+
+            Assert.Contains("already in a group", string.Join("\n", carol.PeekMessages()));
+            Assert.Equal(aliceCh, bob.GroupChannel);
+            Assert.Null(carol.GroupChannel);
+            var ch = ObjectRegistry.GetSingle(aliceCh) as Channel;
+            Assert.NotNull(ch);
+            Assert.Contains(bob.Id, ch!.Listeners);
+        }
+        finally { NodeHandler.SetCurrent(null); }
+    }
 }

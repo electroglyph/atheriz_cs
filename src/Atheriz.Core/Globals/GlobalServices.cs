@@ -276,6 +276,11 @@ public static class GlobalServices
         _singletonLock.EnterWriteLock();
         try { _mapHandler = mh; }
         finally { _singletonLock.ExitWriteLock(); }
+        // Publish the twin slot too: MapHandlerSingleton.Get caches the first
+        // GlobalServices lookup forever, so setting only this slot forks the
+        // two singletons (door paint/cleanup and move stamps would read the
+        // stale world). Mirrors SetNodeHandler above.
+        MapHandlerSingleton.Set(mh);
     }
 
     // Expose lock for StartStop faithful clearing (mirrors get_singleton._SINGLETON_LOCK)

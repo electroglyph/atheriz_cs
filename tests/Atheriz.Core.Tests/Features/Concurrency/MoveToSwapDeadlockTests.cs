@@ -34,8 +34,12 @@ public sealed class MoveToSwapDeadlockTests
             var objB = PortedHelpers.MakeCaller("swapb");
             Assert.True(objA.MoveTo(nodeA, force: true));
             Assert.True(objB.MoveTo(nodeB, force: true));
-            var t1 = Task.Run(() => objA.MoveTo(nodeB, force: true));
-            var t2 = Task.Run(() => objB.MoveTo(nodeA, force: true));
+            // Start barrier: both moves must genuinely overlap. A pooled wait
+            // may inline the delegates sequentially, which would complete
+            // without ever opening the ABBA window this test exists to close.
+            using var start = new Barrier(2);
+            var t1 = Task.Run(() => { start.SignalAndWait(); return objA.MoveTo(nodeB, force: true); });
+            var t2 = Task.Run(() => { start.SignalAndWait(); return objB.MoveTo(nodeA, force: true); });
             Assert.True(Task.WaitAll([t1, t2], 15000));
             Assert.True(t1.Result);
             Assert.True(t2.Result);

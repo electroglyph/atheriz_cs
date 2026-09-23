@@ -15,8 +15,11 @@ public static class GameUtils
         @"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[^[A-Za-z0-9]|\x00",
         RegexOptions.Compiled);
 
-    // Port of utils.py:431 re_empty = re.compile("\n\\s*\n")
-    private static readonly Regex ReEmpty = new(@"\n\s*\n", RegexOptions.Compiled);
+    // Port of utils.py:431 re_empty — narrowed to horizontal whitespace:
+    // \s* also ate newlines, collapsing every 3+-break run to exactly \n\n
+    // before the parameterized pass ran (maxLinebreaks >= 3 was dead), so a
+    // blank gap here is one break pair at most and never spans a run.
+    private static readonly Regex ReEmpty = new(@"\n[ \t]*\n", RegexOptions.Compiled);
     private const string Punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 
     // --- ansi ---
@@ -332,7 +335,9 @@ public static class GameUtils
             (new Regex($@"(?<=\S) {{{key.MaxSpacing},}}", RegexOptions.Compiled),
              new Regex($@"\n{{{key.MaxLinebreaks},}}", RegexOptions.Compiled)));
 
-    public static string CompressWhitespace(string text, int maxLinebreaks = 1, int maxSpacing = 2)
+    // Default maxLinebreaks preserves a single blank line: 1 erased every
+    // blank gap by default, so callers passing no args lost paragraph breaks.
+    public static string CompressWhitespace(string text, int maxLinebreaks = 2, int maxSpacing = 2)
     {
         if (text is null) return "";
         text = text.TrimEnd();

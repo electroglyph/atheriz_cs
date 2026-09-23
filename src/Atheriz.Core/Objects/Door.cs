@@ -257,8 +257,9 @@ public class Door
         }
         if (status == "already_open")
         {
-            fromNode?.MsgContents($"$You(target) $conj(open) the already open door just to be sure.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
-            toNode?.MsgContents($"$You(target) $conj(open) the already open door just to be sure.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
+            // Loc-only like already_closed: the idempotent open is no news on
+            // the far side (every other idempotent path is loc-only too).
+            loc?.MsgContents($"$You(target) $conj(open) the already open door just to be sure.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return true;
         }
         if (status == "locked")

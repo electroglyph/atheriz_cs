@@ -20,9 +20,23 @@ public class WriteGateAsyncTests
     [Fact]
     public async Task EnterAsync_ForkedFlowWhileHeld_Refuses()
     {
+        // Real Thread (not Task.Run): the pool may run a queued delegate on
+        // the just-freed awaiting thread, which would carry the live claim
+        // token on the holder thread and nest instead of refusing.
         using var outer = await DbWriteGate.EnterAsync();
-        var ex = await Record.ExceptionAsync(() => Task.Run(() => DbWriteGate.EnterAsync()));
-        Assert.IsType<InvalidOperationException>(ex);
+        Exception? forkError = null;
+        var done = new ManualResetEventSlim(false);
+        var thread = new Thread(() =>
+        {
+            try { using var _ = DbWriteGate.EnterAsync().GetAwaiter().GetResult(); }
+            catch (Exception ex) { forkError = ex; }
+            finally { done.Set(); }
+        })
+        { IsBackground = true };
+        thread.Start();
+        Assert.True(done.Wait(TimeSpan.FromSeconds(30)), "fork thread did not finish; possible deadlock");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+        Assert.IsType<InvalidOperationException>(forkError);
     }
 
     [Fact]

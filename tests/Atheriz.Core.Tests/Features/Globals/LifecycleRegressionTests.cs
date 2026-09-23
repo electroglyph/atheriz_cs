@@ -98,8 +98,9 @@ public class LifecycleRegressionTests
         gt.AddAlarm("?", "?", 987654321, repeat: true);
         Assert.Single(gt.SnapshotAlarms()[("?", "?")]);
         gt.OnTick();
-        // Entry pruned (the key row stays, as in Python's remove_alarm —
-        // only the dead caller entry is gone).
-        Assert.Empty(gt.SnapshotAlarms()[("?", "?")]);
+        // Entry pruned and the emptied key row dropped (matching Load, which
+        // skips empty buckets) — only the dead caller entry is gone, and no
+        // empty key lingers.
+        Assert.False(gt.SnapshotAlarms().ContainsKey(("?", "?")));
     }
 }

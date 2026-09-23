@@ -54,6 +54,35 @@ public class ObjectMoveAccountScriptTests
         Assert.Single(m.GetParameters());
     }
 
+    // SetMapHandler publishes the singleton twin like SetNodeHandler does:
+    // door paint/cleanup and move stamps read through MapHandlerSingleton.Get,
+    // so they must see the same world GlobalServices readers see.
+    [Fact]
+    public void SetMapHandler_PublishesMapHandlerSingleton()
+    {
+        var t = typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton");
+        Assert.NotNull(t);
+        var set = t.GetMethod("Set");
+        var get = t.GetMethod("Get");
+        Assert.NotNull(set);
+        Assert.NotNull(get);
+        var priorSingleton = get.Invoke(null, null);
+        var priorGlobal = GlobalServices.GetMapHandler();
+        try
+        {
+            var stale = new MapHandler(autoLoad: false);
+            set.Invoke(null, new object[] { stale }); // pin a stale world first
+            var fresh = new MapHandler(autoLoad: false);
+            GlobalServices.SetMapHandler(fresh);
+            Assert.Same(fresh, get.Invoke(null, null));
+        }
+        finally
+        {
+            if (priorGlobal is not null) GlobalServices.SetMapHandler(priorGlobal);
+            set.Invoke(null, new object?[] { priorSingleton });
+        }
+    }
+
     [Fact]
     public void AddExits_InstallsExitCommandsFromSnapshot()
     {

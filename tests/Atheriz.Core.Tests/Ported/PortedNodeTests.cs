@@ -498,8 +498,13 @@ public class PortedNodeTests
         grid.AddNode(node);
         var ex = Record.Exception(() =>
         {
+            // Start barrier: all 8 must genuinely churn together. Sequential
+            // inlining would serialize the link/grid mutation and prove nothing
+            // about enumeration safety.
+            using var start = new Barrier(8);
             var tasks = Enumerable.Range(0, 8).Select(i => Task.Run(() =>
             {
+                start.SignalAndWait();
                 for (int j = 0; j < 100; j++)
                 {
                     node.AddLink(new NodeLink($"l{i}_{j}", new Coord("racegrid",0,1,0)));
@@ -535,9 +540,14 @@ public class PortedNodeTests
         int writerDone = 0;
         var ex = Record.Exception(() =>
         {
-            var writer = Task.Run(() => { for (int i = 1; i <= 200; i++) { nh.RemoveArea(name); Seed(i); } Volatile.Write(ref writerDone, 1); });
+            // Start gate: writer and reader must genuinely overlap across the
+            // whole run. A pooled wait may inline the writer sequentially
+            // ahead of the reader, which would traverse only settled state.
+            using var start = new ManualResetEventSlim(false);
+            var writer = Task.Run(() => { start.Wait(TimeSpan.FromSeconds(30)); for (int i = 1; i <= 200; i++) { nh.RemoveArea(name); Seed(i); } Volatile.Write(ref writerDone, 1); });
             var reader = Task.Run(() =>
             {
+                start.Wait(TimeSpan.FromSeconds(30));
                 // Span the writer's whole run (bounded): nulls are legitimate
                 // (removal windows); any returned node must match coord.
                 for (int i = 0; i < 20000 || (Volatile.Read(ref writerDone) == 0 && i < 2000000); i++)
@@ -546,6 +556,7 @@ public class PortedNodeTests
                     if (n != null && !n.Coord.Equals(coord)) Interlocked.Increment(ref mismatched);
                 }
             });
+            start.Set();
             Assert.True(Task.WaitAll(new[] { writer, reader }, TimeSpan.FromSeconds(60)));
         });
         Assert.Null(ex);

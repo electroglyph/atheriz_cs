@@ -9,8 +9,8 @@ namespace Atheriz.Core.Tests.Features.Globals;
 
 // The shared tick-registration helper keeps both reload sweeps working: a
 // reload re-registers registry tickables and node-grid tickables on the tick
-// ticker (the node-grid loop runs in addition to the registry sweep, which
-// already sees nodes as GameObjects).
+// ticker exactly once each (a node lives in both — the grid sweep skips
+// nodes the registry sweep already gathered).
 [Collection("Ported")]
 public class TickReregistrationTests
 {
@@ -39,7 +39,9 @@ public class TickReregistrationTests
             var settings = new AtherizSettings { TimeSystemEnabled = false, AutosaveMinutes = 0 };
             StartStop.DoReload(settings, ticker);
             int total = ticker.Slots.Values.Sum(s => s.Coros.Count);
-            Assert.Equal(3, total);
+            // One registry object + one node (registry + grid membership
+            // registers a single delegate, not one per sweep).
+            Assert.Equal(2, total);
         }
         finally
         {

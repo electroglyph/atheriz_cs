@@ -34,8 +34,12 @@ public class BanAndThrottleTests
             for (int i = 0; i < 2500; i++)
             {
                 ObjectRegistry.BanIp(host, 999.0); // expired relative to t=1000
-                var check = Task.Run(() => ObjectRegistry.IsIpBanned(host, 1000.0));
-                var refresh = Task.Run(() => ObjectRegistry.BanIp(host, 1100.0));
+                // Start barrier: check and refresh must genuinely overlap —
+                // sequential inlining would never open the check-then-remove
+                // window this hammer exists to close.
+                using var start = new Barrier(2);
+                var check = Task.Run(() => { start.SignalAndWait(); return ObjectRegistry.IsIpBanned(host, 1000.0); });
+                var refresh = Task.Run(() => { start.SignalAndWait(); ObjectRegistry.BanIp(host, 1100.0); });
                 Task.WaitAll(check, refresh);
                 if (!ObjectRegistry.IsIpBanned(host, 1000.0)) lost++;
                 ObjectRegistry.UnbanIp(host);
@@ -58,8 +62,11 @@ public class BanAndThrottleTests
             for (int i = 0; i < 800; i++)
             {
                 ObjectRegistry.ApplyCreationCooldown("create", host, 900.0, 50.0); // exp 950 < 1000
-                var check = Task.Run(() => ObjectRegistry.CreationCooldownActive(host, 1000.0));
-                var refresh = Task.Run(() => ObjectRegistry.ApplyCreationCooldown("create", host, 1000.0, 100.0));
+                // Start barrier: same genuine-overlap requirement as the ban
+                // hammer above — sequential inlining would never race.
+                using var start = new Barrier(2);
+                var check = Task.Run(() => { start.SignalAndWait(); return ObjectRegistry.CreationCooldownActive(host, 1000.0); });
+                var refresh = Task.Run(() => { start.SignalAndWait(); ObjectRegistry.ApplyCreationCooldown("create", host, 1000.0, 100.0); });
                 Task.WaitAll(check, refresh);
                 if (!ObjectRegistry.CreationCooldownActive(host, 1000.0)) lost++;
                 ObjectRegistry.ClearCreationCooldown(host);

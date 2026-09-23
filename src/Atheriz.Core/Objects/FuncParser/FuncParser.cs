@@ -224,7 +224,7 @@ public class FuncParser
         }
         bool cap = false;
         if (raw.FuncName == "Your") cap = true;
-        if (kwargs.TryGetValue("capitalize", out var capStr)) cap = capStr.Equals("true", StringComparison.OrdinalIgnoreCase);
+        if (kwargs.TryGetValue("capitalize", out var capStr)) cap = capStr.Equals("true", StringComparison.OrdinalIgnoreCase) || capStr=="1";
         if (caller == ctx.Receiver) return cap? "Your":"your";
         var name = caller.GetDisplayName(ctx.Receiver);
         return name + "'s";

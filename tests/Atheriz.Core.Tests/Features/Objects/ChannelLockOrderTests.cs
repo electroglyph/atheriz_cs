@@ -34,7 +34,20 @@ public class ChannelLockOrderTests
             // NOTE: a write pin cannot be used — Msg reads Name first and
             // would block before ever reaching the history lock in both impls.
             ch.SyncRoot.EnterReadLock();
-            var msgTask = Task.Run(() => ch.Msg("hello"));
+            // Real Thread for Msg: "blocked while SyncRoot is pinned" must
+            // mean cross-thread blocking. A pooled wait may inline the worker
+            // onto this thread (same verdict for the spinner either way, but
+            // the blocking verdict would no longer prove anything).
+            Exception? msgError = null;
+            using var msgDone = new ManualResetEventSlim(false);
+            var msgThread = new Thread(() =>
+            {
+                try { ch.Msg("hello"); }
+                catch (Exception ex) { msgError = ex; }
+                finally { msgDone.Set(); }
+            })
+            { IsBackground = true };
+            msgThread.Start();
             try
             {
                 var historyTask = Task.Run(() =>
@@ -48,7 +61,7 @@ public class ChannelLockOrderTests
                 });
                 Assert.True(historyTask.Wait(TimeSpan.FromSeconds(5)),
                     "Msg entry never became visible: history lock is pinned while Msg waits");
-                Assert.False(msgTask.IsCompleted,
+                Assert.False(msgDone.IsSet,
                     "Msg finished while SyncRoot pinned (expected it blocked at the dirty mark)");
 
                 // History lock must be acquirable while Msg waits on SyncRoot.
@@ -59,7 +72,9 @@ public class ChannelLockOrderTests
             finally
             {
                 ch.SyncRoot.ExitReadLock();
-                Assert.True(msgTask.Wait(TimeSpan.FromSeconds(5)), "Msg did not finish after SyncRoot release");
+                Assert.True(msgDone.Wait(TimeSpan.FromSeconds(5)), "Msg did not finish after SyncRoot release");
+                Assert.True(msgThread.Join(TimeSpan.FromSeconds(5)));
+                Assert.Null(msgError);
             }
         }
         finally { ObjectRegistry.ClearAll(); }

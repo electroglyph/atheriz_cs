@@ -87,8 +87,13 @@ public class DeleteVetoTeardownTests
             ObjectRegistry.AddObject(kid);
             box.AddObject(kid);
             int winners = 0, totalOps = 0;
+            // Start barrier: all 8 Deletes must genuinely contend for the
+            // atomic claim. Sequential inlining would hand the first task an
+            // uncontended win and pass without testing the claim.
+            using var start = new Barrier(8);
             var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
             {
+                start.SignalAndWait();
                 var r = box.Delete(owner, recursive: true);
                 if (r != null) { System.Threading.Interlocked.Increment(ref winners); System.Threading.Interlocked.Add(ref totalOps, r.Value.ops.Count); }
             })).ToArray();

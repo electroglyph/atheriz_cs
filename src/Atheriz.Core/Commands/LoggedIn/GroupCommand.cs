@@ -65,6 +65,11 @@ public sealed class GroupCommand : Command
             var tgt = ResolveMember(go, targetName, "You can't add yourself!");
             if (tgt is null) return;
             if (!go.FollowersSnapshot.Contains(tgt.Id)) { go.Msg($"{tgt.GetDisplayName(go)} is not following you."); return; }
+            // Single-membership model (one GroupChannel slot): overwriting
+            // silently leaves the target listening to the old group's
+            // traffic with no way back (leave/list only see the new group).
+            // Refuse instead; the old leader kicks first.
+            if (GetGroupChannelId(tgt) is not null) { go.Msg($"{tgt.GetDisplayName(go)} is already in a group."); return; }
             var gc = GetGroupChannelId(go);
             Channel? channel = null;
             if (gc is null)

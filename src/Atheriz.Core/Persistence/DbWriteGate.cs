@@ -164,6 +164,15 @@ public static class DbWriteGate
             // still the live holder, then release the permit.
             if (_claim != 0 && Volatile.Read(ref _asyncHolder) == _claim)
                 Volatile.Write(ref _asyncHolder, 0);
+            if (_claim == 0)
+            {
+                // Stale-fork adopt (EnterAsync) recorded count 1 on this flow
+                // to make nested takes re-entrant; the lease owns that mark,
+                // so disposing the lease undoes exactly one level. Otherwise
+                // the flow keeps a phantom hold and later Enter() calls pass
+                // through beside the real holder.
+                if (_recursion.Value > 0) _recursion.Value--;
+            }
             _sem.Release();
         }
     }

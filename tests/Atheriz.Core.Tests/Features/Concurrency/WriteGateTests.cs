@@ -141,11 +141,25 @@ public class WriteGateTests
         // DB work concurrently with the holder. Synchronous throughout: an
         // await inside a sync Enter hold could resume on another thread and
         // trip the fork guard in this test's own Exit.
+        // Real Thread (not Task.Run + blocking wait): the pool inlines an
+        // unstarted task onto the waiting pool thread, which would make the
+        // "fork" the owner and nest instead of refusing.
         DbWriteGate.Enter();
         try
         {
-            var ex = Record.Exception(() => Task.Run(() => DbWriteGate.EnterAsync()).GetAwaiter().GetResult());
-            Assert.IsType<InvalidOperationException>(ex);
+            Exception? forkError = null;
+            var done = new ManualResetEventSlim(false);
+            var thread = new Thread(() =>
+            {
+                try { using var _ = DbWriteGate.EnterAsync().GetAwaiter().GetResult(); }
+                catch (Exception ex) { forkError = ex; }
+                finally { done.Set(); }
+            })
+            { IsBackground = true };
+            thread.Start();
+            Assert.True(done.Wait(TimeSpan.FromSeconds(30)), "fork thread did not finish; possible deadlock");
+            Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+            Assert.IsType<InvalidOperationException>(forkError);
             Assert.Equal(0, DbWriteGate.Semaphore.CurrentCount);
             Assert.True(DbWriteGate.IsHeld);
         }
@@ -160,10 +174,14 @@ public class WriteGateTests
     {
         // The holder released before the fork ran: the copy is stale, so the
         // fork adopts a real take instead of refusing.
+        // Real Thread (not Task.Run + blocking wait): the pool inlines an
+        // unstarted task onto the waiting pool thread, which would run the
+        // take as the owner instead of a stale fork.
         var proceed = new ManualResetEventSlim(false);
         Exception? forkError = null;
         DbWriteGate.Enter();
-        var t = Task.Run(() =>
+        var done = new ManualResetEventSlim(false);
+        var thread = new Thread(() =>
         {
             try
             {
@@ -172,11 +190,53 @@ public class WriteGateTests
                 if (DbWriteGate.Semaphore.CurrentCount != 0) throw new Xunit.Sdk.XunitException("adopted take did not hold the semaphore");
             }
             catch (Exception ex) { forkError = ex; }
-        });
+            finally { done.Set(); }
+        })
+        { IsBackground = true };
+        thread.Start();
         DbWriteGate.Exit();
         proceed.Set();
-        Assert.True(t.Wait(TimeSpan.FromSeconds(30)), "fork task did not finish; possible deadlock");
+        Assert.True(done.Wait(TimeSpan.FromSeconds(30)), "fork thread did not finish; possible deadlock");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
         Assert.Null(forkError);
+        Assert.Equal(1, DbWriteGate.Semaphore.CurrentCount);
+        Assert.False(DbWriteGate.IsHeld);
+    }
+
+    [Fact]
+    public void EnterAsync_StaleAdoptDispose_ClearsForkHoldState()
+    {
+        // A stale-fork adopt records count 1 on the fork's flow; disposing
+        // the lease must undo that mark, or the fork keeps a phantom hold
+        // and later Enter() calls pass through beside the real holder.
+        // Real Thread (not Task.Run + blocking wait): the pool inlines an
+        // unstarted task onto the waiting pool thread, which would run the
+        // adopt as the owner instead of a stale fork.
+        var proceed = new ManualResetEventSlim(false);
+        Exception? forkError = null;
+        bool? forkHeldAfterDispose = null;
+        DbWriteGate.Enter();
+        var done = new ManualResetEventSlim(false);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                proceed.Wait(TimeSpan.FromSeconds(30));
+                using (DbWriteGate.EnterAsync().GetAwaiter().GetResult()) { }
+                forkHeldAfterDispose = DbWriteGate.IsHeld;
+                if (DbWriteGate.Semaphore.CurrentCount != 1) throw new Xunit.Sdk.XunitException("adopted lease did not release the semaphore");
+            }
+            catch (Exception ex) { forkError = ex; }
+            finally { done.Set(); }
+        })
+        { IsBackground = true };
+        thread.Start();
+        DbWriteGate.Exit();
+        proceed.Set();
+        Assert.True(done.Wait(TimeSpan.FromSeconds(30)), "fork thread did not finish; possible deadlock");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+        Assert.Null(forkError);
+        Assert.False(forkHeldAfterDispose == true);
         Assert.Equal(1, DbWriteGate.Semaphore.CurrentCount);
         Assert.False(DbWriteGate.IsHeld);
     }
@@ -204,11 +264,25 @@ public class WriteGateTests
     {
         // The await-under-Enter shape (Enter, resume on another thread, Exit)
         // must fail fast, not leak the permit and hang all later Enters.
+        // Real Thread (not Task.Run + blocking wait): the pool inlines an
+        // unstarted task onto the waiting pool thread, which would run the
+        // Exit as the owner (releasing the permit!) instead of a fork.
         DbWriteGate.Enter();
         try
         {
-            var ex = Record.Exception(() => Task.Run(() => DbWriteGate.Exit()).GetAwaiter().GetResult());
-            Assert.IsType<InvalidOperationException>(ex);
+            Exception? forkError = null;
+            var done = new ManualResetEventSlim(false);
+            var thread = new Thread(() =>
+            {
+                try { DbWriteGate.Exit(); }
+                catch (Exception ex) { forkError = ex; }
+                finally { done.Set(); }
+            })
+            { IsBackground = true };
+            thread.Start();
+            Assert.True(done.Wait(TimeSpan.FromSeconds(30)), "fork thread did not finish; possible deadlock");
+            Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+            Assert.IsType<InvalidOperationException>(forkError);
             Assert.Equal(0, DbWriteGate.Semaphore.CurrentCount);
             Assert.True(DbWriteGate.IsHeld);
         }
@@ -225,11 +299,24 @@ public class WriteGateTests
         // A forked flow inherits the AsyncLocal count but never ownership:
         // TryEnter(Zero) refuses while the holder is live instead of running
         // beside it, and the parent hold unwinds exactly once.
+        // Real Thread (not Task.Run + blocking wait): the pool inlines an
+        // unstarted task onto the waiting pool thread, which would make the
+        // "fork" the owner and admit instead of refusing.
         DbWriteGate.Enter();
         try
         {
-            bool admitted = Task.Run(() => DbWriteGate.TryEnter(TimeSpan.Zero)).GetAwaiter().GetResult();
-            Assert.False(admitted);
+            bool? admitted = null;
+            var done = new ManualResetEventSlim(false);
+            var thread = new Thread(() =>
+            {
+                try { admitted = DbWriteGate.TryEnter(TimeSpan.Zero); }
+                finally { done.Set(); }
+            })
+            { IsBackground = true };
+            thread.Start();
+            Assert.True(done.Wait(TimeSpan.FromSeconds(30)), "fork thread did not finish; possible deadlock");
+            Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+            Assert.True(admitted == false);
             Assert.Equal(0, DbWriteGate.Semaphore.CurrentCount);
             Assert.True(DbWriteGate.IsHeld);
         }
@@ -239,9 +326,6 @@ public class WriteGateTests
         }
         Assert.Equal(1, DbWriteGate.Semaphore.CurrentCount);
         Assert.False(DbWriteGate.IsHeld);
-        // Repair a leaked permit if the shape ever regresses, so later tests
-        // see a balanced gate; a no-op when balanced (never double-release).
-        if (DbWriteGate.Semaphore.CurrentCount == 0) DbWriteGate.Semaphore.Release();
     }
 
     [Fact]

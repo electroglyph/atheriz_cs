@@ -51,6 +51,12 @@ public class GameTimeTimespanDescTests
     }
 
     [Fact]
+    public void GetTimespan_OneMinute_UsesSingular()
+    {
+        Assert.Equal("1 minute ago", Unloaded().GetTimespan(1).Desc);
+    }
+
+    [Fact]
     public void GetTimespan_Negative_IsFuture()
     {
         Assert.Equal("1 hour in the future", Unloaded().GetTimespan(-60).Desc);

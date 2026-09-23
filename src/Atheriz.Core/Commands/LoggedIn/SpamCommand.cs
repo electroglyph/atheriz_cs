@@ -26,8 +26,16 @@ public sealed class SpamCommand : Command
         var home = go.ResolveLocationObject();
         // Hoisted once: per-index names cannot self-collide within one run,
         // so the old per-iteration FilterBy saw the same answer every time.
+        // Both pools are hoisted: an account name AND a character name each
+        // live in one namespace per kind, so a pre-existing PC (or account)
+        // holding char{idx}/account{idx} skips instead of forking a
+        // duplicate (duplicate PC names cause permanent Multiple-matches
+        // ambiguity on search).
         var existingNames = new HashSet<string>(
             ObjectRegistry.FilterBy(o => o.IsAccount).Select(o => o.Name),
+            StringComparer.OrdinalIgnoreCase);
+        var existingPcNames = new HashSet<string>(
+            ObjectRegistry.FilterBy(o => o.IsPc).Select(o => o.Name),
             StringComparer.OrdinalIgnoreCase);
         List<(string a, string c)> created = [];
         for (int idx = 1; idx <= count; idx++)
@@ -38,6 +46,7 @@ public sealed class SpamCommand : Command
             try
             {
                 if (existingNames.Contains(an)) { go.Msg($"Account '{an}' already exists, skipping..."); continue; }
+                if (existingPcNames.Contains(cn)) { go.Msg($"Character '{cn}' already exists, skipping..."); continue; }
                 var account = Account.Create(an, pw);
                 if (account is null) { go.Msg($"Account '{an}' already exists, skipping..."); continue; }
                 var character = GameObject.Create(cn, "", isPc: true, isMapable: true);

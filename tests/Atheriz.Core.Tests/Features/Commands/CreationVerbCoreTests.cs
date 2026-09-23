@@ -117,4 +117,34 @@ public sealed class CreationVerbCoreTests
         }
         finally { SaltProvider.Clear(); }
     }
+
+    [Fact]
+    public void Guest_SyncStub_PreservesDescRemainder()
+    {
+        // The sync stub keeps the raw remainder after name+gender as desc,
+        // like `new` and the async guest prompts (tokens were parsed, then
+        // dropped).
+        using var env = GlobalTestEnv.Enter();
+        using var gates = new GateScope();
+        var conn = new TestConnection();
+        new GuestCommand().Run(conn, "DescGuest male A tall fellow");
+        Assert.Contains("Guest DescGuest created.", SentText(conn));
+        var puppet = conn.Session.Puppet;
+        Assert.NotNull(puppet);
+        Assert.Equal("male", puppet!.Gender);
+        Assert.Equal("A tall fellow", puppet.Desc);
+    }
+
+    [Fact]
+    public void Guest_SyncStub_EmptyDesc_StaysEmpty()
+    {
+        // Name-only input still creates a desc-less guest (no crash on the
+        // missing remainder).
+        using var env = GlobalTestEnv.Enter();
+        using var gates = new GateScope();
+        var conn = new TestConnection();
+        new GuestCommand().Run(conn, "DescGuest2 female");
+        Assert.Contains("Guest DescGuest2 created.", SentText(conn));
+        Assert.Equal("", conn.Session.Puppet!.Desc);
+    }
 }

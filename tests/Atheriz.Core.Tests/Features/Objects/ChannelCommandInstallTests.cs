@@ -45,8 +45,13 @@ public class ChannelCommandInstallTests
             var go = GameObject.Create("racefan", isPc: true);
             ObjectRegistry.AddObject(go);
             go.IsConnected = true;
+            // Start barrier: all 16 must genuinely overlap at InternalCmdSet
+            // allocation. Sequential inlining would serialize the subscribes
+            // and pass without ever contending.
+            using var start = new Barrier(16);
             var tasks = Enumerable.Range(0, 16).Select(i => Task.Run(() =>
             {
+                start.SignalAndWait();
                 go.Subscribe(i % 2 == 0 ? chA : chB);
             })).ToArray();
             Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));

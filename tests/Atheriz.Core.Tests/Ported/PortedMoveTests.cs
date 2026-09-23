@@ -411,13 +411,28 @@ public class PortedMoveTests
         obj.Location = new Persistence.Dto.LocationRef.CoordLocation(source.Coord);
         source.AddObject(obj);
         obj.SyncRoot.EnterWriteLock();
-        var task = Task.Run(() => obj.MoveTo(dest, announce: false));
+        // Real Thread (not Task.Run + blocking wait): the pool inlines an
+        // unstarted task onto the waiting pool thread, which would
+        // self-deadlock on the held write lock instead of blocking on it.
+        bool? moved = null;
+        Exception? workerError = null;
+        using var done = new ManualResetEventSlim(false);
+        var thread = new Thread(() =>
+        {
+            try { moved = obj.MoveTo(dest, announce: false); }
+            catch (Exception ex) { workerError = ex; }
+            finally { done.Set(); }
+        })
+        { IsBackground = true };
+        thread.Start();
         try
         {
-            Assert.False(task.Wait(TimeSpan.FromMilliseconds(300)), "MoveTo completed without acquiring the mover's lock");
+            Assert.False(done.Wait(TimeSpan.FromMilliseconds(300)), "MoveTo completed without acquiring the mover's lock");
         }
         finally { obj.SyncRoot.ExitWriteLock(); }
-        Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "MoveTo did not finish after the lock was released");
-        Assert.True(task.Result);
+        Assert.True(done.Wait(TimeSpan.FromSeconds(10)), "MoveTo did not finish after the lock was released");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.Null(workerError);
+        Assert.True(moved == true);
     }
 }

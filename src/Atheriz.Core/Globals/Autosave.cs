@@ -237,17 +237,25 @@ public static class Autosave
     public static void Reset()
     {
         AsyncTicker? gt = null;
+        AsyncTicker? started = null;
+        double? interval = null;
         lock (_lock)
         {
             _autosaveStarted = false;
+            interval = _registeredInterval;
             _registeredInterval = null;
             _cachedSettings = null;
             _cachedMap = null;
             _cachedNodes = null;
             _cachedTime = null;
+            started = _startedTicker;
             _startedTicker = null;
             gt = _globalTicker;
             _globalTicker = null;
+        }
+        if (started is not null && interval is not null)
+        {
+            try { started.RemoveCoro(AutosaveTick, interval.Value); } catch (Exception) { }
         }
         if (gt is not null)
         {

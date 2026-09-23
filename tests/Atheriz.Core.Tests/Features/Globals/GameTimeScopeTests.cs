@@ -79,6 +79,41 @@ public sealed class GameTimeScopeTests
         Assert.Equal(other.Id, list[0].CallerId);
     }
 
+    // Emptied alarm buckets are dropped, matching Load (which skips empty
+    // buckets): save and load agree, and removal does not accumulate
+    // ever-growing empty keys.
+    [Fact]
+    public void RemoveAlarm_DropsEmptiedKey()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var gameTime = NewGameTime(env.TempPath);
+        var owner = GameObject.Create("ScopeOwner");
+        ObjectRegistry.AddObject(owner);
+        gameTime.AddAlarm("2", "30", owner.Id);
+        gameTime.RemoveAlarm("2", "30", owner.Id);
+        Assert.False(gameTime.SnapshotAlarms().ContainsKey(("2", "30")));
+    }
+
+    [Fact]
+    public void RemoveAlarmsByCaller_DropsEmptiedKeysKeepsSharedBucket()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var gameTime = NewGameTime(env.TempPath);
+        var owner = GameObject.Create("ScopeOwner");
+        var other = GameObject.Create("ScopeOther");
+        ObjectRegistry.AddObject(owner);
+        ObjectRegistry.AddObject(other);
+        gameTime.AddAlarm("3", "15", owner.Id);
+        gameTime.AddAlarm("3", "15", other.Id);
+        gameTime.AddAlarm("4", "45", owner.Id);
+        gameTime.RemoveAlarmsByCaller(owner.Id);
+        var snap = gameTime.SnapshotAlarms();
+        Assert.False(snap.ContainsKey(("4", "45")));
+        Assert.True(snap.TryGetValue(("3", "15"), out var list));
+        Assert.Single(list);
+        Assert.Equal(other.Id, list[0].CallerId);
+    }
+
     [Fact]
     public void GetTime_ReflectsTicksAfterOnTick()
     {

@@ -1,5 +1,6 @@
 using System.Reflection;
 using Atheriz.Core.Network;
+using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Network;
 
@@ -18,5 +19,17 @@ public sealed class BaseConnectionTimingConstantsTests
         Assert.Equal(TimeSpan.FromMilliseconds(250), Static<TimeSpan>("RetryDrainRearmDelay"));
         Assert.Equal(1.0, Static<double>("InputBusyWindowSeconds"));
         Assert.Equal(1024, Static<int>("MaxOutstandingRetryDrains"));
+    }
+
+    [Fact]
+    public void FreshConnection_LastInputBusy_IsNever()
+    {
+        // "Never busy" must be NegativeInfinity (like
+        // AsyncThreadPool._lastFullLogSeconds): 0.0 is a real timestamp, not
+        // "never", and suppresses the first window under any clock below it.
+        using var env = GlobalTestEnv.Enter();
+        var conn = new TestConnection();
+        var field = typeof(BaseConnection).GetField("_lastInputBusy", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        Assert.Equal(double.NegativeInfinity, (double)field.GetValue(conn)!);
     }
 }

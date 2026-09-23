@@ -179,6 +179,12 @@ public sealed class PendingLimiter
         {
             if (_byTask.TryGetValue(task, out var old))
                 _pendingBytes += nb - old;
+            else if (nb == 0)
+                return; // Reserving nothing tracks nothing: a zero entry with
+                        // no count slot would warn spuriously in Release(task).
+                        // An async zero from TryReserve(task, 0) DOES hold a
+                        // slot and keeps its entry — so the guard lives here,
+                        // where "reserved nothing" is known, not in Release.
             _byTask[task] = nb;
         }
     }

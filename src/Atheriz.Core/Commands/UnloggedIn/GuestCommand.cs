@@ -29,7 +29,12 @@ public sealed class GuestCommand : Command
         var err = Validation.ValidateCharacterName(name);
         if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         if (CreationValidation.PcNameExists(name)) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
-        var character = GameObject.Create(name, "", isPc: true);
+        // Desc is the raw remainder after name+gender (was dropped, while
+        // the async prompt path keeps it and `new` keeps it via
+        // RemainderAfterTokens): re-joined tokens would collapse interior
+        // spacing the async prompt line keeps verbatim.
+        string desc = parts.Count > 2 ? Command.RemainderAfterTokens(text, 2) : "";
+        var character = GameObject.Create(name, desc, isPc: true);
         character.IsTemporary = true;
         character.Gender = parts.Count > 1 ? parts[1] : "neutral";
         try

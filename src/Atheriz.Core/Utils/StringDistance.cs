@@ -12,8 +12,9 @@ public static class StringDistance
     /// Uses <c>StringComparer.Ordinal</c> semantics (char equality <c>a[i-1]==b[j-1]</c>).
     /// </summary>
     /// <summary>
-    /// Inputs longer than this are not worth a full O(n*m) table (10k x 10k
-    /// would allocate ~400MB); the capped upper bound below still orders sane.
+    /// Inputs longer than this are compared on their capped prefixes: the full
+    /// table would cost O(n*m) time, so the table stays bounded at
+    /// <c>MaxInputLength</c>^2 while still ordering by actual content.
     /// </summary>
     public const int MaxInputLength = 1024;
 
@@ -21,9 +22,11 @@ public static class StringDistance
     {
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
-        // Capped upper bound (true distance is always <= max length), no table.
-        if (a.Length > MaxInputLength || b.Length > MaxInputLength)
-            return Math.Max(a.Length, b.Length);
+        // Compare capped prefixes, not a content-blind constant: returning
+        // Max(length) for every over-length input collapses all of them to
+        // the same value and BestMatch degrades to first-candidate-wins.
+        if (a.Length > MaxInputLength) a = a.Substring(0, MaxInputLength);
+        if (b.Length > MaxInputLength) b = b.Substring(0, MaxInputLength);
         // Two-row DP: computes identical distances to the full table (standard
         // result) at O(min(n,m)) memory. The distance is symmetric in a/b, so
         // sizing the rows by the shorter input changes nothing observable.

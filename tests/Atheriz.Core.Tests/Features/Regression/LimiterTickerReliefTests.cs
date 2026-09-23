@@ -63,7 +63,7 @@ public class LimiterTickerReliefTests
     public void PluginReloader_TickSweep_EvictsAnyGameObjectTarget()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Plugins", "PluginReloader.cs");
-        var region = SourceScan.Region(src, "private static void RemoveTickDelegatesFor(");
+        var region = SourceScan.Region(src, "static void RemoveTickDelegatesFor(");
         Assert.Contains("TargetsGameObject(d.Target)", region);
         Assert.DoesNotContain("tickableIds", region);
         Assert.Contains("if (target is GameObject) return true;",

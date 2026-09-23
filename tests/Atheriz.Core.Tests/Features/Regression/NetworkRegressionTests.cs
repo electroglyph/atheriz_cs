@@ -182,14 +182,27 @@ public class NetworkRegressionTests
     }
 
     // a forked AsyncLocal copy must not be mistaken for the gate owner.
+    // Real Thread (not Task.Run + blocking wait): the pool inlines an
+    // unstarted task onto the waiting pool thread, which would make the
+    // "fork" the owner and admit instead of refusing.
     [Fact]
     public void ForkedFlow_DoesNotInheritGate()
     {
         DbWriteGate.Enter();
         try
         {
-            bool forkEntered = Task.Run(() => DbWriteGate.TryEnter(TimeSpan.FromMilliseconds(200))).GetAwaiter().GetResult();
-            Assert.False(forkEntered);
+            bool? forkEntered = null;
+            var done = new ManualResetEventSlim(false);
+            var thread = new Thread(() =>
+            {
+                try { forkEntered = DbWriteGate.TryEnter(TimeSpan.FromMilliseconds(200)); }
+                finally { done.Set(); }
+            })
+            { IsBackground = true };
+            thread.Start();
+            Assert.True(done.Wait(TimeSpan.FromSeconds(30)), "fork thread did not finish; possible deadlock");
+            Assert.True(thread.Join(TimeSpan.FromSeconds(30)));
+            Assert.True(forkEntered == false);
         }
         finally { DbWriteGate.Exit(); }
     }

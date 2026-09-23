@@ -362,7 +362,9 @@ public static class PluginReloader
             try{ Action act=()=>{try{obj.AtTick();}catch (Exception logEx) { Suppress("ReregisterTicks", logEx); }}; ticker.AddCoro(act,secs);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] rereg {obj.Id}: {ex.Message}");}
         }
     }
-    private static void RemoveTickDelegatesFor(AsyncTicker ticker, List<GameObject> tickables)
+    // Internal (not private): StartStop.ReregisterTicks shares this sweep so
+    // both reload paths evict the same stale object-targeting delegates.
+    internal static void RemoveTickDelegatesFor(AsyncTicker ticker, List<GameObject> tickables)
     {
         // Public ticker surface only (Slots/Coros/RemoveCoro) — never poke _slots/_coros privates (breaks on rename).
         IReadOnlyDictionary<double, AsyncTicker.TimeSlot> slots;

@@ -1,4 +1,5 @@
 // Port of atheriz/tests/test_reload_ticks.py:1
+using Atheriz.Core.Concurrency;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 
@@ -110,5 +111,27 @@ public class PortedReloadTicksTests
         var countAfter = ticker.Slots.Values.SelectMany(v=>v.Coros).Count();
         Assert.True(countAfter >= 0);
         Autosave.StopAutosave(ticker);
+    }
+    [Fact] public void ReregisterTicks_TickableNode_RegisteredOnce()
+    {
+        // A tickable node lives in the registry AND the grids (AddNode
+        // publishes both): one reload — or two — must leave exactly one
+        // delegate, not one per sweep per reload.
+        using var env = GlobalTestEnv.Enter();
+        var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 100);
+        var ticker = new AsyncTicker(pool);
+        try
+        {
+            var nh = GlobalServices.GetNodeHandler();
+            var node = new Node(new Coord("rereg-pin", 0, 0, 0)) { IsTickable = true, TickSeconds = 60 };
+            nh.AddNode(node);
+            var mi = typeof(StartStop).GetMethod("ReregisterTicks", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.NotNull(mi);
+            mi.Invoke(null, new object[] { ticker });
+            Assert.Equal(1, ticker.Slots.Values.Sum(s => s.Coros.Count));
+            mi.Invoke(null, new object[] { ticker });
+            Assert.Equal(1, ticker.Slots.Values.Sum(s => s.Coros.Count));
+        }
+        finally { ticker.Clear(); pool.Stop(); }
     }
 }

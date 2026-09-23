@@ -44,7 +44,7 @@ public sealed class MenuEngine{
    if(_choices.Count==0){CurrentNodeSync=null;CurrentNodeAsync=null;return false;} // Port of menu.py:77
    if(input is null)return true; // Null means "no such key" (stay).
    var ch=TryGetChoice(NormalizeKey(input)); if(ch is null)return true; // Port of menu.py:81-82
-  if(ch.CallbackSync is not null||ch.CallbackAsync is not null){try{if(ch.CallbackAsync is not null)throw new InvalidOperationException("async callback requires async handle_input");ch.CallbackSync?.Invoke(Context);}catch{try{AtherizLogger.LogError("menu callback failed");}catch{}}} // Port of menu.py:85-91
+     if(ch.CallbackAsync is not null)throw new InvalidOperationException("async callback requires async handle_input"); if(ch.CallbackSync is not null){try{ch.CallbackSync.Invoke(Context);}catch{try{AtherizLogger.LogError("menu callback failed");}catch{}}} // Port of menu.py:85-91 // Port of menu.py:85-91
   if(ch.GotoSync is not null||ch.GotoAsync is not null){if(ch.GotoAsync is not null)throw new InvalidOperationException("async goto requires async handle_input");CurrentNodeSync=ch.GotoSync;CurrentNodeAsync=null;_Render();return true;} // Port of menu.py:92
   if(ch.Stay){_Render();return true;} // Port of menu.py:96
   CurrentNodeSync=null;CurrentNodeAsync=null;return false; // Port of menu.py:99

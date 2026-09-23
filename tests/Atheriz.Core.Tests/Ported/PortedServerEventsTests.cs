@@ -130,6 +130,44 @@ public class PortedServerEventsTests
         var pcs = ObjectRegistry.FilterBy(o=>o.IsPc && o.Name=="Newbie");
         Assert.Single(pcs);
     }
+    [Fact] public void AtCharCreate_NewAccountRaceLoss_RemovesOrphanAccount()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var home = new Node(new Atheriz.Core.Settings.AtherizSettings().DefaultHome); ObjectRegistry.AddObject(home);
+        bool lossObserved = false;
+        for (int attempt = 0; attempt < 25 && !lossObserved; attempt++)
+        {
+            string acc = $"raceorphan{attempt}", cn = $"racehero{attempt}";
+            var rivals = new List<GameObject>();
+            for (int s = 0; s < 4; s++) rivals.Add(GameObject.Create(cn, isPc: true));
+            var mainDone = new System.Threading.ManualResetEventSlim(false);
+            var spinners = new List<System.Threading.Thread>();
+            foreach (var r in rivals)
+            {
+                var spinner = new System.Threading.Thread(() =>
+                {
+                    while (!mainDone.IsSet)
+                    {
+                        if (ObjectRegistry.FilterBy(o => o.IsAccount && o.Name == acc).Count > 0) break;
+                    }
+                    if (!mainDone.IsSet) { try { ObjectRegistry.AddObject(r); } catch { } }
+                });
+                spinner.IsBackground = true;
+                spinners.Add(spinner);
+            }
+            foreach (var t in spinners) t.Start();
+            var sw = new System.IO.StringWriter();
+            ServerEvents.AtCharCreate(acc, cn, "password123", sw);
+            mainDone.Set();
+            foreach (var t in spinners) t.Join(5000);
+            if (sw.ToString().Contains("already exists"))
+            {
+                lossObserved = true;
+                Assert.Empty(ObjectRegistry.FilterBy(o => o.IsAccount && o.Name == acc));
+            }
+        }
+        Assert.True(lossObserved, "race window never materialized");
+    }
     [Fact] public void AtCharCreate_ReturnsEarlyWhenAccountCreateFails()
     {
         using var env = GlobalTestEnv.Enter();

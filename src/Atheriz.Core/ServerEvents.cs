@@ -152,6 +152,7 @@ public static class ServerEvents
         if (LostPcNameRace(existsLc, ch2.Id))
         {
             ObjectRegistry.RemoveObject(ch2);
+            ObjectRegistry.RemoveObject(account);
             failMsg = $"Character name '{charName}' already exists.";
             return;
         }
