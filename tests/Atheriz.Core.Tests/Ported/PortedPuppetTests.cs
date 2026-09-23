@@ -81,8 +81,8 @@ public class PortedPuppetTests
         cmd.Run(caller, args);
         Assert.True(npc.IsPc);
         var fld=typeof(GameObject).GetField("_puppetRestore", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-        var restore=fld?.GetValue(npc) as Dictionary<string,object>;
+        var restore=fld?.GetValue(npc) as GameObject.PuppetRestoreSnapshot;
         Assert.NotNull(restore);
-        Assert.Equal(false, restore!["is_pc"]);
+        Assert.False(restore!.IsPc);
     }
 }

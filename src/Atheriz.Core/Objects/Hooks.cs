@@ -22,9 +22,15 @@ public partial class GameObject
     /// hooks fall back from args+result to args-only, so call sites keep their
     /// fallback behavior; genuine hook errors propagate unwrapped.
     /// </summary>
+    /// <summary>
+    /// Typed dispatch: enum member instead of the hook-name string. The
+    /// string overload stays for custom (game-defined) hooks.
+    /// </summary>
+    public T Hookable<T>(HookName hookName, Func<T> original, params object?[] args)
+        => Hookable(hookName.Name(), original, args);
+
     public T Hookable<T>(string funcName, Func<T> original, params object?[] args)
-    {
-        HashSet<Delegate>? hooksSnapshot = null;
+    {        HashSet<Delegate>? hooksSnapshot = null;
         bool hasHooks = false;
         _lock.EnterReadLock();
         try

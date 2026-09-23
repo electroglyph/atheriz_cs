@@ -20,7 +20,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     private readonly List<string> _msgLog = new();
 
     // Puppet snapshot — only is_pc/privilege_level per puppet.py:110 wontfix (quelled/can_hear/is_mapable not saved)
-    private Dictionary<string, object>? _puppetRestore; // transient, never persisted
+    private PuppetRestoreSnapshot? _puppetRestore; // transient, never persisted
     private double _secondsPlayed;
 
     // --- identity ---
@@ -58,9 +58,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
 
     // locks: name -> list of predicates, with a parallel declarative policy name per
     // predicate (F004: persisted as "name: policy|policy" and rebuilt via LockPolicies)
-    private Dictionary<string, List<Func<GameObject, bool>>> _locks = [];
-    private Dictionary<string, List<string>> _lockPolicies = [];
-
+    private Dictionary<string, List<LockEntry>> _locks = [];
     // hooks: funcName -> set of delegates tagged via attributes
     private Dictionary<string, HashSet<Delegate>> _hooks = [];
     // Typed hooks access for Script.RemoveHooks (replaces _hooks reflection).
@@ -187,7 +185,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
 
     public virtual Dictionary<(int X, int Y), string> AtPreMapRender(Dictionary<(int X, int Y), string> grid)
     {
-        return Hookable(HookNames.AtPreMapRender, () => grid, grid);
+        return Hookable(HookName.AtPreMapRender, () => grid, grid);
     }
     // Legend projection shared by AtMapUpdate/AtLegendUpdate: the two Select
     // bodies were verified element-wise identical, so one helper emits both.
@@ -195,7 +193,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         => entries.Select(e => new List<object?> { e.sym, e.desc, new List<int> { e.coord.x, e.coord.y } }).ToList();
     public virtual void AtMapUpdate(string mapStr, List<(string sym, string desc, (int x, int y) coord)> entries, int minX, int maxY, bool showLegend, string name)
     {
-        Hookable(HookNames.AtMapUpdate, () =>
+        Hookable(HookName.AtMapUpdate, () =>
         {
             (int relX, int relY) pos = (0, 0);
             try
@@ -251,7 +249,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     }
     public virtual void AtLegendUpdate(List<(string sym, string desc, (int x, int y) coord)> entries, bool show, string area)
     {
-        Hookable(HookNames.AtLegendUpdate, () =>
+        Hookable(HookName.AtLegendUpdate, () =>
         {
             try
             {
@@ -270,8 +268,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             return 0;
         }, entries, show, area);
     }
-    public virtual void AtDesc(GameObject? looker = null) => Hookable(HookNames.AtDesc, () => 0, looker);
-    public virtual string AtPreSay(string message) => Hookable(HookNames.AtPreSay, () => message, message);
+    public virtual void AtDesc(GameObject? looker = null) => Hookable(HookName.AtDesc, () => 0, looker);
+    public virtual string AtPreSay(string message) => Hookable(HookName.AtPreSay, () => message, message);
     public LocationRef Location { get => Read(() => _location); set => Write(() => { _location = value; _flags.IsModified = true; }); }
     public LocationRef Home { get => Read(() => _home); set => Write(() => { _home = value; _flags.IsModified = true; }); }
     private Session? _session;
@@ -510,30 +508,24 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // single-threaded load restore path (ApplyDtoFields). AddLock itself does
     // nothing but this insert (no logging, no events), so restoring through
     // the same core produces identical lock state without re-taking the lock.
-    private void AddLockRestored(string lockName, Func<GameObject, bool> predicate, string policy)
+    private void AddLockRestored(string lockName, LockEntry entry)
     {
         if (!_locks.TryGetValue(lockName, out var lst))
         {
             lst = [];
             _locks[lockName] = lst;
         }
-        lst.Add(predicate);
-        if (!_lockPolicies.TryGetValue(lockName, out var pols))
-        {
-            pols = [];
-            _lockPolicies[lockName] = pols;
-        }
-        pols.Add(policy);
+        lst.Add(entry);
     }
     public void AddLock(string lockName, Func<GameObject, bool> predicate, string policy = LockPolicies.Custom)
     {
-        Write(() => AddLockRestored(lockName, predicate, policy));
+        Write(() => AddLockRestored(lockName, new LockEntry(LockPolicies.Classify(policy), predicate)));
     }
-    // Typed authoring overload: maps the enum to its persisted name, so the
-    // stored "name: policy|policy" rows are identical to the string call.
+    // Typed authoring overload: maps the enum straight to the stored entry, so
+    // the persisted policies are identical to the string call.
     public void AddLock(string lockName, Func<GameObject, bool> predicate, LockPolicies.LockPolicy policy)
-        => AddLock(lockName, predicate, LockPolicies.Name(policy));
-    public void ClearLocksByName(string lockName) => Write(() => { _locks.Remove(lockName); _lockPolicies.Remove(lockName); });
+        => Write(() => AddLockRestored(lockName, new LockEntry(policy, predicate)));
+    public void ClearLocksByName(string lockName) => Write(() => { _locks.Remove(lockName); });
 
     /// <summary>
     /// Mirrors <c>base_lock.AccessLock.access</c>: self-delete/get block, superuser bypass, then iterate locks[name].
@@ -545,16 +537,16 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         if (Id != -1 && accessingObj.Id == Id && (lockName == "delete" || lockName == "get"))
             return false;
         if (accessingObj.IsSuperUser) return true;
-        List<Func<GameObject, bool>> snapshot;
+        List<LockEntry> snapshot;
         using (ReadScope())
         {
             if (!_locks.TryGetValue(lockName, out var lst) || lst.Count == 0) return true;
-            snapshot = new List<Func<GameObject, bool>>(lst);
+            snapshot = new List<LockEntry>(lst);
         }
-        foreach (var fn in snapshot)
+        foreach (var entry in snapshot)
         {
             bool ok;
-            try { ok = fn(accessingObj); }
+            try { ok = entry.Predicate(accessingObj); }
             catch { return false; }
             if (!ok) return false;
         }
@@ -563,6 +555,16 @@ public partial class GameObject : IMessageTarget, ISessionProvider
 
     public virtual void InstallHook(string funcName, Delegate hook)
     {
+        // Attach-time arity validation for known hooks: a delegate that
+        // cannot take any dispatch shape is refused loudly instead of
+        // installing and skipping at every dispatch. Unknown (custom hook)
+        // names bypass validation — game code defines their own shapes.
+        if (HookNameExtensions.TryParseName(funcName) is { } name
+            && !name.AcceptsArity(hook, HookMarkerCache.KindOf(hook)))
+        {
+            AtherizLogger.LogError($"GameObject.InstallHook refused {funcName} hook with mismatched signature ({hook.Method}); hook skipped.");
+            return;
+        }
         Write(() =>
         {
             if (!_hooks.TryGetValue(funcName, out var set))
@@ -573,7 +575,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             set.Add(hook);
         });
     }
+    public void InstallHook(HookName hookName, Delegate hook) => InstallHook(hookName.Name(), hook);
     public bool HasHook(string funcName) => Read(() => _hooks.TryGetValue(funcName, out var s) && s.Count > 0);
+    public bool HasHook(HookName hookName) => HasHook(hookName.Name());
 
     // Single-id fetch core for the GetSingle is Script shape repeated across
     // ResolveRelations/AddScript/RemoveScript/GetScriptsByType. A missing id
@@ -723,36 +727,35 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         // Restore locks from declarative policies (F004). Unknown policies are dropped
         // with a loud log — never silently weakened, never executed from the save file.
         o._locks.Clear();
-        o._lockPolicies.Clear();
         if (dto.Locks is not null)
         {
             foreach (var ld in dto.Locks)
             {
                 if (ld is null || string.IsNullOrEmpty(ld.Name)) continue;
-                foreach (var raw in (ld.Policy ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries))
+                foreach (var pol in ld.Policies ?? [])
                 {
-                    var pol = raw.Trim();
-                    if (string.IsNullOrEmpty(pol)) continue;
-                    if (LockPolicies.TryResolve(pol, o, out var pred))
-                    {
-                        o.AddLockRestored(ld.Name, pred, pol);
-                    }
-                    else if (pol == LockPolicies.Custom)
+                    if (pol == LockPolicies.LockPolicy.Custom)
                     {
                         // Ad-hoc lambda: no declarative policy was ever
                         // persisted — dropped with a loud log, never executed
                         // (mirrors Door.FromDto).
                         AtherizLogger.LogError($"Dropping unpersistable 'custom' lambda on lock '{ld.Name}' for object {dto.Id}; access allowed.");
                     }
+                    else if (LockPolicies.TryResolve(pol, o, out var pred))
+                    {
+                        o.AddLockRestored(ld.Name, new LockEntry(pol, pred));
+                    }
                     else
                     {
                         // Fail closed (mirrors Door.FromDto): Access returns
                         // true for missing entries, so dropping an
                         // unresolvable policy would escalate to allow. Deny
-                        // and preserve the policy name so a re-save keeps the
-                        // entry (still denying).
-                        AtherizLogger.LogError($"Unknown lock policy '{pol}' on lock '{ld.Name}' for object {dto.Id}; denying access.");
-                        o.AddLockRestored(ld.Name, _ => false, pol);
+                        // and store the Denied marker so a re-save keeps the
+                        // entry (still denying). Our own marker reloads
+                        // quietly; anything else logs loudly.
+                        if (pol != LockPolicies.LockPolicy.Denied)
+                            AtherizLogger.LogError($"Unknown lock policy '{pol}' on lock '{ld.Name}' for object {dto.Id}; denying access.");
+                        o.AddLockRestored(ld.Name, new LockEntry(LockPolicies.LockPolicy.Denied, _ => false));
                     }
                 }
             }
@@ -814,9 +817,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             obj.AddLock("view", accessing => obj.IsConnected || accessing.IsBuilder, LockPolicies.LockPolicy.PcView);
         }
         // One "get" entry for pc and/or npc: duplicate Builder entries decide
-        // identically, so a second call would only double the persisted policy
-        // ("Builder|Builder" vs "Builder"). Legacy rows with the doubled form
-        // still load and decide the same; they converge on next save.
+        // identically, so a second call would only double the persisted policy.
+        // Doubled rows still load and decide the same; they converge on next save.
         if (isPc || isNpc)
             obj.AddLock("get", accessing => accessing.IsBuilder, LockPolicies.LockPolicy.Builder);
 
@@ -849,8 +851,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // the public setter deliberately leaves the snapshot alone.
     internal void SetIdRaw(int id) => Write(() => { _id = id; _hashCache = id.GetHashCode(); _flags.IsModified = true; });
     internal Dictionary<string, System.Text.Json.JsonElement> GetExtraSnapshot() => Read(() => new Dictionary<string, System.Text.Json.JsonElement>(_extra));
-    internal Dictionary<string, List<Func<GameObject, bool>>> GetLocksSnapshot() => Read(() => new Dictionary<string, List<Func<GameObject, bool>>>(_locks));
-    internal Dictionary<string, List<string>> GetLockPoliciesSnapshot() => Read(() => new Dictionary<string, List<string>>(_lockPolicies));
+    internal Dictionary<string, List<LockEntry>> GetLockEntriesSnapshot()
+        => Read(() => _locks.ToDictionary(kv => kv.Key, kv => new List<LockEntry>(kv.Value)));
+    internal Dictionary<string, List<Func<GameObject, bool>>> GetLocksSnapshot()
+        => Read(() => _locks.ToDictionary(kv => kv.Key, kv => kv.Value.Select(e => e.Predicate).ToList()));
+    internal Dictionary<string, List<string>> GetLockPoliciesSnapshot()
+        => Read(() => _locks.ToDictionary(kv => kv.Key, kv => kv.Value.Select(e => LockPolicies.Name(e.Policy)).ToList()));
     internal Persistence.Dto.GameObjectDto ToDtoUnsafeInternal() => BuildDto();
     // Raw IsModified access without re-entering lock (caller must hold write lock) — used by GetSaveOps.
     internal bool GetIsModifiedRawNoLock() => _flags.IsModified;
@@ -889,22 +895,16 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     internal void RemoveChannelId(int chId) => Write(() => { if (_channels.Remove(chId)) _flags.IsModified = true; });
 
     // Ban reason for any object (F001: replaces BanReason/_extra reflection in Ban/Connect commands).
-    // Stored under the "ban_reason" extra key (BanCommand spelling); the legacy "banReason"
-    // spelling is read as a fallback. Account overrides this with its field-backed store.
+    // Stored under the "ban_reason" extra key (BanCommand spelling). Account overrides this with its field-backed store.
     public virtual string BanReason
     {
         get => Read(() =>
         {
             if (_extra.TryGetValue("ban_reason", out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String) return v.GetString() ?? "";
-            if (_extra.TryGetValue("banReason", out var v2) && v2.ValueKind == System.Text.Json.JsonValueKind.String) return v2.GetString() ?? "";
             return "";
         });
         set => Write(() =>
         {
-            // A legacy "banReason" key reads as a fallback but must not linger
-            // once the canonical spelling is written: two keys would disagree
-            // on the next raw-extra read.
-            _extra.Remove("banReason");
             _extra["ban_reason"] = System.Text.Json.JsonSerializer.SerializeToElement(value);
             _flags.IsModified = true;
         });

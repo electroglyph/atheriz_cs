@@ -22,7 +22,7 @@ public sealed class DoorCommand : Command
         parser.AddArgument("-d", "--down").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Down");
         parser.AddArgument("-r", "--remove").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Remove door");
         parser.AddArgument("-a", "--auto").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Auto create destination room if it doesn't exist");
-        parser.AddArgument("args", nargs: "*", help: "Other args");
+        parser.AddArgument(ParsedArgKeys.Args, nargs: "*", help: "Other args");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
@@ -30,7 +30,7 @@ public sealed class DoorCommand : Command
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         // Bare direction words ride in the args carrier (like DoorDirectionCommand):
         // `door north`, `door n`, etc. work with or without a dash flag.
-        var lower = pa.GetList("args").Select(a => a.ToLowerInvariant()).ToList();
+        var lower = pa.GetList(ParsedArgKeys.Args).Select(a => a.ToLowerInvariant()).ToList();
         bool north = pa.GetBool("north") || lower.Contains("n") || lower.Contains("north"),
             south = pa.GetBool("south") || lower.Contains("s") || lower.Contains("south"),
             east = pa.GetBool("east") || lower.Contains("e") || lower.Contains("east"),

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Diagnostics;
 using Atheriz.Core.Concurrency;
+using InputHandler = System.Action<Atheriz.Core.Network.BaseConnection, System.Collections.Generic.List<object?>, System.Collections.Generic.Dictionary<string, object?>>;
 
 namespace Atheriz.Core.Network;
 
@@ -30,12 +31,12 @@ public class InputFuncs
     public static Func<MapHandler> MapHandlerFactory = () => GlobalServices.GetMapHandler();
     public static Func<NodeHandler> NodeHandlerFactory = () => NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();
 
-    public Dictionary<string, Delegate> GetHandlers()
+    public Dictionary<string, InputHandler> GetHandlers()
     {
         // Single case-insensitive registry: each handler is stored under its
         // attribute name plus the method name when they differ (no triplication:
         // the derived lowercase form is covered by the comparer itself).
-        var handlers = new Dictionary<string, Delegate>(StringComparer.OrdinalIgnoreCase);
+        var handlers = new Dictionary<string, InputHandler>(StringComparer.OrdinalIgnoreCase);
         // explicit registration list — the eight known handlers bind
         // with no per-construction reflection (method-group delegates).
         // Subclasses add extras by overriding RegisterExtraHandlers and
@@ -57,7 +58,7 @@ public class InputFuncs
     /// they differ (single case-insensitive registry; the derived lowercase
     /// form is covered by the comparer itself).
     /// </summary>
-    protected static void AddInputHandler(Dictionary<string, Delegate> handlers, string name, Delegate del, string methodName)
+    protected static void AddInputHandler(Dictionary<string, InputHandler> handlers, string name, InputHandler del, string methodName)
     {
         handlers[name] = del;
         if (!name.Equals(methodName, StringComparison.OrdinalIgnoreCase)) handlers[methodName] = del;
@@ -67,7 +68,7 @@ public class InputFuncs
     /// Subclass hook for extra handlers. The base is a no-op: subclasses
     /// override it and call <see cref="AddInputHandler"/> explicitly.
     /// </summary>
-    protected virtual void RegisterExtraHandlers(Dictionary<string, Delegate> handlers)
+    protected virtual void RegisterExtraHandlers(Dictionary<string, InputHandler> handlers)
     {
     }
 
@@ -799,7 +800,7 @@ public class ConnectionManager
     // Reaping rides a 60s wall-clock cadence, not registration traffic.
     private System.Threading.Timer? _orphanSweepTimer;
     private int _sweepStarted;
-    private readonly Dictionary<string, Delegate> _messageHandlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, InputHandler> _messageHandlers = new(StringComparer.OrdinalIgnoreCase);
     private int _connectionCounter;
 
     public AsyncThreadPool Atp { get; }
@@ -1140,10 +1141,13 @@ public class ConnectionManager
 
     public void RegisterHandler(string messageType, Delegate handler)
     {
+        ArgumentNullException.ThrowIfNull(handler);
 // exact match only.
+        if (handler is not InputHandler typed)
+            throw new ArgumentException($"Input handler for '{messageType}' must be Action<BaseConnection, List<object?>, Dictionary<string, object?>>.", nameof(handler));
         lock (_lock)
         {
-            _messageHandlers[messageType] = handler;
+            _messageHandlers[messageType] = typed;
         }
     }
 
@@ -1240,7 +1244,7 @@ public class ConnectionManager
             var boxed = StripInputValue(kwargs);
             if (boxed is Dictionary<string, object?> d) kwargs = d;
         }
-        Delegate? handler = null;
+        InputHandler? handler = null;
         lock (_lock)
         {
             _messageHandlers.TryGetValue(cmd, out handler);

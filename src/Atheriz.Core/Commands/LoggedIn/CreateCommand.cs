@@ -16,7 +16,7 @@ public sealed class CreateCommand : Command
         p.AddArgument("-m", "--is_mapable").Help("make object mapable").Action(GameArgumentParser.ArgAction.StoreTrue);
         p.AddArgument("-c", "--is_container").Help("make object a container").Action(GameArgumentParser.ArgAction.StoreTrue);
         p.AddArgument("-t", "--is_tickable").Help("make object tickable").Action(GameArgumentParser.ArgAction.StoreTrue);
-        p.AddArgument("desc").Help("description of the object to create").Nargs("REMAINDER");
+        p.AddArgument(ParsedArgKeys.Desc).Help("description of the object to create").Nargs("REMAINDER");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
@@ -24,7 +24,7 @@ public sealed class CreateCommand : Command
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
         var name = pa.GetString("name");
         if (string.IsNullOrWhiteSpace(name)) { go.Msg(PrintHelp()); return; }
-        var descList = pa.GetList("desc");
+        var descList = pa.GetList(ParsedArgKeys.Desc);
         var desc = string.Join(" ", descList);
         var obj = GameObject.Create(name!, desc, isPc: pa.GetBool("is_pc"), isItem: pa.GetBool("is_item"), isNpc: pa.GetBool("is_npc"), isMapable: pa.GetBool("is_mapable"), isContainer: pa.GetBool("is_container"), isTickable: pa.GetBool("is_tickable"));
         ObjectRegistry.AddObject(obj);

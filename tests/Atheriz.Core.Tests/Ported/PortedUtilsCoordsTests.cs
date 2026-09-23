@@ -70,12 +70,11 @@ public class PortedUtilsCoordsTests
         using var env = GlobalTestEnv.Enter();
         Assert.Equal(5.0, GameUtils.Dist3d((0,0,0),(3,4,0)));
     }
-    [Fact] public void Dist3d_MixedCoordTuple()
+    [Fact] public void Dist3d_CoordAndTuple()
     {
         using var env = GlobalTestEnv.Enter();
         var o = new Coord("limbo",0,0,0);
-        Assert.Equal(5.0, GameUtils.Dist3d(o, new object[]{"limbo",0,3,4,0}));
-        Assert.Equal(5.0, GameUtils.Dist3d(new object[]{"limbo",0,0,0,0}, new object[]{"limbo",0,3,4,0}));
-        Assert.Equal(5.0, GameUtils.Dist3d(new object[]{0,0,0}, new object[]{3,4,0}));
+        Assert.Equal(5.0, GameUtils.Dist3d(o, new Coord("limbo",0,3,4)));
+        Assert.Equal(5.0, GameUtils.Dist3d((0,0,0),(0,3,4)));
     }
 }

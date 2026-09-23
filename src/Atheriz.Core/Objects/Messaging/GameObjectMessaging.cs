@@ -65,12 +65,12 @@ public partial class GameObject
     /// </summary>
     public void Msg(string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, bool raiseErrors = false) => Msg(text ?? "", fromObj, mapping, raiseErrors, null);
 
-    public bool AtMsgReceive(string? text, GameObject? fromObj, string? msgType) => Hookable(HookNames.AtMsgReceive, () => true, text, fromObj, msgType);
-    public void AtMsgSend(string? text, GameObject? toObj, string? msgType) => Hookable(HookNames.AtMsgSend, () => 0, text, toObj, msgType);
+    public bool AtMsgReceive(string? text, GameObject? fromObj, string? msgType) => Hookable(HookName.AtMsgReceive, () => true, text, fromObj, msgType);
+    public void AtMsgSend(string? text, GameObject? toObj, string? msgType) => Hookable(HookName.AtMsgSend, () => 0, text, toObj, msgType);
 
     public virtual void AtSay(string text, bool msgSelf = true)
     {
-        Hookable(HookNames.AtSay, () =>
+        Hookable(HookName.AtSay, () =>
         {
             AtSayFull(text, msgSelf);
             return 0;
@@ -84,7 +84,7 @@ public partial class GameObject
     /// </summary>
     public virtual void AtSayFull(string message, object? msgSelf = null, string? msgLocation = null, IEnumerable<GameObject>? receivers = null, string? msgReceivers = null, string? msgType = null, bool whisper = false, IDictionary<string, object?>? mapping = null)
     {
-        Hookable(HookNames.AtSay, () =>
+        Hookable(HookName.AtSay, () =>
         {
             var recvList = receivers?.ToList();
             if (recvList is not null && recvList.Count == 0) recvList = null;

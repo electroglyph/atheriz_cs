@@ -11,7 +11,7 @@ public partial class GameObject
     public virtual bool AtPreMove(GameObject? destination, string? toExit = null)
     {
         // Hookable wrapper: before hooks advisory, replace hooks override
-        return Hookable(HookNames.AtPreMove, () =>
+        return Hookable(HookName.AtPreMove, () =>
         {
             var locObj = ResolveLocationObject();
             if (locObj is not null && !locObj.Access(this, "exit")) return false;
@@ -23,24 +23,24 @@ public partial class GameObject
 // advisory hookable
     public virtual void AtPostMove(GameObject? destination, string? toExit = null)
     {
-        Hookable(HookNames.AtPostMove, () => 0, destination, toExit);
+        Hookable(HookName.AtPostMove, () => 0, destination, toExit);
     }
 
     public virtual bool AtPreObjectLeave(GameObject? destination, string? toExit = null)
     {
-        return Hookable(HookNames.AtPreObjectLeave, () => true, destination, toExit);
+        return Hookable(HookName.AtPreObjectLeave, () => true, destination, toExit);
     }
     public virtual void AtObjectLeave(GameObject? destination, string? toExit = null)
     {
-        Hookable(HookNames.AtObjectLeave, () => 0, destination, toExit);
+        Hookable(HookName.AtObjectLeave, () => 0, destination, toExit);
     }
     public virtual bool AtPreObjectReceive(GameObject? source, string? fromExit = null)
     {
-        return Hookable(HookNames.AtPreObjectReceive, () => true, source, fromExit);
+        return Hookable(HookName.AtPreObjectReceive, () => true, source, fromExit);
     }
     public virtual void AtObjectReceive(GameObject? source, string? fromExit = null)
     {
-        Hookable(HookNames.AtObjectReceive, () => 0, source, fromExit);
+        Hookable(HookName.AtObjectReceive, () => 0, source, fromExit);
     }
 
     // For Node subclasses, override to provide proper at_pre_object_* checks

@@ -3,9 +3,9 @@ using Atheriz.Core.Objects;
 namespace Atheriz.Core.Tests.Features.Objects;
 
 // Hook dispatch needs one contract: hook failures surface as the hook's own
-// error and a bad replace delegate never takes down the op.
-// Before/replace delegates currently crash MoveTo/Msg with raw reflection
-// exceptions (Hooks/Hookable.cs:30-35).
+// error and a bad replace delegate never takes down the op. Known hooks get
+// attach-time arity validation: a delegate that cannot take any dispatch
+// shape is refused loudly at InstallHook, so the op runs hook-free.
 [Collection("Ported")]
 public class HookDispatchTests
 {
@@ -43,24 +43,25 @@ public class HookDispatchTests
     }
 
     [Fact]
-    public void ReplaceHook_ArityMismatch_FallsBackToOriginal()
+    public void ReplaceHook_ArityMismatch_RefusedAtAttach()
     {
-        // Correct: a replace delegate that cannot take the call args is
-        // ignored and the original runs (mirrors the after-hook arity
-        // fallback at Hooks/Hookable.cs:50).
+        // A replace delegate that cannot take the call args is refused at
+        // attach (loud log, no install), so the original runs hook-free.
         var obj = new GameObject();
         obj.InstallHook("at_look", HookFor("WrongArity", typeof(Func<GameObject?, GameObject?, GameObject?, int>)));
+        Assert.False(obj.HasHook("at_look"));
         Assert.Equal("orig", obj.Hookable<string>("at_look", () => "orig", (GameObject?)null));
     }
 
     [Fact]
-    public void BeforeHook_ArityMismatch_SkippedOriginalRuns()
+    public void BeforeHook_ArityMismatch_RefusedAtAttach()
     {
-        // A mis-signed before hook gets the replace-hook treatment (skip +
-        // loud log), not an exception out of the entry point: MoveTo-style
-        // callers see a normal return instead of a reflection throw.
+        // A mis-signed before hook is refused at attach instead of
+        // installing and skipping at every dispatch: MoveTo-style callers
+        // see a normal return with no hook installed.
         var obj = new GameObject();
         obj.InstallHook("at_look", HookFor("BeforeWrongArity", typeof(Func<GameObject?, GameObject?, GameObject?, string>)));
+        Assert.False(obj.HasHook("at_look"));
         Assert.Equal("orig", obj.Hookable<string>("at_look", () => "orig", (GameObject?)null));
     }
 
@@ -75,5 +76,52 @@ public class HookDispatchTests
         var ex = Assert.Throws<InvalidOperationException>(() =>
             obj.Hookable<string>("at_look", () => "orig", (GameObject?)null));
         Assert.Equal("boom-after", ex.Message);
+    }
+
+    [Fact]
+    public void InstallHook_UnknownName_BypassesValidation()
+    {
+        // Custom hook names define their own shapes: any delegate attaches.
+        var obj = new GameObject();
+        Action<string, bool, int> custom = (_, _, _) => { };
+        obj.InstallHook("at_custom_shape", custom);
+        Assert.True(obj.HasHook("at_custom_shape"));
+    }
+
+    private sealed class TickProbe
+    {
+        public bool Fired;
+        [Before]
+        public void OnTick() { Fired = true; }
+    }
+
+    [Fact]
+    public void InstallHook_HookNameOverload_AttachesAndDispatches()
+    {
+        // The typed overload installs a valid hook that fires on dispatch.
+        var obj = new GameObject();
+        var probe = new TickProbe();
+        obj.InstallHook(HookName.AtTick, (Action)probe.OnTick);
+        Assert.True(obj.HasHook(HookName.AtTick));
+        obj.Hookable<int>(HookName.AtTick, () => 0);
+        Assert.True(probe.Fired);
+    }
+
+    [Fact]
+    public void HookName_Name_RoundTrips_AllMembers()
+    {
+        // Every enum member maps to a distinct non-empty runtime name and
+        // TryParseName inverts the mapping: adding a member without mapper
+        // arms fails here, not as a silently unvalidated hook.
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (HookName name in Enum.GetValues<HookName>())
+        {
+            string runtime = name.Name();
+            Assert.False(string.IsNullOrEmpty(runtime));
+            Assert.True(names.Add(runtime));
+            Assert.Equal(name, HookNameExtensions.TryParseName(runtime));
+        }
+        Assert.Null(HookNameExtensions.TryParseName("at_no_such_hook"));
+        Assert.Null(HookNameExtensions.TryParseName(null));
     }
 }

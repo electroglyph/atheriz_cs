@@ -9,14 +9,14 @@ public sealed class DeleteCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("target").Help("Object to delete.").Nargs("+");
+        p.AddArgument(ParsedArgKeys.Target).Help("Object to delete.").Nargs("+");
         p.AddArgument("-r", "--recursive").Help("Delete contents recursively.").Action(GameArgumentParser.ArgAction.StoreTrue);
     }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
-        var targets = pa.GetList("target");
+        var targets = pa.GetList(ParsedArgKeys.Target);
         if (targets.Count == 0) { go.Msg("Delete what?"); return; }
         string targetName = string.Join(" ", targets).Trim();
         var target = CommandHelpers.ResolveObject(go, targetName);

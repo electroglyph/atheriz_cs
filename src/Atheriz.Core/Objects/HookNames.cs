@@ -13,6 +13,7 @@ public static class HookNames
     public const string AtDesc = "at_desc";
     public const string AtDisconnect = "at_disconnect";
     public const string AtDrop = "at_drop";
+    public const string AtEmitSound = "at_emit_sound";
     public const string AtGet = "at_get";
     public const string AtGive = "at_give";
     public const string AtHear = "at_hear";
@@ -29,8 +30,10 @@ public static class HookNames
     public const string AtPostMove = "at_post_move";
     public const string AtPostPuppet = "at_post_puppet";
     public const string AtPreDrop = "at_pre_drop";
+    public const string AtPreEmitSound = "at_pre_emit_sound";
     public const string AtPreGet = "at_pre_get";
     public const string AtPreGive = "at_pre_give";
+    public const string AtPreHear = "at_pre_hear";
     public const string AtPreMapRender = "at_pre_map_render";
     public const string AtPreMove = "at_pre_move";
     public const string AtPreObjectLeave = "at_pre_object_leave";

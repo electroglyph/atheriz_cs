@@ -55,7 +55,7 @@ public sealed class BuildCommand : Command
         n=pa.GetBool("n"); e=pa.GetBool("e"); s=pa.GetBool("s"); w=pa.GetBool("w"); u=pa.GetBool("u"); d=pa.GetBool("d"); x=pa.GetBool("x");
         room=pa.GetBool("room"); road=pa.GetBool("road"); path=pa.GetBool("path");
         desc=pa["desc"] as string;
-        single=pa.GetBool("single"); dbl=pa.GetBool("double"); round=pa.GetBool("round"); none=pa.GetBool("none");
+        single=pa.GetBool("single"); dbl=pa.GetBool("double"); round=pa.GetBool("round"); none=pa.GetBool(ParsedArgKeys.None);
 
         // Node and map handlers via Singletons
         var nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();

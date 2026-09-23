@@ -16,7 +16,7 @@ public partial class GameObject
 
     public virtual string AtLook(GameObject? target)
     {
-        return Hookable(HookNames.AtLook, () =>
+        return Hookable(HookName.AtLook, () =>
         {
             if (target is null) return "You see nothing here.";
             if (!target.Access(this, "view")) return $"You can't look at '{target.GetDisplayName(this)}'.";
@@ -29,7 +29,7 @@ public partial class GameObject
 
     public virtual string ReturnAppearance(GameObject? looker)
     {
-        return Hookable(HookNames.ReturnAppearance, () =>
+        return Hookable(HookName.ReturnAppearance, () =>
         {
             if (looker is null) return "";
             // Simplified appearance: name + desc + things

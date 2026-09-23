@@ -113,7 +113,7 @@ public class WontfixRegressionTests
         ObjectRegistry.ClearAll();
     }
 
-    // Port of AGENTS.md puppet snapshot only is_pc/privilege_level wontfix: puppet.py:110,138-142
+    // Puppet snapshot covers only is_pc/privilege_level by design: quelled/can_hear/is_mapable are excluded.
     [Fact]
     public void Puppet_Snapshot_OnlyIsPcAndPrivilege()
     {
@@ -136,15 +136,12 @@ public class WontfixRegressionTests
         Assert.True(ok);
         Assert.True(npc.IsPc);
         Assert.Equal(Privilege.Builder, npc.PrivilegeLevel);
-        // check snapshot only has 2 keys via internal method
+        // check snapshot holds exactly the two typed fields via internal method
         var mi = typeof(GameObject).GetMethod("GetPuppetRestore", BindingFlags.NonPublic | BindingFlags.Instance);
-        var restore = mi!.Invoke(npc, null) as Dictionary<string, object>;
+        var restore = mi!.Invoke(npc, null) as GameObject.PuppetRestoreSnapshot;
         Assert.NotNull(restore);
-        Assert.Equal(2, restore!.Count);
-        Assert.True(restore.ContainsKey("is_pc"));
-        Assert.True(restore.ContainsKey("privilege_level"));
-        Assert.False(restore.ContainsKey("quelled"));
-        Assert.False(restore.ContainsKey("can_hear"));
+        Assert.False(restore!.IsPc);
+        Assert.Equal(Privilege.Guest, restore.PrivilegeLevel);
         // mutate quelled/can_hear during puppet
         npc.Quelled = true;
         npc.CanHear = false;
@@ -191,13 +188,11 @@ public class WontfixRegressionTests
         CommandRegistry.Reset(); ObjectRegistry.ClearAll();
     }
 
-    // Port of AGENTS.md mixed Coord/tuple caller error wontfix: utils.py:362,373
+    // Cross-area direction is caller error: returns "" (the untyped
+    // list overloads that used to return "" for mismatched lengths are gone).
     [Fact]
-    public void MixedCoordTuple_IsCallerError()
+    public void CoordAreaMismatch_ReturnsEmpty()
     {
-        var a = new List<object?> { "limbo", 0, 0, 0 };
-        var b = new List<object?> { 0, 0 }; // mismatched length
-        Assert.Equal("", GameUtils.GetDir(a, b)); // caller error returns ""
         var c1 = new Coord("limbo", 0, 0, 0);
         var c2 = new Coord("other", 0, 0, 0);
         Assert.Equal("", GameUtils.GetDir(c1, c2)); // different area

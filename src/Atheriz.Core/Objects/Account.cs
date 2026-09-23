@@ -32,9 +32,9 @@ public class Account : GameObject
     {
         // Unconditional true (test_account.py:88 — not access-gated like the base),
         // routed through the hook pipeline so game code can veto via at_delete hooks.
-        return Hookable(HookNames.AtDelete, () => true, caller);
+        return Hookable(HookName.AtDelete, () => true, caller);
     }
-    public virtual bool AtPrePuppet(GameObject character) => Hookable(HookNames.AtPrePuppet, () => true, character);
+    public virtual bool AtPrePuppet(GameObject character) => Hookable(HookName.AtPrePuppet, () => true, character);
     // Account-specific Delete returns bool (Python) — hides GameObject tuple version.
     // NOTE: C# cannot override with a different return type, so a GameObject-typed
     // reference dispatches to the base tuple Delete. That path converges via

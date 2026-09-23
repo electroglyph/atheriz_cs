@@ -5,14 +5,13 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
-// Puppet snapshot restore: one lookup with ordered arms decides exactly what
-// the double lookup did — boxed enum and int forms both restore, unknown
-// types are ignored.
+// Puppet snapshot restore: the typed record carries both fields, so restore
+// applies exactly what the snapshot holds — no lookup arms, no ignored types.
 [Collection("Ported")]
 public class PuppetSnapshotRoundTripTests
 {
     [Fact]
-    public void RestorePuppetSnapshot_AcceptsEnumAndIntForms()
+    public void RestorePuppetSnapshot_AppliesRecordFields()
     {
         ObjectRegistry.ClearAll();
         try
@@ -21,19 +20,11 @@ public class PuppetSnapshotRoundTripTests
             obj.IsPc = false;
             obj.PrivilegeLevel = Privilege.Player;
 
-            obj.RestorePuppetSnapshot(new Dictionary<string, object>
-            {
-                ["is_pc"] = true,
-                ["privilege_level"] = Privilege.Admin,
-            });
+            obj.RestorePuppetSnapshot(new GameObject.PuppetRestoreSnapshot(true, Privilege.Admin));
             Assert.True(obj.IsPc);
             Assert.Equal(Privilege.Admin, obj.PrivilegeLevel);
 
-            obj.RestorePuppetSnapshot(new Dictionary<string, object>
-            {
-                ["is_pc"] = false,
-                ["privilege_level"] = (int)Privilege.Helper,
-            });
+            obj.RestorePuppetSnapshot(new GameObject.PuppetRestoreSnapshot(false, Privilege.Helper));
             Assert.False(obj.IsPc);
             Assert.Equal(Privilege.Helper, obj.PrivilegeLevel);
         }
@@ -41,21 +32,16 @@ public class PuppetSnapshotRoundTripTests
     }
 
     [Fact]
-    public void RestorePuppetSnapshot_IgnoresUnknownTypes()
+    public void PuppetRestoreSnapshot_ComparesByValue()
     {
-        ObjectRegistry.ClearAll();
-        try
-        {
-            var obj = GameObject.Create("npc");
-            obj.PrivilegeLevel = Privilege.Player;
-
-            obj.RestorePuppetSnapshot(new Dictionary<string, object>
-            {
-                ["privilege_level"] = "admin",
-            });
-
-            Assert.Equal(Privilege.Player, obj.PrivilegeLevel);
-        }
-        finally { ObjectRegistry.ClearAll(); }
+        Assert.Equal(
+            new GameObject.PuppetRestoreSnapshot(true, Privilege.Admin),
+            new GameObject.PuppetRestoreSnapshot(true, Privilege.Admin));
+        Assert.NotEqual(
+            new GameObject.PuppetRestoreSnapshot(true, Privilege.Admin),
+            new GameObject.PuppetRestoreSnapshot(false, Privilege.Admin));
+        Assert.NotEqual(
+            new GameObject.PuppetRestoreSnapshot(true, Privilege.Admin),
+            new GameObject.PuppetRestoreSnapshot(true, Privilege.Guest));
     }
 }

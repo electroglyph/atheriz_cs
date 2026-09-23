@@ -166,7 +166,7 @@ public class NetworkRegressionTests
     public void HandlerDiscovery_UsesNoPerConstructionReflection()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Network", "ConnectionManager.cs");
-        var region = SourceScan.Region(src, "public Dictionary<string, Delegate> GetHandlers()");
+        var region = SourceScan.Region(src, "public Dictionary<string, InputHandler> GetHandlers()");
         Assert.DoesNotContain("GetMethods", region);
     }
 

@@ -8,12 +8,12 @@ public sealed class PuppetCommand : Command
     public override string Desc => "Take control of an object, temporarily making it a player character.";
     public override string Category => "Building";
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("target", help: "Object to puppet (name or #id)."); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Target, help: "Object to puppet (name or #id)."); }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        var query = pa?.GetString("target");
+        var query = pa?.GetString(ParsedArgKeys.Target);
         if (string.IsNullOrWhiteSpace(query)) { go.Msg(PrintHelp()); return; }
         var sess = go.Session;
         if (sess is null) { go.Msg("You have no active session."); return; }

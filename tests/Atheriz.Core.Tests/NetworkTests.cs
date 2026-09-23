@@ -40,7 +40,7 @@ public sealed class NetworkTests
     {
         var conn = new TestConn("qtest", "2.2.2.2");
         // flood beyond limit 100
-        for (int i = 0; i < 110; i++) conn.EnqueueInput((Delegate)(Action<object?, object?>)((_, __) => { }), [], new Dictionary<string, object?>());
+        for (int i = 0; i < 110; i++) conn.EnqueueInput((_, _, _) => { }, [], new Dictionary<string, object?>());
         // queue should not explode — drain should keep bounded, just ensure no exception
         await Task.Delay(80);
         Assert.True(true);

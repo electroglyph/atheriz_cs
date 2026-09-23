@@ -133,41 +133,16 @@ public static class GameUtils
     }
 
     /// <summary>
-    /// Mirrors <c>atheriz/utils.py:get_dir</c>. Takes generic tuples:
-    /// (area,x,y,z) or (x,y) etc. Returns "" if areas differ or coords malformed.
-    /// Wontfix: mixed Coord/tuple with different arities is caller error — returns "".
+    /// Compass direction from one coordinate to another.
+    /// Returns "" when the areas differ.
     /// </summary>
-    public static string GetDir(IReadOnlyList<object?> origin, IReadOnlyList<object?> dest)
-    {
-        try
-        {
-            if (origin.Count != dest.Count) return "";
-            if (origin.Count >= 4 && origin[0] is string oa && dest[0] is string da && oa != da)
-                return "";
-            int oX, oY, dX, dY;
-            if (origin[0] is string)
-            {
-                oX = Convert.ToInt32(origin[1]); oY = Convert.ToInt32(origin[2]);
-                dX = Convert.ToInt32(dest[1]); dY = Convert.ToInt32(dest[2]);
-            }
-            else
-            {
-                oX = Convert.ToInt32(origin[0]); oY = Convert.ToInt32(origin[1]);
-                dX = Convert.ToInt32(dest[0]); dY = Convert.ToInt32(dest[1]);
-            }
-            var ew = dX - oX; var ns = dY - oY;
-            return DirFromDeltas(ew, ns);
-        }
-        catch { return ""; }
-    }
-
     public static string GetDir(Coord origin, Coord dest)
     {
         if (origin.Area != dest.Area) return "";
         return DirFromDeltas(dest.X - origin.X, dest.Y - origin.Y);
     }
 
-    // Shared ns/ew-to-compass composition for both GetDir overloads.
+    // Shared ns/ew-to-compass composition for GetDir.
     private static string DirFromDeltas(int ew, int ns)
     {
         var dir = "";
@@ -176,7 +151,7 @@ public static class GameUtils
         return dir;
     }
 
-    // Shared Euclidean core for the Dist3d overloads. Keeps the Math.Pow
+    // Shared Euclidean core for Dist3d. Keeps the Math.Pow
     // formulation (not dx*dx) so float results cannot drift between overloads.
     private static double DistCore(double dx, double dy, double dz)
         => Math.Sqrt(Math.Pow(dx, 2) + Math.Pow(dy, 2) + Math.Pow(dz, 2));
@@ -186,25 +161,6 @@ public static class GameUtils
 
     public static double Dist3d((int X, int Y, int Z) a, (int X, int Y, int Z) b)
         => DistCore(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
-
-    public static double Dist3d(IReadOnlyList<object?> origin, IReadOnlyList<object?> dest)
-    {
-        try
-        {
-            if (origin.Count == 3 && dest.Count == 3)
-                return DistCore(Convert.ToDouble(origin[0]) - Convert.ToDouble(dest[0]), Convert.ToDouble(origin[1]) - Convert.ToDouble(dest[1]), Convert.ToDouble(origin[2]) - Convert.ToDouble(dest[2]));
-            // area,x,y,z,... use indices 1,2,3
-            return DistCore(Convert.ToDouble(origin[1]) - Convert.ToDouble(dest[1]), Convert.ToDouble(origin[2]) - Convert.ToDouble(dest[2]), Convert.ToDouble(origin[3]) - Convert.ToDouble(dest[3]));
-        } catch { return 0; }
-    }
-    public static double Dist3d(Coord origin, IReadOnlyList<object?> dest)
-    {
-        try{
-            var o = new object[]{origin.Area, origin.X, origin.Y, origin.Z};
-            return Dist3d(o, dest);
-        }catch{ return 0; }
-    }
-    public static double Dist3d(IReadOnlyList<object?> origin, Coord dest) => Dist3d(dest, origin);
 
     public static string WordReplace(string input, double replaceFreq, string replacement = "...")
     {

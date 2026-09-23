@@ -1,6 +1,7 @@
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence.Dto;
+using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
@@ -53,6 +54,8 @@ public class LockRestoreTests
     public void ApplyDtoFields_UnknownPolicy_DeniesAccess()
     {
         // An unresolvable lock policy must deny (fail closed), never vanish.
+        // Strings are gone from the DTO: an out-of-range numeric value stands
+        // in for save data naming a policy the engine does not know.
         using var env = GlobalTestEnv.Enter();
         var obj = MakePlayer("locktest");
         var caller = MakePlayer("caller");
@@ -60,7 +63,7 @@ public class LockRestoreTests
         {
             Id = obj.Id,
             Name = "locktest",
-            Locks = [new LockDefDto { Name = "view", Policy = "frobnicate_policy" }],
+            Locks = [new LockDefDto { Name = "view", Policies = [(LockPolicies.LockPolicy)999] }],
         };
         GameObject.ApplyDtoFields(obj, dto, null);
         Assert.False(obj.Access(caller, "view"));
@@ -78,9 +81,40 @@ public class LockRestoreTests
         {
             Id = obj.Id,
             Name = "locktest2",
-            Locks = [new LockDefDto { Name = "view", Policy = "custom" }],
+            Locks = [new LockDefDto { Name = "view", Policies = [LockPolicies.LockPolicy.Custom] }],
         };
         GameObject.ApplyDtoFields(obj, dto, null);
         Assert.True(obj.Access(caller, "view"));
+    }
+
+    [Fact]
+    public void ApplyDtoFields_DeniedMarker_DeniesAndResavesDenied()
+    {
+        // The fail-closed marker survives a load and re-saves as itself, so a
+        // deny entry never washes out into allow across save/load cycles.
+        using var env = GlobalTestEnv.Enter();
+        var obj = MakePlayer("locktest3");
+        var caller = MakePlayer("caller3");
+        var dto = new GameObjectDto
+        {
+            Id = obj.Id,
+            Name = "locktest3",
+            Locks = [new LockDefDto { Name = "view", Policies = [LockPolicies.LockPolicy.Denied] }],
+        };
+        GameObject.ApplyDtoFields(obj, dto, null);
+        Assert.False(obj.Access(caller, "view"));
+        Assert.Equal([LockPolicies.LockPolicy.Denied],
+            obj.ToDto().Locks.Single(d => d.Name == "view").Policies);
+    }
+
+    [Fact]
+    public void NoParallelPolicyTable_RemainsSingleCollection()
+    {
+        // One lock collection only: the parallel policy table is gone from
+        // both holders, so predicates and policies cannot drift out of sync.
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.cs");
+        Assert.DoesNotContain("_lockPolicies", src);
+        var door = SourceScan.Read("src", "Atheriz.Core", "Objects", "Door.cs");
+        Assert.DoesNotContain("_lockPolicies", door);
     }
 }

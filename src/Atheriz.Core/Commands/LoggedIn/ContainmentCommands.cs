@@ -5,7 +5,7 @@ public sealed class GetCommand : Command
 {
     public override string Key => "get";
     public override string Desc => "Get an object.";
-    protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument("target", nargs: "*", help: "object to get, optionally 'from <container>'"); }
+    protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument(ParsedArgKeys.Target, nargs: "*", help: "object to get, optionally 'from <container>'"); }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
@@ -13,9 +13,9 @@ public sealed class GetCommand : Command
         var loc = go.ResolveLocationObject();
         if (loc is null) { CommandHelpers.MsgNo(go); return; }
         string? objName = null, sourceName = null;
-        // The parser defines a single positional dest ("target"); live input
-        // never carries other keys, so no fallback dests are read here.
-        var tokens = pa.GetList("target");
+        // The parser defines a single positional dest (ParsedArgKeys.Target);
+        // live input never carries other keys, so no fallback dests are read here.
+        var tokens = pa.GetList(ParsedArgKeys.Target);
         if (tokens.Count == 0) { go.Msg(PrintHelp()); return; }
         int fromIdx = -1;
         for (int i=0;i<tokens.Count;i++) if (tokens[i].Equals("from", StringComparison.OrdinalIgnoreCase)) { fromIdx=i; break; }
@@ -109,7 +109,7 @@ public sealed class PutCommand : Command
 {
     public override string Key => "put";
     public override string Desc => "Put an object somewhere.";
-    protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument("args", nargs: "REMAINDER"); }
+    protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument(ParsedArgKeys.Args, nargs: "REMAINDER"); }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var goCaller, PrintHelp())) return;
@@ -119,7 +119,7 @@ public sealed class PutCommand : Command
 // live ParsedArgs carry the `args` list.
         if (args is GameArgumentParser.ParsedArgs pa)
         {
-            var tokens = pa.GetList("args");
+            var tokens = pa.GetList(ParsedArgKeys.Args);
             if (tokens.Count > 0)
             {
                 int split = tokens.FindIndex(s => s.Equals("in", StringComparison.OrdinalIgnoreCase) || s.Equals("into", StringComparison.OrdinalIgnoreCase));

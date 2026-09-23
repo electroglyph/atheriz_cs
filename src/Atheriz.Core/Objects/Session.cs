@@ -154,7 +154,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
                 stack.RemoveAt(stack.Count - 1);
                 // GameObject carries the snapshot as a typed internal member (same
                 // assembly) — no dynamic/reflection needed.
-                // Wontfix: only is_pc/privilege_level per puppet.py:110 — handled in GameObject.RestorePuppetSnapshot
+                // Wontfix: only is_pc/privilege_level are in the snapshot — handled in GameObject.RestorePuppetSnapshot
                 try
                 {
                     var restore = target.GetPuppetRestore();

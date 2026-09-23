@@ -6,7 +6,7 @@ public sealed class HelpCommand : Command
     public override IReadOnlyList<string> Aliases => ["?"];
     public override string Desc => "Show help for commands.";
     public override string Category => "General";
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("command", nargs: "?", help: "Command to get help on"); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Command, nargs: "?", help: "Command to get help on"); }
 
     // Help-table width clamp shared by every caller shape below: the table
     // reserves two columns, and widths below 20 collapse.
@@ -15,7 +15,7 @@ public sealed class HelpCommand : Command
     public override void Run(IMessageTarget caller, object? args)
     {
         var pa = args as GameArgumentParser.ParsedArgs;
-        string? query = pa?.GetString("command")?.Trim().ToLowerInvariant();
+        string? query = pa?.GetString(ParsedArgKeys.Command)?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(query)) query = (args as string ?? "").Trim().ToLowerInvariant();
         var cs = CommandRegistry.UnloggedIn;
         if (string.IsNullOrEmpty(query))

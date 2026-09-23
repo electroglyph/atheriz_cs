@@ -15,7 +15,7 @@ public abstract class DoorDirectionCommand : Command
         p.AddArgument("-w", "--west").Help("West").Action(GameArgumentParser.ArgAction.StoreTrue);
         p.AddArgument("-u", "--up").Help("Up").Action(GameArgumentParser.ArgAction.StoreTrue);
         p.AddArgument("-d", "--down").Help("Down").Action(GameArgumentParser.ArgAction.StoreTrue);
-        p.AddArgument("args").Help("Other args").Nargs("*");
+        p.AddArgument(ParsedArgKeys.Args).Help("Other args").Nargs("*");
     }
 
     public sealed override void Run(IMessageTarget caller, object? args)
@@ -29,7 +29,7 @@ public abstract class DoorDirectionCommand : Command
             return;
         }
         var pa = args as GameArgumentParser.ParsedArgs;
-        var lower = pa?.GetList("args").Select(a => a.ToLowerInvariant()).ToList() ?? [];
+        var lower = pa?.GetList(ParsedArgKeys.Args).Select(a => a.ToLowerInvariant()).ToList() ?? [];
         bool n = pa?.GetBool("north") == true || lower.Contains("n") || lower.Contains("north");
         bool s = pa?.GetBool("south") == true || lower.Contains("s") || lower.Contains("south");
         bool e = pa?.GetBool("east") == true || lower.Contains("e") || lower.Contains("east");

@@ -62,12 +62,8 @@ internal static class GameObjectDtoConverter
         var puppet = obj.GetPuppetRestore();
         if (puppet is not null)
         {
-            if (puppet.TryGetValue(GameObject.PuppetRestoreIsPcKey, out var v) && v is bool b) serIsPc = b;
-            if (puppet.TryGetValue(GameObject.PuppetRestorePrivilegeKey, out var p))
-            {
-                if (p is Privilege priv) serPriv = priv;
-                else if (p is int i) serPriv = (Privilege)i;
-            }
+            serIsPc = puppet.IsPc;
+            serPriv = puppet.PrivilegeLevel;
         }
 
         var dto = new GameObjectDto
@@ -146,15 +142,10 @@ internal static class GameObjectDtoConverter
 
     private static List<LockDefDto> BuildLockDefs(GameObject obj)
     {
-        var policies = obj.GetLockPoliciesSnapshot();
-        var locks = obj.GetLocksSnapshot();
-        List<LockDefDto> defs = new(locks.Count);
-        foreach (var kv in locks)
-        {
-            policies.TryGetValue(kv.Key, out var pols);
-            var names = pols is not null && pols.Count == kv.Value.Count ? pols : Enumerable.Repeat(LockPolicies.Custom, kv.Value.Count);
-            defs.Add(new LockDefDto { Name = kv.Key, Policy = string.Join("|", names) });
-        }
+        var entries = obj.GetLockEntriesSnapshot();
+        List<LockDefDto> defs = new(entries.Count);
+        foreach (var kv in entries)
+            defs.Add(new LockDefDto { Name = kv.Key, Policies = kv.Value.Select(e => e.Policy).ToList() });
         return defs;
     }
 

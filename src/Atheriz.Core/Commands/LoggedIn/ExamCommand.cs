@@ -10,13 +10,13 @@ public sealed class ExamCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("target", nargs: "?", help: "Object to examine (name or #id).");
+        p.AddArgument(ParsedArgKeys.Target, nargs: "?", help: "Object to examine (name or #id).");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        string? targetStr = pa?.GetString("target");
+        string? targetStr = pa?.GetString(ParsedArgKeys.Target);
         GameObject? target = null;
         if (string.IsNullOrEmpty(targetStr))
         {

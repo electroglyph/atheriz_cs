@@ -35,7 +35,7 @@ public sealed class RetryDrainTests
             {
                 baseline = Gauge();
                 var probe = new TestConnection("drain-probe");
-                probe.EnqueueInput(new Action(() => { }), new List<object?>(), new Dictionary<string, object?>());
+                probe.EnqueueInput((_, _, _) => { }, new List<object?>(), new Dictionary<string, object?>());
                 scheduled = Gauge() >= baseline + 1;
                 if (!scheduled) Thread.Sleep(50);
             }

@@ -91,7 +91,7 @@ public class BaseChannelCommand : Command
 
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("message").Help("Message to send").Nargs("*");
+        p.AddArgument(ParsedArgKeys.Message).Help("Message to send").Nargs("*");
         p.AddArgument("-u", "--unsubscribe").Help("Unsubscribe from channel").Action(GameArgumentParser.ArgAction.StoreTrue);
         p.AddArgument("-r", "--replay").Help("View channel history").Action(GameArgumentParser.ArgAction.StoreTrue);
     }
@@ -131,7 +131,7 @@ public class BaseChannelCommand : Command
             if (!string.IsNullOrEmpty(h)) caller.Msg(h);
             else CommandHelpers.MsgNoChannelHistory(caller);
         }
-        else if (string.Join(" ", pa.GetList("message")) is string msg && !string.IsNullOrWhiteSpace(msg))
+        else if (string.Join(" ", pa.GetList(ParsedArgKeys.Message)) is string msg && !string.IsNullOrWhiteSpace(msg))
         {
             if (!ch.Access(go, "send"))
             {

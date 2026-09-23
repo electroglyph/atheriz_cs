@@ -9,18 +9,18 @@ public sealed class NounCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("noun", help: "noun to add or change");
-        p.AddArgument("desc", nargs: "REMAINDER", help: "desc to set for the noun");
+        p.AddArgument(ParsedArgKeys.Noun, help: "noun to add or change");
+        p.AddArgument(ParsedArgKeys.Desc, nargs: "REMAINDER", help: "desc to set for the noun");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null || string.IsNullOrWhiteSpace(pa.GetString("noun")) || pa.GetList("desc").Count == 0) { go.Msg(PrintHelp()); return; }
+        if (pa is null || string.IsNullOrWhiteSpace(pa.GetString(ParsedArgKeys.Noun)) || pa.GetList(ParsedArgKeys.Desc).Count == 0) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject() as Node;
         if (loc is null) { CommandHelpers.MsgNo(go); return; }
-        string noun = pa.GetString("noun")!;
-        string desc = string.Join(" ", pa.GetList("desc"));
+        string noun = pa.GetString(ParsedArgKeys.Noun)!;
+        string desc = string.Join(" ", pa.GetList(ParsedArgKeys.Desc));
         // Atomic add-vs-update decision under the node write lock: a separate
         // GetNoun read here let two concurrent adds of the same new noun both
         // report "Added". Only the absent path inserts; the present path

@@ -140,26 +140,18 @@ public class PortedLocksTests
     }
 }
 
-// Helpers to introspect GameObject locks for testing (mirrors Python's obj.locks dict)
+// Helpers to introspect GameObject locks for testing via the snapshot API
+// (no reflection: the lock table is a single collection of typed entries).
 internal static class LockTestExtensions
 {
     public static List<Func<GameObject,bool>> GetLocks(this GameObject obj, string name)
     {
-        var f=typeof(GameObject).GetField("_locks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-        var dict=(System.Collections.Generic.Dictionary<string, List<Func<GameObject,bool>>>?)f!.GetValue(obj);
-        if(dict!=null && dict.TryGetValue(name, out var lst)) return new List<Func<GameObject,bool>>(lst);
+        var snap = obj.GetLocksSnapshot();
+        if (snap.TryGetValue(name, out var lst)) return new List<Func<GameObject,bool>>(lst);
         return new List<Func<GameObject,bool>>();
     }
     public static bool HasLockName(this GameObject obj, string name)
-    {
-        var f=typeof(GameObject).GetField("_locks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-        var dict=(System.Collections.Generic.Dictionary<string, List<Func<GameObject,bool>>>?)f!.GetValue(obj);
-        return dict!=null && dict.ContainsKey(name);
-    }
+        => obj.GetLocksSnapshot().ContainsKey(name);
     public static List<string> GetAllLockNames(this GameObject obj)
-    {
-        var f=typeof(GameObject).GetField("_locks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-        var dict=(System.Collections.Generic.Dictionary<string, List<Func<GameObject,bool>>>?)f!.GetValue(obj);
-        return dict!=null ? dict.Keys.ToList() : new List<string>();
-    }
+        => obj.GetLocksSnapshot().Keys.ToList();
 }

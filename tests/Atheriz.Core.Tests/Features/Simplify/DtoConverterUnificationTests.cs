@@ -78,12 +78,12 @@ public class DtoConverterUnificationTests
         obj.AddLock("get", _ => true);
         var dto = GameObjectDtoConverter.BuildDto(obj);
         // Emit-all (pre-existing F004 shape): Create-installed defaults keep
-        // their declarative policy names, the ad-hoc lambda is "custom".
-        var byName = dto.Locks.ToDictionary(d => d.Name, d => d.Policy);
+        // their declarative policy names, the ad-hoc lambda is Custom.
+        var byName = dto.Locks.ToDictionary(d => d.Name, d => d.Policies);
         Assert.Equal(3, byName.Count);
-        Assert.Equal("not-self", byName["delete"]);
-        Assert.Equal("puppet-owner", byName["puppet"]);
-        Assert.Equal("custom", byName["get"]);
+        Assert.Equal([LockPolicies.LockPolicy.NotSelf], byName["delete"]);
+        Assert.Equal([LockPolicies.LockPolicy.PuppetOwner], byName["puppet"]);
+        Assert.Equal([LockPolicies.LockPolicy.Custom], byName["get"]);
     }
 
     [Fact]

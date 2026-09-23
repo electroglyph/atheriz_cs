@@ -9,7 +9,7 @@ public sealed class BanCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("target").Help("Player character to ban (name or #id).");
+        p.AddArgument(ParsedArgKeys.Target).Help("Player character to ban (name or #id).");
         p.AddArgument("-r", "--reason").Help("Reason for the ban.");
         p.AddArgument("--account").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Ban the entire account and all its characters.");
         p.AddArgument("--ip").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Also ban the target's IP (requires an online target).");
@@ -18,10 +18,10 @@ public sealed class BanCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
-        var targetName = pa.GetString("target");
+        var targetName = pa.GetString(ParsedArgKeys.Target);
         if (string.IsNullOrWhiteSpace(targetName)) { caller.Msg(PrintHelp()); return; }
         var reason = pa.GetString("reason");
-        bool wantAccount = pa.GetBool("account");
+        bool wantAccount = pa.GetBool(ParsedArgKeys.Account);
         bool ip = pa.GetBool("ip");
         if (!BanHelper.TryResolveBanPreamble(go, targetName, wantAccount, ip, "ban", "banning",
             out var target, out var acct, out var acctChars, out var host, out bool account)
@@ -78,7 +78,7 @@ public sealed class UnbanCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("target").Help("Player character to unban (name or #id).");
+        p.AddArgument(ParsedArgKeys.Target).Help("Player character to unban (name or #id).");
         p.AddArgument("--account").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Unban the entire account and all its characters.");
         p.AddArgument("--ip").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Also clear an IP ban for the target's host (requires an online target).");
     }
@@ -86,9 +86,9 @@ public sealed class UnbanCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
-        var targetName = pa.GetString("target");
+        var targetName = pa.GetString(ParsedArgKeys.Target);
         if (string.IsNullOrWhiteSpace(targetName)) { caller.Msg(PrintHelp()); return; }
-        bool wantAccount = pa.GetBool("account");
+        bool wantAccount = pa.GetBool(ParsedArgKeys.Account);
         bool ip = pa.GetBool("ip");
         if (!BanHelper.TryResolveBanPreamble(go, targetName, wantAccount, ip, "unban", "unbanning",
             out var target, out var acct, out var acctChars, out var host, out bool account)

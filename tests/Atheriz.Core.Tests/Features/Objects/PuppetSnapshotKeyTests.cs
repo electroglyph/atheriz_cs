@@ -1,7 +1,6 @@
-// Pins for the widened puppet-snapshot consts (GameObject.Puppet.cs): the DTO
-// converter reads the same transient snapshot through the shared keys, in
-// both enum and int privilege forms, and the key values stay byte-identical.
-using System.Reflection;
+// Pins for the typed puppet snapshot (GameObject.PuppetRestoreSnapshot): the
+// DTO converter reads the same transient snapshot through the record, and
+// restore applies the record fields exactly.
 using Atheriz.Core.Commands.LoggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
@@ -17,18 +16,6 @@ public sealed class PuppetSnapshotKeyTests
         var pa = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs();
         pa["target"] = target;
         return pa;
-    }
-
-    [Fact]
-    public void PuppetRestoreKeys_MatchPersistedLiterals()
-    {
-        var isPc = typeof(GameObject).GetField("PuppetRestoreIsPcKey", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
-        var priv = typeof(GameObject).GetField("PuppetRestorePrivilegeKey", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
-
-        Assert.NotNull(isPc);
-        Assert.NotNull(priv);
-        Assert.Equal("is_pc", isPc!.GetValue(null));
-        Assert.Equal("privilege_level", priv!.GetValue(null));
     }
 
     [Fact]
@@ -52,15 +39,11 @@ public sealed class PuppetSnapshotKeyTests
     }
 
     [Fact]
-    public void BuildDto_PuppetRestoreIntForm_ReadsSnapshot()
+    public void BuildDto_PuppetRestore_ReadsSnapshotRecord()
     {
         using var env = GlobalTestEnv.Enter();
         var target = GameObject.Create("goblin", isPc: true, privilege: Privilege.Admin);
-        target.SetPuppetRestore(new Dictionary<string, object>
-        {
-            ["is_pc"] = false,
-            ["privilege_level"] = (int)Privilege.Guest,
-        });
+        target.SetPuppetRestore(new GameObject.PuppetRestoreSnapshot(false, Privilege.Guest));
 
         var dto = GameObjectDtoConverter.BuildDto(target);
 
@@ -69,32 +52,26 @@ public sealed class PuppetSnapshotKeyTests
     }
 
     [Fact]
-    public void RestorePuppetSnapshot_EnumPrivilege_RestoresLevel()
+    public void RestorePuppetSnapshot_Record_RestoresFields()
     {
         using var env = GlobalTestEnv.Enter();
         var target = GameObject.Create("goblin", isPc: true, privilege: Privilege.Admin);
-        target.RestorePuppetSnapshot(new Dictionary<string, object>
-        {
-            ["is_pc"] = false,
-            ["privilege_level"] = Privilege.Guest,
-        });
+        target.RestorePuppetSnapshot(new GameObject.PuppetRestoreSnapshot(false, Privilege.Guest));
 
         Assert.False(target.IsPc);
         Assert.Equal(Privilege.Guest, target.PrivilegeLevel);
     }
 
     [Fact]
-    public void RestorePuppetSnapshot_IntPrivilege_RestoresLevel()
+    public void GetPuppetRestore_ReturnsInstalledRecord()
     {
         using var env = GlobalTestEnv.Enter();
         var target = GameObject.Create("goblin", isPc: true, privilege: Privilege.Admin);
-        target.RestorePuppetSnapshot(new Dictionary<string, object>
-        {
-            ["is_pc"] = false,
-            ["privilege_level"] = (int)Privilege.Guest,
-        });
+        Assert.Null(target.GetPuppetRestore());
 
-        Assert.False(target.IsPc);
-        Assert.Equal(Privilege.Guest, target.PrivilegeLevel);
+        var snapshot = new GameObject.PuppetRestoreSnapshot(true, Privilege.Builder);
+        target.SetPuppetRestore(snapshot);
+
+        Assert.Equal(snapshot, target.GetPuppetRestore());
     }
 }

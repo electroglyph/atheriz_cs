@@ -11,20 +11,21 @@ namespace Atheriz.Core.Tests.Features.Objects;
 [Collection("Ported")]
 public class BanVerbLoginVisibilityTests
 {
-    // Writing the canonical ban key clears the legacy spelling so no stale
-    // key lingers beside it.
+    // A stale "banReason" extra key from an old save is ignored: only the
+    // canonical "ban_reason" spelling feeds BanReason, and writing the
+    // canonical key leaves the stale key untouched.
     [Fact]
-    public void BanReason_Write_ClearsLegacyKey()
+    public void BanReason_LegacyKey_Ignored()
     {
         ObjectRegistry.ClearAll();
         try
         {
             var o = GameObject.Create("banned");
             o.SetExtraJson("banReason", JsonSerializer.SerializeToElement("old"));
-            Assert.Equal("old", o.BanReason);
+            Assert.Equal("", o.BanReason);
             o.BanReason = "new";
             Assert.Equal("new", o.BanReason);
-            Assert.False(o.HasExtra("banReason"));
+            Assert.True(o.HasExtra("banReason"));
         }
         finally { ObjectRegistry.ClearAll(); }
     }

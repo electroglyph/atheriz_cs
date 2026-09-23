@@ -12,13 +12,13 @@ public sealed class SayCommand : Command
     public override string Category => "Communication";
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("text").Nargs("REMAINDER").Help("Text to say.");
+        p.AddArgument(ParsedArgKeys.Text).Nargs("REMAINDER").Help("Text to say.");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var puppet)) return;
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
-        var lst = pa.GetList("text");
+        var lst = pa.GetList(ParsedArgKeys.Text);
         if (lst.Count > 0)
         {
             puppet.AtSay(string.Join(" ", lst), msgSelf: true);

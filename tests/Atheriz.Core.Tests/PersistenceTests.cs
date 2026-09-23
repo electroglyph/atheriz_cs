@@ -1,3 +1,4 @@
+using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Dto;
 using Atheriz.Core.Persistence.Entities;
@@ -45,7 +46,7 @@ public class PersistenceTests
                 dto.IsPc = true;
                 dto.Location = new LocationRef.CoordLocation(new Coord("limbo", 4, 4, 4));
                 dto.Tags.Add("hero");
-                dto.Locks.Add(new LockDefDto { Name = "view", Policy = "is_builder" });
+                dto.Locks.Add(new LockDefDto { Name = "view", Policies = [LockPolicies.LockPolicy.Builder] });
                 var row = new ObjectRow
                 {
                     Id = dto.Id,

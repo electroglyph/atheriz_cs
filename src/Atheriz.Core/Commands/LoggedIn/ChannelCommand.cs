@@ -20,7 +20,7 @@ public sealed class ChannelCommand : Command
     public static bool TryGetCached(string name, out Channel? ch) { lock (CacheLock) return ChannelCache.TryGetValue(name, out ch); }
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("message").Help("Message to send").Nargs("*");
+        p.AddArgument(ParsedArgKeys.Message).Help("Message to send").Nargs("*");
         p.AddArgument("-l", "--list").Help("List all channels").Action(GameArgumentParser.ArgAction.StoreTrue);
         p.AddArgument("-c", "--channel").Help("Channel to target");
         p.AddArgument("-u", "--unsubscribe").Help("Unsubscribe from channel").Action(GameArgumentParser.ArgAction.StoreTrue);
@@ -116,7 +116,7 @@ public sealed class ChannelCommand : Command
         }
         else
         {
-            var msgs = pa.GetList("message");
+            var msgs = pa.GetList(ParsedArgKeys.Message);
             var message = string.Join(" ", msgs);
 // an empty message
             // list is falsy and falls through silently (no help text).

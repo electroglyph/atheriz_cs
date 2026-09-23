@@ -6,12 +6,12 @@ namespace Atheriz.Core.Objects;
 // Wontfix document: snapshot only is_pc/privilege_level, quell/can_hear/is_mapable not part of snapshot by design.
 public partial class GameObject
 {
-    // Wontfix: puppet.py:110 restore_snapshot = {"is_pc": target.is_pc, "privilege_level": target.privilege_level}
+    // Wontfix: snapshot = { is_pc, privilege_level } of the puppet target.
     // quelled/can_hear/is_mapable are not part of the snapshot by design — documented here per AGENTS.md.
-    // Transient puppet-restore dict keys (in-memory only, never persisted).
-    // Consts make typos compile-time errors; values stay byte-identical.
-    internal const string PuppetRestoreIsPcKey = "is_pc";
-    internal const string PuppetRestorePrivilegeKey = "privilege_level";
+    // Transient puppet-restore snapshot (in-memory only, never persisted).
+    // A record makes malformed states unrepresentable: two typed fields,
+    // value equality for the stale-restore compare, no string keys to typo.
+    internal sealed record PuppetRestoreSnapshot(bool IsPc, Privilege PrivilegeLevel);
 
     // Shared suppressed-log wrapper for the hook/state fan-out below: every site
     // catches exactly Exception, logs only logEx.Message under its own context
@@ -48,37 +48,25 @@ public partial class GameObject
         catch { enabled = false; return false; }
     }
 
-    internal Dictionary<string, object>? GetPuppetRestore()
-        => Read(() => _puppetRestore is not null ? new Dictionary<string, object>(_puppetRestore) : null);
+    internal PuppetRestoreSnapshot? GetPuppetRestore()
+        => Read(() => _puppetRestore);
 
-    internal void SetPuppetRestore(Dictionary<string, object> restore)
-        => Write(() => _puppetRestore = new Dictionary<string, object>(restore));
+    internal void SetPuppetRestore(PuppetRestoreSnapshot restore)
+        => Write(() => _puppetRestore = restore);
 
     internal void ClearPuppetRestore()
         => Write(() => _puppetRestore = null);
 
-    internal void RestorePuppetSnapshot(Dictionary<string, object> restore)
+    internal void RestorePuppetSnapshot(PuppetRestoreSnapshot restore)
     {
         _lock.EnterWriteLock();
         try
         {
-            if (restore.TryGetValue(PuppetRestoreIsPcKey, out var v) && v is bool b) _flags.IsPc = b;
-            // Single lookup: boxed Privilege never matches `is int` and vice
-            // versa, so ordered arms decide exactly what the double lookup did.
-            if (restore.TryGetValue(PuppetRestorePrivilegeKey, out var p))
-            {
-                switch (p)
-                {
-                    case Privilege priv:
-                        _privilege = priv;
-                        break;
-                    case int i:
-                        _privilege = (Privilege)i;
-                        break;
-                }
-            }
+            // Typed record: both fields always present, no lookup arms.
+            _flags.IsPc = restore.IsPc;
+            _privilege = restore.PrivilegeLevel;
             _flags.IsModified = true;
-            // Wontfix: do NOT restore quelled/can_hear/is_mapable per puppet.py:138-142
+            // Wontfix: do NOT restore quelled/can_hear/is_mapable
         }
         finally { _lock.ExitWriteLock(); }
     }
@@ -100,18 +88,14 @@ public partial class GameObject
         lock (session.Lock)
         {
             npc.SyncRoot.EnterReadLock();
-            Dictionary<string, object> snapshot;
+            PuppetRestoreSnapshot snapshot;
             Privilege callerPriv;
             try
             {
                 if (npc.Session is not null && npc.Session != session) return false; // already puppeted
                 if (npc.IsDeleted) return false;
                 if (!npc.Access(this, "puppet")) return false;
-                snapshot = new Dictionary<string, object>
-                {
-                    [PuppetRestoreIsPcKey] = npc.IsPc,
-                    [PuppetRestorePrivilegeKey] = npc.PrivilegeLevel
-                };
+                snapshot = new PuppetRestoreSnapshot(npc.IsPc, npc.PrivilegeLevel);
                 callerPriv = this.PrivilegeLevel;
             }
             finally { npc.SyncRoot.ExitReadLock(); }
@@ -161,7 +145,7 @@ public partial class GameObject
         if (session is null) return false;
         GameObject? prev;
         GameObject target;
-        Dictionary<string, object>? restore;
+        PuppetRestoreSnapshot? restore;
         // Single critical section : pop + restore-apply + rewire are
         // atomic — a concurrent Puppet/Unpuppet/AtDisconnect in the old gap
         // can no longer clobber the puppet pointer with a stale write. Only
@@ -200,17 +184,15 @@ public partial class GameObject
         }
         if (restore is not null && !stolen)
         {
-            // GetPuppetRestore returns a copy, so compare by content. Apply only if
-            // the installed snapshot still matches the one read above.
+            // Records compare by value: apply only if the installed
+            // snapshot still matches the one read above.
             bool apply = false;
             lock (session.Lock)
             {
                 try
                 {
                     var current = target.GetPuppetRestore();
-                    apply = current is not null
-                        && current.TryGetValue(PuppetRestoreIsPcKey, out var cv) && restore.TryGetValue(PuppetRestoreIsPcKey, out var rv) && Equals(cv, rv)
-                        && current.TryGetValue(PuppetRestorePrivilegeKey, out var cp) && restore.TryGetValue(PuppetRestorePrivilegeKey, out var rp) && Convert.ToInt32(cp) == Convert.ToInt32(rp);
+                    apply = current is not null && current.Equals(restore);
                 }
                 catch { apply = false; }
             }
@@ -238,7 +220,7 @@ public partial class GameObject
     public virtual void AtPostPuppet()
     {
 // verbatim faithful
-        Hookable(HookNames.AtPostPuppet, () => 0);
+        Hookable(HookName.AtPostPuppet, () => 0);
         IsConnected = true;
         Suppress("AtPostPuppet", () => SendSessionCommand("logged_in"));
         Suppress("AtPostPuppet", () =>
@@ -382,34 +364,34 @@ public partial class GameObject
 
     public virtual void AtPuppet(GameObject caller)
     {
-        Hookable(HookNames.AtPuppet, () => 0, caller);
+        Hookable(HookName.AtPuppet, () => 0, caller);
     }
 
     public virtual void AtUnpuppet(GameObject caller)
     {
-        Hookable(HookNames.AtUnpuppet, () => 0, caller);
+        Hookable(HookName.AtUnpuppet, () => 0, caller);
     }
 
     public virtual void AtDisconnect()
     {
-        Hookable(HookNames.AtDisconnect, () => 0);
+        Hookable(HookName.AtDisconnect, () => 0);
         IsConnected = false;
         Session = null;
     }
 
     public virtual void AtCreate()
     {
-        Hookable(HookNames.AtCreate, () => 0);
+        Hookable(HookName.AtCreate, () => 0);
     }
 
     public virtual bool AtDelete(GameObject? caller)
     {
-        return Hookable(HookNames.AtDelete, () => Access(caller, "delete"), caller);
+        return Hookable(HookName.AtDelete, () => Access(caller, "delete"), caller);
     }
 
     public virtual void AtTick()
     {
-        Hookable(HookNames.AtTick, () => 0);
+        Hookable(HookName.AtTick, () => 0);
     }
 
     // Server-event virtuals (replaces TryInvokeVirtual reflection): game-defined
@@ -422,20 +404,20 @@ public partial class GameObject
 
     public virtual void AtSolarEvent(string message)
     {
-        Hookable(HookNames.AtSolarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtSolarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
+        Hookable(HookName.AtSolarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtSolarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
     }
     public virtual void AtLunarEvent(string message)
     {
-        Hookable(HookNames.AtLunarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLunarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
+        Hookable(HookName.AtLunarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLunarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
     }
     public virtual void AtAlarm(Globals.GameTime.GameTimeInfo time, Dictionary<string, System.Text.Json.JsonElement>? data)
     {
-        Hookable(HookNames.AtAlarm, () => 0, time, data);
+        Hookable(HookName.AtAlarm, () => 0, time, data);
     }
 
     public virtual void AtInit()
     {
-        Hookable(HookNames.AtInit, () => 0);
+        Hookable(HookName.AtInit, () => 0);
     }
 
 }

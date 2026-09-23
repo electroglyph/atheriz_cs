@@ -5,7 +5,7 @@ public sealed class GiveCommand : Command
 {
     public override string Key => "give";
     public override string Desc => "Give an object to someone else.";
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("args", nargs: "*", help: "object to give, optionally 'to <target>'"); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Args, nargs: "*", help: "object to give, optionally 'to <target>'"); }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
@@ -15,7 +15,7 @@ public sealed class GiveCommand : Command
         // Single snapshot for the inventory checks below: no mutation occurs
         // before the first MoveTo, so one read covers all three sites.
         var inv = go.ContentsSnapshot;
-        var tokens = pa.GetList("args");
+        var tokens = pa.GetList(ParsedArgKeys.Args);
         if (tokens.Count == 0) { go.Msg("Give it to whom?"); return; }
         string? objName = null, targetName = null;
         // Per-candidate search caches for the split loop below: every candidate

@@ -1,4 +1,6 @@
 
+using Atheriz.Core.Persistence.Dto;
+
 namespace Atheriz.Core.Objects;
 
 /// <summary>
@@ -94,10 +96,9 @@ public class Door
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Door.MarkNodeDoorsModified: " + logEx.Message, "Door"); }
     }
 
-    private readonly Dictionary<string, List<Func<GameObject, bool>>> _locks = new();
-    private readonly Dictionary<string, List<string>> _lockPolicies = new();
-    // Declarative policy names parallel to _locks (mirrors GameObject._lockPolicies):
-    // persisted in DoorDto and rebuilt via LockPolicies.TryResolve. Bare-lambda
+    private readonly Dictionary<string, List<LockEntry>> _locks = new();
+    // One lock-table row per entry (mirrors GameObject._locks): the policy is
+    // what persists in DoorDto, the predicate is what decides. Bare-lambda
     // "custom" entries are kept in memory but dropped on save with a loud log.
 
     // Magic mapping key for door announces + per-call construction helper. Each
@@ -157,24 +158,24 @@ public class Door
         using (WriteScope())
         {
             if (!_locks.TryGetValue(name, out var lst)) { lst = []; _locks[name] = lst; }
-            lst.Add(pred);
-            if (!_lockPolicies.TryGetValue(name, out var pols)) { pols = []; _lockPolicies[name] = pols; }
-            pols.Add(policy);
+            lst.Add(new LockEntry(LockPolicies.Classify(policy), pred));
         }
     }
+    public void AddLock(string name, Func<GameObject, bool> pred, LockPolicies.LockPolicy policy)
+        => AddLock(name, pred, LockPolicies.Name(policy));
     public bool Access(GameObject? caller, string lockName)
     {
         if (caller is null) return false;
         if (caller.IsSuperUser) return true;
-        List<Func<GameObject, bool>> snap;
+        List<LockEntry> snap;
         using (ReadScope())
         {
             if (!_locks.TryGetValue(lockName, out var lst) || lst.Count == 0) return true; snap = [.. lst];
         }
-        foreach (var fn in snap)
+        foreach (var entry in snap)
         {
             bool ok;
-            try { ok = fn(caller); }
+            try { ok = entry.Predicate(caller); }
             catch { return false; }
             if (!ok) return false;
         }
@@ -498,13 +499,10 @@ public class Door
                 Name = _name,
                 Desc = _doorDesc,
                 KeyId = _keyId,
-                Locks = _locks.Select(kv =>
+                Locks = _locks.Select(kv => new LockDefDto
                 {
-                    _lockPolicies.TryGetValue(kv.Key, out var pols);
-                    var names = pols is not null && pols.Count == kv.Value.Count
-                        ? pols
-                        : Enumerable.Repeat(LockPolicies.Custom, kv.Value.Count);
-                    return $"{kv.Key}: {string.Join("|", names)}";
+                    Name = kv.Key,
+                    Policies = kv.Value.Select(e => e.Policy).ToList(),
                 }).ToList(),
             };
         }
@@ -516,25 +514,20 @@ public class Door
         d._name = dto.Name ?? dto.FromExit;
         d._doorDesc = dto.Desc ?? "";
         d._keyId = dto.KeyId;
-        foreach (var entry in dto.Locks ?? [])
+        foreach (var ld in dto.Locks ?? [])
         {
-            int sep = entry.IndexOf(':');
-            if (sep < 0) continue;
-            string lockName = entry.Substring(0, sep).Trim();
-            if (string.IsNullOrEmpty(lockName)) continue;
-            foreach (var raw in entry.Substring(sep + 1).Split('|', StringSplitOptions.RemoveEmptyEntries))
+            if (ld is null || string.IsNullOrEmpty(ld.Name)) continue;
+            foreach (var pol in ld.Policies ?? [])
             {
-                var pol = raw.Trim();
-                if (string.IsNullOrEmpty(pol)) continue;
-                if (LockPolicies.TryResolve(pol, out var pred))
-                    d.AddLock(lockName, pred, pol);
-                else if (pol == LockPolicies.Custom)
+                if (pol == LockPolicies.LockPolicy.Custom)
                 {
                     // Ad-hoc lambda: no declarative policy was ever persisted
                     // (documented engine-wide contract, mirrored by GameObject
                     // lock restore) — dropped with a loud log, never executed.
-                    Atheriz.Core.AtherizLogger.LogError($"Dropping unpersistable 'custom' lambda on door lock '{lockName}'; access allowed.");
+                    Atheriz.Core.AtherizLogger.LogError($"Dropping unpersistable 'custom' lambda on door lock '{ld.Name}'; access allowed.");
                 }
+                else if (LockPolicies.TryResolve(pol, out var pred))
+                    d.AddLock(ld.Name, pred, pol);
                 else
                 {
                     // Fail closed — a NAMED but unresolvable policy (e.g. a
@@ -542,10 +535,11 @@ public class Door
                     // only the 2-arg resolver binds, which Door must not use
                     // with a dummy target) must deny, not vanish:
                     // Door.Access returns true for missing entries, so dropping
-                    // the entry escalates to allow. Keep the policy name so a
-                    // re-save preserves the entry (still denying).
-                    Atheriz.Core.AtherizLogger.LogError($"Unknown lock policy '{pol}' on door lock '{lockName}'; denying access.");
-                    d.AddLock(lockName, _ => false, pol);
+                    // the entry escalates to allow. Store the Denied marker so
+                    // a re-save preserves the entry (still denying).
+                    if (pol != LockPolicies.LockPolicy.Denied)
+                        Atheriz.Core.AtherizLogger.LogError($"Unknown lock policy '{pol}' on door lock '{ld.Name}'; denying access.");
+                    d.AddLock(ld.Name, _ => false, LockPolicies.LockPolicy.Denied);
                 }
             }
         }
@@ -567,7 +561,7 @@ public sealed class DoorDto
     public string Name { get; set; } = "";
     public string Desc { get; set; } = "";
     public int? KeyId { get; set; }
-    // Persisted lock policies as "name: policy|policy" (mirrors GameObject
-    // LockDefDto; bare-lambda "custom" entries are dropped with a loud log).
-    public List<string> Locks { get; set; } = [];
+    // Persisted lock policies as typed LockDefDto rows (mirrors GameObject
+    // Locks; bare-lambda "custom" entries are dropped with a loud log).
+    public List<LockDefDto> Locks { get; set; } = [];
 }

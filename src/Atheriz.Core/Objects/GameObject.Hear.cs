@@ -25,7 +25,7 @@ public partial class GameObject
     // Shared pre-hook core for the identical AtPreHear/AtPreEmitSound shape:
     // both pass the same tuple through the same Hookable/catch-fallback, differing
     // only in the hook name.
-    private (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) RunPreHook(string hook, GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
+    private (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) RunPreHook(HookName hook, GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
         try { return Hookable<(bool, GameObject, string, string, double, bool)>(hook, () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay); }
         catch { return (true, emitter, soundDesc, soundMsg, loudness, isSay); }
@@ -34,18 +34,18 @@ public partial class GameObject
     public virtual (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) AtPreHear(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
         // hookable wrapper simplified: just call Hookable if hooks exist
-        return RunPreHook("at_pre_hear", emitter, soundDesc, soundMsg, loudness, isSay);
+        return RunPreHook(HookName.AtPreHear, emitter, soundDesc, soundMsg, loudness, isSay);
     }
 
     public virtual (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) AtPreEmitSound(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
-        return RunPreHook("at_pre_emit_sound", emitter, soundDesc, soundMsg, loudness, isSay);
+        return RunPreHook(HookName.AtPreEmitSound, emitter, soundDesc, soundMsg, loudness, isSay);
     }
 
 // base returns void in Python, but for uniformity return double like Node
     public virtual double AtHear(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
-        return Hookable(HookNames.AtHear, () =>
+        return Hookable(HookName.AtHear, () =>
         {
             if (!CanHear) return 0.0;
         var loc = ResolveLocationObject();
@@ -92,7 +92,7 @@ public partial class GameObject
 
     public virtual void AtEmitSound(string soundDesc, string soundMsg, double loudness, bool isSay)
     {
-        Hookable<int>("at_emit_sound", () =>
+        Hookable<int>(HookName.AtEmitSound, () =>
         {
             // AtHear renders desc+msg, so only skip when there is nothing to render at all.
             if (string.IsNullOrEmpty(soundMsg) && string.IsNullOrEmpty(soundDesc)) return 0;

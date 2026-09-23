@@ -10,8 +10,8 @@ public sealed class SetCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("target", help: "Object to modify (name, #id, 'me', or 'here').");
-        p.AddArgument("attribute", help: "Attribute name to set.");
+        p.AddArgument(ParsedArgKeys.Target, help: "Object to modify (name, #id, 'me', or 'here').");
+        p.AddArgument(ParsedArgKeys.Attribute, help: "Attribute name to set.");
         // Multi-word values (`set me desc hello world`): OneOrMore keeps the
         // missing-value required error and dash handling of a single
         // positional; Run joins the tokens back with spaces.
@@ -101,8 +101,8 @@ public sealed class SetCommand : Command
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
-        var targetStr = pa.GetString("target") ?? "";
-        var attr = pa.GetString("attribute") ?? "";
+        var targetStr = pa.GetString(ParsedArgKeys.Target) ?? "";
+        var attr = pa.GetString(ParsedArgKeys.Attribute) ?? "";
         // `value` is OneOrMore: join multi-word tokens back. The scalar
         // fallback covers programmatic ParsedArgs with a plain string.
         var valueTokens = pa.GetList("value");
@@ -214,15 +214,15 @@ public sealed class UnsetCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("target", help: "Object to modify (name, #id, 'me', or 'here').");
-        p.AddArgument("attribute", help: "Attribute name to delete.");
+        p.AddArgument(ParsedArgKeys.Target, help: "Object to modify (name, #id, 'me', or 'here').");
+        p.AddArgument(ParsedArgKeys.Attribute, help: "Attribute name to delete.");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
-        var targetStr = pa.GetString("target") ?? "";
-        var attr = pa.GetString("attribute") ?? "";
+        var targetStr = pa.GetString(ParsedArgKeys.Target) ?? "";
+        var attr = pa.GetString(ParsedArgKeys.Attribute) ?? "";
         var target = SetHelper.ResolveTarget(go, targetStr);
         if (target is null) return;
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }

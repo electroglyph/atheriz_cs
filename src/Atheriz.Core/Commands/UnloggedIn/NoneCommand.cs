@@ -6,7 +6,7 @@ public sealed class NoneCommand : Command
     public override string Key => "none";
     public override bool Hide => true;
     public override string Desc => "None.";
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("none", nargs: "*", help: "None."); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.None, nargs: "*", help: "None."); }
     // over the full text), gated like the logged-in twin and help: hidden
     // or inaccessible commands are never suggested (otherwise a typo oracle
     // leaks their names), aliases are not keys (GetAll, not GetKeys, so the
@@ -16,7 +16,7 @@ public sealed class NoneCommand : Command
     {
         var pa = args as GameArgumentParser.ParsedArgs;
         string text = "";
-        if (pa is not null) text = string.Join(" ", pa.GetList("none"));
+        if (pa is not null) text = string.Join(" ", pa.GetList(ParsedArgKeys.None));
         else text = (args as string ?? "").Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; }
         var ignored = AtherizSettings.Global.AutoAliasIgnoredKeys;

@@ -9,14 +9,14 @@ public sealed class MoveCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("coord").Nargs("+").Help("Coordinate: area x y z  or  (area,x,y,z)");
+        p.AddArgument(ParsedArgKeys.Coord).Nargs("+").Help("Coordinate: area x y z  or  (area,x,y,z)");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null || pa.GetList("coord").Count == 0) { go.Msg(PrintHelp()); return; }
-        var raw = string.Join(" ", pa.GetList("coord")).Trim();
+        if (pa is null || pa.GetList(ParsedArgKeys.Coord).Count == 0) { go.Msg(PrintHelp()); return; }
+        var raw = string.Join(" ", pa.GetList(ParsedArgKeys.Coord)).Trim();
         if (raw.StartsWith("(", StringComparison.Ordinal) && raw.EndsWith(")", StringComparison.Ordinal)) raw = raw[1..^1];
         List<string> parts;
         bool commaForm = raw.Contains(",");

@@ -223,8 +223,8 @@ public partial class Node : GameObject
 
     // Identity (id equality) lives on GameObject once; see base Equals/GetHashCode.
 
-    public override void AtDesc(GameObject? looker = null) => Hookable(HookNames.AtDesc, () => 0, looker);
-    public override void AtTick() => Hookable(HookNames.AtTick, () => 0);
+    public override void AtDesc(GameObject? looker = null) => Hookable(HookName.AtDesc, () => 0, looker);
+    public override void AtTick() => Hookable(HookName.AtTick, () => 0);
 
     public List<GameObject> GetContents()
     {
@@ -312,15 +312,15 @@ public partial class Node : GameObject
     }
 
     public override (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) AtPreEmitSound(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
-        => Hookable<(bool, GameObject, string, string, double, bool)>("at_pre_emit_sound", () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay);
+        => Hookable<(bool, GameObject, string, string, double, bool)>(HookName.AtPreEmitSound, () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay);
 
     public override (bool ok, GameObject emitter, string desc, string msg, double loudness, bool isSay) AtPreHear(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
-        => Hookable<(bool, GameObject, string, string, double, bool)>("at_pre_hear", () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay);
+        => Hookable<(bool, GameObject, string, string, double, bool)>(HookName.AtPreHear, () => (true, emitter, soundDesc, soundMsg, loudness, isSay), emitter, soundDesc, soundMsg, loudness, isSay);
 
 // Node propagation, overrides GameObject.AtHear (player hearing is separate)
     public override double AtHear(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
-        return Hookable(HookNames.AtHear, () =>
+        return Hookable(HookName.AtHear, () =>
         {
             var (allow, em2, sd2, sm2, loud2, isSay2) = AtPreHear(emitter, soundDesc, soundMsg, loudness, isSay);
         bool open = false;
@@ -352,21 +352,21 @@ public partial class Node : GameObject
 
     public override bool AtPreObjectLeave(GameObject? destination, string? toExit = null)
     {
-        return Hookable(HookNames.AtPreObjectLeave, () => true, destination, toExit);
+        return Hookable(HookName.AtPreObjectLeave, () => true, destination, toExit);
     }
     public override void AtObjectLeave(GameObject? destination, string? toExit = null)
     {
-        Hookable(HookNames.AtObjectLeave, () => 0, destination, toExit);
+        Hookable(HookName.AtObjectLeave, () => 0, destination, toExit);
     }
     public override bool AtPreObjectReceive(GameObject? source, string? fromExit = null)
     {
-        return Hookable(HookNames.AtPreObjectReceive, () => true, source, fromExit);
+        return Hookable(HookName.AtPreObjectReceive, () => true, source, fromExit);
     }
     public override void AtObjectReceive(GameObject? source, string? fromExit = null)
     {
-        Hookable(HookNames.AtObjectReceive, () => 0, source, fromExit);
+        Hookable(HookName.AtObjectReceive, () => 0, source, fromExit);
     }
-    public override void AtInit() => Hookable(HookNames.AtInit, () => 0);
+    public override void AtInit() => Hookable(HookName.AtInit, () => 0);
 
     public override (int count, List<object> ops)? Delete(GameObject? caller, bool recursive = false)
     {
@@ -474,7 +474,7 @@ public partial class Node : GameObject
 
     public override bool AtDelete(GameObject? caller)
     {
-        return Hookable(HookNames.AtDelete, () =>
+        return Hookable(HookName.AtDelete, () =>
         {
             if (!Access(caller, "delete"))
             {

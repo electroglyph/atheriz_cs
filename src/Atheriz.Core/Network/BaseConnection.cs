@@ -1,5 +1,6 @@
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Objects; // Session now in Objects.Session (standalone)
+using InputHandler = System.Action<Atheriz.Core.Network.BaseConnection, System.Collections.Generic.List<object?>, System.Collections.Generic.Dictionary<string, object?>>;
 
 namespace Atheriz.Core.Network;
 
@@ -56,7 +57,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // Per-connection input pipeline (issue #31)
     // Nominal input item (was a value tuple): the handler triple keeps its
     // Handler/Args/Kwargs member names, now on a compiler-checked type.
-    private sealed record QueuedInput(Delegate Handler, List<object?> Args, Dictionary<string, object?> Kwargs);
+    private sealed record QueuedInput(InputHandler Handler, List<object?> Args, Dictionary<string, object?> Kwargs);
     private readonly Queue<QueuedInput> _inputQueue = new();
     private bool _inputRunning;
     private double _lastInputBusy = double.NegativeInfinity; // 0.0 is a real timestamp, not "never".
@@ -200,7 +201,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     // client gets throttled busy reply (1s window) — see #32. When the drain
     // task cannot be submitted the message stays queued with a retry armed, and
     // the client is told it is queued — never "dropped".
-    public void EnqueueInput(Delegate handler, List<object?> args, Dictionary<string, object?> kwargs)
+    public void EnqueueInput(InputHandler handler, List<object?> args, Dictionary<string, object?> kwargs)
     {
         if (_disposed) return;
         bool notifyBusy = false;
@@ -297,7 +298,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     {
         while (true)
         {
-            Delegate handler;
+            InputHandler handler;
             List<object?> args;
             Dictionary<string, object?> kwargs;
             lock (Lock)
@@ -311,14 +312,9 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             }
             try
             {
-                // Typed dispatch (F001): registered handlers are
-                // Action<BaseConnection, List<object?>, Dictionary<string, object?>>.
-                // Anything else is a shape error: log and continue draining
-                // (same outcome as the old DynamicInvoke arity failure).
-                if (handler is Action<BaseConnection, List<object?>, Dictionary<string, object?>> typed)
-                    typed(this, args, kwargs);
-                else
-                    throw new InvalidOperationException($"Unsupported input handler shape {handler.Method.Name}; register Action<BaseConnection, List<object?>, Dictionary<string, object?>>.");
+                // Typed dispatch: the handler shape is enforced at
+                // registration (RegisterHandler), so invoke directly.
+                handler(this, args, kwargs);
             }
             catch (Exception ex)
             {

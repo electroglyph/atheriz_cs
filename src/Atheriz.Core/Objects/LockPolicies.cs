@@ -2,10 +2,12 @@ namespace Atheriz.Core.Objects;
 
 /// <summary>
 /// Declarative lock-policy names persisted in save data (F004).
-/// persisted as <c>name: policy|policy</c> and rebuilt on load via <see cref="TryResolve"/>,
+/// persisted as typed <see cref="LockPolicy"/> values and rebuilt on load via <see cref="TryResolve"/>,
 /// so loading save data never executes code derived from the save file itself.
-/// The <c>"custom"</c> policy marks predicates that cannot survive a round-trip
+/// The <c>Custom</c> policy marks predicates that cannot survive a round-trip
 /// (ad-hoc lambdas); they are kept in memory but dropped on save with a loud log.
+/// The <c>Denied</c> policy is the fail-closed marker: unresolvable policies
+/// persist as <c>Denied</c> (still denying) instead of vanishing into allow.
 /// </summary>
 public static class LockPolicies
 {
@@ -14,11 +16,12 @@ public static class LockPolicies
     public const string NotSelf = "not-self";
     public const string PuppetOwner = "puppet-owner";
     public const string Custom = "custom";
+    public const string Denied = "denied";
 
     // Typed policy names for authoring sites: AddLock and TryResolve take the
     // enum and map through Name, so a misspelled policy is a compile error.
-    // Persistence still stores the plain names above (Name maps 1:1), and the
-    // string overloads stay for save-load rebuilds and external game code.
+    // Persistence stores the enum values; the string overloads stay for
+    // authoring call sites and external game code.
     public enum LockPolicy
     {
         Builder,
@@ -26,6 +29,7 @@ public static class LockPolicies
         NotSelf,
         PuppetOwner,
         Custom,
+        Denied,
     }
 
     public static string Name(LockPolicy policy) => policy switch
@@ -34,6 +38,7 @@ public static class LockPolicies
         LockPolicy.PcView => PcView,
         LockPolicy.NotSelf => NotSelf,
         LockPolicy.PuppetOwner => PuppetOwner,
+        LockPolicy.Denied => Denied,
         _ => Custom,
     };
 
@@ -45,9 +50,16 @@ public static class LockPolicies
         if (string.Equals(t, NotSelf, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.NotSelf; return true; }
         if (string.Equals(t, PuppetOwner, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.PuppetOwner; return true; }
         if (string.Equals(t, Custom, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.Custom; return true; }
+        if (string.Equals(t, Denied, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.Denied; return true; }
         policy = LockPolicy.Custom;
         return false;
     }
+
+    // String authoring labels classify to the typed policy for storage. Known
+    // names (including "custom") keep their meaning; unrecognized labels become
+    // Denied so a later save/load still denies instead of resurrecting nothing.
+    internal static LockPolicy Classify(string? raw)
+        => TryParseName(raw, out var policy) ? policy : LockPolicy.Denied;
 
     // Shared target-independent leaf for the Builder arms of both overloads:
     // both read only lock-guarded accessing.IsBuilder. Do NOT fold the 1-arg
@@ -64,6 +76,11 @@ public static class LockPolicies
         if (policy == Builder)
         {
             predicate = IsBuilder;
+            return true;
+        }
+        if (policy == Denied)
+        {
+            predicate = _ => false;
             return true;
         }
         predicate = _ => false;
@@ -101,6 +118,9 @@ public static class LockPolicies
                     var sess = accessing.Session;
                     return sess?.Account is Account acc && acc.Characters.Contains(target.Id);
                 };
+                return true;
+            case Denied:
+                predicate = _ => false;
                 return true;
             default:
                 predicate = _ => false;

@@ -6,6 +6,7 @@ using Atheriz.Core.Network;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Commands;
 using Atheriz.Core.Tests.Features.Regression;
+using InputHandler = System.Action<Atheriz.Core.Network.BaseConnection, System.Collections.Generic.List<object?>, System.Collections.Generic.Dictionary<string, object?>>;
 
 namespace Atheriz.Core.Tests.Ported;
 
@@ -25,7 +26,7 @@ public class PortedInputFuncsTests
     {
         public void Foo(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
         public void BarMethod(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
-        protected override void RegisterExtraHandlers(Dictionary<string, Delegate> handlers)
+        protected override void RegisterExtraHandlers(Dictionary<string, InputHandler> handlers)
         {
             AddInputHandler(handlers, nameof(Foo), (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)Foo, nameof(Foo));
             AddInputHandler(handlers, "bar", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)BarMethod, nameof(BarMethod));
@@ -38,7 +39,7 @@ public class PortedInputFuncsTests
     private sealed class ExplicitCustomHelper : InputFuncs
     {
         public void MyHandler(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { }
-        protected override void RegisterExtraHandlers(Dictionary<string, Delegate> handlers)
+        protected override void RegisterExtraHandlers(Dictionary<string, InputHandler> handlers)
         {
             AddInputHandler(handlers, "my_custom", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)MyHandler, nameof(MyHandler));
         }

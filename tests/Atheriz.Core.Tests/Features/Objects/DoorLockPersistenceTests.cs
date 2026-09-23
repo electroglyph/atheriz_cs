@@ -50,7 +50,10 @@ public class DoorLockPersistenceTests
         Assert.True(door.Access(other, "open"));
         var back = Door.FromDto(door.ToDto());
         Assert.False(back.Access(other, "open"));
-        Assert.Contains("not-self", string.Join(";", back.ToDto().Locks));
+        // Target-bound policies cannot resolve on a door (no target to bind),
+        // so the entry fails closed and re-saves as the Denied marker.
+        Assert.Contains(LockPolicies.LockPolicy.Denied,
+            back.ToDto().Locks.Single(l => l.Name == "open").Policies);
     }
 
     [Fact]

@@ -42,7 +42,7 @@ public class Script : GameObject
     /// </summary>
     public virtual void AtInstall()
     {
-        Hookable(HookNames.AtInstall, () => 0);
+        Hookable(HookName.AtInstall, () => 0);
     }
 
     /// <summary>
@@ -83,7 +83,13 @@ public class Script : GameObject
                 AtherizLogger.LogError($"Script {Id}: cannot bind hook {GetType().Name}.{method.Name} (signature not expressible as Action/Func); hook skipped.");
                 continue;
             }
-            child.InstallHook(name, del);
+            // Parse to the typed name when this is a known engine hook so
+            // attach-time arity validation applies; custom names ride the
+            // string overload unvalidated.
+            if (HookNameExtensions.TryParseName(name) is { } hookName)
+                child.InstallHook(hookName, del);
+            else
+                child.InstallHook(name, del);
         }
 
         // Here we ensure child's Scripts set includes this script's Id (mirrors Python child.scripts.add(script.id))

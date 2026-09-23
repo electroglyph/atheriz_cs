@@ -13,7 +13,7 @@ public sealed class LookCommand : Command
 
     protected override void SetupParser(GameArgumentParser parser)
     {
-        parser.AddArgument("target", help: "Object to look at.", nargs: "REMAINDER");
+        parser.AddArgument(ParsedArgKeys.Target, help: "Object to look at.", nargs: "REMAINDER");
     }
 
     public override void Run(IMessageTarget caller, object? args)
@@ -24,7 +24,7 @@ public sealed class LookCommand : Command
             ShowLocation(puppet);
             return;
         }
-        var targets = parsed.GetList("target");
+        var targets = parsed.GetList(ParsedArgKeys.Target);
         if (targets.Count == 0)
         {
             ShowLocation(puppet);

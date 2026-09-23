@@ -11,13 +11,13 @@ public sealed class NoneCommand : Command
     public override string Desc => "Fallback for unknown commands.";
     // Same parsed shape as the unlogged fallback: identical inputs suggest
     // identically pre/post login (quotes, dash-input) instead of raw-vs-parsed.
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("none", nargs: "*", help: "Fallback for unknown commands."); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.None, nargs: "*", help: "Fallback for unknown commands."); }
 
     public override void Run(IMessageTarget caller, object? args)
     {
         var pa = args as GameArgumentParser.ParsedArgs;
         string text = "";
-        if (pa is not null) text = string.Join(" ", pa.GetList("none"));
+        if (pa is not null) text = string.Join(" ", pa.GetList(ParsedArgKeys.None));
         else text = (args as string ?? "").Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; } // none.py:25
         var ignored = Atheriz.Core.Settings.AtherizSettings.Global.AutoAliasIgnoredKeys;

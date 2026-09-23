@@ -95,6 +95,15 @@ public class PortedConnectionTestsPart2
         Assert.Same(h2, d["foo"]);
         mgr.Atp.Stop(wait:false);
     }
+    [Fact] public void RegisterHandlerRejectsWrongShape()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var mgr = MakeMgr();
+        // Fail fast at registration: a wrong-shaped delegate is refused
+        // instead of failing mid-drain.
+        Assert.Throws<ArgumentException>(() => mgr.RegisterHandler("foo", (Action<string>)(_ => { })));
+        mgr.Atp.Stop(wait:false);
+    }
 
     // ----- TestHandleCommand -----
     [Fact] public void HandleDispatchesToHandler()

@@ -6,12 +6,12 @@ public sealed class FollowCommand : Command
     public override string Key => "follow";
     public override string Desc => "Follow another character or creature.";
     public override string Category => "General";
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("target", nargs: "?", help: "Character or creature to follow."); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Target, nargs: "?", help: "Character or creature to follow."); }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        var targetName = pa?.GetString("target");
+        var targetName = pa?.GetString(ParsedArgKeys.Target);
         if (string.IsNullOrEmpty(targetName)) { go.Msg("Follow who?"); return; }
         var matches = CommandHelpers.SearchWithFallback(go, targetName!);
         if (matches.Count == 0) { CommandHelpers.MsgCouldNotFind(go, targetName); return; }

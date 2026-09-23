@@ -61,7 +61,7 @@ public sealed class PluginLoader : IDisposable
 
     /// <summary>
     /// Creates collectible ALC, loads assembly, scans for <see cref="EntityReplacementAttribute"/>, registers.
-    /// Logs via Console.Error mirroring <c>logger.info("[HotReload] ...")</c>.
+    /// Logs via AtherizLogger mirroring <c>logger.info("[HotReload] ...")</c>.
     /// FULL-TRUST LOADER BY DESIGN (mirrors Python importlib): loading executes
     /// static constructors (on <c>LoadFromAssemblyPath</c> + <c>GetTypes</c> scan).
     /// There is deliberately NO allowlist/signature verification — load only
@@ -81,7 +81,7 @@ public sealed class PluginLoader : IDisposable
         var name = Path.GetFileNameWithoutExtension(full);
         if (PluginReloader.IsExcludedAssembly(full))
         {
-            Console.Error.WriteLine($"[PluginLoader] Skipping excluded assembly: {name}");
+            AtherizLogger.LogInformation($"[PluginLoader] Skipping excluded assembly: {name}", "PluginLoader");
             return;
         }
 
@@ -101,7 +101,7 @@ public sealed class PluginLoader : IDisposable
             var probe = Path.Combine(pluginDir, name.Name + ".dll");
             if (!File.Exists(probe)) return null;
             try { return ctx.LoadFromAssemblyPath(probe); }
-            catch (Exception ex) { Console.Error.WriteLine($"[PluginLoader] Dep resolve {name.Name}: {ex.Message}"); return null; }
+            catch (Exception ex) { AtherizLogger.LogError($"[PluginLoader] Dep resolve {name.Name}: {ex.Message}", "PluginLoader"); return null; }
         };
         // Snapshot mtime before load; re-checked after (discovery→load TOCTOU guard).
         var tsBefore = File.GetLastWriteTimeUtc(full);
@@ -112,7 +112,7 @@ public sealed class PluginLoader : IDisposable
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[PluginLoader] Failed to load {full}: {ex.Message}");
+            AtherizLogger.LogError($"[PluginLoader] Failed to load {full}: {ex.Message}", "PluginLoader");
             // Unload the stillborn ALC — overwriting _alc without unloading leaks it.
             try { _alc.Unload(); } catch { }
             _alc = null;
@@ -120,7 +120,7 @@ public sealed class PluginLoader : IDisposable
         }
         if (File.GetLastWriteTimeUtc(full) != tsBefore)
         {
-            Console.Error.WriteLine($"[PluginLoader] {full} changed during load; unloading (TOCTOU).");
+            AtherizLogger.LogWarning($"[PluginLoader] {full} changed during load; unloading (TOCTOU).", "PluginLoader");
             Unload();
             throw new IOException($"Plugin assembly {full} changed during load; refusing to patch from a torn file.");
         }
@@ -159,17 +159,17 @@ public sealed class PluginLoader : IDisposable
         }
         catch (ReflectionTypeLoadException ex)
         {
-            Console.Error.WriteLine($"[PluginLoader] Type load errors: {string.Join("; ", ex.LoaderExceptions.Select(e => e?.Message))}");
+            AtherizLogger.LogError($"[PluginLoader] Type load errors: {string.Join("; ", ex.LoaderExceptions.Select(e => e?.Message))}", "PluginLoader");
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[PluginLoader] Scan failed: {ex.Message}");
+            AtherizLogger.LogError($"[PluginLoader] Scan failed: {ex.Message}", "PluginLoader");
         }
 
         if (found == 0)
-            Console.Error.WriteLine($"[PluginLoader] Loaded {Path.GetFileName(full)} — no [EntityReplacement] found (mirrors 'No CLASS_INJECTIONS').");
+            AtherizLogger.LogInformation($"[PluginLoader] Loaded {Path.GetFileName(full)} — no [EntityReplacement] found (mirrors 'No CLASS_INJECTIONS').", "PluginLoader");
         else
-            Console.Error.WriteLine($"[PluginLoader] Loaded {found} replacement(s) from {Path.GetFileName(full)}.");
+            AtherizLogger.LogInformation($"[PluginLoader] Loaded {found} replacement(s) from {Path.GetFileName(full)}.", "PluginLoader");
         // Instantiate the discovered game-setup entry, if any. This is plugin
         // discovery completing (same exemption as the scan above): module
         // initializers do NOT run eagerly on collectible-ALC loads, so
@@ -183,11 +183,11 @@ public sealed class PluginLoader : IDisposable
                 if (Activator.CreateInstance(gameSetupType) is IGameSetup setup)
                 {
                     InitialSetup.GameSetup = setup;
-                    Console.Error.WriteLine($"[PluginLoader] Game setup: {gameSetupType.FullName}.");
+                    AtherizLogger.LogInformation($"[PluginLoader] Game setup: {gameSetupType.FullName}.", "PluginLoader");
                 }
-                else Console.Error.WriteLine($"[PluginLoader] Game setup {gameSetupType.FullName} has no public parameterless ctor; template setup will run.");
+                else AtherizLogger.LogWarning($"[PluginLoader] Game setup {gameSetupType.FullName} has no public parameterless ctor; template setup will run.", "PluginLoader");
             }
-            catch (Exception ex) { Console.Error.WriteLine($"[PluginLoader] Game setup {gameSetupType.FullName} failed: {ex.Message}; template setup will run."); }
+            catch (Exception ex) { AtherizLogger.LogWarning($"[PluginLoader] Game setup {gameSetupType.FullName} failed: {ex.Message}; template setup will run.", "PluginLoader"); }
         }
     }
 
@@ -213,11 +213,11 @@ public sealed class PluginLoader : IDisposable
     {
         if (!IsValidReplacement(baseType, replacementType))
         {
-            Console.Error.WriteLine($"[PluginLoader] Skipping {replacementType.FullName} → {baseType.FullName} ({source}): replacement is not assignable to base and would never match live objects{skipDetail}.");
+            AtherizLogger.LogWarning($"[PluginLoader] Skipping {replacementType.FullName} → {baseType.FullName} ({source}): replacement is not assignable to base and would never match live objects{skipDetail}.", "PluginLoader");
             return false;
         }
         Replacements[baseType] = replacementType;
-        Console.Error.WriteLine($"[PluginLoader] Injected {replacementType.Name} → {baseType.Name} ({source})");
+        AtherizLogger.LogInformation($"[PluginLoader] Injected {replacementType.Name} → {baseType.Name} ({source})", "PluginLoader");
         return true;
     }
 
@@ -236,10 +236,10 @@ public sealed class PluginLoader : IDisposable
             // leaked Type ref) keeps the weak ref alive — surfacing the leak
             // instead of silently accumulating one assembly per reload.
             _unloadedAlcRef = new WeakReference(_alc);
-            try { _alc.Unload(); } catch (Exception ex) { Console.Error.WriteLine($"[PluginLoader] Unload failed: {ex.Message}"); }
+            try { _alc.Unload(); } catch (Exception ex) { AtherizLogger.LogError($"[PluginLoader] Unload failed: {ex.Message}", "PluginLoader"); }
             _alc = null;
         }
-        Console.Error.WriteLine("[PluginLoader] Unloaded.");
+        AtherizLogger.LogInformation("[PluginLoader] Unloaded.", "PluginLoader");
     }
 
     /// <summary>

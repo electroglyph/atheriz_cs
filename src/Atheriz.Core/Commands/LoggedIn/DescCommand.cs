@@ -9,13 +9,13 @@ public sealed class DescCommand : Command
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("text", nargs: "REMAINDER", help: "New description.");
+        p.AddArgument(ParsedArgKeys.Text, nargs: "REMAINDER", help: "New description.");
     }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         if (!this.RequireParsedArgs(caller, args, out var pa)) return;
-        var lst = pa.GetList("text");
+        var lst = pa.GetList(ParsedArgKeys.Text);
         if (lst.Count > 0)
         {
             var loc = go.ResolveLocationObject();

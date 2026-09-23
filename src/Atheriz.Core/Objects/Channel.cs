@@ -51,7 +51,7 @@ public class Channel : GameObject
         using (WriteScope()) { Name = name; Desc = desc; }
     }
 
-    public override void AtCreate() => Hookable(HookNames.AtCreate, () => 0);    public override bool AtDelete(GameObject? caller) => Hookable(HookNames.AtDelete, () => true, caller);
+    public override void AtCreate() => Hookable(HookName.AtCreate, () => 0);    public override bool AtDelete(GameObject? caller) => Hookable(HookName.AtDelete, () => true, caller);
 
     public override bool IsDeleted
     {

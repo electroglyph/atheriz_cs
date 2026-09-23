@@ -107,8 +107,6 @@ public class PortedNodeSphereTests
     // test_node_sphere.py:135 test_get_dir_different_area_returns_empty
     [Fact] public void GetDirDifferentAreaReturnsEmpty() // test_node_sphere.py:135
     {
-        Assert.Equal("", GameUtils.GetDir(new List<object?>{"AreaA",0,0,0}, new List<object?>{"AreaB",1,0,0}));
-        Assert.Equal("east", GameUtils.GetDir(new List<object?>{"AreaA",0,0,0}, new List<object?>{"AreaA",1,0,0}));
         Assert.Equal("", GameUtils.GetDir(new Coord("A",0,0,0), new Coord("B",5,5,0)));
         Assert.Equal("north", GameUtils.GetDir(new Coord("A",0,0,0), new Coord("A",0,1,0)));
     }

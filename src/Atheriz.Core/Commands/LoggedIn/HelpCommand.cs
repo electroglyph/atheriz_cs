@@ -12,11 +12,11 @@ public sealed class HelpCommand : Command
     public override string Desc => "Show help for commands.";
     public override bool UseParser => true;
 
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("command", nargs: "?", help: "Command to get help on"); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Command, nargs: "?", help: "Command to get help on"); }
     public override void Run(IMessageTarget caller, object? args)
     {
         var pa = args as GameArgumentParser.ParsedArgs;
-        string? query = pa?.GetString("command")?.Trim().ToLowerInvariant();
+        string? query = pa?.GetString(ParsedArgKeys.Command)?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(query)) query = (args as string ?? "").Trim().ToLowerInvariant();
         if (string.IsNullOrEmpty(query))
         {

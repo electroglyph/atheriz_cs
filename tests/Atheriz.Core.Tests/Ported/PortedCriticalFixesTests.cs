@@ -195,7 +195,7 @@ public class PortedCriticalFixesTests
         // In C# BaseConnection uses AsyncThreadPool, not asyncio loop. Verify it does NOT require loop and EnqueueInput works without loop.
         var conn = new FakeConnection("x");
         // Should not throw when enqueueing without loop
-        var ex = Record.Exception(() => conn.EnqueueInput((Delegate)(Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) => {}), new List<object?>(), new Dictionary<string, object?>()));
+        var ex = Record.Exception(() => conn.EnqueueInput((Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) => {}), new List<object?>(), new Dictionary<string, object?>()));
         Assert.Null(ex);
         // Source should use AsyncThreadPool, not throw owning event loop
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Core/Network/BaseConnection.cs");
@@ -224,7 +224,7 @@ public class PortedCriticalFixesTests
         Assert.False(workerResult);
         Assert.True(conn.IsOnLoopThread());
         // Enqueue from worker should still work
-        var ex = Record.Exception(() => conn.EnqueueInput((Delegate)(Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) => {}), new List<object?>(), new Dictionary<string, object?>()));
+        var ex = Record.Exception(() => conn.EnqueueInput((Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) => {}), new List<object?>(), new Dictionary<string, object?>()));
         Assert.Null(ex);
     }
 

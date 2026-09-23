@@ -376,7 +376,7 @@ public partial class Node
         if (looker is null) return "You see nothing here.";
         // Hookable like the base: game code overriding return_appearance must
         // see node renders too.
-        return Hookable(HookNames.ReturnAppearance, () =>
+        return Hookable(HookName.ReturnAppearance, () =>
         {
             // Parts concatenate with no separators; each part emits literally, so
             // a placeholder token inside user-controlled text (e.g. "{desc}" in a

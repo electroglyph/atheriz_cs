@@ -62,7 +62,7 @@ public sealed class GameObjectDto
 public sealed class LockDefDto
 {
     public string Name { get; set; } = ""; // e.g. "view", "get", "delete", "puppet"
-    public string Policy { get; set; } = ""; // declarative, e.g. "is_builder", "self_only"
+    public List<Atheriz.Core.Objects.LockPolicies.LockPolicy> Policies { get; set; } = []; // declarative, e.g. Builder, NotSelf
 }
 
 public static class GameObjectDtoSerializer

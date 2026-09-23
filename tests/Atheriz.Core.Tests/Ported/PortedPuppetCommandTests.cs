@@ -49,10 +49,10 @@ public class PortedPuppetCommandTests
         return pa;
     }
 
-    private static Dictionary<string, object>? GetRestore(GameObject obj)
+    private static GameObject.PuppetRestoreSnapshot? GetRestore(GameObject obj)
     {
         var f = typeof(GameObject).GetField("_puppetRestore", BindingFlags.NonPublic | BindingFlags.Instance);
-        return f?.GetValue(obj) as Dictionary<string, object>;
+        return f?.GetValue(obj) as GameObject.PuppetRestoreSnapshot;
     }
 
     private static (GameObject? target, string? err) FindTargetReflect(GameObject caller, string query)
@@ -286,8 +286,8 @@ public class PortedPuppetCommandTests
         Assert.Single(sess.PuppetStack);
         var restore=GetRestore(target);
         Assert.NotNull(restore);
-        Assert.Equal(false, restore!["is_pc"]);
-        Assert.Equal(Privilege.Helper, restore["privilege_level"]);
+        Assert.False(restore!.IsPc);
+        Assert.Equal(Privilege.Helper, restore.PrivilegeLevel);
     }
 
     [Fact]
@@ -307,8 +307,8 @@ public class PortedPuppetCommandTests
         cmd.Run(caller, PArgs($"#{target.Id}"));
         var restore=GetRestore(target);
         Assert.NotNull(restore);
-        Assert.Equal(true, restore!["is_pc"]);
-        Assert.Equal(Privilege.Player, restore["privilege_level"]);
+        Assert.True(restore!.IsPc);
+        Assert.Equal(Privilege.Player, restore.PrivilegeLevel);
     }
 
     // -----------------------------------------------------------------------
@@ -810,9 +810,9 @@ public class PortedPuppetCommandTests
         var cmd=new PuppetCommand(); var args=new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs(); args["target"]=$"#{target.Id}";
         cmd.Run(caller, args);
         var fld=typeof(GameObject).GetField("_puppetRestore", BindingFlags.NonPublic|BindingFlags.Instance);
-        var restore=fld?.GetValue(target) as Dictionary<string,object>;
+        var restore=fld?.GetValue(target) as GameObject.PuppetRestoreSnapshot;
         Assert.NotNull(restore);
-        Assert.Equal(false, restore!["is_pc"]);
+        Assert.False(restore!.IsPc);
     }
 
     [Fact]

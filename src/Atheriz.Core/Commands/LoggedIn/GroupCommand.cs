@@ -8,12 +8,12 @@ public sealed class GroupCommand : Command
     public override string Desc => "Add a follower to your group.";
     public override string Category => "Communication";
     public override string ExtraDesc => "Use 'group add <name>' to add a follower to your group, 'group <message>' to talk to your group, 'group kick <name>' to remove a follower from your group, 'group leave' to leave your current group, or 'group list' to see your current group.";
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("args", nargs: "REMAINDER", help: "Subcommand (add, kick, leave, list) or a message to group."); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Args, nargs: "REMAINDER", help: "Subcommand (add, kick, leave, list) or a message to group."); }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
         var pa = args as GameArgumentParser.ParsedArgs;
-        var list = pa?.GetList("args") ?? [];
+        var list = pa?.GetList(ParsedArgKeys.Args) ?? [];
         if (list.Count == 0) { go.Msg(PrintHelp()); return; }
         string sub = list[0].ToLowerInvariant();
         if (sub == "list")

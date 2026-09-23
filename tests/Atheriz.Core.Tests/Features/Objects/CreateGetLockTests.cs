@@ -10,15 +10,15 @@ namespace Atheriz.Core.Tests.Features.Objects;
 [Collection("Ported")]
 public sealed class CreateGetLockTests
 {
-    private static string GetPolicy(GameObject obj)
-        => Assert.Single(obj.ToDto().Locks, d => d.Name == "get").Policy;
+    private static List<LockPolicies.LockPolicy> GetPolicy(GameObject obj)
+        => Assert.Single(obj.ToDto().Locks, d => d.Name == "get").Policies;
 
     [Fact]
     public void Create_DualPcNpc_PersistsSingleBuilderPolicy()
     {
         using var env = GlobalTestEnv.Enter();
         var obj = GameObject.Create("Dual", isPc: true, isNpc: true);
-        Assert.Equal(LockPolicies.Builder, GetPolicy(obj));
+        Assert.Equal([LockPolicies.LockPolicy.Builder], GetPolicy(obj));
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public sealed class CreateGetLockTests
         Assert.Equal(beforeGuest, restored.Access(guest, "get"));
         Assert.True(restored.Access(builder, "get"));
         Assert.False(restored.Access(guest, "get"));
-        Assert.Equal(LockPolicies.Builder, GetPolicy(restored));
+        Assert.Equal([LockPolicies.LockPolicy.Builder], GetPolicy(restored));
     }
 
     [Fact]
@@ -48,9 +48,9 @@ public sealed class CreateGetLockTests
     {
         using var env = GlobalTestEnv.Enter();
         var pc = GameObject.Create("PcOnly", isPc: true);
-        Assert.Equal(LockPolicies.Builder, GetPolicy(pc));
+        Assert.Equal([LockPolicies.LockPolicy.Builder], GetPolicy(pc));
         var npc = GameObject.Create("NpcOnly", isNpc: true);
-        Assert.Equal(LockPolicies.Builder, GetPolicy(npc));
+        Assert.Equal([LockPolicies.LockPolicy.Builder], GetPolicy(npc));
     }
 
     [Fact]
@@ -59,8 +59,8 @@ public sealed class CreateGetLockTests
         using var env = GlobalTestEnv.Enter();
         var obj = GameObject.Create("Dual", isPc: true, isNpc: true);
         var dto = obj.ToDto();
-        dto.Locks.Single(d => d.Name == "get").Policy =
-            LockPolicies.Builder + "|" + LockPolicies.Builder;
+        dto.Locks.Single(d => d.Name == "get").Policies =
+            [LockPolicies.LockPolicy.Builder, LockPolicies.LockPolicy.Builder];
         var legacy = GameObject.FromDto(dto);
         var builder = GameObject.Create("Builder", isPc: true, privilege: Privilege.Builder);
         var guest = GameObject.Create("Guest");

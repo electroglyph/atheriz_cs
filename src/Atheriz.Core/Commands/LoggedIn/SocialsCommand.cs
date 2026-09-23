@@ -71,7 +71,7 @@ public sealed class SocialsCommand : Command
         string baseHelp = Parser?.FormatHelp() ?? "";
         return $"{baseHelp}\nAvailable socials:\n{string.Join(", ", Aliases)}\n";
     }
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("target", nargs: "*", help: "Who or what to do this to."); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Target, nargs: "*", help: "Who or what to do this to."); }
     public override void Run(IMessageTarget caller, object? args)
     {
         if (!CommandHelpers.RequirePuppet(caller, out var go)) return;
@@ -87,7 +87,7 @@ public sealed class SocialsCommand : Command
             go.Msg("This command is meant to be invoked via one of its aliases: " + string.Join(", ", Aliases));
             return;
         }
-        var targetNames = pa?.GetList("target") ?? [];
+        var targetNames = pa?.GetList(ParsedArgKeys.Target) ?? [];
         string targetName = string.Join(" ", targetNames);
         if (string.IsNullOrWhiteSpace(targetName))
         {
