@@ -9,7 +9,7 @@ namespace Atheriz.Core.Objects;
 /// Helpers for FuncParser: SafeFormatMap, pad/crop/justify/int2str and text width guards.
 /// Evennia BSD helpers adapted to C# (east_asian_width via Regex, no dill/simple_eval).
 /// </summary>
-public static class FuncParserHelpers
+public static partial class FuncParserHelpers
 {
     public const int MaxPowExponent = 10000;
     public const int MaxPowDigits = 50000;
@@ -34,19 +34,20 @@ public static class FuncParserHelpers
     /// <summary>
     /// Mirrors <c>_SafeFormatMap</c>: missing key returns "{key}" instead of throwing.
     /// </summary>
-    public sealed class SafeFormatMap : Dictionary<string, object?>
+    public sealed partial class SafeFormatMap : Dictionary<string, object?>
     {
         public SafeFormatMap() : base(StringComparer.Ordinal) { }
         public SafeFormatMap(IDictionary<string, object?> src) : base(src, StringComparer.Ordinal) { }
         // Single compiled instance: the old inline pattern re-parsed the same
         // expression per message per receiver. Identical pattern and matches.
-        private static readonly Regex FormatKeyRegex = new(@"\{(\w+)\}", RegexOptions.Compiled);
+        [GeneratedRegex(@"\{(\w+)\}")]
+        private static partial Regex FormatKeyRegex();
         // For director stance: map object -> displayName, keep {key} for missing
         public string Format(string template)
         {
             if (string.IsNullOrEmpty(template)) return template;
             // Simple replace {key} via regex, leaving unknown untouched (handled by TryGet)
-            return FormatKeyRegex.Replace(template, m =>
+            return FormatKeyRegex().Replace(template, m =>
             {
                 var key = m.Groups[1].Value;
                 return TryGetValue(key, out var v) && v is not null ? v.ToString()! : m.Value;
@@ -171,9 +172,6 @@ public static class FuncParserHelpers
         }
     }
 
-    public static bool IsIter(object? o) => o is System.Collections.IEnumerable && o is not string;
-    public static IEnumerable<object?> MakeIter(object? o) => IsIter(o) ? ((System.Collections.IEnumerable)o!).Cast<object?>() : new[] { o };
-
     // copy_word_case); the local variant had diverged subtly, so delegate to the single implementation.
     public static string CopyWordCase(string src, string dst) =>
         global::Atheriz.Core.Utils.GameUtils.CopyWordCase(src, dst);
@@ -276,60 +274,51 @@ public static class FuncParserHelpers
     }
 
     // --- SafeConvertToTypes port (funcparser_helpers.py:404) ---
-    // Single canonical shape: a ValueTuple of (arg converters, kwarg converters).
-    // All call sites pass this shape, so no runtime shape-sniffing is needed.
+    // Converters are plain functions: one per positional arg plus an
+    // optional per-key map for kwargs. No runtime shape-sniffing — the
+    // "py" literal/arithmetic converter is this named function.
+    public static readonly Func<object?, object?> PyConverter = _SafeEval;
+
     /// <summary>
     /// Converts <paramref name="args"/> entries and <paramref name="kwargs"/> values
     /// through the supplied converters, in place.
     /// Caller ownership: both <paramref name="args"/> and <paramref name="kwargs"/>
     /// are consumed, not retained — converted values overwrite the caller's array
-    /// slots and dictionary entries. The kwargs path always mutated in place; the
-    /// args path matches it. Callers retaining their inputs must pass a copy.
+    /// slots and dictionary entries. Callers retaining their inputs must pass a copy.
+    /// A null entry in <paramref name="argConverters"/> leaves that slot as-is.
     /// </summary>
-    public static (object?[] args, Dictionary<string,object?> kwargs) SafeConvertToTypes((object?[] argConvs, Dictionary<string,object?> kwConvs) converters, object?[] args, Dictionary<string,object?> kwargs, bool raiseErrors = true)
+    public static (object?[] args, Dictionary<string, object?> kwargs) SafeConvertToTypes(Func<object?, object?>?[] argConverters, object?[] args, Dictionary<string, object?> kwargs, IDictionary<string, Func<object?, object?>>? kwConverters = null, bool raiseErrors = true)
     {
-        var argList = converters.argConvs?.ToList() ?? [];
-        var kwDict = converters.kwConvs ?? [];
         // Convert args in place: the array is owned by the caller (see contract
         // above), so no defensive copy — converted values overwrite each slot.
-        if(args is not null && argList.Count>0){
-            for(int i=0;i< Math.Min(args.Length, argList.Count); i++){
-                var conv = argList[i];
-                string convName = conv?.ToString() ?? "";
-                if(convName=="py" || convName=="python") conv = (Func<object?,object?>)(o=> _SafeEval(o));
-                try{
-                    if(conv is Type tp){
-                        if(args[i] is string s && tp==typeof(int) && int.TryParse(s, out var iv)) args[i]=iv;
-                        else if(args[i] is string s2 && tp==typeof(float) && double.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var dv)) args[i]=dv;
-                        else if(tp==typeof(string)) args[i]=args[i]?.ToString();
-                        else args[i]= Convert.ChangeType(args[i], tp);
-                    }else if(conv is Delegate del){
-                        args[i]= DelegateInvoker.Invoke(del, new object?[]{ args[i] });
-                    }else if(conv is Func<object?,object?> fn){
-                        args[i]= fn(args[i]);
-                    }
-                }catch{
-                    if(raiseErrors) throw;
+        if (args is not null && argConverters is not null)
+        {
+            for (int i = 0; i < Math.Min(args.Length, argConverters.Length); i++)
+            {
+                var conv = argConverters[i];
+                if (conv is null) continue;
+                try
+                {
+                    args[i] = conv(args[i]);
+                }
+                catch
+                {
+                    if (raiseErrors) throw;
                 }
             }
         }
-        if(kwDict.Count>0 && kwargs is not null){
-            foreach(var kv in kwDict){
-                if(!kwargs.ContainsKey(kv.Key)) continue;
-                var conv = kv.Value;
-                string convName = conv?.ToString() ?? "";
-                if(convName=="py" || convName=="python") conv = (Func<object?,object?>)(o=> _SafeEval(o));
-                try{
-                    if(conv is Type tp){
-                        if(kwargs[kv.Key] is string s && tp==typeof(int) && int.TryParse(s, out var iv2)) kwargs[kv.Key]=iv2;
-                        else if(tp==typeof(string)) kwargs[kv.Key]=kwargs[kv.Key]?.ToString();
-                    }else if(conv is Delegate del){
-                        kwargs[kv.Key]= DelegateInvoker.Invoke(del, new object?[]{ kwargs[kv.Key] });
-                    }else if(conv is Func<object?,object?> fn2){
-                        kwargs[kv.Key]= fn2(kwargs[kv.Key]);
-                    }
-                    }catch{
-                    if(raiseErrors) throw;
+        if (kwConverters is not null && kwConverters.Count > 0 && kwargs is not null)
+        {
+            foreach (var kv in kwConverters)
+            {
+                if (kv.Value is null || !kwargs.ContainsKey(kv.Key)) continue;
+                try
+                {
+                    kwargs[kv.Key] = kv.Value(kwargs[kv.Key]);
+                }
+                catch
+                {
+                    if (raiseErrors) throw;
                 }
             }
         }

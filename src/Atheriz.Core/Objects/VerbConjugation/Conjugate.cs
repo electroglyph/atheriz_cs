@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,10 +11,12 @@ namespace Atheriz.Core.Objects.VerbConjugation;
 /// </summary>
 public static class Conjugate
 {
-    // verb_tenses_keys: index mapping (negated forms are ind+12 in full file)
-    private static readonly Dictionary<string, int> VerbTensesKeys = new(StringComparer.Ordinal)
-    {
-        ["infinitive"] = 0,
+    // verb_tenses_keys: index mapping (negated forms are ind+12 in full file).
+    // Frozen lookup tables: read-only after load, hashed once.
+    private static readonly FrozenDictionary<string, int> VerbTensesKeys =
+        new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["infinitive"] = 0,
         ["1st singular present"] = 1,
         ["2nd singular present"] = 2,
         ["3rd singular present"] = 3,
@@ -25,11 +28,12 @@ public static class Conjugate
         ["past plural"] = 9,
         ["past"] = 10,
         ["past participle"] = 11,
-    };
+        }.ToFrozenDictionary(StringComparer.Ordinal);
 
-    private static readonly Dictionary<string, string> VerbTensesAliases = new(StringComparer.Ordinal)
-    {
-        ["inf"] = "infinitive",
+    private static readonly FrozenDictionary<string, string> VerbTensesAliases =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["inf"] = "infinitive",
         ["1sgpres"] = "1st singular present",
         ["2sgpres"] = "2nd singular present",
         ["3sgpres"] = "3rd singular present",
@@ -40,16 +44,15 @@ public static class Conjugate
         ["3sgpast"] = "3rd singular past",
         ["pastpl"] = "past plural",
         ["ppart"] = "past participle",
-    };
+        }.ToFrozenDictionary(StringComparer.Ordinal);
 
     // verb_tenses: infinitive -> array (0..11 positive, 12..23 negated where present). Mirrors Python verbs.txt loading.
-    private static readonly Dictionary<string, string[]> VerbTenses;
-    private static readonly Dictionary<string, string> VerbLemmas;
+    private static readonly FrozenDictionary<string, string[]> VerbTenses;
+    private static readonly FrozenDictionary<string, string> VerbLemmas;
 
     static Conjugate()
     {
         var raw = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
-        bool loadedFromFile = false;
         void ParseLines(IEnumerable<string> lines)
         {
             foreach (var line in lines)
@@ -78,84 +81,31 @@ public static class Conjugate
             {
                 using var reader = new StreamReader(stream);
                 ParseLines(ReadLines(reader));
-                if (raw.Count > 100) loadedFromFile = true;
             }
         }
         catch { raw.Clear(); }
-        if (!loadedFromFile)
-        {
-            // Fallback: build-output copy, then dev-tree spots. No bare
-            // CWD probe — a foreign verbs.txt must never shadow the module table.
-            var candidatePaths = new[]
-            {
-                Path.Combine(AppContext.BaseDirectory, "Objects", "VerbConjugation", "verbs.txt"),
-                Path.Combine(AppContext.BaseDirectory, "verbs.txt"),
-            };
-            string? found = candidatePaths.FirstOrDefault(File.Exists);
-            if (found is not null)
-            {
-                try
-                {
-                    ParseLines(File.ReadAllLines(found));
-                    if (raw.Count > 100) loadedFromFile = true;
-                }
-                catch { raw.Clear(); }
-            }
-        }
-        if (!loadedFromFile)
-        {
-            // Fallback embedded subset (as before) if file not found
-            raw = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["be"] = new[] { "be","am","are","is","are","being","was","were","was","were","were","been","","am not","aren't","isn't","aren't","","wasn't","weren't","wasn't","weren't","weren't" },
-                ["have"] = new[] { "have","","","has","","having","","","","","had","had","haven't","","hasn't","","","","","hadn't","hadn't" },
-                ["do"] = new[] { "do","","","does","","doing","","","","","did","done","don't","","doesn't","","","","","didn't" },
-                ["go"] = new[] { "go","","","goes","","going","","","","","went","gone" },
-                ["say"] = new[] { "say","","","says","","saying","","","","","said","said" },
-                ["swim"] = new[] { "swim","","","swims","","swimming","","","","","swam","swum" },
-            };
-            string[] RegularRow(string baseVerb)
-            {
-                var third = baseVerb.EndsWith("s", StringComparison.Ordinal) || baseVerb.EndsWith("x", StringComparison.Ordinal) || baseVerb.EndsWith("z", StringComparison.Ordinal) || baseVerb.EndsWith("ch", StringComparison.Ordinal) || baseVerb.EndsWith("sh", StringComparison.Ordinal) ? baseVerb + "es" : baseVerb + "s";
-                if (baseVerb.EndsWith("y", StringComparison.Ordinal) && baseVerb.Length > 1 && !"aeiou".Contains(char.ToLower(baseVerb[^2])))
-                    third = baseVerb[..^1] + "ies";
-                var prog = baseVerb.EndsWith("e", StringComparison.Ordinal) ? baseVerb[..^1] + "ing" : baseVerb + "ing";
-                if (baseVerb.EndsWith("e", StringComparison.Ordinal) && baseVerb.EndsWith("ie", StringComparison.Ordinal)) prog = baseVerb[..^2] + "ying";
-                var past = baseVerb.EndsWith("e", StringComparison.Ordinal) ? baseVerb + "d" : baseVerb + "ed";
-                if (baseVerb.EndsWith("y", StringComparison.Ordinal) && !"aeiou".Contains(char.ToLower(baseVerb[^2]))) past = baseVerb[..^1] + "ied";
-                return new[] { baseVerb, "", "", third, "", prog, "", "", "", "", past, past };
-            }
-            foreach (var v in new[] { "jump","attack","walk","look","get","put","give","take","run","eat","see","make","come","know","want","need","help","open","close","lock","unlock","smile","grin","laugh","bow","nod","wave","dance","sing","shout","whisper","ask","answer","follow","wander","drop","hold","carry","throw","catch","hit","kick","slay","kill","hug","kiss","poke","push","pull","turn","leave","enter","move","cry","try","fly","swim" })
-            {
-                raw.TryAdd(v, RegularRow(v));
-            }
-            raw["run"] = new[] { "run","","","runs","","running","","","","","ran","run" };
-            raw["eat"] = new[] { "eat","","","eats","","eating","","","","","ate","eaten" };
-            raw["see"] = new[] { "see","","","sees","","seeing","","","","","saw","seen" };
-            raw["make"] = new[] { "make","","","makes","","making","","","","","made","made" };
-            raw["come"] = new[] { "come","","","comes","","coming","","","","","came","come" };
-            raw["know"] = new[] { "know","","","knows","","knowing","","","","","knew","known" };
-            raw["take"] = new[] { "take","","","takes","","taking","","","","","took","taken" };
-            raw["give"] = new[] { "give","","","gives","","giving","","","","","gave","given" };
-            raw["hit"] = new[] { "hit","","","hits","","hitting","","","","","hit","hit" };
-            raw["put"] = new[] { "put","","","puts","","putting","","","","","put","put" };
-        }
-
-        VerbTenses = raw;
-
+        // No further fallbacks: the table ships embedded (EmbeddedResource
+        // only — no output-dir copy to shadow it) and always wins above. If
+        // the resource is ever missing the table stays empty and every
+        // lookup below passes the verb through unchanged (pinned by
+        // VerbInfinitiveUnknown), instead of a stale hardcoded subset.
         // Build lemmas: each inflected form -> infinitive (including negated forms, but they map same).
         // Last-wins on collisions is VERBATIM Python (conjugate.py:73-77 unconditional assignment) — keep.
-        VerbLemmas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var kv in VerbTenses)
+        // Built from insertion-ordered `raw` BEFORE freezing: frozen enumeration
+        // order is unspecified, so freezing first would reshuffle collisions.
+        var lemmas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in raw)
         {
             var infinitive = kv.Key;
             foreach (var form in kv.Value)
             {
                 if (!string.IsNullOrEmpty(form))
-                    VerbLemmas[form] = infinitive;
+                    lemmas[form] = infinitive;
             }
-            VerbLemmas[infinitive] = infinitive;
+            lemmas[infinitive] = infinitive;
         }
+        VerbTenses = raw.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+        VerbLemmas = lemmas.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
 
     public static string VerbInfinitive(string verb)
@@ -177,20 +127,22 @@ public static class Conjugate
         return val ?? "";
     }
 
-    private static readonly Dictionary<string, string> PresentPersonTenses = new()
-    {
-        ["1"] = "1st singular present",
-        ["2"] = "2nd singular present",
-        ["3"] = "3rd singular present",
-        ["*"] = "present plural",
-    };
-    private static readonly Dictionary<string, string> PastPersonTenses = new()
-    {
-        ["1"] = "1st singular past",
-        ["2"] = "2nd singular past",
-        ["3"] = "3rd singular past",
-        ["*"] = "past plural",
-    };
+    private static readonly FrozenDictionary<string, string> PresentPersonTenses =
+        new Dictionary<string, string>
+        {
+            ["1"] = "1st singular present",
+            ["2"] = "2nd singular present",
+            ["3"] = "3rd singular present",
+            ["*"] = "present plural",
+        }.ToFrozenDictionary();
+    private static readonly FrozenDictionary<string, string> PastPersonTenses =
+        new Dictionary<string, string>
+        {
+            ["1"] = "1st singular past",
+            ["2"] = "2nd singular past",
+            ["3"] = "3rd singular past",
+            ["*"] = "past plural",
+        }.ToFrozenDictionary();
     private static bool MatchesAnyTense(string verb, string infinitive, IEnumerable<string> tenses, bool negated)
     {
         foreach (var tense in tenses)
@@ -290,18 +242,24 @@ public static class Conjugate
     public static bool VerbIsPresentParticiple(string verb) => VerbTense(verb) == "present participle";
     public static bool VerbIsPastParticiple(string verb) => VerbTense(verb) == "past participle";
 
+    // Person normalization: free text to a person key ("1"/"2"/"3"/"*"/"").
+    // Explicit alias map — the old pipeline stripped real letters
+    // ("past"→"p") and dug digits out of anywhere ("2nd person"→"2").
+    // Unknown text falls back to "" (the any-tense/default path), the same
+    // outcome every previously-missing key already produced.
+    private static readonly FrozenDictionary<string, string> PersonAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["1"] = "1", ["1st"] = "1", ["1sg"] = "1", ["first"] = "1",
+            ["2"] = "2", ["2nd"] = "2", ["2sg"] = "2", ["second"] = "2",
+            ["3"] = "3", ["3rd"] = "3", ["3sg"] = "3", ["third"] = "3",
+            ["*"] = "*", ["pl"] = "*", ["plural"] = "*",
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
     private static string NormalizePerson(string person)
     {
-        if (person is null) return "";
-        var s = person.Replace("pl", "*").Trim();
-        // strip "stndrgural" as python does: strip chars s,t,n,d,r,g,u,a,l
-        // python: .strip("stndrgural") removes those chars from both ends.
-        s = s.Trim('s','t','n','d','r','g','u','a','l');
-        // also need to handle "*" preservation
-        if (s == "*") return "*";
-        // extract digit if present
-        foreach (var c in s) if (char.IsDigit(c)) return c.ToString();
-        return s;
+        if (string.IsNullOrWhiteSpace(person)) return "";
+        return PersonAliases.TryGetValue(person.Trim(), out var canon) ? canon : "";
     }
 
     /// <summary>

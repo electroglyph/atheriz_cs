@@ -38,7 +38,7 @@ public static class MapEdit
         }
     }
 
-    internal static double GetMonotonic() => global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+    internal static double GetMonotonic() => global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
 
     private static string GenerateToken()
     {

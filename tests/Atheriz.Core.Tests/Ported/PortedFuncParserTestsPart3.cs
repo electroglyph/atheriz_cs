@@ -87,13 +87,13 @@ public class PortedFuncParserTestsPart3
     [Fact] public void SafeConvertContainerFlat()
     {
         using var env=GlobalTestEnv.Enter();
-        var conv = FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(a, b)"}, new Dictionary<string,object?>(), true);
+        var conv = FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(a, b)"}, new Dictionary<string,object?>(), raiseErrors: true);
         var arr = conv.args[0] as System.Collections.IEnumerable;
         Assert.NotNull(arr); var list = arr.Cast<object>().Select(o=>o?.ToString()??"").ToList(); Assert.Equal(new[]{"a","b"}, list);
     }
     [Fact] public void SafeConvertNestedRejected()
     {
         using var env=GlobalTestEnv.Enter();
-        Assert.Throws<FuncParser.ParsingError>(()=> FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(a,(b,c))"}, new Dictionary<string,object?>(), true));
+        Assert.Throws<FuncParser.ParsingError>(()=> FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(a,(b,c))"}, new Dictionary<string,object?>(), raiseErrors: true));
     }
 }

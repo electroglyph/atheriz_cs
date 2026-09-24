@@ -1,10 +1,12 @@
+using Atheriz.Core.Tests.Features.Regression;
 using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
-// Cached compiled patterns + single-pass stringify: same inputs produce the
-// same outputs, and distinct (maxLinebreaks, maxSpacing) keys do not cross-talk.
-public class StringHelperCacheTests
+// Span whitespace collapse (no regex, no pattern cache): same inputs produce
+// the same outputs as the old three-regex pipeline, and distinct
+// (maxLinebreaks, maxSpacing) caps do not cross-talk.
+public class WhitespaceCollapseTests
 {
     [Fact]
     public void CompressWhitespace_RepeatedCalls_Agree()
@@ -17,7 +19,7 @@ public class StringHelperCacheTests
     }
 
     [Fact]
-    public void CompressWhitespace_DistinctKeys_DoNotCrossTalk()
+    public void CompressWhitespace_DistinctCaps_DoNotCrossTalk()
     {
         Assert.Equal("a  b", GameUtils.CompressWhitespace("a    b", maxSpacing: 2));
         Assert.Equal("a b", GameUtils.CompressWhitespace("a    b", maxSpacing: 1));
@@ -37,6 +39,38 @@ public class StringHelperCacheTests
     public void CompressWhitespace_MaxLinebreaks3_PreservesThreeBreaks()
     {
         Assert.Equal("a\n\n\nb", GameUtils.CompressWhitespace("a\n\n\n\n\nb", maxLinebreaks: 3));
+    }
+
+    [Fact]
+    public void CompressWhitespace_Quirks_Preserved()
+    {
+        // Leading spaces stay (the old `(?<=\S)` gate never collapsed them).
+        Assert.Equal("  hello  world", GameUtils.CompressWhitespace("  hello   world  ", maxSpacing: 2));
+        // Spaces around a break stay: the pre-break run is too short and the
+        // post-break run has no non-whitespace predecessor.
+        Assert.Equal("a \n b", GameUtils.CompressWhitespace("a \n\n b", maxLinebreaks: 1));
+        // A zero cap disables that collapse (the old `{0,}` pattern no-opped).
+        Assert.Equal("a    b", GameUtils.CompressWhitespace("a    b", maxSpacing: 0));
+        Assert.Equal("a\n\n\nb", GameUtils.CompressWhitespace("a\n\n\nb", maxLinebreaks: 0));
+        // Blank gaps holding tabs collapse like blank gaps holding spaces.
+        Assert.Equal("a\nb", GameUtils.CompressWhitespace("a\n \t\nb", maxLinebreaks: 1));
+        Assert.Equal("", GameUtils.CompressWhitespace(null!));
+    }
+
+    [Fact]
+    public void CompressWhitespace_HasNoPatternCache()
+    {
+        var src = SourceScan.Read("src", "Atheriz.Core", "Utils", "GameUtils.cs");
+        Assert.DoesNotContain("CompressPatternCache", src);
+        Assert.DoesNotContain("GetCompressPatterns", src);
+    }
+
+    [Fact]
+    public void GameUtils_HasNoRuntimeRegex()
+    {
+        var src = SourceScan.Read("src", "Atheriz.Core", "Utils", "GameUtils.cs");
+        Assert.DoesNotContain("new Regex(", src);
+        Assert.Contains("[GeneratedRegex(", src);
     }
 
     [Fact]

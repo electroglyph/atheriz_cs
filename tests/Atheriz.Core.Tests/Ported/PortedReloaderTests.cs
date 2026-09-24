@@ -302,7 +302,7 @@ public class PortedReloaderTests
             Directory.CreateDirectory(Path.GetDirectoryName(child)!);
             File.WriteAllText(child, "x");
             // Simulate os.name=="nt" branch: IsUnder should be true for child under parent even on posix when osName nt
-            Assert.True(Atheriz.Core.Utils.GameUtils.ExistsExact(child, "nt") || File.Exists(child));
+            Assert.True(Atheriz.Core.Utils.GameUtils.ExistsExact(child, ignoreCase: true) || File.Exists(child));
             // check IsUnder via GameUtils helper with nt
             var rel = Path.GetRelativePath(parent, child);
             Assert.False(rel.StartsWith(".."));

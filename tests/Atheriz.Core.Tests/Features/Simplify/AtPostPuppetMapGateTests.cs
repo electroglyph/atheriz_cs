@@ -51,7 +51,7 @@ public class AtPostPuppetMapGateTests
         // The listener gate still resolves a handler (kept side-effect free
         // with an unloadable instance), but the second gate fails first.
         using var env = GlobalTestEnv.Enter();
-        GlobalServices.SetMapHandler(new MapHandler(AtherizSettings.Default, autoLoad: false));
+        GlobalServices.SetMapHandler(new MapHandler(new AtherizSettings(), autoLoad: false));
         bool prev = AtherizSettings.Global.MapEnabled;
         AtherizSettings.Global.MapEnabled = true;
         ObjectRegistry.ClearAll();

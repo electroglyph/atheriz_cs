@@ -8,7 +8,6 @@
 // stays reflection-free.
 
 using System.Reflection;
-using System.Runtime.Loader;
 
 namespace Atheriz.Core.Plugins;
 
@@ -19,7 +18,7 @@ public sealed class PluginLoader : IDisposable
 {
     // Never reload core/server state; mirrors Python excluded set comments.
 
-    private AssemblyLoadContext? _alc;
+    private GamePluginLoadContext? _alc;
     private Assembly? _loaded;
 
     // weak handle to the most recently unloaded ALC. Replacements +
@@ -42,6 +41,10 @@ public sealed class PluginLoader : IDisposable
 
     /// <summary>
     /// Creates collectible ALC, loads assembly, scans for <see cref="EntityReplacementAttribute"/>, registers.
+    /// Returns the discovered game-setup entry (a public non-abstract
+    /// <c>IGameSetup</c> class, instantiated once), or null when the
+    /// assembly provides none. Callers pass it explicitly to
+    /// <c>InitialSetup.RunSetup</c> — no static slot.
     /// Logs via AtherizLogger mirroring <c>logger.info("[HotReload] ...")</c>.
     /// FULL-TRUST LOADER BY DESIGN (mirrors Python importlib): loading executes
     /// static constructors (on <c>LoadFromAssemblyPath</c> + <c>GetTypes</c> scan).
@@ -49,7 +52,7 @@ public sealed class PluginLoader : IDisposable
     /// assemblies from trusted paths (game <c>bin/</c>, <c>&lt;game&gt;/plugins</c>).
     /// A dropped-in dll auto-loads on next reload, same trust as a dropped-in .py.
     /// </summary>
-    public void Load(string assemblyPath)
+    public IGameSetup? Load(string assemblyPath)
     {
         if (string.IsNullOrWhiteSpace(assemblyPath))
             throw new ArgumentException("assemblyPath must not be empty", nameof(assemblyPath));
@@ -63,32 +66,25 @@ public sealed class PluginLoader : IDisposable
         if (PluginReloader.IsExcludedAssembly(full))
         {
             AtherizLogger.LogInformation($"[PluginLoader] Skipping excluded assembly: {name}", "PluginLoader");
-            return;
+            return null;
         }
 
         // Unload any previous ALC first — overwriting _alc without unloading leaks it.
         if (_loaded is not null) Unload();
 
-        // Create collectible ALC — mirrors importlib.reload isolation + Python's two-pass reload.
-        // The Resolving handler serves plugin-local deps from beside the plugin dll.
-        // Framework/core assemblies are deliberately NOT probed here: they must unify
-        // with the default context (a second Atheriz.Core copy would cause Type-identity
-        // mismatch, making Replacements silently miss live objects).
-        _alc = new AssemblyLoadContext($"game-{Guid.NewGuid():N}", isCollectible: true);
-        var pluginDir = Path.GetDirectoryName(full) ?? "";
-        _alc.Resolving += (ctx, name) =>
-        {
-            if (PluginReloader.IsExcludedAssembly(name.Name + ".dll")) return null;
-            var probe = Path.Combine(pluginDir, name.Name + ".dll");
-            if (!File.Exists(probe)) return null;
-            try { return ctx.LoadFromAssemblyPath(probe); }
-            catch (Exception ex) { AtherizLogger.LogError($"[PluginLoader] Dep resolve {name.Name}: {ex.Message}", "PluginLoader"); return null; }
-        };
+        // One collectible context per load — an assembly identity cannot be
+        // reloaded into the same context, so hot-reload churns the ALC by
+        // design; the weak-ref verification below keeps that churn honest.
+        // Deps resolve inside the context (managed + native from beside the
+        // plugin dll); engine/framework assemblies unify with the default
+        // context there, never as second copies.
+        _alc = new GamePluginLoadContext(full);
         // Snapshot mtime before load; re-checked after (discovery→load TOCTOU guard).
         var tsBefore = File.GetLastWriteTimeUtc(full);
         try
         {
-            // LoadFromAssemblyPath uses ALC's default load; we resolve dependencies via ALC.Resolving
+            // Default load through the context; plugin-local deps resolve
+            // via its AssemblyDependencyResolver during the scan below.
             _loaded = _alc.LoadFromAssemblyPath(full);
         }
         catch (Exception ex)
@@ -156,20 +152,22 @@ public sealed class PluginLoader : IDisposable
         // initializers do NOT run eagerly on collectible-ALC loads, so
         // self-registration never fires and the CLI would silently fall back
         // to the template world. Constrained to public IGameSetup classes
-        // with a public parameterless ctor; a single instance per load.
+        // with a public parameterless ctor; a single instance per load,
+        // handed back for explicit dispatch (no static slot).
         if (gameSetupType is not null)
         {
             try
             {
                 if (Activator.CreateInstance(gameSetupType) is IGameSetup setup)
                 {
-                    InitialSetup.GameSetup = setup;
                     AtherizLogger.LogInformation($"[PluginLoader] Game setup: {gameSetupType.FullName}.", "PluginLoader");
+                    return setup;
                 }
-                else AtherizLogger.LogWarning($"[PluginLoader] Game setup {gameSetupType.FullName} has no public parameterless ctor; template setup will run.", "PluginLoader");
+                AtherizLogger.LogWarning($"[PluginLoader] Game setup {gameSetupType.FullName} has no public parameterless ctor; template setup will run.", "PluginLoader");
             }
             catch (Exception ex) { AtherizLogger.LogWarning($"[PluginLoader] Game setup {gameSetupType.FullName} failed: {ex.Message}; template setup will run.", "PluginLoader"); }
         }
+        return null;
     }
 
     /// <summary>

@@ -218,7 +218,7 @@ public class AsyncThreadPool : IDisposable
 
             string name = item.Name;
             long ident = Environment.CurrentManagedThreadId;
-            double started = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            double started = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
             lock (_lock)
             {
                 _busy++;
@@ -342,7 +342,7 @@ public class AsyncThreadPool : IDisposable
             lock (_queueLock) { qsize = _queue.Count; limit = _queueLimit; }
             // use actual queue limit for saturated check, not capped view
             bool saturated = qsize > 0 && (busy >= _maxThreads - 1 || (limit != 0 && qsize >= limit));
-            double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            double now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
             if (saturated)
             {
                 // snapshot under the lock, log after releasing it —
@@ -373,7 +373,7 @@ public class AsyncThreadPool : IDisposable
 
     private void LogStarvation(int qsize, int busy, double duration, Dictionary<long, (string Name, double Started)> tasks)
     {
-        var now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+        var now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
         var detail = string.Join(", ", tasks.OrderBy(kv => kv.Key).Select(kv => $"{kv.Value.Name} running {now - kv.Value.Started:F1}s"));
         var msg = $"[AsyncThreadPool] starvation suspected: {qsize} task(s) queued, {busy}/{_maxThreads - 1} workers busy for {duration:F1}s; running: [{detail}]";
         // Log via AtherizLogger which also echoes to Console.Error for CaptureAtherizLog (see Logger.Write).
@@ -459,7 +459,7 @@ public class AsyncThreadPool : IDisposable
         {
             if (_stopped)
             {
-                double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                double now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
                 if (now - _lastFullLogSeconds > TimeSpan.FromSeconds(10).TotalSeconds)
                 {
                     _lastFullLogSeconds = now;
@@ -471,7 +471,7 @@ public class AsyncThreadPool : IDisposable
             {
                 if (_queueLimit != 0 && _queue.Count >= _queueLimit)
                 {
-                    double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                    double now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
                     if (now - _lastFullLogSeconds > TimeSpan.FromSeconds(10).TotalSeconds)
                     {
                         _lastFullLogSeconds = now;

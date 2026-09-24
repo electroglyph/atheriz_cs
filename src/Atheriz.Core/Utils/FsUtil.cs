@@ -21,14 +21,15 @@ public static class FsUtil
             | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
             | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
 
-    // Shared best-effort core: the mode is the only difference between the wrappers.
-    private static void TryChmod(string path, UnixFileMode mode)
-    {
-        try { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, mode); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException) { }
-    }
-
     // Aliases per task spec (TrySet0600/TrySet0700)
     public static void TrySet0600(string path) => TryChmod0600(path);
     public static void TrySet0700(string path) => TryChmod0700(path);
     public static void TrySet0755(string path) => TryChmod0755(path);
+
+    /// <summary>Best-effort chmod with an explicit mode: one API instead of
+    /// one method per mode. The named wrappers above delegate to this.</summary>
+    public static void TryChmod(string path, UnixFileMode mode)
+    {
+        try { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, mode); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException) { }
+    }
 }

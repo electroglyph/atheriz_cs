@@ -1,7 +1,6 @@
 using Atheriz.Core.Settings;
 using Atheriz.Server.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
-using Microsoft.Extensions.Configuration;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
@@ -15,15 +14,13 @@ public class TlsFailClosedTests
         SecretPath = Path.Combine(Path.GetTempPath(), "atheriz_tls_secret"),
     };
 
-    private static IConfiguration ConfigFor(string? certFile, string? keyFile, bool fallback)
+    private static AtherizSettings TlsSettings(string? certFile, string? keyFile, bool fallback)
     {
-        var pairs = new Dictionary<string, string?>
-        {
-            ["Atheriz:AllowInsecureTlsFallback"] = fallback ? "true" : "false",
-        };
-        if (certFile != null) pairs["Atheriz:SslCertFile"] = certFile;
-        if (keyFile != null) pairs["Atheriz:SslKeyFile"] = keyFile;
-        return new ConfigurationBuilder().AddInMemoryCollection(pairs).Build();
+        var s = BaseSettings();
+        s.AllowInsecureTlsFallback = fallback;
+        if (certFile != null) s.SslCertFile = certFile;
+        if (keyFile != null) s.SslKeyFile = keyFile;
+        return s;
     }
 
     [Fact]
@@ -38,22 +35,16 @@ public class TlsFailClosedTests
         // WebserverEnabled=false must not bind any interface — not even to fail
         // fast: an unparseable interface with the server off is a no-op, while the
         // same interface with it on throws.
-        var pairs = new Dictionary<string, string?>
-        {
-            ["Atheriz:WebserverEnabled"] = "false",
-            ["Atheriz:WebserverInterface"] = "!!!unparseable!!!",
-        };
-        var config = new ConfigurationBuilder().AddInMemoryCollection(pairs).Build();
-        var ex = Record.Exception(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), config));
+        var off = BaseSettings();
+        off.WebserverEnabled = false;
+        off.WebserverInterface = "!!!unparseable!!!";
+        var ex = Record.Exception(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), off));
         Assert.Null(ex);
 
-        var pairsOn = new Dictionary<string, string?>
-        {
-            ["Atheriz:WebserverEnabled"] = "true",
-            ["Atheriz:WebserverInterface"] = "!!!unparseable!!!",
-        };
-        var configOn = new ConfigurationBuilder().AddInMemoryCollection(pairsOn).Build();
-        Assert.Throws<InvalidOperationException>(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), configOn));
+        var on = BaseSettings();
+        on.WebserverEnabled = true;
+        on.WebserverInterface = "!!!unparseable!!!";
+        Assert.Throws<InvalidOperationException>(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), on));
     }
 
     [Fact]
@@ -85,8 +76,11 @@ public class TlsFailClosedTests
     }
 
     [Fact]
-    public void Validator_RejectsUnloadableCert()
+    public void Validator_AcceptsPresentCert_LoadFailsAtHostStartup()
     {
+        // Validation is file-exists-only (no crypto load): a present but
+        // unloadable cert passes here and fails fail-fast at host startup
+        // (Kestrel_UnloadableCert_ThrowsWhenFailClosed pins that half).
         var cert = Path.GetTempFileName();
         File.WriteAllText(cert, "not a pem at all");
         try
@@ -96,8 +90,7 @@ public class TlsFailClosedTests
             s.SslCertFile = cert;
             s.AllowInsecureTlsFallback = false;
             var r = v.Validate(null, s);
-            Assert.True(r.Failed);
-            Assert.Contains("unloadable", r.FailureMessage);
+            Assert.False(r.Failed);
         }
         finally { File.Delete(cert); }
     }
@@ -122,14 +115,14 @@ public class TlsFailClosedTests
     [Fact]
     public void Kestrel_MissingCert_ThrowsWhenFailClosed()
     {
-        var config = ConfigFor(Path.Combine(Path.GetTempPath(), "no_such_atheriz_cert_xyz.pem"), null, fallback: false);
+        var config = TlsSettings(Path.Combine(Path.GetTempPath(), "no_such_atheriz_cert_xyz.pem"), null, fallback: false);
         Assert.Throws<InvalidOperationException>(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), config));
     }
 
     [Fact]
     public void Kestrel_MissingCert_WarnsOnlyUnderExplicitOptIn()
     {
-        var config = ConfigFor(Path.Combine(Path.GetTempPath(), "no_such_atheriz_cert_xyz.pem"), null, fallback: true);
+        var config = TlsSettings(Path.Combine(Path.GetTempPath(), "no_such_atheriz_cert_xyz.pem"), null, fallback: true);
         var ex = Record.Exception(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), config));
         Assert.Null(ex);
     }
@@ -141,7 +134,7 @@ public class TlsFailClosedTests
         File.WriteAllText(cert, "not a pem at all");
         try
         {
-            var config = ConfigFor(cert, null, fallback: false);
+            var config = TlsSettings(cert, null, fallback: false);
             Assert.Throws<InvalidOperationException>(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), config));
         }
         finally { File.Delete(cert); }
@@ -150,7 +143,7 @@ public class TlsFailClosedTests
     [Fact]
     public void Kestrel_NoCert_ConfiguresPlaintext()
     {
-        var config = ConfigFor(null, null, fallback: false);
+        var config = TlsSettings(null, null, fallback: false);
         var ex = Record.Exception(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), config));
         Assert.Null(ex);
     }

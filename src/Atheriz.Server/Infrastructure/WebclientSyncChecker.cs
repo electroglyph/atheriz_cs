@@ -46,7 +46,6 @@ public static class WebclientSyncChecker
     public static Dictionary<string, Dictionary<string, List<string>>>? CheckSync(string gameCwd, string contentRoot, string? engineWebOverride = null, Atheriz.Core.Settings.AtherizSettings? settings = null, IReadOnlyCollection<string>? excludeDirNames = null)
     {
         // Respect WEBCLIENT_SYNC_CHECK — mirrors `if not getattr(settings, "WEBCLIENT_SYNC_CHECK", True): return None`
-        // We read via AtherizSettings.Default default true, but caller should gate; here we just check env var fallback.
         // For faithful, we check both env and settings.Global.
         try
         {

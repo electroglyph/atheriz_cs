@@ -11,9 +11,8 @@
          atheriz/objects/verb_conjugation/verbs.txt. Embedded in the assembly
          (the equivalent of Python's os.path.dirname(__file__)/verbs.txt) so
          identical builds always load the identical table regardless of the
-         launch directory. Also copied to the output dir as a fallback probe. -->
+         launch directory. Embedded only: no output-dir copy shadowing it. -->
     <EmbeddedResource Include="Objects/VerbConjugation/verbs.txt" />
-    <Content Include="Objects/VerbConjugation/verbs.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

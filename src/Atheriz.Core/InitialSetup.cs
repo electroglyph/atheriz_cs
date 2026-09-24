@@ -61,58 +61,89 @@ public static class InitialSetup
     }
 
     /// <summary>
-    /// Game override for CLI world setup (<c>reset</c>/<c>new</c>); null (the
-    /// default) selects the engine template. Set by the game plugin itself on
-    /// load — the engine never names game types.
-    /// </summary>
-    public static IGameSetup? GameSetup { get; set; }
-
-    /// <summary>
     /// World-creation dispatch shared by <c>reset</c> and <c>new</c>: runs the
-    /// registered game setup when present, else the engine template. Without
-    /// this every game resets into the template world instead of its own.
+    /// game setup handed over from plugin discovery when present, else the
+    /// engine template. Without this every game resets into the template
+    /// world instead of its own. The game value rides an explicit parameter
+    /// — no static slot — because only short-lived CLI processes read it.
     /// </summary>
-    public static void RunSetup(string savePath, string? username = null, string? password = null, string? secretPath = null, bool prompt = true)
+    public static void RunSetup(SetupOptions options, IGameSetup? game = null)
     {
-        var game = GameSetup;
         if (game is not null)
         {
             AtherizLogger.LogInformation("[Setup] Running game world setup.");
-            game.DoSetup(savePath, username, password, secretPath, prompt);
+            game.DoSetup(options);
             return;
         }
         AtherizLogger.LogInformation("[Setup] Running template world setup.");
-        DoSetup(savePath, username, password, secretPath, prompt);
+        DoSetup(options);
     }
 
-    public static void DoSetup(string savePath, string? username = null, string? password = null, string? secretPath = null, bool prompt = true, TextReader? input = null)
+    /// <summary>Seed-world handles built by <see cref="BuildLimboWorld"/>:
+    /// node handler + area plus map handler, published for same-process
+    /// readers and handed to <see cref="PersistSeed"/> for the checkpoint.
+    /// </summary>
+    internal sealed record SeedWorld(NodeHandler Nodes, NodeArea Area, MapHandler Maps);
+
+    /// <summary>Resolved superuser credentials (null = skip the superuser;
+    /// limbo still commits).</summary>
+    internal sealed record SeedCredentials(string Username, string Password);
+
+    public static void DoSetup(SetupOptions options)
     {
 // not duplicated to stdout (new.py:740 already prints)
+        var (absSave, absSecret) = PrepareDirectories(options.SavePath, options.SecretPath);
+        AtherizDbContextFactory.DoSetup(absSave);
+        WarmSalt(absSecret);
+        ResetWorldState(absSecret);
+        var settings = AtherizSettings.Global;
+        var world = BuildLimboWorld(settings);
+        var creds = ResolveCredentials(options);
+        PersistSeed(world, settings, creds, absSave, absSecret);
+    }
+
+    // Directory/salt-path prep: absolute save + secret paths, created with
+    // locked-down permissions.
+    private static (string AbsSave, string AbsSecret) PrepareDirectories(string savePath, string? secretPath)
+    {
         // Ensure savePath absolute for guard
         var absSave = Path.GetFullPath(savePath);
         var absSecret = secretPath is not null ? Path.GetFullPath(secretPath) : Path.Combine(Path.GetDirectoryName(absSave) ?? ".", "secret");
         Directory.CreateDirectory(absSecret);
         Utils.FsUtil.TryChmod0700(absSecret);
+        return (absSave, absSecret);
+    }
 
-        AtherizDbContextFactory.DoSetup(absSave);
-        // Ensure salt exists in game's secret folder (mirrors Python SECRET_PATH override)
+    // Best-effort salt warm-up (mirrors Python SECRET_PATH override).
+    private static void WarmSalt(string absSecret)
+    {
         try
         {
             // Force salt creation with explicit path
             SaltProvider.GetSalt(absSecret);
         }
         catch (Exception ex) { AtherizLogger.LogWarning($"Salt setup warning: {ex.Message}"); }
+    }
 
-        // Reset registries for fresh world (mirrors globals cleared by conftest).
-        // (ClearAll already resets the Id generator — no separate SetId.)
+    // Reset registries for fresh world (mirrors globals cleared by conftest).
+    // (ClearAll already resets the Id generator — no separate SetId.)
+    private static void ResetWorldState(string absSecret)
+    {
         ObjectRegistry.ClearAll();
         // Clear any existing node/map/time singletons that might cache old save path
         try { Globals.GlobalServices.Reset(); } catch (Exception ex) { AtherizLogger.LogWarning($"Singleton reset warning: {ex.Message}"); }
         SaltProvider.Clear();
         // Re-seed salt after clear (default slot included — see ReseedForGame).
         SaltProvider.ReseedForGame(absSecret);
+    }
 
-        var settings = AtherizSettings.Global;
+    /// <summary>
+    /// Pure world build: 9x9x9 limbo cube with links plus map placeholders,
+    /// published through the singleton setters so GlobalServices and
+    /// GetCurrent agree. No prompting, no database writes.
+    /// </summary>
+    internal static SeedWorld BuildLimboWorld(AtherizSettings settings)
+    {
         // Build NodeArea 9x9x9
         var nh = new NodeHandler(autoLoad: false);
         // the setup world becomes current explicitly (the ctor no
@@ -183,18 +214,22 @@ public static class InitialSetup
         // Same twin-slot publish as the node handler above: readers through
         // GlobalServices must see the seed world, not a stale handler.
         Globals.GlobalServices.SetMapHandler(mh);
-        // Persist nodes and map.
-        // Resolve credentials BEFORE taking the write gate or opening the seed
-        // transaction. Holding either across interactive ReadLine/ReadKey turned
-        // every slow operator into a TimeoutException (and a pinned DB) for all
-        // concurrent savers. The gate/tx span below covers EnsureCreated +
-        // saves only.
-        // Resolve username/password — mirrors initial_setup.py:98-123
-        string? u = username;
-        string? p = password;
+        return new SeedWorld(nh, area, mh);
+    }
+
+    // Resolve username/password — mirrors initial_setup.py:98-123.
+    // Returns null when nothing usable was provided: limbo commits without
+    // a superuser. Resolution stays outside the write gate/transaction in
+    // PersistSeed: holding either across interactive reads turned every
+    // slow operator into a TimeoutException (and a pinned DB) for all
+    // concurrent savers.
+    internal static SeedCredentials? ResolveCredentials(SetupOptions options)
+    {
+        string? u = options.Username;
+        string? p = options.Password;
         // An explicitly provided reader is used as-is (test/console-redirect
         // seams); otherwise prompts need a real console like before.
-        TextReader? promptInput = input ?? (prompt && !Console.IsInputRedirected ? Console.In : null);
+        TextReader? promptInput = options.Input ?? (options.Prompt && !Console.IsInputRedirected ? Console.In : null);
         if (string.IsNullOrWhiteSpace(u))
         {
             u = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME")?.Trim();
@@ -212,16 +247,14 @@ public static class InitialSetup
         }
         else if (u is not null) u = u.Trim();
 
-        bool skipSuperuser = false;
         if (string.IsNullOrWhiteSpace(u))
         {
             Console.Error.WriteLine("Error: Username cannot be empty.");
             // credential prompts — limbo is durable even with no superuser.
-            // (Committed below, after the gate/tx open.)
-            skipSuperuser = true;
+            return null;
         }
 
-        if (!skipSuperuser && string.IsNullOrWhiteSpace(p))
+        if (string.IsNullOrWhiteSpace(p))
         {
             // Passwords are verbatim: unlike usernames they are never
             // trimmed (CheckPassword compares the exact string, so a
@@ -246,18 +279,27 @@ public static class InitialSetup
             {
                 Console.Error.WriteLine("Error: Password cannot be empty.");
                 // Limbo commits (see username branch above).
-                skipSuperuser = true;
+                return null;
             }
         }
 
-        if (!skipSuperuser)
         {
             var errU = Validation.ValidateAccountName(u!);
             if (errU is not null) throw new ArgumentException($"Invalid superuser username: {errU}");
             var errP = Validation.ValidatePassword(p!);
             if (errP is not null) throw new ArgumentException($"Invalid superuser password: {errP}");
         }
+        return new SeedCredentials(u!, p!);
+    }
 
+    /// <summary>
+    /// Atomic checkpoint: one context + transaction for the whole seed
+    /// (previously five independent commits left half-built worlds on
+    /// mid-setup failure). Any early return / throw below disposes the
+    /// transaction uncommitted (rollback); only the Commit persists.
+    /// </summary>
+    private static void PersistSeed(SeedWorld world, AtherizSettings settings, SeedCredentials? creds, string absSave, string absSecret)
+    {
         // Single shared context + transaction for the whole seed (atomic checkpoint):
         // previously five separate contexts committed independently, so a mid-setup
         // failure left a half-built world. Any early return / throw below disposes the
@@ -276,27 +318,53 @@ public static class InitialSetup
         try { db.Database.ExecuteSqlRaw("PRAGMA synchronous=FULL;"); }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InitialSetup.DoSetup fsync pragma: " + logEx.Message, "InitialSetup"); }
         using var setupTx = db.Database.BeginTransaction();
-        mh.Save(db);
-        nh.Save(db);
+        world.Maps.Save(db);
+        world.Nodes.Save(db);
 
-        if (skipSuperuser)
+        if (creds is null)
         {
             setupTx.Commit();
             Console.Out.WriteLine("Initial world (limbo) created without superuser — run `create` to add account.");
             return;
         }
 
-        // Seeded nodes resolve via the handler first, falling back to the area
-        // grid directly (the handler may not have the area yet during setup).
-        static Node? ResolveSeedNode(NodeHandler nh, NodeArea area, Coord coord)
-        {
-            var node = nh.GetNode(coord);
-            if (node is null)
-            {
-                node = area.GetGrid(coord.Z)?.GetNode(coord.X, coord.Y);
-            }
-            return node;
+        SeedAccount(world, settings, creds, absSecret, db);
+
+// default force=False:
+        // persist only modified objects. Engine subtypes must be registered
+        // first or they save as their base kind with a loud log.
+        RegisterPersistedSubtypes();
+        ObjectRegistry.SaveObjects(db, force: false);
+        world.Nodes.Save(db);
+        setupTx.Commit();
+        AtherizLogger.LogInformation("Initial world state set up.");
         }
+        finally { Atheriz.Core.Persistence.DbWriteGate.Exit(); }
+    }
+
+    // Seeded nodes resolve via the handler first, falling back to the area
+    // grid directly (the handler may not have the area yet during setup).
+    private static Node? ResolveSeedNode(NodeHandler nh, NodeArea area, Coord coord)
+    {
+        var node = nh.GetNode(coord);
+        if (node is null)
+        {
+            node = area.GetGrid(coord.Z)?.GetNode(coord.X, coord.Y);
+        }
+        return node;
+    }
+
+    /// <summary>
+    /// In-registry account content for the seed checkpoint: dashboard alarm,
+    /// clock, superuser account + character, button, channel. Called inside
+    /// <see cref="PersistSeed"/>'s transaction; persistence itself stays there.
+    /// </summary>
+    private static void SeedAccount(SeedWorld world, AtherizSettings settings, SeedCredentials creds, string absSecret, AtherizDbContext db)
+    {
+        var nh = world.Nodes;
+        var area = world.Area;
+        var u = creds.Username;
+        var p = creds.Password;
 
         // Alarm object at 0,0,8
         var alarmCoord = new Coord(LIMBO_AREA, 0, 0, LIMBO_GRID - 1);
@@ -328,9 +396,9 @@ public static class InitialSetup
         // identically either way; the warn above and reseed below own the
         // failure story.
         string saltVal = SaltProvider.GetSalt(absSecret);
-        var account = Account.Create(u!, p!, saltOverride: saltVal);
-        Console.Out.WriteLine($"Creating character '{u!}'...");
-        var character = GameObject.Create(u!, isPc: true);
+        var account = Account.Create(u, p, saltOverride: saltVal);
+        Console.Out.WriteLine($"Creating character '{u}'...");
+        var character = GameObject.Create(u, isPc: true);
         character.Desc = "";
 // faithful registry add before save
         ObjectRegistry.AddObject(character);
@@ -363,16 +431,5 @@ public static class InitialSetup
         chan.AddListener(character);
         if (!character.ChannelsSnapshot.Contains(chan.Id))
             character.Subscribe(chan);
-
-// default force=False:
-        // persist only modified objects. Engine subtypes must be registered
-        // first or they save as their base kind with a loud log.
-        RegisterPersistedSubtypes();
-        ObjectRegistry.SaveObjects(db, force: false);
-        nh.Save(db);
-        setupTx.Commit();
-        AtherizLogger.LogInformation("Initial world state set up.");
-        }
-        finally { Atheriz.Core.Persistence.DbWriteGate.Exit(); }
     }
 }

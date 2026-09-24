@@ -1,6 +1,7 @@
-// Pins for the chained FuncParser ctors: the direct, generic-delegate, and
-// mixed tables all construct equivalent parsers, custom scalars and the
-// default-kwargs copy survive chaining, and generic validation still fires.
+// Pins for the chained FuncParser ctors: the direct table constructs an
+// equivalent parser, custom scalars and the default-kwargs copy survive,
+// and game callables use the ParserCallable shape directly (no
+// signature-sniffed generic-Delegate path).
 using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Objects;
@@ -50,48 +51,6 @@ public sealed class FuncParserCtorPreambleTests
 
         Assert.Equal(1, parser.DefaultKwargs["x"]);
         Assert.False(parser.DefaultKwargs.ContainsKey("late"));
-    }
-
-    [Fact]
-    public void GenericDelegateCtor_TwoParamCallable_ReceivesArgsAndKwargs()
-    {
-        using var env = GlobalTestEnv.Enter();
-        Func<string[], Dictionary<string, object?>, object?> two = (a, k) => $"{a[0]}-{k["flag"]}";
-        var parser = new FuncParser(new Dictionary<string, Delegate> { ["two"] = two });
-
-        Assert.Equal("a-b", parser.Parse("$two(a,flag=b)")?.ToString());
-    }
-
-    [Fact]
-    public void GenericDelegateCtor_InvalidCallable_ThrowsParsingError()
-    {
-        using var env = GlobalTestEnv.Enter();
-        Func<string, object?> one = x => $"hi {x}";
-
-        Assert.Throws<FuncParser.ParsingError>(
-            () => new FuncParser(new Dictionary<string, Delegate> { ["one"] = one }));
-    }
-
-    [Fact]
-    public void MixedTableCtor_SplitsDirectAndAdapted()
-    {
-        using var env = GlobalTestEnv.Enter();
-        Func<string[], Dictionary<string, object?>, object?> two = (a, k) => $"{a[0]}-{k["flag"]}";
-        FuncParser.ParserCallable direct = (a, k, ctx, raw) => "D";
-        var parser = new FuncParser(new Dictionary<string, object> { ["d"] = direct, ["g"] = two });
-
-        Assert.Equal("D", parser.Parse("$d()")?.ToString());
-        Assert.Equal("a-b", parser.Parse("$g(a,flag=b)")?.ToString());
-    }
-
-    [Fact]
-    public void MixedTableCtor_DirectOnly_SkipsValidation()
-    {
-        using var env = GlobalTestEnv.Enter();
-        FuncParser.ParserCallable direct = (a, k, ctx, raw) => "D";
-        var parser = new FuncParser(new Dictionary<string, object> { ["d"] = direct });
-
-        Assert.Equal("D", parser.Parse("$d()")?.ToString());
     }
 
     [Fact]

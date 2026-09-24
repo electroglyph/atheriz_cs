@@ -7,18 +7,16 @@ namespace Atheriz.Core.Settings;
 /// </summary>
 public sealed class AtherizSettings
 {
-    private static readonly Lock _globalLock = new();
+    // Process-wide current settings, published by the host at startup
+    // (and swapped wholesale by tests). A plain reference publish: reads
+    // never take a lock, and nobody performs atomic read-modify-write on
+    // the slot itself, so the old per-access lock bought nothing.
     private static AtherizSettings _global = new();
     public static AtherizSettings Global
     {
-        get { lock (_globalLock) return _global; }
-        set { lock (_globalLock) _global = value ?? new AtherizSettings(); }
+        get => Volatile.Read(ref _global);
+        set => Volatile.Write(ref _global, value ?? new AtherizSettings());
     }
-
-    /// <summary>Shared default instance to avoid per-call <c>new AtherizSettings()</c> allocations.
-    /// Borrowers must treat it as read-only: mutating it poisons every later borrower.
-    /// There are no mutating borrowers; P3BatchElevenTests.SettingsDefault_NeverMutated pins that.</summary>
-    public static AtherizSettings Default { get; } = new();
     // Paths
     public string SavePath { get; set; } = "save";
     public string SecretPath { get; set; } = "secret";

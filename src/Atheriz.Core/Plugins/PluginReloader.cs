@@ -23,6 +23,14 @@ public static class PluginReloader
     //
     // Re-entrant skip-when-busy gate core. This is a DEDICATED reload instance —
     // never the shared DB write gate, which would serialize reloads against saves.
+    // Audit 2026-09: reentrancy is defense-in-depth, not a calling
+    // convention — entry points never nest (ReloadGameLogicAsync holds the
+    // gate and calls the gateless ReloadCoreAsync; the public ReloadAsync
+    // wrapper must never be entered under the gate). Invariant: never fork
+    // unawaited work inside the gate (Task.Run/QueueUserWorkItem inherit
+    // the AsyncLocal count and would corrupt the pairing). All three
+    // entries pair TryEnter→try→finally Exit with nothing throwable
+    // between enter and try.
     private sealed class ReentrantSkipGate
     {
         private readonly SemaphoreSlim _sem = new(1, 1);
@@ -154,41 +162,47 @@ public static class PluginReloader
         if (string.IsNullOrWhiteSpace(assemblyPath)) return false;
         if (IsExcluded(assemblyPath)) { Console.Error.WriteLine($"[PluginReloader] Skipping excluded: {assemblyPath}"); return false; }
         if (!TryEnterGate()) { Console.Error.WriteLine("[HotReload] Reload already in progress; skipping."); return false; }
-        try
+        try { return await ReloadCoreAsync(assemblyPath, ticker, pool).ConfigureAwait(false); }
+        finally { ExitGate(); }
+    }
+    // Gateless core: one gate-holding per operation. ReloadGameLogicAsync
+    // holds the gate across assemblies and calls this directly — the public
+    // wrapper above must never be entered under the gate. Reentrancy stays
+    // in the gate only as defense-in-depth, not as a calling convention.
+    private static async Task<bool> ReloadCoreAsync(string assemblyPath, AsyncTicker ticker, AsyncThreadPool pool)
+    {
+        await Task.Yield();
+        var full = Path.GetFullPath(assemblyPath);
+        if (!File.Exists(full)) { Console.Error.WriteLine($"[HotReload] Not found: {full}"); return false; }
+        var oldAsm = _loader?.LoadedAssembly;
+        if (_loader is not null) { try{_loader.Unload();}catch (Exception logEx) { Suppress("ReloadAsync", logEx); } _loader=null; GC.Collect(); }
+        _loader = new PluginLoader();
+        try { _loader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
+        Console.Error.WriteLine($"[HotReload] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
+        // A previous load already converted the world when live instances
+        // carry plugin types (non-Core assembly deriving a pair base):
+        // exact-match patching can't see them, so a second conversion
+        // would patch nothing while eviction destroyed the working
+        // commands. Skip both loudly instead (restart picks up new code).
+        if (WorldAlreadyConverted(_loader.Replacements))
         {
-            await Task.Yield();
-            var full = Path.GetFullPath(assemblyPath);
-            if (!File.Exists(full)) { Console.Error.WriteLine($"[HotReload] Not found: {full}"); return false; }
-            var oldAsm = _loader?.LoadedAssembly;
-            if (_loader is not null) { try{_loader.Unload();}catch (Exception logEx) { Suppress("ReloadAsync", logEx); } _loader=null; GC.Collect(); }
-            _loader = new PluginLoader();
-            try { _loader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
-            Console.Error.WriteLine($"[HotReload] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
-            // A previous load already converted the world when live instances
-            // carry plugin types (non-Core assembly deriving a pair base):
-            // exact-match patching can't see them, so a second conversion
-            // would patch nothing while eviction destroyed the working
-            // commands. Skip both loudly instead (restart picks up new code).
-            if (WorldAlreadyConverted(_loader.Replacements))
-            {
-                Console.Error.WriteLine("[HotReload] World already converted by a previous load; skipping object patch and command eviction (restart to pick up new code).");
-                return true;
-            }
-            int patched=0;
-            // takes per-object write + handler read locks, same outermost direction
-            // as DoShutdown, so no ABBA. Load/scan stay outside (I/O, no locks held).
-            lock (StartStop.WorldLock)
-            {
-                // Stale command instances first, so the reinstall that patched
-                // objects trigger via AtInit re-adds fresh ones instead of
-                // colliding with (and keeping) the dead ones.
-                try { EvictStaleCommands(oldAsm); } catch (Exception ex) { Suppress("ReloadAsync", ex); }
-                foreach(var kv in _loader.Replacements.ToList()){ try{patched+=PatchLiveObjects(kv.Key,kv.Value);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] Patch {kv.Key.Name}->{kv.Value.Name}: {ex.Message}");} }
-                try{ReregisterTicks(ticker);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] ReregisterTicks: {ex.Message}");}
-            }
-            Console.Error.WriteLine($"[HotReload] ReloadAsync patched {patched}.");
+            Console.Error.WriteLine("[HotReload] World already converted by a previous load; skipping object patch and command eviction (restart to pick up new code).");
             return true;
-        } finally { ExitGate(); }
+        }
+        int patched=0;
+        // takes per-object write + handler read locks, same outermost direction
+        // as DoShutdown, so no ABBA. Load/scan stay outside (I/O, no locks held).
+        lock (StartStop.WorldLock)
+        {
+            // Stale command instances first, so the reinstall that patched
+            // objects trigger via AtInit re-adds fresh ones instead of
+            // colliding with (and keeping) the dead ones.
+            try { EvictStaleCommands(oldAsm); } catch (Exception ex) { Suppress("ReloadAsync", ex); }
+            foreach(var kv in _loader.Replacements.ToList()){ try{patched+=PatchLiveObjects(kv.Key,kv.Value);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] Patch {kv.Key.Name}->{kv.Value.Name}: {ex.Message}");} }
+            try{ReregisterTicks(ticker);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] ReregisterTicks: {ex.Message}");}
+        }
+        Console.Error.WriteLine($"[HotReload] ReloadAsync patched {patched}.");
+        return true;
     }
     // C# cannot swap __class__ in place: build the replacement via GetUninitializedObject
     // (bypasses ctor like Python skipping __init__), copy state, AddObject-replace by id,
@@ -248,13 +262,16 @@ public static class PluginReloader
     }
 
     /// <summary>
-    /// Builds the replacement WITHOUT running any constructor, by design (mirrors
-    /// Python <c>_apply_patch</c> skipping <c>__init__</c> side effects): field
-    /// initializers do not run either, so every field is copied from the old
-    /// instance — plain fields by assignability, transient session/lock state from
-    /// the saved snapshot, and <c>readonly</c>/<c>init-only</c> fields backfilled by
-    /// shared reference (safe: the old instance is detached after rewire). A field
-    /// rename on either side silently skips that field (per-field LogDebug).
+    /// Builds the replacement, explicit contract first: a new type
+    /// implementing <c>IMigrateFrom&lt;T&gt;</c> is constructed normally (all
+    /// field initializers and invariants run) and pulls state via
+    /// <c>MigrateFrom</c> — mirroring Python <c>_apply_patch</c> intent
+    /// without skipping construction. Types without the contract keep the
+    /// legacy field copy below (ctor bypass is intrinsic there: Python
+    /// skips <c>__init__</c> side effects; covered by PortedReloaderTests
+    /// with a throwing ctor). A declared-but-broken contract keeps the old
+    /// instance live and loud, never half-applied, never silently copied.
+    /// Transient session/lock state is engine-restored on both paths.
     /// Callers must hold <c>StartStop.WorldLock</c> (see <c>ReloadAsync</c>).
     /// </summary>
     private static bool PatchSingleObject(GameObject oldObj, Type newType)
@@ -268,6 +285,13 @@ public static class PluginReloader
         var lk=oldObj.SyncRoot; bool taken=false;
         try{
             try{lk.EnterWriteLock(); taken=true;}catch{taken=false;}
+            var migration = TryMigrateExplicit(oldObj, oldType, newType);
+            if (migration.Handled)
+            {
+                if (migration.Replacement is null) return false;
+                RestoreTransients(newType, migration.Replacement, saved);
+                return RegisterReplacement(oldObj, migration.Replacement, lk, ref taken);
+            }
             GameObject newObj; try{newObj=(GameObject)RuntimeHelpers.GetUninitializedObject(newType);}catch(Exception ex){Console.Error.WriteLine($"[HotReload] GetUninitializedObject {newType.Name}: {ex.Message}"); return false;}
             var newByName=GetAllFields(newType).GroupBy(f=>f.Name).ToDictionary(g=>g.Key,g=>g.ToList(),StringComparer.Ordinal);
             foreach(var fOld in oldFields){
@@ -292,7 +316,7 @@ public static class PluginReloader
                     }catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
                 }
             }
-            foreach(var kv in saved){ var fNew=FindField(newType,kv.Key); if(fNew is not null&&!fNew.IsInitOnly) try{fNew.SetValue(newObj,kv.Value);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); } }
+            RestoreTransients(newType, newObj, saved);
             // GetUninitializedObject skips field initializers, so readonly fields (e.g. _flags)
             // stay null — the copy loop above skips init-only fields. Backfill them from the
             // old instance (shared refs are safe: the old instance is detached after rewire).
@@ -315,23 +339,61 @@ public static class PluginReloader
                     catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
                 }
             }
-            var lf=FindField(newType,"_lock");
-            if(lf is not null) try{ var cur=lf.GetValue(newObj); if(cur is null) lf.SetValue(newObj,saved.TryGetValue("_lock",out var v)?v:new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion)); }catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
-            try{newObj.SetIdRaw(oldObj.Id);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
-            // release the old-object write lock BEFORE AddObject +
-            // RewireReferences (which take channel/map/area/grid/session
-            // locks). Holding it across inverted the registry→object order
-            // of FilterBy while ReloadAsync holds WorldLock.
-            if(taken) try{lk.ExitWriteLock(); taken=false;}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
-            ObjectRegistry.AddObject(newObj);
-            // C# cannot swap __class__ in place like Python: AddObject replaced the id,
-            // so rewire direct refs (channels/map/nodes/sessions hold instances, not ids).
-            try { RewireReferences(oldObj, newObj); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Rewire {oldObj.Id}: {ex.Message}"); }
-            return true;
+            return RegisterReplacement(oldObj, newObj, lk, ref taken);
         }catch{
             try{ foreach(var kv in origSnap) try{kv.Key.SetValue(oldObj,kv.Value);}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
             throw;
         }finally{ if(taken) try{lk.ExitWriteLock();}catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }}
+    }
+    // Explicit-contract probe: the first IMigrateFrom<> whose TOld accepts
+    // the live instance wins (implement at most one per replacement type).
+    // No contract → (false, null): the legacy copy path runs. Broken
+    // contract (no ctor, unreachable, throwing MigrateFrom) → (true, null):
+    // the old instance stays live; the failure is logged, never copied.
+    // The call itself is a direct interface call (DIM forwarder routes to
+    // the typed method) — no MethodInfo.Invoke.
+    private static (bool Handled, GameObject? Replacement) TryMigrateExplicit(GameObject oldObj, Type oldType, Type newType)
+    {
+        foreach (var i in newType.GetInterfaces())
+        {
+            if (!i.IsGenericType || i.GetGenericTypeDefinition() != typeof(IMigrateFrom<>)) continue;
+            if (!i.GetGenericArguments()[0].IsAssignableFrom(oldType)) continue;
+            GameObject candidate;
+            try { candidate = (GameObject)Activator.CreateInstance(newType)!; }
+            catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Migrate {oldType.Name}->{newType.Name}: ctor failed ({ex.GetBaseException().Message}); keeping old instance."); return (true, null); }
+            if (candidate is not IMigrateFrom contract)
+            { Console.Error.WriteLine($"[HotReload] Migrate {oldType.Name}->{newType.Name}: contract unreachable; keeping old instance."); return (true, null); }
+            try { contract.MigrateFrom(oldObj); }
+            catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Migrate {oldType.Name}->{newType.Name}: {ex.GetBaseException().Message}; keeping old instance."); return (true, null); }
+            return (true, candidate);
+        }
+        return (false, null);
+    }
+    // Transient session/lock state belongs to the engine, not the game
+    // type: restored identically on migrated and copied replacements —
+    // MigrateFrom must never be trusted with locks or sessions.
+    private static void RestoreTransients(Type newType, GameObject newObj, Dictionary<string, object?> saved)
+    {
+        foreach (var kv in saved) { var fNew = FindField(newType, kv.Key); if (fNew is not null && !fNew.IsInitOnly) try { fNew.SetValue(newObj, kv.Value); } catch (Exception logEx) { Suppress("PatchSingleObject", logEx); } }
+        var lf = FindField(newType, "_lock");
+        if (lf is not null) try { var cur = lf.GetValue(newObj); if (cur is null) lf.SetValue(newObj, saved.TryGetValue("_lock", out var v) ? v : new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion)); } catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
+    }
+    // Shared tail: id, unlock-before-registry, AddObject, rewire. The unlock
+    // order is load-bearing (registry→object inversion documented at the old
+    // release site); both construction paths share it so neither can regress.
+    private static bool RegisterReplacement(GameObject oldObj, GameObject newObj, ReaderWriterLockSlim lk, ref bool taken)
+    {
+        try { newObj.SetIdRaw(oldObj.Id); } catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
+        // release the old-object write lock BEFORE AddObject +
+        // RewireReferences (which take channel/map/area/grid/session
+        // locks). Holding it across inverted the registry→object order
+        // of FilterBy while ReloadAsync holds WorldLock.
+        if (taken) try { lk.ExitWriteLock(); taken = false; } catch (Exception logEx) { Suppress("PatchSingleObject", logEx); }
+        ObjectRegistry.AddObject(newObj);
+        // C# cannot swap __class__ in place like Python: AddObject replaced the id,
+        // so rewire direct refs (channels/map/nodes/sessions hold instances, not ids).
+        try { RewireReferences(oldObj, newObj); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Rewire {oldObj.Id}: {ex.Message}"); }
+        return true;
     }
     private static FieldInfo? FindField(Type t,string n){ var cur=t; while(cur is not null&&cur!=typeof(object)){ var f=cur.GetField(n,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic); if(f is not null) return f; cur=cur.BaseType; } return null; }
     private static List<FieldInfo> GetAllFields(Type t){ List<FieldInfo> l = []; var cur=t; while(cur is not null&&cur!=typeof(object)){ l.AddRange(cur.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.DeclaredOnly)); cur=cur.BaseType; } return l; }
@@ -569,7 +631,7 @@ public static class PluginReloader
             DiscoverNewPluginModules(settings,cands);
             cands=cands.Where(p=>!IsExcluded(p)&&File.Exists(p)).Distinct().ToList();
             Console.Error.WriteLine($"[HotReload] Found {cands.Count} plugin assemblies.");
-            foreach(var p in cands){ try{ if(await ReloadAsync(p,ticker,pool).ConfigureAwait(false)) reloaded++; }catch(Exception ex){ var m=$"Failed {p}: {ex.Message}"; Console.Error.WriteLine($"[HotReload] {m}"); errors.Add(m);} }
+            foreach(var p in cands){ try{ if(await ReloadCoreAsync(p,ticker,pool).ConfigureAwait(false)) reloaded++; }catch(Exception ex){ var m=$"Failed {p}: {ex.Message}"; Console.Error.WriteLine($"[HotReload] {m}"); errors.Add(m);} }
             // No dead second pass (load-then-immediately-unload scanned nothing) and no
             // double patch: ReloadAsync already patched each assembly's replacements.
             if(cands.Count==0) try{ lock (StartStop.WorldLock) { ReregisterTicks(ticker); } }catch(Exception ex){errors.Add($"ReregisterTicks: {ex.Message}");}
@@ -589,7 +651,14 @@ public static class PluginReloader
     // Never throws: every failure is logged and boot continues engine-only.
     // Returns the patched live-object count (0 when no game assembly exists).
     public static int LoadGameAssembliesAtBoot(AtherizSettings? settings = null)
+        => LoadGameAssembliesAtBoot(settings, out _);
+
+    // Same load, additionally handing back the discovered game-setup entry
+    // (last loaded wins, matching the old static slot) for explicit CLI
+    // dispatch; null when no game assembly provides one.
+    public static int LoadGameAssembliesAtBoot(AtherizSettings? settings, out IGameSetup? gameSetup)
     {
+        gameSetup = null;
         settings ??= AtherizSettings.Global;
         if (!TryEnterGate()) { Console.Error.WriteLine("[Boot] Game load already in progress; skipping."); return 0; }
         try
@@ -612,7 +681,12 @@ public static class PluginReloader
                     var full = Path.GetFullPath(p);
                     if (_loader is not null) { try { _loader.Unload(); } catch (Exception logEx) { Suppress("LoadGameAssembliesAtBoot", logEx); } _loader = null; GC.Collect(); }
                     _loader = new PluginLoader();
-                    try { _loader.Load(full); } catch (Exception ex) { Console.Error.WriteLine($"[Boot] Load failed: {ex.Message}"); continue; }
+                    try
+                    {
+                        var discovered = _loader.Load(full);
+                        if (discovered is not null) gameSetup = discovered;
+                    }
+                    catch (Exception ex) { Console.Error.WriteLine($"[Boot] Load failed: {ex.Message}"); continue; }
                     Console.Error.WriteLine($"[Boot] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
                     lock (StartStop.WorldLock)
                     {

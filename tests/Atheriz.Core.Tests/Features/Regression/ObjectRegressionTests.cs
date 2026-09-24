@@ -431,19 +431,15 @@ public class ObjectRegressionTests
         Assert.Throws<TargetParameterCountException>(() => DelegateInvoker.Invoke(f, new object?[] { "x" }));
     }
 
-    // mismatched generic callables must fail as ParsingError, not InvalidCast.
+    // A throwing ParserCallable propagates when raising and echoes the raw
+    // call otherwise — the engine never wraps callable exceptions.
     [Fact]
-    public void MismatchedCallable_RaisesParsingError()
+    public void ThrowingCallable_RaisingRethrows_NonRaisingEchoes()
     {
-        // (string[], Dictionary, int) passes registration validation (has an
-        // array param and a Dictionary param) but matches no call shape: the
-        // >=2 wrapper forwards exactly [string[], dict] and the arity guard
-        // throws TargetParameterCountException instead of a ParsingError.
-        var parser = new FuncParser(new Dictionary<string, object>
-        {
-            ["f"] = (Func<string[], Dictionary<string, object?>, int, string>)((a, k, x) => "r"),
-        });
-        Assert.Throws<FuncParser.ParsingError>(() => parser.Parse("$f(1)", raiseErrors: true));
+        FuncParser.ParserCallable boom = (a, k, ctx, raw) => throw new InvalidOperationException("boom");
+        var parser = new FuncParser(new Dictionary<string, FuncParser.ParserCallable> { ["f"] = boom });
+        Assert.Throws<InvalidOperationException>(() => parser.Parse("$f(1)", raiseErrors: true));
+        Assert.Equal("$f(1)", parser.Parse("$f(1)", raiseErrors: false));
     }
 
     // AtMapUpdate must not stamp success when delivery failed.
@@ -747,7 +743,7 @@ public class ObjectRegressionTests
         Assert.Contains("Atheriz.Core.Objects.VerbConjugation.verbs.txt", asm.GetManifestResourceNames());
         var field = typeof(Conjugate).GetField("VerbTenses", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(field);
-        var table = (Dictionary<string, string[]>)field.GetValue(null)!;
+        var table = (System.Collections.Generic.IReadOnlyDictionary<string, string[]>)field.GetValue(null)!;
         Assert.True(table.Count > 100);
         Assert.Equal("past", Conjugate.VerbTense("ate"));
     }

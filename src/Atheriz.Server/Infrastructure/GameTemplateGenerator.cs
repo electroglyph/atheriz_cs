@@ -174,9 +174,10 @@ public static class GameTemplateGenerator
                 // Load the game (if any) so setup below dispatches to it;
                 // best-effort and never fatal — a brand-new game has no dll
                 // yet, so the template setup still runs.
-                try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(new Atheriz.Core.Settings.AtherizSettings { SavePath = absSaveForSetup }); }
+                Atheriz.Core.IGameSetup? game = null;
+                try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(new Atheriz.Core.Settings.AtherizSettings { SavePath = absSaveForSetup }, out game); }
                 catch (Exception lex) { Console.Error.WriteLine($"[new] Game load failed ({lex.Message}); using template setup."); }
-                Atheriz.Core.InitialSetup.RunSetup(absSaveForSetup, username, password, absSecretForSetup);
+                Atheriz.Core.InitialSetup.RunSetup(new Atheriz.Core.SetupOptions(absSaveForSetup, username, password, absSecretForSetup), game);
             }
             catch (Exception ex)
             {

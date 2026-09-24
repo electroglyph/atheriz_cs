@@ -3,40 +3,29 @@ using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
-// Shared normalization + lookup for the sync/async handlers; the callback
-// exception path (log + stay) is identical in both. A throwing callback logs
-// "menu callback failed" and stays in BOTH paths.
+// Shared normalization + lookup for input handling; a throwing callback logs
+// "menu callback failed" and stays.
 [Collection("Ported")]
 public class MenuInputNormalizeStayTests
 {
-    private static (string, List<Choice>) StayNode(MenuContext ctx)
-        => ("text", [new Choice("key", "desc", cb: _ => throw new InvalidOperationException("boom"), stay: true)]);
+    private static Task<(string, List<Choice>)> StayNode(MenuContext ctx)
+        => Task.FromResult<(string, List<Choice>)>(("text", [new Choice("key", "desc", callback: _ => Task.FromException(new InvalidOperationException("boom")), stay: true)]));
 
-    private static (string, List<Choice>) StayNodeAsync(MenuContext ctx)
-        => ("text", [new Choice("key", "desc", cba: async _ => { await Task.Delay(1); throw new InvalidOperationException("boom"); }, stay: true)]);
+    private static Task<(string, List<Choice>)> StayNodeAsync(MenuContext ctx)
+        => Task.FromResult<(string, List<Choice>)>(("text", [new Choice("key", "desc", callback: async _ => { await Task.Delay(1); throw new InvalidOperationException("boom"); }, stay: true)]));
 
-    [Fact]
-    public void SyncThrowingCallback_LogsAndStays()
+    private static async Task<MenuEngine> Rendered(Func<MenuContext, Task<(string, List<Choice>)>> start)
     {
-        using var env = GlobalTestEnv.Enter();
-        var engine = new MenuEngine(null, StayNode);
-        string log;
-        using (var cap = new CaptureAtherizLog())
-        {
-            Assert.True(engine.HandleInput("  KEY  "));
-            log = cap.Read();
-        }
-        Assert.Contains("menu callback failed", log);
-        Assert.True(engine.HasNode);
+        var engine = new MenuEngine(null, start);
+        await engine.RenderAsync();
+        return engine;
     }
 
     [Fact]
-    public async Task AsyncThrowingCallback_LogsAndStays()
+    public async Task SyncThrowingCallback_LogsAndStays()
     {
         using var env = GlobalTestEnv.Enter();
-        Task<(string, List<Choice>)> Start(MenuContext ctx) => Task.FromResult(StayNodeAsync(ctx));
-        var engine = new MenuEngine(null, Start);
-        await engine.RenderAsync();
+        var engine = await Rendered(StayNode);
         string log;
         using (var cap = new CaptureAtherizLog())
         {
@@ -48,11 +37,26 @@ public class MenuInputNormalizeStayTests
     }
 
     [Fact]
-    public void UnknownKey_Stays()
+    public async Task AsyncThrowingCallback_LogsAndStays()
     {
         using var env = GlobalTestEnv.Enter();
-        var engine = new MenuEngine(null, StayNode);
-        Assert.True(engine.HandleInput("nope"));
+        var engine = await Rendered(StayNodeAsync);
+        string log;
+        using (var cap = new CaptureAtherizLog())
+        {
+            Assert.True(await engine.HandleInputAsync("  KEY  "));
+            log = cap.Read();
+        }
+        Assert.Contains("menu callback failed", log);
+        Assert.True(engine.HasNode);
+    }
+
+    [Fact]
+    public async Task UnknownKey_Stays()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var engine = await Rendered(StayNode);
+        Assert.True(await engine.HandleInputAsync("nope"));
     }
 
     [Fact]
@@ -61,6 +65,9 @@ public class MenuInputNormalizeStayTests
         var src = SourceScan.Read("src", "Atheriz.Core", "Menu.cs");
         Assert.Equal(1, SourceScan.Count(src, "NormalizeKey(string"));
         Assert.Equal(1, SourceScan.Count(src, "TryGetChoice(string"));
-        Assert.Equal(1, SourceScan.Count(src, "RunLoopAsync(MenuEngine"));
+        Assert.DoesNotContain("RunLoopAsync(", src);
+        Assert.DoesNotContain("Task.Run(", src);
+        Assert.DoesNotContain("class MenuRunner", src);
+        Assert.DoesNotContain("public bool HandleInput(", src);
     }
 }

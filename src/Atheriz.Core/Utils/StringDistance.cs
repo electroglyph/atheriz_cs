@@ -1,4 +1,6 @@
 // atheriz/commands/loggedin/none.py:5 and atheriz/commands/unloggedin/none.py:5
+using System.Buffers;
+
 namespace Atheriz.Core.Utils;
 
 /// <summary>
@@ -29,18 +31,27 @@ public static class StringDistance
         // Two-row DP: computes identical distances to the full table (standard
         // result) at O(min(n,m)) memory. The distance is symmetric in a/b, so
         // sizing the rows by the shorter input changes nothing observable.
+        // Rows are pooled, not allocated per call (fuzzy-match hot path).
         if (b.Length > a.Length) (a, b) = (b, a);
-        var prev = new int[b.Length + 1];
-        var curr = new int[b.Length + 1];
-        for (int j = 0; j <= b.Length; j++) prev[j] = j;
-        for (int i = 1; i <= a.Length; i++)
+        var prev = ArrayPool<int>.Shared.Rent(b.Length + 1);
+        var curr = ArrayPool<int>.Shared.Rent(b.Length + 1);
+        try
         {
-            curr[0] = i;
-            for (int j = 1; j <= b.Length; j++)
-                curr[j] = Math.Min(Math.Min(prev[j] + 1, curr[j - 1] + 1), prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
-            (prev, curr) = (curr, prev);
+            for (int j = 0; j <= b.Length; j++) prev[j] = j;
+            for (int i = 1; i <= a.Length; i++)
+            {
+                curr[0] = i;
+                for (int j = 1; j <= b.Length; j++)
+                    curr[j] = Math.Min(Math.Min(prev[j] + 1, curr[j - 1] + 1), prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+                (prev, curr) = (curr, prev);
+            }
+            return prev[b.Length];
         }
-        return prev[b.Length];
+        finally
+        {
+            ArrayPool<int>.Shared.Return(prev);
+            ArrayPool<int>.Shared.Return(curr);
+        }
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 // Port of atheriz/tests/test_verb_conjugate.py:1 + atheriz/tests/test_pronouns.py:1 faithful
 using Atheriz.Core.Objects.VerbConjugation;
+using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Ported;
 
@@ -11,6 +12,18 @@ public class PortedVerbPronounTests
     [Fact] public void VerbInfinitiveRegular(){ Assert.Equal("run", Conjugate.VerbInfinitive("running")); Assert.Equal("walk", Conjugate.VerbInfinitive("walked")); Assert.Equal("eat", Conjugate.VerbInfinitive("eaten")); }
     [Fact] public void VerbInfinitiveAlready(){ Assert.Equal("be", Conjugate.VerbInfinitive("be")); Assert.Equal("run", Conjugate.VerbInfinitive("run")); }
     [Fact] public void VerbInfinitiveUnknown(){ Assert.Equal("xyzzy", Conjugate.VerbInfinitive("xyzzy")); Assert.Equal("", Conjugate.VerbInfinitive("")); }
+
+    [Fact]
+    public void VerbTable_EmbeddedOnly_NoFilesystemFallback()
+    {
+        // The build-output copy and the hardcoded subset are deleted: the
+        // embedded resource always wins, and a missing resource degrades to
+        // pass-through (pinned above) instead of a stale subset.
+        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "VerbConjugation", "Conjugate.cs");
+        Assert.Contains("GetManifestResourceStream", src);
+        Assert.DoesNotContain("candidatePaths", src);
+        Assert.DoesNotContain("RegularRow", src);
+    }
     // verb_conjugate
     [Theory]
     [InlineData("be","infinitive","be")]

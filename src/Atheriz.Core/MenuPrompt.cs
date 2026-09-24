@@ -2,32 +2,29 @@
 namespace Atheriz.Core;
 
 /// <summary>
-/// Shared helper for <c>Menu.Run</c> and <c>MenuRunner.RunMenuAsync</c> to avoid duplication.
-/// Mirrors <c>using var cts=new CancellationTokenSource(Timeout); var t=session.Prompt(display);
-/// await Task.WhenAny(t, Task.Delay(Timeout, cts.Token))</c> with timeout → null.
+/// Shared helper for <c>MenuEngine.RunAsync</c> to avoid duplicating the
+/// timeout pattern at every prompt site.
+/// Mirrors <c>menu.py:153</c> <c>session.Prompt(display)</c> with timeout → null.
 /// </summary>
 public static class MenuPrompt
 {
     /// <summary>
-    /// Prompt with timeout — mirrors <c>menu.py:153</c> <c>session.Prompt(display)</c> + <c>Task.WhenAny</c> timeout.
+    /// Prompt with timeout — mirrors <c>menu.py:153</c> <c>session.Prompt(display)</c> with timeout.
     /// Returns prompt result or <c>null</c> on timeout/cancel/failure.
     /// </summary>
     public static async Task<string?> PromptWithTimeoutAsync(Session session, string display, TimeSpan timeout)
     {
+        // Atomic capture: the token owns exactly this prompt, so the timeout
+        // path cancels it even if a newer prompt has since taken the slot.
+        var (promptTask, token) = session.PromptWithToken(display);
         try
         {
-            // Single timer: the delay below is the only armed clock (the old
-            // CancellationTokenSource(timeout) armed a second one). The
-            // source is cancelled on the success path to release the delay.
-            using var cts = new CancellationTokenSource();
-            // Atomic capture: the token owns exactly this prompt, so the timeout
-            // path cancels it even if a newer prompt has since taken the slot.
-            var (promptTask, token) = session.PromptWithToken(display);
-            var delayTask = Task.Delay(timeout, cts.Token);
-            var done = await Task.WhenAny(promptTask, delayTask).ConfigureAwait(false);
-            if (done != promptTask) { try { session.CancelPrompt(token); } catch { } return null; }
-            try { await cts.CancelAsync().ConfigureAwait(false); } catch { }
-            return await promptTask.ConfigureAwait(false);
+            return await promptTask.WaitAsync(timeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            try { session.CancelPrompt(token); } catch { }
+            return null;
         }
         catch (OperationCanceledException) { return null; }
         catch { return null; }

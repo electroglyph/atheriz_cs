@@ -41,7 +41,7 @@ public class AsyncThreadPoolMonotonicClockTests
             double second = ReadFullLogSeconds(pool);
             Assert.Equal(first, second);
 
-            WriteFullLogSeconds(pool, Atheriz.Core.Utils.TimeProvider.MonotonicSeconds() - 11.0);
+            WriteFullLogSeconds(pool, Atheriz.Core.Utils.GameClock.MonotonicSeconds() - 11.0);
             Assert.False(pool.AddTask(() => { }));
             double third = ReadFullLogSeconds(pool);
             Assert.True(third > second);

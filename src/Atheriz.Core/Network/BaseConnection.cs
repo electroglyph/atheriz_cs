@@ -213,7 +213,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             if (_disconnected || _disposed) return;
             if (_inputQueue.Count >= ConnectionInputQueueLimit)
             {
-                var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                var now = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
                 if (!ThrottleWindow.ShouldLog(ref _lastInputBusy, InputBusyWindowSeconds, now)) return;
                 // The busy log below reports this count: capture the full
                 // queue size here, not just on the pool-failure path.
@@ -235,7 +235,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             {
                 _inputRunning = false;
                 pendingCount = _inputQueue.Count;
-                var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                var now = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
                 if (ThrottleWindow.ShouldLog(ref _lastInputBusy, InputBusyWindowSeconds, now))
                 {
                     notifyRetry = true;

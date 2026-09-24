@@ -54,23 +54,6 @@ public class CliSettingsTemplateTests
         // confirms), so there is no usage line to document it in.
     }
 
-    // AtherizSettings.Default is shared-mutable with zero mutating
-    // borrowers: fail if any source file ever assigns through it.
-    [Fact]
-    public void SettingsDefault_NeverMutated()
-    {
-        var root = Path.Combine(SourceScan.RepoRoot(), "src");
-        var rx = new Regex(@"\.Default\.[A-Za-z_][A-Za-z0-9_]*\s*=(?![=>])", RegexOptions.Compiled);
-        var hits = new List<string>();
-        foreach (var f in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
-        {
-            string text;
-            try { text = File.ReadAllText(f); } catch { continue; }
-            if (rx.IsMatch(text)) hits.Add(f);
-        }
-        Assert.True(hits.Count == 0, "Default mutated in: " + string.Join(", ", hits));
-    }
-
     // Test args travel via ArgumentList (no quote-breakout shaping), and the
     // foreground wait policy holds: --help runs to completion, exit 0.
     [Fact]

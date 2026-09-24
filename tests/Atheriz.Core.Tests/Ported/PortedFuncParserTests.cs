@@ -47,12 +47,6 @@ public class PortedFuncParserTests
         Assert.Empty(pf.Kwargs);
         Assert.Equal("", pf.FullStr.ToString());
         Assert.Equal("", pf.InFuncStr.ToString());
-        Assert.Equal(-1, pf.DoubleQuoted);
-        Assert.Equal("", pf.CurrentKwarg);
-        Assert.Equal(0, pf.OpenLParens);
-        Assert.Equal(0, pf.OpenLSquare);
-        Assert.Equal(0, pf.OpenLCurly);
-        Assert.Equal(0, pf.OpenLSquare);
         Assert.Equal("", pf.ExecReturn?.ToString());
     }
     [Fact] public void ParsedFunc_GetReturnsTuple()
@@ -138,20 +132,6 @@ public class PortedFuncParserTests
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["ok"]=ok});
         Assert.Contains("ok", p.Callables.Keys);
     }
-    [Fact] public void ValidateMissingArgsRaises()
-    {
-        using var env=GlobalTestEnv.Enter();
-        var del = new Func<string, Dictionary<string,object?>, object?>((x,kw)=>"");
-        var ex = Assert.Throws<FuncParser.ParsingError>(()=> new FuncParser(new Dictionary<string, Delegate>{["bad"]=del}));
-        Assert.Contains("*args", ex.Message);
-    }
-    [Fact] public void ValidateMissingKwargsRaises()
-    {
-        using var env=GlobalTestEnv.Enter();
-        var del = new Func<string[], object?>((a)=>"");
-        var ex = Assert.Throws<FuncParser.ParsingError>(()=> new FuncParser(new Dictionary<string, Delegate>{["bad"]=del}));
-        Assert.Contains("**kwargs", ex.Message);
-    }
     [Fact] public void ValidateLambdaPasses()
     {
         using var env=GlobalTestEnv.Enter();
@@ -159,10 +139,6 @@ public class PortedFuncParserTests
         FuncParser.ParserCallable lam=(a,k,ctx,raw)=>1;
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["x"]=lam});
         Assert.Contains("x", p.Callables.Keys);
-        // also generic delegate version with proper signature
-        var del2 = new Func<string[], Dictionary<string,object?>, object?>((a,k)=>1);
-        var p2=new FuncParser(new Dictionary<string, Delegate>{["x2"]=del2});
-        Assert.Contains("x2", p2.Callables.Keys);
     }
     // Execute
     [Fact] public void ExecuteUnknownReturnsString()

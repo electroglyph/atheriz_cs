@@ -22,7 +22,7 @@ public class StartupWiringTests
         var secret = Path.Combine(tmp, "secret");
         try
         {
-            InitialSetup.DoSetup(save, "admin", "password123", secret);
+            InitialSetup.DoSetup(new SetupOptions(save, "admin", "password123", secret));
             var dash = ObjectRegistry.FilterBy(o => o.Name == "A flashing dashboard");
             Assert.Single(dash);
             Assert.True(dash[0].IsItem);

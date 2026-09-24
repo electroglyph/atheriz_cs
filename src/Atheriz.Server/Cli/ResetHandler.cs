@@ -101,7 +101,8 @@ public static class ResetHandler
 
         // Load the game (if any) so setup below dispatches to it; best-effort
         // and never fatal — without a game the template setup still runs.
-        try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings); }
+        Atheriz.Core.IGameSetup? game = null;
+        try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings, out game); }
         catch (Exception ex) { Console.Error.WriteLine($"[reset] Game load failed ({ex.Message}); using template setup."); }
 
         Console.WriteLine("Setting up new world...");
@@ -109,7 +110,7 @@ public static class ResetHandler
         {
             // Explicit no-prompt creds: reset must never interactively
             // ask for a superuser mid-wipe; env creds still apply when set.
-            Atheriz.Core.InitialSetup.RunSetup(savePath, prompt: false);
+            Atheriz.Core.InitialSetup.RunSetup(new Atheriz.Core.SetupOptions(savePath, Prompt: false), game);
             Console.WriteLine("Success! New world created.");
         }
         catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); return 1; }

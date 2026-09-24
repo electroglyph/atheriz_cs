@@ -135,15 +135,21 @@ public class HelpExamMenuTests
         Assert.Contains("TryResolveBanPreamble", SourceScan.Region(ban, "protected override void RunPuppet("));
     }
 
-    // Unknown menu keys are logged, not silently swallowed; the handler
-    // result reads as keep-going under its own name.
+    // Unknown menu keys are logged, not silently swallowed; the menu
+    // stays on its node (keep-going). Behavioral pin, not a source scan:
+    // the async rewrite keeps this in HandleInputAsync.
     [Fact]
-    public void Menu_UnknownKey_Logged_ResultNamedKeepGoing()
+    public async Task Menu_UnknownKey_Logged_StaysOnNode()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Menu.cs");
-        var region = SourceScan.Region(src, "public async Task<bool> Run(Session session");
-        Assert.Contains("menu unknown key", region);
-        Assert.Contains("keepGoing", region);
-        Assert.DoesNotContain("var keep=", region);
+        var engine = new MenuEngine(null, ctx => Task.FromResult<(string, List<Choice>)>(("text", [new Choice("a", "A", stay: true)])));
+        await engine.RenderAsync();
+        string log;
+        using (var cap = new CaptureAtherizLog())
+        {
+            Assert.True(await engine.HandleInputAsync("zzz-no-such-key"));
+            log = cap.Read();
+        }
+        Assert.True(engine.HasNode);
+        Assert.Contains("menu unknown key", log);
     }
 }

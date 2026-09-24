@@ -1,4 +1,5 @@
 // Used at atheriz/globals/salt.py:47, atheriz/globals/mapedit.py:66, atheriz/atheriz.py:557
+using System.Buffers.Text;
 using System.Security.Cryptography;
 
 namespace Atheriz.Core.Utils;
@@ -26,8 +27,7 @@ public static class CryptoRandom
     public static string UrlSafeToken(int bytes = 32)
     {
         var arr = FillBytes(bytes);
-        string b64 = Convert.ToBase64String(arr);
-        return b64.Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        return Base64Url.EncodeToString(arr);
     }
 
     /// <summary>
@@ -36,7 +36,7 @@ public static class CryptoRandom
     public static string HexToken(int bytes = 32)
     {
         var arr = FillBytes(bytes);
-        return Convert.ToHexString(arr).ToLowerInvariant();
+        return Convert.ToHexStringLower(arr);
     }
 
     // Shared guard + alloc + fill core for the token helpers above.

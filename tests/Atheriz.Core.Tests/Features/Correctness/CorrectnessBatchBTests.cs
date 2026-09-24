@@ -156,12 +156,13 @@ public sealed class CorrectnessBatchBTests
 
     // Null input means "no such key" (stay) — no NullReferenceException.
     [Fact]
-    public void MenuEngine_HandleInput_Null_StaysWithoutThrow()
+    public async Task MenuEngine_HandleInput_Null_StaysWithoutThrow()
     {
-        var engine = new MenuEngine(null, ctx => ("text", [new Choice("a", "A", stay: true)]));
-        var ex = Record.Exception(() => engine.HandleInput(null));
+        var engine = new MenuEngine(null, ctx => Task.FromResult<(string, List<Choice>)>(("text", [new Choice("a", "A", stay: true)])));
+        await engine.RenderAsync();
+        var ex = await Record.ExceptionAsync(() => engine.HandleInputAsync(null));
         Assert.Null(ex);
-        Assert.True(engine.HandleInput(null));
+        Assert.True(await engine.HandleInputAsync(null));
         Assert.True(engine.HasNode);
         Assert.Equal("text", engine.CurrentText);
     }
@@ -169,7 +170,8 @@ public sealed class CorrectnessBatchBTests
     [Fact]
     public async Task MenuEngine_HandleInputAsync_Null_StaysWithoutThrow()
     {
-        var engine = new MenuEngine(null, ctx => ("text", [new Choice("a", "A", stay: true)]));
+        var engine = new MenuEngine(null, ctx => Task.FromResult<(string, List<Choice>)>(("text", [new Choice("a", "A", stay: true)])));
+        await engine.RenderAsync();
         Assert.True(await engine.HandleInputAsync(null));
         Assert.True(engine.HasNode);
     }

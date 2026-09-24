@@ -80,7 +80,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     {
         _id = id;
         _hashCache = id.GetHashCode();
-        _lastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+        _lastMapTime = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
         _mapEnabled = true;
     }
 
@@ -233,7 +233,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 }
             }
             catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
-            if (sent) LastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            if (sent) LastMapTime = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
             return 0;
         }, mapStr, entries, minX, maxY, showLegend, name);
     }
@@ -804,7 +804,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         if (isNpc) obj._flags.CanHear = true;
         obj._flags.IsTickable = isTickable;
         obj._tickSeconds = tickSeconds;
-        obj._lastMapTime = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+        obj._lastMapTime = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
         obj._mapEnabled = isMapable || isPc;
         obj._flags.IsModified = true;
 

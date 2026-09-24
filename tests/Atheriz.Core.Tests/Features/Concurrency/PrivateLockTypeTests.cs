@@ -205,11 +205,8 @@ public sealed class PrivateLockTypeTests
         AssertPrivateLockFieldIsLock(typeof(Atheriz.Core.Persistence.Converters.GameObjectDtoConverter), "_subtypeLock");
     }
 
-    [Fact]
-    public void AtherizSettings_GlobalLock_IsLockType()
-    {
-        AssertPrivateLockFieldIsLock(typeof(AtherizSettings), "_globalLock");
-    }
+    // The Global slot is a lock-free volatile publish (no per-access lock),
+    // so there is no lock field to type-check here.
 
     [Fact]
     public void AtherizDbContext_InitLock_IsLockType()

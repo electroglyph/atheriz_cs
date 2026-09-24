@@ -1,14 +1,16 @@
 using System.Net;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
-using Microsoft.Extensions.Configuration;
 
 namespace Atheriz.Server.Hosting;
 
 public static class KestrelConfig
 {
-    public static void ConfigureKestrel(KestrelServerOptions opts, IConfiguration config)
+    // Takes the already-bound settings: binding happens once upstream
+    // (ServerHost), so this method is pure endpoint policy — directly
+    // testable with a POCO, no configuration section involved.
+    public static void ConfigureKestrel(KestrelServerOptions opts, AtherizSettings s)
     {
-        var s = config.GetSection("Atheriz").Get<AtherizSettings>() ?? AtherizSettings.Global;
+        ArgumentNullException.ThrowIfNull(s);
         // Honored opt-out: no bind at all — not even
         // loopback — so HTTP, the webclient, WebSocket and the admin routes stay
         // dark. Telnet and game protocols run independently of Kestrel.

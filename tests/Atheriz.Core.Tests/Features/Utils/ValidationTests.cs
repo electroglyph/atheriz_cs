@@ -2,13 +2,13 @@ using Atheriz.Core;
 using Atheriz.Core.Commands.UnloggedIn;
 using Atheriz.Core.Settings;
 using Atheriz.Core.Utils;
-using TimeProvider = Atheriz.Core.Utils.TimeProvider;
+
 
 namespace Atheriz.Core.Tests.Features.Utils;
 
 // Behavior specifications for validation and parsing helpers: each test asserts
 // the behavior the code should have. Pure functions only — no engine globals touched.
-// Sequential (Ported): the TimeProvider seam tests below swap the global Default,
+// Sequential (Ported): the GameClock seam tests below swap the global Default,
 // which the static clocks now honor — they must not overlap parallel clock readers.
 [Collection("Ported")]
 public sealed class ValidationTests
@@ -146,7 +146,7 @@ public sealed class ValidationTests
         Assert.Equal(orig, back);
     }
 
-    // --- TimeProvider seam: replaceable clock for monotonic time ---
+    // --- GameClock seam: replaceable clock for monotonic time ---
 
     private sealed class FakeClock : ITimeProvider
     {
@@ -159,28 +159,28 @@ public sealed class ValidationTests
     [Fact]
     public void TimeProvider_DefaultSeam_CanBeReplacedAndRestored()
     {
-        var orig = TimeProvider.Default;
+        var orig = GameClock.Default;
         try
         {
             var fake = new FakeClock { T = 1234.5 };
-            TimeProvider.Default = fake;
-            Assert.Equal(1234.5, TimeProvider.Default.MonotonicSeconds());
-            Assert.Equal(1234.5, TimeProvider.Default.Now());
+            GameClock.Default = fake;
+            Assert.Equal(1234.5, GameClock.Default.MonotonicSeconds());
+            Assert.Equal(1234.5, GameClock.Default.Now());
         }
         finally
         {
-            TimeProvider.Default = orig;
+            GameClock.Default = orig;
         }
-        Assert.Same(orig, TimeProvider.Default);
+        Assert.Same(orig, GameClock.Default);
     }
 
     [Fact]
     public void TimeProvider_StaticClock_IsMonotonicNonDecreasing()
     {
-        var a = TimeProvider.MonotonicSeconds();
-        var b = TimeProvider.MonotonicSeconds();
+        var a = GameClock.MonotonicSeconds();
+        var b = GameClock.MonotonicSeconds();
         Assert.True(b >= a);
-        Assert.Equal(a, TimeProvider.Now(), precision: 3);
+        Assert.Equal(a, GameClock.Now(), precision: 3);
     }
 
     [Fact]
@@ -188,19 +188,19 @@ public sealed class ValidationTests
     {
         // The statics must honor a swapped Default: a dead seam means fake
         // clocks drive nothing and every static reader stays on wall time.
-        var orig = TimeProvider.Default;
+        var orig = GameClock.Default;
         try
         {
-            TimeProvider.Default = new FakeClock { T = 1234.5 };
-            Assert.Equal(1234.5, TimeProvider.MonotonicSeconds());
-            Assert.Equal(1234.5, TimeProvider.Now());
-            Assert.Equal(1234500L, TimeProvider.MonotonicMilliseconds());
+            GameClock.Default = new FakeClock { T = 1234.5 };
+            Assert.Equal(1234.5, GameClock.MonotonicSeconds());
+            Assert.Equal(1234.5, GameClock.Now());
+            Assert.Equal(1234500L, GameClock.MonotonicMilliseconds());
         }
         finally
         {
-            TimeProvider.Default = orig;
+            GameClock.Default = orig;
         }
-        Assert.NotEqual(1234.5, TimeProvider.MonotonicSeconds());
+        Assert.NotEqual(1234.5, GameClock.MonotonicSeconds());
     }
 
     // --- Validators: single account and character-name ruleset (port of validation.py),

@@ -122,11 +122,11 @@ public class PortedIsInGameFolderTests
             Directory.SetCurrentDirectory(tmp);
             try
             {
-                Assert.True(GameUtils.IsInGameFolder("nt"));
+                Assert.True(GameUtils.IsInGameFolder(windows: true));
                 File.WriteAllText(Path.Combine(tmp, "atheriz.py"), "# core");
-                Assert.False(GameUtils.IsInGameFolder("nt"));
+                Assert.False(GameUtils.IsInGameFolder(windows: true));
                 File.Delete(Path.Combine(tmp, "atheriz.py"));
-                Assert.True(GameUtils.IsInGameFolder("posix"));
+                Assert.True(GameUtils.IsInGameFolder(windows: false));
                 Assert.True(GameUtils.IsInGameFolder()); // default posix on linux
             }
             finally { Directory.SetCurrentDirectory(old); }
@@ -146,12 +146,12 @@ public class PortedIsInGameFolderTests
             Directory.SetCurrentDirectory(tmp);
             try
             {
-                Assert.True(GameUtils.IsInGameFolder("nt"), "NT filesystem is case-insensitive, detection must be case-insensitive");
+                Assert.True(GameUtils.IsInGameFolder(windows: true), "NT filesystem is case-insensitive, detection must be case-insensitive");
                 File.Delete(Path.Combine(tmp, "SETTINGS.PY"));
                 File.Delete(Path.Combine(tmp, "__INIT__.PY"));
                 File.WriteAllText(Path.Combine(tmp, "settings.py"), "# settings");
                 File.WriteAllText(Path.Combine(tmp, "__init__.py"), "");
-                Assert.True(GameUtils.IsInGameFolder("posix"));
+                Assert.True(GameUtils.IsInGameFolder(windows: false));
             }
             finally { Directory.SetCurrentDirectory(old); }
         }
@@ -170,8 +170,8 @@ public class PortedIsInGameFolderTests
             Directory.SetCurrentDirectory(tmp);
             try
             {
-                Assert.True(GameUtils.IsInGameFolder("nt"), "Windows case-insensitive check must handle mixed case");
-                Assert.False(GameUtils.IsInGameFolder("posix")); // posix should be case-sensitive, Settings.py != settings.py
+                Assert.True(GameUtils.IsInGameFolder(windows: true), "Windows case-insensitive check must handle mixed case");
+                Assert.False(GameUtils.IsInGameFolder(windows: false)); // posix should be case-sensitive, Settings.py != settings.py
             }
             finally { Directory.SetCurrentDirectory(old); }
         }

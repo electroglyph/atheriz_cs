@@ -15,24 +15,21 @@ namespace Atheriz.Core.Tests.Features.Hosting;
 [Collection("Ported")]
 public class HostingRegressionTests
 {
-    private static IConfiguration KestrelConfigFor(Dictionary<string, string?> pairs)
-        => new ConfigurationBuilder().AddInMemoryCollection(pairs).Build();
-
     [Fact]
     public void Kestrel_UnparseableInterface_Throws()
     {
         // a bad interface must never silently serve on loopback/Any.
-        var config = KestrelConfigFor(new() { ["Atheriz:WebserverInterface"] = "not an ip" });
-        Assert.Throws<InvalidOperationException>(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), config));
+        var settings = new AtherizSettings { WebserverInterface = "not an ip" };
+        Assert.Throws<InvalidOperationException>(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), settings));
     }
 
     [Fact]
     public void Kestrel_Limits_Configured()
     {
         // global guardrails behind the per-route caps.
-        var config = KestrelConfigFor(new());
+        var settings = new AtherizSettings();
         var opts = new KestrelServerOptions();
-        KestrelConfig.ConfigureKestrel(opts, config);
+        KestrelConfig.ConfigureKestrel(opts, settings);
         Assert.Equal(4 * 1024 * 1024, opts.Limits.MaxRequestBodySize);
         Assert.Equal(TimeSpan.FromSeconds(30), opts.Limits.RequestHeadersTimeout);
         Assert.Equal(TimeSpan.FromMinutes(2), opts.Limits.KeepAliveTimeout);

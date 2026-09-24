@@ -32,6 +32,8 @@ public static class ServerEvents
     // OUTSIDE the lock (re-entrant predicates cannot deadlock), first match
     // in snapshot (= registry) order wins. An Exists holding the lock across
     // the scan would differ in both deadlock risk and visibility — never that.
+    // Kept as snapshot-then-scan (not FilterBy(predicate)): the scan
+    // early-exits on first match instead of materializing every match.
     private static bool RegistryExists(Func<GameObject, bool> predicate)
     {
         var snapshot = ObjectRegistry.FilterBy(_ => true);

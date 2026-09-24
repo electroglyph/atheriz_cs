@@ -465,7 +465,7 @@ public class MapInfo
         // The handler's own settings, not the ambient global: an
         // explicit-settings boot must throttle with its own limit.
         double fpsLimit = Suppress(() => { int limit = Settings.MapFpsLimit; return limit > 0 ? 1.0 / limit : 0; }, 0.0, "MapFpsLimit");
-        double now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+        double now = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
 
         foreach (var l in listeners)
         {

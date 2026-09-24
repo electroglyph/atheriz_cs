@@ -19,11 +19,8 @@ public class SpawnBannerDefaultsTests
     [Fact]
     public void BannerDefaults_MatchFreshInstance()
     {
-        // The banner shows the same values through Default as through a
-        // fresh instance, so the shared read changes nothing displayed.
-        var fresh = new AtherizSettings();
-        Assert.Equal(fresh.WebserverPort, AtherizSettings.Default.WebserverPort);
-        Assert.Equal(fresh.WebserverInterface, AtherizSettings.Default.WebserverInterface);
-        Assert.Equal(fresh.WebsocketEnabled, AtherizSettings.Default.WebsocketEnabled);
+        // The banner shows fresh-instance values (no shared singleton reads).
+        var lines = Atheriz.Server.Hosting.ServerHost.FormatBannerLines(new AtherizSettings());
+        Assert.Contains("Web server listening on http://0.0.0.0:9999", lines);
     }
 }

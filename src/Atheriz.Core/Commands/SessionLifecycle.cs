@@ -49,7 +49,7 @@ namespace Atheriz.Core.Commands.UnloggedIn
         public static bool TryReserve(IMessageTarget caller, string kind)
         {
             var settings = Settings.AtherizSettings.Global;
-            double now = Utils.TimeProvider.MonotonicSeconds();
+            double now = Utils.GameClock.MonotonicSeconds();
             if (!ObjectRegistry.TryReserveCreationCooldown(kind, RateKey(caller), now, settings.CreationCooldown))
             { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return false; }
             return true;
@@ -63,7 +63,7 @@ namespace Atheriz.Core.Commands.UnloggedIn
         public static void Apply(IMessageTarget caller, string kind)
         {
             var settings = Settings.AtherizSettings.Global;
-            ObjectRegistry.ApplyCreationCooldown(kind, RateKey(caller), Utils.TimeProvider.MonotonicSeconds(), settings.CreationCooldown);
+            ObjectRegistry.ApplyCreationCooldown(kind, RateKey(caller), Utils.GameClock.MonotonicSeconds(), settings.CreationCooldown);
         }
     }
 }

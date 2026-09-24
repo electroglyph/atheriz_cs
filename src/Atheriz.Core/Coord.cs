@@ -24,6 +24,24 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
     // Detailed parse shared by the bool wrappers and by `MoveCommand`'s
     // diagnostics (arity vs bad-number need different messages). `commaOnly`
     // selects the strict grammar above; false selects the wide grammar below.
+    // Splits a span on commas into the caller's range buffer (no Split
+    // array); -1 when more segments than the buffer holds.
+    private static int SplitCommaParts(ReadOnlySpan<char> inner, Span<Range> parts)
+    {
+        int count = 0;
+        int start = 0;
+        for (int i = 0; i <= inner.Length; i++)
+        {
+            if (i == inner.Length || inner[i] == ',')
+            {
+                if (count >= parts.Length) return -1;
+                parts[count++] = new Range(start, i);
+                start = i + 1;
+            }
+        }
+        return count;
+    }
+
     internal static bool TryParse(ReadOnlySpan<char> s, bool commaOnly, out Coord coord, out CoordParseFailure failure)
     {
         coord = new Coord(string.Empty, 0, 0, 0);
@@ -35,18 +53,7 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
             if (inner.Length >= 2 && inner[0] == '(' && inner[^1] == ')') inner = inner[1..^1];
             if (inner.IndexOf(',') < 0) return false;
             Span<Range> parts = stackalloc Range[5];
-            int count = 0;
-            int start = 0;
-            for (int i = 0; i <= inner.Length; i++)
-            {
-                if (i == inner.Length || inner[i] == ',')
-                {
-                    if (count >= 5) return false;
-                    parts[count++] = new Range(start, i);
-                    start = i + 1;
-                }
-            }
-            if (count != 4) return false;
+            if (SplitCommaParts(inner, parts) != 4) return false;
             if (!int.TryParse(inner[parts[1]], out var x)
                 || !int.TryParse(inner[parts[2]], out var y)
                 || !int.TryParse(inner[parts[3]], out var z))
@@ -78,17 +85,7 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
             // Manual comma split (no Split array): exactly 3 numeric segments
             // for Area(X,Y,Z), exactly 4 (area + 3) for (Area,X,Y,Z).
             Span<Range> segs = stackalloc Range[4];
-            int count = 0;
-            int start = 0;
-            for (int i = 0; i <= tail.Length; i++)
-            {
-                if (i == tail.Length || tail[i] == ',')
-                {
-                    if (count >= 4) return false;
-                    segs[count++] = new Range(start, i);
-                    start = i + 1;
-                }
-            }
+            int count = SplitCommaParts(tail, segs);
             string area;
             int numBase;
             if (head.Length == 0)

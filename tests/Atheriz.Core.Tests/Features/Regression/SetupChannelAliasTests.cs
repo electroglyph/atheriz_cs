@@ -48,7 +48,11 @@ public class SetupChannelAliasTests
         Assert.DoesNotContain("GlobalServices.Reset(); } catch { }", region);
         Assert.DoesNotContain("GetSalt(absSecret); } catch {}", region);
         Assert.DoesNotContain("SetSalt(SaltProvider.GetSalt(absSecret)); } catch {}", region);
-        Assert.Contains("Singleton reset warning", region);
+        // DoSetup is a funnel over the split helpers; the reset reporting
+        // lives in the ResetWorldState step that owns it.
+        Assert.Contains("ResetWorldState(absSecret)", region);
+        var reset = SourceScan.Region(src, "private static void ResetWorldState(");
+        Assert.Contains("Singleton reset warning", reset);
         // The salt warnings live in the ReseedForGame funnel that owns them.
         var reseed = SourceScan.Region(SourceScan.Read("src", "Atheriz.Core", "Globals", "SaltProvider.cs"), "public static void ReseedForGame(");
         Assert.Contains("Salt re-seed warning", reseed);
@@ -61,7 +65,11 @@ public class SetupChannelAliasTests
     public void InitialSetup_SeedWorld_PublishedThroughSingletons()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "InitialSetup.cs");
-        var region = SourceScan.Region(src, "public static void DoSetup(");
+        // DoSetup funnels through the world build; the twin-slot publish
+        // lives in the BuildLimboWorld step that owns it.
+        var setup = SourceScan.Region(src, "public static void DoSetup(");
+        Assert.Contains("BuildLimboWorld(settings)", setup);
+        var region = SourceScan.Region(src, "internal static SeedWorld BuildLimboWorld(");
         Assert.Contains("GlobalServices.SetNodeHandler(nh)", region);
         Assert.Contains("GlobalServices.SetMapHandler(mh)", region);
         Assert.DoesNotContain("NodeHandler.SetCurrent(nh)", region);

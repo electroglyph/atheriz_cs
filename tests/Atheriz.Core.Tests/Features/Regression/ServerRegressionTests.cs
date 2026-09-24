@@ -102,7 +102,7 @@ public class ServerRegressionTests
         Directory.CreateDirectory(dir);
         try
         {
-            Atheriz.Core.InitialSetup.DoSetup(dir, "", "", Path.Combine(dir, "secret"));
+            Atheriz.Core.InitialSetup.DoSetup(new Atheriz.Core.SetupOptions(dir, "", "", Path.Combine(dir, "secret")));
             using var db = new Atheriz.Core.Persistence.AtherizDbContext(dir);
             Assert.True(db.Areas.Any() || db.MapData.Any());
         }
@@ -299,15 +299,17 @@ public class ServerRegressionTests
         Assert.Contains("caller is null", src);
     }
 
-    // the open queue orders nodes via CompareTo (heapq __lt__ parity);
-    // no sequence tiebreak fields.
+    // the open queue orders nodes by integer F priority (CompareTo agrees:
+    // both order by F alone, heapq __lt__ parity); no sequence tiebreak fields.
     [Fact]
     public void PathfindQueue_UsesNodeComparer()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Utils", "Pathfind.cs");
         Assert.DoesNotContain("_seq", src);
         Assert.DoesNotContain("_nextSeq", src);
-        Assert.Contains("PriorityQueue<PathNode, PathNode>", src);
+        Assert.Contains("PriorityQueue<PathNode, int>", src);
+        var node = SourceScan.Read("src", "Atheriz.Core", "Utils", "PathNode.cs");
+        Assert.Contains("F.CompareTo(other.F)", node);
     }
 
     // unbounded/negative limits must fail validation.

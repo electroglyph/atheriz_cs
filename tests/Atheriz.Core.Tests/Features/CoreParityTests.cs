@@ -4,7 +4,7 @@ using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Utils;
-using TimeProvider = Atheriz.Core.Utils.TimeProvider;
+
 
 namespace Atheriz.Core.Tests.Features;
 
@@ -24,10 +24,10 @@ public class CoreParityTests
     [Fact]
     public void Clocks_Agree()
     {
-        // Behavior pin: the parallel clocks (TimeProvider / ThrottleWindow)
+        // Behavior pin: the parallel clocks (GameClock / ThrottleWindow)
         // must report the same time. (MapEdit.GetMonotonic is internal.)
-        double a = TimeProvider.MonotonicSeconds();
+        double a = GameClock.MonotonicSeconds();
         double b = ThrottleWindow.Now();
-        Assert.True(Math.Abs(a - b) < 1.0, $"TimeProvider={a} ThrottleWindow={b}");
+        Assert.True(Math.Abs(a - b) < 1.0, $"GameClock={a} ThrottleWindow={b}");
     }
 }

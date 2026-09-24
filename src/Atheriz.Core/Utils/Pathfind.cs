@@ -87,15 +87,16 @@ public static class Pathfind
         var startNode = new PathNode(null, start);
         var endNode = new PathNode(null, end);
 
-        // The queue orders nodes via CompareTo, like heapq via __lt__.
-        var openQueue = new PriorityQueue<PathNode, PathNode>();
+        // The queue orders nodes by integer F priority (CompareTo agrees:
+        // both order by F alone), like heapq via __lt__.
+        var openQueue = new PriorityQueue<PathNode, int>();
         HashSet<Coord> closedSet = [];
         Dictionary<Coord, PathNode> openByPos = [];
         int iterations = 0;
         var grid = start.Grid;
         if (grid is null) return (false, [], []);
         int maxIterations = ResolveMaxIterations(maxIterationsOverride);
-        openQueue.Enqueue(startNode, startNode);
+        openQueue.Enqueue(startNode, startNode.F);
         openByPos[start.Coord] = startNode;
         // The start entry is dequeued up front so the loop body below always
         // works on a queue-issued node, never a pre-loop stand-in.
@@ -117,28 +118,27 @@ public static class Pathfind
                 : GetLinkNodesCaller(currentNode.Position, nh, caller);
             foreach (var n in nodes)
             {
-                var child = new PathNode(currentNode, n);
-                if (closedSet.Contains(child.Position.Coord)) continue;
-                child.G = currentNode.G + 1;
-                if (child.Position.Coord.Area == endNode.Position.Coord.Area)
+                if (closedSet.Contains(n.Coord)) continue;
+                int g = currentNode.G + 1;
+                int h = 0;
+                if (n.Coord.Area == endNode.Position.Coord.Area)
                 {
-                    child.H = Math.Abs(child.Position.Coord.X - endNode.Position.Coord.X)
-                            + Math.Abs(child.Position.Coord.Y - endNode.Position.Coord.Y)
-                            + Math.Abs(child.Position.Coord.Z - endNode.Position.Coord.Z);
+                    h = Math.Abs(n.Coord.X - endNode.Position.Coord.X)
+                        + Math.Abs(n.Coord.Y - endNode.Position.Coord.Y)
+                        + Math.Abs(n.Coord.Z - endNode.Position.Coord.Z);
                 }
-                else child.H = 0;
-                child.F = child.G + child.H;
+                var child = new PathNode(currentNode, n, g, h);
                 if (openByPos.TryGetValue(child.Position.Coord, out var existing))
                 {
                     if (child.G < existing.G)
                     {
-                        openQueue.Enqueue(child, child);
+                        openQueue.Enqueue(child, child.F);
                         openByPos[child.Position.Coord] = child;
                     }
                 }
                 else
                 {
-                    openQueue.Enqueue(child, child);
+                    openQueue.Enqueue(child, child.F);
                     openByPos[child.Position.Coord] = child;
                 }
             }

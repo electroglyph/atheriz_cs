@@ -113,7 +113,7 @@ public sealed class NewCharacterCommand : Command
                 try { character.IsDeleted = true; } catch (Exception) { }
                 return;
             }
-            double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            double now2 = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
             ObjectRegistry.ApplyCreationCooldown("character", rateKey, now2, settings.CreationCooldown);
             account.AddCharacter(character);
             if (!CharacterPuppetSetup.AttachAndHome(caller, character)) return;

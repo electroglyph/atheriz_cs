@@ -2,8 +2,8 @@ using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
-// Certificate fallback chain as an attempt loop: fatal crypto errors rethrow,
-// missing key files fail fast, and an unloadable file fails loudly.
+// Single-attempt load: fatal crypto errors rethrow, missing key files fail
+// fast, and an unloadable file fails loudly.
 public class TlsCertLoaderChainTests
 {
     [Fact]

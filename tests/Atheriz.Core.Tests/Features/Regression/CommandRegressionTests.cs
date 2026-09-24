@@ -825,13 +825,17 @@ public class CommandRegressionTests
         finally { Reset(); }
     }
 
-    // Menu.Run must distinguish handler-exit from timeout/exhaustion.
+    // HandleInputAsync distinguishes keep-going from exit: unknown keys,
+    // null input, callbacks and gotos stay (true); an exhausted choice
+    // list or a terminal choice ends the menu (false). The old Run housed
+    // this; the async split moved it here.
     [Fact]
     public void MenuRun_DistinguishesOutcomes()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Menu.cs");
-        var region = SourceScan.Region(src, "public async Task<bool> Run(");
+        var region = SourceScan.Region(src, "public async Task<bool> HandleInputAsync(");
         Assert.Contains("return true", region);
+        Assert.Contains("return false", region);
     }
 
     // Capture-after-call is safe; cancel is token-guarded.
@@ -957,17 +961,17 @@ public class CommandRegressionTests
         Assert.Contains("AtherizSettings? settings", src);
     }
 
-    // Python MenuEngine.__init__ renders sync start nodes itself
-    // renders sync start nodes itself (menu.py:32-37: `if start_node is not
-    // None and not iscoroutinefunction: self._render_node()`), skipping only
-    // coroutine nodes. The C# sync-ctor _Render() is that faithful port; the
-    // asymmetry is Python's own design. Pin it instead of removing it.
+    // Async-only MenuEngine has one render path: the ctor stores the async
+    // start node without rendering (no sync-ctor _Render); every node —
+    // first, goto, or stay — renders through the single RenderAsync.
     [Fact]
     public void MenuEngine_HasSingleRenderPath()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Menu.cs");
-        var region = SourceScan.Region(src, "public MenuEngine(object? caller,Func<MenuContext,(string,List<Choice>)> start)");
-        Assert.Contains("if(start is not null)_Render()", region);
+        Assert.Equal(1, SourceScan.Count(src, "public async Task RenderAsync()"));
+        var ctor = SourceScan.Region(src, "public MenuEngine(object? caller,");
+        Assert.Contains("CurrentNode = start", ctor);
+        Assert.DoesNotContain("RenderAsync", ctor);
     }
 
     // one spelling for the prompt-with-timeout loop.

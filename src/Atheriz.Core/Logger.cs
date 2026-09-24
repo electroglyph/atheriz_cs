@@ -13,7 +13,10 @@ public static class AtherizLogger
     // _lock so file IO never blocks logger-factory access.
     private static readonly Lock _fileLock = new();
     private static ILoggerFactory? _factory;
-    private static ILogger? _cachedDefault;
+    // True when the live factory is ours (sink provider owns echo + file):
+    // a foreign factory from Configure() only records, so Write() still
+    // echoes + appends after logging there.
+    private static bool _ownsFactory;
     private static LogLevel _level = LogLevel.Information;
     // Built once (frozen, case-insensitive): ApplySettings runs on settings
     // change, but there is no reason to allocate the 5-entry map per call.
@@ -67,7 +70,6 @@ public static class AtherizLogger
             {
                 try { _factory.Dispose(); } catch { }
                 _factory = null;
-                _cachedDefault = null;
             }
         }
         if (_factory is null) SetupLogger();
@@ -90,27 +92,23 @@ public static class AtherizLogger
             _factory = LoggerFactory.Create(b =>
             {
                 b.SetMinimumLevel(_level);
-                // Single-echo: no console provider here. Write() already echoes every
-                // kept message to Console.Error (which CaptureAtherizLog routes) and
-                // appends to save/server.log — a provider would print each line twice.
-                // A sink provider is still required: with zero providers every
-                // ILogger.IsEnabled returns false regardless of minimum level.
-                // NullLoggerProvider honors the factory minimum level but drops all
-                // records (Write() owns echo + file).
-                b.AddProvider(new NullLoggerProvider(_level));
+                // Single-echo: Write() logs here exactly once. The sink owns
+                // echo + file (which CaptureAtherizLog routes via
+                // Console.Error), so no provider here would print twice and
+                // zero providers would disable IsEnabled entirely.
+                b.AddProvider(new AtherizSinkProvider());
             });
-            _cachedDefault = _factory.CreateLogger(DefaultCategory);
+            _ownsFactory = true;
         }
         catch
         {
             _factory = null;
-            _cachedDefault = null;
         }
     }
 
     public static void Configure(ILoggerFactory factory)
     {
-        lock (_lock) { _factory = factory; _cachedDefault = factory.CreateLogger(DefaultCategory); }
+        lock (_lock) { _factory = factory; _ownsFactory = false; }
     }
 
     public static ILogger GetLogger(string category)
@@ -125,19 +123,23 @@ public static class AtherizLogger
         }
     }
 
-    private sealed class NullLoggerProvider : ILoggerProvider
+    // The factory's sink: level-gated echo + file append in one place, so
+    // Write() below is a single Log() call instead of log-then-echo.
+    private sealed class AtherizSinkProvider : ILoggerProvider
     {
-        private readonly LogLevel _min;
-        public NullLoggerProvider(LogLevel min) => _min = min;
-        public ILogger CreateLogger(string categoryName) => new NullLogger(_min);
+        public ILogger CreateLogger(string categoryName) => new SinkLogger(categoryName);
         public void Dispose() { }
-        private sealed class NullLogger : ILogger
+        private sealed class SinkLogger : ILogger
         {
-            private readonly LogLevel _min;
-            public NullLogger(LogLevel min) => _min = min;
+            private readonly string _cat;
+            public SinkLogger(string cat) => _cat = cat;
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-            public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None && logLevel >= _min;
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
+            public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None && logLevel >= _level;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (!IsEnabled(logLevel)) return;
+                EchoAndAppend(logLevel, _cat, formatter(state, exception), exception);
+            }
         }
     }
 
@@ -250,15 +252,20 @@ public static class AtherizLogger
         // logger.py, where a below-level debug never reaches any handler.)
         if (level < _level) return;
         ILogger? logger = null;
-        lock (_lock) logger = _cachedDefault;
+        bool own;
+        // Per-category logger: the sink stamps the creation category on
+        // every line, so routing through one default-category logger would
+        // mute the caller's category (e.g. Node context lines). The factory
+        // caches logger instances per name, so this is a lookup, not a build.
+        lock (_lock) { own = _ownsFactory; if (_factory is not null) logger = _factory.CreateLogger(category); }
         if (logger is not null)
         {
             try
             {
                 logger.Log(level, 0, message, ex, (s, e) => e is not null ? $"{s}\n{e}" : s);
-                // Also echo to Console.Error for CaptureAtherizLog routing (throttling tests rely on Console.Error capture)
-                EchoAndAppend(level, category, message, ex);
-                return;
+                // Our sink already echoed + appended; a foreign factory only
+                // records, so echo + append for that path below.
+                if (own) return;
             }
             catch { }
         }

@@ -4,9 +4,10 @@ using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
-// One armed timer (the delay) instead of two; the timeout path still releases
-// the prompt future, and the success path releases the delay. The sync alias
-// stays: the parity suite and external game code call that spelling.
+// One armed timer instead of two: WaitAsync owns the single timeout clock
+// (no separate delay task to release); the timeout path still releases the
+// prompt future. The sync alias stays: the parity suite and external game
+// code call that spelling.
 [Collection("Ported")]
 public class MenuPromptSingleTimerTests
 {
@@ -38,7 +39,8 @@ public class MenuPromptSingleTimerTests
         var src = SourceScan.Read("src", "Atheriz.Core", "MenuPrompt.cs");
         var region = SourceScan.Region(src, "public static async Task<string?> PromptWithTimeoutAsync(");
         Assert.DoesNotContain("new CancellationTokenSource(timeout)", region);
+        Assert.DoesNotContain("Task.Delay", region);
         Assert.Contains("session.CancelPrompt(token)", region);
-        Assert.Contains("CancelAsync()", region);
+        Assert.Contains(".WaitAsync(timeout)", region);
     }
 }

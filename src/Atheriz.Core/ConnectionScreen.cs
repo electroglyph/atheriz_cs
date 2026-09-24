@@ -1,5 +1,3 @@
-using System.Reflection;
-
 namespace Atheriz.Core;
 
 public static class ConnectionScreen
@@ -66,7 +64,7 @@ public static class ConnectionScreen
     private static readonly Func<Objects.GameObject, bool> IsPcFilter = static o => o.IsPc;
     public static (int online, int known) GetOnline()
     {
-        var now = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds(); // now via TimeProvider
+        var now = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds(); // now via GameClock
         lock (_lock)
         {
             if (now - _cacheTs < 5) return (_cacheOnline, _cacheKnown);
@@ -86,18 +84,20 @@ public static class ConnectionScreen
         return (online, known);
     }
 
-    private static string GetVersion()
+    // Assembly version lookup runs once: the version cannot change under a
+    // running process, so every render reuses this instead of reflecting.
+    private static readonly string VersionString = ResolveVersion();
+
+    private static string ResolveVersion()
     {
         try
         {
-            var asm = Assembly.GetExecutingAssembly();
-            var ver = asm.GetName().Version?.ToString();
-            if (!string.IsNullOrEmpty(ver)) return ver!;
-            // Try package metadata fallback
-            return "?";
+            return System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "?";
         }
         catch { return "?"; }
     }
+
+    private static string GetVersion() => VersionString;
 
     public static string Render(Session? session = null) => Render(AtherizSettings.Global, session);
     public static string Render(AtherizSettings? settings, Session? session = null)

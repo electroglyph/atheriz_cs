@@ -94,7 +94,7 @@ public static class ServerHost
         AddAtherizCore(builder.Services, builder.Configuration);
         ApplyCliOverrides(builder.Configuration, portOverride, hostOverride, telnetOverride);
         builder.Host.ConfigureHostOptions(o => o.ShutdownTimeout = TimeSpan.FromSeconds(5));
-        builder.WebHost.ConfigureKestrel((ctx, opts) => KestrelConfig.ConfigureKestrel(opts, ctx.Configuration));
+        builder.WebHost.ConfigureKestrel((ctx, opts) => KestrelConfig.ConfigureKestrel(opts, ctx.Configuration.GetSection("Atheriz").Get<AtherizSettings>() ?? AtherizSettings.Global));
         Protocols.AddAtherizProtocols(builder.Services, builder.Configuration);
         var app = builder.Build();
         var settings = ResolveSettings(app.Services);

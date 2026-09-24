@@ -1,22 +1,22 @@
-
 namespace Atheriz.Core.Utils;
 
-internal sealed class PathNode : IComparable<PathNode>
+// A* open-list entry: immutable position/parent/scores, ordered by F.
+// A record (value semantics, `with` support) replaces the old mutable
+// G/H/F class whose Equals (Coord-only) disagreed with CompareTo (F):
+// identity in the open set is positional (openByPos keyed by Coord),
+// ordering is by F priority, and the two never shared one member again.
+internal sealed record PathNode(PathNode? Parent, Node Position, int G = 0, int H = 0) : IComparable<PathNode>
 {
-    public PathNode? Parent { get; }
-    public Node Position { get; }
-    public int G { get; set; }
-    public int H { get; set; }
-    public int F { get; set; }
+    public int F => G + H;
+
+    // Two-arg shape kept: test-only reflection constructs PathNode(parent,
+    // node) positionally (Activator does not fill optional parameters).
     public PathNode(PathNode? parent, Node position)
+        : this(parent, position, 0, 0)
     {
-        Parent = parent;
-        Position = position;
-        G = 0; H = 0; F = 0;
     }
-    public override bool Equals(object? obj) => obj is PathNode o && Position.Coord.Equals(o.Position.Coord);
-    public override int GetHashCode() => Position.Coord.GetHashCode();
-// the open queue orders
+
+    // the open queue orders
     // nodes through this comparer, exactly like heapq.
     public int CompareTo(PathNode? other)
     {

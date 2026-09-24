@@ -42,11 +42,11 @@ public class PortedMapMoveRegressionTests
 
     private static MapHandler CreateLimboMapHandler()
     {
-        var mh = new MapHandler(AtherizSettings.Default, autoLoad: false);
-        var s = AtherizSettings.Default;
+        var mh = new MapHandler(new AtherizSettings(), autoLoad: false);
+        var s = new AtherizSettings();
         for (int z = 0; z < 9; z++)
         {
-            var mi = new MapInfo("limbo") { Settings = AtherizSettings.Default };
+            var mi = new MapInfo("limbo") { Settings = new AtherizSettings() };
             for (int x = 0; x < 9; x++) for (int y = 0; y < 9; y++)
             {
                 mi.SetPreCell((x, y), s.RoomPlaceholder);
@@ -160,8 +160,8 @@ public class PortedMapMoveRegressionTests
         NodeHandler.SetCurrent(nh);
         InjectNodeHandler(nh);
 
-        var mh = new MapHandler(AtherizSettings.Default, autoLoad: false);
-        var s = AtherizSettings.Default;
+        var mh = new MapHandler(new AtherizSettings(), autoLoad: false);
+        var s = new AtherizSettings();
         for (int idx = 0; idx < 2; idx++)
         {
             var name = idx == 0 ? "maze1" : "maze2";
@@ -211,7 +211,7 @@ public class PortedMapMoveRegressionTests
         using var env = GlobalTestEnv.Enter();
         var nh = new NodeHandler(autoLoad: false);
         NodeHandler.SetCurrent(nh);
-        var mh = new MapHandler(AtherizSettings.Default, autoLoad: false);
+        var mh = new MapHandler(new AtherizSettings(), autoLoad: false);
         InjectMapHandler(mh);
         InjectNodeHandler(nh);
 
@@ -307,8 +307,8 @@ public class PortedMapMoveRegressionTests
         NodeHandler.SetCurrent(nh);
         InjectNodeHandler(nh);
 
-        var mh = new MapHandler(AtherizSettings.Default, autoLoad: false);
-        var s = AtherizSettings.Default;
+        var mh = new MapHandler(new AtherizSettings(), autoLoad: false);
+        var s = new AtherizSettings();
         var mi = new MapInfo("limbo") { Settings = s };
         for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++)
         {
@@ -403,14 +403,14 @@ public class PortedMapMoveRegressionTests
         var ok2 = hero.MoveTo(dest2!);
         Assert.True(ok2);
         var after2 = conn.Snapshot().Count(x => x.Cmd == "map");
-        Assert.True(after2 > after1, $"second rapid move throttled incorrectly (integer second blocking?): after1 {after1} after2 {after2} fpsLimit {1.0 / AtherizSettings.Default.MapFpsLimit}");
+        Assert.True(after2 > after1, $"second rapid move throttled incorrectly (integer second blocking?): after1 {after1} after2 {after2} fpsLimit {1.0 / new AtherizSettings().MapFpsLimit}");
 
         // Also verify that monotonic double was used: both moves within same wall-clock second should still both send
         // If using integer seconds, after1->after2 would not increase when moves happen within same second.
         // Our sleep ensures we cross fpsLimit but stay within same second boundary if started near end of second? We also test immediate double without sleep via forced render.
         // Double-check LastMapTime is double monotonic, not int
         Assert.True(hero.LastMapTime.HasValue && hero.LastMapTime.Value > 0);
-        double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+        double now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
         Assert.True(now - hero.LastMapTime.Value < 2.0);
     }
 }

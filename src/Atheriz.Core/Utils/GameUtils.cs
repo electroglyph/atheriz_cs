@@ -1,31 +1,28 @@
 using System.Collections;
-using System.Collections.Concurrent;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Atheriz.Core.Utils;
 
 /// <summary>
 /// </summary>
-public static class GameUtils
+public static partial class GameUtils
 {
-    private static readonly Regex AnsiRegex = new(@"\x1b\[[0-9;]*m", RegexOptions.Compiled);
+    // Source-generated (AOT-safe, zero startup compile): previously
+    // runtime-compiled instances built per process start.
+    [GeneratedRegex(@"\x1b\[[0-9;]*m")]
+    private static partial Regex AnsiRegex();
 
-    private static readonly Regex TerminalEscapeRegex = new(
-        @"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[^[A-Za-z0-9]|\x00",
-        RegexOptions.Compiled);
+    [GeneratedRegex(@"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[^[A-Za-z0-9]|\x00")]
+    private static partial Regex TerminalEscapeRegex();
 
-// narrowed to horizontal whitespace:
-    // \s* also ate newlines, collapsing every 3+-break run to exactly \n\n
-    // before the parameterized pass ran (maxLinebreaks >= 3 was dead), so a
-    // blank gap here is one break pair at most and never spans a run.
-    private static readonly Regex ReEmpty = new(@"\n[ \t]*\n", RegexOptions.Compiled);
     private const string Punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 
     // --- ansi ---
 
-    public static string StripAnsi(string input) => AnsiRegex.Replace(input, "");
+    public static string StripAnsi(string input) => AnsiRegex().Replace(input, "");
 
-    public static string StripTerminalEscapes(string input) => TerminalEscapeRegex.Replace(input, "");
+    public static string StripTerminalEscapes(string input) => TerminalEscapeRegex().Replace(input, "");
 
     public static string WrapXterm256(
         string input, int? fg = null, int? bg = null,
@@ -198,29 +195,34 @@ public static class GameUtils
 
     // C# addition: also accepts C# game folder (any *.csproj at cwd, e.g. MyGame.csproj + GameSettings.cs from `new`) so that
     // `dotnet run --project src/Atheriz.Server -- new` + `create`/`start` work without Python settings.py.
-    public static bool IsInGameFolder() => IsInGameFolder(OperatingSystem.IsWindows() ? "nt" : "posix");
     // No cache by design: callers are CLI-op-frequency guard paths, and markers
     // are created/deleted between calls. A directory-mtime-keyed cache proved
     // stale here — .NET's GetLastWriteTimeUtc does not observe File.Delete on
-    // this platform (empirically mtime-equal across a delete), and any key
-    // omitting osName poisons the nt/posix branches against each other.
-    public static bool IsInGameFolder(string osName)
+    // this platform (empirically mtime-equal across a delete).
+    public static bool IsInGameFolder()
     {
         string? cwd;
         try { cwd = Directory.GetCurrentDirectory(); }
         catch { cwd = null; }
-        return CheckGameFolder(osName, cwd);
+        return CheckGameFolder(cwd, OperatingSystem.IsWindows());
     }
-    private static bool CheckGameFolder(string osName, string? cwd)
+    // Typed OS branch (not a stringly "nt"/"posix" flag): the internal
+    // overload lets tests drive the Windows branch on Linux.
+    internal static bool IsInGameFolder(bool windows) => CheckGameFolder(CurrentDirectory(), windows);
+    private static string? CurrentDirectory()
+    {
+        try { return Directory.GetCurrentDirectory(); }
+        catch { return null; }
+    }
+    private static bool CheckGameFolder(string? cwd, bool windows)
     {
         var dir = cwd ?? Directory.GetCurrentDirectory();
-        bool isNt = string.Equals(osName, "nt", StringComparison.OrdinalIgnoreCase);
         bool isPython;
-        if (isNt)
+        if (windows)
         {
-            isPython = ExistsExact(Path.Combine(dir, "settings.py"), "nt")
-                && ExistsExact(Path.Combine(dir, "__init__.py"), "nt")
-                && !ExistsExact(Path.Combine(dir, "atheriz.py"), "nt");
+            isPython = ExistsExact(Path.Combine(dir, "settings.py"), ignoreCase: true)
+                && ExistsExact(Path.Combine(dir, "__init__.py"), ignoreCase: true)
+                && !ExistsExact(Path.Combine(dir, "atheriz.py"), ignoreCase: true);
         }
         else
         {
@@ -235,11 +237,9 @@ public static class GameUtils
         try
         {
             bool hasCsproj = Directory.EnumerateFiles(dir, "*.csproj").Any();
-            bool hasGameSettings;
-            if (isNt)
-                hasGameSettings = ExistsExact(Path.Combine(dir, "GameSettings.cs"), "nt");
-            else
-                hasGameSettings = File.Exists(Path.Combine(dir, "GameSettings.cs"));
+            bool hasGameSettings = windows
+                ? ExistsExact(Path.Combine(dir, "GameSettings.cs"), ignoreCase: true)
+                : File.Exists(Path.Combine(dir, "GameSettings.cs"));
             if (hasCsproj && hasGameSettings) return true;
         }
         catch { }
@@ -248,26 +248,23 @@ public static class GameUtils
 
     /// <summary>
     /// Exact name existence check — mirrors <c>utils.py:_exists_exact</c> / <c>_exists_exact_str</c>.
-    /// On Windows (<c>os.name=="nt"</c>) does case-insensitive compare via <c>lower()</c>;
-    /// on POSIX does case-sensitive <c>name in os.listdir</c>.
+    /// Filesystem semantics already do the right thing per OS (case-insensitive
+    /// on Windows, case-sensitive on POSIX), so production just asks the OS.
     /// </summary>
-    public static bool ExistsExact(string path) => ExistsExact(path, OperatingSystem.IsWindows() ? "nt" : "posix");
-    public static bool ExistsExact(string path, string osName)
+    public static bool ExistsExact(string path) => Path.Exists(path);
+    // Explicit-comparison variant for tests driving the Windows
+    // case-insensitive branch on a case-sensitive filesystem.
+    internal static bool ExistsExact(string path, bool ignoreCase)
     {
+        if (!ignoreCase) return Path.Exists(path);
         try
         {
             var parent = Path.GetDirectoryName(path) ?? ".";
             var name = Path.GetFileName(path);
             if (string.IsNullOrEmpty(name)) return Path.Exists(path);
             if (!Directory.Exists(parent)) return Path.Exists(path);
-            var entries = Directory.GetFileSystemEntries(parent);
-            bool isNt = string.Equals(osName, "nt", StringComparison.OrdinalIgnoreCase);
-            if (isNt)
-            {
-                return entries.Any(e => string.Equals(Path.GetFileName(e), name, StringComparison.OrdinalIgnoreCase));
-            }
-// case-sensitive
-            return entries.Any(e => Path.GetFileName(e) == name);
+            return Directory.GetFileSystemEntries(parent)
+                .Any(e => string.Equals(Path.GetFileName(e), name, StringComparison.OrdinalIgnoreCase));
         }
         catch { return Path.Exists(path); }
     }
@@ -277,53 +274,81 @@ public static class GameUtils
     //
     // Compiled-pattern cache keyed by (maxLinebreaks, maxSpacing): the key space
     // is tiny (small int pairs) and the method runs on broadcast paths, so sharing
-    // one ConcurrentDictionary beats constructing two Regex per call. Same inputs
-    // still produce the same outputs — only the parse cost is amortized.
-    private static readonly ConcurrentDictionary<(int MaxLinebreaks, int MaxSpacing), (Regex Spacing, Regex Linebreaks)> CompressPatternCache = new();
-
-    private static (Regex Spacing, Regex Linebreaks) GetCompressPatterns(int maxLinebreaks, int maxSpacing)
-        => CompressPatternCache.GetOrAdd((maxLinebreaks, maxSpacing), static key =>
-            (new Regex($@"(?<=\S) {{{key.MaxSpacing},}}", RegexOptions.Compiled),
-             new Regex($@"\n{{{key.MaxLinebreaks},}}", RegexOptions.Compiled)));
-
     // Default maxLinebreaks preserves a single blank line: 1 erased every
     // blank gap by default, so callers passing no args lost paragraph breaks.
     public static string CompressWhitespace(string text, int maxLinebreaks = 2, int maxSpacing = 2)
     {
         if (text is null) return "";
         text = text.TrimEnd();
-        text = ReEmpty.Replace(text, "\n\n");
-        var (spacing, linebreaks) = GetCompressPatterns(maxLinebreaks, maxSpacing);
-        text = spacing.Replace(text, new string(' ', maxSpacing));
-        text = linebreaks.Replace(text, new string('\n', maxLinebreaks));
-        return text;
+        // Two span passes, no regex, no cache: blank-gap normalization first
+        // (`\n[ \t]*\n` -> `\n\n`, as the old ReEmpty pre-pass), then the
+        // fused space-run / newline-run caps below.
+        return CollapseRuns(CollapseBlankGaps(text.AsSpan()), maxLinebreaks, maxSpacing);
     }
 
-    public static bool IsIter(object? obj)
+    // Blank-gap normalization: each `\n[ \t]*\n` gap becomes exactly `\n\n`.
+    // Left-to-right non-overlapping, matching the old Replace semantics
+    // (`"a\n\n\nb"` keeps three breaks here; the run cap trims them after).
+    private static string CollapseBlankGaps(ReadOnlySpan<char> text)
     {
-        if (obj is null) return false;
-        if (obj is string) return false;
-        if (obj is byte[]) return false;
-        return obj is IEnumerable;
+        var sb = new StringBuilder(text.Length);
+        int i = 0;
+        while (i < text.Length)
+        {
+            char c = text[i];
+            if (c != '\n') { sb.Append(c); i++; continue; }
+            int j = i + 1;
+            while (j < text.Length && (text[j] == ' ' || text[j] == '\t')) j++;
+            if (j < text.Length && text[j] == '\n') { sb.Append('\n'); sb.Append('\n'); i = j + 1; }
+            else { sb.Append('\n'); i++; }
+        }
+        return sb.ToString();
     }
 
-    public static IEnumerable<object?> MakeIter(object? obj)
+    // Run caps: a space run of `maxSpacing`+ collapses to exactly that many
+    // spaces, but only when preceded by a non-whitespace char (the old
+    // `(?<=\S)` gate — leading spaces and spaces after a break stay as-is);
+    // a newline run of `maxLinebreaks`+ collapses to exactly that many
+    // breaks. A zero cap disables that collapse (the old `{0,}` pattern
+    // matched empty and replaced with empty: a no-op).
+    private static string CollapseRuns(ReadOnlySpan<char> text, int maxLinebreaks, int maxSpacing)
     {
-        if (!IsIter(obj)) return new object?[] { obj };
-        if (obj is IEnumerable<object?> e) return e;
-        if (obj is IEnumerable en) return en.Cast<object?>();
-        return new object?[] { obj };
+        var sb = new StringBuilder(text.Length);
+        int i = 0;
+        while (i < text.Length)
+        {
+            char c = text[i];
+            if (c == '\n')
+            {
+                int j = i;
+                while (j < text.Length && text[j] == '\n') j++;
+                if (maxLinebreaks >= 1 && j - i >= maxLinebreaks) sb.Append('\n', maxLinebreaks);
+                else sb.Append(text.Slice(i, j - i));
+                i = j;
+            }
+            else if (c == ' ')
+            {
+                int j = i;
+                while (j < text.Length && text[j] == ' ') j++;
+                bool gated = i > 0 && !char.IsWhiteSpace(text[i - 1]);
+                if (maxSpacing >= 1 && j - i >= maxSpacing && gated) sb.Append(' ', maxSpacing);
+                else sb.Append(text.Slice(i, j - i));
+                i = j;
+            }
+            else { sb.Append(c); i++; }
+        }
+        return sb.ToString();
     }
 
-    public static IEnumerable<T> MakeIter<T>(object? obj)
+    // Single generic shape: one value yields one; a sequence of T passes
+    // through; strings never enumerate as characters; null yields one null
+    // (callers iterate unconditionally). Sequences need explicit T
+    // (MakeIter<object>(items)): inferring T from the sequence itself would
+    // wrap it instead of passing it through.
+    public static IEnumerable<T> MakeIter<T>(T value)
     {
-        if (obj is IEnumerable<T> seq && obj is not string) return seq;
-        if (obj is T t) return new[] { t };
-        if (obj is null) return new T[] { default! };
-        // No fallback cast: reachable only with non-null obj where `is T` failed,
-        // and a direct cast from static type `object` uses only unbox/castclass
-        // (never user operators), so it would provably throw.
-        return Array.Empty<T>();
+        if (value is IEnumerable<T> seq && value is not string) return seq;
+        return new[] { value };
     }
 
     public static string CopyWordCase(string baseWord, string newWord)

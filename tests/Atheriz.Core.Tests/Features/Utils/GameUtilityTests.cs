@@ -15,11 +15,9 @@ public class GameUtilityTests
     [Fact]
     public void GameUtils_IterHelpers()
     {
-        Assert.False(GameUtils.IsIter("s"));
-        Assert.False(GameUtils.IsIter(null));
-        Assert.True(GameUtils.IsIter(new[] { 1, 2 }));
-        Assert.Equal(new object?[] { 5 }, GameUtils.MakeIter(5));
-        Assert.Equal(new object?[] { "s" }, GameUtils.MakeIter("s"));
+        Assert.Equal(new[] { 5 }, GameUtils.MakeIter(5));
+        Assert.Equal(new[] { "s" }, GameUtils.MakeIter("s"));
+        Assert.Equal(new object[] { 1, 2 }, GameUtils.MakeIter<object>(new object[] { 1, 2 }));
         Assert.Equal("x", GameUtils.Detach("x"));
         GameUtils.EnsureThreadSafe(typeof(GameObject));
     }

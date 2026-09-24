@@ -37,9 +37,9 @@ public class PortedMapInitRegressionTests
         var secret = Path.Combine(tmp, "secret");
         try
         {
-            InitialSetup.DoSetup(save, "admin", "password123", secret);
+            InitialSetup.DoSetup(new SetupOptions(save, "admin", "password123", secret));
             using var db = AtherizDbContextFactory.Create(save);
-            var handler = new MapHandler(AtherizSettings.Default, autoLoad: false);
+            var handler = new MapHandler(new AtherizSettings(), autoLoad: false);
             handler.Load(db);
             var snap = handler.Snapshot();
             Assert.Equal(9, snap.Count);
@@ -49,7 +49,7 @@ public class PortedMapInitRegressionTests
                 var mi = snap[("limbo", z)];
                 Assert.True(mi.PreGrid.Count >= 81, $"preGrid too small z={z} count={mi.PreGrid.Count}");
                 Assert.True(mi.PostGrid.Count >= 81, $"postGrid empty z={z}");
-                var s = AtherizSettings.Default;
+                var s = new AtherizSettings();
                 Assert.DoesNotContain(s.RoomPlaceholder, mi.PostGrid.Values);
                 Assert.DoesNotContain(s.SingleWallPlaceholder, mi.PostGrid.Values);
                 var hasWall = mi.PostGrid.Values.Any(v => v == "─" || v == "│" || v == "┼" || v == "┤" || v == "├" || v.Contains(" "));
@@ -76,16 +76,16 @@ public class PortedMapInitRegressionTests
         var secret = Path.Combine(tmp, "secret");
         try
         {
-            InitialSetup.DoSetup(save, "admin2", "password123", secret);
+            InitialSetup.DoSetup(new SetupOptions(save, "admin2", "password123", secret));
             using var db = AtherizDbContextFactory.Create(save);
-            var handler = new MapHandler(AtherizSettings.Default, autoLoad: false);
+            var handler = new MapHandler(new AtherizSettings(), autoLoad: false);
             handler.Load(db);
             var mi = handler.GetMapInfo("limbo", 4);
             Assert.NotNull(mi);
             Assert.True(mi!.PostGrid.Count > 0);
             // Force save+reload via new handler on same DB
             handler.Save(force: true);
-            var handler2 = new MapHandler(AtherizSettings.Default, autoLoad: false);
+            var handler2 = new MapHandler(new AtherizSettings(), autoLoad: false);
             // need fresh db connection
             using var db2 = AtherizDbContextFactory.Create(save);
             handler2.Load(db2);
@@ -108,9 +108,9 @@ public class PortedMapInitRegressionTests
     {
         using var env = GlobalTestEnv.Enter();
         // Seed map handler with limbo at 4
-        var mh = new MapHandler(AtherizSettings.Default, autoLoad: false);
-        var mi = new MapInfo("limbo") { Settings = AtherizSettings.Default };
-        var s = AtherizSettings.Default;
+        var mh = new MapHandler(new AtherizSettings(), autoLoad: false);
+        var mi = new MapInfo("limbo") { Settings = new AtherizSettings() };
+        var s = new AtherizSettings();
         for (int x = 0; x < 9; x++) for (int y = 0; y < 9; y++)
         {
             mi.SetPreCell((x, y), s.RoomPlaceholder);
@@ -161,8 +161,8 @@ public class PortedMapInitRegressionTests
     {
         using var env = GlobalTestEnv.Enter();
         // Build isolated map info
-        var mi = new MapInfo("limbo") { Settings = AtherizSettings.Default };
-        var s = AtherizSettings.Default;
+        var mi = new MapInfo("limbo") { Settings = new AtherizSettings() };
+        var s = new AtherizSettings();
         for (int x = 0; x < 9; x++) for (int y = 0; y < 9; y++)
         {
             mi.SetPreCell((x, y), s.RoomPlaceholder);
@@ -217,9 +217,9 @@ public class PortedMapInitRegressionTests
         }
         nh.AddArea(area);
         NodeHandler.SetCurrent(nh);
-        var mh = new MapHandler(AtherizSettings.Default, autoLoad: false);
-        var mi = new MapInfo("limbo") { Settings = AtherizSettings.Default };
-        var s = AtherizSettings.Default;
+        var mh = new MapHandler(new AtherizSettings(), autoLoad: false);
+        var mi = new MapInfo("limbo") { Settings = new AtherizSettings() };
+        var s = new AtherizSettings();
         for (int x = 0; x < 9; x++) for (int y = 0; y < 9; y++)
         {
             mi.SetPreCell((x, y), s.RoomPlaceholder);
@@ -288,7 +288,7 @@ public class PortedMapInitRegressionTests
         Exception? bgEx = null;
         var task = Task.Run(() =>
         {
-            try { InitialSetup.DoSetup(save, username: null, password: "pw-provided", secretPath: secret, prompt: true, input: reader); }
+            try { InitialSetup.DoSetup(new SetupOptions(save, Username: null, Password: "pw-provided", SecretPath: secret, Prompt: true, Input: reader)); }
             catch (Exception ex) { bgEx = ex; }
         });
         try

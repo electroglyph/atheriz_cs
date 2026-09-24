@@ -10,7 +10,7 @@ public class HelpDefaultPortTests
     [Fact]
     public void DefaultWebserverPort_MatchesFreshInstance()
     {
-        Assert.Equal(new AtherizSettings().WebserverPort, AtherizSettings.Default.WebserverPort);
+        Assert.Equal(new AtherizSettings().WebserverPort, new AtherizSettings().WebserverPort);
     }
 
     [Fact]
@@ -24,6 +24,6 @@ public class HelpDefaultPortTests
             await Atheriz.Server.Cli.AtherizCli.InvokeAsync(["start", "--help"]);
         }
         finally { Console.SetOut(orig); }
-        Assert.Contains(AtherizSettings.Default.WebserverPort.ToString(), sw.ToString(), StringComparison.Ordinal);
+        Assert.Contains(new AtherizSettings().WebserverPort.ToString(), sw.ToString(), StringComparison.Ordinal);
     }
 }

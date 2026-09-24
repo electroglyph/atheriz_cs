@@ -4,11 +4,11 @@ namespace Atheriz.Core.Network;
 /// <summary>
 /// Shared throttling helper mirroring <c>manager.py:_should_log_malformed</c> (5s per host),
 /// <c>websocket.py:_should_log_oversize</c> (5s per host) and <c>connection.py:EnqueueInput</c> (1s busy).
-/// Uses <c>TimeProvider.MonotonicSeconds</c> monotonic clock (centralized).
+/// Uses <c>GameClock.MonotonicSeconds</c> monotonic clock (centralized).
 /// </summary>
 public static class ThrottleWindow
 {
-    private static double MonotonicNow() => global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+    private static double MonotonicNow() => global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
 
     // Sweep threshold for the amortized TTL eviction in ShouldLog.
     private const int MaxHostsBeforeSweep = 1024;

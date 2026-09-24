@@ -48,14 +48,16 @@ public static class PathGuards
     /// Fail loud here instead of mid-save/mid-token-write: proves the directory
     /// is actually writable (CreateDirectory succeeds on read-only mounts when
     /// the dir already exists, deferring the failure to first write).
+    /// Unique auto-deleted temp: concurrent servers must not share one
+    /// sentinel name, and a crash must not leave a droppings file behind.
     /// </summary>
     private static void ProbeWritable(string dir, string kind)
     {
-        var probe = Path.Combine(dir, ".atheriz_write_probe");
+        var probe = Path.Combine(dir, ".atheriz_write_probe_" + Path.GetRandomFileName());
         try
         {
-            File.WriteAllText(probe, "w");
-            File.Delete(probe);
+            using var fs = new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);
+            fs.WriteByte((byte)'w');
         }
         catch (Exception ex)
         {
@@ -99,11 +101,11 @@ public static class PathGuards
     /// wipe <c>/tmp/save</c> contents. Overwrite scaffolding (<c>new</c>)
     /// performs its own confined save-leaf wipe with explicit operator intent
     /// instead of consulting this world-membership gate.
+    /// Membership markers: <c>server.pid</c> (engine-agnostic liveness
+    /// authority) or any <c>database.sqlite3*</c> file. The prefix — not a
+    /// baked per-engine filename list — keeps the guard true if the storage
+    /// layer gains new sidecar suffixes.
     /// </summary>
-    // Wipe-marker file names shared by GuardWipePath: hoisted so every call does
-    // not allocate a fresh array (contents are fixed; callers only enumerate).
-    private static readonly string[] WipeMarkers = ["database.sqlite3", "database.sqlite3-wal", "database.sqlite3-shm", "database.sqlite3.journal"];
-
     public static void GuardWipePath(string path)
     {
         DenyRoot(path);
@@ -111,8 +113,7 @@ public static class PathGuards
         if (Directory.Exists(full))
         {
             if (File.Exists(Path.Combine(full, "server.pid"))) return;
-            foreach (var marker in WipeMarkers)
-                if (File.Exists(Path.Combine(full, marker))) return;
+            if (Directory.EnumerateFiles(full, "database.sqlite3*").Any()) return;
         }
         // No override: a markerless target refuses even inside a game
         // folder. The operator already confirmed at the reset prompt; a

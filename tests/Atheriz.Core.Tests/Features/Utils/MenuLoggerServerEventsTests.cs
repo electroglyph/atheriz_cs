@@ -1,3 +1,4 @@
+using Atheriz.Core;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Settings;
@@ -38,35 +39,15 @@ public class MenuLoggerServerEventsTests
         Assert.Equal("", await t);
     }
 
-    // Spec-Menu OptionDescs ride alongside Options and render as "[key] desc".
+    // Engine display renders choices as "[key] desc".
     [Fact]
     public async Task Menu_OptionDescs_Rendered()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new TestConn("m1", "127.0.0.99");
-        var sess = new Session(conn);
-        var menu = new Menu("Pick", new Dictionary<string, Func<Session, string, Task<bool>>>
-        {
-            ["a"] = (_, _) => Task.FromResult(false),
-        });
-        menu.OptionDescs["a"] = "Apple";
-        var run = menu.Run(sess, "Pick");
-        string display = "";
-        var end = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (DateTime.UtcNow < end)
-        {
-            foreach (var s in conn.Sent)
-                foreach (var a in s.Args)
-                    if (a is string str && str.Contains("[a]")) display += str;
-            if (display.Contains("[a]")) break;
-            await Task.Delay(20);
-        }
-        Assert.Contains("[a] Apple", display);
-        sess.InputFuture!.TrySetResult("a");
-        var done = await Task.WhenAny(run, Task.Delay(5000));
-        Assert.Same(run, done);
-        // handler-directed exit reports true (false = timeout/exhaustion).
-        Assert.True(await run);
+        var engine = new MenuEngine(null, ctx => Task.FromResult<(string, List<Choice>)>(
+            ("Pick", new List<Choice> { new("a", "Apple", null) })));
+        await engine.RenderAsync();
+        Assert.Contains("[a] Apple", engine.Display);
     }
 
     // Single-echo: a kept message hits Console.Error exactly once (no AddConsole echo).
@@ -151,7 +132,7 @@ public class MenuLoggerServerEventsTests
         var secret = Path.Combine(tmp, "secret");
         try
         {
-            InitialSetup.DoSetup(save, "admin", "password123", secret);
+            InitialSetup.DoSetup(new SetupOptions(save, "admin", "password123", secret));
             using var c = new SqliteConnection($"Data Source={Path.Combine(save, "database.sqlite3")}");
             c.Open();
             using var cmd = c.CreateCommand();

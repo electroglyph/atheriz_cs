@@ -104,7 +104,7 @@ public sealed class GuestCommand : Command
                 try { character.IsDeleted = true; } catch (Exception) { }
                 return;
             }
-            double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            double now2 = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
             ObjectRegistry.ApplyCreationCooldown("guest", rateKey, now2, settings.CreationCooldown);
             // puppet with lock mirroring Python
             if (!CharacterPuppetSetup.AttachAndHome(caller, character)) return;

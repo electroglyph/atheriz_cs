@@ -281,23 +281,6 @@ public class PortedFuncParserTestsPart2
         var p=new FuncParser(new Dictionary<string, FuncParser.ParserCallable>{["ok"]=ok});
         Assert.Contains("ok", p.Callables.Keys);
     }
-    [Fact] public void CallableValidationMissingVarArgsRaises(){
-        using var env=GlobalTestEnv.Enter();
-        var del=new Func<string, Dictionary<string, object?>, object?>((x,kw)=>"");
-        var ex=Assert.Throws<FuncParser.ParsingError>(()=> new FuncParser(new Dictionary<string, Delegate>{["bad"]=del}));
-        Assert.Contains("*args", ex.Message);
-    }
-    [Fact] public void CallableValidationMissingVarKwRaises(){
-        using var env=GlobalTestEnv.Enter();
-        var del=new Func<string[], object?>((a)=>"");
-        var ex=Assert.Throws<FuncParser.ParsingError>(()=> new FuncParser(new Dictionary<string, Delegate>{["bad"]=del}));
-        Assert.Contains("**kwargs", ex.Message);
-    }
-    [Fact] public void CallableValidationMissingBothRaises(){
-        using var env=GlobalTestEnv.Enter();
-        var del=new Func<object?>(()=> "");
-        Assert.Throws<FuncParser.ParsingError>(()=> new FuncParser(new Dictionary<string, Delegate>{["bad"]=del}));
-    }
     [Fact] public void BuiltinWithoutSpecWarnsNotRaises(){
         using var env=GlobalTestEnv.Enter();
         // builtin like len has no getfullargspec -> warning path, should not raise
@@ -307,56 +290,56 @@ public class PortedFuncParserTestsPart2
     }
     [Fact] public void ContainerParsingFlatContainersStillWork(){
         using var env=GlobalTestEnv.Enter();
-        var conv=FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(a, b)"}, new Dictionary<string,object?>(), true);
+        var conv=FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(a, b)"}, new Dictionary<string,object?>(), raiseErrors: true);
         Assert.Equal(2, ((System.Collections.IEnumerable)conv.args[0]!).Cast<object>().Count());
-        var conv2=FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"[1, 2, 3]"}, new Dictionary<string,object?>(), true);
+        var conv2=FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"[1, 2, 3]"}, new Dictionary<string,object?>(), raiseErrors: true);
         Assert.Equal(3, ((System.Collections.IEnumerable)conv2.args[0]!).Cast<object>().Count());
     }
     [Fact] public void ContainerParsingFlatWithQuotedComma(){
         using var env=GlobalTestEnv.Enter();
-        var conv=FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"('a, b', 'c')"}, new Dictionary<string,object?>(), true);
+        var conv=FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"('a, b', 'c')"}, new Dictionary<string,object?>(), raiseErrors: true);
         var list=((System.Collections.IEnumerable)conv.args[0]!).Cast<object>().Select(o=>o?.ToString()).ToList();
         Assert.Contains("a, b", list);
     }
     [Fact] public void ContainerParsingNestedRejectedViaManual(){
         using var env=GlobalTestEnv.Enter();
-        Assert.Throws<FuncParser.ParsingError>(()=> FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(a,(b,c))"}, new Dictionary<string,object?>(), true));
-        Assert.Throws<FuncParser.ParsingError>(()=> FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(a, [1,2])"}, new Dictionary<string,object?>(), true));
-        var conv=FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"([1,2], 3)"}, new Dictionary<string,object?>(), true);
+        Assert.Throws<FuncParser.ParsingError>(()=> FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(a,(b,c))"}, new Dictionary<string,object?>(), raiseErrors: true));
+        Assert.Throws<FuncParser.ParsingError>(()=> FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(a, [1,2])"}, new Dictionary<string,object?>(), raiseErrors: true));
+        var conv=FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"([1,2], 3)"}, new Dictionary<string,object?>(), raiseErrors: true);
         Assert.NotNull(conv.args[0]);
     }
     [Fact] public void ContainerParsingNestedViaMockedLiteralEval(){
         using var env=GlobalTestEnv.Enter();
-        var conv=FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(a, b)"}, new Dictionary<string,object?>(), true);
+        var conv=FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(a, b)"}, new Dictionary<string,object?>(), raiseErrors: true);
         Assert.Equal(2, ((System.Collections.IEnumerable)conv.args[0]!).Cast<object>().Count());
-        Assert.Throws<FuncParser.ParsingError>(()=> FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(a,(b,c))"}, new Dictionary<string,object?>(), true));
+        Assert.Throws<FuncParser.ParsingError>(()=> FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(a,(b,c))"}, new Dictionary<string,object?>(), raiseErrors: true));
     }
     [Fact] public void ContainerParsingQuotedCommasNotSplit(){
         using var env=GlobalTestEnv.Enter();
-        var conv=FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"('a, b', \"c, d\")"}, new Dictionary<string,object?>(), true);
+        var conv=FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"('a, b', \"c, d\")"}, new Dictionary<string,object?>(), raiseErrors: true);
         var list=((System.Collections.IEnumerable)conv.args[0]!).Cast<object>().Select(o=>o?.ToString()?.Trim('\'','"')).ToList();
         Assert.Contains("a, b", list);
         Assert.Contains("c, d", list);
     }
     [Fact] public void ContainerParsingValidLiteralStillUsesLiteralEval(){
         using var env=GlobalTestEnv.Enter();
-        var conv=FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(1,(2,3))"}, new Dictionary<string,object?>(), true);
+        var conv=FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(1,(2,3))"}, new Dictionary<string,object?>(), raiseErrors: true);
         Assert.NotNull(conv.args[0]);
     }
     [Fact] public void ContainerParsingEmptyContainer(){
         using var env=GlobalTestEnv.Enter();
-        var conv=FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"()"}, new Dictionary<string,object?>(), true);
+        var conv=FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"()"}, new Dictionary<string,object?>(), raiseErrors: true);
         Assert.NotNull(conv.args[0]);
     }
     [Fact] public void ContainerParsingNoManualCorruption(){
         using var env=GlobalTestEnv.Enter();
         try{
-            FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(a,(b,c))"}, new Dictionary<string,object?>(), true);
+            FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(a,(b,c))"}, new Dictionary<string,object?>(), raiseErrors: true);
             Assert.Fail("should have raised");
         }catch(FuncParser.ParsingError ex){
             Assert.True(ex.Message.Contains("a")==false || ex.GetType().Name=="ParsingError");
         }
-        var conv=FuncParserHelpers.SafeConvertToTypes((new object[]{"py"}, new Dictionary<string,object?>()), new object?[]{"(a, b)"}, new Dictionary<string,object?>(), true);
+        var conv=FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{"(a, b)"}, new Dictionary<string,object?>(), raiseErrors: true);
         var list=((System.Collections.IEnumerable)conv.args[0]!).Cast<object>().Select(o=>o?.ToString()).ToList();
         Assert.DoesNotContain("(b", list);
     }

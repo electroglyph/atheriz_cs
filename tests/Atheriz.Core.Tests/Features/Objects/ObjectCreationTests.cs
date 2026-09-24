@@ -25,7 +25,7 @@ public class ObjectCreationTests
         // never skew map staleness per construction path.
         var o = GameObject.Create("rock");
         Assert.NotNull(o.LastMapTime);
-        double skew = Math.Abs(Atheriz.Core.Utils.TimeProvider.MonotonicSeconds() - o.LastMapTime.Value);
+        double skew = Math.Abs(Atheriz.Core.Utils.GameClock.MonotonicSeconds() - o.LastMapTime.Value);
         Assert.InRange(skew, 0.0, 60.0);
     }
 }

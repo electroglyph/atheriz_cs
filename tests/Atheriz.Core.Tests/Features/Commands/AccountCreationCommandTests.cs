@@ -28,7 +28,7 @@ public class AccountCreationCommandTests
             var settings = AtherizSettings.Global;
             settings.CreationCooldown = 60;
             var conn = new TestConnection("c1") { ClientHost = "1.2.3.4" };
-            double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            double now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
             Assert.True(ObjectRegistry.TryReserveCreationCooldown("account", "1.2.3.4", now, settings.CreationCooldown));
             var job = CommandDispatcher.ResolveUnloggedIn(conn, "create coolacc1 password123");
             Assert.NotNull(job);
@@ -50,7 +50,7 @@ public class AccountCreationCommandTests
             var settings = AtherizSettings.Global;
             settings.CreationCooldown = 60;
             var conn = new TestConnection("c2") { ClientHost = "5.6.7.8" };
-            double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            double now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
             Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest", "5.6.7.8", now, settings.CreationCooldown));
             var job = CommandDispatcher.ResolveUnloggedIn(conn, "guest tmpguest1");
             Assert.NotNull(job);

@@ -87,7 +87,7 @@ public sealed class CreateAccountCommand : Command
             try
             {
                 var account = Account.Create(name, password);
-                double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                double now2 = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
                 ObjectRegistry.ApplyCreationCooldown("account", rateKey, now2, settings.CreationCooldown);
                 caller.Session.Account = account;
                 caller.SendCommand("logged_in");

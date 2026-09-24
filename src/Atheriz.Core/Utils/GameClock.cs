@@ -9,8 +9,10 @@ namespace Atheriz.Core.Utils;
 /// Central monotonic clock — deduplicates <c>Stopwatch.GetTimestamp</c>/<c>Frequency</c> usage
 /// previously duplicated in <c>ThrottleWindow.MonotonicNow</c>, <c>BaseConnection.MonotonicSeconds</c>,
 /// <c>GameTime.Stopwatch</c>, <c>MapEdit.GetMonotonic</c>, <c>ConnectionScreen.GetOnline</c> etc.
+/// Named GameClock (not TimeProvider) so it never collides with BCL
+/// <c>System.TimeProvider</c> under a plain <c>using System;</c>.
 /// </summary>
-public static class TimeProvider
+public static class GameClock
 {
     // The initial default instance. The statics take the Stopwatch fast path
     // while it is current (one ReferenceEquals, no dispatch); swapping

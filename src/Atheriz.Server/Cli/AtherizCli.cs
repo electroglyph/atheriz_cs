@@ -9,7 +9,7 @@ public static class AtherizCli
 {
     private static Option<int?> PortOption() => new("--port", "-p")
     {
-        Description = $"Override the webserver port (default: {AtherizSettings.Default.WebserverPort})"
+        Description = $"Override the webserver port (default: {new AtherizSettings().WebserverPort})"
     };
 
     private static Option<int?> TelnetPortOption() => new("--telnet-port")

@@ -114,7 +114,7 @@ public class PortedSaltCreationTests
             Directory.SetCurrentDirectory(elsewhere);
             var save = Path.Combine(game, "save");
             var secret = Path.Combine(game, "secret");
-            InitialSetup.DoSetup(save, "admin", "password123", secret);
+            InitialSetup.DoSetup(new SetupOptions(save, "admin", "password123", secret));
             var account = ObjectRegistry.FilterBy(o => o.Name == "admin").FirstOrDefault() as Account;
             Assert.NotNull(account);
             Assert.True(account!.Login("admin", "password123"));

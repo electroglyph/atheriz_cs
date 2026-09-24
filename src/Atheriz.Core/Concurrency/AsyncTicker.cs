@@ -197,7 +197,7 @@ public sealed class AsyncTicker
             if (_pending.Count == 0) return stale;
             double limit = PendingHoldTimeout.TotalSeconds;
             if (!(limit > 0)) return stale;
-            double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            double now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
             foreach (var kv in _pending.ToList())
             {
                 if (now - kv.Value < limit) continue;
@@ -270,13 +270,13 @@ public sealed class AsyncTicker
         private async Task TimerAsync(CancellationToken ct)
         {
             double intervalSeconds = _interval.TotalSeconds;
-            double nextTick = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds() + intervalSeconds;
+            double nextTick = Atheriz.Core.Utils.GameClock.MonotonicSeconds() + intervalSeconds;
             try
             {
                 while (true)
                 {
                     lock (_lock) if (!_running) break;
-                    double delaySeconds = nextTick - Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                    double delaySeconds = nextTick - Atheriz.Core.Utils.GameClock.MonotonicSeconds();
                     TimeSpan delay = TimeSpan.FromSeconds(delaySeconds);
                     if (delay > TimeSpan.Zero)
                     {
@@ -284,7 +284,7 @@ public sealed class AsyncTicker
                     }
                     else if (delay < -_interval)
                     {
-                        nextTick = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                        nextTick = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
                     }
                     List<Delegate> batch;
                     List<string> stale;
@@ -293,7 +293,7 @@ public sealed class AsyncTicker
                         if (!_running) break;
                         stale = EvictStalePendingLocked();
                         batch = _coros.Where(c => !_pending.ContainsKey(c)).ToList();
-                        double now = Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                        double now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();
                         foreach (var c in batch) _pending[c] = now;
                     }
                     foreach (var name in stale)

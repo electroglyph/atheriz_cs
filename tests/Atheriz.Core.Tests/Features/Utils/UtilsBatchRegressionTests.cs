@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using Atheriz.Core.Settings;
+using Atheriz.Core.Tests.Features.Regression;
 using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Tests.Features.Utils;
@@ -31,9 +32,10 @@ public sealed class UtilsBatchRegressionTests
     [Fact]
     public void IsInGameFolder_RepeatedCalls_Agree()
     {
-        // Exercises the per-CWD cache path; result must equal a fresh probe.
+        // No cache by design (markers change between calls); repeated
+        // probes of the same directory still agree with each other.
         Assert.Equal(GameUtils.IsInGameFolder(), GameUtils.IsInGameFolder());
-        Assert.Equal(GameUtils.IsInGameFolder("posix"), GameUtils.IsInGameFolder("posix"));
+        Assert.Equal(GameUtils.IsInGameFolder(windows: false), GameUtils.IsInGameFolder(windows: false));
     }
 
     [Fact]
@@ -79,9 +81,21 @@ public sealed class UtilsBatchRegressionTests
         {
             PathGuards.EnsureSaveDirectory(dir);
             Assert.True(Directory.Exists(dir));
-            Assert.False(File.Exists(Path.Combine(dir, ".atheriz_write_probe")));
+            Assert.Empty(Directory.EnumerateFiles(dir, ".atheriz_write_probe*"));
         }
         finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void ProbeWritable_UsesUniqueAutoDeletedTemp()
+    {
+        // No shared sentinel name (concurrent servers raced on one file)
+        // and no leftover on crash: unique name + DeleteOnClose.
+        var src = SourceScan.Read("src", "Atheriz.Core", "Utils", "PathGuards.cs");
+        var region = SourceScan.Region(src, "private static void ProbeWritable(");
+        Assert.Contains("GetRandomFileName()", region);
+        Assert.Contains("FileOptions.DeleteOnClose", region);
+        Assert.DoesNotContain("\".atheriz_write_probe\")", region);
     }
 
     [Fact]

@@ -31,7 +31,7 @@ public class CorrectnessBatchDTests
             Directory.CreateDirectory(game);
             var save = Path.Combine(game, "save");
             var secret = Path.Combine(game, "secret");
-            InitialSetup.DoSetup(save, "pinadmin", " hunter22  ", secret);
+            InitialSetup.DoSetup(new SetupOptions(save, "pinadmin", " hunter22  ", secret));
             var account = ObjectRegistry.FilterBy(o => o.Name == "pinadmin").FirstOrDefault() as Account;
             Assert.NotNull(account);
             Assert.True(account!.CheckPassword(" hunter22  "));
