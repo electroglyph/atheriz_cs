@@ -83,12 +83,14 @@ public static class PathGuards
     {
         var full = Path.GetFullPath(path);
         var root = Path.GetPathRoot(full) ?? "";
-        var normFull = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var normRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (string.Equals(normFull, normRoot, StringComparison.OrdinalIgnoreCase))
+        // Containment relative to the filesystem root: "." is the root
+        // itself; a separator-free relative path is a direct child
+        // (/save, C:\save). Anything deeper is a real game path.
+        var rel = Path.GetRelativePath(root, full);
+        if (rel == ".")
             throw new InvalidOperationException($"Refusing to wipe filesystem root: {path}");
-        var parent = Path.GetDirectoryName(normFull);
-        if (parent is not null && string.Equals(parent.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), normRoot, StringComparison.OrdinalIgnoreCase))
+        if (!rel.StartsWith("..", StringComparison.Ordinal) &&
+            rel.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0)
             throw new InvalidOperationException($"Refusing to wipe top-level directory: {path}");
     }
 

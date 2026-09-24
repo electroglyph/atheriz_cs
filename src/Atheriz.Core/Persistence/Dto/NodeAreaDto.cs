@@ -1,7 +1,7 @@
 
 namespace Atheriz.Core.Persistence.Dto;
 
-internal sealed class NodeAreaDto
+internal sealed record NodeAreaDto
 {
     public string Name { get; set; } = "";
     public string Theme { get; set; } = "";

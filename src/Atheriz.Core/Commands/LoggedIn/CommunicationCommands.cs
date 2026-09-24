@@ -41,7 +41,7 @@ public sealed class ChannelCommand : LoggedInCommand
             else go.Msg("No channels found.");
             return;
         }
-        var chName = pa.GetString("channel");
+        var chName = pa.GetString(ParsedArgKeys.Channel);
         if (string.IsNullOrEmpty(chName)) { go.Msg(PrintHelp()); return; }
         var nameLower = chName!.ToLowerInvariant();
         Channel? channel = null;

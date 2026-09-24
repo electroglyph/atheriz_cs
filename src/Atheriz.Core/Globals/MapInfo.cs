@@ -582,7 +582,7 @@ public class MapInfo
     }
 
     // DTO for JSON persistence
-    public sealed class MapInfoPersistDto
+    public sealed record MapInfoPersistDto
     {
         public string Name { get; set; } = "unknown";
         public Dictionary<string, string> PreGrid { get; set; } = new();
@@ -635,7 +635,7 @@ public class MapInfo
         }
     }
 
-    public sealed class LegendEntryDto
+    public sealed record LegendEntryDto
     {
         public string? Symbol { get; set; }
         public string? Desc { get; set; }

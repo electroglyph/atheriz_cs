@@ -19,23 +19,43 @@ public class Door
     public ReaderWriterLockSlim Lock => _lock;
     public IDisposable ReadScope() { _lock.EnterReadLock(); return new LockScope(_lock, false); }
     public IDisposable WriteScope() { _lock.EnterWriteLock(); return new LockScope(_lock, true); }
+    // Mark suppression for bodies that already hold the write lock (Try*
+    // paths, paired publishes, DTO restore): per-write marks would take
+    // Lock3 under the door hold, against RemapDoors' Lock3 -> door order.
+    // Suppressed sections publish raw and mark once after release, exactly
+    // like the old direct-field writes.
+    private IDisposable SuppressMarks()
+    {
+        _deferMark = true;
+        return new MarkScope(this);
+    }
+    private readonly struct MarkScope(Door door) : IDisposable
+    {
+        public void Dispose() => door._deferMark = false;
+    }
     // Door state lives outside ObjectRegistry, so direct assignment used to be lost
     // on save (only Try* paths marked doors modified). Every mutating setter below
     // takes the lock, and any change marks the NodeHandler doors section modified
     // (after releasing the door lock, so the order is always door -> handler).
-    private Coord _fromCoord;
-    private string _fromExit = "";
-    private Coord _toCoord;
-    private string _toExit = "";
-    private (int X, int Y)? _symbolCoord;
-    private string _closedSymbol = "";
-    private string _openSymbol = "";
-    private bool _closed = true;
-    private bool _locked = false;
-    private string _name = "";
-    private string _doorDesc = "";
-    private int? _keyId;
-    public Coord FromCoord { get => ReadProp(ref _fromCoord); set => SetProp(ref _fromCoord, value); }
+    // Paired-endpoint publishes (SetEndpoints) take the write hold once and
+    // suppress the per-setter marks: marking takes Lock3, which against
+    // RemapDoors' Lock3 -> door order would be an ABBA edge. The single
+    // release-then-mark at the end of SetEndpoints replaces them.
+    private bool _deferMark; // only touched under the write hold
+    public Coord FromCoord
+    {
+        get { using (ReadScope()) return field; }
+        set
+        {
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<Coord>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    }
     // Paired endpoint publish: the two setters above are single-field (kept for
     // callers that move one end), but a GetNodes snapshot landing between two
     // separate sets pairs endpoints from different generations — no read-side
@@ -45,39 +65,175 @@ public class Door
         bool changed;
         using (WriteScope())
         {
-            changed = !_fromCoord.Equals(from) || !_toCoord.Equals(to);
-            _fromCoord = from; _toCoord = to;
+            _deferMark = true;
+            try
+            {
+                changed = !FromCoord.Equals(from) || !ToCoord.Equals(to);
+                if (changed) { FromCoord = from; ToCoord = to; }
+            }
+            finally { _deferMark = false; }
         }
         if (changed) MarkNodeDoorsModified();
     }
-    public string FromExit { get => ReadProp(ref _fromExit); set => SetProp(ref _fromExit, value ?? ""); }
-    public Coord ToCoord { get => ReadProp(ref _toCoord); set => SetProp(ref _toCoord, value); }
-    public string ToExit { get => ReadProp(ref _toExit); set => SetProp(ref _toExit, value ?? ""); }
-    public (int X, int Y)? SymbolCoord { get => ReadProp(ref _symbolCoord); set => SetProp(ref _symbolCoord, value); }
-    public string ClosedSymbol { get => ReadProp(ref _closedSymbol); set => SetProp(ref _closedSymbol, value ?? ""); }
-    public string OpenSymbol { get => ReadProp(ref _openSymbol); set => SetProp(ref _openSymbol, value ?? ""); }
-    public bool Closed { get => ReadProp(ref _closed); set => SetProp(ref _closed, value); }
-    public bool Locked { get => ReadProp(ref _locked); set => SetProp(ref _locked, value); }
-    public string Name { get => ReadProp(ref _name); set => SetProp(ref _name, value ?? ""); }
-    public string DoorDesc { get => ReadProp(ref _doorDesc); set => SetProp(ref _doorDesc, value ?? ""); }
-    public int? KeyId { get => ReadProp(ref _keyId); set => SetProp(ref _keyId, value); }
-    private T ReadProp<T>(ref T field)
+    public string FromExit
     {
-        _lock.EnterReadLock();
-        try { return field; }
-        finally { _lock.ExitReadLock(); }
-    }
-    private void SetProp<T>(ref T field, T value)
-    {
-        bool changed;
-        _lock.EnterWriteLock();
-        try
+        get { using (ReadScope()) return field ?? ""; }
+        set
         {
-            changed = !EqualityComparer<T>.Default.Equals(field, value);
-            if (changed) field = value;
+            value ??= "";
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<string>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
         }
-        finally { _lock.ExitWriteLock(); }
-        if (changed) MarkNodeDoorsModified();
+    }
+    public Coord ToCoord
+    {
+        get { using (ReadScope()) return field; }
+        set
+        {
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<Coord>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    }
+    public string ToExit
+    {
+        get { using (ReadScope()) return field ?? ""; }
+        set
+        {
+            value ??= "";
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<string>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    }
+    public (int X, int Y)? SymbolCoord
+    {
+        get { using (ReadScope()) return field; }
+        set
+        {
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<(int X, int Y)?>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    }
+    public string ClosedSymbol
+    {
+        get { using (ReadScope()) return field ?? ""; }
+        set
+        {
+            value ??= "";
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<string>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    }
+    public string OpenSymbol
+    {
+        get { using (ReadScope()) return field ?? ""; }
+        set
+        {
+            value ??= "";
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<string>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    }
+    public bool Closed
+    {
+        get { using (ReadScope()) return field; }
+        set
+        {
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<bool>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    } = true;
+    public bool Locked
+    {
+        get { using (ReadScope()) return field; }
+        set
+        {
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<bool>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    }
+    public string Name
+    {
+        get { using (ReadScope()) return field ?? ""; }
+        set
+        {
+            value ??= "";
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<string>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    }
+    public string DoorDesc
+    {
+        get { using (ReadScope()) return field ?? ""; }
+        set
+        {
+            value ??= "";
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<string>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
+    }
+    public int? KeyId
+    {
+        get { using (ReadScope()) return field; }
+        set
+        {
+            bool changed;
+            using (WriteScope())
+            {
+                changed = !EqualityComparer<int?>.Default.Equals(field, value);
+                if (changed) field = value;
+            }
+            if (changed && !_deferMark) MarkNodeDoorsModified();
+        }
     }
     /// <summary>
     /// Best-effort doors-modified mark (mirrors the Try* paths below and Python's
@@ -113,12 +269,17 @@ public class Door
         (int, int)? symbolCoord = null, string closedSymbol = "", string openSymbol = "",
         bool closed = true, bool locked = false)
     {
-        // Direct field init: a fresh door must not mark the handler dirty.
-        _fromCoord = from; _toCoord = to; _fromExit = fromExit; _toExit = toExit;
-        _symbolCoord = symbolCoord; _closedSymbol = closedSymbol; _openSymbol = openSymbol;
-        _closed = closed; _locked = locked;
-        _name = fromExit;
-        _doorDesc = "";
+        // Suppressed publish: a fresh door must not mark the handler dirty.
+        // The marking setters take the same (uncontended — the door is not
+        // published yet) lock; the scope only silences the mark.
+        using (SuppressMarks())
+        {
+            FromCoord = from; ToCoord = to; FromExit = fromExit; ToExit = toExit;
+            SymbolCoord = symbolCoord; ClosedSymbol = closedSymbol; OpenSymbol = openSymbol;
+            Closed = closed; Locked = locked;
+            Name = fromExit;
+            DoorDesc = "";
+        }
     }
 
     public static Door Create(Coord fromCoord, string fromExit, Coord toCoord, string toExit,
@@ -132,16 +293,19 @@ public class Door
         bool closed = true, bool locked = false)
     {
         var d = new Door();
-        if (fromCoord is not null) d._fromCoord = fromCoord.Value;
-        if (toCoord is not null) d._toCoord = toCoord.Value;
-        d._fromExit = fromExit ?? "";
-        d._toExit = toExit ?? "";
-        d._symbolCoord = symbolCoord;
-        d._closedSymbol = closedSymbol ?? "";
-        d._openSymbol = openSymbol ?? "";
-        d._closed = closed;
-        d._locked = locked;
-        d._name = fromExit ?? "";
+        using (d.SuppressMarks())
+        {
+            if (fromCoord is not null) d.FromCoord = fromCoord.Value;
+            if (toCoord is not null) d.ToCoord = toCoord.Value;
+            d.FromExit = fromExit ?? "";
+            d.ToExit = toExit ?? "";
+            d.SymbolCoord = symbolCoord;
+            d.ClosedSymbol = closedSymbol ?? "";
+            d.OpenSymbol = openSymbol ?? "";
+            d.Closed = closed;
+            d.Locked = locked;
+            d.Name = fromExit ?? "";
+        }
         return d;
     }
     // Compat overload
@@ -188,14 +352,14 @@ public class Door
     {
         using (ReadScope())
         {
-            var status = _closed ? "A closed" : "An open";
+            var status = Closed ? "A closed" : "An open";
             string text;
-            if (fromCoord.Equals(_fromCoord)) text = $"{status} door leading {_fromExit}";
-            else if (fromCoord.Equals(_toCoord)) text = $"{status} door leading {_toExit}";
+            if (fromCoord.Equals(FromCoord)) text = $"{status} door leading {FromExit}";
+            else if (fromCoord.Equals(ToCoord)) text = $"{status} door leading {ToExit}";
             else return "Door desc: unexpected coord.";
             // DoorDesc is builder flavor persisted with the door (never
             // rendered until now): appended verbatim when set.
-            if (!string.IsNullOrEmpty(_doorDesc)) text += " " + _doorDesc;
+            if (!string.IsNullOrEmpty(DoorDesc)) text += " " + DoorDesc;
             return text;
         }
     }
@@ -208,7 +372,7 @@ public class Door
         // nodes from different generations. Resolution itself stays outside the
         // hold (it takes handler locks).
         Coord from, to;
-        using (ReadScope()) { from = _fromCoord; to = _toCoord; }
+        using (ReadScope()) { from = FromCoord; to = ToCoord; }
         Node? fromNode = null, toNode = null;
         if (nh is not null)
         {
@@ -231,10 +395,13 @@ public class Door
         _lock.EnterWriteLock();
         try
         {
-            if (!Closed) status = "already_open";
-            else if (Locked) status = "locked";
-            else if (!canAccess) status = "no_access";
-            else { _closed = false; status = "opened"; }
+            using (SuppressMarks())
+            {
+                if (!Closed) status = "already_open";
+                else if (Locked) status = "locked";
+                else if (!canAccess) status = "no_access";
+                else { Closed = false; status = "opened"; }
+            }
         }
         finally { _lock.ExitWriteLock(); }
         if (status == "opened")
@@ -276,9 +443,17 @@ public class Door
     {
         bool opened;
         _lock.EnterWriteLock();
-        // Idempotent open is success even when locked: the state already matches.
-        // A locked *shut* door still refuses (the lock guards the transition, not the state).
-        try { if (!_closed) return true; if (_locked) return false; _closed = false; opened = true; }
+        try
+        {
+            using (SuppressMarks())
+            {
+                // Idempotent open is success even when locked: the state already matches.
+                // A locked *shut* door still refuses (the lock guards the transition, not the state).
+                if (!Closed) return true;
+                if (Locked) return false;
+                Closed = false; opened = true;
+            }
+        }
         finally { _lock.ExitWriteLock(); }
         if (opened) MarkNodeDoorsModified();
         return true;
@@ -294,9 +469,12 @@ public class Door
         _lock.EnterWriteLock();
         try
         {
-            if (Closed) status = "already_closed";
-            else if (!canAccess) status = "no_access";
-            else { _closed = true; status = "closed"; }
+            using (SuppressMarks())
+            {
+                if (Closed) status = "already_closed";
+                else if (!canAccess) status = "no_access";
+                else { Closed = true; status = "closed"; }
+            }
         }
         finally { _lock.ExitWriteLock(); }
         if (status == "closed")
@@ -332,8 +510,15 @@ public class Door
     {
         bool closed;
         _lock.EnterWriteLock();
-        // Idempotent close is success: the door state already matches what was wanted.
-        try { if (_closed) return true; _closed = true; closed = true; }
+        try
+        {
+            using (SuppressMarks())
+            {
+                // Idempotent close is success: the door state already matches what was wanted.
+                if (Closed) return true;
+                Closed = true; closed = true;
+            }
+        }
         finally { _lock.ExitWriteLock(); }
         if (closed) MarkNodeDoorsModified();
         return true;
@@ -345,18 +530,20 @@ public class Door
         // Access predicates run before the door write lock (see TryOpen).
         bool canAccess = Access(caller, "lock");
         // A keyed door needs its key on the caller: null KeyId means no key.
-        int? keyId;
-        using (ReadScope()) { keyId = _keyId; }
+        int? keyId = KeyId;
         bool hasKey = keyId is null || caller.ContentsSnapshot.Contains(keyId.Value);
         string status;
         _lock.EnterWriteLock();
         try
         {
-            if (!canAccess) status = "no_access";
-            else if (!hasKey) status = "no_key";
-            else if (!Closed) status = "not_closed";
-            else if (Locked) status = "already_locked";
-            else { _locked = true; status = "locked"; }
+            using (SuppressMarks())
+            {
+                if (!canAccess) status = "no_access";
+                else if (!hasKey) status = "no_key";
+                else if (!Closed) status = "not_closed";
+                else if (Locked) status = "already_locked";
+                else { Locked = true; status = "locked"; }
+            }
         }
         finally { _lock.ExitWriteLock(); }
         if (status == "locked")
@@ -395,17 +582,19 @@ public class Door
         // Access predicates run before the door write lock (see TryOpen).
         bool canAccess = Access(caller, "unlock");
         // Same key gate as TryLock: unlocking a keyed door needs its key.
-        int? keyId;
-        using (ReadScope()) { keyId = _keyId; }
+        int? keyId = KeyId;
         bool hasKey = keyId is null || caller.ContentsSnapshot.Contains(keyId.Value);
         string status;
         _lock.EnterWriteLock();
         try
         {
-            if (!canAccess) status = "no_access";
-            else if (!hasKey) status = "no_key";
-            else if (_locked) { _locked = false; status = "unlocked"; }
-            else status = "already_unlocked";
+            using (SuppressMarks())
+            {
+                if (!canAccess) status = "no_access";
+                else if (!hasKey) status = "no_key";
+                else if (Locked) { Locked = false; status = "unlocked"; }
+                else status = "already_unlocked";
+            }
         }
         finally { _lock.ExitWriteLock(); }
         if (status == "unlocked")
@@ -483,18 +672,18 @@ public class Door
         {
             return new DoorDto
             {
-                FromCoord = _fromCoord,
-                FromExit = _fromExit,
-                ToCoord = _toCoord,
-                ToExit = _toExit,
-                SymbolCoord = _symbolCoord,
-                ClosedSymbol = _closedSymbol,
-                OpenSymbol = _openSymbol,
-                Closed = _closed,
-                Locked = _locked,
-                Name = _name,
-                Desc = _doorDesc,
-                KeyId = _keyId,
+                FromCoord = FromCoord,
+                FromExit = FromExit,
+                ToCoord = ToCoord,
+                ToExit = ToExit,
+                SymbolCoord = SymbolCoord,
+                ClosedSymbol = ClosedSymbol,
+                OpenSymbol = OpenSymbol,
+                Closed = Closed,
+                Locked = Locked,
+                Name = Name,
+                Desc = DoorDesc,
+                KeyId = KeyId,
                 Locks = _lockTable.SnapshotEntries().Select(kv => new LockDefDto
                 {
                     Name = kv.Key,
@@ -506,10 +695,13 @@ public class Door
     public static Door FromDto(DoorDto dto)
     {
         var d = new Door(dto.FromCoord, dto.ToCoord, dto.FromExit, dto.ToExit, dto.SymbolCoord, dto.ClosedSymbol, dto.OpenSymbol, dto.Closed, dto.Locked);
-        // Direct field restore: a loaded door must not mark the handler dirty.
-        d._name = dto.Name ?? dto.FromExit;
-        d._doorDesc = dto.Desc ?? "";
-        d._keyId = dto.KeyId;
+        // Suppressed restore: a loaded door must not mark the handler dirty.
+        using (d.SuppressMarks())
+        {
+            d.Name = dto.Name ?? dto.FromExit;
+            d.DoorDesc = dto.Desc ?? "";
+            d.KeyId = dto.KeyId;
+        }
         foreach (var ld in dto.Locks ?? [])
         {
             if (ld is null || string.IsNullOrEmpty(ld.Name)) continue;

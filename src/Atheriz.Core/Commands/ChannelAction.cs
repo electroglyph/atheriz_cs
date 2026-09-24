@@ -34,10 +34,10 @@ internal static class ChannelActionParser
     internal static ChannelAction Parse(GameArgumentParser.ParsedArgs pa)
     {
         ArgumentNullException.ThrowIfNull(pa);
-        if (pa.GetBool("list")) return ChannelAction.List;
-        if (pa.GetBool("unsubscribe")) return ChannelAction.Unsubscribe;
-        if (pa.GetBool("subscribe")) return ChannelAction.Subscribe;
-        if (pa.GetBool("replay")) return ChannelAction.Replay;
+        if (pa.GetBool(ParsedArgKeys.List)) return ChannelAction.List;
+        if (pa.GetBool(ParsedArgKeys.Unsubscribe)) return ChannelAction.Unsubscribe;
+        if (pa.GetBool(ParsedArgKeys.Subscribe)) return ChannelAction.Subscribe;
+        if (pa.GetBool(ParsedArgKeys.Replay)) return ChannelAction.Replay;
         return ChannelAction.Send;
     }
 }

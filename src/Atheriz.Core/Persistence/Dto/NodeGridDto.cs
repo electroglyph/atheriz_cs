@@ -1,7 +1,7 @@
 
 namespace Atheriz.Core.Persistence.Dto;
 
-internal sealed class NodeGridDto
+internal sealed record NodeGridDto
 {
     public string Area { get; set; } = "";
     public int Z { get; set; }

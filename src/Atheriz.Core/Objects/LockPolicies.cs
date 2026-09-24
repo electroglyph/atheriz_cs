@@ -85,18 +85,13 @@ public static class LockPolicies
 
     public static bool TryResolve(LockPolicy policy, out Func<GameObject, bool> predicate)
     {
-        switch (policy)
+        predicate = policy switch
         {
-            case LockPolicy.Builder:
-                predicate = IsBuilder;
-                return true;
-            case LockPolicy.Denied:
-                predicate = _ => false;
-                return true;
-            default:
-                predicate = _ => false;
-                return false;
-        }
+            LockPolicy.Builder => IsBuilder,
+            LockPolicy.Denied => _ => false,
+            _ => _ => false,
+        };
+        return policy is LockPolicy.Builder or LockPolicy.Denied;
     }
     /// <summary>
     /// Resolves a persisted policy name to a predicate bound to <paramref name="target"/>.
@@ -104,37 +99,26 @@ public static class LockPolicies
     /// </summary>
     public static bool TryResolve(string policy, GameObject target, out Func<GameObject, bool> predicate)
     {
-        switch (policy)
+        predicate = policy switch
         {
-            case Builder:
-                predicate = IsBuilder;
-                return true;
-            case PcView:
+            Builder => IsBuilder,
 // tests only the *target's* connection.
-                // Builders and above keep sight of offline PCs (room lists,
-                // search, examine); regular players fail view and never see them.
-                predicate = accessing => !target.IsPc || target.IsConnected || accessing.IsBuilder;
-                return true;
-            case NotSelf:
-                predicate = accessing => accessing.Id != target.Id;
-                return true;
-            case PuppetOwner:
+            // Builders and above keep sight of offline PCs (room lists,
+            // search, examine); regular players fail view and never see them.
+            PcView => accessing => !target.IsPc || target.IsConnected || accessing.IsBuilder,
+            NotSelf => accessing => accessing.Id != target.Id,
 // F001)
-                predicate = accessing =>
-                {
-                    if (target.IsNpc) return true;
-                    if (accessing.IsSuperUser) return true;
-                    var sess = accessing.Session;
-                    return sess?.Account is Account acc && acc.Characters.Contains(target.Id);
-                };
-                return true;
-            case Denied:
-                predicate = _ => false;
-                return true;
-            default:
-                predicate = _ => false;
-                return false;
-        }
+            PuppetOwner => accessing =>
+            {
+                if (target.IsNpc) return true;
+                if (accessing.IsSuperUser) return true;
+                var sess = accessing.Session;
+                return sess?.Account is Account acc && acc.Characters.Contains(target.Id);
+            },
+            Denied => _ => false,
+            _ => _ => false,
+        };
+        return policy is Builder or PcView or NotSelf or PuppetOwner or Denied;
     }
 
     public static bool TryResolve(LockPolicy policy, GameObject target, out Func<GameObject, bool> predicate)

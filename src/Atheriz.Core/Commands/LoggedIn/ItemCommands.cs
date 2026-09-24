@@ -5,14 +5,14 @@ public sealed class DropCommand : LoggedInCommand
     public override string Key => "drop";
     public override string Desc => "Drop an object.";
     protected override bool AllowMissingArgs => true;
-    protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument("object", nargs: "REMAINDER", help: "object to drop or all"); }
+    protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument(ParsedArgKeys.Object, nargs: "REMAINDER", help: "object to drop or all"); }
     protected override void RunPuppet(GameObject go, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
         // Extract drop name robustly
         string? dropName = null;
-        // The parser defines a single positional dest ("object"); live input
-        // never carries other keys, so no fallback dests are read here.
-        var lst = pa.GetList("object");
+        // The parser defines a single positional dest (ParsedArgKeys.Object);
+        // live input never carries other keys, so no fallback dests are read here.
+        var lst = pa.GetList(ParsedArgKeys.Object);
         if (lst.Count > 0) dropName = string.Join(" ", lst).Trim();
         if (string.IsNullOrWhiteSpace(dropName)) { go.Msg(PrintHelp()); return; }
         var loc = go.ResolveLocationObject();

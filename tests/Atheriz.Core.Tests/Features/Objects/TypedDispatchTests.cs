@@ -102,17 +102,58 @@ public class TypedDispatchTests
     public void ParsedArgKeys_MatchRuntimeKeys()
     {
         Assert.Equal("account", ParsedArgKeys.Account);
+        Assert.Equal("account_name", ParsedArgKeys.AccountName);
         Assert.Equal("args", ParsedArgKeys.Args);
         Assert.Equal("attribute", ParsedArgKeys.Attribute);
+        Assert.Equal("auto", ParsedArgKeys.Auto);
+        Assert.Equal("channel", ParsedArgKeys.Channel);
         Assert.Equal("command", ParsedArgKeys.Command);
         Assert.Equal("coord", ParsedArgKeys.Coord);
+        Assert.Equal("count", ParsedArgKeys.Count);
+        Assert.Equal("d", ParsedArgKeys.D);
         Assert.Equal("desc", ParsedArgKeys.Desc);
+        Assert.Equal("double", ParsedArgKeys.Double);
+        Assert.Equal("down", ParsedArgKeys.Down);
+        Assert.Equal("e", ParsedArgKeys.E);
+        Assert.Equal("east", ParsedArgKeys.East);
+        Assert.Equal("ip", ParsedArgKeys.Ip);
+        Assert.Equal("is_container", ParsedArgKeys.IsContainer);
+        Assert.Equal("is_item", ParsedArgKeys.IsItem);
+        Assert.Equal("is_mapable", ParsedArgKeys.IsMapable);
+        Assert.Equal("is_npc", ParsedArgKeys.IsNpc);
+        Assert.Equal("is_pc", ParsedArgKeys.IsPc);
+        Assert.Equal("is_tickable", ParsedArgKeys.IsTickable);
+        Assert.Equal("list", ParsedArgKeys.List);
         Assert.Equal("message", ParsedArgKeys.Message);
+        Assert.Equal("n", ParsedArgKeys.N);
+        Assert.Equal("name", ParsedArgKeys.Name);
         Assert.Equal("none", ParsedArgKeys.None);
+        Assert.Equal("north", ParsedArgKeys.North);
         Assert.Equal("noun", ParsedArgKeys.Noun);
+        Assert.Equal("object", ParsedArgKeys.Object);
+        Assert.Equal("password", ParsedArgKeys.Password);
+        Assert.Equal("path", ParsedArgKeys.Path);
+        Assert.Equal("reason", ParsedArgKeys.Reason);
+        Assert.Equal("recursive", ParsedArgKeys.Recursive);
+        Assert.Equal("remove", ParsedArgKeys.Remove);
+        Assert.Equal("replay", ParsedArgKeys.Replay);
+        Assert.Equal("road", ParsedArgKeys.Road);
+        Assert.Equal("room", ParsedArgKeys.Room);
+        Assert.Equal("round", ParsedArgKeys.Round);
+        Assert.Equal("s", ParsedArgKeys.S);
+        Assert.Equal("single", ParsedArgKeys.Single);
+        Assert.Equal("south", ParsedArgKeys.South);
+        Assert.Equal("subscribe", ParsedArgKeys.Subscribe);
         Assert.Equal("target", ParsedArgKeys.Target);
         Assert.Equal("text", ParsedArgKeys.Text);
-        Assert.Equal(11, typeof(ParsedArgKeys).GetFields(
+        Assert.Equal("u", ParsedArgKeys.U);
+        Assert.Equal("unsubscribe", ParsedArgKeys.Unsubscribe);
+        Assert.Equal("up", ParsedArgKeys.Up);
+        Assert.Equal("value", ParsedArgKeys.Value);
+        Assert.Equal("w", ParsedArgKeys.W);
+        Assert.Equal("west", ParsedArgKeys.West);
+        Assert.Equal("x", ParsedArgKeys.X);
+        Assert.Equal(52, typeof(ParsedArgKeys).GetFields(
             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static).Length);
     }
 
@@ -120,7 +161,13 @@ public class TypedDispatchTests
     public void ParsedArgCallSites_UseConstants()
     {
         string[] methods = ["AddArgument(\"", "GetString(\"", "GetList(\"", "GetBool(\"", "GetObjList(\"", "Has(\""];
-        string[] keys = ["account", "args", "attribute", "command", "coord", "desc", "message", "none", "noun", "target", "text"];
+        string[] keys = ["account", "account_name", "args", "attribute", "auto", "channel", "command",
+            "coord", "count", "d", "desc", "double", "down", "e", "east", "ip",
+            "is_container", "is_item", "is_mapable", "is_npc", "is_pc", "is_tickable",
+            "list", "message", "n", "name", "none", "north", "noun", "object",
+            "password", "path", "reason", "recursive", "remove", "replay", "road",
+            "room", "round", "s", "single", "south", "subscribe", "target", "text",
+            "u", "unsubscribe", "up", "value", "w", "west", "x"];
         int literals = 0;
         foreach (var file in Directory.EnumerateFiles(
             Path.Combine(SourceScan.RepoRoot(), "src", "Atheriz.Core", "Commands"), "*.cs", SearchOption.AllDirectories))

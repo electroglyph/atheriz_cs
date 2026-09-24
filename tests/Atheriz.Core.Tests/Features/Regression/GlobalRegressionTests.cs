@@ -273,13 +273,17 @@ public class GlobalRegressionTests
         Assert.Contains("ids.ToList()", region);
     }
 
-    // saveability check must not span two sequential locks.
+    // saveability check holds one scope: the obj lock is taken inside the
+    // AllLock hold, never after a release.
     [Fact]
     public void SaveableCheck_IsAtomic()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "ObjectRegistry.cs");
         var region = SourceScan.Region(src, "private static bool IsStillSaveable(");
-        Assert.True(region.IndexOf("obj.SyncRoot.EnterReadLock()", StringComparison.Ordinal) < region.IndexOf("AllLock.ExitReadLock()", StringComparison.Ordinal));
+        var open = region.IndexOf("lock (AllLock)", StringComparison.Ordinal);
+        var take = region.IndexOf("obj.SyncRoot.EnterReadLock()", StringComparison.Ordinal);
+        Assert.True(open >= 0 && take > open);
+        Assert.DoesNotContain("AllLock.ExitReadLock", region);
     }
 
     // mapedit token generation must run outside the global write lock.

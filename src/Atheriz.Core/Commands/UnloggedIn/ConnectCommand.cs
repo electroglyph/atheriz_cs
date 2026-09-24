@@ -8,8 +8,8 @@ public sealed class ConnectCommand : Command
     public override string Desc => "Connect to an existing account with a password.";
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("account_name", help: "The name of the account to connect to.");
-        p.AddArgument("password", help: "The password for the account.");
+        p.AddArgument(ParsedArgKeys.AccountName, help: "The name of the account to connect to.");
+        p.AddArgument(ParsedArgKeys.Password, help: "The password for the account.");
     }
     public override void Run(CommandContext ctx)
     {
@@ -49,8 +49,8 @@ public sealed class ConnectCommand : Command
     // (fire-and-forget vs awaited).
     private static Account? TryAuthenticate(IMessageTarget caller, GameArgumentParser.ParsedArgs pa)
     {
-        string accountName = pa.GetString("account_name") ?? "";
-        string password = pa.GetString("password") ?? "";
+        string accountName = pa.GetString(ParsedArgKeys.AccountName) ?? "";
+        string password = pa.GetString(ParsedArgKeys.Password) ?? "";
         // This command is normally async; in C# we provide sync stub that checks password via ObjectRegistry
         var accounts = ObjectRegistry.FilterBy(x => x.IsAccount && x.Name.Equals(accountName, StringComparison.OrdinalIgnoreCase));
         if (accounts.Count == 0)

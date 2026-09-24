@@ -276,32 +276,6 @@ public sealed class TelnetSessionReaderTests
     }
 
     [Fact]
-    public async Task TelnetSessionReader_SyncReadDelivers()
-    {
-        // The sync TextReader contract serves session slices like the async one.
-        using var env = GlobalTestEnv.Enter();
-        var (peer, serverStream) = InMemoryPipe.Create();
-        using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
-        try
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            var reader = new TelnetSessionReader(session, cts.Token);
-            var bytes = Encoding.UTF8.GetBytes("sync\r\ntail");
-            await peer.WriteAsync(bytes, 0, bytes.Length, cts.Token);
-            peer.Close();
-            var sb = new StringBuilder();
-            var buf = new char[16];
-            int n;
-            while ((n = reader.Read(buf, 0, buf.Length)) != 0) sb.Append(buf, 0, n);
-            Assert.Equal("sync\r\ntail", sb.ToString());
-        }
-        finally
-        {
-            peer.Dispose();
-        }
-    }
-
-    [Fact]
     public async Task TelnetSessionReader_PreCancelledTokenReadsAsEof()
     {
         // A cancelled stopping token reports EOF instead of blocking: the
@@ -331,11 +305,10 @@ public sealed class TelnetSessionReaderTests
         try
         {
             var reader = new TelnetSessionReader(session);
-            Assert.Throws<ArgumentNullException>(() => reader.Read(null!, 0, 1));
-            await Assert.ThrowsAsync<ArgumentNullException>(async () => { await reader.ReadAsync(null!, 0, 1); });
-            Assert.Throws<ArgumentOutOfRangeException>(() => reader.Read(new char[4], -1, 1));
-            Assert.Throws<ArgumentOutOfRangeException>(() => reader.Read(new char[4], 0, -1));
-            Assert.Throws<ArgumentOutOfRangeException>(() => reader.Read(new char[4], 3, 2));
+            await Assert.ThrowsAsync<ArgumentNullException>(() => reader.ReadAsync(null!, 0, 1));
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reader.ReadAsync(new char[4], -1, 1));
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reader.ReadAsync(new char[4], 0, -1));
+            await Assert.ThrowsAsync<ArgumentException>(() => reader.ReadAsync(new char[4], 3, 2));
             Assert.Equal(0, await reader.ReadAsync(Memory<char>.Empty));
         }
         finally

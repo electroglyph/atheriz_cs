@@ -28,12 +28,12 @@ public abstract class DoorDirectionCommand : LoggedInCommand
             return;
         }
         var lower = pa.GetList(ParsedArgKeys.Args).Select(a => a.ToLowerInvariant()).ToList();
-        bool n = pa.GetBool("north") || lower.Contains("n") || lower.Contains("north");
-        bool s = pa.GetBool("south") || lower.Contains("s") || lower.Contains("south");
-        bool e = pa.GetBool("east") || lower.Contains("e") || lower.Contains("east");
-        bool w = pa.GetBool("west") || lower.Contains("w") || lower.Contains("west");
-        bool u = pa.GetBool("up") || lower.Contains("u") || lower.Contains("up");
-        bool d = pa.GetBool("down") || lower.Contains("d") || lower.Contains("down");
+        bool n = pa.GetBool(ParsedArgKeys.North) || lower.Contains("n") || lower.Contains("north");
+        bool s = pa.GetBool(ParsedArgKeys.South) || lower.Contains("s") || lower.Contains("south");
+        bool e = pa.GetBool(ParsedArgKeys.East) || lower.Contains("e") || lower.Contains("east");
+        bool w = pa.GetBool(ParsedArgKeys.West) || lower.Contains("w") || lower.Contains("west");
+        bool u = pa.GetBool(ParsedArgKeys.Up) || lower.Contains("u") || lower.Contains("up");
+        bool d = pa.GetBool(ParsedArgKeys.Down) || lower.Contains("d") || lower.Contains("down");
         if (!(n || s || e || w || u || d))
         {
             string cap = char.ToUpperInvariant(VerbNoun[0]) + VerbNoun.Substring(1);

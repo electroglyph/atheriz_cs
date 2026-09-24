@@ -10,13 +10,17 @@ namespace Atheriz.Core.Globals;
 /// plumbing. Classification state (IP bans, creation cooldowns) lives in
 /// IpBanStore / CreationCooldownStore; the registry forwards for call-site
 /// continuity.
-/// All access guarded by ReaderWriterLockSlim (mirrors Python RLock).
+/// All access guarded by a single non-reentrant <see cref="Lock"/>.
 /// Persistence via <see cref="AtherizDbContext"/> + JSON (replaces dill).
 /// </summary>
 public static class ObjectRegistry
 {
     // --- state ---
-    internal static readonly ReaderWriterLockSlim AllLock = new(LockRecursionPolicy.SupportsRecursion);
+    // Single non-reentrant hold: every take below is a leaf (enter, touch the
+    // dicts, exit) — no path takes AllLock twice, so recursion is never
+    // needed. Uniqueness predicates (AddObjectUnique) must only read object
+    // properties, never touch the registry.
+    internal static readonly Lock AllLock = new();
     private static readonly Dictionary<int, GameObject> AllObjects = new();
 
     // reverse index (reference -> key) so re-keying an already
@@ -46,9 +50,7 @@ public static class ObjectRegistry
     /// </summary>
     public static void NoteDeleted(int id)
     {
-        AllLock.EnterWriteLock();
-        try { _pendingDeletions.Add(id); }
-        finally { AllLock.ExitWriteLock(); }
+        lock (AllLock) { _pendingDeletions.Add(id); }
     }
 
     // All callers hold AllLock write.
@@ -84,9 +86,7 @@ public static class ObjectRegistry
     public static List<GameObject> FilterBy(Func<GameObject, bool> predicate)
     {
         List<GameObject> snap;
-        AllLock.EnterReadLock();
-        try { snap = AllObjects.Values.ToList(); }
-        finally { AllLock.ExitReadLock(); }
+        lock (AllLock) { snap = AllObjects.Values.ToList(); }
         return snap.Where(predicate).ToList();
     }
 
@@ -102,10 +102,8 @@ public static class ObjectRegistry
             if (indexed is not null) return indexed;
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ObjectRegistry.FindNodeByCoord index lookup: " + logEx.Message, "ObjectRegistry"); }
-        AllLock.EnterReadLock();
         List<GameObject> snap;
-        try { snap = AllObjects.Values.ToList(); }
-        finally { AllLock.ExitReadLock(); }
+        lock (AllLock) { snap = AllObjects.Values.ToList(); }
         foreach (var o in snap)
             if (o is Node n && n.Coord.Equals(coord)) return n;
         return null;
@@ -128,17 +126,14 @@ public static class ObjectRegistry
 
     public static List<GameObject> Get(int id)
     {
-        AllLock.EnterReadLock();
-        try { return AllObjects.TryGetValue(id, out var o) ? [o] : []; }
-        finally { AllLock.ExitReadLock(); }
+        lock (AllLock) { return AllObjects.TryGetValue(id, out var o) ? [o] : []; }
     }
     public static List<GameObject> Get(IEnumerable<int> ids)
     {
         // materialize the caller enumerable BEFORE the read lock —
         // a lazy enumerable would execute arbitrary caller code under AllLock.
         var list = ids.ToList();
-        AllLock.EnterReadLock();
-        try
+        lock (AllLock)
         {
             List<GameObject> res = new(list.Count);
             foreach (var id in list)
@@ -146,7 +141,6 @@ public static class ObjectRegistry
                     res.Add(o);
             return res;
         }
-        finally { AllLock.ExitReadLock(); }
     }
 
     /// <summary>
@@ -159,9 +153,7 @@ public static class ObjectRegistry
     /// </summary>
     public static bool TryGetSingle(int id, out GameObject? obj)
     {
-        AllLock.EnterReadLock();
-        try { return AllObjects.TryGetValue(id, out obj); }
-        finally { AllLock.ExitReadLock(); }
+        lock (AllLock) { return AllObjects.TryGetValue(id, out obj); }
     }
 
     /// <summary>
@@ -172,47 +164,41 @@ public static class ObjectRegistry
 
     public static void AddObject(GameObject obj)
     {
-        AllLock.EnterWriteLock();
-        try
+        lock (AllLock)
         {
             IndexInsert(obj);
         }
-        finally { AllLock.ExitWriteLock(); }
     }
 
     public static GameObject? GetEver(int id)
     {
         // Live-map only (F005): the old EverCreated strong-ref cache leaked memory and
         // resurrected ClearAll'd objects. Callers needing a stale object must hold their own ref.
-        AllLock.EnterReadLock();
-        try { return AllObjects.TryGetValue(id, out var o) ? o : null; }
-        finally { AllLock.ExitReadLock(); }
+        lock (AllLock) { return AllObjects.TryGetValue(id, out var o) ? o : null; }
     }
 
     public static void AddObjectUnique(GameObject obj, Func<GameObject, bool> predicate, string error)
     {
-        // Single write lock covering check+insert (F005) — no read-check/write-recheck spin.
-        // Safe: uniqueness predicates only read object properties (no registry re-entry).
-        AllLock.EnterWriteLock();
-        try
+        // Single hold covering check+insert (F005) — no read-check/write-recheck spin.
+        // Safe: uniqueness predicates only read object properties (no registry
+        // re-entry — the hold is non-reentrant, so a registry-touching
+        // predicate would deadlock instead of merely racing).
+        lock (AllLock)
         {
             if (AllObjects.Values.Any(predicate)) throw new InvalidOperationException(error);
             IndexInsert(obj);
         }
-        finally { AllLock.ExitWriteLock(); }
     }
 
     public static void RemoveObject(GameObject obj)
     {
-        AllLock.EnterWriteLock();
-        try
+        lock (AllLock)
         {
             AllObjects.Remove(obj.Id);
             // Drop the reverse entry only if it points at the removed key —
             // AllObjects[obj.Id] may have been a different occupant.
             if (_keysByRef.TryGetValue(obj, out var k) && k == obj.Id) _keysByRef.Remove(obj);
         }
-        finally { AllLock.ExitWriteLock(); }
     }
 
     public static void ClearAll()
@@ -220,8 +206,7 @@ public static class ObjectRegistry
         // Hold both AllLock and IdGenerator lock to prevent duplicate Id race with concurrent GetUniqueId
         lock (IdGenerator.LockObj)
         {
-            AllLock.EnterWriteLock();
-            try
+            lock (AllLock)
             {
                 AllObjects.Clear();
                 _keysByRef.Clear();
@@ -229,7 +214,6 @@ public static class ObjectRegistry
                 // Already holding IdGenerator.LockObj; SetId is safe (Monitor is re-entrant).
                 IdGenerator.SetId(-1);
             }
-            finally { AllLock.ExitWriteLock(); }
         }
         IpBanStore.Clear();
         CreationCooldownStore.Clear();
@@ -237,7 +221,7 @@ public static class ObjectRegistry
 
     public static int Count
     {
-        get { AllLock.EnterReadLock(); try { return AllObjects.Count; } finally { AllLock.ExitReadLock(); } }
+        get { lock (AllLock) { return AllObjects.Count; } }
     }
 
     private static bool IsStillSaveable(GameObject obj, bool forSave = false, bool force = false)
@@ -245,16 +229,15 @@ public static class ObjectRegistry
         var id = obj.Id;
         // lock coupling — the obj read lock is taken BEFORE AllLock
         // is released, so the registry-membership check and the flag reads
-        // are atomic (no evict/delete/re-key can interleave). Read->read
-        // nesting is safe: no path holds AllLock.Write while taking obj
-        // locks, and callers never hold obj locks into this method.
-        AllLock.EnterReadLock();
-        try
+        // are atomic (no evict/delete/re-key can interleave). The coupling is
+        // one scope, not nesting: the obj lock is taken inside the AllLock
+        // hold and outlives it, and callers never hold obj locks into this
+        // method.
+        lock (AllLock)
         {
             if (!AllObjects.TryGetValue(id, out var cur) || !ReferenceEquals(cur, obj)) return false;
             obj.SyncRoot.EnterReadLock();
         }
-        finally { AllLock.ExitReadLock(); }
         // need obj lock
         try
         {
@@ -334,8 +317,7 @@ public static class ObjectRegistry
         // id that a row then overwrites.
         lock (IdGenerator.LockObj)
         {
-            AllLock.EnterWriteLock();
-            try
+            lock (AllLock)
             {
                 AllObjects.Clear();
                 _keysByRef.Clear();
@@ -344,16 +326,13 @@ public static class ObjectRegistry
                 _pendingDeletions.Clear();
                 foreach (var kv in objects) { AllObjects[kv.Key] = kv.Value; _keysByRef[kv.Value] = kv.Key; }
             }
-            finally { AllLock.ExitWriteLock(); }
 
             if (maxId > IdGenerator.GetId())
                 IdGenerator.SetId(maxId);
         }
 
         List<GameObject> snap;
-        AllLock.EnterReadLock();
-        try { snap = AllObjects.Values.ToList(); }
-        finally { AllLock.ExitReadLock(); }
+        lock (AllLock) { snap = AllObjects.Values.ToList(); }
         foreach (var o in snap)
         {
             try { o.ResolveRelations(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
@@ -417,9 +396,7 @@ public static class ObjectRegistry
     public static void SaveObjects(AtherizDbContext db, bool force = false)
     {
         List<GameObject> snapshot;
-        AllLock.EnterReadLock();
-        try { snapshot = AllObjects.Values.ToList(); }
-        finally { AllLock.ExitReadLock(); }
+        lock (AllLock) { snapshot = AllObjects.Values.ToList(); }
 
         List<GameObject> filtered = new(snapshot.Count);
         foreach (var o in snapshot)
@@ -434,13 +411,11 @@ public static class ObjectRegistry
         // Drain the delete journal with this checkpoint: ids re-registered
         // since the delete (same-id recreate) are live and must survive.
         List<int> tombstones;
-        AllLock.EnterWriteLock();
-        try
+        lock (AllLock)
         {
             tombstones = _pendingDeletions.Where(id => !AllObjects.ContainsKey(id)).ToList();
             _pendingDeletions.Clear();
         }
-        finally { AllLock.ExitWriteLock(); }
 
         // A failed checkpoint must not lose delete intent: re-journal so a
         // later checkpoint retries (the rows are still there).
@@ -449,9 +424,7 @@ public static class ObjectRegistry
             if (tombstones.Count == 0) return;
             try
             {
-                AllLock.EnterWriteLock();
-                try { foreach (var id in tombstones) _pendingDeletions.Add(id); }
-                finally { AllLock.ExitWriteLock(); }
+                lock (AllLock) { foreach (var id in tombstones) _pendingDeletions.Add(id); }
             }
             catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.SaveObjects: " + logEx.Message, "BoundedDictionary"); }
         }

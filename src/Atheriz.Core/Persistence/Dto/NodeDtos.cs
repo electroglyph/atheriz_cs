@@ -2,7 +2,7 @@
 namespace Atheriz.Core.Persistence.Dto;
 
 // Node persistence DTOs (moved from Globals/NodeHandler.cs per file-organization hygiene).
-internal sealed class NodeDto
+internal sealed record NodeDto
 {
     public Coord Coord { get; set; }
     public string Name { get; set; } = "";

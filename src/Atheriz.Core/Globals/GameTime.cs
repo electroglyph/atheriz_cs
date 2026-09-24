@@ -218,14 +218,14 @@ public class GameTime
         public Dictionary<string, JsonElement>? Data { get; set; }
     }
 
-    private sealed class AlarmDto
+    private sealed record AlarmDto
     {
         public int CallerId { get; set; }
         public bool Repeat { get; set; }
         public Dictionary<string, JsonElement>? Data { get; set; }
     }
 
-    private sealed class GameTimePersistDto
+    private sealed record GameTimePersistDto
     {
         public long Ticks { get; set; }
         public Dictionary<string, List<AlarmDto>> Alarms { get; set; } = new();

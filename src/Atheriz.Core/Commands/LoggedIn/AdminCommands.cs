@@ -195,13 +195,13 @@ public sealed class SpamCommand : LoggedInCommand
     public override string Category => "Admin";
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
     protected override bool AllowMissingArgs => true;
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("count", type: typeof(int), help: "Number of accounts to create"); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Count, type: typeof(int), help: "Number of accounts to create"); }
     protected override void RunPuppet(GameObject go, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
-        if (pa["count"] is null) { go.Msg("Usage: spam <count>"); return; }
+        if (pa[ParsedArgKeys.Count] is null) { go.Msg("Usage: spam <count>"); return; }
         // No floor: count 0/negative runs an empty loop with the count
         // messages below (established behavior, not a refusal).
-        _ = CommandHelpers.TryGetCount(pa, "count", 0, null, out int count);
+        _ = CommandHelpers.TryGetCount(pa, ParsedArgKeys.Count, 0, null, out int count);
         if (count > 1000) { go.Msg("Maximum count is 1000."); return; }
         go.Msg($"Creating {count} accounts and characters...");
         var sw = System.Diagnostics.Stopwatch.StartNew();

@@ -19,9 +19,9 @@ public sealed class BanCommand : BuilderCommand
     {
         var targetName = pa.GetString(ParsedArgKeys.Target);
         if (string.IsNullOrWhiteSpace(targetName)) { go.Msg(PrintHelp()); return; }
-        var reason = pa.GetString("reason");
+        var reason = pa.GetString(ParsedArgKeys.Reason);
         bool wantAccount = pa.GetBool(ParsedArgKeys.Account);
-        bool ip = pa.GetBool("ip");
+        bool ip = pa.GetBool(ParsedArgKeys.Ip);
         if (!BanHelper.TryResolveBanPreamble(go, targetName, wantAccount, ip, "ban", "banning",
             out var target, out var acct, out var acctChars, out var host, out bool account)
             || target is null)
@@ -117,10 +117,10 @@ public sealed class BuildCommand : BuilderCommand
         bool room=false, road=false, path=false;
         string? desc=null;
         bool single=false, dbl=false, round=false, none=false;
-        n=pa.GetBool("n"); e=pa.GetBool("e"); s=pa.GetBool("s"); w=pa.GetBool("w"); u=pa.GetBool("u"); d=pa.GetBool("d"); x=pa.GetBool("x");
-        room=pa.GetBool("room"); road=pa.GetBool("road"); path=pa.GetBool("path");
-        desc=pa["desc"] as string;
-        single=pa.GetBool("single"); dbl=pa.GetBool("double"); round=pa.GetBool("round"); none=pa.GetBool(ParsedArgKeys.None);
+        n=pa.GetBool(ParsedArgKeys.N); e=pa.GetBool(ParsedArgKeys.E); s=pa.GetBool(ParsedArgKeys.S); w=pa.GetBool(ParsedArgKeys.W); u=pa.GetBool(ParsedArgKeys.U); d=pa.GetBool(ParsedArgKeys.D); x=pa.GetBool(ParsedArgKeys.X);
+        room=pa.GetBool(ParsedArgKeys.Room); road=pa.GetBool(ParsedArgKeys.Road); path=pa.GetBool(ParsedArgKeys.Path);
+        desc=pa[ParsedArgKeys.Desc] as string;
+        single=pa.GetBool(ParsedArgKeys.Single); dbl=pa.GetBool(ParsedArgKeys.Double); round=pa.GetBool(ParsedArgKeys.Round); none=pa.GetBool(ParsedArgKeys.None);
 
         // Node and map handlers via Singletons
         var nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();
@@ -355,7 +355,7 @@ public sealed class CreateCommand : BuilderCommand
     public override string Category => "Building";
     protected override void SetupParser(GameArgumentParser p)
     {
-        p.AddArgument("name").Help("name of the object to create");
+        p.AddArgument(ParsedArgKeys.Name).Help("name of the object to create");
         p.AddArgument("-p", "--is_pc").Help("create as player character").Action(GameArgumentParser.ArgAction.StoreTrue);
         p.AddArgument("-i", "--is_item").Help("create as item").Action(GameArgumentParser.ArgAction.StoreTrue);
         p.AddArgument("-n", "--is_npc").Help("create as NPC").Action(GameArgumentParser.ArgAction.StoreTrue);
@@ -366,11 +366,11 @@ public sealed class CreateCommand : BuilderCommand
     }
     protected override void RunPuppet(GameObject go, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
-        var name = pa.GetString("name");
+        var name = pa.GetString(ParsedArgKeys.Name);
         if (string.IsNullOrWhiteSpace(name)) { go.Msg(PrintHelp()); return; }
         var descList = pa.GetList(ParsedArgKeys.Desc);
         var desc = string.Join(" ", descList);
-        var obj = GameObject.Create(name!, desc, isPc: pa.GetBool("is_pc"), isItem: pa.GetBool("is_item"), isNpc: pa.GetBool("is_npc"), isMapable: pa.GetBool("is_mapable"), isContainer: pa.GetBool("is_container"), isTickable: pa.GetBool("is_tickable"));
+        var obj = GameObject.Create(name!, desc, isPc: pa.GetBool(ParsedArgKeys.IsPc), isItem: pa.GetBool(ParsedArgKeys.IsItem), isNpc: pa.GetBool(ParsedArgKeys.IsNpc), isMapable: pa.GetBool(ParsedArgKeys.IsMapable), isContainer: pa.GetBool(ParsedArgKeys.IsContainer), isTickable: pa.GetBool(ParsedArgKeys.IsTickable));
         ObjectRegistry.AddObject(obj);
         obj.MoveTo(go);
         go.Msg($"Created object '{obj.Name}' (ID: {obj.Id}).");
@@ -397,7 +397,7 @@ public sealed class DeleteCommand : BuilderCommand
         if (!target.Access(go, "delete")) { go.Msg("You do not have permission to delete that."); return; }
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot delete an object of equal or higher privilege."); return; }
         var fullName = target.GetDisplayName(go);
-        var result = target.Delete(go, pa.GetBool("recursive"));
+        var result = target.Delete(go, pa.GetBool(ParsedArgKeys.Recursive));
         if (result is null) { go.Msg("Deletion aborted."); return; }
         int count = result.Value.Count;
         if (count > 1) go.Msg($"Deleted or moved {fullName}, {count} objects total.");
@@ -457,13 +457,13 @@ public sealed class DoorCommand : BuilderCommand
         // Bare direction words ride in the args carrier (like DoorDirectionCommand):
         // `door north`, `door n`, etc. work with or without a dash flag.
         var lower = pa.GetList(ParsedArgKeys.Args).Select(a => a.ToLowerInvariant()).ToList();
-        bool north = pa.GetBool("north") || lower.Contains("n") || lower.Contains("north"),
-            south = pa.GetBool("south") || lower.Contains("s") || lower.Contains("south"),
-            east = pa.GetBool("east") || lower.Contains("e") || lower.Contains("east"),
-            west = pa.GetBool("west") || lower.Contains("w") || lower.Contains("west"),
-            up = pa.GetBool("up") || lower.Contains("u") || lower.Contains("up"),
-            down = pa.GetBool("down") || lower.Contains("d") || lower.Contains("down");
-        bool remove = pa.GetBool("remove"), auto = pa.GetBool("auto");
+        bool north = pa.GetBool(ParsedArgKeys.North) || lower.Contains("n") || lower.Contains("north"),
+            south = pa.GetBool(ParsedArgKeys.South) || lower.Contains("s") || lower.Contains("south"),
+            east = pa.GetBool(ParsedArgKeys.East) || lower.Contains("e") || lower.Contains("east"),
+            west = pa.GetBool(ParsedArgKeys.West) || lower.Contains("w") || lower.Contains("west"),
+            up = pa.GetBool(ParsedArgKeys.Up) || lower.Contains("u") || lower.Contains("up"),
+            down = pa.GetBool(ParsedArgKeys.Down) || lower.Contains("d") || lower.Contains("down");
+        bool remove = pa.GetBool(ParsedArgKeys.Remove), auto = pa.GetBool(ParsedArgKeys.Auto);
         if (!remove && !(north||south||east||west||up||down))
         {
             go.Msg("You must specify a direction when creating a door.");
@@ -1110,7 +1110,7 @@ public sealed class SetCommand : BuilderCommand
         // Multi-word values (`set me desc hello world`): OneOrMore keeps the
         // missing-value required error and dash handling of a single
         // positional; Run joins the tokens back with spaces.
-        p.AddArgument("value", help: "Value to set (evaluated with ast.literal_eval).", nargs: "+");
+        p.AddArgument(ParsedArgKeys.Value, help: "Value to set (evaluated with ast.literal_eval).", nargs: "+");
     }
     private static object? ConvertJsonElement(JsonElement je)
     {
@@ -1198,8 +1198,8 @@ public sealed class SetCommand : BuilderCommand
         var attr = pa.GetString(ParsedArgKeys.Attribute) ?? "";
         // `value` is OneOrMore: join multi-word tokens back. The scalar
         // fallback covers programmatic ParsedArgs with a plain string.
-        var valueTokens = pa.GetList("value");
-        var raw = valueTokens.Count > 0 ? string.Join(" ", valueTokens) : (pa.GetString("value") ?? "");
+        var valueTokens = pa.GetList(ParsedArgKeys.Value);
+        var raw = valueTokens.Count > 0 ? string.Join(" ", valueTokens) : (pa.GetString(ParsedArgKeys.Value) ?? "");
         var target = SetHelper.ResolveTarget(go, targetStr);
         if (target is null) return;
         if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }
@@ -1315,7 +1315,7 @@ public sealed class UnbanCommand : BuilderCommand
         var targetName = pa.GetString(ParsedArgKeys.Target);
         if (string.IsNullOrWhiteSpace(targetName)) { go.Msg(PrintHelp()); return; }
         bool wantAccount = pa.GetBool(ParsedArgKeys.Account);
-        bool ip = pa.GetBool("ip");
+        bool ip = pa.GetBool(ParsedArgKeys.Ip);
         if (!BanHelper.TryResolveBanPreamble(go, targetName, wantAccount, ip, "unban", "unbanning",
             out var target, out var acct, out var acctChars, out var host, out bool account)
             || target is null)
@@ -1416,10 +1416,10 @@ public sealed class WanderCommand : BuilderCommand
     public override string Desc => "Spawn 10 NPCs to your location to wander around";
     public override string Category => "Building";
     protected override bool AllowMissingArgs => true;
-    protected override void SetupParser(GameArgumentParser p) { p.AddArgument("count", nargs: "?", type: typeof(int), help: "Number of wanderers to spawn"); }
+    protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Count, nargs: "?", type: typeof(int), help: "Number of wanderers to spawn"); }
     protected override void RunPuppet(GameObject go, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
-        if (!CommandHelpers.TryGetCount(pa, "count", 10, 1, out int count)) { go.Msg("Count must be a positive number."); return; }
+        if (!CommandHelpers.TryGetCount(pa, ParsedArgKeys.Count, 10, 1, out int count)) { go.Msg("Count must be a positive number."); return; }
         if (count > 1000) { go.Msg("Maximum count is 1000."); return; }
         var loc = go.ResolveLocationObject() as Node;
         if (loc is null) { go.Msg("You must be in a room to spawn wanderers."); return; }

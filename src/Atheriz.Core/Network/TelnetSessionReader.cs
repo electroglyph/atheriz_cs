@@ -49,15 +49,6 @@ public sealed class TelnetSessionReader : TextReader
     public override ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default) =>
         ReadCoreAsync(buffer, cancellationToken);
 
-    public override int Read(char[] buffer, int index, int count)
-    {
-        ArgumentNullException.ThrowIfNull(buffer);
-        // Sync TextReader contract over the session's async slices. Same safety shape
-        // as TelnetCsWriter.Write: context-free server threads, ConfigureAwait(false)
-        // throughout the library, session-serialized reads.
-        return ReadCoreAsync(buffer.AsMemory(index, count), CancellationToken.None).AsTask().GetAwaiter().GetResult();
-    }
-
     private async ValueTask<int> ReadCoreAsync(Memory<char> destination, CancellationToken callerToken)
     {
         if (destination.IsEmpty)
