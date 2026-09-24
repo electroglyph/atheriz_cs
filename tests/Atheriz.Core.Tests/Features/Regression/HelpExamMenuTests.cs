@@ -25,7 +25,7 @@ public class HelpExamMenuTests
     [Fact]
     public void HelpListings_ShareOneShape()
     {
-        var logged = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "HelpCommand.cs");
+        var logged = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "InfoCommands.cs");
         var unlogged = SourceScan.Read("src", "Atheriz.Core", "Commands", "UnloggedIn", "HelpCommand.cs");
         Assert.DoesNotContain(".GetAll().Distinct()", logged);
         Assert.DoesNotContain(".GetAll().Distinct()", unlogged);
@@ -53,8 +53,13 @@ public class HelpExamMenuTests
     [Fact]
     public void Exam_NodeBranch_TestsTypeDirectly()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "ExamCommand.cs");
-        var region = SourceScan.Region(src, "public override void Run(");
+        var file = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "BuildingCommands.cs");
+        // Commands share the family file: scope to ExamCommand's own region
+        // before locating its RunPuppet (the file's first RunPuppet is Ban's).
+        int examAt = file.IndexOf("public sealed class ExamCommand", StringComparison.Ordinal);
+        Assert.True(examAt >= 0);
+        var src = file.Substring(examAt);
+        var region = SourceScan.Region(src, "protected override void RunPuppet(");
         Assert.DoesNotContain("target.IsNode && target is Node", region);
         Assert.Contains("target is Node nodeTarget", region);
         Assert.Contains("keysInOrder", region);
@@ -126,8 +131,8 @@ public class HelpExamMenuTests
         var region = SourceScan.Region(src, "internal static bool CheckPrivilege(");
         Assert.Contains("No self-exempt idiom on purpose", src);
         Assert.Contains("candidate.PrivilegeLevel >= go.PrivilegeLevel", region);
-        var ban = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "BanCommand.cs");
-        Assert.Contains("TryResolveBanPreamble", SourceScan.Region(ban, "public override void Run("));
+        var ban = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "BuildingCommands.cs");
+        Assert.Contains("TryResolveBanPreamble", SourceScan.Region(ban, "protected override void RunPuppet("));
     }
 
     // Unknown menu keys are logged, not silently swallowed; the handler

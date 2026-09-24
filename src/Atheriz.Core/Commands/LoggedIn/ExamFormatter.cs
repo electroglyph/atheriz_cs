@@ -127,7 +127,7 @@ public static class ExamFormatter
     }
 
     internal static string FormatIdSet(List<int> ids)
-        => "{" + string.Join(", ", ids.Select(ExpandId)) + "}";
+        => $"{{{string.Join(", ", ids.Select(ExpandId))}}}";
 
     // Empty-enumerable check for the strict id-set hints: a throwing
     // enumerable counts as non-empty (the old single-pass loop's exception
@@ -151,121 +151,147 @@ public static class ExamFormatter
     public static object FormatValue(object? val, string? hint)
     {
         if (hint is not null && (hint.Contains("password", StringComparison.OrdinalIgnoreCase) || hint.Contains("secret", StringComparison.OrdinalIgnoreCase))) return "<hidden>";
-        if (hint == "internal_cmdset") return "<hidden>";
-        if (hint == "external_cmdset")
+        // One tuple switch instead of the old if-chain on hint strings: each
+        // hint keeps its dedicated renderer below, and the value-shape
+        // fallbacks (dict, enumerable, ToString) live in FormatGeneric. The
+        // scripts/_contents renderer returns null to fall through to the
+        // generic renderer exactly as the old chain's trailing comment did.
+        return (val, hint) switch
         {
-            if (val is null) return "None";
-            if (val is CmdSet cs)
+            (_, "internal_cmdset") => "<hidden>",
+            (_, "external_cmdset") => FormatCmdSet(val),
+            (_, "followers") => FormatFollowers(val),
+            (_, "created_by") or (_, "last_touched_by") => FormatTouchedBy(val),
+            (_, "scripts") or (_, "_contents") => FormatIdMembers(val) ?? FormatGeneric(val),
+            (_, "locks") => FormatLocks(val),
+            (_, "session") => FormatSession(val),
+            _ => FormatGeneric(val),
+        };
+    }
+
+    private static object FormatCmdSet(object? val)
+    {
+        if (val is null) return "None";
+        if (val is CmdSet cs)
+        {
+            HashSet<int> seen = [];
+            List<string> keys = [];
+            foreach (var cmd in cs.GetAll())
             {
-                HashSet<int> seen = [];
-                List<string> keys = [];
-                foreach (var cmd in cs.GetAll())
-                {
-                    if (cmd is null) continue;
-                    if (!seen.Add(RuntimeHelpers.GetHashCode(cmd))) continue;
-                    keys.Add(cmd.Key);
-                }
-                return keys.Count > 0 ? "[" + string.Join(", ", keys) + "]" : "[]";
+                if (cmd is null) continue;
+                if (!seen.Add(RuntimeHelpers.GetHashCode(cmd))) continue;
+                keys.Add(cmd.Key);
             }
-            return "<hidden>";
+            return keys.Count > 0 ? $"[{string.Join(", ", keys)}]" : "[]";
         }
-        if (hint == "followers")
+        return "<hidden>";
+    }
+
+    private static object FormatFollowers(object? val)
+    {
+        if (val is null) return "set()";
+        try
         {
-            if (val is null) return "set()";
+            if (val is System.Collections.IEnumerable)
+                return TryCollectIds(val, out var followerIds) ? FormatIdSet(followerIds) : "set()";
+        }
+        catch (Exception) { }
+        return "set()";
+    }
+
+    private static object FormatTouchedBy(object? val)
+    {
+        if (val is int iv)
+        {
+            if (iv == -1) return "-1";
+            return ExpandId(iv).Replace("#", "");
+            // Python: f"{val} ({name})" if name else str(val)
+            // ExpandId returns "#id (name)", we want "id (name)" to match python's "{val} ({name})"
+        }
+        // Fallback try convert
+        try
+        {
+            int id = Convert.ToInt32(val);
+            if (id == -1) return "-1";
+            var name = ObjectRegistry.GetSingle(id)?.Name;
+            return name is not null ? $"{id} ({name})" : id.ToString();
+        }
+        catch (Exception) { }
+        return val?.ToString() ?? "None";
+    }
+
+    // The scripts and _contents blocks were identical (strict ints-only
+    // collect; empty renders "set()"; non-int members fall through to the
+    // generic renderer below instead of rendering a partial set). Null means
+    // "fall through", which the switch routes to FormatGeneric.
+    private static object? FormatIdMembers(object? val)
+    {
+        if (val is null) return "set()";
+        try
+        {
+            if (val is System.Collections.IEnumerable en)
+            {
+                if (TryCollectIds(en, strictInts: true, out var memberIds)) return FormatIdSet(memberIds);
+                if (IsEmpty(en)) return "set()";
+            }
+        }
+        catch (Exception) { }
+        return null;
+    }
+
+    private static object FormatLocks(object? val)
+    {
+        // Python returns list[str] where first is "" and rest are "lock: [lambda...]"
+        var lines = new List<string> { "" };
+        if (val is not null)
+        {
             try
             {
-                if (val is System.Collections.IEnumerable)
-                    return TryCollectIds(val, out var followerIds) ? FormatIdSet(followerIds) : "set()";
-            }
-            catch (Exception) { }
-            return "set()";
-        }
-        if (hint == "created_by" || hint == "last_touched_by")
-        {
-            if (val is int iv)
-            {
-                if (iv == -1) return "-1";
-                return ExpandId(iv).Replace("#", "");
-                // Python: f"{val} ({name})" if name else str(val)
-                // ExpandId returns "#id (name)", we want "id (name)" to match python's "{val} ({name})"
-            }
-            // Fallback try convert
-            try
-            {
-                int id = Convert.ToInt32(val);
-                if (id == -1) return "-1";
-                var name = ObjectRegistry.GetSingle(id)?.Name;
-                return name is not null ? $"{id} ({name})" : id.ToString();
-            }
-            catch (Exception) { }
-            return val?.ToString() ?? "None";
-        }
-        // The scripts and _contents blocks were identical (strict ints-only
-        // collect; empty renders "set()"; non-int members fall through to the
-        // generic renderer below instead of rendering a partial set).
-        if (hint is "scripts" or "_contents")
-        {
-            if (val is null) return "set()";
-            try
-            {
-                if (val is System.Collections.IEnumerable en)
+                if (val is System.Collections.IDictionary lockDict)
                 {
-                    if (TryCollectIds(en, strictInts: true, out var memberIds)) return FormatIdSet(memberIds);
-                    if (IsEmpty(en)) return "set()";
-                }
-            }
-            catch (Exception) { }
-            // fallback
-        }
-        if (hint == "locks")
-        {
-            // Python returns list[str] where first is "" and rest are "lock: [lambda...]"
-            var lines = new List<string> { "" };
-            if (val is not null)
-            {
-                try
-                {
-                    if (val is System.Collections.IDictionary lockDict)
+                    foreach (System.Collections.DictionaryEntry kv in lockDict)
                     {
-                        foreach (System.Collections.DictionaryEntry kv in lockDict)
+                        string lockName = kv.Key?.ToString() ?? "";
+                        var callables = kv.Value as System.Collections.IEnumerable;
+                        List<string> bodies = [];
+                        if (callables is not null)
                         {
-                            string lockName = kv.Key?.ToString() ?? "";
-                            var callables = kv.Value as System.Collections.IEnumerable;
-                            List<string> bodies = [];
-                            if (callables is not null)
+                            foreach (var fn in callables)
                             {
-                                foreach (var fn in callables)
-                                {
-                                    if (fn is Delegate d) bodies.Add(LambdaSource(d));
-                                    else bodies.Add(fn?.ToString() ?? "<callable>");
-                                }
+                                if (fn is Delegate d) bodies.Add(LambdaSource(d));
+                                else bodies.Add(fn?.ToString() ?? "<callable>");
                             }
-                            lines.Add($"{lockName}: [{string.Join(", ", bodies)}]");
                         }
+                        lines.Add($"{lockName}: [{string.Join(", ", bodies)}]");
                     }
                 }
-                catch (Exception) { }
             }
-            return lines;
+            catch (Exception) { }
         }
-        if (hint == "session")
-        {
-            if (val is null) return "None";
-            if (val is not Session sess) return val.ToString() ?? "Session()";
-            List<string> parts = [];
-            // getattr-style guards — one throwing accessor (e.g. a
-            // puppet whose Name raises) must not abort the whole exam list.
-            var acc = SafeGet(() => sess.Account);
-            if (acc is not null) parts.Add($"account={SafeGet(() => acc.Name) ?? "?"} (#{SafeGet(() => acc.Id)})");
-            var conn = SafeGet(() => sess.Connection);
-            if (conn is not null) parts.Add($"conn={SafeGet(() => conn.ClientHost) ?? SafeGet(() => conn.SessionId) ?? "?"}");
-            var puppet = SafeGet(() => sess.Puppet);
-            if (puppet is not null) parts.Add($"puppet={SafeGet(() => puppet.Name) ?? "?"} (#{SafeGet(() => puppet.Id)})");
-            var tw = SafeGet(() => sess.TermWidth); var th = SafeGet(() => sess.TermHeight);
-            if (tw != 0 && th != 0) parts.Add($"w={tw}, h={th}");
-            if (SafeGet(() => sess.ScreenReader)) parts.Add("sr=True");
-            return parts.Count > 0 ? "Session(" + string.Join(", ", parts) + ")" : "Session()";
-        }
+        return lines;
+    }
+
+    private static object FormatSession(object? val)
+    {
+        if (val is null) return "None";
+        if (val is not Session sess) return val.ToString() ?? "Session()";
+        List<string> parts = [];
+        // getattr-style guards — one throwing accessor (e.g. a
+        // puppet whose Name raises) must not abort the whole exam list.
+        var acc = SafeGet(() => sess.Account);
+        if (acc is not null) parts.Add($"account={SafeGet(() => acc.Name) ?? "?"} (#{SafeGet(() => acc.Id)})");
+        var conn = SafeGet(() => sess.Connection);
+        if (conn is not null) parts.Add($"conn={SafeGet(() => conn.ClientHost) ?? SafeGet(() => conn.SessionId) ?? "?"}");
+        var puppet = SafeGet(() => sess.Puppet);
+        if (puppet is not null) parts.Add($"puppet={SafeGet(() => puppet.Name) ?? "?"} (#{SafeGet(() => puppet.Id)})");
+        var tw = SafeGet(() => sess.TermWidth); var th = SafeGet(() => sess.TermHeight);
+        if (tw != 0 && th != 0) parts.Add($"w={tw}, h={th}");
+        if (SafeGet(() => sess.ScreenReader)) parts.Add("sr=True");
+        return parts.Count > 0 ? $"Session({string.Join(", ", parts)})" : "Session()";
+    }
+
+    private static object FormatGeneric(object? val)
+    {
         if (val is null) return "None";
         if (val is string s) return s;
         // Typed lock check: no type named RLock exists in C# (the name is a
@@ -284,7 +310,7 @@ public static class ExamFormatter
                 var vf = FormatValue(kv.Value, kv.Key?.ToString()) as string ?? kv.Value?.ToString() ?? "";
                 items.Add($"{kf}: {vf}");
             }
-            return "{" + string.Join(", ", items) + "}";
+            return $"{{{string.Join(", ", items)}}}";
         }
         var valType2 = val.GetType();
         if (val is System.Collections.IEnumerable en2 && val is not string)
@@ -298,9 +324,9 @@ public static class ExamFormatter
             // Set check by generic definition: matches HashSet of any element
             // type without catching unrelated types that merely contain
             // HashSet in their name.
-            if (valType2.IsGenericType && valType2.GetGenericTypeDefinition() == typeof(System.Collections.Generic.HashSet<>)) return "{" + string.Join(", ", elems) + "}";
-            if (val is System.Array) return "(" + string.Join(", ", elems) + ")";
-            return "[" + string.Join(", ", elems) + "]";
+            if (valType2.IsGenericType && valType2.GetGenericTypeDefinition() == typeof(System.Collections.Generic.HashSet<>)) return $"{{{string.Join(", ", elems)}}}";
+            if (val is System.Array) return $"({string.Join(", ", elems)})";
+            return $"[{string.Join(", ", elems)}]";
         }
         try { return val.ToString() ?? "<unprintable>"; } catch { return "<unprintable>"; }
     }

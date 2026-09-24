@@ -1,3 +1,5 @@
+using Atheriz.Core.Objects;
+
 namespace Atheriz.Core.Commands;
 
 /// <summary>
@@ -7,4 +9,17 @@ namespace Atheriz.Core.Commands;
 public interface IMessageTarget
 {
     void Msg(string text);
+
+    /// <summary>
+    /// Owning session when the caller has one (GameObject, BaseConnection);
+    /// null for session-less shapes, which keeps the shared quiet-close a
+    /// silent noop for them.
+    /// </summary>
+    Session? Session { get => null; }
+
+    /// <summary>
+    /// Closes the caller's connection. Noop unless the implementer owns one
+    /// (BaseConnection overrides it).
+    /// </summary>
+    void Close() { }
 }

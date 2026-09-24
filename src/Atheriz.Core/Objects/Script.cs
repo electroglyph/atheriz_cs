@@ -31,6 +31,27 @@ public class Script : GameObject
         get { using (ReadScope()) return _child; }
     }
 
+    /// <inheritdoc/>
+    public override bool IsKnownProperty(string name) => name switch
+    {
+        "Child" or "child" or "_child" => true,
+        _ => base.IsKnownProperty(name),
+    };
+
+    /// <inheritdoc/>
+    public override bool TrySetProperty(string name, object? value, out string? error)
+    {
+        error = null;
+        switch (name)
+        {
+            case "Child" or "child" or "_child":
+                error = $"'{name}' is a read-only attribute.";
+                return false;
+            default:
+                return base.TrySetProperty(name, value, out error);
+        }
+    }
+
     public override IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
     {
         foreach (var m in base.GetExamMembers()) yield return m;

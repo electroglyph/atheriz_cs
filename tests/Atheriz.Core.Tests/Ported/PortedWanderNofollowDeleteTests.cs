@@ -174,9 +174,9 @@ public class PortedWanderNofollowDeleteTests
     [Fact] public void Wander_ReorderFix_SourceOrder()
     {
         using var env=GlobalTestEnv.Enter();
-        var path=System.IO.Path.Combine("/home/anon/atheriz-cs/src/Atheriz.Core/Commands/LoggedIn/WanderCommand.cs");
+        var path=System.IO.Path.Combine("/home/anon/atheriz-cs/src/Atheriz.Core/Commands/LoggedIn/BuildingCommands.cs");
         // If file not exist at that path, use cs path fallback
-        if(!System.IO.File.Exists(path)) path="/home/anon/atheriz-cs/src/Atheriz.Core/Commands/LoggedIn/WanderCommand.cs";
+        if(!System.IO.File.Exists(path)) path="/home/anon/atheriz-cs/src/Atheriz.Core/Commands/LoggedIn/BuildingCommands.cs";
         var src=System.IO.File.ReadAllText(path);
         var loopStart=src.IndexOf("for (int i = 0; i < count; i++)");
         if(loopStart==-1) loopStart=src.IndexOf("for i in range(count):");

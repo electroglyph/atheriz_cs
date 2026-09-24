@@ -7,37 +7,31 @@ internal static class BanHelper
     {
         if (name.StartsWith("#", StringComparison.Ordinal))
         {
-            if (!CommandHelpers.TryParseIdRef(name, out var id))
-            {
-                caller.Msg("Invalid ID format. Use #<number>.");
-                return null;
-            }
-            var t = ObjectRegistry.GetSingle(id);
-            if (t is null)
-            {
-                caller.Msg($"No object found with ID {id}.");
-                return null;
-            }
-            if (!t.IsPc)
+            var (t, err) = TargetResolution.ResolveById(caller, name);
+            if (err is not null) { caller.Msg(err); return null; }
+            if (!t!.IsPc)
             {
                 caller.Msg("You can only ban player characters.");
                 return null;
             }
             return t;
         }
-        var matches = ObjectRegistry.FilterBy(x => x.IsPc && x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (matches.Count == 0)
+        // Name search runs through the shared resolver. The filter repeats
+        // the exact-name check so the world-scope union lands on exactly the
+        // old global result (same match, same order, same messages); the
+        // multi-line error is sent one message per line as before.
+        var (target, resolveErr) = TargetResolution.ResolveObject(
+            caller,
+            name,
+            filter: o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase),
+            notFound: $"No player character found named '{name}'.",
+            multiHeader: $"Multiple matches for '{name}':");
+        if (resolveErr is not null)
         {
-            caller.Msg($"No player character found named '{name}'.");
+            foreach (var line in resolveErr.Split('\n')) caller.Msg(line);
             return null;
         }
-        if (matches.Count > 1)
-        {
-            CommandHelpers.MsgMultipleMatchesColon(caller, name);
-            foreach (var m in matches) caller.Msg($"  #{m.Id} {m.Name}");
-            return null;
-        }
-        return matches[0];
+        return target;
     }
 
     internal static GameObject? FindAccount(GameObject target)

@@ -69,6 +69,37 @@ public class Account : GameObject
     }
     public IReadOnlyList<int> Characters => Read(() => (IReadOnlyList<int>)new List<int>(_characters));
     public override string BanReason { get => Read(() => _banReason); set => Write(() => { _banReason = value; IsModified = true; }); }
+
+    /// <inheritdoc/>
+    public override bool IsKnownProperty(string name) => name switch
+    {
+        "Characters" or "characters" or "_characters" => true,
+        "BanReason" or "ban_reason" or "_ban_reason" => true,
+        "PasswordHash" or "password_hash" or "_password_hash" => true,
+        "LoggedIn" or "logged_in" or "_logged_in" => true,
+        _ => base.IsKnownProperty(name),
+    };
+
+    /// <inheritdoc/>
+    public override bool TrySetProperty(string name, object? value, out string? error)
+    {
+        error = null;
+        switch (name)
+        {
+            case "BanReason" or "ban_reason" or "_ban_reason":
+                // Null passes into the non-nullable property like the old
+                // (string) cast did; the compiler cannot see that flow.
+                BanReason = ToText(value)!;
+                return true;
+            case "Characters" or "characters" or "_characters"
+                or "PasswordHash" or "password_hash" or "_password_hash"
+                or "LoggedIn" or "logged_in" or "_logged_in":
+                error = $"'{name}' is a read-only attribute.";
+                return false;
+            default:
+                return base.TrySetProperty(name, value, out error);
+        }
+    }
     // LoggedIn is transient session state, not persisted save data — intentionally not marked modified.
     public bool LoggedIn { get => Read(() => _loggedIn); private set => Write(() => _loggedIn = value); }
 

@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Atheriz.Core.Commands;
 
-public static class CommandHelpers
+public static partial class CommandHelpers
 {
     /// <summary>
     /// Single shared implementation of the puppet guard repeated across every logged-in
@@ -76,17 +76,10 @@ public static class CommandHelpers
     /// search below instead of becoming a coord lookup.
     /// </summary>
     internal static bool TryParseCommaCoord(string raw, out Coord coord)
-    {
-        coord = new Coord(string.Empty, 0, 0, 0);
-        string inner = raw;
-        if (inner.StartsWith("(", StringComparison.Ordinal) && inner.EndsWith(")", StringComparison.Ordinal)) inner = inner[1..^1];
-        if (!inner.Contains(",")) return false;
-        var parts = inner.Split(',').Select(p => p.Trim()).ToList();
-        if (parts is not [var areaName, var xs, var ys, var zs]) return false;
-        if (!int.TryParse(xs, out var x) || !int.TryParse(ys, out var y) || !int.TryParse(zs, out var z)) return false;
-        coord = new Coord(areaName, x, y, z);
-        return true;
-    }
+        // Single home for the comma-only grammar lives on `Coord`; this stays
+        // as the call-site name the search path uses (pins in
+        // `CommaCoordSearchTests`).
+        => Coord.TryParseCommaOnly(raw, out coord);
 
     /// <summary>
     /// Single truth for <c>#&lt;id&gt;</c> references: true with <paramref name="id"/>
@@ -207,25 +200,4 @@ public static class CommandHelpers
         }
         return list[0];
     }
-
-    // ----- Centralized message dialects -----
-    // The Python originals spell these differently per command; behavior is
-    // preserved exactly — one home for the literals, no unification.
-    public static void MsgNo(IMessageTarget go) => go.Msg("No.");
-    public static void MsgNowhere(IMessageTarget go) => go.Msg("You are nowhere.");
-    public static void MsgNowhereExclaim(IMessageTarget go) => go.Msg("You are nowhere!");
-    public static void MsgInvalidLocation(IMessageTarget go) => go.Msg("You have an invalid location.");
-    public static void MsgObjectNotFound(IMessageTarget go) => go.Msg("Object not found.");
-    public static string FormatNoMatchFound(string name) => $"No match found for '{name}'.";
-    public static void MsgNoMatchFound(IMessageTarget go, string name) => go.Msg(FormatNoMatchFound(name));
-    public static string FormatCouldNotFind(string name) => $"Could not find '{name}'.";
-    public static void MsgCouldNotFind(IMessageTarget go, string name) => go.Msg(FormatCouldNotFind(name));
-    public static void MsgChannelViewDenied(IMessageTarget go) => go.Msg("You do not have permission to view this channel.");
-    public static void MsgChannelSendDenied(IMessageTarget go) => go.Msg("You do not have permission to send to this channel.");
-    public static void MsgNoChannelHistory(IMessageTarget go) => go.Msg("No history available.");
-    public static void MsgMultipleMatches(IMessageTarget go, string name) => go.Msg($"Multiple matches for '{name}'.");
-    public static void MsgMultipleMatchesColon(IMessageTarget go, string name) => go.Msg($"Multiple matches for '{name}':");
-    public static void MsgMultipleMatchesFound(IMessageTarget go, string name) => go.Msg($"Multiple matches found for '{name}'.");
-    public static string FormatMultipleMatchesIdList(IEnumerable<GameObject> matches)
-        => $"Multiple matches: {string.Join(", ", matches.Select(m => $"#{m.Id} {m.Name}"))}. Use #id to pick one.";
 }

@@ -12,11 +12,12 @@ public sealed class HelpCommand : Command
     // reserves two columns, and widths below 20 collapse.
     private static int ClampTermWidth(int tw) => tw < 20 ? 20 : tw;
 
-    public override void Run(IMessageTarget caller, object? args)
+    public override void Run(CommandContext ctx)
     {
-        var pa = args as GameArgumentParser.ParsedArgs;
+        var caller = ctx.Caller;
+        var pa = ctx.Args;
         string? query = pa?.GetString(ParsedArgKeys.Command)?.Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(query)) query = (args as string ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(query)) query = ctx.RawText.Trim().ToLowerInvariant();
         var cs = CommandRegistry.UnloggedIn;
         if (string.IsNullOrEmpty(query))
         {

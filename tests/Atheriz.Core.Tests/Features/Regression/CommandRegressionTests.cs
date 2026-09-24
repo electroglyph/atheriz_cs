@@ -249,7 +249,7 @@ public class CommandRegressionTests
     [Fact]
     public void LookHit_ChecksViewBeforeAtLook()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "LookCommand.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "InfoCommands.cs");
         int hit = src.IndexOf("puppet.Msg(puppet.AtLook(found[0]))", StringComparison.Ordinal);
         Assert.True(hit >= 0);
         var before = src.Substring(0, hit);
@@ -662,7 +662,7 @@ public class CommandRegressionTests
     [Fact]
     public void GroupResolution_DoesNotGuess()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "GroupCommand.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "CommunicationCommands.cs");
         Assert.DoesNotContain("\"all \" + targetName", src);
         Assert.DoesNotContain("Next(0, 100)", src);
     }
@@ -740,7 +740,7 @@ public class CommandRegressionTests
     [Fact]
     public void Puppet_ChecksPermissionFirst()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "PuppetCommand.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "BuildingCommands.cs");
         Assert.True(src.IndexOf("Access(go, \"puppet\")", StringComparison.Ordinal) < src.IndexOf("already being puppeted", StringComparison.Ordinal));
     }
 
@@ -774,7 +774,7 @@ public class CommandRegressionTests
     [Fact]
     public void ServerStop_RunsAfterConfirmation()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "ShutdownCommand.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminCommands.cs");
         Assert.True(src.IndexOf("AtServerStop()", StringComparison.Ordinal) > src.IndexOf("IsSuccessStatusCode", StringComparison.Ordinal));
     }
 
@@ -782,9 +782,9 @@ public class CommandRegressionTests
     [Fact]
     public void Reload_DoesNotBlockOrSwallow()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "ReloadCommand.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminCommands.cs");
         Assert.DoesNotContain("GetAwaiter().GetResult()", src);
-        var region = SourceScan.Region(src, "public override void Run(");
+        var region = SourceScan.Region(src, "protected override void RunPuppetRaw(");
         Assert.True(region.IndexOf("GetServerChannel()", StringComparison.Ordinal) > region.IndexOf("try", StringComparison.Ordinal));
     }
 
@@ -793,7 +793,7 @@ public class CommandRegressionTests
     [Fact]
     public void Suggestions_MatchNonePy()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "NoneCommand.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "InfoCommands.cs");
         Assert.Contains("!c.Hide", src);
         Assert.Contains("c.Access(", src);
         Assert.DoesNotContain("Huh?", src);
@@ -807,7 +807,7 @@ public class CommandRegressionTests
     [Fact]
     public void WanderFailure_IsSurfaced()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "WanderCommand.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "BuildingCommands.cs");
         Assert.Contains("if (!MoveTo(node", src);
     }
 
@@ -895,8 +895,8 @@ public class CommandRegressionTests
     [Fact]
     public void DoorDirection_ResolvesOnce()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "DoorDirectionCommand.cs");
-        var region = SourceScan.Region(src, "public sealed override void Run(");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "MovementCommands.cs");
+        var region = SourceScan.Region(src, "protected sealed override void RunPuppet(");
         Assert.Equal(1, SourceScan.Count(region, "ResolveLocationObject()"));
     }
 

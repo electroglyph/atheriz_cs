@@ -12,12 +12,13 @@ public sealed class NoneCommand : Command
     // leaks their names), aliases are not keys (GetAll, not GetKeys, so the
     // "?" alias is not suggestible), and verbs disabled by settings
     // (IsUnloggedInEnabled — dispatch demotes them to none) are not offered.
-    public override void Run(IMessageTarget caller, object? args)
+    public override void Run(CommandContext ctx)
     {
-        var pa = args as GameArgumentParser.ParsedArgs;
+        var caller = ctx.Caller;
+        var pa = ctx.Args;
         string text = "";
         if (pa is not null) text = string.Join(" ", pa.GetList(ParsedArgKeys.None));
-        else text = (args as string ?? "").Trim();
+        else text = ctx.RawText.Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; }
         var ignored = AtherizSettings.Global.AutoAliasIgnoredKeys;
         List<string> cmds = [];

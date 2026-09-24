@@ -17,28 +17,32 @@ public sealed class NewCharacterCommand : Command
     private static void RegisterNewCharacter(GameObject character, string name)
         => ObjectRegistry.AddObjectUnique(character, o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase), $"Character with this name ({name}) already exists.");
 
-    public override void Run(IMessageTarget caller, object? args)
+    public override void Run(CommandContext ctx)
     {
+        var caller = ctx.Caller;
         var settings = Settings.AtherizSettings.Global;
         if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Character creation is not enabled."); return; }
         if (!CreationCooldownHelper.TryReserve(caller, "character")) return;
         // sync stub for tests: expects "name gender desc"
-        var text = args as string ?? "";
-        var parts = Command.SplitStubArgs(text);
-        if (parts.Count == 0) { CreationCooldownHelper.Clear(caller); caller.Msg("Usage: new <name> (interactive in real server)."); return; }
-        string name = parts[0];
+        var text = ctx.RawText;
+        // One walk for head + verbatim tail (see CreateAccountCommand).
+        var (head, descTail) = Command.SplitHeadTail(text, 2);
+        if (head.Count == 0) { CreationCooldownHelper.Clear(caller); caller.Msg("Usage: new <name> (interactive in real server)."); return; }
+        string name = head[0];
         var err = Validation.ValidateCharacterName(name);
         if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
         if (caller is BaseConnection conn && conn.Session?.Account is Account acc)
         {
             if (acc.Characters.Count >= settings.MaxCharacters) { CreationCooldownHelper.Clear(caller); caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
             if (CreationValidation.PcNameExists(name)) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
-            // Desc is the raw remainder after name+gender (was re-joined
-            // tokens, which collapsed interior spacing the async prompt
-            // line keeps verbatim).
-            string desc = parts.Count > 2 ? Command.RemainderAfterTokens(text, 2) : "";
+            // Desc is the raw remainder after name+gender (re-joined
+            // tokens would collapse interior spacing the async prompt
+            // line keeps verbatim). The tail is empty exactly when there
+            // is no third token, which is the old `parts.Count > 2` gate
+            // (Head is capped at the first two tokens).
+            string desc = descTail;
             var character = GameObject.Create(name, desc, isPc: true);
-            character.Gender = parts.Count > 1 ? parts[1] : "neutral";
+            character.Gender = head.Count > 1 ? head[1] : "neutral";
             try
             {
                 RegisterNewCharacter(character, name);
@@ -65,42 +69,56 @@ public sealed class NewCharacterCommand : Command
             else caller.Msg($"Would create character {name} (no account session).");
         }
     }
-    public async Task RunAsync(BaseConnection caller)
+    /// <summary>
+    /// Async entry: delegates to the existing connection wizard when the
+    /// caller is a connection, else falls back to the sync stub.
+    /// </summary>
+    public override Task RunAsync(CommandContext ctx, CancellationToken ct)
     {
-        var settings = Settings.AtherizSettings.Global;
-        if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Character creation is not enabled."); return; }
-        var account = caller.Session.Account as Account;
-        if (account is null) { caller.Msg("You must be logged in first."); return; }
-        if (account.Characters.Count >= settings.MaxCharacters) { caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
-        string rateKey = CreationCooldownHelper.RateKey(caller);
-        if (!CreationCooldownHelper.TryReserve(caller, "character")) return;
-        string name = await caller.Session.Prompt("Enter a name for your character:").ConfigureAwait(false);
-        name = name.Trim();
-        var err = Validation.ValidateCharacterName(name);
-        if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
-        string gender = await caller.Session.Prompt("Enter your character's gender:").ConfigureAwait(false);
-        gender = gender.Trim();
-        if (string.IsNullOrEmpty(gender)) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg("Gender cannot be empty."); return; }
-        string desc = await caller.Session.Prompt("Enter a short description of your character:").ConfigureAwait(false);
-        if (CreationValidation.PcNameExists(name))
-        { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg($"Character with this name ({name}) already exists."); return; }
-        var character = GameObject.Create(name, desc, isPc: true);
-        character.Gender = gender;
+        if (ctx.Caller is BaseConnection conn) return RunAsync(conn, ct);
+        Run(ctx);
+        return Task.CompletedTask;
+    }
+    public async Task RunAsync(BaseConnection caller, CancellationToken ct = default)
+    {
         try
         {
-            RegisterNewCharacter(character, name);
+            var settings = Settings.AtherizSettings.Global;
+            if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Character creation is not enabled."); return; }
+            var account = caller.Session.Account as Account;
+            if (account is null) { caller.Msg("You must be logged in first."); return; }
+            if (account.Characters.Count >= settings.MaxCharacters) { caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
+            string rateKey = CreationCooldownHelper.RateKey(caller);
+            if (!CreationCooldownHelper.TryReserve(caller, "character")) return;
+            string name = await caller.Session.Prompt("Enter a name for your character:", false, ct).ConfigureAwait(false);
+            name = name.Trim();
+            var err = Validation.ValidateCharacterName(name);
+            if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+            string gender = await caller.Session.Prompt("Enter your character's gender:", false, ct).ConfigureAwait(false);
+            gender = gender.Trim();
+            if (string.IsNullOrEmpty(gender)) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg("Gender cannot be empty."); return; }
+            string desc = await caller.Session.Prompt("Enter a short description of your character:", false, ct).ConfigureAwait(false);
+            if (CreationValidation.PcNameExists(name))
+            { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg($"Character with this name ({name}) already exists."); return; }
+            var character = GameObject.Create(name, desc, isPc: true);
+            character.Gender = gender;
+            try
+            {
+                RegisterNewCharacter(character, name);
+            }
+            catch (InvalidOperationException ex)
+            {
+                ObjectRegistry.ClearCreationCooldown(rateKey);
+                caller.Msg(ex.Message);
+                try { character.IsDeleted = true; } catch (Exception) { }
+                return;
+            }
+            double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+            ObjectRegistry.ApplyCreationCooldown("character", rateKey, now2, settings.CreationCooldown);
+            account.AddCharacter(character);
+            if (!CharacterPuppetSetup.AttachAndHome(caller, character)) return;
+            caller.Msg($"Character {name} created and puppeted.");
         }
-        catch (InvalidOperationException ex)
-        {
-            ObjectRegistry.ClearCreationCooldown(rateKey);
-            caller.Msg(ex.Message);
-            try { character.IsDeleted = true; } catch (Exception) { }
-            return;
-        }
-        double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
-        ObjectRegistry.ApplyCreationCooldown("character", rateKey, now2, settings.CreationCooldown);
-        account.AddCharacter(character);
-        if (!CharacterPuppetSetup.AttachAndHome(caller, character)) return;
-        caller.Msg($"Character {name} created and puppeted.");
+        catch (OperationCanceledException) { return; }
     }
 }

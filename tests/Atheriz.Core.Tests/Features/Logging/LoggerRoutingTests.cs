@@ -67,7 +67,7 @@ public class LoggerRoutingTests
         new object[] { "src/Atheriz.Core/Globals/StartStop.cs" },
         new object[] { "src/Atheriz.Core/Globals/GlobalServices.cs" },
         new object[] { "src/Atheriz.Core/Globals/SaltProvider.cs" },
-        new object[] { "src/Atheriz.Core/Commands/LoggedIn/ExitCommand.cs" },
+        new object[] { "src/Atheriz.Core/Commands/LoggedIn/MovementCommands.cs" },
         new object[] { "src/Atheriz.Core/Commands/UnloggedIn/ConnectCommand.cs" },
         new object[] { "src/Atheriz.Core/Commands/UnloggedIn/CreateAccountCommand.cs" },
         new object[] { "src/Atheriz.Core/Plugins/PluginLoader.cs" },

@@ -42,7 +42,7 @@ public class ScreenReaderShutdownExitTests
     [Fact]
     public void Shutdown_ReusesSharedClient_PoolThread()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "ShutdownCommand.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminCommands.cs");
         Assert.Contains("SharedShutdownClient", src);
         Assert.DoesNotContain("new HttpClient()", src);
         Assert.DoesNotContain("new Thread(", src);
@@ -53,7 +53,7 @@ public class ScreenReaderShutdownExitTests
     [Fact]
     public void Exit_DoorRestore_LivesInOneHelper()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "ExitCommand.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "MovementCommands.cs");
         Assert.Contains("internal static void RestoreClosedDoor(", src);
         Assert.Equal(2, SourceScan.Count(src, "RestoreClosedDoor(door, c);"));
         Assert.Equal(1, SourceScan.Count(src, "door.TryClose(c); } catch { closedOk = false; }"));

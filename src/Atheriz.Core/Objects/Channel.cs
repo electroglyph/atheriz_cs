@@ -18,6 +18,35 @@ public class Channel : GameObject
 
     public int CreatedBy { get; set; } = -1;
 
+    /// <inheritdoc/>
+    public override bool IsKnownProperty(string name) => name switch
+    {
+        "CreatedBy" or "created_by" or "_created_by" => true,
+        "Listeners" or "listeners" or "_listeners" => true,
+        "History" or "history" or "_history" => true,
+        "Command" or "command" or "_command" => true,
+        _ => base.IsKnownProperty(name),
+    };
+
+    /// <inheritdoc/>
+    public override bool TrySetProperty(string name, object? value, out string? error)
+    {
+        error = null;
+        switch (name)
+        {
+            case "CreatedBy" or "created_by" or "_created_by":
+                CreatedBy = ToInt(value);
+                return true;
+            case "Listeners" or "listeners" or "_listeners"
+                or "History" or "history" or "_history"
+                or "Command" or "command" or "_command":
+                error = $"'{name}' is a read-only attribute.";
+                return false;
+            default:
+                return base.TrySetProperty(name, value, out error);
+        }
+    }
+
     public Channel(int historyLimit = 50)
     {
         IsChannel = true;
@@ -138,10 +167,10 @@ public class Channel : GameObject
 
     public Atheriz.Core.Commands.Command? GetCommand()
     {
-        // Snapshot Name/Desc/Id before locking: GameObject props take SyncRoot, so
+        // Snapshot Name/Desc before locking: GameObject props take SyncRoot, so
         // reading them under _histLock would nest channel -> object (inversion;
-        // the fixed order everywhere is object -> channel). Id is read outside
-        // the lock alongside Name/Desc.
+        // the fixed order everywhere is object -> channel). The command ctor
+        // below re-reads the same pair plus Id the same way (never under _histLock).
         // Name and Desc share one ReadScope — two independent reads could cache
         // a new-key/old-desc command across a concurrent rename. Pair with the
         // single-hold Rename on the write side; the read hold alone cannot
@@ -149,17 +178,11 @@ public class Channel : GameObject
         string key;
         string desc;
         using (ReadScope()) { key = Name.ToLowerInvariant(); desc = Desc; }
-        int id = Id;
         lock (_histLock)
         {
             // Invalidate the cached command on rename (old cache ignored Name/Desc).
             if (_command is not null && _commandKey == key && _commandDesc == desc) return _command;
-            var cmd = new BaseChannelCommand();
-            var channelCmd = (BaseChannelCommand)cmd;
-            channelCmd.SetKey(key);
-            channelCmd.SetDesc(desc);
-            cmd.Channel = this;
-            cmd.Id = id;
+            Atheriz.Core.Commands.BaseChannelCommand cmd = new(this);
             _command = cmd;
             _commandKey = key;
             _commandDesc = desc;

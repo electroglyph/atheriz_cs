@@ -117,7 +117,7 @@ public class SetupChannelAliasTests
             Assert.Contains("account1", content);
             Assert.DoesNotContain("password1", content);
             // Create already registers: no second add in the command body.
-            var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "SpamCommand.cs");
+            var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminCommands.cs");
             Assert.DoesNotContain("AddObject(account)", src);
         }
         finally

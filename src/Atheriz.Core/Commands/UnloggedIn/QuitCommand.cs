@@ -8,10 +8,10 @@ public sealed class QuitCommand : Command
     public override IReadOnlyList<string> Aliases => ["exit", "logout", "disconnect"];
     public override string Desc => "Quit.";
     public override bool UseParser => false;
-    public override void Run(IMessageTarget caller, object? args)
+    public override void Run(CommandContext ctx)
     {
-        caller.Msg("Goodbye!");
-        LoggedIn.ConnectionHelper.CloseQuietly(caller);
+        ctx.Caller.Msg("Goodbye!");
+        LoggedIn.ConnectionHelper.CloseQuietly(ctx.Caller);
     }
 }
 

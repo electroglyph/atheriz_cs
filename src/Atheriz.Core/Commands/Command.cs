@@ -24,7 +24,7 @@ public abstract class Command
 
     public virtual bool Access(IMessageTarget caller) => true;
 
-    public GameArgumentParser? Parser
+    public virtual GameArgumentParser? Parser
     {
         get
         {
@@ -66,23 +66,155 @@ public abstract class Command
     }
 
     /// <summary>
-    /// Override to implement logic. <paramref name="args"/> is either ParsedArgs or raw string.
+    /// Untyped entry. Builds a <see cref="CommandContext"/> from the dual-type
+    /// <paramref name="args"/> (<c>ParsedArgs</c> vs raw <c>string</c>) and
+    /// forwards to <see cref="Run(CommandContext)"/>, so direct
+    /// <c>Run(caller, pa-or-string)</c> calls keep working. New commands
+    /// override <see cref="Run(CommandContext)"/> (or <see cref="RunParsed"/>
+    /// / <see cref="RunRaw"/>) instead. Stays virtual so existing overrides of
+    /// this shape keep compiling; production commands all sit on the context.
     /// </summary>
-    public abstract void Run(IMessageTarget caller, object? args);
+    // Re-entrancy depth for the adapter below: the RunParsed/RunRaw defaults
+    // bridge back to Run(caller, args), so a command overriding only one of
+    // them and receiving the other input shape would ping-pong adapter ->
+    // context -> default -> adapter until the stack overflows. The defaults
+    // go terminal (PrintHelp) instead once re-entered. Only the base adapter
+    // body counts (overrides replace it outright), so decorator forwarding
+    // (LagGateCommand -> inner Run(ctx)) and nested command calls are
+    // unaffected: their first bridge back still runs.
+    private static readonly AsyncLocal<int> _runDepth = new();
+
+    public virtual void Run(IMessageTarget caller, object? args)
+    {
+        _runDepth.Value++;
+        try
+        {
+            Run(new CommandContext(caller, null, args as GameArgumentParser.ParsedArgs, args as string ?? "", CancellationToken.None));
+        }
+        finally { _runDepth.Value--; }
+    }
+
+    /// <summary>
+    /// Primary entry point: the typed invocation for a command. The default
+    /// splits parsed vs raw input (non-null <see cref="CommandContext.Args"/>
+    /// runs <see cref="RunParsed"/>, otherwise <see cref="RunRaw"/>).
+    /// </summary>
+    public virtual void Run(CommandContext ctx)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+        if (ctx.Args is not null) RunParsed(ctx);
+        else RunRaw(ctx);
+    }
+
+    /// <summary>
+    /// Async entry surface (sync dispatch stays). Override to await
+    /// wizard-style flows under <paramref name="ct"/>; the default runs the
+    /// sync body inline.
+    /// </summary>
+    public virtual Task RunAsync(CommandContext ctx, CancellationToken ct)
+    {
+        Run(ctx);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Parsed-args entry: default forwards to <see cref="Run"/>, or sends
+    /// help when re-entered (a RunRaw-only command receiving parsed args).
+    /// Commands on the <see cref="LoggedInCommand"/> base never touch
+    /// <c>object?</c> here.
+    /// </summary>
+    public virtual void RunParsed(CommandContext ctx)
+    {
+        if (_runDepth.Value > 1) { ctx.Caller.Msg(PrintHelp()); return; }
+        Run(ctx.Caller, ctx.Args);
+    }
+
+    /// <summary>
+    /// Raw-text entry: default forwards to <see cref="Run"/>, or sends help
+    /// when re-entered (a RunParsed-only command receiving raw text).
+    /// </summary>
+    public virtual void RunRaw(CommandContext ctx)
+    {
+        if (_runDepth.Value > 1) { ctx.Caller.Msg(PrintHelp()); return; }
+        Run(ctx.Caller, ctx.RawText);
+    }
+
+    /// <summary>Forwarder so decorators (e.g. <see cref="LagGateCommand"/>) can drive setup.</summary>
+    internal void SetupParserForwarder(GameArgumentParser parser) => SetupParser(parser);
 
     // Shlex helper — mirrors Python's shlex.split( posix=True ) with escaping for Windows backslashes
     internal static List<string> SplitArgs(string argsString)
     {
-        ArgumentNullException.ThrowIfNull(argsString);
-        // replicate Python: re.sub(r'\\(?![\"\'\\])', r'\\\\', args_string)
-        var escaped = EscapeBareBackslashes(argsString);
-        // simple shlex posix split respecting quotes and backslash escapes
-        List<string> tokens = [];
+        var (head, _, _, balanced) = Tokenize(argsString);
+        if (!balanced) throw new ArgumentException("Unbalanced quote");
+        return head;
+    }
+
+    // Single tokenizer behind `SplitArgs` and the creation stubs: one
+    // escape-aware span walk yields head values plus verbatim-tail offsets, so
+    // the head and the tail can never disagree on quoting. `headCount`
+    // selects how many tokens go to `Head`; `Tail` is the verbatim rest after
+    // them (leading separators stripped, interior spacing intact — passwords
+    // and descs are credential/text bytes, not re-joined tokens).
+    // Unbalanced quotes keep the legacy stub contract bit-for-bit: head falls
+    // back to a plain whitespace split while the tail uses the old
+    // quote-scan, exactly as `SplitStubArgs` + `RemainderAfterTokens` did.
+    internal static (List<string> Head, string Tail) SplitHeadTail(string text, int headCount)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (headCount < 0) throw new ArgumentOutOfRangeException(nameof(headCount));
+        var (values, ends, origin, balanced) = Tokenize(text);
+        if (!balanced)
+        {
+            // Legacy fallback: whitespace head + old quote-scan tail.
+            var head = text.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries).Take(headCount).ToList();
+            return (head, RemainderScan(text, headCount));
+        }
+        List<string> head2 = values.Take(headCount).ToList();
+        string tail = "";
+        if (values.Count > headCount)
+        {
+            int origEnd = ends[headCount - 1] < origin.Count ? origin[ends[headCount - 1]] : text.Length;
+            // The mapped offset lands on the delimiter run after the head
+            // token (escaped/head spans end at the separator); skip only the
+            // following separator run, like the old scan did.
+            int k = origEnd;
+            while (k < text.Length && char.IsWhiteSpace(text[k])) k++;
+            tail = k < text.Length ? text[k..] : "";
+        }
+        return (head2, tail);
+    }
+
+    // One escape-aware span walk behind `SplitArgs` (values) and
+    // `SplitHeadTail` (values plus escaped end-offsets per token, with the
+    // escaped-to-original origin map for verbatim tail slicing). The walk
+    // mirrors the old SplitArgs body exactly; `balanced` reports whether any
+    // quote was left open.
+    private static (List<string> Values, List<int> Ends, List<int> Origin, bool Balanced) Tokenize(string text)
+    {
+        // Pre-pass with origin map: replicate Python
+        // re.sub(r'\\(?![\"\'\\])', r'\\\\', s) while remembering which
+        // original offset each escaped char came from (doubled chars map to
+        // the backslash's offset). Tail slicing runs on original offsets;
+        // head values run on escaped text, exactly like SplitArgs always did.
+        var escaped = new System.Text.StringBuilder(text.Length + 8);
+        var origin = new List<int>(text.Length + 8);
+        for (int o = 0; o < text.Length; o++)
+        {
+            char c = text[o];
+            if (c != '\\') { escaped.Append(c); origin.Add(o); continue; }
+            char next = o + 1 < text.Length ? text[o + 1] : '\0';
+            escaped.Append('\\'); origin.Add(o);
+            if (next is not ('"' or '\'' or '\\')) { escaped.Append('\\'); origin.Add(o); }
+        }
+        string e = escaped.ToString();
+        List<string> values = [];
+        List<int> ends = [];
         var cur = new System.Text.StringBuilder();
         bool inSingle = false, inDouble = false, escapedNext = false;
-        for (int i = 0; i < escaped.Length; i++)
+        for (int i = 0; i < e.Length; i++)
         {
-            char c = escaped[i];
+            char c = e[i];
             if (escapedNext) { cur.Append(c); escapedNext = false; continue; }
             if (c == '\\')
             {
@@ -94,54 +226,21 @@ public abstract class Command
             if (c == '"' && !inSingle) { inDouble = !inDouble; continue; }
             if (!inSingle && !inDouble && char.IsWhiteSpace(c))
             {
-                if (cur.Length > 0) { tokens.Add(cur.ToString()); cur.Clear(); }
+                if (cur.Length > 0) { values.Add(cur.ToString()); ends.Add(i); cur.Clear(); }
                 continue;
             }
             cur.Append(c);
         }
         if (escapedNext) cur.Append('\\');
-        if (inSingle || inDouble) throw new ArgumentException("Unbalanced quote");
-        if (cur.Length > 0) tokens.Add(cur.ToString());
-        return tokens;
+        bool balanced = !inSingle && !inDouble;
+        if (balanced && cur.Length > 0) { values.Add(cur.ToString()); ends.Add(e.Length); }
+        return (values, ends, origin, balanced);
     }
 
-    // Single-pass equivalent of Regex.Replace(s, @"\\(?![\""\'\\])", @"\\"):
-    // a backslash NOT followed by '"', '\'' or '\\' is doubled so the shlex
-    // loop below reads it as a literal backslash. A trailing backslash has
-    // no follower, so the lookahead succeeds and it doubles as well.
-    private static string EscapeBareBackslashes(string s)
-    {
-        int first = s.IndexOf('\\');
-        if (first < 0) return s;
-        var sb = new System.Text.StringBuilder(s.Length + 8);
-        sb.Append(s, 0, first);
-        for (int i = first; i < s.Length; i++)
-        {
-            char c = s[i];
-            if (c != '\\') { sb.Append(c); continue; }
-            char next = i + 1 < s.Length ? s[i + 1] : '\0';
-            sb.Append('\\');
-            if (next is not ('"' or '\'' or '\\')) sb.Append('\\');
-        }
-        return sb.ToString();
-    }
-
-    // Sync-stub splitter for the creation stubs (create/guest/new-character):
-    // honors quotes/tabs like the parser path; on unbalanced quotes falls
-    // back to a plain whitespace split so weird input still reaches validation.
-    internal static List<string> SplitStubArgs(string text)
-    {
-        try { return SplitArgs(text); }
-        catch (ArgumentException) { return text.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries).ToList(); }
-    }
-
-    // Raw-remainder splitter for the creation stubs (create/new-character):
-    // skips `count` leading tokens, strips only the following separator run,
-    // and returns the rest verbatim. Token spans mirror SplitArgs (quotes
-    // delimit, whitespace separates) so the remainder starts exactly where
-    // the skipped tokens end; interior spacing is preserved, matching the
-    // async prompt lines which are consumed whole.
-    internal static string RemainderAfterTokens(string text, int count)
+    // Old quote-scan kept for the unbalanced fallback only: skips `count`
+    // leading tokens (quotes delimit, whitespace separates, no escape
+    // processing) and returns the rest verbatim.
+    private static string RemainderScan(string text, int count)
     {
         int i = 0;
         for (int t = 0; t < count; t++)

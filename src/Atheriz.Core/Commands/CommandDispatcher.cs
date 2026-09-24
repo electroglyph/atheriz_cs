@@ -112,6 +112,48 @@ public static class CommandDispatcher
         return null;
     }
 
+    // Auto-alias tail of the resolution chain: the global-registry prefix
+    // scan behind the AutoCommandAliasing setting. A refused single-char
+    // no-alias verb reports through <paramref name="refused"/> so the caller
+    // aborts before the none-fallback (a refusal is not "unknown").
+    private static Command? TryResolveAutoAlias(GameObject puppet, string rawCmdKey, ref string matchedAlias, out bool refused)
+    {
+        refused = false;
+        if (!_settings.AutoCommandAliasing) return null;
+        if (rawCmdKey.Length == 1 && NoAliasCommands.Contains(rawCmdKey))
+        {
+            puppet.Msg("You can't do that.");
+            refused = true;
+            return null;
+        }
+        // Deliberate divergence from Python: non-social commands take priority over socials
+        // (else "sa"→salute would shadow "say", etc.).
+        Command? cmd;
+        (cmd, matchedAlias) = AutoAlias(CommandRegistry.LoggedIn, rawCmdKey, socialsFallback: true, caller: puppet);
+        return cmd;
+    }
+
+    // Glued single-char non-alpha: a lone leading symbol with text stuck to
+    // it retries as its first character (so `'hello` can reach `'`). The
+    // retry keeps the internal-first/global-second head: an internal
+    // single-char verb shadows the global one on glued input too.
+    private static Command? TryResolveGlued(GameObject puppet, string stripped, string rawCmdKey, ref string matchedAlias, ref string cmdArgs)
+    {
+        var first = rawCmdKey.Length > 0 ? rawCmdKey[..1] : "";
+        if (string.IsNullOrEmpty(first) || char.IsLetter(first[0])) return null;
+        var cmd = TryResolveGlobal(puppet, first);
+        cmd ??= TryResolveLocal(puppet, first);
+        if (cmd is null) return null;
+        matchedAlias = first;
+        // glued args: parts[0][1:] + remainder
+        int ws = stripped.IndexOfAny(WhitespaceChars);
+        string rawFirstToken = ws < 0 ? stripped : stripped[..ws];
+        string gluedRemainder = rawFirstToken.Length > 1 ? rawFirstToken[1..] : "";
+        if (!string.IsNullOrEmpty(cmdArgs)) gluedRemainder = gluedRemainder.Length > 0 ? gluedRemainder + " " + cmdArgs : cmdArgs;
+        cmdArgs = gluedRemainder.TrimStart(WhitespaceChars);
+        return cmd;
+    }
+
     /// <summary>
     /// Mirrors <c>dispatch_loggedin(puppet, text, immediate)</c> (inputfuncs.py:88).
     /// If <paramref name="immediate"/> is false, queues on threadpool and returns null.
@@ -125,51 +167,24 @@ public static class CommandDispatcher
         var cmdArgs = parsed.CmdArgs;
         string matchedAlias = parsed.MatchedAlias;
 
-        Command? cmd = TryResolveGlobal(puppet, rawCmdKey);
+        // Resolution precedence, one link per resolver: global, then the
+        // glued single-char retry, then local, then auto-alias, then the
+        // none-fallback. Each resolver runs only when every earlier one
+        // missed — no nested fallthroughs.
+        // Short-circuit note: when an earlier resolver hits,
+        // TryResolveAutoAlias never runs and refused keeps its
+        // initializer (false) below — a hit is never a refusal.
+        bool refused = false;
+        Command? cmd = TryResolveGlobal(puppet, rawCmdKey)
+            ?? TryResolveGlued(puppet, stripped, rawCmdKey, ref matchedAlias, ref cmdArgs)
+            ?? TryResolveLocal(puppet, rawCmdKey)
+            ?? TryResolveAutoAlias(puppet, rawCmdKey, ref matchedAlias, out refused);
+        if (refused) return null;
         if (cmd is null)
         {
-            // glued single-char non-alpha: a lone leading symbol with text stuck to
-            // it retries as its first character (so `'hello` can reach `'`).
-            var first = rawCmdKey.Length > 0 ? rawCmdKey[..1] : "";
-            if (!string.IsNullOrEmpty(first) && !char.IsLetter(first[0]))
-            {
-                // Glued lookup prefers internal-first, same as the normal path above:
-                // an internal single-char verb shadows the global one on glued input too.
-                cmd = TryResolveGlobal(puppet, first);
-                cmd ??= TryResolveLocal(puppet, first);
-                if (cmd is not null)
-                {
-                    matchedAlias = first;
-                    // glued args: parts[0][1:] + remainder
-                    int ws = stripped.IndexOfAny(WhitespaceChars);
-                    string rawFirstToken = ws < 0 ? stripped : stripped[..ws];
-                    string gluedRemainder = rawFirstToken.Length > 1 ? rawFirstToken[1..] : "";
-                    if (!string.IsNullOrEmpty(cmdArgs)) gluedRemainder = gluedRemainder.Length > 0 ? gluedRemainder + " " + cmdArgs : cmdArgs;
-                    cmdArgs = gluedRemainder.TrimStart(WhitespaceChars);
-                }
-            }
-            if (cmd is null)
-            {
-                // check location and inventory external cmdsets — faithful to inputfuncs.py loc.contents + puppet.contents
-                cmd = TryResolveLocal(puppet, rawCmdKey);
-            }
-            if (cmd is null && _settings.AutoCommandAliasing)
-            {
-                if (rawCmdKey.Length == 1 && NoAliasCommands.Contains(rawCmdKey))
-                {
-                    puppet.Msg("You can't do that.");
-                    return null;
-                }
-                // Deliberate divergence from Python: non-social commands take priority over socials
-                // (else "sa"→salute would shadow "say", etc.).
-                (cmd, matchedAlias) = AutoAlias(CommandRegistry.LoggedIn, rawCmdKey, socialsFallback: true, caller: puppet);
-            }
-            if (cmd is null)
-            {
-                cmd = CommandRegistry.LoggedIn.Get("none");
-                matchedAlias = "none";
-                cmdArgs = stripped;
-            }
+            cmd = CommandRegistry.LoggedIn.Get("none");
+            matchedAlias = "none";
+            cmdArgs = stripped;
         }
         if (cmd is null) return null;
         if (!cmd.Access(puppet))

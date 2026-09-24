@@ -16,25 +16,19 @@ public sealed class CreateAccountCommand : Command
     private static string? ValidateInputs(string name, string? password = null)
         => Validation.ValidateAccountName(name) ?? (password is null ? null : Validation.ValidatePassword(password));
 
-    public override void Run(IMessageTarget caller, object? args)
+    public override void Run(CommandContext ctx)
     {
+        var caller = ctx.Caller;
         if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Account creation is not enabled."); return; }
         if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
         // Sync stub: expects args as string "name password" for test convenience; real flow is async prompts via Session.Prompt
-        var text = args as string ?? "";
-        var parts = Command.SplitStubArgs(text);
-        if (parts.Count < 2)
-        {
-            CreationCooldownHelper.Clear(caller);
-            caller.Msg("Usage: create <account_name> <password> (interactive prompts in real server).");
-            return;
-        }
-        string name = parts[0];
-        // Passwords may contain spaces (Python prompts the whole line): take
-        // the raw remainder after the name, not re-joined tokens, so interior
-        // spacing survives exactly as the async prompt line keeps it.
-        string password = Command.RemainderAfterTokens(text, 1);
-        if (password.Length == 0)
+        var text = ctx.RawText;
+        // One walk for head + verbatim tail: the name is quote-aware while
+        // the password keeps interior spacing exactly as the async prompt
+        // line keeps it (passwords are credential bytes, never re-joined).
+        var (head, password) = Command.SplitHeadTail(text, 1);
+        string name = head.FirstOrDefault() ?? "";
+        if (head.Count == 0 || password.Length == 0)
         {
             CreationCooldownHelper.Clear(caller);
             caller.Msg("Usage: create <account_name> <password> (interactive prompts in real server).");
@@ -60,37 +54,55 @@ public sealed class CreateAccountCommand : Command
         catch (InvalidOperationException ex) { CreationCooldownHelper.Clear(caller); caller.Msg(ex.Message); }
         catch (ArgumentException ex) { CreationCooldownHelper.Clear(caller); caller.Msg(ex.Message); }
     }
-    // Async version for real server (mirrors Python's async run)
-    public async Task RunAsync(BaseConnection caller)
+    /// <summary>
+    /// Async entry: delegates to the existing connection wizard when the
+    /// caller is a connection, else falls back to the sync stub.
+    /// </summary>
+    public override Task RunAsync(CommandContext ctx, CancellationToken ct)
     {
-        var settings = Settings.AtherizSettings.Global;
-        if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Account creation is not enabled."); return; }
-        string rateKey = CreationCooldownHelper.RateKey(caller);
-        if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
-        string name = await caller.Session.Prompt("Enter an account name:").ConfigureAwait(false);
-        name = name.Trim();
-        var err = ValidateInputs(name);
-        if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
-        string password = await caller.Session.Prompt("Enter a password:").ConfigureAwait(false);
-        err = ValidateInputs(name, password);
-        if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+        if (ctx.Caller is BaseConnection conn) return RunAsync(conn, ct);
+        Run(ctx);
+        return Task.CompletedTask;
+    }
+    // Async version for real server (mirrors Python's async run). Cancellation
+    // ends the wizard silently: a cancelled prompt resolves to "" like
+    // CancelPrompt (flowing into the existing validation paths below), while
+    // a racing teardown cancels the future itself and lands in the outer
+    // OperationCanceledException catch.
+    public async Task RunAsync(BaseConnection caller, CancellationToken ct = default)
+    {
         try
         {
-            var account = Account.Create(name, password);
-            double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
-            ObjectRegistry.ApplyCreationCooldown("account", rateKey, now2, settings.CreationCooldown);
-            caller.Session.Account = account;
-            caller.SendCommand("logged_in");
-            if (settings.CharCreationEnabled)
+            var settings = Settings.AtherizSettings.Global;
+            if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Account creation is not enabled."); return; }
+            string rateKey = CreationCooldownHelper.RateKey(caller);
+            if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
+            string name = await caller.Session.Prompt("Enter an account name:", false, ct).ConfigureAwait(false);
+            name = name.Trim();
+            var err = ValidateInputs(name);
+            if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+            string password = await caller.Session.Prompt("Enter a password:", false, ct).ConfigureAwait(false);
+            err = ValidateInputs(name, password);
+            if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+            try
             {
-                try { await ConnectCommand.CharSelectionAsync(caller, account).ConfigureAwait(false); }
-                catch (Exception ex) { AtherizLogger.LogError($"[Create] char_selection failed: {ex}"); }
+                var account = Account.Create(name, password);
+                double now2 = global::Atheriz.Core.Utils.TimeProvider.MonotonicSeconds();
+                ObjectRegistry.ApplyCreationCooldown("account", rateKey, now2, settings.CreationCooldown);
+                caller.Session.Account = account;
+                caller.SendCommand("logged_in");
+                if (settings.CharCreationEnabled)
+                {
+                    try { await ConnectCommand.CharSelectionAsync(caller, account, ct).ConfigureAwait(false); }
+                    catch (Exception ex) { AtherizLogger.LogError($"[Create] char_selection failed: {ex}"); }
+                }
+                else
+                {
+                    caller.Msg("Account created. Character creation is not enabled.");
+                }
             }
-            else
-            {
-                caller.Msg("Account created. Character creation is not enabled.");
-            }
+            catch (Exception ex) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(ex.Message); }
         }
-        catch (Exception ex) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(ex.Message); }
+        catch (OperationCanceledException) { return; }
     }
 }

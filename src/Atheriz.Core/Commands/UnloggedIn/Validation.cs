@@ -2,9 +2,10 @@ using System.Text.RegularExpressions;
 
 namespace Atheriz.Core.Commands.UnloggedIn;
 
-public static class Validation
+public static partial class Validation
 {
-    private static readonly Regex NameRe = new(@"^[A-Za-z0-9 _'\-]+$", RegexOptions.Compiled);
+    [GeneratedRegex(@"^[A-Za-z0-9 _'\-]+$")]
+    private static partial Regex NameRegex();
     public static string? ValidateName(string? name, int maxLen)
     {
         // Null and blank fail the same way passwords do: every caller handles
@@ -15,7 +16,7 @@ public static class Validation
         if (stripped.Length < 3) return "Name must be at least 3 characters.";
         if (stripped.Length > maxLen) return $"Name must be at most {maxLen} characters.";
         if (stripped.Contains('\x1b') || stripped.Contains('\x00')) return "Name contains invalid characters.";
-        if (!NameRe.IsMatch(stripped)) return "Name may only contain letters, digits, spaces, hyphens, underscores and apostrophes.";
+        if (!NameRegex().IsMatch(stripped)) return "Name may only contain letters, digits, spaces, hyphens, underscores and apostrophes.";
         if (!stripped.Any(char.IsLetter)) return "Name must contain at least one letter.";
         if (stripped.Contains("  ")) return "Name cannot contain consecutive spaces.";
         // Search pronouns are resolved by the lookup path: letting a character
@@ -25,6 +26,18 @@ public static class Validation
             || stripped.Equals("all", StringComparison.OrdinalIgnoreCase))
             return "That name is reserved.";
         return null;
+    }
+    /// <summary>
+    /// Throwing twin of <see cref="ValidateName"/>: returns the trimmed name,
+    /// or throws <see cref="ArgumentException"/> carrying the exact message
+    /// <see cref="ValidateName"/> would return (single-argument throw keeps
+    /// <see cref="Exception.Message"/> byte-identical to that string).
+    /// </summary>
+    public static string ValidateNameOrThrow(string? name, int maxLen)
+    {
+        string? error = ValidateName(name, maxLen);
+        if (error is not null) throw new ArgumentException(error);
+        return (name ?? "").Trim();
     }
     public static string? ValidateAccountName(string? name) => ValidateName(name, AtherizSettings.Global.MaxAccountNameLength);
     public static string? ValidateCharacterName(string? name) => ValidateName(name, AtherizSettings.Global.MaxCharacterNameLength);

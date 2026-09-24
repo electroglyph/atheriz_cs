@@ -11,10 +11,44 @@ public sealed class ConnectCommand : Command
         p.AddArgument("account_name", help: "The name of the account to connect to.");
         p.AddArgument("password", help: "The password for the account.");
     }
-    public override void Run(IMessageTarget caller, object? args)
+    public override void Run(CommandContext ctx)
     {
-        var pa = args as GameArgumentParser.ParsedArgs;
+        var caller = ctx.Caller;
+        var pa = ctx.Args;
         if (pa is null) { caller.Msg("Invalid arguments."); return; }
+        var account = TryAuthenticate(caller, pa);
+        if (account is null) return;
+        if (caller is BaseConnection conn2 && conn2.Session is not null)
+        {
+            conn2.Session.Account = account;
+            conn2.SendCommand("logged_in");
+// fire-and-forget async, bound to the connection lifetime: a disconnect
+// mid-wizard cancels the prompts (they resolve like CancelPrompt) instead
+// of stranding the wizard on a dead session. The linked source is disposed
+// when the wizard completes.
+            var wizardCts = CancellationTokenSource.CreateLinkedTokenSource(conn2.RetryLifetimeToken);
+            _ = Task.Run(async () =>
+            {
+                using (wizardCts)
+                {
+                    try { await CharSelectionAsync(conn2, account, wizardCts.Token).ConfigureAwait(false); }
+                    catch (Exception ex) { AtherizLogger.LogError($"[Connect] char_selection failed: {ex}"); }
+                }
+            });
+        }
+        else
+        {
+            // For tests where caller is GameObject acting as connection
+            caller.Msg($"Welcome {account.Name}.");
+        }
+    }
+
+    // Credential checks shared by the sync entry and the async entry below:
+    // identical messages and side effects (ban/timing-failure bookkeeping),
+    // null when the login must stop. The session/wizard tail stays per entry
+    // (fire-and-forget vs awaited).
+    private static Account? TryAuthenticate(IMessageTarget caller, GameArgumentParser.ParsedArgs pa)
+    {
         string accountName = pa.GetString("account_name") ?? "";
         string password = pa.GetString("password") ?? "";
         // This command is normally async; in C# we provide sync stub that checks password via ObjectRegistry
@@ -23,15 +57,15 @@ public sealed class ConnectCommand : Command
         {
             try { Account.HashPassword(password); } catch (Exception) { }
             caller.Msg("Invalid password.");
-            return;
+            return null;
         }
-        if (accounts.Count > 1) { caller.Msg("Error: Please contact server admin."); return; }
+        if (accounts.Count > 1) { caller.Msg("Error: Please contact server admin."); return null; }
         var account = (Account)accounts[0];
         if (account.IsBanned)
         {
             caller.Msg($"You have been banned from this server. Reason: {account.BanReason ?? "None specified"}");
             if (caller is BaseConnection conn) conn.Close();
-            return;
+            return null;
         }
         if (!account.CheckPassword(password))
         {
@@ -52,34 +86,44 @@ public sealed class ConnectCommand : Command
                 if (caller is BaseConnection c2) c2.Close();
                 if (host != "?") ObjectRegistry.BanIp(host, DateTimeOffset.UtcNow.ToUnixTimeSeconds() + settings.LoginAttemptCooldown);
             }
-            return;
+            return null;
         }
         string host2 = (caller as BaseConnection)?.ClientHost ?? "?";
         if (host2 != "?") ObjectRegistry.FailedLogins.Remove(host2);
         try { if (caller is BaseConnection bc) bc.FailedLoginAttempts = 0; } catch (Exception) { }
-        if (caller is BaseConnection conn2 && conn2.Session is not null)
-        {
-            conn2.Session.Account = account;
-            conn2.SendCommand("logged_in");
-// fire-and-forget async
-            _ = Task.Run(async () =>
-            {
-                try { await CharSelectionAsync(conn2, account).ConfigureAwait(false); }
-                catch (Exception ex) { AtherizLogger.LogError($"[Connect] char_selection failed: {ex}"); }
-            });
-        }
-        else
-        {
-            // For tests where caller is GameObject acting as connection
-            caller.Msg($"Welcome {account.Name}.");
-        }
+        return account;
     }
 
-    internal static async Task CharSelectionAsync(BaseConnection caller, Account account)
+    /// <summary>
+    /// Async entry: same credential checks as <see cref="Run"/>, then the
+    /// character-selection wizard awaited inline under the passed token
+    /// linked with the connection lifetime (instead of the fire-and-forget
+    /// <c>Task.Run</c> the sync entry uses).
+    /// </summary>
+    public override async Task RunAsync(CommandContext ctx, CancellationToken ct)
+    {
+        if (ctx.Caller is not BaseConnection conn || conn.Session is null) { Run(ctx); return; }
+        var pa = ctx.Args;
+        if (pa is null) { conn.Msg("Invalid arguments."); return; }
+        var account = TryAuthenticate(conn, pa);
+        if (account is null) return;
+        conn.Session.Account = account;
+        conn.SendCommand("logged_in");
+        using var wizardCts = CancellationTokenSource.CreateLinkedTokenSource(ct, conn.RetryLifetimeToken);
+        try { await CharSelectionAsync(conn, account, wizardCts.Token).ConfigureAwait(false); }
+        catch (Exception ex) { AtherizLogger.LogError($"[Connect] char_selection failed: {ex}"); }
+    }
+
+    internal static async Task CharSelectionAsync(BaseConnection caller, Account account, CancellationToken ct = default)
     {
         var settings = AtherizSettings.Global;
         while (true)
         {
+            // Linked-lifetime exit: a cancelled prompt resolves to "" (it
+            // never throws), so without this the wizard would answer its own
+            // prompts with "" and loop "Invalid choice." on a dead session
+            // forever. Never true when ct cannot cancel.
+            if (ct.IsCancellationRequested) return;
             GameObject? puppetCheck;
             lock (caller.Session.Lock) puppetCheck = caller.Session.Puppet;
             if (puppetCheck is not null) break;
@@ -111,14 +155,14 @@ public sealed class ConnectCommand : Command
             // Single Prompt(display): menu + prompt line in one message, so the
             // webclient prints one trailing ">" (Msg + Prompt = double prompt).
             string choice;
-            try { choice = await caller.Session.Prompt(text + "Enter your choice:").ConfigureAwait(false); }
+            try { choice = await caller.Session.Prompt(text + "Enter your choice:", false, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
             catch { return; }
             if (choice is null) return;
             if (settings.CharCreationEnabled && choice.Trim().Equals("new", StringComparison.OrdinalIgnoreCase))
             {
                 var newCmd = new NewCharacterCommand();
-                try { await newCmd.RunAsync(caller).ConfigureAwait(false); }
+                try { await newCmd.RunAsync(caller, ct).ConfigureAwait(false); }
                 catch (Exception ex) { AtherizLogger.LogError($"[Connect] NewCharacter failed: {ex}"); caller.Msg("Character creation failed."); }
                 continue;
             }

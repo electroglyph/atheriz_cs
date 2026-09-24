@@ -3,13 +3,37 @@ namespace Atheriz.Core.Commands;
 
 /// <summary>
 /// </summary>
-public class BaseChannelCommand : Command
+public class BaseChannelCommand : LoggedInCommand
 {
     private string _key = "__base_channel";
     private string _desc = "Command for accessing channel";
     public override string Key => _key;
     public override string Desc => _desc;
     public override string Category => "Communication";
+
+    /// <summary>
+    /// Keeps the lazy path working: commands are built parameterless and then
+    /// renamed through <see cref="SetKey"/>/<see cref="SetDesc"/>.
+    /// </summary>
+    public BaseChannelCommand() { }
+
+    /// <summary>
+    /// Captures a live channel with the same wiring the
+    /// <see cref="Objects.Channel.GetCommand"/> lazy path installs: lowercased
+    /// channel name as key, channel desc as desc, channel id plus the live
+    /// reference backing <see cref="TryGetChannel"/>.
+    /// </summary>
+    public BaseChannelCommand(Channel channel)
+    {
+        ArgumentNullException.ThrowIfNull(channel);
+        string key;
+        string desc;
+        using (channel.ReadScope()) { key = channel.Name.ToLowerInvariant(); desc = channel.Desc; }
+        SetKey(key);
+        SetDesc(desc);
+        Channel = channel;
+        Id = channel.Id;
+    }
 
     /// <summary>
     /// Renames this command. Must be called before the command is added to a
@@ -89,60 +113,57 @@ public class BaseChannelCommand : Command
         set => channel = value;
     }
 
-    protected override void SetupParser(GameArgumentParser p)
-    {
-        p.AddArgument(ParsedArgKeys.Message).Help("Message to send").Nargs("*");
-        p.AddArgument("-u", "--unsubscribe").Help("Unsubscribe from channel").Action(GameArgumentParser.ArgAction.StoreTrue);
-        p.AddArgument("-r", "--replay").Help("View channel history").Action(GameArgumentParser.ArgAction.StoreTrue);
-    }
+    protected override void SetupParser(GameArgumentParser p) => ChannelActionParser.AddCommonArgs(p);
 
-    public override void Run(IMessageTarget caller, object? args)
+    protected override bool AllowMissingArgs => true;
+
+    protected override void RunPuppet(GameObject go, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
-        if (caller is not GameObject go) { caller.Msg("You can't do that."); return; }
         // The single getter below only hands out live channels, so the
         // deleted re-check it replaces is subsumed (same user message).
         if (!TryGetChannel(out var ch) || ch is null)
         {
-            caller.Msg("That channel no longer exists.");
+            go.Msg("That channel no longer exists.");
             return;
         }
-        var pa = args as GameArgumentParser.ParsedArgs;
-        if (pa is null)
+        // One triage shared with ChannelCommand (same flag precedence); the
+        // arms stay local — this command's denied messages must not cross
+        // over to ChannelCommand's view-as-not-found spoofing.
+        switch (ChannelActionParser.Parse(pa))
         {
-            // Try to parse if args is raw string? For test they pass ParsedArgs directly
-            caller.Msg(Parser!.FormatHelp());
-            return;
-        }
-        if (pa.GetBool("unsubscribe"))
-        {
-            // failures propagate, never swallowed.
-            ch.RemoveListener(go);
-            go.Unsubscribe(ch);
-            // also remove command from internal cmdset? Handled via Unsubscribe
-        }
-        else if (pa.GetBool("replay"))
-        {
-            if (!ch.Access(go, "view"))
-            {
-                CommandHelpers.MsgChannelViewDenied(caller);
-                return;
-            }
-            var h = ch.GetHistory();
-            if (!string.IsNullOrEmpty(h)) caller.Msg(h);
-            else CommandHelpers.MsgNoChannelHistory(caller);
-        }
-        else if (string.Join(" ", pa.GetList(ParsedArgKeys.Message)) is string msg && !string.IsNullOrWhiteSpace(msg))
-        {
-            if (!ch.Access(go, "send"))
-            {
-                CommandHelpers.MsgChannelSendDenied(caller);
-                return;
-            }
-            ch.Msg(msg, go);
-        }
-        else
-        {
-            caller.Msg(Parser!.FormatHelp());
+            case ChannelAction.Unsubscribe:
+                // failures propagate, never swallowed.
+                ch.RemoveListener(go);
+                go.Unsubscribe(ch);
+                // also remove command from internal cmdset? Handled via Unsubscribe
+                break;
+            case ChannelAction.Replay:
+                if (!ch.Access(go, "view"))
+                {
+                    CommandHelpers.MsgChannelViewDenied(go);
+                    return;
+                }
+                var h = ch.GetHistory();
+                if (!string.IsNullOrEmpty(h)) go.Msg(h);
+                else CommandHelpers.MsgNoChannelHistory(go);
+                break;
+            default:
+                // Send (List/Subscribe carry no flags here — the parser
+                // defines neither — so they read as an empty message).
+                if (string.Join(" ", pa.GetList(ParsedArgKeys.Message)) is string msg && !string.IsNullOrWhiteSpace(msg))
+                {
+                    if (!ch.Access(go, "send"))
+                    {
+                        CommandHelpers.MsgChannelSendDenied(go);
+                        return;
+                    }
+                    ch.Msg(msg, go);
+                }
+                else
+                {
+                    go.Msg(Parser!.FormatHelp());
+                }
+                break;
         }
     }
 

@@ -21,9 +21,9 @@ public static class InitialSetup
         public override string Desc => "It's a button, you can push it.";
         public override string Category => "Danger?";
         public override bool UseParser => false;
-        public override void Run(IMessageTarget caller, object? args)
+        public override void Run(CommandContext ctx)
         {
-            if (caller is GameObject go)
+            if (ctx.Caller is GameObject go)
             {
                 var loc = go.ResolveLocationObject();
                 loc?.MsgContents("BEEEEEP!", go);

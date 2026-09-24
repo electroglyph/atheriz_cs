@@ -12,7 +12,7 @@ namespace Atheriz.Core.Objects;
 /// Thread-safe via <see cref="Lock"/> (mirrors Python RLock) guarding Puppet / PuppetStack / InputFuture.
 /// Scalar fields Term/Map dims + ScreenReader are atomic (no lock required) but writes are lock-guarded for consistency.
 /// </summary>
-public class Session : Atheriz.Core.Commands.ISessionProvider
+public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Commands.IMessageTarget
 {
     // Guards puppet / puppet_stack / input_future, which are written by game workers and read by per-connection input drain (#31).
     // Scalar fields (term/map dims, screenreader) are single atomic stores under the GIL and need no lock — we still guard writes.
@@ -99,6 +99,11 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
 
     // F001 typed seam: a session provides itself (satisfies ISessionProvider without reflection).
     Session? Atheriz.Core.Commands.ISessionProvider.Session => this;
+    // Batch D: a session is itself a message target (Msg is public above), so
+    // the shared quiet-close resolves it through the interface: itself as the
+    // session, and its connection for Close.
+    Session? Atheriz.Core.Commands.IMessageTarget.Session => this;
+    void Atheriz.Core.Commands.IMessageTarget.Close() => Connection?.Close();
 
     public Session(BaseConnection? connection = null, Account? account = null)
     {
@@ -263,10 +268,24 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
     /// Sends <paramref name="text"/> and awaits response via <see cref="InputFuture"/>.
     /// Handles _input_masked echo logic (echo_on when switching mask) and prev future completion.
     /// </summary>
-    public async Task<string> Prompt(string text, bool mask = false)
+    public Task<string> Prompt(string text, bool mask = false) => Prompt(text, mask, CancellationToken.None);
+
+    /// <summary>
+    /// Cancellable <see cref="Prompt(string, bool)"/>: <paramref name="ct"/>
+    /// cancellation completes the prompt with an empty result exactly like
+    /// <see cref="CancelPrompt(object?)"/> (a newer prompt owning the slot is
+    /// never disturbed, and <see cref="Closed"/>/<see cref="InputFuture"/>
+    /// semantics are untouched). A racing disconnect still cancels the
+    /// underlying future itself, so callers also handle
+    /// <see cref="OperationCanceledException"/>.
+    /// </summary>
+    public async Task<string> Prompt(string text, bool mask, CancellationToken ct)
     {
-        var (task, _) = PromptWithToken(text, mask);
-        return await task.ConfigureAwait(false);
+        var (task, token) = PromptWithToken(text, mask);
+        if (!ct.CanBeCanceled)
+            return await task.ConfigureAwait(false);
+        using (ct.Register(() => CancelPrompt(token)))
+            return await task.ConfigureAwait(false);
     }
 
     /// <summary>

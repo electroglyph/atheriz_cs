@@ -13,19 +13,20 @@ public sealed class GameArgumentParser
     public bool AddHelp { get; }
 
     private readonly List<ArgumentDef> _defs = new();
-    // Version counter for the precomputed def maps below: bumped on every _defs
-    // mutation path (both AddArgument overloads and every Builder mutator, which
-    // edits a def already in the list). ParseArgs rebuilds the cached maps only
-    // when the version changed, so post-build mutations stay visible without a
-    // per-call rebuild when defs are effectively static.
+    // Def maps are built lazily and version-stamped: `EnsureDefMaps` rebuilds
+    // the positional and optional maps whenever `_defsVersion` moved since the
+    // last build. Defs stay mutable post-build — adding an argument (or
+    // mutating a published def through its `Builder`) after the first
+    // `ParseArgs` is visible to the next parse (pinned by ParserDefMapsTests).
+    // Re-keying a command (channel/exit `SetKey`) resets `Command.Parser` to
+    // null so the next touch rebuilds from scratch.
     private int _defsVersion;
+    private int _cachedDefsVersion = -1;
     private List<ArgumentDef>? _cachedPositionals;
     private Dictionary<string, ArgumentDef>? _cachedOptionals;
-    private int _cachedDefsVersion = -1;
-    // Guards the lazy def-map cache below: parsers are shared across command
-    // threads, and a post-publish _defs mutation racing EnsureDefMaps could
-    // otherwise tear the rebuild (R2). The lock also serializes concurrent
-    // first-builds so only one identical map set is published.
+    // Guards the one-time def-map build below: parsers are shared across
+    // command threads, and concurrent first-builds must publish a single
+    // identical map set.
     private readonly Lock _cacheLock = new();
 
     public GameArgumentParser(string prog = "", string description = "", bool addHelp = true)
@@ -43,7 +44,6 @@ public sealed class GameArgumentParser
                 Help = "show this help message and exit",
                 IsHelp = true,
             });
-            _defsVersion++;
         }
     }
 
@@ -75,10 +75,10 @@ public sealed class GameArgumentParser
     public sealed class Builder
     {
         private readonly ArgumentDef _def;
-        private Action? _onMutated;
+        private Action? _invalidate;
         public Builder(ArgumentDef def) => _def = def;
-        internal void AttachInvalidation(Action onMutated) => _onMutated = onMutated;
-        private void Touch() => _onMutated?.Invoke();
+        internal void AttachInvalidation(Action invalidate) => _invalidate = invalidate;
+        private void Touch() => _invalidate?.Invoke();
         public Builder Help(string h) { _def.Help = h; Touch(); return this; }
         public Builder Required(bool v = true) { _def.Required = v; _def.RequiredExplicit = true; Touch(); return this; }
         public Builder Action(ArgAction a) { _def.Action = a; Touch(); return this; }
@@ -110,16 +110,17 @@ public sealed class GameArgumentParser
         _ => NargsKind.None
     };
 
-    // Python-compatible AddArgument overloads
+    // Python-compatible AddArgument overloads. Defs stay mutable for the
+    // parser's lifetime; each add bumps the version so the next ParseArgs
+    // rebuilds the cached maps (see the field comment).
     public Builder AddArgument(params string[] names)
     {
         var def = new ArgumentDef { Names = names.ToList() };
         // dest: like argparse, prefer long option (--) for optional args
         def.Dest = DeriveDest(names);
-        _defs.Add(def);
-        _defsVersion++;
         var builder = new Builder(def);
-        builder.AttachInvalidation(() => _defsVersion++);
+        lock (_cacheLock) { _defs.Add(def); _defsVersion++; }
+        builder.AttachInvalidation(InvalidateDefMaps);
         return builder;
     }
 
@@ -149,10 +150,9 @@ public sealed class GameArgumentParser
         // dest
         def.Dest = DeriveDest(def.Names);
         if (type is not null) def.Type = type;
-        _defs.Add(def);
-        _defsVersion++;
         var builder = new Builder(def);
-        builder.AttachInvalidation(() => _defsVersion++);
+        lock (_cacheLock) { _defs.Add(def); _defsVersion++; }
+        builder.AttachInvalidation(InvalidateDefMaps);
         return builder;
     }
 
@@ -304,6 +304,14 @@ public sealed class GameArgumentParser
     // unknown optionals) instead of swallowing them as values .
     private static bool LooksLikeUnknownOption(string tok)
         => tok.StartsWith("-", StringComparison.Ordinal) && tok.Length > 1 && !IsNegativeNumber(tok);
+
+    // Bumps the def version so the next ParseArgs rebuilds the cached maps.
+    // Runs under `_cacheLock` from AddArgument; Builder mutations take it
+    // here (builders are short-lived setup handles, never a hot path).
+    private void InvalidateDefMaps()
+    {
+        lock (_cacheLock) { _defsVersion++; }
+    }
 
     private void EnsureDefMaps(out List<ArgumentDef> positionalDefs, out Dictionary<string, ArgumentDef> optionalMap)
     {

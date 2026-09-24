@@ -16,9 +16,9 @@ public sealed class ExitCommand : Command
     // mutating, so the command must own its list.
     public void SetAliases(List<string> a) => _aliases = a is null ? [] : [.. a];
     public override bool UseParser => false;
-    public override void Run(IMessageTarget caller, object? args)
+    public override void Run(CommandContext ctx)
     {
-        if (caller is GameObject go)
+        if (ctx.Caller is GameObject go)
         {
             var dest = NodeHandler.GetCurrent()?.GetNode(Destination);
             if (dest is not null)
