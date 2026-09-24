@@ -1,12 +1,19 @@
 using Atheriz.Core.Commands;
+using Atheriz.Core.Commands.LoggedIn;
+using Atheriz.Core.Commands.UnloggedIn;
+using Atheriz.Core.Globals;
+using Atheriz.Core.Objects;
+using Atheriz.Core.Settings;
+using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
-// Pins for the adapter re-entrancy guard: a command overriding only one of
-// RunParsed/RunRaw and receiving the other input shape must get help, not a
-// stack overflow (adapter -> context -> default -> adapter ping-pong).
+// The untyped Run(caller, args) adapter splits parsed input to RunParsed
+// and raw strings to RunRaw; single-override commands receiving the other
+// shape get help instead of recursing, and legacy Run-only overrides are
+// still reached through the context entry.
 [Collection("Ported")]
-public sealed class AdapterReentryPinsTests
+public sealed class CommandAdapterTests
 {
     private sealed class ParsedOnlyCommand : Command
     {
@@ -22,9 +29,6 @@ public sealed class AdapterReentryPinsTests
         public override void RunRaw(CommandContext ctx) => SawRaw = true;
     }
 
-    // Legacy shape: overrides only the untyped entry, like the 51
-    // test doubles across the suite. The context entry must bridge back
-    // to it on first entry (LagGateCommand relies on this path).
     private sealed class LegacyCommand : Command
     {
         public override string Key => "legacy";
@@ -36,6 +40,33 @@ public sealed class AdapterReentryPinsTests
     {
         public readonly List<string> Msgs = [];
         public void Msg(string text) => Msgs.Add(text);
+    }
+
+    private sealed class StrictCommand : Command
+    {
+        public override string Key => "strict";
+        public bool SawParsed;
+        public bool SawRaw;
+        public override void RunParsed(CommandContext ctx) => SawParsed = true;
+        public override void RunRaw(CommandContext ctx) => SawRaw = true;
+    }
+
+    [Fact]
+    public void CommandAdapter_ParsedArgs_ReachesRunParsed()
+    {
+        var cmd = new StrictCommand();
+        cmd.Run(new FakeCaller(), new GameArgumentParser.ParsedArgs());
+        Assert.True(cmd.SawParsed);
+        Assert.False(cmd.SawRaw);
+    }
+
+    [Fact]
+    public void CommandAdapter_RawString_ReachesRunRaw()
+    {
+        var cmd = new StrictCommand();
+        cmd.Run(new FakeCaller(), "raw text");
+        Assert.True(cmd.SawRaw);
+        Assert.False(cmd.SawParsed);
     }
 
     [Fact]

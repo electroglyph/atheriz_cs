@@ -13,7 +13,7 @@ namespace Atheriz.Core.Tests.Features.Commands;
 // guard into its own Run. Builder-gated verbs run through BuilderCommand's
 // single IsBuilder gate. Reflection is permitted in tests/.
 [Collection("Ported")]
-public sealed class LoggedInTemplateBasesTests
+public sealed class LoggedInCommandBaseTests
 {
     // Verbs that intentionally stay on the raw Command base: they either
     // serve unpuppeted callers (help/none/quit) or resolve the puppet
@@ -42,7 +42,7 @@ public sealed class LoggedInTemplateBasesTests
     }
 
     [Fact]
-    public void MigratedCommands_InheritTemplateBases()
+    public void LoggedInVerbs_InheritTemplateBases()
     {
         // Every concrete logged-in verb except the documented keeps resolves
         // its puppet through LoggedInCommand.Run (or BuilderCommand's gate).
@@ -102,7 +102,7 @@ public sealed class LoggedInTemplateBasesTests
     }
 
     [Fact]
-    public void MigratedSources_ContainNoPuppetPreamble()
+    public void CommandSources_ContainNoPuppetPreamble()
     {
         // The two-line preamble (puppet guard, parsed-args guard) lives in
         // the base now. Any copy left behind in a migrated command means it

@@ -9,7 +9,7 @@ namespace Atheriz.Core.Tests.Features.Commands;
 // names through the shared resolver with their own filters and messages.
 // Each pin fails if its verb regresses to the other's wording or shape.
 [Collection("Ported")]
-public sealed class ResolveObjectMergePinsTests
+public sealed class TargetResolutionTests
 {
     private static GameObject MakeBuilder(string name = "resbuilder")
     {
@@ -35,7 +35,7 @@ public sealed class ResolveObjectMergePinsTests
     }
 
     [Fact]
-    public void ResolveObjectMerge_BanUnknownName_ReportsNotFound()
+    public void TargetResolution_BanUnknownName_ReportsNotFound()
     {
         using var env = GlobalTestEnv.Enter();
         var caller = MakeBuilder();
@@ -44,7 +44,7 @@ public sealed class ResolveObjectMergePinsTests
     }
 
     [Fact]
-    public void ResolveObjectMerge_BanMultiMatch_ListsIdsPerLine()
+    public void TargetResolution_BanMultiMatch_ListsIdsPerLine()
     {
         using var env = GlobalTestEnv.Enter();
         var caller = MakeBuilder();
@@ -60,7 +60,7 @@ public sealed class ResolveObjectMergePinsTests
     }
 
     [Fact]
-    public void ResolveObjectMerge_PuppetUnknownName_ReportsNoMatch()
+    public void TargetResolution_PuppetUnknownName_ReportsNoMatch()
     {
         using var env = GlobalTestEnv.Enter();
         var caller = MakeBuilder();
@@ -71,7 +71,7 @@ public sealed class ResolveObjectMergePinsTests
     }
 
     [Fact]
-    public void ResolveObjectMerge_PuppetMultiMatch_ListsIdsSingleLine()
+    public void TargetResolution_PuppetMultiMatch_ListsIdsSingleLine()
     {
         using var env = GlobalTestEnv.Enter();
         var node = new Node(new Coord("resmerge", 0, 0, 0));
@@ -96,7 +96,7 @@ public sealed class ResolveObjectMergePinsTests
     }
 
     [Fact]
-    public void ResolveObjectMerge_FilteredIdTarget_ReportsNotFound()
+    public void TargetResolution_FilteredIdTarget_ReportsNotFound()
     {
         // The filter also gates the #id leg: a filtered-out id reports the
         // caller's notFound text, while ResolveById errors pass through
@@ -114,7 +114,7 @@ public sealed class ResolveObjectMergePinsTests
     }
 
     [Fact]
-    public void ResolveObjectMerge_BanMultiMatch_PreservesRegistryOrder()
+    public void TargetResolution_BanMultiMatch_PreservesRegistryOrder()
     {
         // The per-line multi list follows the global exact-name order, so a
         // reorder of the resolver union would fail here, not just Contains.
@@ -132,7 +132,7 @@ public sealed class ResolveObjectMergePinsTests
     }
 
     [Fact]
-    public void ResolveObjectMerge_PuppetIgnoresDistantSameName()
+    public void TargetResolution_PuppetIgnoresDistantSameName()
     {
         // Unfiltered puppet search is local only: a same-named object two
         // rooms away must not resolve (no global-index leakage).
