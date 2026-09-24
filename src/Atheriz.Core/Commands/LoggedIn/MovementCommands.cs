@@ -93,6 +93,17 @@ public sealed class FollowCommand : LoggedInCommand
     public override string Category => "General";
     protected override bool AllowMissingArgs => true;
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Target, nargs: "?", help: "Character or creature to follow."); }
+    // Global lock order for the follow pair (the MoveTo CompareLockOrder
+    // sequence for non-nodes, identity-hash tiebreak for same-id
+    // collisions): both directions take First then Second, so opposite
+    // simultaneous follows can never hold-and-wait in opposite order.
+    internal static (GameObject First, GameObject Second) FollowLockOrder(GameObject go, GameObject target)
+    {
+        int order = go.Id.CompareTo(target.Id);
+        if (order > 0 || (order == 0 && System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(go) > System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(target)))
+            return (target, go);
+        return (go, target);
+    }
     protected override void RunPuppet(GameObject go, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
         var targetName = pa.GetString(ParsedArgKeys.Target);
@@ -136,7 +147,14 @@ public sealed class FollowCommand : LoggedInCommand
                 try { prev.RemoveFollower(go.Id); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed FollowCommand old-leader cleanup: " + logEx.Message, "FollowCommand"); }
             }
         }
-        target.SyncRoot.EnterWriteLock();
+        // Ordered pair acquire by Id (FollowLockOrder above): holding target
+        // while the Following setter takes go's lock inverts the global
+        // order, so opposite simultaneous follows deadlock (ABBA). Both
+        // locks are taken here in First/Second sequence; the body uses raw
+        // no-lock helpers, never the locking setters.
+        var (first, second) = FollowLockOrder(go, target);
+        first.SyncRoot.EnterWriteLock();
+        if (!ReferenceEquals(first, second)) second.SyncRoot.EnterWriteLock();
         try
         {
             target.AddFollowerRawNoLock(go.Id);
@@ -145,9 +163,16 @@ public sealed class FollowCommand : LoggedInCommand
                 if (!target.GetScriptsByType("FollowScript").Any()) target.AddScript(fresh);
                 else orphan = fresh;
             }
-            go.Following = target.Id;
+            go.SetFollowingRawNoLock(target.Id);
         }
-        finally { target.SyncRoot.ExitWriteLock(); }
+        finally
+        {
+            if (!ReferenceEquals(first, second))
+            {
+                try { second.SyncRoot.ExitWriteLock(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed FollowCommand unlock: " + logEx.Message, "FollowCommand"); }
+            }
+            try { first.SyncRoot.ExitWriteLock(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed FollowCommand unlock: " + logEx.Message, "FollowCommand"); }
+        }
         if (orphan is not null) Atheriz.Core.Globals.ObjectRegistry.RemoveObject(orphan);
         var loc2 = go.ResolveLocationObject();
         if (loc2 is Node node && target.Access(go, "view")) node.MsgContents($"$You(caller) $conj(start) following $you(target).", exclude: null, fromObj: go, mapping: new Dictionary<string, object?> { ["caller"] = go, ["target"] = target });

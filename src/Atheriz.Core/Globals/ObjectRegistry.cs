@@ -58,6 +58,11 @@ public static class ObjectRegistry
     {
         if (_keysByRef.TryGetValue(obj, out var oldKey) && oldKey != obj.Id)
             AllObjects.Remove(oldKey);
+        // Overwriting a different live occupant must also drop that
+        // occupant's reverse entry, or a later RemoveObject(victim) would
+        // still see it as indexed at this id.
+        if (AllObjects.TryGetValue(obj.Id, out var prev) && !ReferenceEquals(prev, obj))
+            _keysByRef.Remove(prev);
         AllObjects[obj.Id] = obj;
         _keysByRef[obj] = obj.Id;
     }
@@ -194,7 +199,10 @@ public static class ObjectRegistry
     {
         lock (AllLock)
         {
-            AllObjects.Remove(obj.Id);
+            // Remove the live entry only when it is this object — the id
+            // may have been overwritten by a different occupant since.
+            if (AllObjects.TryGetValue(obj.Id, out var cur) && ReferenceEquals(cur, obj))
+                AllObjects.Remove(obj.Id);
             // Drop the reverse entry only if it points at the removed key —
             // AllObjects[obj.Id] may have been a different occupant.
             if (_keysByRef.TryGetValue(obj, out var k) && k == obj.Id) _keysByRef.Remove(obj);

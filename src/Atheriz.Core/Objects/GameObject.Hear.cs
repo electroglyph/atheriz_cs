@@ -100,6 +100,7 @@ public partial class GameObject
             var allow1 = AtPreEmitSound(this, soundDesc, soundMsg, loudness, isSay);
             if (!allow1.ok) return 0;
             soundDesc = allow1.desc; soundMsg = allow1.msg; loudness = allow1.loudness; isSay = allow1.isSay;
+            var emitter = allow1.emitter;
             if (loc is not null)
             {
                 // Single type test: the node location (when present) serves the
@@ -111,13 +112,17 @@ public partial class GameObject
                     var allow2 = nodeLoc.AtPreEmitSound(allow1.emitter, soundDesc, soundMsg, loudness, isSay);
                     if (!allow2.ok) return 0;
                     soundDesc = allow2.desc; soundMsg = allow2.msg; loudness = allow2.loudness; isSay = allow2.isSay;
+                    // The node gate may swap the emitter (a proxy speaking
+                    // through an effect): fan-out below must use the gated
+                    // emitter, not the pre-gate one.
+                    emitter = allow2.emitter;
                 }
                 // broadcast to contents that can hear in source room
                 var contents = nodeLoc is not null ? nodeLoc.GetContents() : Globals.ObjectRegistry.Get(loc.ContentsSnapshot);
                 foreach (var o in contents)
                 {
                     if (!o.CanHear) continue;
-                    var pre = o.AtPreHear(allow1.emitter, soundDesc, soundMsg, loudness, isSay);
+                    var pre = o.AtPreHear(emitter, soundDesc, soundMsg, loudness, isSay);
                     if (!pre.ok) continue;
                     o.AtHear(pre.emitter, pre.desc, pre.msg, pre.loudness, pre.isSay);
                 }
@@ -153,7 +158,7 @@ public partial class GameObject
                         {
                             var (node, nodeLoud) = queue.Dequeue();
                             var ncoord = (node.Coord.X, node.Coord.Y, node.Coord.Z);
-                            double ret = node.AtHear(allow1.emitter, soundDesc, soundMsg, nodeLoud, isSay);
+                            double ret = node.AtHear(emitter, soundDesc, soundMsg, nodeLoud, isSay);
                             if (ret > 0)
                             {
                                 foreach (var neighbor in area.GetNeighbors(ncoord))

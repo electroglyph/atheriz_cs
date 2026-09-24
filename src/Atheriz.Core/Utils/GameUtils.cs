@@ -111,7 +111,9 @@ public static partial class GameUtils
     {
         if (rolls > 0 && faces < 1) throw new ArgumentOutOfRangeException(nameof(faces));
         var result = 0;
-        for (var i = 0; i < rolls; i++) result += Random.Shared.Next(1, faces + 1);
+        // Long bound: faces + 1 overflows int at int.MaxValue faces (same
+        // trap DiceRollAverage already avoids with faces + 1L).
+        for (var i = 0; i < rolls; i++) result += (int)Random.Shared.NextInt64(1, (long)faces + 1);
         return result;
     }
 

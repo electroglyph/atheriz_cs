@@ -82,8 +82,8 @@ public class FuncParser
             ["mult"] = (a,k,ctx,raw) => ApplyOp(a,k,ctx,"*"),
             ["div"] = (a,k,ctx,raw) => ApplyOp(a,k,ctx,"/"),
             ["round"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; if(!double.TryParse(a[0], out var d)) return ""; int sig=0; if(a.Length>1) int.TryParse(a[1], out sig); var r=Math.Round(d,sig); if(sig==0) return ((int)r).ToString(); return r.ToString(System.Globalization.CultureInfo.InvariantCulture); },
-            ["random"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ if(a[0].Contains('.')){ double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); return rnd.NextDouble()*mx; } int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } { double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn); double.TryParse(a[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); bool isFloat=a[0].Contains('.')||a[1].Contains('.'); if(isFloat) return mn + (mx-mn)*rnd.NextDouble(); return rnd.Next((int)mn,(int)mx+1); } },
-            ["randint"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ int.TryParse(a[0], out var mx2); return rnd.Next(0,mx2+1); } int.TryParse(a[0], out var mn2); int.TryParse(a[1], out var mx3); return rnd.Next(mn2,mx3+1); },
+            ["random"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ if(a[0].Contains('.')){ double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); return rnd.NextDouble()*mx; } int.TryParse(a[0], out var mx2); return (int)rnd.NextInt64(0, (long)mx2+1); } { double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn); double.TryParse(a[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); bool isFloat=a[0].Contains('.')||a[1].Contains('.'); if(isFloat) return mn + (mx-mn)*rnd.NextDouble(); return (int)rnd.NextInt64((int)mn,(long)(int)mx+1); } },
+            ["randint"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ int.TryParse(a[0], out var mx2); return (int)rnd.NextInt64(0, (long)mx2+1); } int.TryParse(a[0], out var mn2); int.TryParse(a[1], out var mx3); return (int)rnd.NextInt64(mn2,(long)mx3+1); },
             ["choice"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; var rnd=Random.Shared;
                 if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[", StringComparison.Ordinal)&&single.EndsWith("]", StringComparison.Ordinal)){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.Choice: " + logEx.Message, "ParsedFunc"); } } try{
                         var conv = FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{single}, new Dictionary<string,object?>(), raiseErrors: ctx.RaiseErrors); if(conv.args.Length>0 && conv.args[0] is System.Collections.IEnumerable en && !(conv.args[0] is string)){ var list=en.Cast<object?>().ToArray(); if(list.Length>0) return list[rnd.Next(list.Length)]?.ToString()??""; } }catch{ if(ctx.RaiseErrors) throw; }
@@ -146,6 +146,13 @@ public class FuncParser
             }
             try{
                 double res = op=="+"?v1+v2: op=="-"?v1-v2: op=="*"?v1*v2: op=="/"?v1/v2:0;
+                // Overflow renders as Infinity (like division by zero does),
+                // so chat never renders it.
+                if (!double.IsFinite(res))
+                {
+                    if (ctx.RaiseErrors) throw new ParsingError("arithmetic overflow");
+                    return "";
+                }
                 if(op!="/" && !a[0].Contains('.') && !a[1].Contains('.') && a[0].Trim().All(c=>char.IsDigit(c)||c=='-' ) && a[1].Trim().All(c=>char.IsDigit(c)||c=='-')) return ((long)res).ToString();
                 return res.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }catch{ return ctx.RaiseErrors? throw new ParsingError("op failed"): ""; }
@@ -200,8 +207,8 @@ public class FuncParser
             return raw.ToString();
         }
         bool cap = false;
-        if (kwargs.TryGetValue("capitalize", out var capStr)) cap = capStr.Equals("true", StringComparison.OrdinalIgnoreCase) || capStr=="1";
         if (raw.FuncName == "You" || raw.FuncName == "Obj") cap = true;
+        if (kwargs.TryGetValue("capitalize", out var capStr)) cap = capStr.Equals("true", StringComparison.OrdinalIgnoreCase) || capStr=="1";
         if (caller == ctx.Receiver) return cap? "You":"you";
         return caller.GetDisplayName(ctx.Receiver);
     }
@@ -230,7 +237,21 @@ public class FuncParser
             return raw.ToString();
         }
         var verb = args[0]??"";
-        GameObject? obj = ResolveMappedActor(ctx.Mapping, args.Length > 1 ? args[1] : null, ctx.Caller);
+        GameObject? obj;
+        if (args.Length > 1 && ctx.Mapping is not null)
+        {
+            // An explicit key against a present mapping that lacks it is a
+            // misspelling, not the caller: stay visible instead of silently
+            // conjugating for the caller.
+            var key = args[1];
+            if (!ctx.Mapping.TryGetValue(key, out var mv) || mv is not GameObject mgo)
+            {
+                if (ctx.RaiseErrors) throw new ParsingError($"conj: unknown actor '{key}'");
+                return raw.ToString();
+            }
+            obj = mgo;
+        }
+        else obj = ctx.Caller;
         var (second, third) = Conjugate.VerbActorStanceComponents(verb, plural:false);
         return obj == ctx.Receiver ? second : third;
     }
@@ -243,7 +264,18 @@ public class FuncParser
             return raw.ToString();
         }
         var verb = args[0]??"";
-        GameObject? obj = ResolveMappedActor(ctx.Mapping, args.Length > 1 ? args[1] : null, ctx.Caller);
+        GameObject? obj;
+        if (args.Length > 1 && ctx.Mapping is not null)
+        {
+            var key = args[1];
+            if (!ctx.Mapping.TryGetValue(key, out var mv) || mv is not GameObject mgo)
+            {
+                if (ctx.RaiseErrors) throw new ParsingError($"pconj: unknown actor '{key}'");
+                return raw.ToString();
+            }
+            obj = mgo;
+        }
+        else obj = ctx.Caller;
         bool plural=false;
         if(obj is not null)
         {

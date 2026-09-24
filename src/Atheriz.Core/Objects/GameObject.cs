@@ -282,6 +282,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     internal double RawSecondsPlayed { get => Read(() => _secondsPlayed); set => Write(() => _secondsPlayed = value); }
     public bool NoFollow { get => Read(() => _noFollow); set => Write(() => { _noFollow = value; _flags.IsModified = true; }); }
     public int? Following { get => Read(() => _following); set => Write(() => { _following = value; _flags.IsModified = true; }); }
+    // No-lock write for callers that already hold this object's write lock
+    // under an ordered multi-acquire (FollowCommand's Id-ordered pair).
+    internal void SetFollowingRawNoLock(int? v) { _following = v; _flags.IsModified = true; }
     public int? GroupChannel { get => Read(() => _groupChannel); set => Write(() => { _groupChannel = value; _flags.IsModified = true; }); }
     public CmdSet? InternalCmdSet { get => Read(() => _internalCmdSet); set => Write(() => _internalCmdSet = value); }
     public CmdSet? ExternalCmdSet { get => Read(() => _externalCmdSet); set => Write(() => _externalCmdSet = value); }

@@ -307,7 +307,8 @@ public class InputFuncs
             {
                 if (lst.Count!=2) return false;
                 foreach (var x in lst)
-                    if (x is not int) return false;
+                    // Cells accept int/long coords, so legend entries do too.
+                    if (x is not int && x is not long) return false;
             }
             else if (coord is System.Text.Json.JsonElement je2 && je2.ValueKind==System.Text.Json.JsonValueKind.Array)
             {
@@ -432,46 +433,49 @@ public class InputFuncs
         bool HasStyle);
 
     // Validating parse pass: runs the exact validation sequence of the old
-    // first traversal (same order, same first-failure silent-return) and
+    // first traversal (same order, same first-failure return) and
     // materializes each passing cell. Room cells skip drawing exactly as
     // before (IsRoom; apply continues past them, roomMoves collects them).
-    private static bool TryParseMapEditCells(List<object?> cells, out List<MapEditCell> parsed)
+    // The first failing cell index reports back so the caller can reject
+    // loudly instead of dropping the edit silently.
+    private static bool TryParseMapEditCells(List<object?> cells, out List<MapEditCell> parsed, out int failIndex)
     {
         parsed = new List<MapEditCell>(cells.Count);
-        foreach (var cellObj in cells)
+        failIndex = -1;
+        for (int idx = 0; idx < cells.Count; idx++)
         {
-            var cell = ToList(cellObj);
-            if (cell.Count == 0) return false;
+            var cell = ToList(cells[idx]);
+            if (cell.Count == 0) { failIndex = idx; return false; }
             // Convert possible JsonElement string first element
             object? first = cell[0];
             if (first is System.Text.Json.JsonElement jef && jef.ValueKind == System.Text.Json.JsonValueKind.String) first = jef.GetString();
             if (first is string fs && fs == "room")
             {
-                if (cell.Count != 5) return false;
+                if (cell.Count != 5) { failIndex = idx; return false; }
                 for (int i = 1; i < 5; i++)
                 {
                     var v = cell[i];
-                    if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) return false; }
-                    else if (v is not int && v is not long) return false;
+                    if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) { failIndex = idx; return false; } }
+                    else if (v is not int && v is not long) { failIndex = idx; return false; }
                 }
                 parsed.Add(new MapEditCell(true, ToInt(cell[1]), ToInt(cell[2]), ToInt(cell[3]), ToInt(cell[4]), "", null, null, null, false));
                 continue;
             }
-            if (cell.Count != 3 && cell.Count != 6) return false;
+            if (cell.Count != 3 && cell.Count != 6) { failIndex = idx; return false; }
             // first two must be int
             for (int i = 0; i < 2; i++)
             {
                 var v = cell[i];
-                if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) return false; }
-                else if (v is not int && v is not long) return false;
+                if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) { failIndex = idx; return false; } }
+                else if (v is not int && v is not long) { failIndex = idx; return false; }
             }
             if (cell[2] is not string)
             {
-                if (cell[2] is System.Text.Json.JsonElement je3 && je3.ValueKind == System.Text.Json.JsonValueKind.String) { } else return false;
+                if (cell[2] is System.Text.Json.JsonElement je3 && je3.ValueKind == System.Text.Json.JsonValueKind.String) { } else { failIndex = idx; return false; }
             }
             if (cell.Count == 6)
             {
-                if (!IsColor(cell[3]) || !IsColor(cell[4]) || !IsAttrs(cell[5])) return false;
+                if (!IsColor(cell[3]) || !IsColor(cell[4]) || !IsAttrs(cell[5])) { failIndex = idx; return false; }
             }
             string sym = cell[2] is string ss ? ss : (cell[2] is System.Text.Json.JsonElement je4 && je4.ValueKind == System.Text.Json.JsonValueKind.String ? je4.GetString() ?? "" : "");
             parsed.Add(cell.Count == 3
@@ -500,7 +504,14 @@ public class InputFuncs
         var cells = ToList(cellsObj);
         // Single validating parse (replaces the old validate traversal); the
         // apply and roomMoves phases below iterate the typed list.
-        if (!TryParseMapEditCells(cells, out var parsed)) return;
+        if (!TryParseMapEditCells(cells, out var parsed, out var failIndex))
+        {
+            // A failing cell must reject loudly like a failing legend entry —
+            // silently dropping the whole edit hides validation disagreements
+            // (e.g. scalar cell colors, which the cell gate rejects by design).
+            connection.SendCommand("map_edit_reject", new List<object?> { $"Invalid map edit cell at index {failIndex}." }, []);
+            return;
+        }
         var result = ConsumeOrReply(connection, key, seq);
         if (result is null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
@@ -731,14 +742,22 @@ public class InputFuncs
             le.Show = dict.TryGetValue("show", out var sh) && sh is bool sb ? sb : true;
             if (dict.TryGetValue("fg", out var fg) && fg is not null)
             {
-                if (fg is double dd) le.Fg=dd;
+                // A validated [r,g,b] triple keeps its RGB form (the scalar
+                // hue stays default); scalars fill Fg as before.
+                if (fg is List<object?> fgList && fgList.Count == 3)
+                    le.FgRgb = [ToInt(fgList[0]), ToInt(fgList[1]), ToInt(fgList[2])];
+                else if (fg is double dd) le.Fg=dd;
+                else if (fg is float ff) le.Fg=ff;
                 else if (fg is int ii) le.Fg=ii;
                 else if (fg is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number && je.TryGetDouble(out var dv)) le.Fg=dv;
                 else le.Fg=170.0;
             }
             if (dict.TryGetValue("bg", out var bg) && bg is not null)
             {
-                if (bg is double db) le.Bg=db;
+                if (bg is List<object?> bgList && bgList.Count == 3)
+                    le.BgRgb = [ToInt(bgList[0]), ToInt(bgList[1]), ToInt(bgList[2])];
+                else if (bg is double db) le.Bg=db;
+                else if (bg is float fb) le.Bg=fb;
                 else if (bg is int ib) le.Bg=ib;
                 else if (bg is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number && je.TryGetDouble(out var dv)) le.Bg=dv;
                 else le.Bg=null;

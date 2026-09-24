@@ -95,7 +95,7 @@ public sealed class FuncParserActorResolutionTests
     }
 
     [Fact]
-    public void Conj_UnmappedKey_FallsBackToCaller()
+    public void Conj_UnmappedKey_StaysVisible()
     {
         using var env = GlobalTestEnv.Enter();
         var alice = GameObject.Create("Alice");
@@ -103,7 +103,12 @@ public sealed class FuncParserActorResolutionTests
         var parser = ActorParser();
         var mapping = new Dictionary<string, object?> { ["tommy"] = bob };
 
-        Assert.Equal("jump", parser.Parse("$conj(jump, nobody)", alice, alice, mapping)?.ToString());
+        var quiet = parser.Parse("$conj(jump, nobody)", alice, alice, mapping)?.ToString();
+        Assert.Contains("nobody", quiet);
+        Assert.NotEqual("jump", quiet);
+        var ex = Assert.Throws<FuncParser.ParsingError>(
+            () => parser.Parse("$conj(jump, nobody)", alice, alice, mapping, raiseErrors: true));
+        Assert.Contains("unknown actor", ex.Message);
     }
 
     [Fact]

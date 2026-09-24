@@ -643,6 +643,8 @@ public class MapInfo
         public bool Show { get; set; } = true;
         public double Fg { get; set; } = 170.0;
         public double? Bg { get; set; }
+        public List<int>? FgRgb { get; set; }
+        public List<int>? BgRgb { get; set; }
 
         public static LegendEntryDto FromDomain(LegendEntry e)
         {
@@ -654,6 +656,8 @@ public class MapInfo
                 Show = e.Show,
                 Fg = e.Fg,
                 Bg = e.Bg,
+                FgRgb = e.FgRgb is null ? null : new List<int>(e.FgRgb),
+                BgRgb = e.BgRgb is null ? null : new List<int>(e.BgRgb),
             };
         }
 
@@ -674,6 +678,8 @@ public class MapInfo
             e.Show = Show;
             e.Fg = Fg;
             e.Bg = Bg;
+            e.FgRgb = FgRgb is null ? null : new List<int>(FgRgb);
+            e.BgRgb = BgRgb is null ? null : new List<int>(BgRgb);
             return e;
         }
     }

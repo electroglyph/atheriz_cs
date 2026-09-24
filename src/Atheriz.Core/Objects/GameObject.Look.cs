@@ -36,7 +36,9 @@ public partial class GameObject
             var name = GetDisplayName(looker);
             var desc = Desc;
             var things = GetDisplayThings(looker);
-            // Use appearance_template = "{name}: {desc}{things}" from base_obj.py:78
+            // Use appearance_template = "{name}: {desc}{things}" from base_obj.py:78,
+            // with no dangling template colon when desc is empty.
+            if (string.IsNullOrEmpty(desc)) return $"{name}{things}".Trim();
             return $"{name}: {desc}{things}".Trim();
         }, looker);
     }

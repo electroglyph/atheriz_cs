@@ -92,7 +92,13 @@ public static partial class CommandHelpers
     {
         id = 0;
         if (!query.StartsWith("#", StringComparison.Ordinal)) return false;
-        return int.TryParse(query[1..], out id);
+        var rest = query[1..];
+        // Digits only: int.TryParse alone accepts whitespace, signs, and
+        // grouping, so "# 123", "#+12", and "#-5" would all parse.
+        if (rest.Length == 0) return false;
+        foreach (var c in rest)
+            if (!char.IsAsciiDigit(c)) return false;
+        return int.TryParse(rest, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out id);
     }
 
     /// <summary>

@@ -101,7 +101,7 @@ public sealed class ConnectionJsonConversionTests
     }
 
     [Fact]
-    public void MapEditLegendHandler_ListColorTriple_AcceptsWithDefaultFg()
+    public void MapEditLegendHandler_ListColorTriple_PreservesTriple()
     {
         using var env = GlobalTestEnv.Enter();
         ResetChains();
@@ -118,6 +118,7 @@ public sealed class ConnectionJsonConversionTests
             new InputFuncs().MapEditLegendHandler(conn, [hk, 1, legend], []);
             Assert.Equal("legend_ok", conn.Sent[^1].Cmd);
             Assert.Single(mi.LegendEntries);
+            Assert.Equal(new List<int> { 1, 2, 3 }, mi.LegendEntries[0].FgRgb);
             Assert.Equal(170.0, mi.LegendEntries[0].Fg);
         }
         finally { ResetChains(); }

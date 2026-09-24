@@ -80,19 +80,14 @@ public class CmdSet
 
     public virtual void RemoveByTag(string tag)
     {
-        HashSet<string> toDel = new(StringComparer.OrdinalIgnoreCase);
         lock (_lock)
         {
-            foreach (var kv in _commands) if (kv.Value.Tag == tag) toDel.Add(kv.Key);
-        }
-        if (toDel.Count == 0) return;
-        lock (_lock)
-        {
-        // re-validate each tag under the write lock — a key collected
-        // above may have been re-added with a different tag in between.
+            // Single hold: snapshot and delete atomically, so a key added
+            // with this tag between a collect pass and a delete pass cannot
+            // survive this eviction.
             bool removed = false;
             foreach (var kv in _commands.ToList())
-                if (toDel.Contains(kv.Key) && kv.Value.Tag == tag)
+                if (kv.Value.Tag == tag)
                 {
                     _commands.Remove(kv.Key);
                     removed = true;

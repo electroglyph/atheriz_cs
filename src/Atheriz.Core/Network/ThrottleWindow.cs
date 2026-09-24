@@ -14,8 +14,13 @@ public static class ThrottleWindow
     private const int MaxHostsBeforeSweep = 1024;
     // Per-call opportunistic bound: examine at most this many entries (O(1),
     // not O(n)) so small dicts still evict promptly (pinned by
-    // ThrottleWindow_EvictsExpiredHosts) without taxing every call.
+    // ThrottleWindow_EvictsExpiredHosts) without taxing every call. Small
+    // dicts scan fully; larger ones probe a rotating 16-entry window so
+    // every entry is visited within ceil(n/16) calls instead of lingering
+    // past the cap in insertion order.
     private const int MaxEvictProbePerCall = 16;
+    private const int FullScanBelowCount = 32;
+    private static int _probeCursor;
 
     /// <summary>
     /// Per-host throttling — mirrors <c>manager.py:17-24</c> and <c>websocket.py:20-27</c>.
@@ -28,13 +33,17 @@ public static class ThrottleWindow
             // Amortized TTL eviction : Python (manager.py:17-24) does
             // no eviction at all; a per-call O(n) sweep here taxed every
             // throttled message under the serializing lock. Sweep fully only
-            // once the dict exceeds a cap; every call additionally evicts
-            // expired entries among a bounded probe prefix (O(1)), so small
-            // dicts still drain promptly while the common path stays flat.
+            // once the dict exceeds a cap; small dicts scan fully every
+            // call, and larger ones evict expired entries among a bounded
+            // rotating probe window (O(1)) so tail entries drain instead of
+            // lingering in insertion order.
             if (last.Count > MaxHostsBeforeSweep)
-                EvictExpiredLocked(last, window, now, int.MaxValue);
+                EvictExpiredLocked(last, window, now, int.MaxValue, 0);
+            else if (last.Count > FullScanBelowCount)
+                EvictExpiredLocked(last, window, now, MaxEvictProbePerCall,
+                    Interlocked.Increment(ref _probeCursor));
             else if (last.Count > 0)
-                EvictExpiredLocked(last, window, now, MaxEvictProbePerCall);
+                EvictExpiredLocked(last, window, now, int.MaxValue, 0);
             if (last.TryGetValue(host, out var prev) && now - prev < window) return false;
             last[host] = now;
             return true;
@@ -46,12 +55,17 @@ public static class ThrottleWindow
     // nothing itself. Keeps the >=window predicate, enumeration order,
     // lazy-alloc, and deferred-remove (no inline remove during enumerate);
     // the Count>0 guard at the caller avoids the enumerator on the hot path.
-    private static void EvictExpiredLocked(Dictionary<string, double> last, double window, double now, int maxProbe)
+    // A nonzero startSkip rotates the probe window across calls.
+    private static void EvictExpiredLocked(Dictionary<string, double> last, double window, double now, int maxProbe, int startSkip)
     {
         List<string>? expired = null;
         int probed = 0;
+        int skip = maxProbe == int.MaxValue || last.Count <= maxProbe
+            ? 0
+            : startSkip % last.Count;
         foreach (var entry in last)
         {
+            if (skip > 0) { skip--; continue; }
             if (probed++ >= maxProbe) break;
             if (now - entry.Value >= window)
                 (expired ??= []).Add(entry.Key);

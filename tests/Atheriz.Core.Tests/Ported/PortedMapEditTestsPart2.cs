@@ -139,16 +139,28 @@ public class PortedMapEditTestsPart2
         Assert.Equal("replay", ((FakeConn2)conn).Sent[1].Args[0] as string);
     }
 
-    [Fact] public void MapEditMalformedArgsAreIgnored()
+    [Fact] public void MapEditMalformedArgs_SilentForBadShape_RejectForBadCells()
     {
         using var env = GlobalTestEnv.Enter();
         Reset();
         var conn = MakeConn();
-        var cases = new List<List<object?>>{
-            new List<object?>{}, new List<object?>{"key"}, new List<object?>{123,0,new List<object?>{}}, new List<object?>{"key","0",new List<object?>{}}, new List<object?>{"key",0,"cells"}, new List<object?>{ "key",0,new List<object?>{ new List<object?>{1}}}, new List<object?>{ "key",0,new List<object?>{ new List<object?>{"a","b","c"}}}, new List<object?>{ "key",0,new List<object?>{ new List<object?>{0,0,1}}}, new List<object?>{ "key",0,new List<object?>{ new List<object?>{"room",0,0}}}
+        // Bad arg shapes stay silent (no sends).
+        var silent = new List<List<object?>>{
+            new List<object?>{}, new List<object?>{"key"}, new List<object?>{123,0,new List<object?>{}}, new List<object?>{"key","0",new List<object?>{}}, new List<object?>{"key",0,"cells"}
         };
-        foreach(var a in cases) new InputFuncs().MapEditHandler(conn, a, new Dictionary<string,object?>());
+        foreach(var a in silent) new InputFuncs().MapEditHandler(conn, a, new Dictionary<string,object?>());
         Assert.Empty(((FakeConn2)conn).Sent);
+        // Malformed cells reject loudly with their index instead.
+        var badCells = new List<List<object?>>{
+            new List<object?>{ "key",0,new List<object?>{ new List<object?>{1}}}, new List<object?>{ "key",0,new List<object?>{ new List<object?>{"a","b","c"}}}, new List<object?>{ "key",0,new List<object?>{ new List<object?>{0,0,1}}}, new List<object?>{ "key",0,new List<object?>{ new List<object?>{"room",0,0}}}
+        };
+        foreach(var a in badCells) new InputFuncs().MapEditHandler(conn, a, new Dictionary<string,object?>());
+        Assert.Equal(badCells.Count, ((FakeConn2)conn).Sent.Count);
+        foreach(var sent in ((FakeConn2)conn).Sent)
+        {
+            Assert.Equal("map_edit_reject", sent.Cmd);
+            Assert.Equal("Invalid map edit cell at index 0.", sent.Args[0] as string);
+        }
     }
 
     [Fact] public void MapEditRoomOpMovesNode()

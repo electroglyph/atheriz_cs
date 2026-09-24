@@ -107,7 +107,10 @@ public sealed class GameArgumentParser
         "*" => NargsKind.ZeroOrMore,
         "+" => NargsKind.OneOrMore,
         "REMAINDER" or "..." => NargsKind.Remainder,
-        _ => NargsKind.None
+        // Unknown strings must fail loudly: silently compiling to
+        // single-value changes arity/requiredness (a "REMINDER" typo stops
+        // capturing remainders with no error).
+        _ => throw new ArgumentException($"Unknown nargs value: '{s}'. Expected one of '?', '*', '+', 'REMAINDER', '...'.", nameof(s))
     };
 
     // Python-compatible AddArgument overloads. Defs stay mutable for the
@@ -115,6 +118,9 @@ public sealed class GameArgumentParser
     // rebuilds the cached maps (see the field comment).
     public Builder AddArgument(params string[] names)
     {
+        ArgumentNullException.ThrowIfNull(names);
+        if (names.Length == 0) throw new ArgumentException("At least one argument name is required.", nameof(names));
+        if (names.Any(string.IsNullOrEmpty)) throw new ArgumentException("Argument names must not be null or empty.", nameof(names));
         var def = new ArgumentDef { Names = names.ToList() };
         // dest: like argparse, prefer long option (--) for optional args
         def.Dest = DeriveDest(names);
@@ -126,6 +132,7 @@ public sealed class GameArgumentParser
 
     public Builder AddArgument(string name, string help = "", string nargs = "", string action = "", Type? type = null, object? defaultValue = null, string[]? choices = null, bool? required = null)
     {
+        ArgumentException.ThrowIfNullOrEmpty(name);
         // Handle case where caller passed two option strings positionally: AddArgument("-f","--flag")
         // In that case 'help' looks like an option (starts with -), treat as second alias rather than help text.
         // Guard requires BOTH strings to be option-like so genuine help text
@@ -259,12 +266,12 @@ public sealed class GameArgumentParser
         }
         if (type == typeof(float))
         {
-            if (float.TryParse(val, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var fv)) return fv;
+            if (float.TryParse(val, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fv)) return fv;
             throw new CommandError($"argument {display}: invalid float value: '{val}'");
         }
         if (type == typeof(double))
         {
-            if (double.TryParse(val, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var dv)) return dv;
+            if (double.TryParse(val, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var dv)) return dv;
             throw new CommandError($"argument {display}: invalid double value: '{val}'");
         }
         return val;
@@ -401,9 +408,10 @@ public sealed class GameArgumentParser
                 else if (opt.Action == ArgAction.StoreFalse) { result.Set(opt.Dest, false); i++; }
                 else
                 {
-                    // store: consume value(s). List consumers stop at unknown
-                    // -flags (they are unrecognized optionals, not values);
-                    // a single-value store keeps argparse's greedy take.
+                    // store: consume value(s). List and single-value consumers
+                    // alike stop at known optionals and unknown -flags (they
+                    // are unrecognized optionals, not values); only negative
+                    // numbers and plain tokens are consumable values.
                     if (opt.Nargs == NargsKind.ZeroOrMore || opt.Nargs == NargsKind.OneOrMore || opt.Nargs == NargsKind.Remainder)
                     {
                         List<string> lst = [];
@@ -433,6 +441,10 @@ public sealed class GameArgumentParser
                     {
                         i++;
                         if (i >= argList.Count) throw new CommandError($"argument {tok}: expected one argument");
+                        // Like the list path above, a following known
+                        // optional or unknown -flag is not a value (argparse
+                        // errors instead of swallowing the flag as data).
+                        if (!IsValueToken(argList[i])) throw new CommandError($"argument {tok}: expected one argument");
                         string val = argList[i++];
                         // type conversion (uniform with positionals)
                         object conv = ConvertTypedValue(opt.Type, tok, val);

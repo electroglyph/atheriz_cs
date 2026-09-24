@@ -306,13 +306,14 @@ public class CommandRegressionTests
         Assert.Equal("-5.", args.GetString("val"));
     }
 
-    // RemoveByTag must re-validate tags under the write lock.
+    // RemoveByTag collects and deletes atomically under one lock.
     [Fact]
-    public void RemoveByTag_RevalidatesUnderWriteLock()
+    public void RemoveByTag_CollectsAndDeletesUnderSingleLock()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "CmdSet.cs");
         var region = SourceScan.Region(src, "public virtual void RemoveByTag(");
-        Assert.Equal(2, SourceScan.Count(region, "kv.Value.Tag == tag"));
+        Assert.Equal(1, SourceScan.Count(region, "lock (_lock)"));
+        Assert.Equal(1, SourceScan.Count(region, "kv.Value.Tag == tag"));
     }
 
     // GetAll must not return per-alias duplicates (Distinct trap).

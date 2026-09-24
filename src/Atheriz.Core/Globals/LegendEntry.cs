@@ -11,6 +11,11 @@ public sealed record LegendEntry
     public bool Show { get; set; } = true;
     public double Fg { get; set; } = 170.0;
     public double? Bg { get; set; }
+    // RGB-triple form of the colors: set when the entry arrives as [r,g,b]
+    // (the validator accepts both scalar hues and triples). Null for scalar
+    // entries; the scalar Fg/Bg stay at their defaults then.
+    public List<int>? FgRgb { get; set; }
+    public List<int>? BgRgb { get; set; }
 
     public LegendEntry() { }
     public LegendEntry(string? symbol = null, string? desc = null, (int X, int Y)? coord = null)

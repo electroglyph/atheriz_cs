@@ -3,9 +3,10 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Network;
 
-// MapEdit single-parse validation: any malformed cell anywhere is a silent
-// return (no sends), while shape-valid draw and room cells pass validation
-// and reach consume (room cells never touch drawing).
+// MapEdit single-parse validation: any malformed cell anywhere rejects
+// loudly with its index (no silent drops), while shape-valid draw and
+// room cells pass validation and reach consume (room cells never touch
+// drawing).
 [Collection("Ported")]
 public sealed class MapEditCellParsingTests
 {
@@ -13,7 +14,7 @@ public sealed class MapEditCellParsingTests
         new InputFuncs().MapEditHandler(conn, ["nope", 1, cells], []);
 
     [Fact]
-    public void MalformedCell_AtAnyPosition_SilentReturn()
+    public void MalformedCell_AtAnyPosition_RejectsWithIndex()
     {
         using var env = GlobalTestEnv.Enter();
         var badShapes = new List<List<object?>>
@@ -29,17 +30,20 @@ public sealed class MapEditCellParsingTests
         };
         foreach (var bad in badShapes)
         {
-            // Bad cell first, middle, and last all fail the same silent way.
-            foreach (var cells in new List<List<object?>>
-                     {
-                         new List<object?> { bad, new List<object?> { 1, 2, "ok" } },
-                         new List<object?> { new List<object?> { 1, 2, "ok" }, bad },
-                         new List<object?> { new List<object?> { 1, 2, "ok" }, bad, new List<object?> { 3, 4, "ok2" } },
-                     })
+            // Bad cell first, middle, and last all reject with the bad index.
+            var arrangements = new List<(List<object?> cells, int badIndex)>
+            {
+                (new List<object?> { bad, new List<object?> { 1, 2, "ok" } }, 0),
+                (new List<object?> { new List<object?> { 1, 2, "ok" }, bad }, 1),
+                (new List<object?> { new List<object?> { 1, 2, "ok" }, bad, new List<object?> { 3, 4, "ok2" } }, 1),
+            };
+            foreach (var (cells, badIndex) in arrangements)
             {
                 var conn = new TestConnection();
                 CallMapEdit(conn, cells);
-                Assert.Empty(conn.Sent);
+                var sent = Assert.Single(conn.Sent);
+                Assert.Equal("map_edit_reject", sent.Cmd);
+                Assert.Equal($"Invalid map edit cell at index {badIndex}.", sent.Args[0]);
             }
         }
     }
