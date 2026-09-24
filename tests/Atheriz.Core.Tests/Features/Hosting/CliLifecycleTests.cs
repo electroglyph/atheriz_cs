@@ -45,13 +45,15 @@ public class CliLifecycleTests
     }
 
     [Fact]
-    public async Task WaitForExitDots_ExitedProcess_ReturnsTrueImmediately()
+    public async Task WaitForExit_ExitedProcess_ReturnsTrueImmediately()
     {
         using var proc = Process.Start(new ProcessStartInfo("true") { RedirectStandardOutput = true });
         Assert.NotNull(proc);
         proc.WaitForExit(5000);
         var sw = Stopwatch.StartNew();
-        Assert.True(await ProcessHelper.WaitForExitDotsAsync(proc, 30));
+        var m = typeof(ProcessHelper).GetMethod("WaitForExitAsync", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(m);
+        Assert.True(await (Task<bool>)m!.Invoke(null, [proc, TimeSpan.FromSeconds(3)])!);
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
     }
 
@@ -63,40 +65,33 @@ public class CliLifecycleTests
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
     }
 
-    // WaitForPort* are internal (no InternalsVisibleTo in repo): reflection,
-    // same pattern as StopSafetyTests.InvokeShutdownRequest.
-    private static Task<bool> InvokePortWait(string name, int port, int tenths)
+    // WaitForPortStateAsync is internal (no InternalsVisibleTo in repo):
+    // reflection, same pattern as StopSafetyTests.InvokeShutdownRequest.
+    private static Task<bool> InvokePortWait(string name, int port, TimeSpan timeout)
     {
         var m = typeof(RestartHandler).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(m);
-        return (Task<bool>)m!.Invoke(null, new object[] { port, tenths })!;
+        return (Task<bool>)m!.Invoke(null, new object[] { port, timeout })!;
     }
 
     [Fact]
     public async Task WaitForPortFree_FreePort_ReturnsTrue()
     {
-        Assert.True(await InvokePortWait("WaitForPortFreeAsync", FreePort(), 5));
+        Assert.True(await InvokePortWait("WaitForPortFreeAsync", FreePort(), TimeSpan.FromSeconds(2)));
     }
 
     [Fact]
-    public async Task WaitForPortUp_ListeningPort_ReturnsTrue()
+    public async Task WaitForPortFree_ListeningPort_ReturnsFalseAfterBound()
     {
         var l = new TcpListener(IPAddress.Loopback, 0);
         l.Start();
         try
         {
             int port = ((IPEndPoint)l.LocalEndpoint).Port;
-            Assert.True(await InvokePortWait("WaitForPortUpAsync", port, 5));
-            Assert.False(await InvokePortWait("WaitForPortFreeAsync", port, 2));
+            var sw = Stopwatch.StartNew();
+            Assert.False(await InvokePortWait("WaitForPortFreeAsync", port, TimeSpan.FromMilliseconds(300)));
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
         }
         finally { l.Stop(); }
-    }
-
-    [Fact]
-    public async Task WaitForPortUp_FreePort_ReturnsFalseAfterBound()
-    {
-        var sw = Stopwatch.StartNew();
-        Assert.False(await InvokePortWait("WaitForPortUpAsync", FreePort(), 2));
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
     }
 }

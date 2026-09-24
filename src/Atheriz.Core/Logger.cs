@@ -157,6 +157,8 @@ public static class AtherizLogger
         }
     }
 
+    private static string? _createdDir; // best-effort cache: last directory known created
+
     private static void AppendToFile(LogLevel level, string category, string message, Exception? ex)
     {
         // F009: serialize size-check + rotate + append so concurrent writers cannot
@@ -168,22 +170,37 @@ public static class AtherizLogger
             var dir = _savePath;
             // mirrors save/server.log RotatingFileHandler 5M*5
             var file = Path.Combine(dir, "server.log");
-            try { Directory.CreateDirectory(dir); } catch { }
-            var line = FormatLine(level, category, message, ex, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} ");
-            line += Environment.NewLine;
+            // Single encode: this byte array feeds the rotation size check
+            // and the write below (no separate GetByteCount pass).
+            var payload = System.Text.Encoding.UTF8.GetBytes(
+                FormatLine(level, category, message, ex, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} ") + Environment.NewLine);
+            if (_createdDir != dir)
+            {
+                try { Directory.CreateDirectory(dir); } catch { }
+            }
             // size check + rotate before append
             try
             {
-                if (File.Exists(file))
-                {
-                    var info = new FileInfo(file);
-                    if (info.Length + System.Text.Encoding.UTF8.GetByteCount(line) > MaxFileBytes)
-                        RotateLocked(file);
-                }
+                var info = new FileInfo(file);
+                if (info.Exists && info.Length + payload.Length > MaxFileBytes)
+                    RotateLocked(file);
             }
             catch { }
-            try { File.AppendAllText(file, line); Volatile.Write(ref _lastFileFailureTicks, 0); }
-            catch { Volatile.Write(ref _lastFileFailureTicks, DateTime.UtcNow.Ticks); }
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Append, FileAccess.Write, FileShare.Read);
+                stream.Write(payload, 0, payload.Length);
+                _createdDir = dir;
+                Volatile.Write(ref _lastFileFailureTicks, 0);
+            }
+            catch
+            {
+                // A failed write may mean a directory deleted at runtime:
+                // forget the cache so the next call recreates it (a healed
+                // directory writes on the very next call, no cooldown skip).
+                _createdDir = null;
+                Volatile.Write(ref _lastFileFailureTicks, DateTime.UtcNow.Ticks);
+            }
         }
         catch { }
         }

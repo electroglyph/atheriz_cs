@@ -3,11 +3,12 @@ using Microsoft.AspNetCore.StaticFiles;
 
 namespace Atheriz.Server.Hosting;
 
-public static class StaticFileConfig
+public static partial class StaticFileConfig
 {
     // Content-hashed bundle filename (e.g. app.ab12cd34.js): compiled once,
     // matched per static-file response for the immutable cache header.
-    private static readonly Regex HashedBundlePattern = new(@"\.[0-9a-fA-F]{8,}\.[a-z0-9]+$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"\.[0-9a-fA-F]{8,}\.[a-z0-9]+$", RegexOptions.IgnoreCase)]
+    private static partial Regex HashedBundlePattern();
 
     // Shared no-cache trio for the three entry-HTML shapes (byte-identical).
     private static void SetNoCache(HttpResponse response)
@@ -16,17 +17,9 @@ public static class StaticFileConfig
         response.Headers.Pragma = "no-cache";
     }
 
-    // First existing file candidate (static-vs-template fallbacks below).
-    private static string? FirstExisting(params string?[] candidates)
-    {
-        foreach (var c in candidates)
-            if (c is not null && File.Exists(c)) return c;
-        return null;
-    }
-    public static (string? staticCandidate, string? templatesCandidate) Configure(WebApplication app, AtherizSettings settings)
+    public static string? Configure(WebApplication app, AtherizSettings settings)
     {
         var staticCandidate = AssetPathResolver.ResolveWwwRoot(app.Environment.ContentRootPath, AppContext.BaseDirectory);
-        var templatesCandidate = AssetPathResolver.ResolveTemplates(app.Environment.ContentRootPath, AppContext.BaseDirectory);
         if (staticCandidate is not null)
         {
             AtherizLogger.LogInformation($"Serving static files from: {staticCandidate}");
@@ -61,7 +54,7 @@ public static class StaticFileConfig
                     // outside assets/ served 86400, not immutable. Keeping the
                     // guard preserves header bytes for that overlap exactly.
                     bool immutable = path.StartsWith("/static/assets/", StringComparison.OrdinalIgnoreCase)
-                        || (!path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase) && HashedBundlePattern.IsMatch(path));
+                        || (!path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase) && HashedBundlePattern().IsMatch(path));
                     if (immutable)
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
                     else if (path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase))
@@ -91,19 +84,15 @@ public static class StaticFileConfig
         app.MapGet("/", (HttpContext ctx) =>
         {
             SetNoCache(ctx.Response);
-            var tpl = templatesCandidate is not null ? Path.Combine(templatesCandidate, "index.html") : null;
             var idx = staticCandidate is not null ? Path.Combine(staticCandidate, "index.html") : null;
-            var hit = FirstExisting(tpl, idx);
-            if (hit is not null) return Results.File(hit, contentType: "text/html");
+            if (idx is not null && File.Exists(idx)) return Results.File(idx, contentType: "text/html");
             return Results.Content($"<h1>{settings.ServerName}</h1><p><a href=\"/webclient/index.html\">Play</a></p>", "text/html");
         });
         app.MapGet("/webclient/index.html", (HttpContext ctx) =>
         {
             SetNoCache(ctx.Response);
             var compiled = staticCandidate is not null ? Path.Combine(staticCandidate, "webclient", "index.html") : null;
-            var tpl = templatesCandidate is not null ? Path.Combine(templatesCandidate, "webclient", "index.html") : null;
-            var hit = FirstExisting(compiled, tpl);
-            if (hit is not null) return Results.File(hit, contentType: "text/html");
+            if (compiled is not null && File.Exists(compiled)) return Results.File(compiled, contentType: "text/html");
             return Results.NotFound("Webclient not built — run webclient build and deploy.");
         });
         // Single registration: the bare pattern also matches the
@@ -132,6 +121,6 @@ public static class StaticFileConfig
         app.MapGet("/ready", () => ServerLifecycle.StartupSucceeded
             ? Results.Json(new { status = "ok", server = settings.ServerName })
             : Results.Json(new { status = "starting", server = settings.ServerName }, statusCode: 503));
-        return (staticCandidate, templatesCandidate);
+        return staticCandidate;
     }
 }

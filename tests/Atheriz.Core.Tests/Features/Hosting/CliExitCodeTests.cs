@@ -21,7 +21,7 @@ public class CliExitCodeTests
     }
 
     [Fact]
-    public async Task New_RejectedFolder_SignalsFailure()
+    public void New_RejectedFolder_SignalsFailure()
     {
         var root = Path.Combine(Path.GetTempPath(), "atheriz_exitrej_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -30,10 +30,7 @@ public class CliExitCodeTests
         {
             Directory.SetCurrentDirectory(root);
             Directory.CreateDirectory(Path.Combine(root, "my-game"));
-            CliExitCode.Set(0);
-            var result = await NewHandler.HandleNewAsync(new[] { "my-game", "--foreground" });
-            Assert.False(result);
-            Assert.Equal(1, CliExitCode.Code);
+            Assert.False(NewHandler.TryCreateFolder("my-game", overwrite: false, out _));
         }
         finally
         {
@@ -43,28 +40,20 @@ public class CliExitCodeTests
     }
 
     [Fact]
-    public async Task New_ForegroundSuccess_SignalsZero()
+    public void New_CreateFolder_SignalsSuccess()
     {
         var root = Path.Combine(Path.GetTempPath(), "atheriz_exitok_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         var origCwd = Directory.GetCurrentDirectory();
-        var oldUser = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME");
-        var oldPass = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
-        Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", "s1exitadmin");
-        Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", "s1ExitPass123");
         try
         {
             Directory.SetCurrentDirectory(root);
-            CliExitCode.Set(1);
-            var result = await NewHandler.HandleNewAsync(new[] { "s1exitgame", "--foreground" });
-            Assert.True(result);
-            Assert.Equal(0, CliExitCode.Code);
+            Assert.True(NewHandler.TryCreateFolder("s1exitgame", overwrite: false, out var abs));
+            Assert.True(Directory.Exists(abs));
         }
         finally
         {
             try { Directory.SetCurrentDirectory(origCwd); } catch { }
-            Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", oldUser);
-            Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", oldPass);
             try { Directory.Delete(root, true); } catch { }
         }
     }
@@ -72,17 +61,13 @@ public class CliExitCodeTests
     [Fact]
     public async Task Reload_NoServer_SignalsFailure()
     {
-        CliExitCode.Set(0);
-        await ReloadHandler.HandleReloadAsync(new[] { "--port", FindFreePort().ToString() });
-        Assert.Equal(1, CliExitCode.Code);
+        Assert.Equal(1, await ReloadHandler.ReloadAsync(FindFreePort()));
     }
 
     [Fact]
     public async Task Stop_NoServer_SignalsFailure()
     {
-        CliExitCode.Set(0);
-        await StopHandler.HandleStopAsync(new[] { "--port", FindFreePort().ToString() });
-        Assert.Equal(1, CliExitCode.Code);
+        Assert.Equal(1, await StopHandler.StopAsync(FindFreePort()));
     }
 
     private static void SetEffectiveSettings(AtherizSettings? settings)
@@ -179,10 +164,9 @@ public class CliExitCodeTests
         try
         {
             Console.SetOut(capture);
-            await CreateHandler.HandleCreateAsync(["--port", stub.Port.ToString(), "stubacc", "StubChar", "StubPass123"]);
+            Assert.Equal(1, await CreateHandler.CreateAsync("stubacc", "StubChar", "StubPass123", stub.Port));
             await serve.WaitAsync(TimeSpan.FromSeconds(15));
             Assert.Contains("already exists", capture.ToString(), StringComparison.Ordinal);
-            Assert.Equal(1, CliExitCode.Code);
         }
         finally
         {
@@ -207,10 +191,9 @@ public class CliExitCodeTests
         try
         {
             Console.SetOut(capture);
-            await CreateHandler.HandleCreateAsync(["--port", stub.Port.ToString(), "okacc", "OkChar", "OkPass123"]);
+            Assert.Equal(0, await CreateHandler.CreateAsync("okacc", "OkChar", "OkPass123", stub.Port));
             await serve.WaitAsync(TimeSpan.FromSeconds(15));
             Assert.Contains("Account created.", capture.ToString(), StringComparison.Ordinal);
-            Assert.Equal(0, CliExitCode.Code);
         }
         finally
         {

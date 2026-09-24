@@ -540,35 +540,6 @@ public class PortedTelnetTests
         conn.SendCommand("prompt_masked", new List<object?>{"hi"});
         Assert.Empty(w.Iacs); Assert.Empty(w.Writes);
     }
-    [Fact] public void SetupSkippedWhenDisabled()
-    {
-        using var env = GlobalTestEnv.Enter();
-        var app = new FakeApp2();
-        var prev = AtherizSettings.Global.TelnetEnabled;
-        AtherizSettings.Global.TelnetEnabled = false;
-        try{ new TelnetProtocol().Setup(app); } finally{ AtherizSettings.Global.TelnetEnabled = prev; }
-        Assert.Null(app.Router.LifespanContext);
-    }
-    [Fact] public void SetupRegistersLifespan()
-    {
-        using var env = GlobalTestEnv.Enter();
-        var app = new FakeApp2();
-        var prev = AtherizSettings.Global.TelnetEnabled;
-        AtherizSettings.Global.TelnetEnabled = true;
-        try{ new TelnetProtocol().Setup(app); } finally{ AtherizSettings.Global.TelnetEnabled = prev; }
-        Assert.NotNull(app.Router.LifespanContext);
-    }
-    private sealed class FakeApp2 : ITelnetApp
-    {
-        public object? Captured = null!;
-        public FakeRouter2 Router { get; } = new();
-        ITelnetRouter? ITelnetApp.Router => Router;
-    }
-    private sealed class FakeRouter2 : ITelnetRouter
-    {
-        public object? lifespan_context;
-        public object? LifespanContext { get=> lifespan_context; set=> lifespan_context=value; }
-    }
     [Fact] public void ClampNawsNormal()
     {
         Assert.Equal((24,80), TelnetProtocol.ClampNaws(24,80));

@@ -289,9 +289,9 @@ public class SourceHygieneTests
         Assert.True(Scan(["Atheriz.Server/Cli"], @"Environment\.Exit").Count == 0,
             "Environment.Exit must not live in a library method (HandleTest)");
 
-    [Fact] public void Host_RestartForwardsForegroundFlag() =>
-        Assert.True(Scan(["Atheriz.Server/Cli"], @"Task<bool> HandleRestartAsync", fileNameContains: "RestartHandler.cs").Count > 0,
-            "RestartHandler must preserve StopHandler's Task<bool> foreground flag");
+    [Fact] public void Host_RestartRunsForeground() =>
+        Assert.True(Scan(["Atheriz.Server/Cli"], @"Task<int> RestartAsync", fileNameContains: "RestartHandler.cs").Count > 0,
+            "RestartHandler runs the replacement in-process and returns its exit code");
 
     [Fact] public void Host_PidFile_Fsyncs() =>
         Assert.True(Scan(["Atheriz.Server/Infrastructure"], @"Flush\(true\)", fileNameContains: "PidFile.cs").Count > 0,

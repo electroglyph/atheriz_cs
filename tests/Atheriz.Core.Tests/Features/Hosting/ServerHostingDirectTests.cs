@@ -3,6 +3,7 @@ using Atheriz.Server.Cli;
 using Atheriz.Server.Hosting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Net;
 using System.Reflection;
@@ -56,10 +57,13 @@ public class ServerHostingDirectTests
         };
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = tmp });
         builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton(settings);
+        AdminAuthServices.AddAdminAuth(builder.Services);
         var app = builder.Build();
         app.MapAdminRoutes(settings);
         StaticFileConfig.Configure(app, settings);
-        ProtocolBootstrap.RegisterProtocols(app, settings);
+        app.UseAuthentication();
+        app.UseAuthorization();
         await app.StartAsync();
         var addr = app.Urls.First(u => u.StartsWith("http://", StringComparison.Ordinal));
         return new Booted
@@ -73,29 +77,30 @@ public class ServerHostingDirectTests
     private static async Task<JsonDocument> PostJson(HttpClient c, string path)
     {
         var resp = await c.PostAsync(path, new StringContent(string.Empty));
-        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var body = await resp.Content.ReadAsStringAsync();
         return JsonDocument.Parse(body);
     }
 
     [Fact]
-    public async Task AdminRoutes_Shutdown_NoToken_Returns200ErrorContract()
+    public async Task AdminRoutes_Shutdown_NoToken_Returns401ErrorContract()
     {
-        // atheriz.py:348-350 port — auth failures stay HTTP 200 {status:error}.
+        // Auth failures stay {status:error} JSON, now with HTTP 401.
         await using var b = await BootAsync();
-        using var doc = await PostJson(b.Client, "/_internal/shutdown");
+        var resp = await b.Client.PostAsync("/_internal/shutdown", new StringContent(string.Empty));
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         Assert.Equal("error", doc.RootElement.GetProperty("status").GetString());
         Assert.False(string.IsNullOrEmpty(doc.RootElement.GetProperty("message").GetString()));
     }
 
     [Fact]
-    public async Task AdminRoutes_HotReload_NoToken_Returns200ErrorFast()
+    public async Task AdminRoutes_HotReload_NoToken_Returns401ErrorFast()
     {
         // Auth gate runs before any ticker/plugin work — must return quickly.
         await using var b = await BootAsync();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var resp = await b.Client.PostAsync("/_internal/hot_reload", new StringContent(string.Empty), cts.Token);
-        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(cts.Token));
         Assert.Equal("error", doc.RootElement.GetProperty("status").GetString());
     }
@@ -118,9 +123,8 @@ public class ServerHostingDirectTests
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Contains("no-store", resp.Headers.GetValues("Cache-Control").First());
         Assert.Contains("no-cache", resp.Headers.GetValues("Pragma").First());
-        // No wwwroot files: the compiled-missing fallback template (title AtheriZ;
-        // the fallback does not interpolate the configured server name).
-        Assert.Contains("AtheriZ", await resp.Content.ReadAsStringAsync());
+        // No wwwroot files: the fallback names the configured server.
+        Assert.Contains("TestSrv", await resp.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -199,7 +203,7 @@ public class ServerHostingDirectTests
     public async Task ReloadHandler_MissingToken_ReturnsQuietly()
     {
         // Port 1 listens on nothing; global secret path has no token in test env.
-        await ReloadHandler.HandleReloadAsync(new[] { "--port", "1" });
+        Assert.Equal(1, await ReloadHandler.ReloadAsync(1));
     }
 
     [Fact]

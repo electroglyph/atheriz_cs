@@ -112,118 +112,12 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
-    /// Best-effort: find PID holding LISTEN on port via /proc (Linux) or lsof/ss fallback. Mirrors psutil.net_connections.
-    /// Helper output is read asynchronously with a hard timeout : a
-    /// stalled lsof/ss must never hang `stop`.
-    /// </summary>
-    public static bool TryFindPidListeningOnPort(int port, out int pid)
-    {
-        pid = -1;
-        // Try lsof
-        try
-        {
-            var psi = new ProcessStartInfo { FileName = "lsof", UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-            psi.ArgumentList.Add("-i");
-            psi.ArgumentList.Add($":{port}");
-            psi.ArgumentList.Add("-sTCP:LISTEN");
-            psi.ArgumentList.Add("-t");
-            using var p = Process.Start(psi);
-            if (p is not null)
-            {
-                string outp = ReadHelperOutput(p, TimeSpan.FromSeconds(5));
-                // One split of the captured lsof output; both passes scan the
-                // same array so verified servers keep priority over any holder.
-                // Scoped to this path: the ss fallback below keeps its own
-                // parse (different backend, different token shape).
-                var lines = outp.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                foreach (var line in lines)
-                    if (int.TryParse(line.Trim(), out var cand) && IsServerProcess(cand) && IsProcessListeningOnPort(cand, port)) { pid = cand; return true; }
-                foreach (var line in lines)
-                    if (int.TryParse(line.Trim(), out var cand) && IsProcessListeningOnPort(cand, port)) { pid = cand; return true; }
-            }
-        }
-        catch { }
-        // Try ss
-        try
-        {
-            var psi2 = new ProcessStartInfo { FileName = "ss", UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-            psi2.ArgumentList.Add("-lptn");
-            psi2.ArgumentList.Add($"sport = :{port}");
-            using var p2 = Process.Start(psi2);
-            if (p2 is not null)
-            {
-                string outp = ReadHelperOutput(p2, TimeSpan.FromSeconds(5));
-                // parse pid=1234,
-                foreach (var token in outp.Split(new[] { "pid=", "," }, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var num = new string(token.TakeWhile(char.IsDigit).ToArray());
-                    if (int.TryParse(num, out var cand) && IsServerProcess(cand) && IsProcessListeningOnPort(cand, port)) { pid = cand; return true; }
-                }
-            }
-        }
-        catch { }
-        // Fallback: scan /proc
-        try
-        {
-            if (Directory.Exists("/proc"))
-            {
-                // collect inodes for listening sockets on port via /proc/net/tcp*
-                var targetInodes = GetListeningInodes(port, out _);
-                if (targetInodes.Count > 0)
-                {
-                    // Two passes: verified servers first, then any process
-                    // holding the socket (identical link resolution).
-                    if (ScanProcForInode(targetInodes, serverOnly: true) is int verified) { pid = verified; return true; }
-                    if (ScanProcForInode(targetInodes, serverOnly: false) is int holder) { pid = holder; return true; }
-                }
-            }
-        }
-        catch { }
-
-        // /proc fd scan shared by both passes above: verified servers first,
-        // then any socket holder. serverOnly gates the IsServerProcess
-        // pre-filter and the fdinfo fallback, preserving each pass exactly.
-        static int? ScanProcForInode(HashSet<string> inodes, bool serverOnly)
-        {
-            foreach (var dir in Directory.GetDirectories("/proc"))
-            {
-                var name = Path.GetFileName(dir);
-                if (!int.TryParse(name, out var candPid)) continue;
-                if (serverOnly && !IsServerProcess(candPid)) continue;
-                try
-                {
-                    var fdDir = Path.Combine(dir, "fd");
-                    if (!Directory.Exists(fdDir)) continue;
-                    foreach (var fd in Directory.GetFiles(fdDir))
-                    {
-                        try
-                        {
-                            var link = File.ResolveLinkTarget(fd, true)?.ToString() ?? (serverOnly ? new FileInfo(fd).LinkTarget ?? "" : "");
-                            // fallback via readlink
-                            if (serverOnly && string.IsNullOrEmpty(link))
-                            {
-                                try { link = File.ReadAllText($"/proc/{candPid}/fdinfo/{Path.GetFileName(fd)}"); } catch { }
-                            }
-                            foreach (var ino in inodes)
-                                if (link.Contains($"socket:[{ino}]")) return candPid;
-                        }
-                        catch { }
-                    }
-                }
-                catch { }
-            }
-            return null;
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// shared /proc/net/tcp* LISTEN-inode parser (was duplicated in
-    /// the port locator and the single-pid verifier). Returns the inodes of
-    /// sockets in LISTEN state on <paramref name="port"/>.
-    /// <paramref name="tablesRead"/> reports whether the tables were readable
-    /// at all: false on non-Linux (no /proc/net/tcp) or on read errors, so
-    /// callers can fail closed instead of degrading into a global check.
+    /// shared /proc/net/tcp* LISTEN-inode parser for the single-pid
+    /// verifier below. Returns the inodes of sockets in LISTEN state on
+    /// <paramref name="port"/>. <paramref name="tablesRead"/> reports
+    /// whether the tables were readable at all: false on non-Linux
+    /// (no /proc/net/tcp) or on read errors, so callers can fail closed
+    /// instead of degrading into a global check.
     /// </summary>
     private static HashSet<string> GetListeningInodes(int port, out bool tablesRead)
     {
@@ -254,62 +148,11 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
-    /// Reads a helper's stdout to end without ever blocking the caller past
-    /// <paramref name="timeout"/>: async read + bounded wait, kill on expiry.
-    /// Returns whatever was captured (possibly empty).
-    /// </summary>
-    private static string ReadHelperOutput(Process p, TimeSpan timeout)
-    {
-        try
-        {
-            var read = p.StandardOutput.ReadToEndAsync();
-            // Drain stderr concurrently: an undrained pipe (lsof/ss warnings)
-            // deadlocks the helper once the 4K buffer fills, hanging `stop`.
-            Task? err = null;
-            try { if (p.StartInfo.RedirectStandardError) err = p.StandardError.ReadToEndAsync(); } catch { }
-            if (!read.Wait(timeout)) { try { p.Kill(entireProcessTree: false); } catch { } }
-            try { p.WaitForExit(1000); } catch { }
-            if (err is not null) { try { err.Wait(TimeSpan.FromSeconds(1)); } catch { } }
-            return read.IsCompletedSuccessfully ? read.Result : "";
-        }
-        catch { return ""; }
-    }
-
-    /// <summary>
-    /// Async twin of <see cref="ReadHelperOutput"/>: awaits the helper's
-    /// stdout with <c>WaitAsync</c> and reaps via <c>WaitForExitAsync</c>,
-    /// so async callers never park a thread on a stalled helper.
-    /// Returns whatever was captured (possibly empty).
-    /// </summary>
-    public static async Task<string> ReadHelperOutputAsync(Process p, TimeSpan timeout, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(p);
-        try
-        {
-            Task<string> read;
-            try { read = p.StandardOutput.ReadToEndAsync(); }
-            catch { return ""; }
-            Task? err = null;
-            try { if (p.StartInfo.RedirectStandardError) err = p.StandardError.ReadToEndAsync(); } catch { }
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(timeout);
-            try { await read.WaitAsync(timeoutCts.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) { try { p.Kill(entireProcessTree: false); } catch { } }
-            using var exitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            exitCts.CancelAfter(TimeSpan.FromSeconds(1));
-            try { await p.WaitForExitAsync(exitCts.Token).ConfigureAwait(false); } catch { }
-            if (err is not null) { try { await err.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false); } catch { } }
-            return read.IsCompletedSuccessfully ? await read.ConfigureAwait(false) : "";
-        }
-        catch { return ""; }
-    }
-
-    /// <summary>
-    /// Verify pid actually holds LISTEN on port (mirrors _process_listening_by_port).
-    /// Fail closed: when per-PID verification is unavailable (no /proc tables
-    /// on non-Linux, unreadable fd dir, unexpected errors) the answer is
-    /// "not verified", never the global port check — degrading to the global
-    /// check would let `stop` signal an unverified process on pid reuse.
+    /// Verify pid actually holds LISTEN on port. Fail closed: when per-PID
+    /// verification is unavailable (no /proc tables on non-Linux,
+    /// unreadable fd dir, unexpected errors) the answer is "not verified",
+    /// never the global port check — degrading to the global check would
+    /// let `stop` signal an unverified process on pid reuse.
     /// </summary>
     public static bool IsProcessListeningOnPort(int pid, int port)
     {
@@ -335,6 +178,7 @@ public sealed class PidFile : IDisposable
         }
         catch { return false; }
     }
+
 
     /// <summary>
     /// The server.pid governing this game: always <c>{savePath}/server.pid</c>.

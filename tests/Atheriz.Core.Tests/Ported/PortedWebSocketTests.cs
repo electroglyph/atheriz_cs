@@ -5,50 +5,64 @@ using System.Text.Json;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
 using Atheriz.Core.Settings;
+using Atheriz.Server.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Atheriz.Core.Tests.Ported;
 
 [Collection("Ported")]
 public class PortedWebSocketTests
 {
-    // Helpers for endpoint capture
-    private sealed class FakeApp : IWebSocketApp
+    // Scripted System.Net.WebSockets.WebSocket: yields queued text messages
+    // (fragmented to the receive buffer) then a clean close. Drives the real
+    // /ws pump (WebSocketHandler) with no network.
+    private class ScriptSocket : WebSocket
     {
-        public Dictionary<string, Delegate> Captured = new();
-        public void WebSocket(string path, Func<IWebSocketPeer, Task> endpoint) => Captured[path] = endpoint;
-    }
-    private static Func<IWebSocketPeer, Task> CaptureEndpoint()
-    {
-        var app = new FakeApp();
-        var prev = AtherizSettings.Global.WebsocketEnabled;
-        AtherizSettings.Global.WebsocketEnabled = true;
-        try { new WebSocketProtocol().Setup(app); }
-        finally { AtherizSettings.Global.WebsocketEnabled = prev; }
-        return (Func<IWebSocketPeer, Task>)app.Captured["/ws"];
+        private byte[] _current = [];
+        private int _offset;
+        private readonly Queue<byte[]> _msgs;
+        public WebSocketCloseStatus? Status;
+        public ScriptSocket(IEnumerable<string> texts) => _msgs = new Queue<byte[]>(texts.Select(Encoding.UTF8.GetBytes));
+        public override WebSocketCloseStatus? CloseStatus => Status;
+        public override string? CloseStatusDescription => null;
+        public override WebSocketState State => WebSocketState.Open;
+        public override string? SubProtocol => null;
+        public override void Abort() { }
+        public override void Dispose() { }
+        public override Task CloseAsync(WebSocketCloseStatus s, string? d, CancellationToken c) { Status = s; return Task.CompletedTask; }
+        public override Task CloseOutputAsync(WebSocketCloseStatus s, string? d, CancellationToken c) => CloseAsync(s, d, c);
+        public override Task SendAsync(ArraySegment<byte> b, WebSocketMessageType t, bool e, CancellationToken c) => Task.CompletedTask;
+        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken c)
+        {
+            while (_offset >= _current.Length)
+            {
+                if (_msgs.Count == 0)
+                    return Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true));
+                _current = _msgs.Dequeue();
+                _offset = 0;
+            }
+            int n = Math.Min(_current.Length - _offset, buffer.Count);
+            Buffer.BlockCopy(_current, _offset, buffer.Array!, buffer.Offset, n);
+            _offset += n;
+            return Task.FromResult(new WebSocketReceiveResult(n, WebSocketMessageType.Text, _offset >= _current.Length));
+        }
     }
 
-    private sealed class MockClient : IWebSocketClientInfo { public string host = "127.0.0.1"; string? IWebSocketClientInfo.Host => host; }
-    private sealed class MockWsEndpoint : IWebSocketPeer
+    private sealed class ScriptFeature : IHttpWebSocketFeature
     {
-        public object? client;
-        public Func<Task> acceptImpl = () => Task.CompletedTask;
-        public Func<Task<string>> receiveTextImpl = () => Task.FromResult("");
-        public List<int> CloseCodes = new();
-        public bool CloseCalled;
-        public Task accept() => acceptImpl();
-        public Task<string> receive_text() => receiveTextImpl();
-        public Task close(object? code = null, object? reason = null)
-        {
-            CloseCalled = true;
-            if (code is int i) CloseCodes.Add(i);
-            else if (code != null) CloseCodes.Add(0);
-            else CloseCodes.Add(0);
-            return Task.CompletedTask;
-        }
-        object? IWebSocketPeer.Client => client;
-        Task IWebSocketPeer.AcceptAsync() => accept();
-        Task<string> IWebSocketPeer.ReceiveTextAsync() => receive_text();
-        Task IWebSocketPeer.CloseAsync(int code, string? reason) => close(code, reason);
+        private readonly WebSocket _ws;
+        public ScriptFeature(WebSocket ws) => _ws = ws;
+        public bool IsWebSocketRequest => true;
+        public Task<WebSocket> AcceptAsync(WebSocketAcceptContext context) => Task.FromResult(_ws);
+    }
+
+    private static DefaultHttpContext WsContext(ScriptSocket sock, string host = "127.0.0.1")
+    {
+        var http = new DefaultHttpContext();
+        http.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(host);
+        http.Features.Set<IHttpWebSocketFeature>(new ScriptFeature(sock));
+        return http;
     }
 
     private sealed class FakeWs : WebSocket
@@ -95,15 +109,14 @@ public class PortedWebSocketTests
     public async Task OversizedMessageDisconnectsConnection()
     {
         using var env = GlobalTestEnv.Enter();
-        var endpoint = CaptureEndpoint();
-        var ws = new MockWsEndpoint();
-        ws.client = new MockClient { host = "127.0.0.1" };
-        ws.receiveTextImpl = () => Task.FromResult(new string('x', 100_000));
+        var sock = new ScriptSocket([new string('x', 100_000)]);
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint(ws); }
-        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
+        try { await WebSocketHandler.HandleAsync(WsContext(sock), new AtherizSettings { WebsocketMaxMessageSize = 100 }).WaitAsync(TimeSpan.FromSeconds(15)); }
+        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait: false); }
+        Assert.Equal(WebSocketCloseStatus.MessageTooBig, sock.Status);
+        Assert.Equal(0, mockMgr.HandleCalls);
         Assert.Equal(1, mockMgr.DisconnectCalls);
     }
 
@@ -111,16 +124,20 @@ public class PortedWebSocketTests
     public async Task ReceiveErrorDisconnectsConnection()
     {
         using var env = GlobalTestEnv.Enter();
-        var endpoint = CaptureEndpoint();
-        var ws = new MockWsEndpoint();
-        ws.client = new MockClient { host = "127.0.0.1" };
-        ws.receiveTextImpl = () => throw new InvalidOperationException("socket error");
+        var sock = new ErrorSocket();
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint(ws); }
-        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
+        try { await WebSocketHandler.HandleAsync(WsContext(sock), new AtherizSettings()).WaitAsync(TimeSpan.FromSeconds(15)); }
+        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait: false); }
         Assert.Equal(1, mockMgr.DisconnectCalls);
+    }
+
+    private sealed class ErrorSocket : ScriptSocket
+    {
+        public ErrorSocket() : base([]) { }
+        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken c) =>
+            Task.FromException<WebSocketReceiveResult>(new InvalidOperationException("socket error"));
     }
 
     // ----- TestWebSocketNone -----
@@ -128,18 +145,16 @@ public class PortedWebSocketTests
     public async Task WsEndpointToleratesClientNone()
     {
         using var env = GlobalTestEnv.Enter();
-        var endpoint = CaptureEndpoint();
-        var ws = new MockWsEndpoint();
-        ws.client = null;
-        ws.receiveTextImpl = () => throw new TestWebSocketDisconnectException();
+        var sock = new ScriptSocket([]);
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint(ws); }
-        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
+        var http = new DefaultHttpContext();
+        http.Features.Set<IHttpWebSocketFeature>(new ScriptFeature(sock));
+        try { await WebSocketHandler.HandleAsync(http, new AtherizSettings()).WaitAsync(TimeSpan.FromSeconds(15)); }
+        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait: false); }
         Assert.Equal(1, mockMgr.DisconnectCalls);
     }
-    private sealed class TestWebSocketDisconnectException : Exception { }
 
     // ----- TestWebSocketConnection -----
     [Fact] public void InitStoresWebsocket()
@@ -199,74 +214,33 @@ public class PortedWebSocketTests
         Assert.Empty(parsed[2].EnumerateObject());
     }
 
-    // ----- TestWebSocketProtocolSetup -----
-    [Fact] public void SetupRegistersRoute()
-    {
-        using var env = GlobalTestEnv.Enter();
-        var app = new FakeApp();
-        var prev = AtherizSettings.Global.WebsocketEnabled;
-        AtherizSettings.Global.WebsocketEnabled = true;
-        try { new WebSocketProtocol().Setup(app); } finally { AtherizSettings.Global.WebsocketEnabled = prev; }
-        Assert.True(app.Captured.ContainsKey("/ws"));
-    }
-    [Fact] public void SetupSkippedWhenDisabled()
-    {
-        using var env = GlobalTestEnv.Enter();
-        var app = new FakeApp();
-        var prev = AtherizSettings.Global.WebsocketEnabled;
-        AtherizSettings.Global.WebsocketEnabled = false;
-        try { new WebSocketProtocol().Setup(app); } finally { AtherizSettings.Global.WebsocketEnabled = prev; }
-        Assert.Empty(app.Captured);
-    }
-
-    // ----- TestBaseProtocol -----
-    [Fact] public void SetupNotImplemented()
-    {
-        using var env = GlobalTestEnv.Enter();
-        var proto = new DummyProtocol();
-        var ex = Record.Exception(()=> proto.Setup(new object()));
-        Assert.NotNull(ex);
-        Assert.IsType<NotImplementedException>(ex);
-    }
-    private sealed class DummyProtocol : BaseProtocol { public override void Setup(object app)=> throw new NotImplementedException(); }
 
     // ----- TestWebSocketMessageSize -----
     [Fact]
     public async Task RejectsOversizedMessage()
     {
         using var env = GlobalTestEnv.Enter();
-        var endpoint = CaptureEndpoint();
-        var ws = new MockWsEndpoint();
-        ws.client = new MockClient { host = "127.0.0.1" };
-        ws.receiveTextImpl = () => Task.FromResult(new string('x', 100_000));
+        var sock = new ScriptSocket([new string('x', 100_000)]);
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint(ws); }
-        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
-        Assert.Contains(1009, ws.CloseCodes);
+        try { await WebSocketHandler.HandleAsync(WsContext(sock), new AtherizSettings { WebsocketMaxMessageSize = 100 }).WaitAsync(TimeSpan.FromSeconds(15)); }
+        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait: false); }
+        Assert.Equal(WebSocketCloseStatus.MessageTooBig, sock.Status);
     }
 
     [Fact]
     public async Task AcceptsNormalMessage()
     {
         using var env = GlobalTestEnv.Enter();
-        var endpoint = CaptureEndpoint();
-        var ws = new MockWsEndpoint();
-        ws.client = new MockClient { host = "127.0.0.1" };
-        int call = 0;
-        ws.receiveTextImpl = () => {
-            call++;
-            if (call==1) return Task.FromResult("hello");
-            throw new TestWebSocketDisconnectException();
-        };
+        var sock = new ScriptSocket(["hello"]);
         var mockMgr = new MockMgr();
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint(ws); }
-        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
+        try { await WebSocketHandler.HandleAsync(WsContext(sock), new AtherizSettings()).WaitAsync(TimeSpan.FromSeconds(15)); }
+        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait: false); }
         Assert.Equal(1, mockMgr.HandleCalls);
-        Assert.Empty(ws.CloseCodes);
+        Assert.Null(sock.Status);
     }
 
     // ----- TestWebSocketSendSerialization -----

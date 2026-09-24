@@ -18,97 +18,45 @@ namespace Atheriz.Core.Tests.Features.Network;
 [Collection("Ported")]
 public class WebSocketConnectionTests
 {
-    // --- WebSocket pump via mock app (decorator pattern, no server) ---
-
-    private sealed class FakeWsApp : IWebSocketApp
-    {
-        // Typed app surface: Setup registers the endpoint directly.
-        public Func<IWebSocketPeer, Task>? CapturedEndpoint;
-        public void WebSocket(string path, Func<IWebSocketPeer, Task> endpoint) => CapturedEndpoint += endpoint;
-    }
-
-    public sealed class FakeWsClient : IWebSocketClientInfo
-    {
-        public string host = "9.9.9.9";
-        string? IWebSocketClientInfo.Host => host;
-    }
-
-    public sealed class FakeWebsocket : IWebSocketPeer
-    {
-        public readonly FakeWsClient client = new();
-        public readonly Queue<Func<Task<string>>> Script = new();
-        public readonly List<object?> Closes = new();
-        public Task accept() => Task.CompletedTask;
-        public Task<string> receive_text() => Script.Dequeue()();
-        public Task close() { Closes.Add("close()"); return Task.CompletedTask; }
-        public Task close(int code) { Closes.Add(code); return Task.CompletedTask; }
-        public Task close(int code, string? reason) { Closes.Add((code, reason)); return Task.CompletedTask; }
-        object? IWebSocketPeer.Client => client;
-        Task IWebSocketPeer.AcceptAsync() => accept();
-        Task<string> IWebSocketPeer.ReceiveTextAsync() => receive_text();
-        Task IWebSocketPeer.CloseAsync(int code, string? reason) => close(code);
-    }
-
-    private sealed class WsScope : IDisposable
-    {
-        public bool PrevEnabled;
-        public int PrevMax;
-        public WsScope()
-        {
-            PrevEnabled = AtherizSettings.Global.WebsocketEnabled;
-            PrevMax = AtherizSettings.Global.WebsocketMaxMessageSize;
-            AtherizSettings.Global.WebsocketEnabled = true;
-        }
-        public void Dispose()
-        {
-            AtherizSettings.Global.WebsocketEnabled = PrevEnabled;
-            AtherizSettings.Global.WebsocketMaxMessageSize = PrevMax;
-        }
-    }
-
     [Fact]
-    public async Task Ws_FallbackSend_IsLogged_NotSwallowed()
+    public async Task Ws_SendCommand_LimiterSettlesToZero()
     {
-        // Behavior: a non-System.Net.WebSockets peer gets FallbackConnection
-        // whose SendCommand/Close are empty no-ops — server replies vanish
-        // without a trace. The drop must at least be logged.
-        using var _ = new WsScope();
-        var mgr = PortedHelpers.MakeManager();
-        ConnectionManager.GlobalInstance = mgr;
+        // Sole-accounting invariant: every reservation is released exactly
+        // once, so after the async send finishes no bytes/counts linger
+        // (the other half of the telnet-leak and double-subtract fixes).
+        var sock = new RecordingSocket();
+        var conn = new WebSocketConnection(sock, sessionId: "x", clientHost: "?");
         try
         {
-            var app = new FakeWsApp();
-            new WebSocketProtocol().Setup(app);
-            Assert.NotNull(app.CapturedEndpoint);
-            var fake = new FakeWebsocket();
-            var hold = new TaskCompletionSource<string>();
-            fake.Script.Enqueue(() => Task.FromResult("[\"ping\"]"));
-            fake.Script.Enqueue(() => hold.Task);
-            var pump = app.CapturedEndpoint!(fake);
-            BaseConnection? conn = null;
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-            while (conn == null && DateTime.UtcNow < deadline)
-            {
-                conn = mgr.ConnectionsSnapshot.Values.FirstOrDefault();
-                if (conn == null) await Task.Delay(10);
-            }
-            Assert.NotNull(conn);
-            string log;
-            using (var cap = new CaptureAtherizLog())
-            {
-                conn!.SendCommand("text", new List<object?> { "hello" }, null);
-                await Task.Delay(50);
-                log = cap.Read();
-            }
-            hold.TrySetException(new InvalidOperationException("test end"));
-            await pump.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.Contains("drop", log, StringComparison.OrdinalIgnoreCase);
+            conn.SendCommand("text", new List<object?> { "hello" }, new Dictionary<string, object?> { ["k"] = "v" });
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (conn.PendingCount != 0 && DateTime.UtcNow < deadline)
+                await Task.Delay(10);
+            Assert.Equal(0, conn.PendingCount);
+            Assert.Equal(0, conn.PendingBytes);
+            Assert.NotEmpty(sock.SentBytes);
         }
-        finally
+        finally { try { conn.Dispose(); } catch { } }
+    }
+
+    private sealed class RecordingSocket : System.Net.WebSockets.WebSocket
+    {
+        public readonly List<int> SentBytes = new();
+        public override System.Net.WebSockets.WebSocketCloseStatus? CloseStatus => null;
+        public override string? CloseStatusDescription => null;
+        public override System.Net.WebSockets.WebSocketState State => System.Net.WebSockets.WebSocketState.Open;
+        public override string? SubProtocol => null;
+        public override void Abort() { }
+        public override void Dispose() { }
+        public override Task CloseAsync(System.Net.WebSockets.WebSocketCloseStatus s, string? d, CancellationToken c) => Task.CompletedTask;
+        public override Task CloseOutputAsync(System.Net.WebSockets.WebSocketCloseStatus s, string? d, CancellationToken c) => Task.CompletedTask;
+        public override Task SendAsync(ArraySegment<byte> b, System.Net.WebSockets.WebSocketMessageType t, bool e, CancellationToken c)
         {
-            mgr.Atp.Stop(wait: false);
-            ConnectionManager.GlobalInstance = null;
+            SentBytes.Add(b.Count);
+            return Task.CompletedTask;
         }
+        public override Task<System.Net.WebSockets.WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> b, CancellationToken c) =>
+            Task.FromResult(new System.Net.WebSockets.WebSocketReceiveResult(0, System.Net.WebSockets.WebSocketMessageType.Close, true));
     }
 
     // --- Close handshake against a hanging peer (no network) ---

@@ -229,7 +229,7 @@ public class StopSafetyTests
         try
         {
             var serve = ServeOneAdminReplyAsync(listener, """{"status":"error","message":"account_name, char_name and password are required."}""");
-            await CreateHandler.HandleCreateAsync(new[] { "liveacc", "LiveChar", "supersecret123" });
+            await CreateHandler.CreateAsync("liveacc", "LiveChar", "supersecret123", null);
             await serve;
         }
         finally
@@ -244,16 +244,18 @@ public class StopSafetyTests
     }
 
     [Fact]
-    public void HandleStop_FallbackPathVerifiesIdentityBeforeKill()
+    public void HandleStop_VerifiesIdentityBeforeKill()
     {
-        // Structural pin: the no-pidfile fallback must hold a verified per-PID
-        // check (identity + port hold) before signalling, and a refused
-        // graceful request must abort rather than escalate. (The verified-kill
-        // funnel renamed the local from foundPid to pid; the gates are the same.)
+        // Structural pin: the pid-file path holds the verified per-PID
+        // gates (identity + port hold) before signalling, a refused
+        // graceful request aborts rather than escalates, and no listener
+        // scan discovers victims — a listening port without an owner is
+        // reported.
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/StopHandler.cs");
         Assert.Contains("IsServerProcess(pid)", src);
         Assert.Contains("IsProcessListeningOnPort(pid", src);
         Assert.Contains("AuthRejected", src);
+        Assert.DoesNotContain("TryFindPidListeningOnPort", src);
     }
 
     [Fact]
@@ -290,8 +292,8 @@ public class StopSafetyTests
     [Fact]
     public void PerPidPortCheck_AttributesListenerToHolderOnly()
     {
-        // A bound port is attributed to its holder and to nobody else — the
-        // true path must keep working after the fail-closed change below.
+        // A bound port is attributed to its holder and to nobody else.
+        if (!OperatingSystem.IsLinux()) return; // /proc attribution is Linux-only
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         try
@@ -308,9 +310,7 @@ public class StopSafetyTests
     {
         // Structural pin: the per-PID check must fail closed (false) when
         // verification is unavailable — never degrade to the global port
-        // check, which would let `stop` signal an unverified process. The
-        // unavailable-tables path only triggers off-Linux, so the wiring is
-        // pinned structurally; the Linux-observable paths above pin behavior.
+        // check, which would let `stop` signal an unverified process.
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/PidFile.cs");
         var start = src.IndexOf("public static bool IsProcessListeningOnPort", StringComparison.Ordinal);
         var end = src.IndexOf("public static string LocateServerPidFile", StringComparison.Ordinal);
@@ -318,4 +318,5 @@ public class StopSafetyTests
         Assert.DoesNotContain("return IsPortListening(port)", body);
         Assert.Contains("if (!tablesRead) return false", body);
     }
+
 }

@@ -1,11 +1,12 @@
+using System.Diagnostics;
 using Atheriz.Core.Tests.Features.Regression;
 using Atheriz.Server.Cli;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
-// Shared dot-wait cadence (Delay(100) + Write(".")); per-caller exit probes
-// keep their own catch semantics. Native (libc) P/Invoke is banned
-// repo-wide — see NoNativeLibcTests.
+// Quiet bounded waits (WaitForExitAsync + pid polling); no dot progress
+// output. Native (libc) P/Invoke is banned repo-wide — see
+// NoNativeLibcTests.
 [Collection("Ported")]
 public class DotWaitNativeSplitTests
 {
@@ -16,10 +17,28 @@ public class DotWaitNativeSplitTests
     }
 
     [Fact]
-    public void DotWaits_ShareOneCadenceCore()
+    public async Task TerminateAsync_ExitedProcess_SettlesPromptly()
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("--version");
+        using var p = Process.Start(psi);
+        Assert.NotNull(p);
+        Assert.True(p!.WaitForExit(15000));
+        await ProcessHelper.TerminateAsync(p).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(p.HasExited);
+    }
+
+    [Fact]
+    public void Waits_AreQuiet_NoDotProgress()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "ProcessHelper.cs");
-        Assert.Equal(1, SourceScan.Count(src, "internal static async Task WaitUntilAsync("));
-        Assert.Contains("WaitUntilAsync(() =>", src);
+        Assert.DoesNotContain("Console.Write(\".\")", src);
     }
 }

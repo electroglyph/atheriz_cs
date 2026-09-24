@@ -3,19 +3,10 @@ namespace Atheriz.Server.Cli;
 
 public static class CreateHandler
 {
-    public static async Task HandleCreateAsync(string[] a)
+    public static async Task<int> CreateAsync(string accName, string charName, string pw, int? portOverride)
     {
         var settings = StopHandler.EffectiveSettingsValue;
-        var port = ArgumentParser.ParsePort(a);
-        var filtered = ArgumentParser.StripPortOptions(a);
-        if (filtered.Length < 3)
-        {
-            Console.Error.WriteLine("Usage: atheriz create <accountname> <charactername> <password> [--port N]");
-            Console.Error.WriteLine("atheriz: error: the following arguments are required: accountname, charactername, password");
-            throw new CliExitException(2);
-        }
-        var accName = filtered[0]; var charName = filtered[1]; var pw = filtered[2];
-        var portVal = port ?? settings.WebserverPort;
+        var portVal = portOverride ?? settings.WebserverPort;
         var tlsOn = !string.IsNullOrEmpty(settings.SslCertFile);
         var payload = JsonSerializer.Serialize(new { account_name = accName, char_name = charName, password = pw });
         // Any HTTP answer — even {status:"error"} — proves a live server owns
@@ -32,29 +23,27 @@ public static class CreateHandler
                 Console.WriteLine(msg);
                 // A live server answered: its verdict is the exit code
                 // (ok->0, anything else->1), mirroring reload.
-                CliExitCode.Set(status == "ok" ? 0 : 1);
-                return;
+                return status == "ok" ? 0 : 1;
             }
-            catch { Console.WriteLine(resp.Body); CliExitCode.Set(1); return; }
+            catch { Console.WriteLine(resp.Body); return 1; }
         }
         Console.WriteLine("No running server detected; creating directly against the database.");
         Console.WriteLine("Loading existing data...");
         var savePath = settings.SavePath;
-        // A null admin response is "unreachable", not "not running". Refuse the
-        // offline direct-DB writes when the target world's pid file names a
-        // live verified server — same probe as `new --overwrite`.
+        // A null admin response is "unreachable", not "not running". Refuse
+        // the offline direct-DB writes when the target world's pid file
+        // names a live verified server.
         try
         {
             var pidFile = Path.Combine(savePath, "server.pid");
             if (Infrastructure.PidFile.IsLiveClaim(pidFile, out int ownerPid))
             {
                 Console.WriteLine($"A live server owns this world (verified server.pid {ownerPid}); stop it first instead of offline create.");
-                CliExitCode.Set(1);
-                return;
+                return 1;
             }
         }
         catch { }
-        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); CliExitCode.Set(1); return; }
+        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
         Directory.CreateDirectory(savePath);
         try
         {
@@ -62,8 +51,8 @@ public static class CreateHandler
             db.Database.EnsureCreated();
             Atheriz.Core.Globals.ObjectRegistry.LoadObjects(savePath);
         }
-        catch (Exception ex) { Console.WriteLine($"Load failed: {ex.Message}"); CliExitCode.Set(1); return; }
+        catch (Exception ex) { Console.WriteLine($"Load failed: {ex.Message}"); return 1; }
         ServerEvents.AtCharCreate(accName, charName, pw);
-        CliExitCode.Set(0);
+        return 0;
     }
 }

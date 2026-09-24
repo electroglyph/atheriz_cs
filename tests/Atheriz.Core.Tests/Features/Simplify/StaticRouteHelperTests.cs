@@ -19,11 +19,12 @@ public class StaticRouteHelperTests
     }
 
     [Fact]
-    public void FileFallbacks_ShareFirstExisting()
+    public void EntryFiles_SingleRoot_NoTemplateFallback()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Hosting", "StaticFileConfig.cs");
-        Assert.Equal(1, SourceScan.Count(src, "private static string? FirstExisting("));
-        Assert.True(SourceScan.Count(src, "FirstExisting(") >= 3);
+        Assert.DoesNotContain("templatesCandidate", src);
+        Assert.DoesNotContain("FirstExisting(", src);
+        Assert.Contains("staticCandidate", src);
     }
 
     [Fact]

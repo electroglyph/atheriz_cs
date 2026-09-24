@@ -6,21 +6,15 @@ using Atheriz.Server.Cli;
 
 namespace Atheriz.Core.Tests.Features.Simplify;
 
-// One bounded tenth-second poll for a port to reach a listening state; the
-// free/up pair differs only in polarity (same probe count, cadence, bounds).
+// One bounded quiet poll for a port to reach a state; the free wrapper is
+// a thin polarity adapter over the shared core.
 [Collection("Ported")]
 public class PortWaitStateTests
 {
-    private static async Task<bool> WaitForPortState(int port, int tenths, bool wantUp)
+    private static async Task<bool> WaitForPortState(int port, TimeSpan timeout, bool wantUp)
     {
         var m = typeof(RestartHandler).GetMethod("WaitForPortStateAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
-        return await (Task<bool>)m.Invoke(null, [port, tenths, wantUp])!;
-    }
-
-    private static async Task<bool> Wrapper(string name, int port, int tenths)
-    {
-        var m = typeof(RestartHandler).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)!;
-        return await (Task<bool>)m.Invoke(null, [port, tenths])!;
+        return await (Task<bool>)m.Invoke(null, [port, timeout, wantUp])!;
     }
 
     private static int FreePort()
@@ -36,24 +30,23 @@ public class PortWaitStateTests
     public async Task FreePort_IsFree_NotUp()
     {
         int port = FreePort();
-        Assert.True(await WaitForPortState(port, 3, wantUp: false));
-        Assert.False(await WaitForPortState(port, 2, wantUp: true));
+        Assert.True(await WaitForPortState(port, TimeSpan.FromSeconds(1), wantUp: false));
+        Assert.False(await WaitForPortState(port, TimeSpan.FromMilliseconds(200), wantUp: true));
     }
 
     [Fact]
-    public async Task Wrappers_MatchCorePolarity()
+    public async Task FreeWrapper_MatchesCorePolarity()
     {
         int port = FreePort();
-        Assert.True(await Wrapper("WaitForPortFreeAsync", port, 3));
-        Assert.False(await Wrapper("WaitForPortUpAsync", port, 2));
+        var m = typeof(RestartHandler).GetMethod("WaitForPortFreeAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
+        Assert.True(await (Task<bool>)m.Invoke(null, [port, TimeSpan.FromSeconds(1)])!);
     }
 
     [Fact]
-    public void Wrappers_AreThinPolarityAdapters()
+    public void FreeWrapper_IsThinPolarityAdapter()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "RestartHandler.cs");
         Assert.Equal(1, SourceScan.Count(src, "internal static async Task<bool> WaitForPortStateAsync("));
         Assert.Contains("wantUp: false", src);
-        Assert.Contains("wantUp: true", src);
     }
 }

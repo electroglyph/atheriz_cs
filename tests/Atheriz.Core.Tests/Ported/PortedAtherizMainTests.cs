@@ -82,80 +82,81 @@ public class PortedAtherizMainTests
     [Fact] public void RegistersListedProtocols()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
-        Assert.Contains("NetworkProtocols", src);
-        Assert.Contains("WebSocketProtocol", src);
-        Assert.Contains("Setup", src); // setup_protocols
+        var protos = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/Protocols.cs");
+        Assert.Contains("TelnetHostedService", protos);
+        Assert.Contains("TelnetEnabled", protos);
+        var host = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/ServerHost.cs");
+        Assert.Contains("Map(\"/ws\"", host);
+        Assert.Contains("WebsocketEnabled", host);
     }
-    [Fact] public void SkipsInvalidProtocol()
+    [Fact] public async Task RejectsUnknownCommand()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
-        // Should have try/catch around protocol registration to skip invalid
-        Assert.Contains("try", src);
-        Assert.Contains("Failed to register protocol", src);
+        Assert.NotEqual(0, await Atheriz.Server.Cli.AtherizCli.InvokeAsync(["bogus-command"]));
     }
     [Fact] public void GameFolderProtocolSettingIsAppliedBeforeSetup()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
-        // Verify that start_server respects WEBSOCKET_ENABLED / NETWORK_PROTOCOLS before setup
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/ServerHost.cs");
+        // CLI overrides land in configuration before Build; the websocket
+        // map honors the resolved settings before startup runs.
+        Assert.Contains("ApplyCliOverrides", src);
         Assert.Contains("WebsocketEnabled", src);
-        Assert.Contains("NetworkProtocols", src);
+        Assert.Contains("DoStartup", src);
     }
     [Fact] public void RunsCoreTestsWhenInCoreRepo()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/TestHandler.cs");
         Assert.Contains("dotnet", src);
         Assert.Contains("test", src);
     }
     [Fact] public void RunsGameTestsWhenInGameFolder()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/TestHandler.cs");
         Assert.Contains("HandleTest", src);
     }
     [Fact] public void AddsWarningIgnore()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/TestHandler.cs");
         // C# delegates to dotnet test, which handles warnings differently, but should contain test handling
         Assert.Contains("test", src.ToLower());
     }
     [Fact] public void ExitsWithPytestReturnCode()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/TestHandler.cs");
         Assert.Contains("ExitCode", src);
         Assert.Contains("WaitForExit", src);
     }
     [Fact] public void LoadsObjectsAndCallsSetup()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
-        Assert.Contains("LoadObjects", src);
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/ServerHost.cs");
         Assert.Contains("DoStartup", src);
     }
     [Fact] public void DelegatesToRunningServerWhenAvailable()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/CreateHandler.cs");
         Assert.Contains("_internal/create_account", src);
-        Assert.Contains("X-Admin-Token", src);
+        var client = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/ShutdownClient.cs");
+        Assert.Contains("X-Admin-Token", client);
     }
     [Fact] public void PrintsErrorWhenServerRefuses()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
-        Assert.Contains("already exists", src.ToLower());
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/ShutdownClient.cs");
+        Assert.Contains("Server refused the shutdown request", src);
     }
     [Fact] public void FallsBackToOfflineCreateWhenUnavailable()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/CreateHandler.cs");
         Assert.Contains("No running server", src);
-        Assert.Contains("offline", src.ToLower());
+        Assert.Contains("against the database", src);
     }
     [Fact] public void UnavailableWithoutTokenFile()
     {
@@ -194,20 +195,20 @@ public class PortedAtherizMainTests
     [Fact] public void RejectsMissingTokenFile()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/AdminToken.cs");
         Assert.Contains("Token file not found", src);
     }
     [Fact] public void RejectsInvalidToken()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/AdminToken.cs");
         Assert.Contains("Invalid token", src);
         Assert.Contains("FixedTimeEquals", src); // hmac compare
     }
     [Fact] public void RejectsRemoteHost()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/AdminToken.cs");
         Assert.Contains("Remote", src);
         Assert.Contains("IsLoopback", src);
     }
@@ -224,19 +225,19 @@ public class PortedAtherizMainTests
     [Fact] public void RejectsMissingBodyFields()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/AdminRoutes.cs");
         Assert.Contains("account_name, char_name and password are required", src);
     }
     [Fact] public void RejectsInvalidJsonBody()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/AdminRoutes.cs");
         Assert.Contains("Invalid JSON body", src);
     }
     [Fact] public void HotReloadBlocksLoop()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/AdminRoutes.cs");
         // hot_reload endpoint should be async and not block loop (uses PluginReloader)
         Assert.Contains("hot_reload", src);
         Assert.Contains("ReloadGameLogicAsync", src);
@@ -244,9 +245,9 @@ public class PortedAtherizMainTests
     [Fact] public void ShutdownBlocksLoop()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/AdminRoutes.cs");
         Assert.Contains("_internal/shutdown", src);
-        Assert.Contains("Background", src); // uses background tasks
+        Assert.Contains("Task.Run(", src); // single thread-pool hop
         Assert.Contains("StopApplication", src);
     }
     [Fact] public void ResetCompletesAndDatabaseUsableAfterSetup()
@@ -268,16 +269,23 @@ public class PortedAtherizMainTests
     [Fact] public void ResetAbortsWhenConfirmationDeclined()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/ResetHandler.cs");
         Assert.Contains("Aborted", src);
         Assert.Contains("Are you sure", src);
     }
-    [Fact] public void SpawnSubprocess()
+    [Fact] public void BackgroundSpawnUsesNoShell()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
-        Assert.Contains("ProcessStartInfo", src);
-        Assert.Contains("dotnet", src);
+        // Daemons spawn via managed ProcessStartInfo: the spawner exists, the
+        // CLI layer stays spawn-free, and no shell binary is ever the filename.
+        Assert.NotNull(Type.GetType("Atheriz.Server.Cli.DaemonSpawner, Atheriz.Server"));
+        var cli = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/AtherizCli.cs");
+        Assert.DoesNotContain("ProcessStartInfo", cli);
+        var spawner = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/DaemonSpawner.cs");
+        Assert.Contains("ArgumentList", spawner);
+        Assert.DoesNotContain("\"bash\"", spawner);
+        Assert.DoesNotContain("\"sh\"", spawner);
+        Assert.DoesNotContain("\"cmd\"", spawner);
     }
     [Fact] public void SkipsIfServerAlreadyRunning()
     {
@@ -289,33 +297,33 @@ public class PortedAtherizMainTests
     [Fact] public void NoSslKwargsWhenUnset()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/ServerHost.cs");
         Assert.Contains("SslCertFile", src);
         Assert.Contains("SSL is disabled", src);
     }
     [Fact] public void SslKwargsWhenBothSet()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
-        Assert.Contains("CreateFromPemFile", src);
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/ServerHost.cs");
+        Assert.Contains("TlsCertLoader.Load", src);
         Assert.Contains("separate key file", src.ToLower());
     }
     [Fact] public void CombinedPemWhenOnlyCertSet()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/ServerHost.cs");
         Assert.Contains("combined pem", src.ToLower());
     }
     [Fact] public void WarnsWhenCertFileMissing()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/ServerHost.cs");
         Assert.Contains("WARNING: SSL cert file not found", src);
     }
     [Fact] public void NoSslKwargsWhenOnlyKeySet()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Program.cs");
+        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/ServerHost.cs");
         // When only key set but no cert, should be disabled
         Assert.Contains("SslCertFile", src);
         Assert.Contains("SslKeyFile", src);

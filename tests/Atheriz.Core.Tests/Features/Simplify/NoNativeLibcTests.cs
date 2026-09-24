@@ -1,13 +1,15 @@
 namespace Atheriz.Core.Tests.Features.Simplify;
 
-// Cross-platform rule (AGENTS.md): production code must build and run on
-// Windows, macOS, and Linux — no native libc P/Invoke, no Mono.Unix.
-// Managed cross-platform APIs only.
+// Native P/Invoke is confined to the guarded detach helper (AGENTS.md):
+// no Mono.Unix anywhere, and native imports exist only in
+// Cli/DaemonDetach.cs behind OperatingSystem guards with a run-attached
+// fallback. Never call the real detach in a test — setsid in the test
+// host would detach the test runner itself.
 [Collection("Ported")]
 public class NoNativeLibcTests
 {
     [Fact]
-    public void Src_HasNoNativeLibcPInvoke()
+    public void Src_ConfinesNativePInvokeToDetach()
     {
         var root = FindRepoRoot();
         var offenders = new List<string>();
@@ -16,10 +18,24 @@ public class NoNativeLibcTests
             string text;
             try { text = File.ReadAllText(f); }
             catch { continue; }
-            if (text.Contains("DllImport(\"libc\"") || text.Contains("Mono.Unix"))
+            if (text.Contains("Mono.Unix"))
+                offenders.Add(Path.GetRelativePath(root, f));
+            if ((text.Contains("DllImport(\"") || text.Contains("LibraryImport(\""))
+                && !f.EndsWith(Path.Combine("Cli", "DaemonDetach.cs"), StringComparison.Ordinal))
                 offenders.Add(Path.GetRelativePath(root, f));
         }
         Assert.Empty(offenders);
+    }
+
+    [Fact]
+    public void Detach_IsGuardedWithFallback()
+    {
+        var root = FindRepoRoot();
+        var text = File.ReadAllText(Path.Combine(root, "src", "Atheriz.Server", "Cli", "DaemonDetach.cs"));
+        Assert.Contains("OperatingSystem.IsLinux()", text);
+        Assert.Contains("OperatingSystem.IsMacOS()", text);
+        Assert.Contains("OperatingSystem.IsWindows()", text);
+        Assert.Contains("continuing attached", text);
     }
 
     private static string FindRepoRoot()

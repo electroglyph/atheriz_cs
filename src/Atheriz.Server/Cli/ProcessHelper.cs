@@ -2,59 +2,52 @@ namespace Atheriz.Server.Cli;
 
 public static class ProcessHelper
 {
-    // signal first, escalate only when the process survives.
+    // Signal first, escalate only when the process survives.
     // Process.Kill() sends SIGTERM on Unix (graceful first step) and
-    // terminates on Windows; KillProcessWithDots escalates below when the
-    // process survives.
+    // terminates on Windows.
     public static void RequestTerminate(Process proc)
     {
         try { if (!proc.HasExited) proc.Kill(entireProcessTree: false); } catch { }
     }
 
-    public static async Task<bool> WaitForExitDotsAsync(Process proc, int tenths)
+    // Quiet terminate escalation: SIGTERM, bounded wait, SIGKILL on survival,
+    // bounded wait. No progress output; callers print their own lines.
+    public static async Task TerminateAsync(Process proc, TimeSpan? grace = null)
     {
-        // Shared dot-wait cadence below; the exit probe keeps its own
-        // catch semantics (probe failure = exited) and tail.
-        await WaitUntilAsync(() => { try { return proc.HasExited; } catch { return true; } }, tenths).ConfigureAwait(false);
+        grace ??= TimeSpan.FromSeconds(3);
+        RequestTerminate(proc);
+        if (!await WaitForExitAsync(proc, grace.Value).ConfigureAwait(false))
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: false); } catch { }
+            await WaitForExitAsync(proc, grace.Value).ConfigureAwait(false);
+        }
+    }
+
+    internal static async Task<bool> WaitForExitAsync(Process proc, TimeSpan timeout)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            try { await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
+        catch { }
         try { return proc.HasExited; } catch { return true; }
     }
 
-    public static async Task KillProcessWithDots(Process proc)
+    public static async Task<bool> WaitForPidExitAsync(int pid, TimeSpan? timeout = null)
     {
-        // Terminate first (the old code only waited, then SIGKILLed); escalate
-        // to SIGKILL only when the process survives SIGTERM.
-        RequestTerminate(proc);
-        if (!await WaitForExitDotsAsync(proc, 30).ConfigureAwait(false))
+        timeout ??= TimeSpan.FromSeconds(5);
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < timeout)
         {
-            Console.Write(" Timeout! Force killing...");
-            try { if (!proc.HasExited) proc.Kill(entireProcessTree: false); } catch { }
-            await WaitForExitDotsAsync(proc, 30).ConfigureAwait(false);
-        }
-    }
-
-    // Shared dot-wait core: bounded Delay(100) + Write(".") cadence only.
-    // Per-caller exit predicates (with their own catch semantics) and tails
-    // stay at the call sites — ExitDots treats probe failure as exited while
-    // PidExit treats it as alive (except ArgumentException), and the bounds
-    // differ (tenths param vs hardcoded 50).
-    internal static async Task WaitUntilAsync(Func<bool> isDone, int tenths)
-    {
-        for (int i = 0; i < tenths && !isDone(); i++)
-        {
+            bool gone;
+            try { using var p = Process.GetProcessById(pid); gone = p.HasExited; }
+            catch (ArgumentException) { return true; }
+            catch { return false; }
+            if (gone) return true;
             await Task.Delay(100).ConfigureAwait(false);
-            Console.Write(".");
         }
-    }
-
-    public static async Task<bool> WaitForPidExitAsync(int pid)
-    {
-        await WaitUntilAsync(() =>
-        {
-            bool exists = true;
-            try { using var p = Process.GetProcessById(pid); exists = !p.HasExited; } catch (ArgumentException) { exists = false; } catch { }
-            return !exists;
-        }, 50).ConfigureAwait(false);
         try { using var q = Process.GetProcessById(pid); return q.HasExited; } catch (ArgumentException) { return true; } catch { return false; }
     }
-
 }

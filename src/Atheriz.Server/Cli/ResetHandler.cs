@@ -1,17 +1,17 @@
 using System.Net.NetworkInformation;
+using Atheriz.Server.Hosting;
 
 namespace Atheriz.Server.Cli;
 
 public static class ResetHandler
 {
-    public static async Task HandleResetAsync(string[] a)
+    public static async Task<int> ResetAsync(int? portOverride, int? telnetOverride, bool foreground = true)
     {
-        // reset always confirms: there is no --force/--yes skip. The prompt
-        // is the operator guard; the port checks, server stop, and
-        // world-marker wipe gate below are the non-interactive containment.
+        // Reset always confirms: there is no --force skip. The prompt is the
+        // operator guard; the port checks, server stop, and world-marker wipe
+        // gate below are the non-interactive containment.
         var settings = StopHandler.EffectiveSettingsValue;
-        var port = ArgumentParser.ParsePort(a) ?? settings.WebserverPort;
-        var host = ArgumentParser.ParseHost(a);
+        var port = portOverride ?? settings.WebserverPort;
         var savePath = settings.SavePath;
         var pidPath = Path.Combine(savePath, "server.pid");
         bool isRunning = false;
@@ -25,7 +25,7 @@ public static class ResetHandler
         if (isRunning) Console.WriteLine("The server is currently running and will be stopped.");
         Console.Write("Are you sure you want to continue? [y/N] ");
         var resp = Console.ReadLine();
-        if (!string.Equals(resp, "y", StringComparison.OrdinalIgnoreCase)) { Console.WriteLine("Aborted."); CliExitCode.Set(1); return; }
+        if (!string.Equals(resp, "y", StringComparison.OrdinalIgnoreCase)) { Console.WriteLine("Aborted."); return 1; }
         // Ports that must be free before the wipe: the CLI override plus the
         // configured ports, so a mismatched --port cannot blind the guard
         // to the running server's real listeners.
@@ -41,10 +41,9 @@ public static class ResetHandler
                 if (watchPorts.Contains(ep.Port))
                 {
                     // Our own server holds these ports; it is stopped below. Anything else aborts.
-                    if (isRunning && pid is not null && Infrastructure.PidFile.IsProcessListeningOnPort(pid.Value, ep.Port)) continue;
+                    if (isRunning && pid is not null && Infrastructure.PidFile.IsServerProcess(pid.Value)) continue;
                     Console.WriteLine($"Port {ep.Port} still listening; abort");
-                    CliExitCode.Set(1);
-                    return;
+                    return 1;
                 }
             }
         }
@@ -53,33 +52,16 @@ public static class ResetHandler
         if (isRunning && pid is not null)
         {
             Console.WriteLine("Stopping server...");
-            await StopHandler.HandleStopAsync(a).ConfigureAwait(false);
-            Console.Write($"Waiting for server (PID {pid}) to stop...");
+            _ = await StopHandler.StopAsync(port).ConfigureAwait(false);
             bool stopped = await ProcessHelper.WaitForPidExitAsync(pid.Value).ConfigureAwait(false);
-            Console.WriteLine(" Done.");
             await Task.Delay(500).ConfigureAwait(false);
             // Liveness re-check before the irreversible wipe: the stop above
             // may have missed (e.g. a --port override that doesn't match the
             // running server). Never delete live data — fail closed.
             if (!stopped || Infrastructure.PidFile.IsServerProcess(pid.Value))
             {
-                try
-                {
-                    var props = IPGlobalProperties.GetIPGlobalProperties();
-                    foreach (var ep in props.GetActiveTcpListeners())
-                    {
-                        if (watchPorts.Contains(ep.Port) && Infrastructure.PidFile.IsProcessListeningOnPort(pid.Value, ep.Port))
-                        {
-                            Console.WriteLine($"Port {ep.Port} still listening; abort");
-                            CliExitCode.Set(1);
-                            return;
-                        }
-                    }
-                }
-                catch { }
                 Console.WriteLine("Warning: Process still exists after kill.");
-                CliExitCode.Set(1);
-                return;
+                return 1;
             }
         }
 
@@ -92,14 +74,14 @@ public static class ResetHandler
         // never deleted, but an absent dir needs no protection.
         if (Directory.Exists(savePath))
         {
-            try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); CliExitCode.Set(1); return; }
+            try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
             try
             {
                 Directory.Delete(savePath, recursive: true);
             }
-            catch (Exception ex) { Console.WriteLine($"Failed to delete save: {ex.Message}"); CliExitCode.Set(1); return; }
+            catch (Exception ex) { Console.WriteLine($"Failed to delete save: {ex.Message}"); return 1; }
         }
-        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); CliExitCode.Set(1); return; }
+        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
         Directory.CreateDirectory(savePath);
         Atheriz.Core.Utils.FsUtil.TryChmod0700(savePath);
         // Fail closed: never run setup over a half-wiped world — a failed
@@ -110,11 +92,10 @@ public static class ResetHandler
             if (Directory.EnumerateFileSystemEntries(savePath).Any())
             {
                 Console.WriteLine($"Wipe incomplete, entries remain under {absSave}; aborting before setup.");
-                CliExitCode.Set(1);
-                return;
+                return 1;
             }
         }
-        catch (Exception ex) { Console.WriteLine($"Could not verify wipe of {absSave}: {ex.Message}"); CliExitCode.Set(1); return; }
+        catch (Exception ex) { Console.WriteLine($"Could not verify wipe of {absSave}: {ex.Message}"); return 1; }
 
         try { Atheriz.Core.Persistence.AtherizDbContextFactory.ReopenDatabase(); } catch { }
 
@@ -126,18 +107,15 @@ public static class ResetHandler
         Console.WriteLine("Setting up new world...");
         try
         {
-            // Explicit no-prompt creds : reset must never interactively
+            // Explicit no-prompt creds: reset must never interactively
             // ask for a superuser mid-wipe; env creds still apply when set.
             Atheriz.Core.InitialSetup.RunSetup(savePath, prompt: false);
             Console.WriteLine("Success! New world created.");
         }
-        catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); CliExitCode.Set(1); return; }
+        catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); return 1; }
 
-        // respawn preserves the CLI telnet-port override, else the
-        // replacement silently binds the configured default instead.
-        var resetTelnetPort = ArgumentParser.ParseTelnetPort(a);
-        var resetSpawnArgs = DaemonSpawner.BuildSpawnArgs(port, host, resetTelnetPort);
-        bool resetSpawned = await DaemonSpawner.SpawnDaemonAsync(resetSpawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
-        CliExitCode.Set(resetSpawned ? 0 : 1);
+        Console.WriteLine("Starting server...");
+        if (!foreground) return await DaemonSpawner.SpawnStart(Directory.GetCurrentDirectory(), portOverride, null, telnetOverride).ConfigureAwait(false);
+        return await ServerHost.RunForegroundAsync(port, null, telnetOverride).ConfigureAwait(false);
     }
 }

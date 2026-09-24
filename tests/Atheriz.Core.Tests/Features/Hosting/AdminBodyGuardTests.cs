@@ -5,6 +5,7 @@ using Atheriz.Server.Infrastructure;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Reflection;
 using System.Text.Json;
@@ -46,10 +47,13 @@ public class AdminBodyGuardTests
         };
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = tmp });
         builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton(settings);
+        AdminAuthServices.AddAdminAuth(builder.Services);
         var app = builder.Build();
         app.MapAdminRoutes(settings);
         StaticFileConfig.Configure(app, settings);
-        ProtocolBootstrap.RegisterProtocols(app, settings);
+        app.UseAuthentication();
+        app.UseAuthorization();
         await app.StartAsync();
         var addr = app.Urls.First(u => u.StartsWith("http://", StringComparison.Ordinal));
         return new Booted

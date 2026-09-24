@@ -11,6 +11,7 @@ using Atheriz.Core.Settings;
 using Atheriz.Core.Tests;
 using Atheriz.Core.Tests.Ported;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using telnet_cs;
 using telnet_cs.Server;
@@ -802,10 +803,10 @@ public sealed class TelnetServerIntegrationTests
     }
 
     [Fact]
-    public async Task Setup_IHostPath_ServesTelnetAndStopsWithHost()
+    public async Task HostedService_ServesTelnetAndStopsWithHost()
     {
-        // The real IHost wiring (not the lifespan-composition branch): Setup starts
-        // a serving listener, and host shutdown stops it via ApplicationStopping.
+        // Real IHost wiring through the hosted service: start serves a
+        // listener, and host shutdown stops it via ApplicationStopping.
         using var env = GlobalTestEnv.Enter();
         var port = FreePort();
         var settings = new AtherizSettings { TelnetInterface = "127.0.0.1", TelnetPort = port };
@@ -817,20 +818,20 @@ public sealed class TelnetServerIntegrationTests
             {
                 s.AddSingleton(settings);
                 s.AddSingleton(mgr);
+                s.AddHostedService(sp => new TelnetHostedService(mgr, settings, sp.GetRequiredService<IHostApplicationLifetime>()));
             })
             .Build();
         try
         {
-            new TelnetProtocol().Setup(host);
             await host.StartAsync();
-            Assert.True(await WaitForTcpAsync(IPAddress.Loopback, port), "telnet never listened via Setup");
+            Assert.True(await WaitForTcpAsync(IPAddress.Loopback, port), "telnet never listened via hosted service");
             Assert.True(await WaitForEmptyAsync(mgr), "probe session lingered");
 
             using var client = new TcpClient();
             await client.ConnectAsync(IPAddress.Loopback, port);
             using var stream = client.GetStream();
             var opening = await ReadUntilAsync(stream, [ClearScreen]);
-            Assert.True(Contains(opening, ClearScreen), "no prompt via Setup-started server: " + Convert.ToHexString(opening));
+            Assert.True(Contains(opening, ClearScreen), "no prompt via hosted server: " + Convert.ToHexString(opening));
             CloseAbortive(client);
             Assert.True(await WaitForEmptyAsync(mgr), "session lingered");
 
@@ -848,7 +849,7 @@ public sealed class TelnetServerIntegrationTests
     }
 
     [Fact]
-    public async Task Setup_IHostPath_SkippedWhenDisabled()
+    public async Task HostedService_SkippedWhenDisabled()
     {
         using var env = GlobalTestEnv.Enter();
         var port = FreePort();
@@ -861,11 +862,14 @@ public sealed class TelnetServerIntegrationTests
             {
                 s.AddSingleton(settings);
                 s.AddSingleton(mgr);
+                Atheriz.Server.Hosting.Protocols.AddAtherizProtocols(s,
+                    new ConfigurationBuilder()
+                        .AddInMemoryCollection(new Dictionary<string, string?> { ["Atheriz:TelnetEnabled"] = "false" })
+                        .Build());
             })
             .Build();
         try
         {
-            new TelnetProtocol().Setup(host);
             await host.StartAsync();
             await Task.Delay(1000);
             Assert.False(await IsTcpOpenAsync(IPAddress.Loopback, port), "telnet listened while disabled");

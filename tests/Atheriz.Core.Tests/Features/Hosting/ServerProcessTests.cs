@@ -21,16 +21,16 @@ public class ServerProcessTests
     // --- CLI/host ---
 
     [Fact]
-    public async Task KillProcess_DoesTerminate()
+    public async Task Terminate_DoesTerminate()
     {
-        // Behavior: KillProcessWithDots must actually terminate the process
-        // instead of waiting ~5 s and returning while it is still alive.
+        // Behavior: TerminateAsync must actually terminate the process
+        // (SIGTERM, bounded wait, escalate) instead of returning live.
         using var p = Process.Start("sleep", "30");
         Assert.NotNull(p);
         try
         {
-            await ProcessHelper.KillProcessWithDots(p).WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.True(p.HasExited, "KillProcessWithDots must terminate the process");
+            await ProcessHelper.TerminateAsync(p).WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.True(p.HasExited, "TerminateAsync must terminate the process");
         }
         finally
         {
@@ -48,11 +48,10 @@ public class ServerProcessTests
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
         try
         {
-            Assert.True(PidFile.TryFindPidListeningOnPort(port, out int pid));
-            Assert.Equal(Environment.ProcessId, pid);
+            Assert.True(PidFile.IsPortListening(port));
         }
         finally { listener.Stop(); }
-        Assert.False(PidFile.TryFindPidListeningOnPort(port, out _));
+        Assert.False(PidFile.IsPortListening(port));
     }
 
     [Fact]

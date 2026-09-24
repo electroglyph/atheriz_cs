@@ -6,15 +6,20 @@ public static class StopHandler
 {
     internal static AtherizSettings EffectiveSettingsValue => EffectiveSettings;
     private static AtherizSettings? _effectiveCache;
-    private static AtherizSettings EffectiveSettings => _effectiveCache ??= LoadEffectiveSettings();
+    private static AtherizSettings EffectiveSettings => _effectiveCache ??= LoadSettingsFor(Directory.GetCurrentDirectory());
     internal static void InvalidateEffectiveSettings() => _effectiveCache = null;
-    private static AtherizSettings LoadEffectiveSettings()
+
+    // Config-only load scoped to a game folder (no DB touch): the background
+    // parent resolves the child's expected port/banners from the target game
+    // without changing directory. Relative paths in the result stay relative
+    // to the given folder — callers combine them with it explicitly.
+    internal static AtherizSettings LoadSettingsFor(string gameFolder)
     {
         // Prefer Global if it has been initialized from host; otherwise load from appsettings.json + env
         try
         {
             var builder = new ConfigurationBuilder()
-                .SetBasePath(Directory.GetCurrentDirectory())
+                .SetBasePath(gameFolder)
                 .AddJsonFile("appsettings.json", optional: true)
                 .AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production"}.json", optional: true)
                 .AddEnvironmentVariables();
@@ -26,73 +31,34 @@ public static class StopHandler
         catch { }
         return AtherizSettings.Global;
     }
-
-    // Shared verified-kill funnel for the port-scan-found and pid-file stop
-    // paths. Both the IsServerProcess + IsProcessListeningOnPort gates run on
-    // every path (a dropped gate would silently kill a foreign process);
-    // kill escalates through the shared KillProcessWithDots helper and
-    // release is owner-verified. A null pidFilePath selects the scan-found
-    // chatter/release shape, a non-null one the pid-file shape — every
-    // user-visible string is preserved per path.
-    internal static async Task KillVerifiedPidAsync(int pid, int port, string? pidFilePath)
+    private static AtherizSettings LoadEffectiveSettings()
     {
-        if (pidFilePath is null)
-        {
-            // The finder is best-effort: hold a verified per-PID check on
-            // BOTH stop paths before signalling any process.
-            if (!PidFile.IsServerProcess(pid) || !PidFile.IsProcessListeningOnPort(pid, port))
-            {
-                Console.WriteLine($"Found process (PID: {pid}) on port {port} is not a verified server; refusing to terminate.");
-                CliExitCode.Set(1);
-                return;
-            }
-            string foundName = "process";
-            try { using var pn = Process.GetProcessById(pid); foundName = pn.ProcessName; } catch { }
-            Console.WriteLine($"Found process {foundName} (PID: {pid}) listening on port {port}...");
-            try
-            {
-                var proc2 = Process.GetProcessById(pid);
-                Console.Write($"Stopping server process with PID: {pid}...");
-                // Same terminate→wait→kill escalation as the pid-file
-                // path (KillProcessWithDots): timeout chatter and
-                // Kill-failure swallowing live in the helper now.
-                await ProcessHelper.KillProcessWithDots(proc2).ConfigureAwait(false);
-                Console.WriteLine(" Done.");
-                try
-                {
-                    var cwdL = new FileInfo($"/proc/{pid}/cwd").LinkTarget; if (!string.IsNullOrEmpty(cwdL)) { var pf = Path.Combine(cwdL, "save", "server.pid"); PidFile.ReleaseIfOwner(pf, pid); }
-                }
-                catch { }
-                CliExitCode.Set(0);
-                return;
-            }
-            catch (Exception ex) { Console.WriteLine($"Error stopping found process: {ex.Message}"); CliExitCode.Set(1); return; }
-        }
-        Process? proc = null;
+        return LoadSettingsFor(Directory.GetCurrentDirectory());
+    }
+
+    // Verified kill for the pid-file path: the IsServerProcess gate runs
+    // before signalling anything (a dropped gate would kill a foreign
+    // process on pid reuse); release is owner-verified. Returns the exit code.
+    internal static async Task<int> KillVerifiedPidAsync(int pid, int port, string pidFilePath)
+    {
+        Process? proc;
         try { proc = Process.GetProcessById(pid); }
-        catch (ArgumentException) { Console.WriteLine("Process from PID file not found; removing stale PID file."); PidFile.ReleaseIfOwner(pidFilePath, pid); CliExitCode.Set(0); return; }
-        catch (Exception ex) { Console.WriteLine($"Could not inspect PID {pid}: {ex.Message}"); CliExitCode.Set(1); return; }
-        // Per-PID hold only: the port being listened on by *someone* while
-        // this pid is a server must never implicate this pid .
-        bool listening = PidFile.IsProcessListeningOnPort(pid, port);
-        if (!listening)
+        catch (ArgumentException) { Console.WriteLine("Process from PID file not found; removing stale PID file."); PidFile.ReleaseIfOwner(pidFilePath, pid); return 0; }
+        catch (Exception ex) { Console.WriteLine($"Could not inspect PID {pid}: {ex.Message}"); return 1; }
+        if (!PidFile.IsServerProcess(pid))
+        {
+            Console.WriteLine($"PID {pid} is not a verified Atheriz server process; refusing to terminate an unverified process.");
+            return 1;
+        }
+        // Per-PID hold: the port being listened on by *someone* while this
+        // pid is a server must never implicate this pid. Fail closed.
+        if (!PidFile.IsProcessListeningOnPort(pid, port))
         {
             Console.WriteLine($"PID {pid} is not listening on port {port}; refusing to terminate an unverified process.");
-            CliExitCode.Set(1);
-            return;
+            return 1;
         }
-        bool isServer = PidFile.IsServerProcess(pid);
-        if (!isServer)
-        {
-            // name the failed check — this branch fired on the
-            // process-identity gate, not the port-listening gate above.
-            Console.WriteLine($"PID {pid} is not a verified Atheriz server process; refusing to terminate an unverified process.");
-            CliExitCode.Set(1);
-            return;
-        }
-        Console.Write($"Stopping server process with PID: {pid}...");
-        await ProcessHelper.KillProcessWithDots(proc).ConfigureAwait(false);
-        Console.WriteLine(" Done.");
+        Console.WriteLine($"Stopping server process with PID: {pid}...");
+        await ProcessHelper.TerminateAsync(proc).ConfigureAwait(false);
         if (File.Exists(pidFilePath))
         {
             try
@@ -102,49 +68,46 @@ public static class StopHandler
                 // Owner-verified: only remove the file when it still names
                 // the process just stopped — never a successor's pid file
                 // across the kill/delete window (pid reuse).
-                if (!stillRunning) { PidFile.ReleaseIfOwner(pidFilePath, pid); CliExitCode.Set(0); }
-                else { Console.WriteLine("\nWarning: Process still exists after kill."); CliExitCode.Set(1); }
+                if (!stillRunning) { PidFile.ReleaseIfOwner(pidFilePath, pid); Console.WriteLine("Done."); return 0; }
+                Console.WriteLine("Warning: Process still exists after kill.");
+                return 1;
             }
             catch { }
         }
+        return 0;
     }
 
-    public static async Task HandleStopAsync(string[] a)
+    public static async Task<int> StopAsync(int? portOverride)
     {
-        var port = ArgumentParser.ParsePort(a) ?? EffectiveSettings.WebserverPort;
+        var port = portOverride ?? EffectiveSettings.WebserverPort;
         var secretPath = EffectiveSettings.SecretPath;
         var tlsOn = !string.IsNullOrEmpty(EffectiveSettings.SslCertFile);
         switch (await ShutdownClient.TryRequestShutdownAsync(port, secretPath, tlsOn).ConfigureAwait(false))
         {
             case ShutdownRequestResult.Accepted:
                 Console.WriteLine("Graceful shutdown request accepted; the server will stop itself.");
-                CliExitCode.Set(0);
-                return;
+                return 0;
             case ShutdownRequestResult.AuthRejected:
                 // A live server refused us: abort here, never escalate into signals.
-                CliExitCode.Set(1);
-                return;
+                return 1;
             default: break;
         }
         var savePath = EffectiveSettings.SavePath;
         var pidFilePath = PidFile.LocateServerPidFile(savePath);
         if (!File.Exists(pidFilePath))
         {
-            Console.WriteLine($"Scanning for process listening on port {port}...");
-            if (PidFile.TryFindPidListeningOnPort(port, out var foundPid))
+            // No pid file, so no pid to verify: never signal. A listening
+            // port without an owner is reported, not killed.
+            if (PidFile.IsPortListening(port))
             {
-                await KillVerifiedPidAsync(foundPid, port, pidFilePath: null).ConfigureAwait(false);
-                return;
+                Console.WriteLine($"Port {port} is listening but no pid file names its owner; refusing to terminate an unverified process.");
+                return 1;
             }
             Console.WriteLine("No server process found.");
-            CliExitCode.Set(1);
-            return;
+            return 1;
         }
         int? pid = PidFile.TryReadPid(pidFilePath);
-        if (pid is null) { Console.WriteLine("Invalid PID file content."); CliExitCode.Set(1); }
-        if (pid is not null)
-        {
-            await KillVerifiedPidAsync(pid.Value, port, pidFilePath).ConfigureAwait(false);
-        }
+        if (pid is null) { Console.WriteLine("Invalid PID file content."); return 1; }
+        return await KillVerifiedPidAsync(pid.Value, port, pidFilePath).ConfigureAwait(false);
     }
 }

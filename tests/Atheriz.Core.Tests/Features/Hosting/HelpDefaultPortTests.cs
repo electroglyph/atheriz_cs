@@ -1,5 +1,4 @@
 using Atheriz.Core.Settings;
-using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
@@ -15,10 +14,16 @@ public class HelpDefaultPortTests
     }
 
     [Fact]
-    public void PrintCommandHelp_ReadsSharedDefault()
+    public async Task StartHelp_NamesDefaultPort()
     {
-        var src = SourceScan.Read("src", "Atheriz.Server", "Program.cs");
-        Assert.Contains("var defPort = AtherizSettings.Default.WebserverPort;", src);
-        Assert.DoesNotContain("new AtherizSettings().WebserverPort", src);
+        var orig = Console.Out;
+        var sw = new StringWriter();
+        Console.SetOut(sw);
+        try
+        {
+            await Atheriz.Server.Cli.AtherizCli.InvokeAsync(["start", "--help"]);
+        }
+        finally { Console.SetOut(orig); }
+        Assert.Contains(AtherizSettings.Default.WebserverPort.ToString(), sw.ToString(), StringComparison.Ordinal);
     }
 }

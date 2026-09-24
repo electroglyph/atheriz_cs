@@ -81,20 +81,8 @@ public static class AdminToken
     {
         var a = Encoding.UTF8.GetBytes(provided ?? "");
         var b = Encoding.UTF8.GetBytes(expected ?? "");
-        // FixedTimeEquals requires same length; if lengths differ, we still want constant time?
-        // Python's compare_digest returns false for different lengths but still constant time.
-        // .NET FixedTimeEquals returns false if lengths differ, but is it constant time? We pad.
-        // Simplest: if lengths differ, do dummy compare to avoid timing leak, then return false.
-        if (a.Length != b.Length)
-        {
-            // Do a dummy fixed time of same length to avoid early exit timing? Not strictly required but closer to hmac.compare_digest
-            // We'll compare a with itself? Instead we ensure we still call FixedTimeEquals on equal-length dummy
-            // Keep behavior: just return FixedTimeEquals result which is false when lengths differ, but .NET docs say it returns false without comparing content.
-            // To mitigate timing, we could hash? For now, use if true branch with dummy.
-            // Perform dummy compare of b with b (true) to spend similar time, then return false
-            CryptographicOperations.FixedTimeEquals(b, b);
-            return false;
-        }
+        // FixedTimeEquals returns false on length mismatch, so one call
+        // covers both shapes with no dummy dance.
         return CryptographicOperations.FixedTimeEquals(a, b);
     }
 

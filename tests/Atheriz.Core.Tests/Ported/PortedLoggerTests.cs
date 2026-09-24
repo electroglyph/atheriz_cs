@@ -90,17 +90,14 @@ public class PortedLoggerTests
     public void NoUnboundedGrowthViaPlainAppend()
     {
         using var env = GlobalTestEnv.Enter();
-        // Verify AppendToFile does size check + Rotate before AppendAllText, not plain open append (AppendToFile may be private)
-        var src = typeof(AtherizLogger).GetMethod("AppendToFile", BindingFlags.NonPublic|BindingFlags.Static);
-        if (src == null) src = typeof(AtherizLogger).GetMethod("AppendToFile", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
-        // Fallback: at least Rotate exists and constants unify via FileLogger delegation (FileLogger no longer duplicates)
-        var rotate = typeof(AtherizLogger).GetMethod("Rotate", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
+        // Size check + rotate live in AppendToFile (single encode feeds both
+        // the check and the write); rotation honors the shared constants.
+        var append = typeof(AtherizLogger).GetMethod("AppendToFile", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(append);
+        var rotate = typeof(AtherizLogger).GetMethod("Rotate", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(rotate);
-        // Ensure FileLogger delegates to AtherizLogger (no duplicate MaxBytes)
-        var fileLoggerSrc = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/FileLogger.cs");
-        Assert.Contains("AtherizLogger.MaxFileBytes", fileLoggerSrc);
-        Assert.Contains("AtherizLogger.Rotate", fileLoggerSrc);
-        Assert.DoesNotContain("private const long MaxBytes", fileLoggerSrc);
+        Assert.Equal(5 * 1024 * 1024, AtherizLogger.MaxFileBytes);
+        Assert.Equal(5, AtherizLogger.MaxFiles);
     }
 
     [Fact]

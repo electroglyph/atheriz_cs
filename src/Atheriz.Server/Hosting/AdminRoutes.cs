@@ -16,28 +16,16 @@ public static class AdminRoutes
 
     public static void MapAdminRoutes(this WebApplication app, AtherizSettings settings)
     {
-        bool RequireAdmin(HttpContext ctx, string action, out string? error)
-        {
-            var remoteIp = ctx.Connection.RemoteIpAddress?.ToString();
-            var provided = ctx.Request.Headers["X-Admin-Token"].FirstOrDefault() ?? string.Empty;
-            var err = AdminToken.CheckAdmin(settings.SecretPath, remoteIp, provided, action);
-            error = err;
-            return err is null;
-        }
-
-// auth failures are HTTP 200 with
-        // {status: error} so the CLI reads data.status (IsSuccess path).
-        // Single guard-result shape shared by the three admin endpoints;
-        // endpoints keep their own response shapes otherwise.
-        static IResult AdminError(string? message) => Results.Json(new { status = "error", message });
-        static IResult AdminOk(string? message) => Results.Json(new { status = "ok", message });
+// Auth failures are HTTP 401 with {status:"error"} (AdminAuth); the CLI
+// reads data.status. Single guard-result shape shared by the three admin
+// endpoints; endpoints keep their own response shapes otherwise.
+        static IResult AdminError(string? message) => TypedResults.Json(new AdminResult("error", message));
+        static IResult AdminOk(string? message) => TypedResults.Json(new AdminResult("ok", message));
 
         app.MapPost("/_internal/hot_reload", async (HttpContext ctx) =>
         {
-            if (!RequireAdmin(ctx, "reload", out var err))
-                return AdminError(err);
             if (IsBodyTooLarge(ctx))
-                return Results.Json(new { status = "error", message = "Request body too large." });
+                return AdminError("Request body too large.");
             try
             {
                 // Watchdog: a hung reload must not pin the worker forever.
@@ -74,16 +62,14 @@ public static class AdminRoutes
             }
             catch (Exception ex)
             {
-                return Results.Json(new { status = "error", message = ex.Message });
+                return AdminError(ex.Message);
             }
-        });
+        }).RequireAuthorization(AdminAuthServices.Policy);
 
         app.MapPost("/_internal/shutdown", (HttpContext ctx, IHostApplicationLifetime lifetime) =>
         {
-            if (!RequireAdmin(ctx, "shutdown", out var err))
-                return AdminError(err);
             if (IsBodyTooLarge(ctx))
-                return Results.Json(new { status = "error", message = "Request body too large." });
+                return AdminError("Request body too large.");
 
             AtherizLogger.LogInformation("Internal shutdown request received. Running shutdown tasks...");
 
@@ -108,30 +94,27 @@ public static class AdminRoutes
             });
 
             return AdminOk("Shutdown tasks queued.");
-        });
+        }).RequireAuthorization(AdminAuthServices.Policy);
 
         app.MapPost("/_internal/create_account", async (HttpContext ctx) =>
         {
-            if (!RequireAdmin(ctx, "account creation", out var err))
-                return AdminError(err);
-
             // Size-capped body read: reject oversized payloads without allocating them.
             using var doc = await ReadCappedJsonBodyAsync(ctx, 64 * 1024).ConfigureAwait(false);
             if (doc is null)
             {
-                return Results.Json(new { status = "error", message = "Invalid JSON body." });
+                return AdminError("Invalid JSON body.");
             }
-            var root = doc.RootElement;
-            string? accountName = root.TryGetProperty("account_name", out var a) ? a.GetString() : null;
-            string? charName = root.TryGetProperty("char_name", out var c) ? c.GetString() : null;
-            string? password = root.TryGetProperty("password", out var p) ? p.GetString() : null;
+            var request = doc.RootElement.Deserialize<CreateAccountRequest>();
+            string? accountName = request?.AccountName;
+            string? charName = request?.CharName;
+            string? password = request?.Password;
             if (string.IsNullOrWhiteSpace(accountName) || string.IsNullOrWhiteSpace(charName) || string.IsNullOrWhiteSpace(password))
-                return Results.Json(new { status = "error", message = "account_name, char_name and password are required." });
+                return AdminError("account_name, char_name and password are required.");
 
             string? vErr = Atheriz.Core.Commands.UnloggedIn.Validation.ValidateAccountName(accountName, settings)
                 ?? Atheriz.Core.Commands.UnloggedIn.Validation.ValidateCharacterName(charName, settings)
                 ?? Atheriz.Core.Commands.UnloggedIn.Validation.ValidatePassword(password, settings);
-            if (vErr is not null) return Results.Json(new { status = "error", message = vErr });
+            if (vErr is not null) return AdminError(vErr);
 
             try
             {
@@ -145,10 +128,18 @@ public static class AdminRoutes
             }
             catch (Exception ex)
             {
-                return Results.Json(new { status = "error", message = ex.Message });
+                return AdminError(ex.Message);
             }
-        });
+        }).RequireAuthorization(AdminAuthServices.Policy);
     }
+
+    /// <summary>
+    /// Typed create_account body. Property names match the JSON contract.
+    /// </summary>
+    public sealed record CreateAccountRequest(
+        [property: System.Text.Json.Serialization.JsonPropertyName("account_name")] string? AccountName,
+        [property: System.Text.Json.Serialization.JsonPropertyName("char_name")] string? CharName,
+        [property: System.Text.Json.Serialization.JsonPropertyName("password")] string? Password);
 
     /// <summary>
     /// Reads the request body as JSON with a hard size cap. Returns null when the body

@@ -39,20 +39,16 @@ public class StartupGuardEnsureTests
     }
 
     [Fact]
-    public void Program_CallsSharedEnsureFromBothPaths()
+    public void ServerHost_CallsSharedEnsureFromBothPaths()
     {
-        var src = SourceScan.Read("src", "Atheriz.Server", "Program.cs");
-        Assert.Equal(1, SourceScan.Count(src, "static void EnsureDirsOrExit(AtherizSettings s)"));
+        var src = SourceScan.Read("src", "Atheriz.Server", "Hosting", "ServerHost.cs");
+        Assert.Equal(1, SourceScan.Count(src, "internal static bool EnsureDirs("));
+        Assert.Equal(2, SourceScan.Count(src, "EnsureDirs(settings)"));
         Assert.Contains("GuardSavePath(s.SavePath)", src);
         Assert.Contains("GuardSecretPath(s.SecretPath)", src);
         Assert.Contains("EnsureSaveDirectory(s.SavePath)", src);
         Assert.Contains("EnsureSecretDirectory(s.SecretPath)", src);
-        Assert.Contains("EnsureDirsOrExit(effSpawn)", src);
-        Assert.Contains("EnsureDirsOrExit(settings)", src);
-        Assert.DoesNotContain("GuardSavePath(effSpawn.SavePath)", src);
-        Assert.DoesNotContain("GuardSavePath(settings.SavePath)", src);
-        // Per-caller behavior stays out of the helper.
-        Assert.Contains("IsSafeHost(hostOverride)", src);
+        // Both paths claim the pid file; per-caller behavior stays out of the helper.
         Assert.Equal(2, SourceScan.Count(src, "PidFile.TryAcquire("));
     }
 }

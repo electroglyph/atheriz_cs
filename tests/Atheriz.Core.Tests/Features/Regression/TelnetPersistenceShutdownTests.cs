@@ -1,9 +1,13 @@
 using System.Reflection;
+using System.Net.WebSockets;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Plugins;
 using Atheriz.Core.Tests.Features.Regression;
+using Atheriz.Server.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 
 namespace Atheriz.Core.Tests.Features.Regression;
@@ -22,31 +26,6 @@ public class TelnetPersistenceShutdownTests
         Assert.DoesNotContain("treated as EOF (clean disconnect path)", src);
     }
 
-    private sealed class FakeApp : IWebSocketApp
-    {
-        public Dictionary<string, Delegate> Captured = new();
-        public void WebSocket(string path, Func<IWebSocketPeer, Task> endpoint) => Captured[path] = endpoint;
-    }
-
-    private sealed class MockClient : IWebSocketClientInfo
-    {
-        string? IWebSocketClientInfo.Host => "127.0.0.1";
-    }
-
-    private sealed class MockPeer : IWebSocketPeer
-    {
-        public object? client;
-        public List<(int Code, string? Reason)> Closes = new();
-        object? IWebSocketPeer.Client => client;
-        Task IWebSocketPeer.AcceptAsync() => Task.CompletedTask;
-        Task<string> IWebSocketPeer.ReceiveTextAsync() => Task.FromResult("never");
-        Task IWebSocketPeer.CloseAsync(int code, string? reason)
-        {
-            Closes.Add((code, reason));
-            return Task.CompletedTask;
-        }
-    }
-
     private sealed class RefusingMgr : ConnectionManager
     {
         public RefusingMgr()
@@ -57,28 +36,52 @@ public class TelnetPersistenceShutdownTests
         public override string GenerateConnectionId() => "conn_refused";
     }
 
-    private static Func<IWebSocketPeer, Task> CaptureEndpoint()
+    private sealed class DisposalSocket : WebSocket
     {
-        var app = new FakeApp();
-        var prev = Atheriz.Core.Settings.AtherizSettings.Global.WebsocketEnabled;
-        Atheriz.Core.Settings.AtherizSettings.Global.WebsocketEnabled = true;
-        try { new WebSocketProtocol().Setup(app); }
-        finally { Atheriz.Core.Settings.AtherizSettings.Global.WebsocketEnabled = prev; }
-        return (Func<IWebSocketPeer, Task>)app.Captured["/ws"];
+        private WebSocketState _state = WebSocketState.Open;
+        public bool Disposed { get; private set; }
+        public override WebSocketCloseStatus? CloseStatus => null;
+        public override string? CloseStatusDescription => null;
+        public override WebSocketState State => _state;
+        public override string? SubProtocol => null;
+        public override void Abort() { _state = WebSocketState.Aborted; }
+        public override void Dispose() { Disposed = true; }
+        public override Task CloseAsync(WebSocketCloseStatus s, string? d, CancellationToken c)
+        {
+            _state = WebSocketState.Closed;
+            return Task.CompletedTask;
+        }
+        public override Task CloseOutputAsync(WebSocketCloseStatus s, string? d, CancellationToken c) => CloseAsync(s, d, c);
+        public override Task SendAsync(ArraySegment<byte> b, WebSocketMessageType t, bool e, CancellationToken c) => Task.CompletedTask;
+        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> b, CancellationToken c) =>
+            Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true));
     }
 
-    // A refused peer is closed, not left dangling on a log-only Close.
-    [Fact]
-    public async Task RefusedPeer_ClosedNotDangled()
+    private sealed class WsFeature : IHttpWebSocketFeature
     {
-        var endpoint = CaptureEndpoint();
-        var peer = new MockPeer { client = new MockClient() };
+        private readonly WebSocket _ws;
+        public WsFeature(WebSocket ws) => _ws = ws;
+        public bool IsWebSocketRequest => true;
+        public Task<WebSocket> AcceptAsync(WebSocketAcceptContext context) => Task.FromResult(_ws);
+    }
+
+    // A refused socket is disposed, not left dangling.
+    [Fact]
+    public async Task RefusedSocket_DisposedNotDangled()
+    {
+        var sock = new DisposalSocket();
         var mgr = new RefusingMgr();
         var prev = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mgr;
-        try { await endpoint(peer); }
+        try
+        {
+            var http = new DefaultHttpContext();
+            http.Connection.RemoteIpAddress = System.Net.IPAddress.Loopback;
+            http.Features.Set<IHttpWebSocketFeature>(new WsFeature(sock));
+            await WebSocketHandler.HandleAsync(http, new Atheriz.Core.Settings.AtherizSettings()).WaitAsync(TimeSpan.FromSeconds(15));
+        }
         finally { ConnectionManager.GlobalInstance = prev; mgr.Atp.Stop(wait: false); }
-        Assert.Single(peer.Closes);
+        Assert.True(sock.Disposed);
     }
 
     // Every transient name resolves to a real field on the engine family:
@@ -131,23 +134,25 @@ public class TelnetPersistenceShutdownTests
         Assert.Contains("ExecuteDelete()", SourceScan.Region(src, "public static void DeleteObjects("));
     }
 
-    // The shutdown client reads the body's status contract: no dead
-    // HTTP-status branch above the JSON handling.
+    // The shutdown client reads the body's status contract: auth failures
+    // arrive as HTTP 401 with {status:"error"} JSON, never bare statuses —
+    // so no dead HTTP-status branch sits above the JSON handling.
     [Fact]
     public void ShutdownClient_NoDeadStatusBranch()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "ShutdownClient.cs");
-        var region = SourceScan.Region(src, "internal static async Task<ShutdownRequestResult> TryRequestShutdownAsync(");
-        Assert.DoesNotContain("resp.StatusCode == 401", region);
-        Assert.Contains("HTTP 200 + {status:\"error\"}", region);
+        Assert.DoesNotContain("resp.StatusCode == 401", src);
+        Assert.Contains("HTTP 401 with {status:\"error\"}", src);
     }
 
-    // No empty existence check litters the token lookup.
+    // Token lookup stays scoped: configured dir plus the upward walk, no
+    // listener-scan discovery and no /proc probe.
     [Fact]
-    public void TokenLookup_NoEmptyExistenceCheck()
+    public void TokenLookup_ScopedNoProcProbe()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "ShutdownClient.cs");
-        Assert.DoesNotContain("Directory.Exists(link)", src);
-        Assert.Contains("LinkTarget", src);
+        Assert.DoesNotContain("/proc/", src);
+        Assert.DoesNotContain("TryFindPidListeningOnPort", src);
+        Assert.Contains("admin.token", src);
     }
 }

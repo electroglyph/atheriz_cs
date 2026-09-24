@@ -8,7 +8,7 @@ namespace Atheriz.Core.Tests.Features.Hosting;
 public class GameFolderRejectTests
 {
     [Fact]
-    public async Task New_WithRejectedFolderName_DoesNotChdirOrStartServer()
+    public void New_WithRejectedFolderName_DoesNotCreate()
     {
         // Behavior: when folder creation is rejected (invalid identifier),
         // `new` must stop without changing directory or starting a server.
@@ -23,8 +23,7 @@ public class GameFolderRejectTests
         {
             Directory.SetCurrentDirectory(root);
             Directory.CreateDirectory(Path.Combine(root, "my-game"));
-            var result = await NewHandler.HandleNewAsync(new[] { "my-game", "--foreground" });
-            Assert.False(result);
+            Assert.False(NewHandler.TryCreateFolder("my-game", overwrite: false, out _));
             Assert.Equal(root, Directory.GetCurrentDirectory());
         }
         finally
@@ -139,6 +138,29 @@ public class GameFolderRejectTests
         return ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
     }
 
+    private static System.Diagnostics.Process StartServer(string dll, string[] args, string workingDir, Dictionary<string, string> env, System.Text.StringBuilder output)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "dotnet",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = workingDir,
+        };
+        psi.ArgumentList.Add(dll);
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
+        var proc = new System.Diagnostics.Process { StartInfo = psi };
+        proc.OutputDataReceived += (s, e) => { if (e.Data != null) lock (output) output.AppendLine(e.Data); };
+        proc.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (output) output.AppendLine(e.Data); };
+        proc.Start();
+        proc.BeginOutputReadLine();
+        proc.BeginErrorReadLine();
+        return proc;
+    }
+
     private static async Task<string> RunProcessAsync(string fileName, string args, string? workingDir, Dictionary<string, string>? env, int timeoutMs)
     {
         var psi = new System.Diagnostics.ProcessStartInfo
@@ -162,6 +184,28 @@ public class GameFolderRejectTests
         var cts = new CancellationTokenSource(timeoutMs);
         try { await proc.WaitForExitAsync(cts.Token); } catch (OperationCanceledException) { try { proc.Kill(entireProcessTree: true); } catch { } }
         return sb.ToString();
+    }
+
+    private static async Task<bool> IsPortOpenAsync(int port)
+    {
+        try
+        {
+            using var c = new System.Net.Sockets.TcpClient();
+            await c.ConnectAsync("127.0.0.1", port).WaitAsync(TimeSpan.FromSeconds(2));
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static async Task<bool> WaitForPortClosedAsync(int port, int timeoutMs)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            if (!await IsPortOpenAsync(port)) return true;
+            await Task.Delay(300);
+        }
+        return !await IsPortOpenAsync(port);
     }
 
     private static async Task<bool> WaitForHealthAsync(int port, int timeoutMs)
@@ -189,7 +233,7 @@ public class GameFolderRejectTests
         // overwrite before anything is deleted.
         if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePort();
         var telnetPort = FindFreePort();
@@ -207,8 +251,11 @@ public class GameFolderRejectTests
         var oldPass = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
         try
         {
-            var output = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh new {gameFolder} --port {port} --telnet-port {telnetPort} --overwrite", repoRoot, env, 30000);
-            Assert.True(await WaitForHealthAsync(port, 15000), $"Server did not become healthy. Output: {output}");
+            var serverOut = new System.Text.StringBuilder();
+            using var server = StartServer(dll,
+                ["new", gameFolder, "--port", port.ToString(), "--telnet-port", telnetPort.ToString(), "--overwrite"],
+                repoRoot, env, serverOut);
+            Assert.True(await WaitForHealthAsync(port, 30000), $"Server did not become healthy. Output: {serverOut}");
             var pidFile = Path.Combine(gameFolder, "save", "server.pid");
             Assert.True(File.Exists(pidFile));
             var dbFile = Path.Combine(gameFolder, "save", "database.sqlite3");
@@ -219,12 +266,15 @@ public class GameFolderRejectTests
             Assert.False(GameTemplateGenerator.CreateGameFolder(gameFolder, overwrite: true));
             Assert.True(File.Exists(pidFile), "refused overwrite must not delete the pid file");
             Assert.True(File.Exists(dbFile), "refused overwrite must not delete the database");
+            // Script stop from the game folder shuts it down gracefully.
+            await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", gameFolder, null, 15000);
+            Assert.True(await WaitForPortClosedAsync(port, 15000), "server still listening after stop");
         }
         finally
         {
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", oldUser);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", oldPass);
-            try { await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", repoRoot, null, 15000); } catch { }
+            try { await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", gameFolder, null, 15000); } catch { }
             try
             {
                 var pf = Path.Combine(gameFolder, "save", "server.pid");

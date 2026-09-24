@@ -4,8 +4,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using telnet_cs.Server;
 
 namespace Atheriz.Core.Network;
@@ -362,18 +360,7 @@ public interface ITelnetWriter : ITelnetBufferSource
     IReadOnlyList<ITelnetBufferSource> BufferSources => [this];
 }
 
-public interface ITelnetRouter
-{
-    object? LifespanContext { get; set; }
-}
-
-/// <summary>Typed app surface for TelnetProtocol.Setup.</summary>
-public interface ITelnetApp
-{
-    ITelnetRouter? Router { get; }
-}
-
-public sealed class TelnetProtocol : BaseProtocol
+public static class TelnetProtocol
 {
     private const int TELNET_INPUT_CHUNK = 4096;
 
@@ -488,122 +475,6 @@ public sealed class TelnetProtocol : BaseProtocol
             return Atheriz.Core.Utils.TlsCertLoader.Load(certFile, keyFile);
         }
         catch (Exception e) { Atheriz.Core.AtherizLogger.LogWarning($"WARNING: Could not load telnet TLS cert: {e}"); return null; }
-    }
-
-    // We support two app shapes to remain faithful to Python tests:
-    // - FastAPI-style mock with app.router.lifespan_context (test_telnet.py:113-174)
-    // - Real IHost/WebApplication via IServiceProvider + IHostApplicationLifetime
-    public override void Setup(object app)
-    {
-        // Typed contract: test doubles expose ITelnetApp.Router (FakeApp2/FakeAppLifespan).
-        try
-        {
-            if (app is ITelnetApp tapp && tapp.Router is { } router)
-            {
-                var previous = router.LifespanContext;
-                var settingsForLifespan = AtherizSettings.Global;
-                if (app is IHost telnetHost)
-                {
-                    try { settingsForLifespan = telnetHost.Services.GetRequiredService<AtherizSettings>(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
-                }
-
-                if (settingsForLifespan.TelnetEnabled)
-                {
-                    // Create composed lifespan wrapper — mirrors telnet.py:436-446.
-                    object composed = CreateComposedLifespan(previous, settingsForLifespan);
-                    router.LifespanContext = composed;
-                }
-                return;
-            }
-        }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
-
-        // Fallback to IHost/WebApplication path — real server
-        AtherizSettings settings = AtherizSettings.Global;
-        IHost? host = app as IHost;
-        IServiceProvider? sp = null;
-        IHostApplicationLifetime? lifetime = null;
-        ConnectionManager? manager = null;
-
-        try
-        {
-            // Typed service resolution (covers WebApplication and IHost).
-            if (app is IHost typedHost) sp = typedHost.Services;
-            if (sp is not null)
-            {
-                try { settings = sp.GetRequiredService<AtherizSettings>(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
-                try { lifetime = sp.GetRequiredService<IHostApplicationLifetime>(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
-                try { manager = sp.GetService<ConnectionManager>(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
-            }
-            if (lifetime is null && host is not null) lifetime = host.Services.GetService<IHostApplicationLifetime>();
-        }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.Setup: " + logEx.Message, "TelnetProtocol"); }
-
-        if (lifetime is null)
-        {
-            // No lifetime available — cannot start background listener; log and return
-            Atheriz.Core.AtherizLogger.LogWarning("[Telnet] No IHostApplicationLifetime available — telnet server not started");
-            return;
-        }
-
-        if (!settings.TelnetEnabled) return;
-        manager ??= ConnectionManager.GlobalInstance ?? new ConnectionManager(settings: settings);
-
-        // Hosted-service kickoff (same non-blocking start the Task.Run gave):
-        // BackgroundService.StartAsync runs the loop and returns, so Setup
-        // still never blocks; faults stay inside ExecuteAsync's catch-all
-        // (same strings as the old inline body). The stop registration joins
-        // the loop instead of abandoning it at shutdown.
-        var service = new TelnetHostedService(manager, settings, lifetime);
-        _ = service.StartAsync(lifetime.ApplicationStopping);
-        lifetime.ApplicationStopping.Register(() => { _ = service.StopAsync(CancellationToken.None).ContinueWith(t => { if (t.IsFaulted && t.Exception is not null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] server failed: {t.Exception}"); }, TaskScheduler.Default); });
-    }
-
-    private static object CreateComposedLifespan(object? previous, AtherizSettings settings)
-    {
-        // In Python, lifespan is an asynccontextmanager; in C# we simulate via Func<object, Task>
-        // The wrapper, when invoked, will:
-        // - if previous is not null, await previous as context manager (call it)
-        // - start telnet server (stub), yield, then stop server
-        // For test purposes, we just ensure previous is invoked and wrapper is callable.
-        return new TelnetLifespanComposed(previous, settings);
-    }
-
-    private sealed class TelnetLifespanComposed
-    {
-        private readonly object? _previous;
-        private readonly AtherizSettings _settings;
-        public TelnetLifespanComposed(object? previous, AtherizSettings settings) { _previous = previous; _settings = settings; }
-
-        // Make this object callable/invocable via dynamic — support app.router.lifespan_context being invoked as async context manager
-        // In Python test, they do: installed = app.router.lifespan_context; async with installed(app): pass
-        // In C# we expose method that can be awaited via dynamic
-        public async Task Invoke(object app, Func<Task> inner)
-        {
-            // Simulate lifespan composition: run previous if exists, then inner, then cleanup.
-            // Previous lifespans are opaque doubles; composition only preserves
-            // the reference (pinned by MountingTelnetPreservesPreviousLifespan).
-            if (_previous is not null)
-            {
-                try { /* preserve only */ }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetLifespanComposed.Invoke: " + logEx.Message, "TelnetLifespanComposed"); }
-            }
-            await inner().ConfigureAwait(false);
-        }
-
-        // For dynamic invocation as app.router.lifespan_context(app) being awaited as async disposable
-        // Provide method to be used as `await using (var ctx = lifespan(app))`
-        public IAsyncDisposable GetAsyncDisposable(object app)
-        {
-            return new LifespanDisposable(_previous, app);
-        }
-
-        private sealed class LifespanDisposable : IAsyncDisposable
-        {
-            private readonly object? _prev; private readonly object _app;
-            public LifespanDisposable(object? prev, object app) { _prev = prev; _app = app; }
-            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-        }
     }
 
     // Peer-label helper for the accept filter: the library exposes the endpoint

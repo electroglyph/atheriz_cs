@@ -113,7 +113,7 @@ public class ResetContainmentTests
         Console.SetIn(new StringReader("y" + Environment.NewLine));
         try
         {
-            await ResetHandler.HandleResetAsync(Array.Empty<string>());
+            await ResetHandler.ResetAsync(null, null);
         }
         finally
         {

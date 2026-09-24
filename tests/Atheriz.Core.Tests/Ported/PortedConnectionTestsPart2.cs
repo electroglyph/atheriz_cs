@@ -4,6 +4,10 @@ using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Settings;
+using Atheriz.Server.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using System.Net.WebSockets;
 using System.Text.Json;
 
 namespace Atheriz.Core.Tests.Ported;
@@ -536,23 +540,23 @@ public class PortedConnectionTestsPart2
     public async Task WebSocketEndpointExitsWhenRegistrationRefused()
     {
         using var env = GlobalTestEnv.Enter();
-        // Capture endpoint via WebSocketProtocol Setup
-        var app = new WebSocketTestsFakeApp();
-        var prev = AtherizSettings.Global.WebsocketEnabled;
-        AtherizSettings.Global.WebsocketEnabled = true;
-        try { new WebSocketProtocol().Setup(app); } finally { AtherizSettings.Global.WebsocketEnabled = prev; }
-        var endpoint = app.Captured["/ws"] as Func<IWebSocketPeer, Task>;
-        Assert.NotNull(endpoint);
-        var ws = new WebSocketEndpointMockWs();
-        ws.client = new MockClient2 { host = "1.2.3.4" };
-        ws.receive_text = () => Task.FromResult("should not be handled");
-        // Mock manager to refuse
+        // Refused registration on the real pump: nothing handled, and the
+        // handler disposes instead of disconnecting (no Disconnect call).
+        var sock = new RefusedScriptSocket();
         var mockMgr = new MockMgrForEndpoint { RegisterReturn = false };
         var prevMgr = ConnectionManager.GlobalInstance;
         ConnectionManager.GlobalInstance = mockMgr;
-        try { await endpoint!(ws); } finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait:false); }
+        try
+        {
+            var http = new DefaultHttpContext();
+            http.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("1.2.3.4");
+            http.Features.Set<IHttpWebSocketFeature>(new RefusedWsFeature(sock));
+            await WebSocketHandler.HandleAsync(http, new AtherizSettings()).WaitAsync(TimeSpan.FromSeconds(15));
+        }
+        finally { ConnectionManager.GlobalInstance = prevMgr; mockMgr.Atp.Stop(wait: false); }
         Assert.Equal(0, mockMgr.HandleCalls);
         Assert.Equal(0, mockMgr.DisconnectCalls);
+        Assert.True(sock.Disposed);
     }
     [Fact]
     public async Task TelnetShellExitsWhenRegistrationRefused()
@@ -589,24 +593,27 @@ public class PortedConnectionTestsPart2
         public override void SendCommand(string cmd, List<object?>? args = null, Dictionary<string, object?>? kwargs = null) => throw new InvalidOperationException("boom");
         public override void Close(){}
     }
-    private sealed class WebSocketTestsFakeApp : IWebSocketApp
+    private sealed class RefusedScriptSocket : WebSocket
     {
-        public Dictionary<string, Delegate> Captured = new();
-        public void WebSocket(string path, Func<IWebSocketPeer, Task> endpoint) => Captured[path] = endpoint;
+        public bool Disposed { get; private set; }
+        public override WebSocketCloseStatus? CloseStatus => null;
+        public override string? CloseStatusDescription => null;
+        public override WebSocketState State => WebSocketState.Open;
+        public override string? SubProtocol => null;
+        public override void Abort() { }
+        public override void Dispose() { Disposed = true; }
+        public override Task CloseAsync(WebSocketCloseStatus s, string? d, CancellationToken c) => Task.CompletedTask;
+        public override Task CloseOutputAsync(WebSocketCloseStatus s, string? d, CancellationToken c) => Task.CompletedTask;
+        public override Task SendAsync(ArraySegment<byte> b, WebSocketMessageType t, bool e, CancellationToken c) => Task.CompletedTask;
+        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> b, CancellationToken c) =>
+            Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true));
     }
-    private sealed class MockClient2 : IWebSocketClientInfo { public string host="1.2.3.4"; string? IWebSocketClientInfo.Host => host; }
-    private sealed class WebSocketEndpointMockWs : IWebSocketPeer
+    private sealed class RefusedWsFeature : IHttpWebSocketFeature
     {
-        public object client = new MockClient2();
-        public Func<Task<string>> receive_text = () => Task.FromResult("");
-        public Func<Task> accept = () => Task.CompletedTask;
-        public Task acceptMethod() => accept();
-        public Task<string> receive_textMethod() => receive_text();
-        public Task close(object? code=null, object? reason=null) => Task.CompletedTask;
-        object? IWebSocketPeer.Client => client;
-        Task IWebSocketPeer.AcceptAsync() => accept();
-        Task<string> IWebSocketPeer.ReceiveTextAsync() => receive_text();
-        Task IWebSocketPeer.CloseAsync(int code, string? reason) => close(code, reason);
+        private readonly WebSocket _ws;
+        public RefusedWsFeature(WebSocket ws) => _ws = ws;
+        public bool IsWebSocketRequest => true;
+        public Task<WebSocket> AcceptAsync(WebSocketAcceptContext context) => Task.FromResult(_ws);
     }
     private sealed class MockMgrForEndpoint : ConnectionManager
     {

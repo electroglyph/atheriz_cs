@@ -79,12 +79,49 @@ public class PortedServerIntegrationTests
         return sbOut.ToString() + "\n" + sbErr.ToString();
     }
 
+    // Foreground CLI: servers run until killed, so integration tests launch
+    // them backgrounded (drained output, no wait) and stop them explicitly.
+    private sealed class BackgroundServer : IDisposable
+    {
+        public Process Proc { get; }
+        public StringBuilder Output { get; } = new();
+        private BackgroundServer(Process proc) => Proc = proc;
+        public static BackgroundServer Start(string dll, string[] args, string workingDir, Dictionary<string, string>? env)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WorkingDirectory = workingDir,
+            };
+            psi.ArgumentList.Add(dll);
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            if (env != null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
+            var srv = new BackgroundServer(Process.Start(psi)!);
+            srv.Proc.OutputDataReceived += (s, e) => { if (e.Data != null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
+            srv.Proc.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
+            srv.Proc.BeginOutputReadLine();
+            srv.Proc.BeginErrorReadLine();
+            return srv;
+        }
+        public string ReadOutput() { lock (Output) return Output.ToString(); }
+        public void Dispose()
+        {
+            try { Proc.Kill(entireProcessTree: true); } catch { }
+            try { Proc.WaitForExit(5000); } catch { }
+            try { Proc.Dispose(); } catch { }
+        }
+    }
+
     [Fact(Timeout = 120000)]
     public async Task ServerLifecycle_WsAndTelnet_BasicCommands()
     {
-        if (!OperatingSystem.IsLinux()) return; // only on linux where atheriz.sh works
+        if (!OperatingSystem.IsLinux()) return; // only on linux where loopback spawns work
         var repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return; // skip if not built
         var port = FindFreePortInt();
         var telnetPort = FindFreePortInt();
@@ -109,13 +146,14 @@ public class PortedServerIntegrationTests
         string output = "";
         try
         {
-            // 1. atheriz.sh new --port <port>  (should start server in background)
-            output = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh new {gameFolder} --port {port} --telnet-port {telnetPort} --overwrite", repoRoot, env, 30000);
+            // 1. start the server backgrounded (foreground CLI): health gates progress
+            using var server = BackgroundServer.Start(dll,
+                ["new", gameFolder, "--port", port.ToString(), "--telnet-port", telnetPort.ToString(), "--overwrite"],
+                repoRoot, env);
+            Assert.True(await WaitForHealthAsync(port, 30000), $"Server did not become healthy on {port}. Output: {server.ReadOutput()}\nLog: {TryReadLog(gameFolder)}");
+            output = server.ReadOutput();
             Assert.Contains("Creating game folder", output);
-            Assert.Contains("Server starting in background", output);
             Assert.Contains("Web server listening", output);
-            // Wait for health
-            Assert.True(await WaitForHealthAsync(port, 15000), $"Server did not become healthy on {port}. Output: {output}\nLog: {TryReadLog(gameFolder)}");
             // Verify pid file exists
             var pidFile = Path.Combine(gameFolder, "save", "server.pid");
             Assert.True(File.Exists(pidFile), "server.pid not created");
@@ -137,8 +175,8 @@ public class PortedServerIntegrationTests
             // After reload, health should still be ok and WS should still work (new connection)
             Assert.True(await WaitForHealthAsync(port, 5000), "health after reload failed");
             await TestWebSocketAsync(port, "intadmin", "intpass123");
-            // 5. Stop test
-            var stopOut = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", repoRoot, null, 15000);
+            // 5. Stop test (from the game folder, so token + pid resolve)
+            var stopOut = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", gameFolder, null, 15000);
             Assert.Contains("Graceful shutdown", stopOut + TryReadLog(gameFolder));
             // Wait for port to close via PortedHelpers.WaitAsync + TCS determinism (instead of raw while+Delay polling)
             var stoppedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -161,7 +199,7 @@ public class PortedServerIntegrationTests
         finally
         {
             // Cleanup: ensure stopped, kill if needed, delete tmp
-            try { await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", repoRoot, null, 5000); } catch { }
+            try { await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", gameFolder, null, 5000); } catch { }
             try { await Task.Delay(1500); } catch { }
             // Force kill if still listening
             try
@@ -187,11 +225,84 @@ public class PortedServerIntegrationTests
     }
 
     [Fact(Timeout = 120000)]
+    public async Task BackgroundNew_SurvivesSighup_AndStopsViaDll()
+    {
+        // Background `new`: the launching process prints the banners and
+        // exits itself; the daemon survives SIGHUP and stops via direct
+        // `dotnet <dll> stop` (the stop path under test is not .sh-only).
+        if (!OperatingSystem.IsLinux()) return; // SIGHUP is Unix-only
+        var repoRoot = "/home/anon/atheriz-cs";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+        if (!File.Exists(dll)) return; // skip if not built
+        var port = FindFreePortInt();
+        var telnetPort = FindFreePortInt();
+        int attempts = 0;
+        while ((telnetPort == port || await IsPortListeningAsync(port) || await IsPortListeningAsync(telnetPort)) && attempts < 5)
+        {
+            port = FindFreePortInt();
+            telnetPort = FindFreePortInt();
+            attempts++;
+        }
+        var tmp = Path.Combine(Path.GetTempPath(), $"atheriz_daemon_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tmp);
+        var gameFolder = Path.Combine(tmp, "mygame");
+        var env = new Dictionary<string, string>
+        {
+            ["ATHERIZ_SUPERUSER_USERNAME"] = "daemonadmin",
+            ["ATHERIZ_SUPERUSER_PASSWORD"] = "daemonpass123",
+            ["ATHERIZ_TELNET_PORT"] = telnetPort.ToString(),
+            ["Atheriz__TelnetPort"] = telnetPort.ToString()
+        };
+        try
+        {
+            var newOut = await RunProcessAsync("dotnet",
+                $"{dll} new \"{gameFolder}\" --port {port} --telnet-port {telnetPort} --overwrite",
+                repoRoot, env, 90000);
+            Assert.Contains("Creating game folder", newOut);
+            Assert.Contains("Web server listening", newOut);
+            Assert.True(await WaitForHealthAsync(port, 15000), $"Daemon not healthy on {port}. Output: {newOut}\nLog: {TryReadLog(gameFolder)}");
+            var pidFile = Path.Combine(gameFolder, "save", "server.pid");
+            Assert.True(File.Exists(pidFile), "server.pid not created");
+            Assert.True(int.TryParse(File.ReadAllText(pidFile).Trim(), out var daemonPid), "server.pid unparseable");
+            Assert.NotEqual(Environment.ProcessId, daemonPid);
+            await RunProcessAsync("kill", $"-HUP {daemonPid}", gameFolder, null, 5000);
+            await Task.Delay(1500);
+            Assert.True(await WaitForHealthAsync(port, 10000), $"Daemon died on SIGHUP.\nLog: {TryReadLog(gameFolder)}");
+            var stopOut = await RunProcessAsync("dotnet", $"{dll} stop --port {port}", gameFolder, null, 30000);
+            Assert.Contains("Graceful shutdown", stopOut + TryReadLog(gameFolder));
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 15000 && await IsPortListeningAsync(port))
+                await Task.Delay(300);
+            Assert.False(await IsPortListeningAsync(port), $"Daemon still listening on {port} after stop. Output: {stopOut}");
+            Assert.False(File.Exists(pidFile), "pid file still exists after stop");
+        }
+        finally
+        {
+            try { await RunProcessAsync("dotnet", $"{dll} stop --port {port}", gameFolder, null, 5000); } catch { }
+            try { await Task.Delay(1000); } catch { }
+            try
+            {
+                if (await IsPortListeningAsync(port))
+                {
+                    var pf = Path.Combine(gameFolder, "save", "server.pid");
+                    if (File.Exists(pf) && int.TryParse(File.ReadAllText(pf).Trim(), out var pid))
+                        try { Process.GetProcessById(pid).Kill(); } catch { }
+                    await Task.Delay(1000);
+                }
+            }
+            catch { }
+            try { await RunProcessAsync("bash", $"rm -rf \"{tmp}\"", null, null, 60000); } catch { }
+            try { if (Directory.Exists(tmp)) await RunProcessAsync("bash", $"rm -rf \"{tmp}\"", null, null, 60000); } catch { }
+            try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    [Fact(Timeout = 120000)]
     public async Task BareNameNewOverwrite_CanConnect()
     {
         if (!OperatingSystem.IsLinux()) return;
         var repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePortInt();
         var telnetPort = FindFreePortInt();
@@ -221,9 +332,13 @@ public class PortedServerIntegrationTests
         try
         {
             // Bare name `test` with --overwrite must recreate world even though folder existed (folderExistsInitially=true)
-            output = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh new test --port {port} --telnet-port {telnetPort} --overwrite", tmpRoot, env, 30000);
+            using var server = BackgroundServer.Start(dll,
+                ["new", "test", "--port", port.ToString(), "--telnet-port", telnetPort.ToString(), "--overwrite"],
+                tmpRoot, env);
+            output = "";
+            Assert.True(await WaitForHealthAsync(port, 30000), $"Server did not become healthy on {port}. Output: {server.ReadOutput()}\nLog: {TryReadLog(gameFolder)}");
+            output = server.ReadOutput();
             Assert.Contains("Creating game folder", output);
-            Assert.Contains("Server starting in background", output);
             Assert.True(File.Exists(Path.Combine(gameFolder, "save", "database.sqlite3")) || File.Exists(Path.Combine(gameFolder, "save", "server.log")), $"DB/log not created. Output: {output}");
             Assert.False(File.Exists(Path.Combine(gameFolder, "save", "stale.txt")), "stale.txt not wiped on overwrite");
             Assert.True(await WaitForHealthAsync(port, 15000), $"Server did not become healthy on {port}. Output: {output}\nLog: {TryReadLog(gameFolder)}");
@@ -233,7 +348,7 @@ public class PortedServerIntegrationTests
             await TestWebSocketAsync(port, "bareadmin", "barepass123");
             await TestTelnetAsync(gameFolder, telnetPort, "bareadmin", "barepass123");
             // Verify overwrite is idempotent: second bare `new test --overwrite` with different creds should replace DB
-            var stop1 = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", tmpRoot, null, 15000);
+            var stop1 = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", gameFolder, null, 15000);
             await Task.Delay(1500);
             env["ATHERIZ_SUPERUSER_USERNAME"] = "bareadmin2";
             env["ATHERIZ_SUPERUSER_PASSWORD"] = "barepass456";
@@ -246,18 +361,20 @@ public class PortedServerIntegrationTests
             }
             env["ATHERIZ_TELNET_PORT"] = telnetPort2.ToString();
             env["Atheriz__TelnetPort"] = telnetPort2.ToString();
-            output = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh new test --port {port2} --telnet-port {telnetPort2} --overwrite", tmpRoot, env, 30000);
-            Assert.Contains("Creating game folder", output);
-            Assert.True(await WaitForHealthAsync(port2, 15000), $"Second overwrite server not healthy on {port2}. Output: {output}\nLog: {TryReadLog(gameFolder)}");
+            using var server2 = BackgroundServer.Start(dll,
+                ["new", "test", "--port", port2.ToString(), "--telnet-port", telnetPort2.ToString(), "--overwrite"],
+                tmpRoot, env);
+            Assert.True(await WaitForHealthAsync(port2, 30000), $"Second overwrite server not healthy on {port2}. Output: {server2.ReadOutput()}\nLog: {TryReadLog(gameFolder)}");
+            Assert.Contains("Creating game folder", server2.ReadOutput());
             await TestWebSocketAsync(port2, "bareadmin2", "barepass456");
             // Clean second server
-            await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port2}", tmpRoot, null, 15000);
+            await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port2}", gameFolder, null, 15000);
             await Task.Delay(1000);
             Assert.False(await IsPortListeningAsync(port2), $"Second server still listening on {port2}");
         }
         finally
         {
-            try { await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", tmpRoot, null, 5000); } catch { }
+            try { await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", gameFolder, null, 5000); } catch { }
             try { await Task.Delay(1000); } catch { }
             try { await RunProcessAsync("bash", $"rm -rf \"{tmpRoot}\"", null, null, 60000); } catch { }
             try { if (Directory.Exists(tmpRoot)) await RunProcessAsync("bash", $"rm -rf \"{tmpRoot}\"", null, null, 60000); } catch { }

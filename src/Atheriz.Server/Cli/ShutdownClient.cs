@@ -8,7 +8,7 @@ namespace Atheriz.Server.Cli;
 internal enum ShutdownRequestResult { Accepted, Unreachable, AuthRejected }
 
 // One HTTP answer from a /_internal/* admin endpoint. Auth failures are
-// HTTP 200 with {status:"error"} (AdminRoutes), so callers must inspect the
+// HTTP 401 with {status:"error"} (AdminAuth), so callers must inspect the
 // body, not just reachability.
 internal sealed record AdminResponse(int StatusCode, string Body)
 {
@@ -97,8 +97,8 @@ public static class ShutdownClient
             Console.WriteLine("Could not contact server for graceful shutdown (server might be hung or stopped).");
             return ShutdownRequestResult.Unreachable;
         }
-        // Auth failures arrive as HTTP 200 + {status:"error"} by route
-        // design (AdminRoutes), never as 401/403 — read the body below.
+        // Auth failures arrive as HTTP 401 + {status:"error"} by route
+        // design (AdminAuth keeps the JSON shape) — read the body below.
         try
         {
             var status = resp.GetStatus("");
@@ -121,22 +121,11 @@ public static class ShutdownClient
             for (int i = 0; i < 6 && cur is not null; i++) { var p = Path.Combine(cur.FullName, "secret", "admin.token"); if (File.Exists(p)) return p; var p2 = Path.Combine(cur.FullName, "save", "..", "secret", "admin.token"); if (File.Exists(Path.GetFullPath(p2))) return Path.GetFullPath(p2); cur = cur.Parent; }
         }
         catch { }
-        try
-        {
-            if (Infrastructure.PidFile.TryFindPidListeningOnPort(port, out var lpid))
-            {
-                try
-                {
-                    var realCwd = new FileInfo($"/proc/{lpid}/cwd").LinkTarget;
-                    if (!string.IsNullOrEmpty(realCwd)) { var p3 = Path.Combine(realCwd, "secret", "admin.token"); if (File.Exists(p3)) return p3; }
-                }
-                catch { }
-            }
-        }
-        catch { }
-        // no blind CWD-tree scan — a planted admin.token in a nested
-        // directory would hand CLI control to the wrong server. Lookup is
-        // scoped: configured secret dir, upward secret/ walk, /proc probe.
+        // Scoped lookup only: configured secret dir plus the upward walk
+        // above. A planted admin.token in a nested directory would hand CLI
+        // control to the wrong server, and listener-scan discovery is gone
+        // with the /proc+lsof probing.
+        _ = port;
         return null;
     }
 }

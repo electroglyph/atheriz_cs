@@ -1,151 +1,193 @@
+using System.Net;
+using Atheriz.Server.Hosting;
 
 namespace Atheriz.Server.Cli;
 
+// Background launcher for start/new/restart/reset: spawns a detached child
+// (`start --foreground`) with inherited stdio (never redirected — a pipe
+// would die with the parent) and waits boundedly for readiness before
+// printing the operator banners itself and exiting.
 public static class DaemonSpawner
 {
-    // Split once: the last-token parse and the fallback first-parse scan
-    // below read the same token array from the daemon-pid output.
-    private static readonly char[] PidSeparators = ['\n', '\r', ' ', '\t'];
-    // Bash single-quote armor: inside '...' nothing expands ($, `, \, !
-    // are all literal), so --host/--port values cannot inject commands.
-    // An embedded ' ends the quote, inserts an escaped quote, and reopens.
-    internal static string BashQuote(string s) => "'" + s.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+    internal const string DaemonEnvKey = "ATHERIZ_DAEMON";
 
-    // Host charset allowlist (names, IPv4/IPv6 incl. brackets + zone id).
-    // Defense in depth behind BashQuote: fail closed before spawning.
-    internal static bool IsSafeHost(string h) =>
-        h.Length > 0 && h.Length <= 255 && h.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_' or ':' or '[' or ']' or '%');
+    private static readonly TimeSpan ReadinessTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan PollCadence = TimeSpan.FromMilliseconds(200);
 
-    // Shared spawn-arg builder for the daemon/reset/restart spawn paths:
-    // --port/--host/--telnet-port in one order. The child parses
-    // order-independently (GetOptionValue scans all argv), so the unified
-    // order is exact. Pure list builder — host validation stays in
-    // SpawnDaemonAsync (reset/restart pass through to it).
-    internal static List<string> BuildSpawnArgs(int? port, string? host, int? telnetPort)
+    // Shared host gate with ServerHost.RunForegroundAsync: one rule, one
+    // message shape, fail-fast exit 2.
+    public static bool IsSafeHost(string? host)
+        => host is null || IPAddress.TryParse(host, out _);
+
+    public static async Task<int> SpawnStart(string gameFolderAbs, int? port, string? host, int? telnetPort)
     {
-        var argList = new List<string>();
-        if (port.HasValue) { argList.Add("--port"); argList.Add(port.Value.ToString()); }
-        if (!string.IsNullOrEmpty(host)) { argList.Add("--host"); argList.Add(host!); }
-        if (telnetPort.HasValue) { argList.Add("--telnet-port"); argList.Add(telnetPort.Value.ToString()); }
-        return argList;
+        ArgumentException.ThrowIfNullOrEmpty(gameFolderAbs);
+        if (!IsSafeHost(host)) { Console.Error.WriteLine($"Invalid --host value: {host}"); return 2; }
+        if (!TryResolveChildExe(out var fileName, out var dllArg, out var exeError))
+        { Console.Error.WriteLine(exeError); return 1; }
+
+        var settings = StopHandler.LoadSettingsFor(gameFolderAbs);
+        var bannerSettings = WithOverrides(settings, gameFolderAbs, port, host);
+        int expectedPort = bannerSettings.WebserverPort;
+        bool webEnabled = bannerSettings.WebserverEnabled;
+        var pidPath = Path.Combine(CombineWithGame(gameFolderAbs, settings.SavePath), "server.pid");
+        var logPath = Path.Combine(CombineWithGame(gameFolderAbs, settings.SavePath), "server.log");
+
+        if (PidFile.IsLiveClaim(pidPath, out int ownerPid))
+        { Console.WriteLine($"{PidFile.AlreadyRunningMessagePrefix} {ownerPid}"); return 1; }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            WorkingDirectory = gameFolderAbs,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        if (dllArg is not null) psi.ArgumentList.Add(dllArg);
+        psi.ArgumentList.Add("start");
+        psi.ArgumentList.Add("--foreground");
+        if (port is not null) { psi.ArgumentList.Add("--port"); psi.ArgumentList.Add(port.Value.ToString()); }
+        if (host is not null) { psi.ArgumentList.Add("--host"); psi.ArgumentList.Add(host); }
+        if (telnetPort is not null) { psi.ArgumentList.Add("--telnet-port"); psi.ArgumentList.Add(telnetPort.Value.ToString()); }
+        psi.Environment[DaemonEnvKey] = "1";
+
+        Process? child;
+        try { child = Process.Start(psi); }
+        catch (Exception ex) { Console.Error.WriteLine($"Failed to start server process: {ex.Message}"); return 1; }
+        if (child is null) { Console.Error.WriteLine("Failed to start server process."); return 1; }
+        using (child)
+        {
+            Console.WriteLine("Starting server...");
+            int parentPid = Environment.ProcessId;
+            bool interrupted = false;
+            using var timeoutCts = new CancellationTokenSource(ReadinessTimeout);
+            void OnCancel(object? s, ConsoleCancelEventArgs e)
+            {
+                e.Cancel = true;
+                interrupted = true;
+                try { timeoutCts.Cancel(); } catch { }
+            }
+            Console.CancelKeyPress += OnCancel;
+            try
+            {
+                bool ready = false, died = false;
+                while (!timeoutCts.Token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        if (child.HasExited) { died = true; break; }
+                    }
+                    catch { died = true; break; }
+                    int? claim = PidFile.TryReadPid(pidPath);
+                    bool claimOk = claim is int c && c != parentPid && PidFile.IsServerProcess(c);
+                    bool portOk = !webEnabled || PidFile.IsPortListening(expectedPort);
+                    if (claimOk && portOk) { ready = true; break; }
+                    try { await Task.Delay(PollCadence, timeoutCts.Token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { break; }
+                }
+
+                if (ready)
+                {
+                    if (webEnabled) foreach (var line in ServerHost.FormatBannerLines(bannerSettings)) Console.WriteLine(line);
+                    else Console.WriteLine(ServerHost.HeadlessBanner);
+                    return 0;
+                }
+                if (interrupted)
+                {
+                    try { Console.Error.WriteLine($"Spawn interrupted; child process {child.Id} may still be starting."); }
+                    catch { Console.Error.WriteLine("Spawn interrupted; a child process may still be starting."); }
+                    return 1;
+                }
+                if (!died && PidFile.IsLiveClaim(pidPath, out int rival) && rival != parentPid)
+                { Console.WriteLine($"{PidFile.AlreadyRunningMessagePrefix} {rival}"); return 1; }
+                int exitCode = -1;
+                try { exitCode = child.HasExited ? child.ExitCode : exitCode; } catch { }
+                try { Console.Error.WriteLine($"Server did not become ready (child process {child.Id}, exit {exitCode})."); }
+                catch { Console.Error.WriteLine("Server did not become ready."); }
+                Console.Error.WriteLine($"--- {logPath} tail ---");
+                Console.Error.WriteLine(ReadLogTail(logPath));
+                return 1;
+            }
+            finally
+            {
+                Console.CancelKeyPress -= OnCancel;
+            }
+        }
     }
 
-    // Returns false when nothing was spawned (invalid args, spawn failure):
-    // the caller holds the pid claim and must release it on false, or the
-    // pid file points at a dead CLI.
-    public static async Task<bool> SpawnDaemonAsync(string[] origArgs, string folder)
+    private static string CombineWithGame(string gameFolderAbs, string? configured)
     {
-        bool spawned = false;
+        if (string.IsNullOrWhiteSpace(configured)) return gameFolderAbs;
+        try { return Path.GetFullPath(Path.Combine(gameFolderAbs, configured)); }
+        catch { return gameFolderAbs; }
+    }
+
+    // Effective settings for banners and the readiness wait: configured
+    // values with CLI overrides applied, cert paths resolved against the
+    // game folder (the parent may run from another directory).
+    private static AtherizSettings WithOverrides(AtherizSettings settings, string gameFolderAbs, int? port, string? host)
+    {
+        return new AtherizSettings
+        {
+            WebserverInterface = host ?? settings.WebserverInterface,
+            WebserverPort = port ?? settings.WebserverPort,
+            SslCertFile = ResolvePath(settings.SslCertFile, gameFolderAbs),
+            SslKeyFile = ResolvePath(settings.SslKeyFile, gameFolderAbs),
+            AllowInsecureTlsFallback = settings.AllowInsecureTlsFallback,
+            WebsocketEnabled = settings.WebsocketEnabled,
+            WebserverEnabled = settings.WebserverEnabled,
+        };
+    }
+
+    private static string? ResolvePath(string? configured, string gameFolderAbs)
+    {
+        if (string.IsNullOrWhiteSpace(configured)) return configured;
+        try { return Path.IsPathRooted(configured) ? configured : Path.GetFullPath(Path.Combine(gameFolderAbs, configured)); }
+        catch { return configured; }
+    }
+
+    private static string ReadLogTail(string logPath)
+    {
         try
         {
-            var dll = typeof(Program).Assembly.Location;
-            var port = ArgumentParser.ParsePort(origArgs);
-            var host = ArgumentParser.ParseHost(origArgs);
-            var telnetPort = ArgumentParser.ParseTelnetPort(origArgs);
-            var argList = new List<string> { "start", "--foreground" };
-            if (!string.IsNullOrEmpty(host) && !IsSafeHost(host!)) { Console.Error.WriteLine($"Invalid --host value: {host}"); return false; }
-            argList.AddRange(BuildSpawnArgs(port, host, telnetPort));
-            var saveLog = Path.Combine(Path.GetFullPath(folder), "save", "server.log");
-            Directory.CreateDirectory(Path.GetDirectoryName(saveLog)!);
-            try
-            {
-                var logInfo = new FileInfo(saveLog);
-                if (logInfo.Exists && logInfo.Length > 5 * 1024 * 1024)
-                {
-                    for (int i = 5; i >= 1; i--)
-                    {
-                        var src = i == 1 ? saveLog : Path.Combine(Path.GetDirectoryName(saveLog)!, $"server.log.{i - 1}");
-                        var dst = Path.Combine(Path.GetDirectoryName(saveLog)!, $"server.log.{i}");
-                        if (File.Exists(src)) try { File.Move(src, dst, overwrite: true); } catch { }
-                    }
-                }
-            }
-            catch { }
-            var escapedDll = BashQuote(dll);
-            var escapedArgs = string.Join(" ", argList.Select(BashQuote));
-            var escapedLog = BashQuote(saveLog);
-            Console.WriteLine($"Spawning server in background. Logging to: {saveLog}");
-            // BashQuote already returns a fully single-quoted word — do NOT wrap
-            // it in extra double quotes (that would pass literal quote chars
-            // to dotnet and to the log redirect, breaking the spawn).
-            var innerCmd = $"dotnet {escapedDll} {escapedArgs}";
-            var shellCmd = $"nohup {innerCmd} >> {escapedLog} 2>&1 & echo $!";
-            var psi = new ProcessStartInfo
-            {
-                FileName = "bash",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                WorkingDirectory = Path.GetFullPath(folder),
-            };
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(shellCmd);
-            string pidStr = "";
-            int daemonPid = -1;
-            try
-            {
-                using var proc = Process.Start(psi);
-                if (proc is not null)
-                {
-                    // Drain stderr concurrently: the redirect has no reader, so
-                    // a chatty bash (errors, warnings) would block on a full
-                    // pipe while we sit in the stdout read. The text is only
-                    // diagnostics; the pid parse below is the contract.
-                    var stderrTask = proc.StandardError.ReadToEndAsync();
-                    pidStr = (await proc.StandardOutput.ReadToEndAsync().ConfigureAwait(false)).Trim();
-                    using var exitCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    try { await proc.WaitForExitAsync(exitCts.Token).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { }
-                    try { _ = await stderrTask.ConfigureAwait(false); } catch { }
-                    var toks = pidStr.Split(PidSeparators, StringSplitOptions.RemoveEmptyEntries);
-                    var last = toks.LastOrDefault() ?? "";
-                    if (int.TryParse(last, out var p)) daemonPid = p;
-                    if (daemonPid == -1) { foreach (var tok in toks) if (int.TryParse(tok, out p)) { daemonPid = p; break; } }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Bash-less host: the bash redirect above is what keeps
-                // server.log alive after the spawner exits. An in-process pump
-                // would die with this process and leave the child writing to
-                // a readerless pipe (block/SIGPIPE, lost log) despite
-                // "Logging to:" being printed — so fail loudly instead of
-                // spawning a time-bomb daemon. Use --foreground on such hosts.
-                Console.Error.WriteLine($"bash spawn failed: {ex.Message}. Cannot daemonize without bash; not spawning (use --foreground instead).");
-                return false;
-            }
-            if (daemonPid != -1)
-            {
-                spawned = true;
-                Console.WriteLine($"Server started with PID: {daemonPid}");
-                Console.WriteLine($"Server starting in background (PID {daemonPid}), log: {saveLog}");
-                // Display values come from the explicit spawn flags plus the
-                // shipped defaults (the child's baseline): the child runs in
-                // the target folder with its own resolved config, so the
-                // parent's settings must never feed these lines. Inherited
-                // environment survives into the child, so the env TLS probe
-                // stays valid. Anything else is in save/server.log.
-                // Read-only banner use (ports/flags below), so the shared
-                // Default instance is safe here — never assigned through.
-                var shippedDefaults = AtherizSettings.Default;
-                int effPort = port ?? shippedDefaults.WebserverPort;
-                string effHost = host ?? shippedDefaults.WebserverInterface;
-                string dispHost = effHost.Contains(':') ? $"[{effHost}]" : effHost;
-                bool hasSsl = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ATHERIZ_SSL_CERTFILE"));
-                string effScheme = hasSsl ? "https" : "http";
-                if (effHost == "0.0.0.0" || effHost == "::") Console.WriteLine($"Web server running on {effScheme}://localhost:{effPort}");
-                else Console.WriteLine($"Web server running on {effScheme}://{dispHost}:{effPort}");
-                Console.WriteLine($"Web server listening on {effScheme}://{dispHost}:{effPort}");
-                if (shippedDefaults.WebsocketEnabled)
-                {
-                    string wssScheme = hasSsl ? "wss" : "ws";
-                    Console.WriteLine($"WebSocket server available at {wssScheme}://{dispHost}:{effPort}/ws");
-                }
-            }
-            else Console.WriteLine("Failed to spawn server daemon.");
+            if (!File.Exists(logPath)) return "(no server.log yet)";
+            return string.Join(Environment.NewLine, File.ReadAllLines(logPath).TakeLast(20));
         }
-        catch (Exception ex) { Console.Error.WriteLine($"Failed to spawn daemon: {ex.Message}"); }
-        return spawned;
+        catch (Exception ex) { return $"(could not read log: {ex.Message})"; }
+    }
+
+    // Resolve the real server exe without assuming `dotnet <dll>`: a file
+    // name starting with atheriz is our own single-file publish (re-exec
+    // it); otherwise the framework-dependent `dotnet` + dll fallback.
+    internal static bool TryResolveChildExe(out string fileName, out string? dllArg, out string? error)
+    {
+        fileName = "";
+        dllArg = null;
+        error = null;
+        string? self = null;
+        string baseDir;
+        try { self = Environment.ProcessPath; } catch { }
+        try { baseDir = AppContext.BaseDirectory; }
+        catch (Exception ex) { error = $"Cannot locate server binary: {ex.Message}"; return false; }
+        var dllProbe = Path.Combine(baseDir, "Atheriz.Server.dll");
+        try
+        {
+            if (!string.IsNullOrEmpty(self)
+                && Path.GetFileName(self).StartsWith("atheriz", StringComparison.OrdinalIgnoreCase)
+                && File.Exists(self))
+            {
+                fileName = self;
+                return true;
+            }
+            if (File.Exists(dllProbe))
+            {
+                fileName = !string.IsNullOrEmpty(self) && File.Exists(self) ? self : "dotnet";
+                dllArg = dllProbe;
+                return true;
+            }
+        }
+        catch (Exception ex) { error = $"Cannot resolve server binary: {ex.Message}"; return false; }
+        error = $"Cannot resolve server binary (no {dllProbe}).";
+        return false;
     }
 }

@@ -65,7 +65,8 @@ public static class KestrelConfig
             try
             {
                 var cert = Atheriz.Core.Utils.TlsCertLoader.Load(certFile, keyFile);
-                listen.UseHttps(cert);
+                var selector = new KestrelCertSelector(cert);
+                listen.UseHttps(https => https.ServerCertificateSelector = selector.Select);
                 AtherizLogger.LogInformation($"SSL is enabled (cert: {certFile})");
             }
             catch (Exception ex)

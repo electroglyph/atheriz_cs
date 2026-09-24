@@ -37,22 +37,24 @@ public class AssetPidStaticFileTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
-    // The pid-file stop path routes through the shared kill helper instead
-    // of inlining its own terminate/wait/kill sequence.
+    // The pid-file stop path routes through the shared quiet terminate
+    // helper instead of inlining its own terminate/wait/kill sequence.
     [Fact]
     public void StopPidPath_UsesSharedKillHelper()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "StopHandler.cs");
-        Assert.Contains("KillProcessWithDots(proc)", src);
-        Assert.DoesNotContain("WaitForExitDotsAsync(proc, 50)", src);
+        Assert.Contains("ProcessHelper.TerminateAsync(proc)", src);
+        Assert.DoesNotContain("KillProcessWithDots", src);
     }
 
-    // The content-hash cache check compiles once, not per static-file request.
+    // The content-hash cache check is source-generated, not compiled per
+    // request and not newed per request.
     [Fact]
-    public void StaticFile_HashRegexHoisted()
+    public void StaticFile_HashRegexGenerated()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Hosting", "StaticFileConfig.cs");
-        Assert.Contains("static readonly Regex", src);
-        Assert.DoesNotContain("Regex.IsMatch(path", src);
+        Assert.Contains("[GeneratedRegex(", src);
+        Assert.Contains("partial Regex HashedBundlePattern()", src);
+        Assert.DoesNotContain("new Regex(", src);
     }
 }

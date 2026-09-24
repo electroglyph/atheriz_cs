@@ -11,14 +11,9 @@ namespace Atheriz.Core.Tests.Features.Hosting;
 public class CliSafetyTests
 {
     [Fact]
-    public void HasBareHost_FlagsOnlyValuelessHost()
+    public async Task BareHost_RejectedBeforeDispatch()
     {
-        Assert.True(ArgumentParser.HasBareHost(new[] { "start", "--host" }));
-        Assert.True(ArgumentParser.HasBareHost(new[] { "--host=" }));
-        Assert.False(ArgumentParser.HasBareHost(new[] { "start", "--host", "0.0.0.0" }));
-        Assert.False(ArgumentParser.HasBareHost(new[] { "start", "--host=0.0.0.0" }));
-        Assert.False(ArgumentParser.HasBareHost(new[] { "start" }));
-        Assert.False(ArgumentParser.HasBareHost(new[] { "create", "mygame" }));
+        Assert.NotEqual(0, await AtherizCli.InvokeAsync(["start", "--host"]));
     }
 
     [Fact]

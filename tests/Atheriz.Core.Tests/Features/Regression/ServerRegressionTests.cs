@@ -31,31 +31,17 @@ public class ServerRegressionTests
         Assert.True(between.Contains("IsServerProcess") || between.Contains("IsPortListening"));
     }
 
-    // --host must not survive bash -c expansion ($,`,\,!).
-    // Fixed with single-quote armor (nothing expands inside '...') plus a
-    // host charset allowlist; stronger than per-char double-quote escaping.
+    // No shell spawns: servers run in-process (foreground), so no
+    // bash -c armor, quoting, or $! parsing exists anywhere.
     [Fact]
-    public void DaemonArgs_EscapeShellMetachars()
+    public void NoShellSpawn()
     {
-        var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "DaemonSpawner.cs");
-        Assert.Contains("BashQuote(string s)", src);
-        Assert.Contains("Replace(\"'\", \"'\\\\''\"", src);
-        int i = src.IndexOf("escapedArgs =", StringComparison.Ordinal);
-        Assert.True(i >= 0);
-        var line = src.Substring(i, src.IndexOf('\n', i) - i);
-        Assert.Contains("BashQuote", line);
-        Assert.Contains("IsSafeHost", src);
-    }
-
-    // the fallback spawn must fail loudly, never attach a pump that dies
-    // with the spawner and leaves the child on a readerless pipe.
-    [Fact]
-    public void FallbackSpawn_FailsLoudWithoutPump()
-    {
-        var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "DaemonSpawner.cs");
-        Assert.DoesNotContain("trying direct", src);
-        Assert.DoesNotContain("BeginOutputReadLine", src);
-        Assert.Contains("use --foreground instead", src);
+        var host = SourceScan.Read("src", "Atheriz.Server", "Hosting", "ServerHost.cs");
+        Assert.DoesNotContain("bash", host);
+        Assert.DoesNotContain("nohup", host);
+        var cli = SourceScan.Read("src", "Atheriz.Server", "Cli", "AtherizCli.cs");
+        Assert.DoesNotContain("bash", cli);
+        Assert.DoesNotContain("nohup", cli);
     }
 
     // process identity must not match on a mere substring.
@@ -66,12 +52,14 @@ public class ServerRegressionTests
         Assert.DoesNotContain("|| lower.Contains(\"atheriz\")", src);
     }
 
-    // helper output reads must be async/timeout-bound, never blocking.
+    // waits must be async/timeout-bound, never blocking or dot-printing.
     [Fact]
     public void HelperReads_AreTimeoutBound()
     {
-        var src = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
-        Assert.Contains("ReadToEndAsync", src);
+        var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "ProcessHelper.cs");
+        Assert.Contains("WaitForExitAsync", src);
+        Assert.DoesNotContain("Console.Write(\".\")", src);
+        Assert.DoesNotContain(".Wait(", src);
     }
 
     // pid lookup must stay pinned to the target game (no listener-
@@ -187,26 +175,24 @@ public class ServerRegressionTests
         Assert.Contains("InvariantCulture", region);
     }
 
-    // glued -p1 parses as a port; trailing bare flags never become values.
+    // Glued -p1 normalizes before parsing; handlers take typed positionals.
     [Fact]
-    public void GluedPort_Parses()
+    public void GluedPort_Normalizes()
     {
-        Assert.Equal(1, ArgumentParser.ParsePort(new[] { "-p1" }));
+        Assert.Equal(["-p", "1"], Atheriz.Server.Cli.AtherizCli.NormalizeArgs(["-p1"]));
     }
 
     [Fact]
-    public void TrailingBareFlag_NeverBecomesValue()
+    public void PositionalHandlers_UseTypedArguments()
     {
-        // Guard lives once in the shared StripOptions core, not inline per handler.
-        var parser = SourceScan.Read("src", "Atheriz.Server", "Cli", "ArgumentParser.cs");
-        Assert.Equal(1, SourceScan.Count(parser, "i + 1 >= a.Length"));
-        var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "CreateHandler.cs");
-        Assert.Contains("StripPortOptions", src);
-        Assert.DoesNotContain("i + 1 >= a.Length", src);
+        // No hand filter strips flags out of positionals: create/new take
+        // typed arguments from the command tree.
+        var create = SourceScan.Read("src", "Atheriz.Server", "Cli", "CreateHandler.cs");
+        Assert.Contains("CreateAsync(string accName", create);
+        Assert.DoesNotContain("StripPortOptions", create);
         var novel = SourceScan.Read("src", "Atheriz.Server", "Cli", "NewHandler.cs");
-        Assert.Contains("StripKnownOptions", novel);
-        Assert.DoesNotContain("i + 1 >= a.Length", novel);
-        Assert.Contains("filtered[0].StartsWith(\"-\", StringComparison.Ordinal)", novel);
+        Assert.Contains("NewAsync(string folder", novel);
+        Assert.DoesNotContain("StripKnownOptions", novel);
     }
 
     // token lookup must be port/listener-scoped, never a blind tree scan.
@@ -231,20 +217,18 @@ public class ServerRegressionTests
         Assert.Equal(2, SourceScan.Count(client, "await PostAdminAsync("));
     }
 
-    // respawn preserves the CLI telnet-port override via the shared spawner:
-    // the literal lives once in DaemonSpawner.BuildSpawnArgs and both
-    // handlers funnel through it (behavior pinned by SpawnArgsBuilderTests).
+    // restart/reset/new forward the typed telnet-port override into the
+    // foreground run (plus the env fallback at the CLI layer): no spawn-arg
+    // builder sits between the flag and the server.
     [Fact]
     public void Respawn_PreservesTelnetPort()
     {
-        var spawner = SourceScan.Read("src", "Atheriz.Server", "Cli", "DaemonSpawner.cs");
-        Assert.Equal(1, SourceScan.Count(spawner, "\"--telnet-port\""));
         var restart = SourceScan.Read("src", "Atheriz.Server", "Cli", "RestartHandler.cs");
-        Assert.Contains("DaemonSpawner.BuildSpawnArgs", restart);
-        Assert.DoesNotContain("\"--telnet-port\"", restart);
+        Assert.Contains("RunForegroundAsync(port, host, telnetPort)", restart);
         var reset = SourceScan.Read("src", "Atheriz.Server", "Cli", "ResetHandler.cs");
-        Assert.Contains("DaemonSpawner.BuildSpawnArgs", reset);
-        Assert.DoesNotContain("\"--telnet-port\"", reset);
+        Assert.Contains("telnetOverride", reset);
+        var cli = SourceScan.Read("src", "Atheriz.Server", "Cli", "AtherizCli.cs");
+        Assert.Contains("TelnetPortOrEnv(", cli);
     }
 
     // pid waits must report their outcome.
@@ -267,7 +251,7 @@ public class ServerRegressionTests
     [Fact]
     public void BannerScheme_AgreesWithKestrel()
     {
-        var src = SourceScan.Read("src", "Atheriz.Server", "Program.cs");
+        var src = SourceScan.Read("src", "Atheriz.Server", "Hosting", "ServerHost.cs");
         Assert.Contains("AllowInsecureTlsFallback", src);
     }
 
@@ -395,12 +379,14 @@ public class ServerRegressionTests
         Assert.DoesNotContain("var age = DateTimeOffset.UtcNow", src);
     }
 
-    // one shared /proc/net/tcp helper (duplicated, not triplicated).
+    // One shared /proc/net/tcp helper for the single-pid verifier (no
+    // lsof/ss subprocesses, no full-table scans).
     [Fact]
     public void TcpParse_HasSharedHelper()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
         Assert.Contains("GetListeningInodes(", src);
+        Assert.DoesNotContain("\"lsof\"", src);
     }
 
     // refusal messages name the failed check.
@@ -446,13 +432,15 @@ public class ServerRegressionTests
         Assert.DoesNotContain("_cachedToken", src);
     }
 
-    // rotation compares bytes to bytes.
+    // rotation compares bytes to bytes: one encode feeds both the size
+    // check and the write (no separate GetByteCount pass).
     [Fact]
     public void RotationComparesBytes()
     {
-        var src = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "FileLogger.cs");
-        var region = SourceScan.Region(src, "if (File.Exists(file))");
-        Assert.Contains("GetByteCount", region);
+        var src = SourceScan.Read("src", "Atheriz.Core", "Logger.cs");
+        var region = SourceScan.Region(src, "size check + rotate before append");
+        Assert.Contains("payload.Length", region);
+        Assert.DoesNotContain("GetByteCount", region);
     }
 
     // write-only latch goes.

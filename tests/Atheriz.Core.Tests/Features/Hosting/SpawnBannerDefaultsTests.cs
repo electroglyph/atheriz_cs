@@ -1,24 +1,19 @@
 using Atheriz.Core.Settings;
 using Atheriz.Core.Tests.Features.Regression;
-using System.Text.RegularExpressions;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// The post-spawn banner reads its display defaults from the shared
-// AtherizSettings.Default instance instead of allocating one per spawn.
+// The startup banners read the resolved settings instance (never the
+// shared Default, which reads must not mutate).
 [Collection("Ported")]
 public class SpawnBannerDefaultsTests
 {
     [Fact]
-    public void BannerDefaults_UseSharedDefaultInstance()
+    public void BannerDefaults_UseResolvedSettings()
     {
-        var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "DaemonSpawner.cs");
-        Assert.Contains("AtherizSettings.Default", src);
-        Assert.DoesNotContain("new AtherizSettings()", src);
-        // Reads only: no assignment through the shared instance (which would
-        // poison every later borrower). Mirrors SettingsDefault_NeverMutated.
-        var rx = new Regex(@"shippedDefaults\.[A-Za-z_][A-Za-z0-9_]*\s*=(?![=>])", RegexOptions.None);
-        Assert.DoesNotMatch(rx, src);
+        var src = SourceScan.Read("src", "Atheriz.Server", "Hosting", "ServerHost.cs");
+        Assert.Contains("PrintBanners(settings)", src);
+        Assert.DoesNotContain("AtherizSettings.Default", src);
     }
 
     [Fact]

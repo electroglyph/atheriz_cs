@@ -32,6 +32,17 @@ public class PortedMazeBackgroundWsIntegrationTests
         }
         return false;
     }
+    private static System.Diagnostics.Process StartServer(string dll, string[] args, string wd, Dictionary<string,string> env, StringBuilder output){
+        var psi=new ProcessStartInfo{FileName="dotnet",UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,WorkingDirectory=wd};
+        psi.ArgumentList.Add(dll);
+        foreach(var a in args) psi.ArgumentList.Add(a);
+        foreach(var kv in env) psi.Environment[kv.Key]=kv.Value;
+        var proc=new Process{StartInfo=psi};
+        proc.OutputDataReceived+=(s,e)=>{if(e.Data!=null) lock(output) output.AppendLine(e.Data);};
+        proc.ErrorDataReceived+=(s,e)=>{if(e.Data!=null) lock(output) output.AppendLine(e.Data);};
+        proc.Start(); proc.BeginOutputReadLine(); proc.BeginErrorReadLine();
+        return proc;
+    }
     private static async Task<string> Run(string file, string args, string? wd=null, Dictionary<string,string>? env=null,int to=30000){
         var psi=new ProcessStartInfo{FileName=file,Arguments=args,RedirectStandardOutput=true,RedirectStandardError=true,UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=wd??Directory.GetCurrentDirectory()};
         if(env!=null) foreach(var kv in env) psi.Environment[kv.Key]=kv.Value;
@@ -53,7 +64,7 @@ public class PortedMazeBackgroundWsIntegrationTests
     {
         if(!OperatingSystem.IsLinux()) return;
         var repoRoot="/home/anon/atheriz-cs";
-        var dll=$"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
+        var dll=$"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
         if(!File.Exists(dll)) return;
         int port=FreePort(), telnetPort=FreePort();
         int attempts=0;
@@ -67,10 +78,13 @@ public class PortedMazeBackgroundWsIntegrationTests
             ["ATHERIZ_TELNET_PORT"]=telnetPort.ToString(),
             ["Atheriz__TelnetPort"]=telnetPort.ToString()
         };
+        System.Diagnostics.Process? server = null;
         try{
-            var out1=await Run("bash",$"{repoRoot}/atheriz.sh new {game} --port {port} --telnet-port {telnetPort} --overwrite",repoRoot,env,30000);
-            Assert.Contains("Creating game folder",out1);
-            Assert.True(await WaitHealth(port,15000), $"health failed {out1} log:{TryLog(game)}");
+            var outSb = new StringBuilder();
+            server = StartServer(dll,
+                ["new", game, "--port", port.ToString(), "--telnet-port", telnetPort.ToString(), "--overwrite"],
+                repoRoot, env, outSb);
+            Assert.True(await WaitHealth(port,30000), $"health failed {outSb} log:{TryLog(game)}");
             // WS connect
             using var ws=new ClientWebSocket();
             var cts=new CancellationTokenSource(10000);
@@ -199,11 +213,13 @@ public class PortedMazeBackgroundWsIntegrationTests
             try{ qcts.Cancel(); }catch{}
             try{ await recvTask.WaitAsync(TimeSpan.FromSeconds(1)); }catch{}
             try{ await ws.CloseAsync(WebSocketCloseStatus.NormalClosure,"",CancellationToken.None); }catch{}
-            // stop
-            var stopOut=await Run("bash",$"{repoRoot}/atheriz.sh stop --port {port}",repoRoot,null,15000);
+            // stop from the game folder so token + pid resolve
+            var stopOut=await Run("bash",$"{repoRoot}/atheriz.sh stop --port {port}",game,null,15000);
             Assert.Contains("Graceful shutdown",stopOut+TryLog(game));
         }finally{
-            try{ await Run("bash",$"{repoRoot}/atheriz.sh stop --port {port}",repoRoot,null,5000);}catch{}
+            try{ await Run("bash",$"{repoRoot}/atheriz.sh stop --port {port}",game,null,5000);}catch{}
+            try{ if(server != null && !server.HasExited) server.Kill(entireProcessTree:true); }catch{}
+            try{ server?.Dispose(); }catch{}
             await Task.Delay(800);
             try{ if(await IsListening(port)){ var pf=Path.Combine(game,"save","server.pid"); if(File.Exists(pf)&&int.TryParse(File.ReadAllText(pf).Trim(),out var pid)) try{ Process.GetProcessById(pid).Kill(); }catch{} } }catch{}
             try{ await Run("bash",$"rm -rf \"{tmp}\"",null,null,60000);}catch{}

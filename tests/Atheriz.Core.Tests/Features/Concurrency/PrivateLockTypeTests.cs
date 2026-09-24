@@ -54,12 +54,6 @@ public sealed class PrivateLockTypeTests
     }
 
     [Fact]
-    public void FileLoggerProvider_InternalLock_IsLockType()
-    {
-        AssertPrivateLockFieldIsLock(typeof(FileLoggerProvider), "_lock");
-    }
-
-    [Fact]
     public void Channel_HistoryLock_IsLockType()
     {
         AssertPrivateLockFieldIsLock(typeof(Channel), "_histLock");
@@ -111,12 +105,6 @@ public sealed class PrivateLockTypeTests
     public void BaseConnection_RetryDrainDropThrottle_IsHolder()
     {
         AssertPrivateHolderIsThrottledLog(typeof(BaseConnection), "_retryDrainDropLog");
-    }
-
-    [Fact]
-    public void WebSocketProtocol_OversizeThrottle_IsHolder()
-    {
-        AssertPrivateHolderIsThrottledLog(typeof(WebSocketProtocol), "_oversizeLog");
     }
 
     [Fact]

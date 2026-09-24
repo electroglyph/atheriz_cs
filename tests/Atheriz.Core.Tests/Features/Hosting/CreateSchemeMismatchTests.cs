@@ -70,11 +70,46 @@ public class CreateSchemeMismatchTests
         return false;
     }
 
+    private sealed class BackgroundServer : IDisposable
+    {
+        public Process Proc { get; }
+        public StringBuilder Output { get; } = new();
+        private BackgroundServer(Process proc) => Proc = proc;
+        public static BackgroundServer Start(string dll, string[] args, string workingDir, Dictionary<string, string>? env)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WorkingDirectory = workingDir,
+            };
+            psi.ArgumentList.Add(dll);
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            if (env != null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
+            var srv = new BackgroundServer(Process.Start(psi)!);
+            srv.Proc.OutputDataReceived += (s, e) => { if (e.Data != null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
+            srv.Proc.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
+            srv.Proc.BeginOutputReadLine();
+            srv.Proc.BeginErrorReadLine();
+            return srv;
+        }
+        public string ReadOutput() { lock (Output) return Output.ToString(); }
+        public void Dispose()
+        {
+            try { Proc.Kill(entireProcessTree: true); } catch { }
+            try { Proc.WaitForExit(5000); } catch { }
+            try { Proc.Dispose(); } catch { }
+        }
+    }
+
     [Fact(Timeout = 120000)]
     public async Task Create_SchemeMismatch_FlippedRetryFindsLiveServer()
     {        if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePort();
         var telnetPort = FindFreePort();
@@ -92,8 +127,10 @@ public class CreateSchemeMismatchTests
         var capture = new StringWriter();
         try
         {
-            var output = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh new {gameFolder} --port {port} --telnet-port {telnetPort} --overwrite", repoRoot, env, 30000);
-            Assert.True(await WaitForHealthAsync(port, 15000), $"Server did not become healthy. Output: {output}");
+            using var server = BackgroundServer.Start(dll,
+                ["new", gameFolder, "--port", port.ToString(), "--telnet-port", telnetPort.ToString(), "--overwrite"],
+                repoRoot, env);
+            Assert.True(await WaitForHealthAsync(port, 30000), $"Server did not become healthy. Output: {server.ReadOutput()}");
             // Lie about the scheme: settings claim TLS, the live server is plaintext.
             // SecretPath points at the live game's token so only the scheme differs.
             SetEffectiveSettings(new AtherizSettings
@@ -102,7 +139,7 @@ public class CreateSchemeMismatchTests
                 SslCertFile = "/nonexistent-cert.pem",
             });
             Console.SetOut(capture);
-            await CreateHandler.HandleCreateAsync(["--port", port.ToString(), "flipacc", "flipchar", "FlipPass123"]);
+            await CreateHandler.CreateAsync("flipacc", "flipchar", "FlipPass123", port);
             var text = capture.ToString();
             // The offline path must NOT run: its marker proves the flipped retry missed.
             Assert.DoesNotContain("No running server detected", text);
@@ -112,7 +149,7 @@ public class CreateSchemeMismatchTests
         {
             Console.SetOut(oldOut);
             SetEffectiveSettings(null);
-            try { await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", repoRoot, null, 15000); } catch { }
+            try { await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", gameFolder, null, 15000); } catch { }
             try
             {
                 var pf = Path.Combine(gameFolder, "save", "server.pid");
@@ -133,7 +170,7 @@ public class CreateSchemeMismatchTests
         // server live, offline direct-DB writes must be refused via the pid probe.
         if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePort();
         var telnetPort = FindFreePort();
@@ -151,8 +188,10 @@ public class CreateSchemeMismatchTests
         var capture = new StringWriter();
         try
         {
-            var output = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh new {gameFolder} --port {port} --telnet-port {telnetPort} --overwrite", repoRoot, env, 30000);
-            Assert.True(await WaitForHealthAsync(port, 15000), $"Server did not become healthy. Output: {output}");
+            using var server = BackgroundServer.Start(dll,
+                ["new", gameFolder, "--port", port.ToString(), "--telnet-port", telnetPort.ToString(), "--overwrite"],
+                repoRoot, env);
+            Assert.True(await WaitForHealthAsync(port, 30000), $"Server did not become healthy. Output: {server.ReadOutput()}");
             // Remove the token: both admin schemes are now unreachable, but the
             // server is live and its pid file verifies.
             var tokenFile = Path.Combine(gameFolder, "secret", "admin.token");
@@ -164,7 +203,7 @@ public class CreateSchemeMismatchTests
                 SecretPath = Path.Combine(gameFolder, "secret"),
             });
             Console.SetOut(capture);
-            await CreateHandler.HandleCreateAsync(["--port", port.ToString(), "guardacc", "guardchar", "GuardPass123"]);
+            await CreateHandler.CreateAsync("guardacc", "guardchar", "GuardPass123", port);
             var text = capture.ToString();
             Assert.Contains("stop it first", text);
         }

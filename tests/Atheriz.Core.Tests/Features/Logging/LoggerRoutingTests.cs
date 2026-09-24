@@ -58,8 +58,9 @@ public class LoggerRoutingTests
     // Fully converted files must contain no direct Console writes at all.
     public static IEnumerable<object[]> ConvertedFiles => new List<object[]>
     {
+        new object[] { "src/Atheriz.Server/Cli/AtherizCli.cs" },
+        new object[] { "src/Atheriz.Server/Hosting/Protocols.cs" },
         new object[] { "src/Atheriz.Server/Hosting/KestrelConfig.cs" },
-        new object[] { "src/Atheriz.Server/Hosting/ProtocolBootstrap.cs" },
         new object[] { "src/Atheriz.Server/Hosting/StaticFileConfig.cs" },
         new object[] { "src/Atheriz.Server/Hosting/AdminRoutes.cs" },
         new object[] { "src/Atheriz.Server/Infrastructure/PidFile.cs" },
@@ -87,11 +88,12 @@ public class LoggerRoutingTests
     }
 
     // Files with deliberate keeps: logger-failure fallbacks
-    // (try { Log } catch { Console }) and CLI prompt validation. Counts pin
+    // (try { Log } catch { Console }), CLI prompt validation, and the
+    // foreground server's operator banners. Counts pin
     // the keeps so a reintroduced direct write fails loudly.
     public static IEnumerable<object[]> KeptFallbackFiles => new List<object[]>
     {
-        new object[] { "src/Atheriz.Server/Hosting/WebSocketHandler.cs", 2 },
+        new object[] { "src/Atheriz.Server/Hosting/ServerHost.cs", 15 },        new object[] { "src/Atheriz.Server/Hosting/WebSocketHandler.cs", 2 },
         new object[] { "src/Atheriz.Core/Globals/StartStop.cs", 1 },
         new object[] { "src/Atheriz.Core/InitialSetup.cs", 2 },
         new object[] { "src/Atheriz.Core/Concurrency/AsyncThreadPool.cs", 5 },

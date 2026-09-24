@@ -5,42 +5,33 @@ using System.Net.Sockets;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// The captured lsof output is split once; two passes over the one array keep
-// the verified-servers-first priority over any socket holder. The ss
-// fallback keeps its own parse (different backend).
+// Port liveness is a single cross-platform socket-table read; per-pid
+// attribution stays a small Linux-only /proc read for the stop gate.
+// Listener discovery by scan (lsof/ss subprocesses) is gone: a listening
+// port without a pid-file owner is reported, never killed.
 [Collection("Ported")]
 public class PidDiscoveryPriorityTests
 {
     [Fact]
-    public void LsofOutput_SplitOnce_TwoPassesPreservePriority()
+    public void IsPortListening_LoopbackListener_ResolvesAndClears()
     {
-        var src = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
-        // One lsof split plus the untouched ss-backend split.
-        Assert.Equal(1, SourceScan.Count(src, "outp.Split('\\n'"));
-        Assert.Equal(2, SourceScan.Count(src, "outp.Split"));
-        Assert.Contains("var lines = outp.Split('\\n', StringSplitOptions.RemoveEmptyEntries);", src);
-        Assert.Equal(2, SourceScan.Count(src, "foreach (var line in lines)"));
-        // Verified-servers pass still runs before the any-holder pass.
-        int verifiedAt = src.IndexOf("IsServerProcess(cand) && IsProcessListeningOnPort(cand, port)", StringComparison.Ordinal);
-        Assert.True(verifiedAt >= 0);
-        int holderAt = src.IndexOf("foreach (var line in lines)", verifiedAt, StringComparison.Ordinal);
-        Assert.True(holderAt > verifiedAt);
-        Assert.Contains("pid=", src);
-    }
-
-    [Fact]
-    public void TryFindPidListeningOnPort_LoopbackListener_StillResolves()
-    {
-        // End-to-end through the hoisted split: a live loopback listener is
-        // discovered, and a stopped one is not.
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
         try
         {
-            Assert.True(PidFile.TryFindPidListeningOnPort(port, out _));
+            Assert.True(PidFile.IsPortListening(port));
         }
         finally { listener.Stop(); }
-        Assert.False(PidFile.TryFindPidListeningOnPort(port, out _));
+        Assert.False(PidFile.IsPortListening(port));
+    }
+
+    [Fact]
+    public void PidFile_HasNoListenerScanSurface()
+    {
+        var src = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
+        Assert.DoesNotContain("\"lsof\"", src);
+        Assert.DoesNotContain("TryFindPidListeningOnPort", src);
+        Assert.DoesNotContain("ReadHelperOutput", src);
     }
 }

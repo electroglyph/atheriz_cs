@@ -154,4 +154,20 @@ public class TlsFailClosedTests
         var ex = Record.Exception(() => KestrelConfig.ConfigureKestrel(new KestrelServerOptions(), config));
         Assert.Null(ex);
     }
+
+    [Fact]
+    public void CertSelector_ServesStartupLoadedCert()
+    {
+        // The endpoint serves the startup-loaded cert through the selector
+        // (fail-fast load stays in KestrelConfig); selection itself never
+        // reads the filesystem and ignores the SNI name.
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        var req = new System.Security.Cryptography.X509Certificates.CertificateRequest(
+            "CN=selectortest", rsa, System.Security.Cryptography.HashAlgorithmName.SHA256,
+            System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var selector = new KestrelCertSelector(cert);
+        Assert.Same(cert, selector.Select(null, null));
+        Assert.Same(cert, selector.Select(null, "any-sni-name"));
+    }
 }

@@ -1,94 +1,69 @@
+using Atheriz.Server.Hosting;
 
 namespace Atheriz.Server.Cli;
 
 public static class RestartHandler
 {
-    // Returns true when --foreground was given (caller falls through to foreground start).
-    public static async Task<bool> HandleRestartAsync(string[] a)
+    // Stop the old server, then run the replacement in this process.
+    // Returns the process exit code.
+    public static async Task<int> RestartAsync(int? port, string? host, int? telnetPort, bool foreground = true)
     {
-        var port = ArgumentParser.ParsePort(a);
-        var host = ArgumentParser.ParseHost(a);
-        var fg = ArgumentParser.HasFlag(a, "--foreground", "-f");
         var sw = Stopwatch.StartNew();
-        await StopHandler.HandleStopAsync(a).ConfigureAwait(false);
-        // The stop above ran against cached settings; re-read so the spawn
-        // below (and the port waits) see post-stop configuration, not a stale cache.
+        _ = await StopHandler.StopAsync(port).ConfigureAwait(false);
+        // The stop above ran against cached settings; re-read so the waits
+        // below see post-stop configuration, not a stale cache.
         StopHandler.InvalidateEffectiveSettings();
         int portVal = port ?? StopHandler.EffectiveSettingsValue.WebserverPort;
         var savePath2 = StopHandler.EffectiveSettingsValue.SavePath;
         var pidPath2 = Path.Combine(savePath2, "server.pid");
         if (Infrastructure.PidFile.TryReadPid(pidPath2) is int oldPid)
         {
-            try
+            bool exited = await ProcessHelper.WaitForPidExitAsync(oldPid).ConfigureAwait(false);
+            if (!exited)
             {
-                Console.Write($"Waiting for server (PID {oldPid}) to stop...");
-                bool exited = await ProcessHelper.WaitForPidExitAsync(oldPid).ConfigureAwait(false);
-                if (!exited)
+                // Grace expired and the old server is stuck: escalate, but
+                // only after re-verifying the pid still names our server —
+                // it may have been recycled mid-wait.
+                bool ours = false;
+                try { ours = Infrastructure.PidFile.TryReadPid(pidPath2) == oldPid && Infrastructure.PidFile.IsServerProcess(oldPid); } catch { }
+                if (ours)
                 {
-                    // 5s grace expired and the old server is stuck: escalate to
-                    // SIGKILL, but only after re-verifying the pid still names
-                    // our server — it may have been recycled mid-wait.
-                    bool ours = false;
-                    try { ours = Infrastructure.PidFile.TryReadPid(pidPath2) == oldPid && Infrastructure.PidFile.IsServerProcess(oldPid); } catch { }
-                    if (ours)
-                    {
-                        Console.Write(" grace expired; force killing...");
-                        try { using var stuck = Process.GetProcessById(oldPid); try { stuck.Kill(entireProcessTree: false); } catch { } } catch { }
-                        exited = await ProcessHelper.WaitForPidExitAsync(oldPid).ConfigureAwait(false);
-                    }
-                    if (!exited && ours)
-                    {
-                        Console.WriteLine($" old server (PID {oldPid}) did not stop; aborting restart.");
-                        CliExitCode.Set(1);
-                        return false;
-                    }
+                    try { using var stuck = Process.GetProcessById(oldPid); try { stuck.Kill(entireProcessTree: false); } catch { } } catch { }
+                    exited = await ProcessHelper.WaitForPidExitAsync(oldPid).ConfigureAwait(false);
                 }
-                Console.WriteLine(" Done.");
+                if (!exited && ours)
+                {
+                    Console.WriteLine($"Old server (PID {oldPid}) did not stop; aborting restart.");
+                    return 1;
+                }
             }
-            catch { }
         }
         else await Task.Delay(500).ConfigureAwait(false);
 
-        // Wait for the old server to release the port before spawning the
-        // replacement, so the new bind does not race the old listener. Abort
-        // the spawn when the port never frees: the child would fail to bind
-        // while the old server keeps running, after the operator was told a
-        // restart happened.
-        if (!await WaitForPortFreeAsync(portVal, 100).ConfigureAwait(false))
+        // Wait for the old server to release the port before binding the
+        // replacement, so the new bind does not race the old listener.
+        if (!await WaitForPortFreeAsync(portVal, TimeSpan.FromSeconds(10)).ConfigureAwait(false))
         {
-            Console.WriteLine($"Error: port {portVal} still listening after stop; aborting restart (not spawning).");
-            CliExitCode.Set(1);
-            return false;
+            Console.WriteLine($"Error: port {portVal} still listening after stop; aborting restart.");
+            return 1;
         }
 
-        if (fg) { Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms"); CliExitCode.Set(0); return true; }
-        // respawn preserves the CLI telnet-port override, else the
-        // replacement silently binds the configured default instead.
-        var telnetPort = ArgumentParser.ParseTelnetPort(a);
-        var spawnArgs = DaemonSpawner.BuildSpawnArgs(port, host, telnetPort);
-        bool respawned = await DaemonSpawner.SpawnDaemonAsync(spawnArgs.ToArray(), Directory.GetCurrentDirectory()).ConfigureAwait(false);
-        // Wait for the new server to come up on the port (bounded).
-        if (!await WaitForPortUpAsync(portVal, 150).ConfigureAwait(false)) Console.WriteLine($"Warning: port {portVal} not listening yet; check save/server.log.");
         Console.WriteLine($"Restart took {sw.Elapsed.TotalMilliseconds:F2}ms");
-        CliExitCode.Set(respawned ? 0 : 1);
-        return false;
+        if (!foreground) return await DaemonSpawner.SpawnStart(Directory.GetCurrentDirectory(), port, host, telnetPort).ConfigureAwait(false);
+        return await ServerHost.RunForegroundAsync(port, host, telnetPort).ConfigureAwait(false);
     }
 
-    // Shared bounded tenth-second poll for a port to reach a listening state:
-    // same socket-probe count, same 100 ms cadence, same bounds in both
-    // polarities — only the desired state differs.
-    internal static async Task<bool> WaitForPortStateAsync(int port, int tenths, bool wantUp)
+    // Bounded quiet poll for a port to reach a state: same socket-probe
+    // count, same 100 ms cadence — only the desired state differs.
+    internal static async Task<bool> WaitForPortStateAsync(int port, TimeSpan timeout, bool wantUp)
     {
-        for (int i = 0; i < tenths && Infrastructure.PidFile.IsPortListening(port) != wantUp; i++)
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < timeout && Infrastructure.PidFile.IsPortListening(port) != wantUp)
             await Task.Delay(100).ConfigureAwait(false);
         return Infrastructure.PidFile.IsPortListening(port) == wantUp;
     }
 
     // Bounded poll for a port to become free (old listener released).
-    internal static async Task<bool> WaitForPortFreeAsync(int port, int tenths)
-        => await WaitForPortStateAsync(port, tenths, wantUp: false).ConfigureAwait(false);
-
-    // Bounded poll for a port to come up (new server bound).
-    internal static async Task<bool> WaitForPortUpAsync(int port, int tenths)
-        => await WaitForPortStateAsync(port, tenths, wantUp: true).ConfigureAwait(false);
+    internal static Task<bool> WaitForPortFreeAsync(int port, TimeSpan timeout)
+        => WaitForPortStateAsync(port, timeout, wantUp: false);
 }

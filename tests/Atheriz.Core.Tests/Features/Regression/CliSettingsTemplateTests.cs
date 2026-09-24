@@ -37,12 +37,19 @@ public class CliSettingsTemplateTests
 
     // Every accepted CLI flag is documented in its usage line.
     [Fact]
-    public void CliUsage_DocumentsAcceptedFlags()
+    public async Task CliUsage_DocumentsAcceptedFlags()
     {
-        var newSrc = SourceScan.Read("src", "Atheriz.Server", "Cli", "NewHandler.cs");
-        Assert.Contains("[--overwrite|--force]", newSrc);
-        var prog = SourceScan.Read("src", "Atheriz.Server", "Program.cs");
-        Assert.Contains("[--overwrite|--force]", prog);
+        var orig = Console.Out;
+        var sw = new StringWriter();
+        Console.SetOut(sw);
+        try
+        {
+            await AtherizCli.InvokeAsync(["new", "--help"]);
+        }
+        finally { Console.SetOut(orig); }
+        var help = sw.ToString();
+        Assert.Contains("--overwrite", help, StringComparison.Ordinal);
+        Assert.Contains("--force", help, StringComparison.Ordinal);
         // No --yes assertion: no command accepts --yes (reset always
         // confirms), so there is no usage line to document it in.
     }

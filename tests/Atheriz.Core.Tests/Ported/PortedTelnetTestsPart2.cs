@@ -83,69 +83,16 @@ public class PortedTelnetTestsPart2
         Assert.Null(res[0]); Assert.Equal("fine", res[1]);
     }
 
-    // ----- TelnetLifespan -----
-    private sealed class FakeAppLifespan : ITelnetApp
+    // ----- Telnet hosting -----
+    [Fact]
+    public void TelnetProtocol_IsStaticWithoutServerTask()
     {
-        public FakeRouterLifespan Router { get; } = new();
-        ITelnetRouter? ITelnetApp.Router => Router;
-    }
-    private sealed class FakeRouterLifespan : ITelnetRouter
-    {
-        public object? lifespan_context;
-        public object? LifespanContext { get=> lifespan_context; set=> lifespan_context=value; }
-        public object? _serverTask = null!; // should not exist
+        // The listener is owned by TelnetHostedService (DI); the protocol
+        // type holds only static helpers and keeps no server-task state.
+        Assert.True(typeof(TelnetProtocol).IsAbstract && typeof(TelnetProtocol).IsSealed);
+        Assert.Null(typeof(TelnetProtocol).GetField("_server_task", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public));
     }
 
-    [Fact]
-    public void MountingTelnetPreservesPreviousLifespan()
-    {
-        using var env = GlobalTestEnv.Enter();
-        var app = new FakeAppLifespan();
-        var calls = new List<string>();
-        // Simulate previous lifespan as object
-        var prev = new DummyPrevLifespan(calls);
-        app.Router.LifespanContext = prev;
-        var prevEnabled = AtherizSettings.Global.TelnetEnabled;
-        AtherizSettings.Global.TelnetEnabled = true;
-        try { new TelnetProtocol().Setup(app); } finally { AtherizSettings.Global.TelnetEnabled = prevEnabled; }
-        Assert.NotNull(app.Router.LifespanContext);
-        Assert.NotSame(prev, app.Router.LifespanContext);
-        // Check previous stored inside composed
-        var composed = app.Router.LifespanContext!;
-        var f = composed.GetType().GetField("_previous", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-        if (f != null) Assert.NotNull(f.GetValue(composed));
-        // Ensure not class attr _server_task
-        Assert.False(typeof(TelnetProtocol).GetField("_server_task", System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Public) != null);
-    }
-    [Fact]
-    public void SetupComposesServerLifecycleWithPrevious()
-    {
-        using var env = GlobalTestEnv.Enter();
-        var app = new FakeAppLifespan();
-        var calls = new List<string>();
-        var prev = new DummyPrevLifespan(calls);
-        app.Router.LifespanContext = prev;
-        var prevEnabled = AtherizSettings.Global.TelnetEnabled;
-        AtherizSettings.Global.TelnetEnabled = true;
-        try
-        {
-            new TelnetProtocol().Setup(app);
-            var composed = app.Router.LifespanContext!;
-            // Simulate lifespan invocation: calls should be start/inside/stop
-            // Our composed is TelnetLifespanComposed which has Invoke method; we simulate by checking that previous not lost
-            // For faithful, we verify that composed type is not null and previous preserved
-            var f = composed.GetType().GetField("_previous", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(f);
-            Assert.Same(prev, f!.GetValue(composed));
-        }
-        finally { AtherizSettings.Global.TelnetEnabled = prevEnabled; }
-        Assert.False(typeof(TelnetProtocol).GetField("_server_task", System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic) != null);
-    }
-    private sealed class DummyPrevLifespan
-    {
-        public List<string> Calls;
-        public DummyPrevLifespan(List<string> c){Calls=c;}
-    }
 
     // ----- TLS -----
     private static (string key, string cert, string combined) MakeSelfSigned(string dir)
