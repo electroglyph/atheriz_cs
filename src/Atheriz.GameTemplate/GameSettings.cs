@@ -10,12 +10,12 @@ namespace MyGame;
 /// <remarks>
 /// Template source for <c>atheriz new</c> — scaffolded into new game folders by
 /// <c>GameTemplateGenerator</c> as the generated game's settings file.
+/// Only values that differ from the engine defaults live here.
 /// </remarks>
 public static class GameSettings
 {
-    // Paths — mirrors SAVE_PATH="save" / SECRET_PATH="secret"
-    public const string SavePath = "save";
-    public const string SecretPath = "secret";
+    // Only overrides live here: SavePath/SecretPath match the engine
+    // defaults ("save"/"secret"), so they are inherited, not re-declared.
 
     // Display — mirrors SERVERNAME="AtheriZ"
     public const string ServerName = "MyGame";

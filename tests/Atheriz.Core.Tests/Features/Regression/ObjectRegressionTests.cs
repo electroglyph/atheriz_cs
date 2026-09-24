@@ -99,7 +99,7 @@ public class ObjectRegressionTests
             Assert.True(listener.MoveTo(room));
             conn.ClearSent();
             room.MsgContents("hello");
-            Assert.Contains(conn.SentCommandsBag, t => t.Json.Contains("hello"));
+            Assert.Contains(conn.Sent, s => s.Cmd.Contains("hello", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("hello", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("hello", StringComparison.Ordinal) == true));
         }
         finally { Reset(); }
     }
@@ -381,7 +381,7 @@ public class ObjectRegressionTests
             ch.Location = new LocationRef.CoordLocation(node.Coord);
             conn.ClearSent();
             ch.AtPostPuppet();
-            Assert.Contains(conn.SentCommands, c => c == "map_enable");
+            Assert.Contains(conn.Sent, s => s.Cmd == "map_enable");
         }
         finally { Reset(); }
     }
@@ -451,7 +451,7 @@ public class ObjectRegressionTests
         {
             var obj = GameObject.Create("mapper");
             ObjectRegistry.AddObject(obj);
-            var sess = new Session(new BareConn());
+            var sess = new Session(new TestConnection() { ThrowOnSend = true });
             obj.Session = sess;
             sess.Puppet = obj;
             var before = obj.LastMapTime;

@@ -91,6 +91,6 @@ public sealed class CommandTypeSwitchTests
         var conn = new TestConnection();
         new Atheriz.Core.Commands.LoggedIn.QuitCommand().Run(conn, null);
         Assert.True(conn.Closed);
-        Assert.Contains(conn.SentCommands, c => c == "text");
+        Assert.Contains(conn.Sent, s => s.Cmd == "text");
     }
 }

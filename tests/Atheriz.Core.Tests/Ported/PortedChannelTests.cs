@@ -557,7 +557,7 @@ public class PortedChannelTests
         Assert.DoesNotContain("m-0", outStr);
     }
 
-    [Fact] public void GetCommand_NameDescPairingSurvivesConcurrentRename()
+    [Fact] public async Task GetCommand_NameDescPairingSurvivesConcurrentRename()
     {
         // Name and Desc were read under two independent locks, so a rename
         // landing between them cached a new-key/old-desc command until the
@@ -582,10 +582,10 @@ public class PortedChannelTests
             Assert.NotNull(cmd);
             Assert.Equal(cmd.Desc, "c15d" + cmd.Key.Substring("c15n".Length));
         }
-        Assert.True(writer.Wait(TimeSpan.FromSeconds(30)));
+        await writer.WaitAsync(TimeSpan.FromSeconds(30));
     }
 
-    [Fact] public void GetCommand_SnapshotsIdOutsideChannelLock()
+    [Fact] public async Task GetCommand_SnapshotsIdOutsideChannelLock()
     {
         // Id was read under _histLock while Name/Desc were snapshotted outside
         // (object→channel order inversion). All three are snapshots now: the
@@ -609,7 +609,7 @@ public class PortedChannelTests
                 Assert.Equal(chan.Id, ((Atheriz.Core.Commands.BaseChannelCommand)c!).Id);
             }
         })).ToArray();
-        Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
+        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Equal(chan.Id, ((Atheriz.Core.Commands.BaseChannelCommand)chan.GetCommand()!).Id);
     }
 }

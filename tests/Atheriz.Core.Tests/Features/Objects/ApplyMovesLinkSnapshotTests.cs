@@ -35,7 +35,7 @@ public sealed class ApplyMovesLinkSnapshotTests
     }
 
     [Fact]
-    public void ApplyMoves_ConcurrentLinkAdd_CompletesWithoutEnumerationError()
+    public async Task ApplyMoves_ConcurrentLinkAdd_CompletesWithoutEnumerationError()
     {
         using var env = GlobalTestEnv.Enter();
         var grid = new NodeGrid("snaprace", 0);
@@ -75,7 +75,7 @@ public sealed class ApplyMovesLinkSnapshotTests
         });
         start.Set();
 
-        Assert.True(Task.WaitAll([mover, linker], TimeSpan.FromSeconds(60)));
+        await Task.WhenAll([mover, linker]).WaitAsync(TimeSpan.FromSeconds(60));
         Assert.Empty(errors);
         Assert.True(grid.Nodes.ContainsKey((0, 0)) || grid.Nodes.ContainsKey((5, 5)));
     }

@@ -48,7 +48,7 @@ public class PortedEngineRegressionsTests
     [Fact] public void UnloggedinHelpParserlessCommandNoCrash()
     {
         using var env = GlobalTestEnv.Enter();
-        var caller = new FakeConnection();
+        var caller = new TestConnection();
         var cs = GlobalServices.GetUnloggedInCmdSet();
         var help = cs.Get("help");
         Assert.NotNull(help);
@@ -71,7 +71,7 @@ public class PortedEngineRegressionsTests
         if (realCs.Get("secretcmd") == null) realCs.Add(cmd);
         try
         {
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             var job = CommandDispatcher.ResolveUnloggedIn(conn, "secretcmd");
             Assert.Null(job);
             Assert.Empty(ran);
@@ -94,7 +94,7 @@ public class PortedEngineRegressionsTests
     {
         using var env = GlobalTestEnv.Enter();
         var cmd = new TCommand();
-        var (func, caller, args) = cmd.Execute(new FakeConnection(), "\"hello world\"", "t");
+        var (func, caller, args) = cmd.Execute(new TestConnection(), "\"hello world\"", "t");
         Assert.NotNull(func);
         var pa = args as GameArgumentParser.ParsedArgs;
         Assert.NotNull(pa);

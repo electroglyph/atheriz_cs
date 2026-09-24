@@ -41,7 +41,7 @@ if %errorlevel% neq 0 (
 )
 where dotnet >nul 2>nul
 if %errorlevel% neq 0 (
-  echo error: dotnet 8.0.130+ required 1>&2
+  echo error: dotnet 10.0.100+ required 1>&2
   exit /b 1
 )
 

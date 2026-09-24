@@ -81,12 +81,12 @@ public class PortedReloaderTests
         var patched = PluginReloader.PatchLiveObjects(typeof(GameObject), typeof(GameObject));
         Assert.True(patched >= 0);
     }
-    [Fact] public void DiscoverNewModule_Scan()
+    [Fact] public async Task DiscoverNewModule_Scan()
     {
         using var env = GlobalTestEnv.Enter();
         var ticker = GlobalServices.GetAsyncTicker();
         var pool = GlobalServices.GetAsyncThreadPool();
-        var res = PluginReloader.ReloadAsync("/tmp/nonexistent_discover.dll", ticker, pool).GetAwaiter().GetResult();
+        var res = await PluginReloader.ReloadAsync("/tmp/nonexistent_discover.dll", ticker, pool);
         Assert.False(res); // nonexistent should return false
     }
     [Fact] public void FallbackPatchLock_Available()
@@ -270,22 +270,22 @@ public class PortedReloaderTests
 
     // ---- SecondPassErrors 2 ----
     [Fact]
-    public void GameSecondPassFailureLoggedAndInErrors()
+    public async Task GameSecondPassFailureLoggedAndInErrors()
     {
         using var env = GlobalTestEnv.Enter();
         var ticker = GlobalServices.GetAsyncTicker();
         var pool = GlobalServices.GetAsyncThreadPool();
         // Simulate second pass failure logged: ReloadAsync will log error for nonexistent second pass?
         // Just verify that ReloadAsync handles second pass failure without crashing
-        var res = PluginReloader.ReloadAsync("/tmp/nonexistent_second.dll", ticker, pool).GetAwaiter().GetResult();
+        var res = await PluginReloader.ReloadAsync("/tmp/nonexistent_second.dll", ticker, pool);
         Assert.False(res);
     }
 
     [Fact]
-    public void AtherizSecondPassFailureLogged()
+    public async Task AtherizSecondPassFailureLogged()
     {
         using var env = GlobalTestEnv.Enter();
-        var msg = PluginReloader.ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(), GlobalServices.GetAsyncThreadPool(), new Atheriz.Core.Settings.AtherizSettings()).GetAwaiter().GetResult();
+        var msg = await PluginReloader.ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(), GlobalServices.GetAsyncThreadPool(), new Atheriz.Core.Settings.AtherizSettings());
         Assert.Contains("Reloaded", msg);
     }
 

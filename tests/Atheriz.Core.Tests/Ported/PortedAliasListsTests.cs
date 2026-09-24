@@ -153,7 +153,7 @@ public class PortedAliasListsTests
         try
         {
             field?.SetValue(null, cmdset);
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             var result = CommandDispatcher.ResolveUnloggedIn(conn, "qu");
             Assert.NotNull(result);
             var isNone = result!.Func.Method.DeclaringType?.Name.Contains("None") == true || cmdset.Get("none") != null;

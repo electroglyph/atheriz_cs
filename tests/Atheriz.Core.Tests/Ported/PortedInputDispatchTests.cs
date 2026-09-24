@@ -25,7 +25,7 @@ public class PortedInputDispatchTests
         void Handler(BaseConnection c, List<object?> a, Dictionary<string, object?> k)
         { lock (lk) seen.Add(Environment.CurrentManagedThreadId); }
         mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)Handler);
-        var conn = new FakeConnection("t1");
+        var conn = new TestConnection("t1");
         mgr.HandleCommand(conn, System.Text.Json.JsonSerializer.Serialize(new object[] { "text", new object[] { "look" }, new Dictionary<string, object?>() }));
         Assert.True(Wait(() => { lock(lk) return seen.Count>0; }));
         lock(lk) { Assert.Single(seen); Assert.NotEqual(callerTid, seen[0]); }
@@ -41,7 +41,7 @@ public class PortedInputDispatchTests
         var started = new ManualResetEventSlim(false);
         void Handler(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { started.Set(); release.Wait(2000); }
         mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)Handler);
-        var c = new FakeConnection();
+        var c = new TestConnection();
         var sw = Stopwatch.StartNew();
         mgr.Dispatch(c, "text", new List<object?>(), new Dictionary<string, object?>());
         sw.Stop();
@@ -61,7 +61,7 @@ public class PortedInputDispatchTests
         var lk = new object();
         void H(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { lock(lk) got.Add(Convert.ToInt32(a[0])); }
         mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)H);
-        var conn = new FakeConnection("fifo");
+        var conn = new TestConnection("fifo");
         int n = 50; // faithful to original 50 (not 20)
         for (int i=0;i<n;i++) mgr.Dispatch(conn, "text", new List<object?>{i}, new Dictionary<string, object?>());
         Assert.True(Wait(() => { lock(lk) return got.Count==n; }, 5));
@@ -80,7 +80,7 @@ public class PortedInputDispatchTests
         void Fast(BaseConnection c, List<object?> a, Dictionary<string, object?> k) => doneB.Set();
         mgr.RegisterHandler("slow", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)Slow);
         mgr.RegisterHandler("fast", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)Fast);
-        var a = new FakeConnection("a"); var b = new FakeConnection("b");
+        var a = new TestConnection("a"); var b = new TestConnection("b");
         mgr.Dispatch(a, "slow", new List<object?>(), new Dictionary<string, object?>());
         mgr.Dispatch(b, "fast", new List<object?>(), new Dictionary<string, object?>());
         Assert.True(doneB.Wait(2000));
@@ -102,7 +102,7 @@ public class PortedInputDispatchTests
         void Second(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { lock(ranLock) ran.Add("second"); }
         mgr.RegisterHandler("first", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)First);
         mgr.RegisterHandler("second", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)Second);
-        var c = new FakeConnection("c1");
+        var c = new TestConnection("c1");
         mgr.RegisterConnection("c1", c);
         mgr.Dispatch(c, "first", new List<object?>(), new Dictionary<string, object?>());
         Thread.Sleep(80);
@@ -131,7 +131,7 @@ public class PortedInputDispatchTests
         void Seq(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { lock(ranLock) ran.Add(Convert.ToInt32(a[0])); }
         mgr.RegisterHandler("first", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)First);
         mgr.RegisterHandler("seq", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)Seq);
-        var c = new FakeConnection("cap");
+        var c = new TestConnection("cap");
         mgr.Dispatch(c, "first", new List<object?>(), new Dictionary<string, object?>());
         Assert.True(started.Wait(2000));
         var cap = new AtherizSettings().ConnectionInputQueueLimit;
@@ -158,7 +158,7 @@ public class PortedInputDispatchTests
         void First(BaseConnection c, List<object?> a, Dictionary<string, object?> k) { started.Set(); release.Wait(5000); }
         mgr.RegisterHandler("first", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)First);
         mgr.RegisterHandler("seq", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c,a,k)=>{ lock(ranLock) ran.Add(a[0]!); }));
-        var c = new FakeConnection("cap2");
+        var c = new TestConnection("cap2");
         mgr.Dispatch(c, "first", new List<object?>(), new Dictionary<string, object?>());
         Assert.True(started.Wait(2000));
         var cap = new AtherizSettings().ConnectionInputQueueLimit;

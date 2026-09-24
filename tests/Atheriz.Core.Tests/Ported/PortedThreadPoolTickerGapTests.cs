@@ -10,9 +10,9 @@ namespace Atheriz.Core.Tests.Ported;
 [Collection("Ported")]
 public class PortedThreadPoolTickerGapTests
 {
-    private static bool Wait(Func<bool> cond, int timeoutMs = 5000)
-        // Deterministic: delegate to PortedHelpers.WaitAsync + sync wait (TCS-based polling) instead of raw spin loop
-        => PortedHelpers.WaitAsync(cond, timeoutMs, 20).GetAwaiter().GetResult();
+    private static Task<bool> WaitAsync(Func<bool> cond, int timeoutMs = 5000)
+        // Deterministic: delegate to PortedHelpers.WaitAsync (TCS-based polling) instead of raw spin loop
+        => PortedHelpers.WaitAsync(cond, timeoutMs, 20);
 
     // ---- threadpool.py: test_async_partial ----
     [Fact]
@@ -102,7 +102,7 @@ public class PortedThreadPoolTickerGapTests
 
     // ---- starvation: test_threadpool_relief_cooldown_respects_limit ----
     [Fact]
-    public void ThreadpoolReliefCooldownRespectsLimit()
+    public async Task ThreadpoolReliefCooldownRespectsLimit()
     {
         // Directly test _maybe_spawn_relief_worker cooldown and cap logic via reflection / observable behavior
         using var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 100, reliefLimit: 1);
@@ -113,7 +113,7 @@ public class PortedThreadPoolTickerGapTests
         // Fill queue to trigger relief
         for(int i=0;i<5;i++) pool.AddTask(() => Thread.Sleep(10));
         // First spawn should happen (cooldown initially 0)
-        Assert.True(Wait(()=> pool.ReliefCount >= 0, 1000));
+        Assert.True(await WaitAsync(()=> pool.ReliefCount >= 0, 1000));
         // Now test cooldown: immediate second spawn should be blocked by cooldown
         var before = pool.ReliefCount;
         // Spam again quickly
@@ -299,7 +299,7 @@ public class PortedThreadPoolTickerGapTests
 
     // ---- StopTimeoutOnStuckWorker exact timing ----
     [Fact]
-    public void StopTimeoutOnStuckWorkerExact()
+    public async Task StopTimeoutOnStuckWorkerExact()
     {
         using var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 10);
         var block = new ManualResetEventSlim(false);
@@ -313,8 +313,8 @@ public class PortedThreadPoolTickerGapTests
         // also test that n=50 case for NoReliefWhenPoolHealthy keeps exact
         using var pool2 = new AsyncThreadPool(maxThreads: 4, queueLimit: 1000, reliefLimit: 4);
         for(int i=0;i<50;i++) pool2.AddTask(()=>{});
-        Assert.True(Wait(() => pool2.QueueCount == 0, 3000));
-        Assert.True(Wait(() => pool2.ReliefCount == 0, 3000));
+        Assert.True(await WaitAsync(() => pool2.QueueCount == 0, 3000));
+        Assert.True(await WaitAsync(() => pool2.ReliefCount == 0, 3000));
         pool2.Stop();
     }
 

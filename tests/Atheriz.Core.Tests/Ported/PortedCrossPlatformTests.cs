@@ -218,7 +218,7 @@ public class PortedCrossPlatformTests
         var result2 = Atheriz.Core.Commands.CommandDispatcher.DispatchLoggedIn(puppet, "look\r", immediate: true);
         Assert.NotNull(result2);
         // unknown command with args should fallback to none with full stripped string
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var job = Atheriz.Core.Commands.CommandDispatcher.ResolveUnloggedIn(conn, "unknown foo bar");
         Assert.NotNull(job);
         Assert.NotNull(job!.Func);
@@ -229,7 +229,7 @@ public class PortedCrossPlatformTests
         // Our Command uses SplitArgs that preserves backslashes unless escaping quote
         // Test via Command.Execute with quoted arg containing backslash
         var cmd = new DummyShlexCmd();
-        var (func, caller, args) = cmd.Execute(new FakeConnection(), "C:\\new\\file", "dummy");
+        var (func, caller, args) = cmd.Execute(new TestConnection(), "C:\\new\\file", "dummy");
         Assert.NotNull(func);
         var pa = args as Atheriz.Core.Commands.GameArgumentParser.ParsedArgs;
         Assert.NotNull(pa);
@@ -245,7 +245,7 @@ public class PortedCrossPlatformTests
     }
     [Fact] public void ConnectionNewline()
     {
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Msg("hello");
         Assert.NotEmpty(conn.Sent);
         var last = conn.Sent.Last();
@@ -266,7 +266,7 @@ public class PortedCrossPlatformTests
     [Fact] public void TelnetNewlineConversion()
     {
         // BaseConnection only ensures trailing \n, telnet would convert \n to \r\n — in C# telnet conversion is separate
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Msg("a\nb\n");
         var txt = conn.Sent.Last().Args[0]?.ToString() ?? "";
         Assert.EndsWith("\n", txt);

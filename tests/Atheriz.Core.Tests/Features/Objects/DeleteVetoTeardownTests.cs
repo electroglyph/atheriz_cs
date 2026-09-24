@@ -70,7 +70,7 @@ public class DeleteVetoTeardownTests
     }
 
     [Fact]
-    public void ConcurrentDelete_SingleWinner_NoDoubleTeardown()
+    public async Task ConcurrentDelete_SingleWinner_NoDoubleTeardown()
     {
         // Two racing Deletes both walked, both emitted delete ops, both tore
         // tore down (double session close / ticker remove). The atomic claim
@@ -97,7 +97,7 @@ public class DeleteVetoTeardownTests
                 var r = box.Delete(owner, recursive: true);
                 if (r != null) { System.Threading.Interlocked.Increment(ref winners); System.Threading.Interlocked.Add(ref totalOps, r.Value.Operations.Count); }
             })).ToArray();
-            Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
+            await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30));
             Assert.Equal(1, winners);
             Assert.True(box.IsDeleted);
             Assert.True(kid.IsDeleted);

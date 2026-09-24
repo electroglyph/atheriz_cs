@@ -89,7 +89,7 @@ public class LockOrderTests
     }
 
     [Fact]
-    public void Door_PredicateAndHandlerLock_DoNotDeadlock()
+    public async Task Door_PredicateAndHandlerLock_DoNotDeadlock()
     {
         using var env = GlobalTestEnv.Enter();
         var (n1, nh) = MakeNodes("LockOrder4");
@@ -129,7 +129,9 @@ public class LockOrderTests
             }
         });
         // Bounded: a lock-order inversion hangs here instead of failing.
-        bool done = Task.WaitAll(new[] { t1, t2 }, TimeSpan.FromSeconds(20));
+        var doorAll = Task.WhenAll(t1, t2);
+        var doorWinner = await Task.WhenAny(doorAll, Task.Delay(TimeSpan.FromSeconds(20)));
+        bool done = doorWinner == doorAll;
         Assert.True(done, "door/handler lock-order inversion deadlocked");
         if (t1.IsFaulted) throw t1.Exception!;
         if (t2.IsFaulted) throw t2.Exception!;

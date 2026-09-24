@@ -17,9 +17,9 @@ public class PortedBanAccountTests
         pc.ClearMessages();
         return pc;
     }
-    private static FakeConnection Attach(GameObject pc, string host="1.2.3.4", Account? acct=null)
+    private static TestConnection Attach(GameObject pc, string host="1.2.3.4", Account? acct=null)
     {
-        var conn = new FakeConnection($"conn-{pc.Id}");
+        var conn = new TestConnection($"conn-{pc.Id}");
         conn.ClientHost = host;
         pc.Session = conn.Session;
         conn.Session.Puppet = pc;

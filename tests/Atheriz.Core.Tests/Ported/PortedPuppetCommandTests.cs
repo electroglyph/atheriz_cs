@@ -705,7 +705,7 @@ public class PortedPuppetCommandTests
     public void RealObjectRoundTrip()
     {
         using var env=GlobalTestEnv.Enter();
-        var sess=new Session(new FakeConnection());
+        var sess=new Session(new TestConnection());
         var caller=GameObject.Create("builder", isPc:true, privilege:Privilege.Builder);
         var target=GameObject.Create("goblin", isNpc:true, privilege:Privilege.Guest);
         caller.Session=sess; sess.Puppet=caller;
@@ -737,7 +737,7 @@ public class PortedPuppetCommandTests
         var owner=Account.Create("owner", "pw1");
         owner.AddCharacter(victim);
         ObjectRegistry.AddObject(victim); ObjectRegistry.AddObject(owner);
-        var sess=new Session(new FakeConnection());
+        var sess=new Session(new TestConnection());
         var caller=GameObject.Create("builder", isPc:true, privilege:Privilege.Builder);
         caller.Session=sess; sess.Puppet=caller;
         ObjectRegistry.AddObject(caller);
@@ -755,7 +755,7 @@ public class PortedPuppetCommandTests
     public void RealObjectGateAllowsOwnedPc()
     {
         using var env=GlobalTestEnv.Enter();
-        var sess=new Session(new FakeConnection());
+        var sess=new Session(new TestConnection());
         var caller=GameObject.Create("builder", isPc:true, privilege:Privilege.Builder);
         var account=Account.Create("bob", "pw1");
         account.AddCharacter(caller);
@@ -779,7 +779,7 @@ public class PortedPuppetCommandTests
     {
         using var env=GlobalTestEnv.Enter();
         var caller=GameObject.Create("builder", isPc:true, privilege:Privilege.Builder);
-        var sess=new Session(new FakeConnection()); caller.Session=sess; sess.Puppet=caller;
+        var sess=new Session(new TestConnection()); caller.Session=sess; sess.Puppet=caller;
         ObjectRegistry.AddObject(caller);
         var target=GameObject.Create("goblin", isNpc:true, privilege:Privilege.Guest);
         ObjectRegistry.AddObject(target);
@@ -818,7 +818,7 @@ public class PortedPuppetCommandTests
     public void PuppetRestoreNeverSerialized()
     {
         using var env=GlobalTestEnv.Enter();
-        var sess=new Session(new FakeConnection());
+        var sess=new Session(new TestConnection());
         var caller=GameObject.Create("builder", isPc:true, privilege:Privilege.Builder);
         caller.Session=sess; sess.Puppet=caller;
         ObjectRegistry.AddObject(caller);
@@ -842,7 +842,7 @@ public class PortedPuppetCommandTests
     public void CrashBeforeTeardownLeavesDiskClean()
     {
         using var env=GlobalTestEnv.Enter();
-        var sess=new Session(new FakeConnection());
+        var sess=new Session(new TestConnection());
         var caller=GameObject.Create("builder", isPc:true, privilege:Privilege.Builder);
         caller.Session=sess; sess.Puppet=caller;
         ObjectRegistry.AddObject(caller);
@@ -862,7 +862,7 @@ public class PortedPuppetCommandTests
     public void PersistedRestoreSurvivesFullSaveLoadCycle()
     {
         using var env=GlobalTestEnv.Enter();
-        var sess=new Session(new FakeConnection());
+        var sess=new Session(new TestConnection());
         var caller=GameObject.Create("builder", isPc:true, privilege:Privilege.Builder);
         caller.Session=sess; sess.Puppet=caller;
         ObjectRegistry.AddObject(caller);

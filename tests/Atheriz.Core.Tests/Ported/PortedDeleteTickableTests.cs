@@ -63,7 +63,7 @@ public class PortedDeleteTickableTests
     }
 
     [Fact]
-    public void ConcurrentTickSecondsSwap_LeavesSingleRegistration()
+    public async Task ConcurrentTickSecondsSwap_LeavesSingleRegistration()
     {
         // The TickSeconds swap spanned separate locks, so racing swaps each
         // removed their own stale-read old interval and added their own —
@@ -83,7 +83,7 @@ public class PortedDeleteTickableTests
             start.SignalAndWait();
             node.TickSeconds = (i % 2 == 0) ? 2.0 : 3.0;
         })).ToArray();
-        Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
+        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30));
         double v = node.TickSeconds;
         Assert.True(v == 2.0 || v == 3.0);
         var slot = ticker.GetSlot(v);

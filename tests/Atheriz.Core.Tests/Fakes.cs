@@ -1,84 +1,48 @@
+#pragma warning disable xUnit1031 // CaptureAtherizLog constructor takes the capture semaphore synchronously
 using Atheriz.Core.Network;
 using Atheriz.Core.Objects;
 using System.Collections.Concurrent;
 
 namespace Atheriz.Core.Tests;
 
-// Single canonical thread-safe connection for tests.
-// Uses lock-free ConcurrentQueue / ConcurrentBag for Sent/Received isolation.
+// Single canonical thread-safe connection for tests: one tuple store plus
+// the Received queue. (Former TestConnection/ConcreteConn/TestConn/BareConn
+// aliases and the parallel bag/string/queue stores deleted 2026-09-25 —
+// every consumer reads Sent/Received/Closed.)
 public class TestConnection : BaseConnection
 {
-    private readonly ConcurrentQueue<(string Cmd, List<object?> Args, Dictionary<string, object?> Kwargs)> _sentQueue = new();
-    private readonly List<(string Cmd, List<object?> Args, Dictionary<string, object?> Kwargs)> _sentSnapshotLock = new();
     private readonly object _sentLock = new();
+    private readonly List<(string Cmd, List<object?> Args, Dictionary<string, object?> Kwargs)> _sent = new();
 
-    // Legacy Sent list (snapshot, thread-safe via lock)
     public List<(string Cmd, List<object?> Args, Dictionary<string, object?> Kwargs)> Sent
     {
-        get { lock (_sentLock) return _sentSnapshotLock.ToList(); }
-    }
-
-    // New spec: ConcurrentBag of (Cmd, Json) + ConcurrentQueue Received
-    public ConcurrentBag<(string Cmd, string Json)> SentCommandsBag { get; } = new();
-    public List<string> SentCommands
-    {
-        get { lock (_sentLock) return _sentSnapshotLock.Select(s => s.Cmd).ToList(); }
+        get { lock (_sentLock) return _sent.ToList(); }
     }
 
     public ConcurrentQueue<string> Received { get; } = new();
     public bool Closed { get; private set; }
 
+    // Failure injection for delivery-failure paths (the one use the old
+    // throwing BareConn served: FailedMapSend_LeavesLastMapTime).
+    public bool ThrowOnSend { get; set; }
+
     public TestConnection(string? sessionId = "test_conn") : base(sessionId) { }
 
     public override void SendCommand(string cmd, List<object?>? args = null, Dictionary<string, object?>? kwargs = null)
     {
+        if (ThrowOnSend) throw new InvalidOperationException("ThrowOnSend: simulated delivery failure.");
         var a = args ?? new List<object?>();
         var k = kwargs ?? new Dictionary<string, object?>();
-        lock (_sentLock) _sentSnapshotLock.Add((cmd, a, k));
-        _sentQueue.Enqueue((cmd, a, k));
-        try
-        {
-            var json = System.Text.Json.JsonSerializer.Serialize(new object[] { cmd, a, k });
-            SentCommandsBag.Add((cmd, json));
-        }
-        catch { SentCommandsBag.Add((cmd, "")); }
+        lock (_sentLock) _sent.Add((cmd, a, k));
     }
 
     public override void Close()
     {
         Closed = true;
-        lock (_sentLock) _sentSnapshotLock.Add(("__closed__", new List<object?>(), new Dictionary<string, object?>()));
+        lock (_sentLock) _sent.Add(("__closed__", new List<object?>(), new Dictionary<string, object?>()));
     }
 
-    public void EnqueueReceived(string text) => Received.Enqueue(text);
-    public string? DequeueReceived() => Received.TryDequeue(out var v) ? v : null;
-    public void ClearSent() { lock (_sentLock) _sentSnapshotLock.Clear(); while (_sentQueue.TryDequeue(out _)) { } while (SentCommandsBag.TryTake(out _)) { } }
-    public IReadOnlyList<(string Cmd, List<object?> Args, Dictionary<string, object?> Kwargs)> SentSnapshot
-        => Sent;
-}
-
-// Backward-compat aliases — deprecated triplication unified
-public sealed class FakeConnection : TestConnection
-{
-    public FakeConnection(string? sessionId = "test_conn") : base(sessionId) { }
-}
-
-// Provide compat types for ConcreteConn/BareConn/TestConn triplication (used in PortedConnectionTests, NetworkTests)
-public sealed class ConcreteConn : TestConnection
-{
-    public ConcreteConn(string? sessionId = null) : base(sessionId) { }
-}
-public sealed class BareConn : TestConnection
-{
-    public BareConn(string? sid = null) : base(sid)
-    {
-    }
-    public override void SendCommand(string cmd, List<object?>? args = null, Dictionary<string, object?>? kwargs = null) => throw new NotImplementedException();
-    public override void Close() => throw new NotImplementedException();
-}
-public sealed class TestConn : TestConnection
-{
-    public TestConn(string id, string host) : base(id) { ClientHost = host; }
+    public void ClearSent() { lock (_sentLock) _sent.Clear(); }
 }
 
 // Port of atheriz/tests/fakes.py:64 FakeSession

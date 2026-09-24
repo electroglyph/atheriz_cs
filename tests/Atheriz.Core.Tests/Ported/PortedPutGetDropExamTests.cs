@@ -561,11 +561,11 @@ public class PortedPutGetDropExamTests
     {
         using var env = GlobalTestEnv.Enter();
         var m = typeof(ExamCommand).GetMethod("FormatValue", BindingFlags.NonPublic|BindingFlags.Static);
-        var sess = new Session(new FakeConnection(){});
+        var sess = new Session(new TestConnection(){});
         var acc = Account.Create("alice", "pw1");
         acc.Id = 1;
         sess.Account = acc;
-        sess.Connection = new FakeConnection(){};
+        sess.Connection = new TestConnection(){};
         var res = m!.Invoke(null, new object?[]{ sess, "session"}) as string;
         Assert.Contains("Session(", res);
         Assert.Contains("alice", res);

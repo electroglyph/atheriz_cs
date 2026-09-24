@@ -41,7 +41,7 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "error: dotnet SDK 8.0.100+ required (see global.json)" >&2
+  echo "error: dotnet SDK 10.0.100+ required (see global.json)" >&2
   exit 1
 fi
 if ! command -v rsync >/dev/null 2>&1; then

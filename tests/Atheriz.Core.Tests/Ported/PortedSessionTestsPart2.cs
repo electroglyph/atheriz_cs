@@ -80,7 +80,7 @@ public class PortedSessionTestsPart2
     [Fact] public async Task SessionPromptBindsFuture()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var sess = new Session(connection: conn);
         var task = sess.Prompt("hello");
         await Task.Delay(50);
@@ -93,7 +93,7 @@ public class PortedSessionTestsPart2
     [Fact] public async Task SessionEchoRaceMaskedPromptThenDisconnectSendsEchoOn()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var sess = new Session(connection: conn);
         var task = sess.Prompt("secret", mask:true);
         await Task.Delay(20);
@@ -108,7 +108,7 @@ public class PortedSessionTestsPart2
     [Fact] public void SessionDoubleDisconnectIdempotent()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var sess = new Session(connection: conn);
         var puppet = new CountingPuppet("p1");
         puppet.IsPc = true; ObjectRegistry.AddObject(puppet);
@@ -124,7 +124,7 @@ public class PortedSessionTestsPart2
     [Fact] public async Task SessionEchoStateNotLeakedOnCancelledPrompt()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var sess = new Session(connection: conn);
         var t1 = sess.Prompt("first", mask:true);
         await Task.Delay(20);
@@ -139,7 +139,7 @@ public class PortedSessionTestsPart2
     [Fact] public void ConnectionDoubleCloseNoRuntimeError()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Close();
         var ex = Record.Exception(()=> conn.Close());
         Assert.Null(ex);
@@ -184,7 +184,7 @@ public class PortedSessionTestsPart2
         var settings = new AtherizSettings();
         var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 100);
         var mgr = new ConnectionManager(pool: pool, settings: settings);
-        var c = new FakeConnection();
+        var c = new TestConnection();
         // Create session with failing puppet
         var failingPuppet = new FailingPuppet("fail");
         failingPuppet.IsPc = true;
@@ -209,7 +209,7 @@ public class PortedSessionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var pool = new AsyncThreadPool(maxThreads: 4, queueLimit: 100);
         var mgr = new ConnectionManager(pool: pool);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var rec = new RecordingPuppet("rec");
         ObjectRegistry.AddObject(rec);
         conn.Session.Puppet = rec; rec.Session = conn.Session; conn.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds()-1;
@@ -225,7 +225,7 @@ public class PortedSessionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var pool = new AsyncThreadPool(maxThreads: 4, queueLimit: 100);
         var mgr = new ConnectionManager(pool: pool);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var rec = new RecordingPuppet("rec2", delay:0.5);
         ObjectRegistry.AddObject(rec);
         conn.Session.Puppet = rec; rec.Session = conn.Session; conn.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds()-1;
@@ -249,7 +249,7 @@ public class PortedSessionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var pool = new AsyncThreadPool(maxThreads: 1, queueLimit: 1);
         var mgr = new ConnectionManager(pool: pool);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var rec = new RecordingPuppet("rec3");
         ObjectRegistry.AddObject(rec);
         conn.Session.Puppet = rec; rec.Session = conn.Session; conn.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds()-1;
@@ -276,7 +276,7 @@ public class PortedSessionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var pool = new AsyncThreadPool(maxThreads: 4, queueLimit: 100);
         var mgr = new ConnectionManager(pool: pool);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var rec = new RecordingPuppet("rec4");
         ObjectRegistry.AddObject(rec);
         conn.Session.Puppet = rec; rec.Session = conn.Session; conn.Session.ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds()-1;
@@ -293,7 +293,7 @@ public class PortedSessionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 100);
         var mgr = new ConnectionManager(pool: pool);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         // Clear puppet to simulate no session work but still have session object
         conn.Session.Puppet = null;
         mgr.RegisterConnection("c1", conn);

@@ -31,7 +31,7 @@ public class ConnectionInputTests
         var mgr = PortedHelpers.MakeManager();
         try
         {
-            var c = new TestConn("c1", "9.9.9.9");
+            var c = new TestConnection("c1") { ClientHost = "9.9.9.9" };
             string log;
             using (var cap = new CaptureAtherizLog())
             {
@@ -52,7 +52,7 @@ public class ConnectionInputTests
         var mgr = PortedHelpers.MakeManager(new AtherizSettings { WebsocketMaxMessageSize = 16 });
         try
         {
-            var c = new TestConn("c-oversize", "10.30.0.1");
+            var c = new TestConnection("c-oversize") { ClientHost = "10.30.0.1" };
             // 14 chars on the wire but 24 bytes of UTF-8: over a 16-byte
             // budget without ever exceeding 16 chars.
             string raw = "[\"éééééééééé\"]";
@@ -77,7 +77,7 @@ public class ConnectionInputTests
         var mgr = PortedHelpers.MakeManager();
         try
         {
-            var c = new TestConn("c-malformed", "10.30.0.2");
+            var c = new TestConnection("c-malformed") { ClientHost = "10.30.0.2" };
             // Valid JSON object, not an array: takes the malformed path.
             // 6 chars, 7 bytes of UTF-8.
             string raw = "{\"é\":1}";

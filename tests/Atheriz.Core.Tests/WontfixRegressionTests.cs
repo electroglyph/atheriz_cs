@@ -127,7 +127,7 @@ public class WontfixRegressionTests
         npc.Quelled = false;
         npc.CanHear = true;
         npc.IsMapable = true;
-        var conn = new FakeConnection("puppet_test");
+        var conn = new TestConnection("puppet_test");
         var sess = conn.Session;
         hero.Session = sess;
         sess.Puppet = hero;

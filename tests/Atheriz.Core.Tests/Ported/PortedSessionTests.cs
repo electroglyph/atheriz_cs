@@ -29,7 +29,7 @@ public class PortedSessionTests
     {
         using var env = GlobalTestEnv.Enter();
         var acc = Account.Create("alice", "pw123456");
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var s = new Session(connection: conn, account: acc);
         Assert.Same(acc, s.Account);
         Assert.Same(conn, s.Connection);
@@ -143,7 +143,7 @@ public class PortedSessionTests
     [Fact] public async Task AtDisconnectCancelsPendingInputFuture()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var s = new Session(connection: conn);
         var task = s.Prompt("> ");
         await Task.Delay(50);
@@ -159,7 +159,7 @@ public class PortedSessionTests
     [Fact] public void MsgProxiesToConnection()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var s = new Session(connection: conn);
         s.Msg("hello");
         Assert.Single(conn.Sent);
@@ -168,7 +168,7 @@ public class PortedSessionTests
     [Fact] public void MsgWithKwargs()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var s = new Session(connection: conn);
         s.Msg("hi");
         // also test SendCommand with prompt kw
@@ -188,7 +188,7 @@ public class PortedSessionTests
     [Fact] public async Task PromptRoundTrip()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var s = new Session(connection: conn);
         var task = s.Prompt("> ");
         await Task.Delay(20);
@@ -200,7 +200,7 @@ public class PortedSessionTests
     [Fact] public async Task PromptCreatesNewInputFuture()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var s = new Session(connection: conn);
         var task = s.Prompt("> ");
         await Task.Delay(20);
@@ -212,7 +212,7 @@ public class PortedSessionTests
     [Fact] public async Task PromptWithEmptyResponse()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var s = new Session(connection: conn);
         var task = s.Prompt("> ");
         await Task.Delay(20);
@@ -223,7 +223,7 @@ public class PortedSessionTests
     [Fact] public async Task PromptMsgCalledBeforeFutureCreated()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var s = new Session(connection: conn);
         var task = s.Prompt("> ");
         await Task.Delay(20);
@@ -238,7 +238,7 @@ public class PortedSessionTests
     [Fact] public void PromptSendsTextViaMsg()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var s = new Session(connection: conn);
         // Python: conn.msg.assert_called_once_with("hi", prompt=">", foo="bar") — C# two-send adaptation
         // Session.Msg sends text via Connection.SendCommand("text"); prompt goes via separate SendCommand("prompt")

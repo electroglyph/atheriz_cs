@@ -44,7 +44,7 @@ public class CheckpointTests
     // --- Concurrent mutation wiped by snapshot-then-clear ---
 
     [Fact]
-    public void NodeHandler_AreaAddedMidSave_IsNotLost()
+    public async Task NodeHandler_AreaAddedMidSave_IsNotLost()
     {
         // NodeHandler snapshots refs before clearing _modified; an area added
         // between snapshot and clean must survive via the generation guard
@@ -69,7 +69,7 @@ public class CheckpointTests
             if (ObjectRegistry.Get(nodeB.Id).Count == 0) ObjectRegistry.AddObject(nodeB);
             nh.AddNode(nodeB); // lands strictly between snapshot and clean
             blocker.Proceed.Set();
-            saveTask.Wait(TimeSpan.FromSeconds(20));
+            await saveTask.WaitAsync(TimeSpan.FromSeconds(20));
             Assert.True(saveTask.IsCompletedSuccessfully, "save task faulted: " + saveTask.Exception);
             // The concurrent add must have SURVIVED as dirty (gen guard skips
             // the clean), so a follow-up incremental save persists it. (Without
@@ -85,7 +85,7 @@ public class CheckpointTests
     }
 
     [Fact]
-    public void NodeHandler_DoorAddedMidSave_SurvivesViaGenGuard()
+    public async Task NodeHandler_DoorAddedMidSave_SurvivesViaGenGuard()
     {
         // Pin: the door branch IS gen-guarded (_doorGen), so the same
         // interleaving must survive for doors. Guards the existing fix.
@@ -106,7 +106,7 @@ public class CheckpointTests
             Assert.True(blocker.Entered.Wait(TimeSpan.FromSeconds(15)), "save never reached serialization");
             nh.AddDoor(Door.Create(coordA, "east", coordB, "west", closed: true));
             blocker.Proceed.Set();
-            saveTask.Wait(TimeSpan.FromSeconds(20));
+            await saveTask.WaitAsync(TimeSpan.FromSeconds(20));
             Assert.True(saveTask.IsCompletedSuccessfully, "save task faulted: " + saveTask.Exception);
             nh.Save(force: true);
             using var db2 = new AtherizDbContext(env.TempPath);
@@ -120,7 +120,7 @@ public class CheckpointTests
     }
 
     [Fact]
-    public void Object_SaveClearing_IsAtomicUnderHammer()
+    public async Task Object_SaveClearing_IsAtomicUnderHammer()
     {
         // Pin documenting the corrected mechanism: per-object
         // snapshot+clear is atomic under the object's write lock
@@ -139,7 +139,7 @@ public class CheckpointTests
         for (int i = 0; i < 200; i++) o.Desc = "v" + i;
         ObjectRegistry.SaveObjects(env.TempPath, force: true);
         stop.Cancel();
-        saver.Wait(TimeSpan.FromSeconds(15));
+        await saver.WaitAsync(TimeSpan.FromSeconds(15));
         ObjectRegistry.ClearAll();
         ObjectRegistry.LoadObjects(env.TempPath);
         var back = ObjectRegistry.Get(o.Id).FirstOrDefault();

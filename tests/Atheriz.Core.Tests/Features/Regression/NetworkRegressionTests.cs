@@ -240,7 +240,7 @@ public class NetworkRegressionTests
     // CANCELS the pending prompt (TaskCanceledException on Wait), so assert
     // completion, not a successful result.
     [Fact]
-    public void StoppedPool_StillTearsDownSession()
+    public async Task StoppedPool_StillTearsDownSession()
     {
         Reset();
         var prev = ConnectionManager.GlobalInstance;
@@ -252,8 +252,8 @@ public class NetworkRegressionTests
             var promptTask = conn.Session.Prompt("name:");
             mgr.Atp.Stop(wait: false);
             mgr.Disconnect(conn);
-            try { promptTask.Wait(TimeSpan.FromSeconds(3)); }
-            catch (AggregateException) { }
+            try { await promptTask.WaitAsync(TimeSpan.FromSeconds(3)); }
+            catch (Exception) { }
             Assert.True(promptTask.IsCompleted);
         }
         finally { ConnectionManager.GlobalInstance = prev; Reset(); }

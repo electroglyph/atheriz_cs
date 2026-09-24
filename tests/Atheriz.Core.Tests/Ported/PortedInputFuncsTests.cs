@@ -83,7 +83,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var helper = new DecoratorDefaultHelper();
-        var result = helper.MyHandler(new FakeConnection(), new List<object?>(), new Dictionary<string, object?>());
+        var result = helper.MyHandler(new TestConnection(), new List<object?>(), new Dictionary<string, object?>());
         Assert.Equal(42, result);
     }
 
@@ -140,7 +140,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.TermWidth = 0; conn.Session.TermHeight = 0;
         inp.TermSize(conn, new List<object?>{100, 50}, new Dictionary<string, object?>());
         Assert.Equal(100, conn.Session.TermWidth);
@@ -152,7 +152,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.TermWidth = 80;
         inp.TermSize(conn, new List<object?>{100}, new Dictionary<string, object?>());
         Assert.Equal(80, conn.Session.TermWidth);
@@ -163,7 +163,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.TermWidth = 80; conn.Session.TermHeight = 45;
         // Python: ["hello", [1,2,3]] — both non-int
         inp.TermSize(conn, new List<object?>{"hello", new List<int>{1,2,3}}, new Dictionary<string, object?>());
@@ -190,7 +190,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.TermWidth = 80; conn.Session.TermHeight = 45;
         inp.TermSize(conn, new List<object?>{0, 0}, new Dictionary<string, object?>());
         Assert.Equal(80, conn.Session.TermWidth);
@@ -202,7 +202,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.TermWidth = 80; conn.Session.TermHeight = 45;
         inp.TermSize(conn, new List<object?>{-1, 80}, new Dictionary<string, object?>());
         Assert.Equal(80, conn.Session.TermWidth);
@@ -214,7 +214,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.TermWidth = 80; conn.Session.TermHeight = 45;
         var maxW = new Atheriz.Core.Settings.AtherizSettings().TermSizeMaxWidth;
         inp.TermSize(conn, new List<object?>{maxW + 1, 50}, new Dictionary<string, object?>());
@@ -227,7 +227,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.TermWidth = 0; conn.Session.TermHeight = 0;
         inp.TermSize(conn, new List<object?>{24, 80}, new Dictionary<string, object?>());
         Assert.Equal(24, conn.Session.TermWidth);
@@ -240,7 +240,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.MapWidth = 0; conn.Session.MapHeight = 0;
         inp.MapSize(conn, new List<object?>{30, 20}, new Dictionary<string, object?>());
         Assert.Equal(30, conn.Session.MapWidth);
@@ -252,7 +252,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.MapWidth = 5;
         inp.MapSize(conn, new List<object?>(), new Dictionary<string, object?>());
         Assert.Equal(5, conn.Session.MapWidth);
@@ -263,7 +263,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.MapWidth = 5; conn.Session.MapHeight = 5;
         inp.MapSize(conn, new List<object?>{"bad", null}, new Dictionary<string, object?>());
         Assert.Equal(5, conn.Session.MapWidth);
@@ -281,7 +281,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.MapWidth = 5; conn.Session.MapHeight = 5;
         inp.MapSize(conn, new List<object?>{0, 0}, new Dictionary<string, object?>());
         Assert.Equal(5, conn.Session.MapWidth);
@@ -293,7 +293,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.MapWidth = 5; conn.Session.MapHeight = 5;
         inp.MapSize(conn, new List<object?>{-1, 20}, new Dictionary<string, object?>());
         Assert.Equal(5, conn.Session.MapWidth);
@@ -305,7 +305,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.MapWidth = 5; conn.Session.MapHeight = 5;
         var maxH = new Atheriz.Core.Settings.AtherizSettings().MapSizeMaxHeight;
         inp.MapSize(conn, new List<object?>{50, maxH + 1}, new Dictionary<string, object?>());
@@ -318,7 +318,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.MapWidth = 0; conn.Session.MapHeight = 0;
         inp.MapSize(conn, new List<object?>{30, 20}, new Dictionary<string, object?>());
         Assert.Equal(30, conn.Session.MapWidth);
@@ -331,7 +331,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.ScreenReader = false;
         conn.ClearSent();
         inp.Screenreader(conn, new List<object?>{true}, new Dictionary<string, object?>());
@@ -346,7 +346,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.ScreenReader = true;
         inp.Screenreader(conn, new List<object?>{false}, new Dictionary<string, object?>());
         Assert.False(conn.Session.ScreenReader);
@@ -357,7 +357,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.ScreenReader = false;
         inp.Screenreader(conn, new List<object?>(), new Dictionary<string, object?>());
         Assert.False(conn.Session.ScreenReader);
@@ -368,7 +368,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.ClearSent();
         inp.Screenreader(conn, new List<object?>{true}, new Dictionary<string, object?>());
         Assert.True(conn.Sent.Count > 0);
@@ -382,7 +382,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.InputFuture = null;
         conn.ClearSent();
         inp.Text(conn, new List<object?>{""}, new Dictionary<string, object?>());
@@ -395,7 +395,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.InputFuture = null;
         var ex = Record.Exception(() => inp.Text(conn, new List<object?>(), new Dictionary<string, object?>()));
         Assert.Null(ex);
@@ -407,7 +407,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var future = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         conn.Session.InputFuture = future;
         conn.Session.Puppet = null;
@@ -424,7 +424,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var future = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         conn.Session.InputFuture = future;
         conn.Session.Puppet = null;
@@ -444,7 +444,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.ClearSent();
         inp.ClientReady(conn, new List<object?>(), new Dictionary<string, object?>());
         Assert.True(conn.Sent.Count >= 1);
@@ -463,7 +463,7 @@ public class PortedInputFuncsTests
     {
         using var env = GlobalTestEnv.Enter();
         var inp = new InputFuncs();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         // Python: @patch("importlib.reload") mock_reload.assert_not_called() after two client_ready calls
         // C#: translate @patch to manual mock — create MockReload and assert not_called verbatim
         var mockReload = new MockReload();

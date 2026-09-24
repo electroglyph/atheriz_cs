@@ -80,10 +80,10 @@ public class InfraRegressionTests
     [Fact]
     public void GameTemplate_CheckedInSources_CarryAssemblyDescription_AndMyGameNamespace()
     {
-        // checked-in template mirrors the scaffold emitters (AI()).
+        // checked-in template mirrors the scaffold emitters (AI()/GS()).
         var asmInfo = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.GameTemplate/AssemblyInfo.cs");
         Assert.Contains("AssemblyDescription", asmInfo);
-        var custom = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.GameTemplate/CustomObject.cs");
-        Assert.Contains("namespace MyGame;", custom);
+        var settings = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.GameTemplate/GameSettings.cs");
+        Assert.Contains("namespace MyGame;", settings);
     }
 }

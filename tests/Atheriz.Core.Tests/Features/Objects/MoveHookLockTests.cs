@@ -25,7 +25,7 @@ public class MoveHookLockTests
     }
 
     [Fact]
-    public void MoveTo_ReleasesLocationLocksBeforeLeaveHooks()
+    public async Task MoveTo_ReleasesLocationLocksBeforeLeaveHooks()
     {
         // Correct: while a leave hook runs, neither location write lock is
         // held, so other threads can still enter them.
@@ -58,8 +58,9 @@ public class MoveHookLockTests
             finally
             {
                 gate.Proceed.Set();
-                Assert.True(moveTask.Wait(TimeSpan.FromSeconds(5)), "MoveTo did not finish after hook release");
-                Assert.True(moveTask.Result);
+                var moveWinner = await Task.WhenAny(moveTask, Task.Delay(TimeSpan.FromSeconds(5)));
+                Assert.True(moveWinner == moveTask, "MoveTo did not finish after hook release");
+                Assert.True(await moveTask);
             }
         }
         finally { ObjectRegistry.ClearAll(); }

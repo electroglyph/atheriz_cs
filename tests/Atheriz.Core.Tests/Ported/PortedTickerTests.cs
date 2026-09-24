@@ -12,7 +12,7 @@ namespace Atheriz.Core.Tests.Ported;
 public class PortedTickerTests
 {
     [Fact]
-    public void TickerPeriodicallyRunsTask()
+    public async Task TickerPeriodicallyRunsTask()
     {
         using var pool = new AsyncThreadPool(maxThreads: 4, queueLimit: 1000);
         var ticker = new AsyncTicker(pool);
@@ -21,7 +21,7 @@ public class PortedTickerTests
         void Tick() { if (Interlocked.Increment(ref counter) >= 3) tcs.TrySetResult(true); }
         ticker.AddCoro(Tick, 0.05);
         // Deterministic: TCS after 3 ticks instead of fixed Thread.Sleep
-        bool completed = Task.WhenAny(tcs.Task, Task.Delay(1000)).GetAwaiter().GetResult() == tcs.Task;
+        bool completed = await Task.WhenAny(tcs.Task, Task.Delay(1000)) == tcs.Task;
         int c = Volatile.Read(ref counter);
         ticker.Stop();
         pool.Stop();
@@ -147,7 +147,7 @@ public class PortedTickerTests
     }
 
     [Fact]
-    public void SlowTickNeverRunsConcurrently()
+    public async Task SlowTickNeverRunsConcurrently()
     {
         using var pool = new AsyncThreadPool(maxThreads: 4, queueLimit: 1000);
         var ticker = new AsyncTicker(pool);
@@ -161,7 +161,7 @@ public class PortedTickerTests
             lock(lk){ active--; runs++; if (runs >=2) tcs.TrySetResult(true); }
         }
         ticker.AddCoro(Slow, 0.05);
-        bool completed = Task.WhenAny(tcs.Task, Task.Delay(2000)).GetAwaiter().GetResult() == tcs.Task;
+        bool completed = await Task.WhenAny(tcs.Task, Task.Delay(2000)) == tcs.Task;
         ticker.RemoveCoro(Slow, 0.05);
         ticker.Stop(); pool.Stop();
         Assert.True(completed, $"runs {runs} <2 within 2s");
@@ -170,7 +170,7 @@ public class PortedTickerTests
     }
 
     [Fact]
-    public void PendingBlocksOnlyBusyCoro()
+    public async Task PendingBlocksOnlyBusyCoro()
     {
         using var pool = new AsyncThreadPool(maxThreads: 4, queueLimit: 1000);
         var ticker = new AsyncTicker(pool);
@@ -180,7 +180,7 @@ public class PortedTickerTests
         void Fast() { if (Interlocked.Increment(ref fastCount) >= 4) tcs.TrySetResult(true); }
         ticker.AddCoro(Slow, 0.05);
         ticker.AddCoro(Fast, 0.05);
-        bool completed = Task.WhenAny(tcs.Task, Task.Delay(1000)).GetAwaiter().GetResult() == tcs.Task;
+        bool completed = await Task.WhenAny(tcs.Task, Task.Delay(1000)) == tcs.Task;
         ticker.RemoveCoro(Slow, 0.05);
         ticker.RemoveCoro(Fast, 0.05);
         ticker.Stop(); pool.Stop();

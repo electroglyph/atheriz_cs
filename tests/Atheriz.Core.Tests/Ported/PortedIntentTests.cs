@@ -388,7 +388,7 @@ public class PortedIntentTests
     {
         using var env=GlobalTestEnv.Enter();
         var caller=MakeCaller("Alice");
-        var sess=new Session(); var conn=new FakeConnection("quit_test"); sess.Connection=conn; caller.Session=sess;
+        var sess=new Session(); var conn=new TestConnection("quit_test"); sess.Connection=conn; caller.Session=sess;
         var quit=CommandRegistry.UnloggedIn.Get("quit");
         Assert.NotNull(quit);
         var ex=Record.Exception(()=>quit!.Run(caller, null));

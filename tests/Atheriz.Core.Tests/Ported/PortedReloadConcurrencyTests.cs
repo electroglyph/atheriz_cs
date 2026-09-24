@@ -7,7 +7,7 @@ namespace Atheriz.Core.Tests.Ported;
 [Collection("Ported")]
 public class PortedReloadConcurrencyTests
 {
-    [Fact] public void Reloads_AreSerialized_MaxOverlapOne()
+    [Fact] public async Task Reloads_AreSerialized_MaxOverlapOne()
     {
         using var env = GlobalTestEnv.Enter();
         // In C# PluginReloader uses _reloadLock Monitor.TryEnter — concurrent reloads shouldn't overlap
@@ -15,7 +15,7 @@ public class PortedReloadConcurrencyTests
         var ticker = GlobalServices.GetAsyncTicker();
         var pool = GlobalServices.GetAsyncThreadPool();
         for(int i=0;i<2;i++) tasks.Add(PluginReloader.ReloadAsync("/tmp/nonexistent.dll", ticker, pool));
-        Task.WaitAll(tasks.ToArray(), TimeSpan.FromSeconds(5));
+        await Task.WhenAll(tasks.ToArray()).WaitAsync(TimeSpan.FromSeconds(5));
         // Both should complete, second with "already in progress" false
         Assert.Equal(2, tasks.Count);
         Assert.All(tasks, t => Assert.True(t.IsCompleted));
@@ -44,7 +44,7 @@ public class PortedReloadConcurrencyTests
         }
         Assert.False(System.Threading.Monitor.IsEntered(StartStop.WorldLock));
     }
-    [Fact] public void HttpVsIngameReload_NotInterleaved()
+    [Fact] public async Task HttpVsIngameReload_NotInterleaved()
     {
         using var env = GlobalTestEnv.Enter();
         // Placeholder for INTEN 5.5 — verify ReloadAsync TryEnter prevents double entry
@@ -52,7 +52,7 @@ public class PortedReloadConcurrencyTests
         var pool = GlobalServices.GetAsyncThreadPool();
         var t1 = PluginReloader.ReloadAsync("/tmp/a.dll", ticker, pool);
         var t2 = PluginReloader.ReloadAsync("/tmp/b.dll", ticker, pool);
-        Task.WaitAll(new[]{t1,t2}, 3000);
+        await Task.WhenAll(t1, t2).WaitAsync(TimeSpan.FromMilliseconds(3000));
         Assert.True(t1.IsCompleted && t2.IsCompleted);
     }
 }

@@ -195,14 +195,14 @@ public sealed class TelnetCsWriterTests
     }
 
     [Fact]
-    public void TelnetCsWriter_OpeningPresetSendsDoTtype()
+    public async Task TelnetCsWriter_OpeningPresetSendsDoTtype()
     {
         using var env = GlobalTestEnv.Enter();
         var (peer, serverStream) = InMemoryPipe.Create();
         using var session = new ServerSession(serverStream, QuietOptions(), CancellationToken.None);
         try
         {
-            session.SendOpeningPresetAsync().GetAwaiter().GetResult();
+            await session.SendOpeningPresetAsync();
             Assert.Equal(new byte[] { 255, 253, 24 }, ReadExactly(peer, 3));
         }
         finally

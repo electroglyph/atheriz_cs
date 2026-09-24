@@ -39,7 +39,7 @@ public class ConcurrencyTests
         pool.Delay(TimeSpan.FromMilliseconds(50), () => tcs.TrySetResult(true));
         var completed = await Task.WhenAny(tcs.Task, Task.Delay(1000)) == tcs.Task;
         Assert.True(completed, "Delay task did not execute within 1s");
-        Assert.True(tcs.Task.Result);
+        Assert.True(await tcs.Task);
         pool.Stop();
     }
 

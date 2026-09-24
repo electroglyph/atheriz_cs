@@ -130,7 +130,7 @@ public class PortedSimpleCommandsTests
         using var env = GlobalTestEnv.Enter();
         var c = MakeCaller();
         var sess = new Session();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         sess.Connection = conn;
         c.Session = sess;
         new QuitCommand().Run(c, null);

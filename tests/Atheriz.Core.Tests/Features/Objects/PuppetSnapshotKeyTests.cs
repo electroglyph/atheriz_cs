@@ -23,7 +23,7 @@ public sealed class PuppetSnapshotKeyTests
     {
         using var env = GlobalTestEnv.Enter();
         var caller = GameObject.Create("builder", isPc: true, privilege: Privilege.Builder);
-        var sess = new Session(new FakeConnection());
+        var sess = new Session(new TestConnection());
         caller.Session = sess;
         sess.Puppet = caller;
         ObjectRegistry.AddObject(caller);

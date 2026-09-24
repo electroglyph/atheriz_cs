@@ -8,14 +8,19 @@ namespace Atheriz.Core.Globals;
 public static class SaltProvider
 {
     // Default-invocation cache: kept as a plain static string slot because the
-    // test harness pins it via reflection (save/clear/restore `_salt`, plus a
-    // wontfix marker asserting the shared static field). Explicit-path calls
-    // bypass it and use the per-path dict below: a single global slot would
-    // serve pathA's salt for a later GetSalt(pathB) (Python has no such
-    // hazard — it reads one global SECRET_PATH).
+    // test harness saves/clears/restores it (plus a wontfix marker asserting
+    // the shared static field). Explicit-path calls bypass it and use the
+    // per-path dict below: a single global slot would serve pathA's salt for
+    // a later GetSalt(pathB) (Python has no such hazard — it reads one global
+    // SECRET_PATH).
     private static string? _salt;
     private static readonly Dictionary<string, string> _salts = new(StringComparer.Ordinal);
     private static readonly Lock _lock = new();
+
+    // Test seam: current default salt without reflection (lock-free volatile
+    // read — a reference load is atomic, and a lock-free seam keeps the
+    // SaltRng_RunsOutsideLock positional pin green).
+    internal static string? CurrentSaltForTests => Volatile.Read(ref _salt);
 
     // Full-path keying for explicit arguments; the default invocation uses a
     // fixed key (single static salt is an intentional wontfix).

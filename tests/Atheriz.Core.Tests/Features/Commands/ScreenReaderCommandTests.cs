@@ -31,7 +31,7 @@ public sealed class ScreenReaderCommandTests
         }
         finally { CommandRegistry.Reset(); }
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var sess = new Session { Connection = conn };
         var go = GameObject.Create("srtoggle", isPc: true);
         go.Session = sess;

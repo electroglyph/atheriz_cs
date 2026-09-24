@@ -214,7 +214,7 @@ public class WebSocketHandlerTests
         ConnectionManager.GlobalInstance = mgr;
         try
         {
-            Assert.True(mgr.RegisterConnection("ws-cap-fill", new TestConn("ws-cap-fill", "10.0.0.1")));
+            Assert.True(mgr.RegisterConnection("ws-cap-fill", new TestConnection("ws-cap-fill") { ClientHost = "10.0.0.1" }));
             var fake = new DisposalTrackingSocket();
             var http = new DefaultHttpContext();
             http.Connection.RemoteIpAddress = IPAddress.Loopback;

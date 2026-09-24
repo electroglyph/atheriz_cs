@@ -12,7 +12,7 @@ public class PromptTokenTests
     [Fact]
     public async Task PromptWithToken_TokenIsLiveSlot_CancelCancelsExactlyIt()
     {
-        var conn = new FakeConnection("prompt-token-live");
+        var conn = new TestConnection("prompt-token-live");
         var sess = conn.Session;
         var (task, token) = sess.PromptWithToken("ask");
         Assert.Same(sess.InputFuture, token);
@@ -26,7 +26,7 @@ public class PromptTokenTests
     [Fact]
     public async Task PromptWithToken_SupersededToken_RefusesCancel()
     {
-        var conn = new FakeConnection("prompt-token-superseded");
+        var conn = new TestConnection("prompt-token-superseded");
         var sess = conn.Session;
         var (first, token1) = sess.PromptWithToken("first");
         var (second, token2) = sess.PromptWithToken("second");
@@ -44,7 +44,7 @@ public class PromptTokenTests
         // The menu prompt is superseded before its timeout fires: it resolves
         // with the supersede answer while the newer prompt stays pending —
         // the timeout path must not cancel a prompt it does not own.
-        var conn = new FakeConnection("prompt-token-menu");
+        var conn = new TestConnection("prompt-token-menu");
         var sess = conn.Session;
         var menuTask = Atheriz.Core.MenuPrompt.PromptWithTimeout(sess, "pick", TimeSpan.FromMinutes(5));
         var (late, lateToken) = sess.PromptWithToken("late");
@@ -59,7 +59,7 @@ public class PromptTokenTests
     {
         // Unsuperseded menu prompt: the timeout cancels exactly it, leaving
         // no orphaned InputFuture behind.
-        var conn = new FakeConnection("prompt-token-timeout");
+        var conn = new TestConnection("prompt-token-timeout");
         var sess = conn.Session;
         var result = await Atheriz.Core.MenuPrompt.PromptWithTimeout(sess, "pick", TimeSpan.FromMilliseconds(50));
         Assert.Null(result);
@@ -71,7 +71,7 @@ public class PromptTokenTests
     {
         // Parallel prompts serialize on the session lock; each task completes
         // (superseded ones with "") and the slot ends owned by exactly one.
-        var conn = new FakeConnection("prompt-token-race");
+        var conn = new TestConnection("prompt-token-race");
         var sess = conn.Session;
         var errors = new ConcurrentQueue<Exception>();
         var results = new ConcurrentBag<(Task<string> Task, object Token)>();

@@ -20,9 +20,9 @@ public class PortedBanCommandTests
         pc.ClearMessages();
         return pc;
     }
-    private static FakeConnection AttachConnection(GameObject pc, string host = "1.2.3.4", Account? account = null)
+    private static TestConnection AttachConnection(GameObject pc, string host = "1.2.3.4", Account? account = null)
     {
-        var conn = new FakeConnection(sessionId: $"conn-{pc.Id}");
+        var conn = new TestConnection(sessionId: $"conn-{pc.Id}");
         conn.ClientHost = host;
         var sess = pc.Session ?? conn.Session;
         // ensure pc.Session points to conn.Session

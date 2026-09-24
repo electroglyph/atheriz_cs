@@ -55,8 +55,8 @@ public sealed class ThrottleIsolationTests
         // Fixed-key holder lives on the connection: two connections each own
         // a fresh suppression map, so one connection's full backlog never
         // silences the other's drop warning.
-        var first = new FakeConnection("iso-drain-1");
-        var second = new FakeConnection("iso-drain-2");
+        var first = new TestConnection("iso-drain-1");
+        var second = new TestConnection("iso-drain-2");
         var field = typeof(BaseConnection).GetField(
             "_retryDrainDropLog", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var firstLog = (ThrottledLog)field.GetValue(first)!;

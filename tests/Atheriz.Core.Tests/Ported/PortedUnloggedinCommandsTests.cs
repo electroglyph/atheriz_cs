@@ -11,7 +11,7 @@ public class PortedUnloggedinCommandsTests
     [Fact] public void ScreenReader_Toggle()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var session = conn.Session;
         session.ScreenReader = false;
         var cmd = CommandRegistry.UnloggedIn.GetAll().FirstOrDefault(c=>c.Key=="screenreader");
@@ -31,7 +31,7 @@ public class PortedUnloggedinCommandsTests
     [Fact] public void Quit_SendsGoodbyeAndCloses()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var quit = CommandRegistry.UnloggedIn.GetAll().First(c=>c.Key=="quit");
         quit.Run(conn, null);
         Assert.Contains(conn.Sent, s=>s.Cmd=="text" && s.Args.Any(a=>a?.ToString()?.Contains("Goodbye")==true));

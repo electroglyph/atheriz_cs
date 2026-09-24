@@ -563,7 +563,7 @@ public class PortedPersistenceTests
     [Fact] public void GuestTemporaryRemovedOnDisconnect()
     {
         using var env=GlobalTestEnv.Enter();
-        var conn=new FakeConnection();
+        var conn=new TestConnection();
         var sess=conn.Session;
         var ch=GameObject.Create("GuestLeak", isPc:true); ch.IsTemporary=true; ObjectRegistry.AddObject(ch);
         sess.Puppet=ch;
@@ -578,11 +578,11 @@ public class PortedPersistenceTests
     {
         using var env=GlobalTestEnv.Enter();
         var before=new HashSet<int>(ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));
-        var conns=new List<FakeConnection>();
+        var conns=new List<TestConnection>();
         var chars=new List<GameObject>();
         for(int i=0;i<3;i++)
         {
-            var c=new FakeConnection(sessionId:$"g{i}");
+            var c=new TestConnection(sessionId:$"g{i}");
             var ch=GameObject.Create($"Tmp{i}", isPc:true); ch.IsTemporary=true; ObjectRegistry.AddObject(ch);
             c.Session.Puppet=ch; ch.Session=c.Session;
             conns.Add(c); chars.Add(ch);

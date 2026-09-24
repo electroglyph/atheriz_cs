@@ -12,8 +12,8 @@ public class WriteGateAsyncTests
     {
         using var outer = await DbWriteGate.EnterAsync();
         var nestedTask = DbWriteGate.EnterAsync();
-        Assert.True(nestedTask.Wait(TimeSpan.FromSeconds(5)));
-        using var nested = nestedTask.Result;
+        await nestedTask.WaitAsync(TimeSpan.FromSeconds(5));
+        using var nested = await nestedTask;
         Assert.Equal(0, DbWriteGate.Semaphore.CurrentCount);
     }
 
@@ -26,9 +26,9 @@ public class WriteGateAsyncTests
         using var outer = await DbWriteGate.EnterAsync();
         Exception? forkError = null;
         var done = new ManualResetEventSlim(false);
-        var thread = new Thread(() =>
+        var thread = new Thread(async () =>
         {
-            try { using var _ = DbWriteGate.EnterAsync().GetAwaiter().GetResult(); }
+            try { using var _ = await DbWriteGate.EnterAsync(); }
             catch (Exception ex) { forkError = ex; }
             finally { done.Set(); }
         })

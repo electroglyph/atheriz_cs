@@ -21,7 +21,7 @@ public class BanAndThrottleTests
     // --- Ban/cooldown check-then-remove race ---
 
     [Fact]
-    public void IpBan_ExpiryRefresh_Race_DoesNotDeleteFreshBan_Stress()
+    public async Task IpBan_ExpiryRefresh_Race_DoesNotDeleteFreshBan_Stress()
     {
         // Ban expiry uses remove-if-equal: a BanIp refresh landing between
         // check and remove must not delete the fresh ban. Hammers the
@@ -40,7 +40,7 @@ public class BanAndThrottleTests
                 using var start = new Barrier(2);
                 var check = Task.Run(() => { start.SignalAndWait(); return ObjectRegistry.IsIpBanned(host, 1000.0); });
                 var refresh = Task.Run(() => { start.SignalAndWait(); ObjectRegistry.BanIp(host, 1100.0); });
-                Task.WaitAll(check, refresh);
+                await Task.WhenAll(check, refresh);
                 if (!ObjectRegistry.IsIpBanned(host, 1000.0)) lost++;
                 ObjectRegistry.UnbanIp(host);
             }
@@ -50,7 +50,7 @@ public class BanAndThrottleTests
     }
 
     [Fact]
-    public void CreationCooldown_Refresh_Race_DoesNotDeleteFreshCooldown_Stress()
+    public async Task CreationCooldown_Refresh_Race_DoesNotDeleteFreshCooldown_Stress()
     {
         // Creation cooldown uses the same remove-if-equal shape as IP bans:
         // a refresh racing the expiry check must preserve the fresh cooldown.
@@ -67,7 +67,7 @@ public class BanAndThrottleTests
                 using var start = new Barrier(2);
                 var check = Task.Run(() => { start.SignalAndWait(); return ObjectRegistry.CreationCooldownActive(host, 1000.0); });
                 var refresh = Task.Run(() => { start.SignalAndWait(); ObjectRegistry.ApplyCreationCooldown("create", host, 1000.0, 100.0); });
-                Task.WaitAll(check, refresh);
+                await Task.WhenAll(check, refresh);
                 if (!ObjectRegistry.CreationCooldownActive(host, 1000.0)) lost++;
                 ObjectRegistry.ClearCreationCooldown(host);
             }

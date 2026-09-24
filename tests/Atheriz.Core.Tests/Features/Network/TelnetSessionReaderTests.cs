@@ -276,7 +276,7 @@ public sealed class TelnetSessionReaderTests
     }
 
     [Fact]
-    public void TelnetSessionReader_SyncReadDelivers()
+    public async Task TelnetSessionReader_SyncReadDelivers()
     {
         // The sync TextReader contract serves session slices like the async one.
         using var env = GlobalTestEnv.Enter();
@@ -287,7 +287,7 @@ public sealed class TelnetSessionReaderTests
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             var reader = new TelnetSessionReader(session, cts.Token);
             var bytes = Encoding.UTF8.GetBytes("sync\r\ntail");
-            peer.WriteAsync(bytes, 0, bytes.Length, cts.Token).GetAwaiter().GetResult();
+            await peer.WriteAsync(bytes, 0, bytes.Length, cts.Token);
             peer.Close();
             var sb = new StringBuilder();
             var buf = new char[16];
@@ -323,7 +323,7 @@ public sealed class TelnetSessionReaderTests
     }
 
     [Fact]
-    public void TelnetSessionReader_ArgumentValidation()
+    public async Task TelnetSessionReader_ArgumentValidation()
     {
         using var env = GlobalTestEnv.Enter();
         var (peer, serverStream) = InMemoryPipe.Create();
@@ -332,11 +332,11 @@ public sealed class TelnetSessionReaderTests
         {
             var reader = new TelnetSessionReader(session);
             Assert.Throws<ArgumentNullException>(() => reader.Read(null!, 0, 1));
-            Assert.Throws<ArgumentNullException>(() => { reader.ReadAsync(null!, 0, 1).GetAwaiter().GetResult(); });
+            await Assert.ThrowsAsync<ArgumentNullException>(async () => { await reader.ReadAsync(null!, 0, 1); });
             Assert.Throws<ArgumentOutOfRangeException>(() => reader.Read(new char[4], -1, 1));
             Assert.Throws<ArgumentOutOfRangeException>(() => reader.Read(new char[4], 0, -1));
             Assert.Throws<ArgumentOutOfRangeException>(() => reader.Read(new char[4], 3, 2));
-            Assert.Equal(0, reader.ReadAsync(Memory<char>.Empty).GetAwaiter().GetResult());
+            Assert.Equal(0, await reader.ReadAsync(Memory<char>.Empty));
         }
         finally
         {

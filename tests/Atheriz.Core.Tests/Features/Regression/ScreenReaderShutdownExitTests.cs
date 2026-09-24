@@ -71,7 +71,7 @@ public class ScreenReaderShutdownExitTests
             bool called = false;
             var lk = new object();
             mgr.RegisterHandler("text", (Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) => { lock (lk) called = true; }));
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             var small = JsonSerializer.Serialize(new object[] { "text", new object[] { "hi" }, new Dictionary<string, object?>() });
             mgr.HandleCommand(conn, small);
             Assert.True(PortedHelpers.WaitFor(() => { lock (lk) return called; }, 5000));

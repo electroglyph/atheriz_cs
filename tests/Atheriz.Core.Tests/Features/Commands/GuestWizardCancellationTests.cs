@@ -21,7 +21,7 @@ public sealed class GuestWizardCancellationTests
         AtherizSettings.Global.GuestEnabled = true;
         try
         {
-            var conn = new FakeConnection("batchd-guest");
+            var conn = new TestConnection("batchd-guest");
             using var cts = new CancellationTokenSource();
             cts.Cancel();
             var ex = await Record.ExceptionAsync(() =>

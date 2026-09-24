@@ -266,7 +266,7 @@ public class PortedMapInitRegressionTests
     }
 
     [Fact]
-    public void DoSetup_PromptHoldsNoWriteGate()
+    public async Task DoSetup_PromptHoldsNoWriteGate()
     {
         // The seed held DbWriteGate (and an open sqlite transaction) across
         // interactive credential prompts — every slow operator became
@@ -298,7 +298,7 @@ public class PortedMapInitRegressionTests
             Assert.True(DbWriteGate.TryEnter(TimeSpan.FromSeconds(5)), "write gate held across interactive prompt");
             DbWriteGate.Exit();
             reader.Release();
-            Assert.True(task.Wait(TimeSpan.FromSeconds(60)));
+            await task.WaitAsync(TimeSpan.FromSeconds(60));
             Assert.Null(bgEx);
             Assert.Contains("without superuser", capture.ToString());
         }

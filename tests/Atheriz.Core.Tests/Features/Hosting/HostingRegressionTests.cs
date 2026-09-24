@@ -66,7 +66,7 @@ public class HostingRegressionTests
         var mgr = new ConnectionManager(pool: pool, settings: new AtherizSettings());
         try
         {
-            var conn = new FakeConnection("sweep-me") { ClientHost = "10.9.9.9" };
+            var conn = new TestConnection("sweep-me") { ClientHost = "10.9.9.9" };
             Assert.True(mgr.RegisterConnection("sweep-me", conn));
             Assert.Equal(1, mgr.SweepOrphanedConnections(TimeSpan.FromMilliseconds(-1)));
             Assert.Equal(0, mgr.ConnectionCount);
@@ -85,7 +85,7 @@ public class HostingRegressionTests
         ConnectionManager.GlobalInstance = mgr;
         try
         {
-            var conn = new TestConn("sweep-kept", "10.9.9.9");
+            var conn = new TestConnection("sweep-kept") { ClientHost = "10.9.9.9" };
             conn.Session.Puppet = PortedHelpers.MakeCaller("sweep-kept-puppet");
             Assert.True(mgr.RegisterConnection("sweep-kept", conn));
             Assert.Equal(0, mgr.SweepOrphanedConnections(TimeSpan.FromMilliseconds(-1)));
@@ -107,8 +107,8 @@ public class HostingRegressionTests
         var mgr = new ConnectionManager(pool: pool, settings: settings);
         try
         {
-            var c1 = new FakeConnection("cap-1") { ClientHost = "10.9.9.1" };
-            var c2 = new FakeConnection("cap-2") { ClientHost = "10.9.9.2" };
+            var c1 = new TestConnection("cap-1") { ClientHost = "10.9.9.1" };
+            var c2 = new TestConnection("cap-2") { ClientHost = "10.9.9.2" };
             Assert.True(mgr.RegisterConnection("cap-1", c1));
             Assert.False(mgr.RegisterConnection("cap-2", c2));
             Assert.Equal(1, mgr.ConnectionCount);

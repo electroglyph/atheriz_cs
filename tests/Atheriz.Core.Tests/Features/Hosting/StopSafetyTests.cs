@@ -23,12 +23,12 @@ public class StopSafetyTests
         f!.SetValue(null, settings);
     }
 
-    private static string InvokeShutdownRequest(string secretPath, int port, bool tlsOn = false)
+    private static async Task<string> InvokeShutdownRequest(string secretPath, int port, bool tlsOn = false)
     {
         var m = typeof(ShutdownClient).GetMethod("TryRequestShutdownAsync", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(m);
         var task = (Task)m!.Invoke(null, new object[] { port, secretPath, tlsOn })!;
-        task.GetAwaiter().GetResult();
+        await task;
         var resultProp = task.GetType().GetProperty("Result");
         return resultProp!.GetValue(task)!.ToString()!;
     }
@@ -148,7 +148,7 @@ public class StopSafetyTests
     }
 
     [Fact]
-    public void TryRequestShutdown_UnreachableWithoutTokenOrServer()
+    public async Task TryRequestShutdown_UnreachableWithoutTokenOrServer()
     {
         var dir = Path.Combine(Path.GetTempPath(), "atheriz_nosrv_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -156,7 +156,7 @@ public class StopSafetyTests
         {
             var origOut = Console.Out;
             Console.SetOut(new StringWriter());
-            try { Assert.Equal("Unreachable", InvokeShutdownRequest(dir, FreePort())); }
+            try { Assert.Equal("Unreachable", await InvokeShutdownRequest(dir, FreePort())); }
             finally { Console.SetOut(origOut); }
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
@@ -177,7 +177,7 @@ public class StopSafetyTests
             var origOut = Console.Out;
             string outcome;
             Console.SetOut(new StringWriter());
-            try { outcome = InvokeShutdownRequest(dir, port); }
+            try { outcome = await InvokeShutdownRequest(dir, port); }
             finally { Console.SetOut(origOut); }
             await serve;
             Assert.Equal("AuthRejected", outcome);
@@ -200,7 +200,7 @@ public class StopSafetyTests
             var origOut = Console.Out;
             string outcome;
             Console.SetOut(new StringWriter());
-            try { outcome = InvokeShutdownRequest(dir, port); }
+            try { outcome = await InvokeShutdownRequest(dir, port); }
             finally { Console.SetOut(origOut); }
             await serve;
             Assert.Equal("Accepted", outcome);

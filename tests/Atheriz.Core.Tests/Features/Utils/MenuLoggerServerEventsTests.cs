@@ -107,7 +107,7 @@ public class MenuLoggerServerEventsTests
 
     // Lock narrowing: concurrent same-name creates serialize (no hang, one winner).
     [Fact]
-    public void ServerEvents_ConcurrentSameName_SingleHeroNoHang()
+    public async Task ServerEvents_ConcurrentSameName_SingleHeroNoHang()
     {
         using var env = GlobalTestEnv.Enter();
         var home = new Node(AtherizSettings.Global.DefaultHome);
@@ -119,7 +119,9 @@ public class MenuLoggerServerEventsTests
         using var start = new Barrier(2);
         var t1 = Task.Run(() => { start.SignalAndWait(); ServerEvents.AtCharCreate("acc1", "Hero", "password123"); });
         var t2 = Task.Run(() => { start.SignalAndWait(); ServerEvents.AtCharCreate("acc1", "Hero", "password123"); });
-        Assert.True(Task.WaitAll(new[] { t1, t2 }, 15000), "concurrent AtCharCreate hung");
+        var heroAll = Task.WhenAll(t1, t2);
+        var heroWinner = await Task.WhenAny(heroAll, Task.Delay(15000));
+        Assert.True(heroWinner == heroAll, "concurrent AtCharCreate hung");
         Assert.Single(ObjectRegistry.FilterBy(o => o.IsPc && o.Name == "Hero"));
     }
 

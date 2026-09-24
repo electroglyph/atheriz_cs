@@ -44,7 +44,7 @@ public class ObjectExtraFieldTests
         Assert.Contains("disconnect", cmd.Aliases);
         Assert.DoesNotContain("q", cmd.Aliases);
         // check via ResolveUnloggedIn
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var job = CommandDispatcher.ResolveUnloggedIn(conn, "quit");
         Assert.NotNull(job);
         // message check via GameObject
@@ -61,7 +61,7 @@ public class ObjectExtraFieldTests
     public void ScreenReader_Toggle_ConfirmsNewState()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var sess = new Session { Connection = conn };
         var go = GameObject.Create("tester", isPc: true);
         go.Session = sess;
@@ -80,7 +80,7 @@ public class ObjectExtraFieldTests
         // The typed ISessionProvider branch handles GameObject callers, so the
         // command works with no per-type fallback.
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var sess = new Session { Connection = conn };
         var go = GameObject.Create("srgo", isPc: true);
         go.Session = sess;
@@ -98,7 +98,7 @@ public class ObjectExtraFieldTests
     {
         // The typed ISessionProvider branch handles connection callers too.
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var sess = conn.Session;
         var cmd = new Atheriz.Core.Commands.UnloggedIn.ScreenReaderCommand();
         Assert.False(sess.ScreenReader);
@@ -148,7 +148,7 @@ public class ObjectExtraFieldTests
         Assert.NotNull(cmd);
         // run with no puppet should give "You are not puppeting anything."
         var go = GameObject.Create("tester", isPc: true);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         go.Session = new Session { Connection = conn };
         go.ClearMessages();
         cmd!.Run(go, null);

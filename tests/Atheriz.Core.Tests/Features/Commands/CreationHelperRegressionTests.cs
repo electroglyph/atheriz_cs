@@ -15,7 +15,7 @@ public sealed class CreationHelperRegressionTests
     {
         using var env = GlobalTestEnv.Enter();
         SaltProvider.SetSalt("testsalt");
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         new CreateAccountCommand().Run(conn, "bob my secret words");
         var acc = ObjectRegistry.FilterBy(o => o.IsAccount && o.Name == "bob").FirstOrDefault() as Account;
         Assert.NotNull(acc);
@@ -31,7 +31,7 @@ public sealed class CreationHelperRegressionTests
         SaltProvider.SetSalt("testsalt");
         try
         {
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             new CreateAccountCommand().Run(conn, "dframe password  123");
             var acc = ObjectRegistry.FilterBy(o => o.IsAccount && o.Name == "dframe").FirstOrDefault() as Account;
             Assert.NotNull(acc);
@@ -46,7 +46,7 @@ public sealed class CreationHelperRegressionTests
     {
         using var env = GlobalTestEnv.Enter();
         SaltProvider.SetSalt("testsalt");
-        var conn = new TestConn("c1", "198.51.100.11");
+        var conn = new TestConnection("c1") { ClientHost = "198.51.100.11" };
         var cmd = new CreateAccountCommand();
         cmd.Run(conn, "bad name! x"); // invalid account name -> reservation must be released
         cmd.Run(conn, "goodname hunter22"); // same host: must NOT be rate-limited
@@ -58,7 +58,7 @@ public sealed class CreationHelperRegressionTests
     public void Guest_ValidationFailure_ClearsCooldown()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new TestConn("c2", "198.51.100.12");
+        var conn = new TestConnection("c2") { ClientHost = "198.51.100.12" };
         var cmd = new GuestCommand();
         cmd.Run(conn, ""); // empty name -> usage, reservation released
         cmd.Run(conn, "GuestOk M");
@@ -74,7 +74,7 @@ public sealed class CreationHelperRegressionTests
         {
             var acc = Account.Create("alice", "secret");
             ObjectRegistry.AddObject(acc);
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             conn.Session.Account = acc;
             new NewCharacterCommand().Run(conn, "Hobbis M A tall figure");
             var ch = ObjectRegistry.FilterBy(o => o.Name == "Hobbis").FirstOrDefault() as GameObject;
@@ -93,7 +93,7 @@ public sealed class CreationHelperRegressionTests
         {
             var acc = Account.Create("aliceraw", "secret");
             ObjectRegistry.AddObject(acc);
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             conn.Session.Account = acc;
             new NewCharacterCommand().Run(conn, "HobbisRaw M A  tall  figure");
             var ch = ObjectRegistry.FilterBy(o => o.Name == "HobbisRaw").FirstOrDefault() as GameObject;
@@ -107,7 +107,7 @@ public sealed class CreationHelperRegressionTests
     public void Guest_SyncStub_AttachesPuppet()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         new GuestCommand().Run(conn, "PupGuest M");
         Assert.NotNull(conn.Session.Puppet);
         Assert.Equal("PupGuest", conn.Session.Puppet!.Name);
@@ -117,7 +117,7 @@ public sealed class CreationHelperRegressionTests
     public void New_NoAccountPath_ClearsCooldown()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new TestConn("c3", "198.51.100.13");
+        var conn = new TestConnection("c3") { ClientHost = "198.51.100.13" };
         conn.Session.Account = null;
         var cmd = new NewCharacterCommand();
         cmd.Run(conn, "NoAcctA M"); // no-account path: validates only, creates nothing

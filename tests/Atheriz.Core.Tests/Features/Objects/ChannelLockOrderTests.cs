@@ -1,3 +1,4 @@
+#pragma warning disable xUnit1031 // Thread-affine RWL held across the wait: awaiting would hop threads and break lock affinity (Msg_DoesNotHoldHistoryLockWhileWaitingOnSyncRoot).
 using System.Reflection;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
@@ -59,7 +60,8 @@ public class ChannelLockOrderTests
                         spinner.SpinOnce();
                     }
                 });
-                Assert.True(historyTask.Wait(TimeSpan.FromSeconds(5)),
+                var historyWinner = Task.WhenAny(historyTask, Task.Delay(TimeSpan.FromSeconds(5))).GetAwaiter().GetResult();
+                Assert.True(historyWinner == historyTask,
                     "Msg entry never became visible: history lock is pinned while Msg waits");
                 Assert.False(msgDone.IsSet,
                     "Msg finished while SyncRoot pinned (expected it blocked at the dirty mark)");

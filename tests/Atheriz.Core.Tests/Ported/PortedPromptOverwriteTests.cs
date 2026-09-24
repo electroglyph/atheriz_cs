@@ -12,7 +12,7 @@ public class PortedPromptOverwriteTests
     public async Task ConcurrentPromptsBothResolve()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection("prompt_test");
+        var conn = new TestConnection("prompt_test");
         var sess = conn.Session;
         // Simulate overlapping prompts: first prompt then second before first resolves
         var firstTask = sess.Prompt("first");

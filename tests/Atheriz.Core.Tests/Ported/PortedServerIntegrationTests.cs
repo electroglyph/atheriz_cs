@@ -50,7 +50,7 @@ public class PortedServerIntegrationTests
             tcs.TrySetResult(false);
         });
         var winner = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs + 1000));
-        return winner == tcs.Task && tcs.Task.Result;
+        return winner == tcs.Task && await tcs.Task;
     }
 
     private static async Task<string> RunProcessAsync(string fileName, string args, string? workingDir = null, Dictionary<string,string>? env = null, int timeoutMs = 30000)
@@ -151,7 +151,18 @@ public class PortedServerIntegrationTests
                 ["new", gameFolder, "--port", port.ToString(), "--telnet-port", telnetPort.ToString(), "--overwrite"],
                 repoRoot, env);
             Assert.True(await WaitForHealthAsync(port, 30000), $"Server did not become healthy on {port}. Output: {server.ReadOutput()}\nLog: {TryReadLog(gameFolder)}");
-            output = server.ReadOutput();
+            // Health needs only the port; the parent prints banners after the
+            // pid claim lands too, so poll for the banner text (bounded) instead
+            // of asserting on the first read — under suite IO load the claim
+            // lags the bind and the immediate read races it.
+            output = "";
+            var bannerDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            while (DateTime.UtcNow < bannerDeadline)
+            {
+                output = server.ReadOutput();
+                if (output.Contains("Web server listening", StringComparison.Ordinal)) break;
+                await Task.Delay(200);
+            }
             Assert.Contains("Creating game folder", output);
             Assert.Contains("Web server listening", output);
             // Verify pid file exists
@@ -178,21 +189,23 @@ public class PortedServerIntegrationTests
             // 5. Stop test (from the game folder, so token + pid resolve)
             var stopOut = await RunProcessAsync("bash", $"{repoRoot}/atheriz.sh stop --port {port}", gameFolder, null, 15000);
             Assert.Contains("Graceful shutdown", stopOut + TryReadLog(gameFolder));
-            // Wait for port to close via PortedHelpers.WaitAsync + TCS determinism (instead of raw while+Delay polling)
-            var stoppedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = Task.Run(async () =>
+            // Wait for port to close via async polling (per-attempt 600ms
+            // cap preserves the old sync-wrapper timeout semantics).
+            bool stopped = false;
+            var stopSw = Stopwatch.StartNew();
+            while (stopSw.ElapsedMilliseconds < 10000)
             {
-                bool ok = await PortedHelpers.WaitAsync(() =>
-                {
-                    // Sync wrapper over async check; use .GetAwaiter().GetResult() with timeout
-                    var t = IsPortListeningAsync(port);
-                    try { t.Wait(600); } catch { }
-                    return t.IsCompletedSuccessfully && !t.Result;
-                }, 10000, 200);
-                stoppedTcs.TrySetResult(ok);
-            });
-            var stoppedWinner = await Task.WhenAny(stoppedTcs.Task, Task.Delay(11000));
-            bool stopped = stoppedWinner == stoppedTcs.Task && stoppedTcs.Task.Result;
+                var check = IsPortListeningAsync(port);
+                var checkWinner = await Task.WhenAny(check, Task.Delay(600));
+                if (checkWinner == check && !await check) { stopped = true; break; }
+                await Task.Delay(200);
+            }
+            if (!stopped)
+            {
+                var final = IsPortListeningAsync(port);
+                var finalWinner = await Task.WhenAny(final, Task.Delay(600));
+                stopped = finalWinner == final && !await final;
+            }
             Assert.True(stopped, $"Server still listening on {port} after stop. Output: {stopOut}");
             Assert.False(File.Exists(pidFile), "pid file still exists after stop");
         }

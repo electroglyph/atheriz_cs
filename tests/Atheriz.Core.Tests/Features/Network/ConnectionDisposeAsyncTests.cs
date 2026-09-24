@@ -66,7 +66,7 @@ public sealed class ConnectionDisposeAsyncTests
         var writer = new GateWriter();
         // Construct off the test thread so SendCommand takes the off-loop
         // (ScheduleWrite) path instead of delivering inline.
-        var conn = Task.Run(() => new TelnetConnection(new object(), writer, "dispose-join")).GetAwaiter().GetResult();
+        var conn = await Task.Run(() => new TelnetConnection(new object(), writer, "dispose-join"));
         conn.SendCommand("text", new List<object?> { "gated" }, new Dictionary<string, object?>());
         Assert.True(writer.Entered.Wait(TimeSpan.FromSeconds(5)), "offloaded write never started");
         var disposeTask = conn.DisposeAsync().AsTask();

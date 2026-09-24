@@ -12,7 +12,7 @@ namespace Atheriz.Core.Tests.Features.Concurrency;
 public sealed class MoveToSwapDeadlockTests
 {
     [Fact]
-    public void MoveTo_ConcurrentSwap_CompletesWithoutDeadlock()
+    public async Task MoveTo_ConcurrentSwap_CompletesWithoutDeadlock()
     {
         // Two movers swapping rooms take mover/source/destination locks in
         // one global order, so the swap always completes instead of
@@ -40,9 +40,9 @@ public sealed class MoveToSwapDeadlockTests
             using var start = new Barrier(2);
             var t1 = Task.Run(() => { start.SignalAndWait(); return objA.MoveTo(nodeB, force: true); });
             var t2 = Task.Run(() => { start.SignalAndWait(); return objB.MoveTo(nodeA, force: true); });
-            Assert.True(Task.WaitAll([t1, t2], 15000));
-            Assert.True(t1.Result);
-            Assert.True(t2.Result);
+            await Task.WhenAll(t1, t2).WaitAsync(TimeSpan.FromMilliseconds(15000));
+            Assert.True(await t1);
+            Assert.True(await t2);
             Assert.Equal(cB, Assert.IsType<LocationRef.CoordLocation>(objA.Location).Coord);
             Assert.Equal(cA, Assert.IsType<LocationRef.CoordLocation>(objB.Location).Coord);
         }

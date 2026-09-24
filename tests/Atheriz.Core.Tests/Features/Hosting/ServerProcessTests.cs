@@ -71,7 +71,7 @@ public class ServerProcessTests
     // --- Prompted create on closed stdin ---
 
     [Fact]
-    public void GameTemplate_PromptedCreate_CompletesOnClosedStdin()
+    public async Task GameTemplate_PromptedCreate_CompletesOnClosedStdin()
     {
         // Pin: with stdin at EOF, the existing-folder prompt aborts instead of
         // hanging. (A real terminal with no input blocks in ReadLine — that
@@ -86,7 +86,8 @@ public class ServerProcessTests
         try
         {
             var task = Task.Run(() => GameTemplateGenerator.CreateGameFolder(dir));
-            Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "prompted create must not hang on closed stdin");
+            var createWinner = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(10)));
+            Assert.True(createWinner == task, "prompted create must not hang on closed stdin");
             Assert.Contains("Aborted", sb.ToString());
         }
         finally

@@ -99,8 +99,8 @@ public class TelnetConnectionTests
                 // SocketException shape — so a wedged peer closes the connection
                 // instead of parking the game thread (an unobserved fault or a
                 // hang would both be worse).
-                try { writeTask.Wait(TimeSpan.FromSeconds(15)); }
-                catch (AggregateException) { }
+                try { await writeTask.WaitAsync(TimeSpan.FromSeconds(15)); }
+                catch (Exception) { }
                 Assert.True(writeTask.IsCompleted, "write to a non-draining peer must not block the game thread indefinitely");
                 Assert.True(writeTask.IsFaulted, "8 MiB into an undrained peer must exceed the write deadline");
                 var io = Assert.IsType<IOException>(writeTask.Exception!.InnerException);

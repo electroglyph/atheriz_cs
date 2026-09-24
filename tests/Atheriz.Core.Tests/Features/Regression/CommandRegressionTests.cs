@@ -150,7 +150,7 @@ public class CommandRegressionTests
         {
             ObjectRegistry.BanIp("9.9.9.9");
             var mgr = new ConnectionManager();
-            Assert.False(mgr.RegisterConnection("regban", new TestConn("regban", "9.9.9.9")));
+            Assert.False(mgr.RegisterConnection("regban", new TestConnection("regban") { ClientHost = "9.9.9.9" }));
         }
         finally { ObjectRegistry.UnbanIp("9.9.9.9"); ConnectionManager.GlobalInstance = prev; Reset(); }
     }
@@ -209,7 +209,7 @@ public class CommandRegressionTests
             var job = CommandDispatcher.ResolveUnloggedIn(conn, "create foo");
             Assert.NotNull(job);
             job!.Func(job.Caller, job.Args);
-            Assert.Contains(conn.SentCommandsBag, t => t.Json.Contains("create foo"));
+            Assert.Contains(conn.Sent, s => s.Cmd.Contains("create foo", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("create foo", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("create foo", StringComparison.Ordinal) == true));
         }
         finally { Reset(); }
     }
@@ -239,7 +239,7 @@ public class CommandRegressionTests
             var pa = cmd.Parser!.ParseArgs(new[] { "here" });
             pa.CmdString = "smile";
             cmd.Run(go, pa);
-            Assert.Contains(conn.SentCommandsBag, t => t.Json.Contains("smile"));
+            Assert.Contains(conn.Sent, s => s.Cmd.Contains("smile", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("smile", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("smile", StringComparison.Ordinal) == true));
         }
         finally { NodeHandler.SetCurrent(null); Reset(); }
     }
@@ -373,7 +373,7 @@ public class CommandRegressionTests
             var job = CommandDispatcher.DispatchLoggedIn(go, ";hello", immediate: true);
             Assert.NotNull(job);
             job!.Func(job.Caller, job.Args);
-            Assert.Contains(conn.SentCommandsBag, t => t.Json.Contains("glued-wave"));
+            Assert.Contains(conn.Sent, s => s.Cmd.Contains("glued-wave", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("glued-wave", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("glued-wave", StringComparison.Ordinal) == true));
         }
         finally { NodeHandler.SetCurrent(null); Reset(); }
     }
@@ -413,7 +413,7 @@ public class CommandRegressionTests
             var job = CommandDispatcher.DispatchLoggedIn(go, "'hello", immediate: true);
             Assert.NotNull(job);
             job!.Func(job.Caller, job.Args);
-            Assert.Contains(conn.SentCommandsBag, t => t.Json.Contains("internal-quote"));
+            Assert.Contains(conn.Sent, s => s.Cmd.Contains("internal-quote", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("internal-quote", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("internal-quote", StringComparison.Ordinal) == true));
         }
         finally { NodeHandler.SetCurrent(null); Reset(); }
     }
@@ -437,7 +437,7 @@ public class CommandRegressionTests
             var job = CommandDispatcher.ResolveUnloggedIn(conn, "quit");
             Assert.NotNull(job);
             job!.Func(job.Caller, job.Args);
-            Assert.Empty(conn.SentCommandsBag);
+            Assert.Empty(conn.Sent);
         }
         finally { Command.GlobalLagCheck = null; Reset(); }
     }
@@ -452,7 +452,7 @@ public class CommandRegressionTests
         {
             var conn = new TestConnection();
             new CreateAccountCommand().Run(conn, "");
-            Assert.Contains(conn.SentCommandsBag, t => t.Json.Contains("not enabled"));
+            Assert.Contains(conn.Sent, s => s.Cmd.Contains("not enabled", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("not enabled", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("not enabled", StringComparison.Ordinal) == true));
         }
         finally { Reset(); }
     }
@@ -653,7 +653,7 @@ public class CommandRegressionTests
         {
             var conn = new TestConnection();
             new PutCommand().Run(conn, null);
-            Assert.Contains(conn.SentCommandsBag, t => t.Json.Contains("usage: put"));
+            Assert.Contains(conn.Sent, s => s.Cmd.Contains("usage: put", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("usage: put", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("usage: put", StringComparison.Ordinal) == true));
         }
         finally { Reset(); }
     }
@@ -754,7 +754,7 @@ public class CommandRegressionTests
         {
             var conn = new TestConnection();
             new CreateAccountCommand().Run(conn, "\"my name\" secretpw");
-            Assert.Contains(conn.SentCommandsBag, t => t.Json.Contains("Account my name created."));
+            Assert.Contains(conn.Sent, s => s.Cmd.Contains("Account my name created.", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("Account my name created.", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("Account my name created.", StringComparison.Ordinal) == true));
         }
         finally { Reset(); }
     }
@@ -890,7 +890,7 @@ public class CommandRegressionTests
             viewer.Location = new LocationRef.ObjectLocation(box.Id);
             conn.ClearSent();
             new LookCommand().Run(viewer, null);
-            Assert.DoesNotContain(conn.SentCommandsBag, t => t.Json.Contains("viewer-desc-regt"));
+            Assert.DoesNotContain(conn.Sent, s => s.Cmd.Contains("viewer-desc-regt", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("viewer-desc-regt", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("viewer-desc-regt", StringComparison.Ordinal) == true));
         }
         finally { Reset(); }
     }

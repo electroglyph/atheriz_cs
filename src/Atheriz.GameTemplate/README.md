@@ -15,14 +15,9 @@ dotnet run --project ../src/Atheriz.Server -- --foreground
 
 ## Files
 
-- `GameSettings.cs` — mirrors `settings.py` CLASS_INJECTIONS + SAVE_PATH/SecretPath/ServerName defaults; points to `Atheriz.Core.Settings.AtherizSettings`
-- `CustomObject.cs` — `class CustomObject : GameObject` with `AtCreate` placeholder (mirrors `object.py`)
-- `CustomNode.cs` — `: Node` (mirrors `node.py`)
-- `CustomAccount.cs` — `: Account` (mirrors `account.py`, global static salt wontfix)
-- `CustomChannel.cs` — `: Channel` (mirrors `channel.py`, lazy _channel_cache)
-- `CustomScript.cs` — `: Script` (mirrors `script.py`, before hooks advisory)
+- `GameSettings.cs` — only the values that differ from the engine defaults (`ServerName`, `WebclientSyncCheck`); `SavePath`/`SecretPath` match `Atheriz.Core.Settings.AtherizSettings` and are inherited, not re-declared. It also documents the `[EntityReplacement]` pattern for games that add custom types later.
 
-Each <100 lines, `namespace MyGame;`, referencing `Atheriz.Core`. They demonstrate the injection pattern via `[EntityReplacement]` attributes processed by `Atheriz.Core.Plugins.PluginLoader`.
+`GameSettings.cs` carries `namespace MyGame;`, referencing `Atheriz.Core`. Behavior-empty `Custom*` subclasses are deliberately absent: add one back only when the game actually customizes it, with a comment saying why.
 
 Sample instance: `test/` at the repo root is a live game folder generated from this template
 (`test/test.csproj`, `save/`, `secret/`, `web/`). It is private owner code: excluded from
@@ -45,4 +40,4 @@ At runtime, `setup_game_folder` equivalent would call `PluginLoader.Load("MyGame
 - No webclient: `web/` is intentionally not scaffolded.
 - No Windows ACL hardening: POSIX best-effort `File.SetUnixFileMode` with `try/catch`, `wontfix` on Windows (parent ACL inherits).
 - Puppet snapshot only `is_pc`/`privilege_level` per AGENTS.md.
-- Keep `GameSettings.SavePath = "save"` relative; `PathGuards.GuardSavePath` requires absolute or in-game-folder.
+- Keep `SavePath` relative (the `"save"` engine default); `PathGuards.GuardSavePath` requires absolute or in-game-folder.

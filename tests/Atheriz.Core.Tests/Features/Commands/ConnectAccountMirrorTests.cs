@@ -20,7 +20,7 @@ public class ConnectAccountMirrorTests
         {
             var acc = Account.Create("mirror_user", "correct");
             ObjectRegistry.AddObject(acc);
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             conn.ClientHost = "9.9.9.9";
             conn.Session.Puppet = GameObject.Create("hero");
             var cmd = new ConnectCommand();

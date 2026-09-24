@@ -30,7 +30,7 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr();
-        var c1 = new FakeConnection(); var c2 = new FakeConnection();
+        var c1 = new TestConnection(); var c2 = new TestConnection();
         mgr.RegisterConnection("c1", c1); mgr.RegisterConnection("c2", c2);
         var conns = mgr.GetAllConnections();
         Assert.Contains(c1, conns); Assert.Contains(c2, conns);
@@ -40,7 +40,7 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr();
-        var c1 = new FakeConnection(); mgr.RegisterConnection("c1", c1);
+        var c1 = new TestConnection(); mgr.RegisterConnection("c1", c1);
         var list1 = mgr.GetAllConnections(); list1.Clear();
         Assert.Equal(1, mgr.ConnectionCount);
         mgr.Atp.Stop(wait:false);
@@ -51,7 +51,7 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr();
-        var c1 = new FakeConnection(); var c2 = new FakeConnection();
+        var c1 = new TestConnection(); var c2 = new TestConnection();
         mgr.RegisterConnection("c1", c1); mgr.RegisterConnection("c2", c2);
         mgr.Broadcast("hello");
         Assert.Single(c1.Sent); Assert.Single(c2.Sent);
@@ -61,7 +61,7 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr();
-        var c1 = new FakeCrashConn("c1", "1.1.1.1"); var c2 = new FakeConnection();
+        var c1 = new FakeCrashConn("c1", "1.1.1.1"); var c2 = new TestConnection();
         mgr.RegisterConnection("c1", c1); mgr.RegisterConnection("c2", c2);
         mgr.Broadcast("hi");
         Assert.Single(c2.Sent);
@@ -117,7 +117,7 @@ public class PortedConnectionTestsPart2
         bool called = false; List<object?>? gotArgs = null; Dictionary<string,object?>? gotKwargs=null;
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=>{ called=true; gotArgs=a; gotKwargs=k; });
         mgr.RegisterHandler("text", h);
-        var c = new FakeConnection();
+        var c = new TestConnection();
         mgr.HandleCommand(c, JsonSerializer.Serialize(new object[]{ "text", new object[]{"hello"}, new Dictionary<string,object?>()}));
         Assert.True(Wait(()=>called));
         Assert.Single(gotArgs!); Assert.Equal("hello", gotArgs![0]?.ToString());
@@ -127,7 +127,7 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr();
-        var c = new FakeConnection();
+        var c = new TestConnection();
         var ex = Record.Exception(()=> mgr.HandleCommand(c, "not json"));
         Assert.Null(ex);
         mgr.Atp.Stop(wait:false);
@@ -139,7 +139,7 @@ public class PortedConnectionTestsPart2
         bool called=false;
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=> called=true);
         mgr.RegisterHandler("text", h);
-        var c = new FakeConnection();
+        var c = new TestConnection();
         mgr.HandleCommand(c, JsonSerializer.Serialize("not a list"));
         Assert.False(called);
         mgr.Atp.Stop(wait:false);
@@ -151,7 +151,7 @@ public class PortedConnectionTestsPart2
         bool called=false;
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=> called=true);
         mgr.RegisterHandler("text", h);
-        var c = new FakeConnection();
+        var c = new TestConnection();
         mgr.HandleCommand(c, JsonSerializer.Serialize(new object[]{}));
         Assert.False(called);
         mgr.Atp.Stop(wait:false);
@@ -163,7 +163,7 @@ public class PortedConnectionTestsPart2
         bool called=false; List<object?>? gotArgs=null; Dictionary<string,object?>? gotKwargs=null;
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=>{called=true; gotArgs=a; gotKwargs=k;});
         mgr.RegisterHandler("text", h);
-        var c = new FakeConnection();
+        var c = new TestConnection();
         mgr.HandleCommand(c, JsonSerializer.Serialize(new object[]{"text"}));
         Assert.True(Wait(()=>called));
         Assert.Empty(gotArgs!); Assert.Empty(gotKwargs!);
@@ -176,7 +176,7 @@ public class PortedConnectionTestsPart2
         bool called=false; List<object?>? gotArgs=null;
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=>{called=true; gotArgs=a;});
         mgr.RegisterHandler("text", h);
-        var c = new FakeConnection();
+        var c = new TestConnection();
         mgr.HandleCommand(c, JsonSerializer.Serialize(new object[]{"text", new object[]{"x"}}));
         Assert.True(Wait(()=>called));
         Assert.Single(gotArgs!); Assert.Equal("x", gotArgs![0]?.ToString());
@@ -186,7 +186,7 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr();
-        var c = new FakeConnection();
+        var c = new TestConnection();
         var ex = Record.Exception(()=> mgr.HandleCommand(c, JsonSerializer.Serialize(new object[]{"unknown", new object[]{}, new Dictionary<string,object?>()})));
         Assert.Null(ex);
         mgr.Atp.Stop(wait:false);
@@ -197,7 +197,7 @@ public class PortedConnectionTestsPart2
         var mgr = MakeMgr();
         Delegate bad = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=> throw new InvalidOperationException("boom"));
         mgr.RegisterHandler("text", bad);
-        var c = new FakeConnection();
+        var c = new TestConnection();
         var ex = Record.Exception(()=> mgr.HandleCommand(c, JsonSerializer.Serialize(new object[]{"text"})));
         Assert.Null(ex);
         Thread.Sleep(100);
@@ -212,7 +212,7 @@ public class PortedConnectionTestsPart2
         bool called=false; List<object?>? gotA=null; Dictionary<string,object?>? gotK=null;
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=>{called=true; gotA=a; gotK=k;});
         mgr.RegisterHandler("text", h);
-        var c = new FakeConnection();
+        var c = new TestConnection();
         mgr.Dispatch(c, "text", new List<object?>{"a"}, new Dictionary<string,object?>{["k"]="v"});
         Assert.True(Wait(()=>called));
         Assert.Single(gotA!); Assert.Equal("a", gotA![0]?.ToString()); Assert.Equal("v", gotK!["k"]);
@@ -222,7 +222,7 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr();
-        var c = new FakeConnection();
+        var c = new TestConnection();
         var ex = Record.Exception(()=> mgr.Dispatch(c, "unknown", new List<object?>(), new Dictionary<string,object?>()));
         Assert.Null(ex);
         mgr.Atp.Stop(wait:false);
@@ -236,7 +236,7 @@ public class PortedConnectionTestsPart2
         try
         {
             var mgr = MakeMgr();
-            var c = new FakeConnection();
+            var c = new TestConnection();
             using var cap = new CaptureAtherizLog();
             mgr.Dispatch(c, "foobar", new List<object?>(), new Dictionary<string,object?>());
             Thread.Sleep(50);
@@ -254,7 +254,7 @@ public class PortedConnectionTestsPart2
         var mgr = MakeMgr(new AtherizSettings{MaxConnectionsPerIp=0});
         var errors = new System.Collections.Concurrent.ConcurrentBag<Exception>();
         var threads = new List<Thread>();
-        for(int i=0;i<20;i++){int ii=i; var t=new Thread(()=>{try{var c=new FakeConnection(); mgr.RegisterConnection($"c{ii}", c);}catch(Exception e){errors.Add(e);}}); threads.Add(t);}
+        for(int i=0;i<20;i++){int ii=i; var t=new Thread(()=>{try{var c=new TestConnection(); mgr.RegisterConnection($"c{ii}", c);}catch(Exception e){errors.Add(e);}}); threads.Add(t);}
         foreach(var t in threads) t.Start(); foreach(var t in threads) t.Join();
         Assert.Empty(errors); Assert.Equal(20, mgr.ConnectionCount);
         mgr.Atp.Stop(wait:false);
@@ -276,7 +276,7 @@ public class PortedConnectionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var settings = new AtherizSettings{StripInputEscapeSequences=true};
         var mgr = MakeMgr(settings);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var received = new List<object?>();
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=> received.AddRange(a));
         mgr.RegisterHandler("text", h);
@@ -290,7 +290,7 @@ public class PortedConnectionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var settings = new AtherizSettings{StripInputEscapeSequences=false};
         var mgr = MakeMgr(settings);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var received = new List<object?>();
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=> received.AddRange(a));
         mgr.RegisterHandler("text", h);
@@ -304,7 +304,7 @@ public class PortedConnectionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var settings = new AtherizSettings{StripInputEscapeSequences=true};
         var mgr = MakeMgr(settings);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var received = new List<object?>();
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=> received.AddRange(a));
         mgr.RegisterHandler("text", h);
@@ -318,7 +318,7 @@ public class PortedConnectionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var settings = new AtherizSettings{StripInputEscapeSequences=true};
         var mgr = MakeMgr(settings);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var received = new List<object?>();
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=> received.AddRange(a));
         mgr.RegisterHandler("text", h);
@@ -331,7 +331,7 @@ public class PortedConnectionTestsPart2
         using var env = GlobalTestEnv.Enter();
         var settings = new AtherizSettings{StripInputEscapeSequences=true};
         var mgr = MakeMgr(settings);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var received = new List<object?>();
         Delegate h = (Action<BaseConnection, List<object?>, Dictionary<string,object?>>)((c,a,k)=> received.AddRange(a));
         mgr.RegisterHandler("cmd", h);
@@ -346,7 +346,7 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr();
-        var c1 = new FakeCrashConn("c1","1.1.1.1"); var c2 = new FakeConnection(); c2.ClientHost="1.1.1.2";
+        var c1 = new FakeCrashConn("c1","1.1.1.1"); var c2 = new TestConnection(); c2.ClientHost="1.1.1.2";
         mgr.RegisterConnection("c1", c1); mgr.RegisterConnection("c2", c2);
         mgr.Broadcast("hello");
         Assert.Single(c2.Sent); Assert.Contains("hello", c2.Sent[0].Args[0]?.ToString());
@@ -356,7 +356,7 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr();
-        var c = new FakeConnection(); c.ClientHost="1.2.3.4";
+        var c = new TestConnection(); c.ClientHost="1.2.3.4";
         var longRaw = new string('x', 200) + "{ bad json";
         // Clear malformed state via reflection (the per-manager holder owns the host map now)
         var logField = typeof(ConnectionManager).GetField("_malformedLog", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
@@ -425,7 +425,7 @@ public class PortedConnectionTestsPart2
     }
 
     // ----- per-IP limit -----
-    private FakeConnection ConnWithHost(string host){ var c=new FakeConnection(); c.ClientHost=host; return c; }
+    private TestConnection ConnWithHost(string host){ var c=new TestConnection(); c.ClientHost=host; return c; }
 
     [Fact] public void ThirdConnectionFromSameHostIsRefused()
     {
@@ -453,9 +453,9 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr(new AtherizSettings{MaxConnectionsPerIp=2});
-        Assert.True(mgr.RegisterConnection("c0", new FakeConnection()));
-        Assert.True(mgr.RegisterConnection("c1", new FakeConnection()));
-        var third = new FakeConnection(); // default host "?"
+        Assert.True(mgr.RegisterConnection("c0", new TestConnection()));
+        Assert.True(mgr.RegisterConnection("c1", new TestConnection()));
+        var third = new TestConnection(); // default host "?"
         Assert.True(mgr.RegisterConnection("c2", third));
         mgr.Atp.Stop(wait:false);
     }
@@ -483,9 +483,9 @@ public class PortedConnectionTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeMgr(new AtherizSettings{MaxConnectionsPerIp=2});
-        var c1=new FakeConnection(); c1.ClientHost="?";
-        var c2=new FakeConnection(); c2.ClientHost="?";
-        var c3=new FakeConnection(); c3.ClientHost="?";
+        var c1=new TestConnection(); c1.ClientHost="?";
+        var c2=new TestConnection(); c2.ClientHost="?";
+        var c3=new TestConnection(); c3.ClientHost="?";
         Assert.True(mgr.RegisterConnection("q1", c1));
         Assert.True(mgr.RegisterConnection("q2", c2));
         Assert.True(mgr.RegisterConnection("q3", c3));
@@ -497,8 +497,8 @@ public class PortedConnectionTestsPart2
         var mgr = MakeMgr(new AtherizSettings{MaxConnectionsPerIp=1});
         var real = ConnWithHost("8.8.8.8");
         Assert.True(mgr.RegisterConnection("real1", real));
-        var u1=new FakeConnection(); u1.ClientHost="?";
-        var u2=new FakeConnection(); u2.ClientHost="?";
+        var u1=new TestConnection(); u1.ClientHost="?";
+        var u2=new TestConnection(); u2.ClientHost="?";
         Assert.True(mgr.RegisterConnection("u1", u1));
         Assert.True(mgr.RegisterConnection("u2", u2));
         mgr.Atp.Stop(wait:false);

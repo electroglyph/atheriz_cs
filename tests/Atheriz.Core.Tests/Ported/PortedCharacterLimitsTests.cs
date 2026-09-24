@@ -95,12 +95,12 @@ public class PortedCharacterLimitsTests
         Atheriz.Core.Settings.AtherizSettings.Global.GuestEnabled = true;
         try
         {
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             // Simulate GuestCommand via ServerEvents or direct Guest logic? Use GuestCommand if exists
             var guestCmd = new Atheriz.Core.Commands.UnloggedIn.GuestCommand();
-            // GuestCommand expects a caller with session; we simulate via FakeConnection as caller
+            // GuestCommand expects a caller with session; we simulate via TestConnection as caller
             // GuestCommand.Run is async in Python; in C# it may be sync — check signature
-            var caller = new FakeConnection();
+            var caller = new TestConnection();
             // Use session puppet approach: directly create temporary PC as guest would
             var before = new HashSet<int>(ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));
             var guest = GameObject.Create("LeakGuest", isPc: true);

@@ -87,7 +87,7 @@ public class NetworkLifecycleRegressionTests
     }
 
     [Fact]
-    public void TelnetDispose_DrainsInflightWrites()
+    public async Task TelnetDispose_DrainsInflightWrites()
     {
         // Dispose waits (bounded) for scheduled off-loop writes.
         using var env = GlobalTestEnv.Enter();
@@ -122,7 +122,7 @@ public class NetworkLifecycleRegressionTests
             Assert.True(disposeDone.Wait(TimeSpan.FromSeconds(5)), "Dispose must finish after the write drains");
             Assert.True(disposeThread.Join(TimeSpan.FromSeconds(5)));
             Assert.Null(disposeError);
-            Assert.True(sendTask.Wait(TimeSpan.FromSeconds(5)));
+            await sendTask.WaitAsync(TimeSpan.FromSeconds(5));
             lock (writer.Writes) Assert.Single(writer.Writes);
             Assert.Equal("drain-me", writer.Writes[0]);
         }

@@ -16,7 +16,7 @@ set "PUBLISH_DLL=%PROJECT_ROOT%\publish\Atheriz.Server.dll"
 
 where dotnet >nul 2>nul
 if %errorlevel% neq 0 (
-  echo error: dotnet 8.0.130+ required (see global.json) 1>&2
+  echo error: dotnet 10.0.100+ required (see global.json) 1>&2
   exit /b 1
 )
 

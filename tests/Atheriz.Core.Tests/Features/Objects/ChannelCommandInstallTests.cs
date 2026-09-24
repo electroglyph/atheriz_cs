@@ -32,7 +32,7 @@ public class ChannelCommandInstallTests
     }
 
     [Fact]
-    public void ConcurrentSubscribe_BothCommandsSurvive()
+    public async Task ConcurrentSubscribe_BothCommandsSurvive()
     {
         // Two racing Subscribes both saw a null InternalCmdSet, both
         // allocated, and the second orphaned the first channel's command.
@@ -54,7 +54,7 @@ public class ChannelCommandInstallTests
                 start.SignalAndWait();
                 go.Subscribe(i % 2 == 0 ? chA : chB);
             })).ToArray();
-            Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
+            await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30));
             Assert.True(HasChannelCmd(go, "racechana"));
             Assert.True(HasChannelCmd(go, "racechanb"));
             Assert.Contains(chA.Id, go.ChannelsSnapshot);

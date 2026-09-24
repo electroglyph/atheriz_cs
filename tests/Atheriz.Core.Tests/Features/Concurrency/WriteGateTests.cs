@@ -149,9 +149,9 @@ public class WriteGateTests
         {
             Exception? forkError = null;
             var done = new ManualResetEventSlim(false);
-            var thread = new Thread(() =>
+            var thread = new Thread(async () =>
             {
-                try { using var _ = DbWriteGate.EnterAsync().GetAwaiter().GetResult(); }
+                try { using var _ = await DbWriteGate.EnterAsync(); }
                 catch (Exception ex) { forkError = ex; }
                 finally { done.Set(); }
             })
@@ -181,12 +181,12 @@ public class WriteGateTests
         Exception? forkError = null;
         DbWriteGate.Enter();
         var done = new ManualResetEventSlim(false);
-        var thread = new Thread(() =>
+        var thread = new Thread(async () =>
         {
             try
             {
                 proceed.Wait(TimeSpan.FromSeconds(30));
-                using var hold = DbWriteGate.EnterAsync().GetAwaiter().GetResult();
+                using var hold = await DbWriteGate.EnterAsync();
                 if (DbWriteGate.Semaphore.CurrentCount != 0) throw new Xunit.Sdk.XunitException("adopted take did not hold the semaphore");
             }
             catch (Exception ex) { forkError = ex; }
@@ -217,12 +217,12 @@ public class WriteGateTests
         bool? forkHeldAfterDispose = null;
         DbWriteGate.Enter();
         var done = new ManualResetEventSlim(false);
-        var thread = new Thread(() =>
+        var thread = new Thread(async () =>
         {
             try
             {
                 proceed.Wait(TimeSpan.FromSeconds(30));
-                using (DbWriteGate.EnterAsync().GetAwaiter().GetResult()) { }
+                using (await DbWriteGate.EnterAsync()) { }
                 forkHeldAfterDispose = DbWriteGate.IsHeld;
                 if (DbWriteGate.Semaphore.CurrentCount != 1) throw new Xunit.Sdk.XunitException("adopted lease did not release the semaphore");
             }
@@ -242,13 +242,13 @@ public class WriteGateTests
     }
 
     [Fact]
-    public void EnterAsync_OwnerFlow_NestsWithoutTake()
+    public async Task EnterAsync_OwnerFlow_NestsWithoutTake()
     {
         // Same-flow async re-entry stays a nested no-op lease.
         DbWriteGate.Enter();
         try
         {
-            using var hold = DbWriteGate.EnterAsync().GetAwaiter().GetResult();
+            using var hold = await DbWriteGate.EnterAsync();
             Assert.Equal(0, DbWriteGate.Semaphore.CurrentCount);
             Assert.True(DbWriteGate.IsHeld);
         }

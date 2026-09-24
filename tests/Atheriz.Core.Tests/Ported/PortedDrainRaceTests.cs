@@ -54,7 +54,7 @@ public class PortedDrainRaceTests
         ConnectionManager.GlobalInstance = mgr;
         try
         {
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             var rec = new DrainRecorder();
             int total = 20;
             for (int i=0;i<total;i++) conn.EnqueueInput(rec.MakeHandler(i), new List<object?>(), new Dictionary<string, object?>());
@@ -83,7 +83,7 @@ public class PortedDrainRaceTests
         ConnectionManager.GlobalInstance = mgr;
         try
         {
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             var rec = new DrainRecorder();
             conn.EnqueueInput(rec.MakeHandler("A"), new List<object?>(), new Dictionary<string, object?>());
             // queue must be kept intact on rejection
@@ -118,7 +118,7 @@ public class PortedDrainRaceTests
         ConnectionManager.GlobalInstance = mgr;
         try
         {
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             var blocker = new ManualResetEventSlim(false);
             var rec = new DrainRecorder();
             conn.EnqueueInput(rec.MakeHandler("first", blocker: blocker), new List<object?>(), new Dictionary<string, object?>());
@@ -143,7 +143,7 @@ public class PortedDrainRaceTests
         ConnectionManager.GlobalInstance = mgr;
         try
         {
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             var rec = new DrainRecorder();
             for(int i=0;i<5;i++) conn.EnqueueInput(rec.MakeHandler(i), new List<object?>(), new Dictionary<string, object?>());
             int busy = conn.Sent.Count(s => s.Cmd=="text" && s.Args.FirstOrDefault()?.ToString()?.ToLowerInvariant().Contains("busy")==true);
@@ -178,7 +178,7 @@ public class PortedDrainRaceTests
         ConnectionManager.GlobalInstance = mgr;
         try
         {
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             var rec = new DrainRecorder();
             conn.EnqueueInput(rec.MakeHandler("only"), new List<object?>(), new Dictionary<string, object?>());
             var q = (System.Collections.ICollection)typeof(BaseConnection).GetField("_inputQueue", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(conn)!;
@@ -217,7 +217,7 @@ public class PortedDrainRaceTests
         int savedCounter = (int)counterField.GetValue(null)!;
         try
         {
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             var rec = new DrainRecorder();
             counterField.SetValue(null, 2000);
             conn.EnqueueInput(rec.MakeHandler("only"), new List<object?>(), new Dictionary<string, object?>());

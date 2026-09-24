@@ -30,7 +30,7 @@ public sealed class DispatchLagSnapshotTests
     }
 
     [Fact]
-    public void Dispatch_LagCheckConcurrentSwap_NeverThrows()
+    public async Task Dispatch_LagCheckConcurrentSwap_NeverThrows()
     {
         CommandRegistry.Reset();
         var puppet = new GameObject { Name = "Hero" };
@@ -61,7 +61,9 @@ public sealed class DispatchLagSnapshotTests
         finally
         {
             cts.Cancel();
-            Assert.True(Task.WaitAll(swappers.ToArray(), TimeSpan.FromSeconds(30)), "swappers did not stop");
+            var swapAll = Task.WhenAll(swappers);
+            var swapWinner = await Task.WhenAny(swapAll, Task.Delay(TimeSpan.FromSeconds(30)));
+            Assert.True(swapWinner == swapAll, "swappers did not stop");
             CommandDispatcher.LagCheck = null;
             CommandRegistry.Reset();
         }

@@ -98,7 +98,7 @@ public class PersistenceRegressionTests
     }
 
     [Fact]
-    public void GateTryEnter_TimesOutWhenHeld_SucceedsAfterRelease()
+    public async Task GateTryEnter_TimesOutWhenHeld_SucceedsAfterRelease()
     {
         using var env = GlobalTestEnv.Enter();
         using var held = new ManualResetEventSlim(false);
@@ -121,7 +121,7 @@ public class PersistenceRegressionTests
         finally
         {
             release.Set();
-            holder.Wait(TimeSpan.FromSeconds(10));
+            await holder.WaitAsync(TimeSpan.FromSeconds(10));
         }
         Assert.True(DbWriteGate.TryEnter(TimeSpan.FromSeconds(5)));
         DbWriteGate.Exit();

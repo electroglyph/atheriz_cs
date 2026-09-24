@@ -29,7 +29,7 @@ public class ConnectionLifetimeTests
     }
 
     [Fact]
-    public void DroppedInput_IsRetriedAfterPoolFrees()
+    public async Task DroppedInput_IsRetriedAfterPoolFrees()
     {
         // Pin: pool-full drops schedule RetryDrain chains (50 ms) that deliver
         // once capacity returns — no silent loss on transient pressure.
@@ -44,7 +44,8 @@ public class ConnectionLifetimeTests
                 new Action<BaseConnection, List<object?>, Dictionary<string, object?>>((c, a, k) => tcs.TrySetResult(true)),
                 new List<object?>(), new Dictionary<string, object?>());
             mgr.Atp.QueueLimit = 10000;
-            Assert.True(tcs.Task.Wait(TimeSpan.FromSeconds(2)), "dropped input was never retried");
+            var retryWinner = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+            Assert.True(retryWinner == tcs.Task, "dropped input was never retried");
         }
         finally
         {

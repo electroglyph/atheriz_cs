@@ -1,3 +1,4 @@
+#pragma warning disable xUnit1031 // Thread-affine RWL held across the wait: awaiting would hop threads and break lock affinity (ScriptChild_Read_BlocksUnderWriteLock).
 using System.Text.Json;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
@@ -141,7 +142,8 @@ public class ObjectMoveAccountScriptTests
                 Assert.False(task.Wait(TimeSpan.FromMilliseconds(300)), "Child read completed without acquiring the read lock");
             }
             finally { script.SyncRoot.ExitWriteLock(); }
-            Assert.True(task.Wait(TimeSpan.FromSeconds(10)), "Child read did not finish after the lock was released");
+            var childWinner = Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(10))).GetAwaiter().GetResult();
+            Assert.True(childWinner == task, "Child read did not finish after the lock was released");
             Assert.Same(child, task.Result);
         }
         finally { ObjectRegistry.ClearAll(); }

@@ -16,7 +16,7 @@ public sealed class RaceFixRegressionTests
     // leave it listed in both rooms' contents. Pre-fix the loser proceeded
     // with a stale source (multiHome ~6/25 rounds in the /tmp probe).
     [Fact]
-    public void MoveTo_ConcurrentSameObjectMoves_NeverDualHomed()
+    public async Task MoveTo_ConcurrentSameObjectMoves_NeverDualHomed()
     {
         using var env = GlobalTestEnv.Enter();
         var r1 = new Node(new Coord("racearea", 0, 0, 0));
@@ -42,7 +42,7 @@ public sealed class RaceFixRegressionTests
                 Assert.True(mover.MoveTo(r1, force: true, announce: false));
                 var tA = Task.Run(() => { barrier.SignalAndWait(); mover.MoveTo(r2, force: true, announce: false); });
                 var tB = Task.Run(() => { barrier.SignalAndWait(); mover.MoveTo(r3, force: true, announce: false); });
-                Assert.True(Task.WaitAll([tA, tB], TimeSpan.FromSeconds(30)));
+                await Task.WhenAll([tA, tB]).WaitAsync(TimeSpan.FromSeconds(30));
                 var holders = rooms.Where(r => r.ContentsSnapshot.Contains(mover.Id)).ToList();
                 var loc = mover.ResolveLocationObject();
                 Assert.True(holders.Count == 1 && loc is not null && holders[0].Id == loc.Id);
@@ -55,7 +55,7 @@ public sealed class RaceFixRegressionTests
     // orphan a live channel command. Statistical pin (window is narrow;
     // the /tmp probe fires ~2/5000): fails pre-fix with high probability.
     [Fact]
-    public void Subscribe_Delete_Race_NeverOrphansCommand()
+    public async Task Subscribe_Delete_Race_NeverOrphansCommand()
     {
         using var env = GlobalTestEnv.Enter();
         for (int i = 0; i < 3000; i++)
@@ -70,7 +70,7 @@ public sealed class RaceFixRegressionTests
             using var start = new Barrier(2);
             var tA = Task.Run(() => { start.SignalAndWait(); peer.Subscribe(ch); });
             var tB = Task.Run(() => { start.SignalAndWait(); ch.Delete(); });
-            Assert.True(Task.WaitAll([tA, tB], TimeSpan.FromSeconds(30)));
+            await Task.WhenAll([tA, tB]).WaitAsync(TimeSpan.FromSeconds(30));
             bool subscribed = peer.ChannelsSnapshot.Contains(ch.Id);
             bool hasCmd = peer.InternalCmdSet?.GetAll().Any(c => c.Key == "racechan" + i) == true;
             Assert.True(subscribed == hasCmd && (!subscribed || !ch.IsDeleted));
@@ -91,7 +91,7 @@ public sealed class RaceFixRegressionTests
     // R1: racing first Parser access must publish one complete instance.
     // Characterization pin (x86/ARM informal — the fix makes it formal).
     [Fact]
-    public void Parser_ConcurrentFirstAccess_PublishesCompleteInstance()
+    public async Task Parser_ConcurrentFirstAccess_PublishesCompleteInstance()
     {
         using var env = GlobalTestEnv.Enter();
         var cmd = new SlowSetupCommand();
@@ -102,7 +102,7 @@ public sealed class RaceFixRegressionTests
             barrier.SignalAndWait();
             seen[i] = cmd.Parser;
         })).ToArray();
-        Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
+        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30));
         foreach (var p in seen) Assert.Same(seen[0], p);
         Assert.Contains("target", seen[0]!.FormatHelp());
     }
@@ -111,7 +111,7 @@ public sealed class RaceFixRegressionTests
     // Characterization pin (production serializes via Command._parserLock;
     // the cache lock makes direct sharing safe too).
     [Fact]
-    public void ParseArgs_ConcurrentSharedParser_NoFailures()
+    public async Task ParseArgs_ConcurrentSharedParser_NoFailures()
     {
         using var env = GlobalTestEnv.Enter();
         var cmd = new SlowSetupCommand();
@@ -126,7 +126,7 @@ public sealed class RaceFixRegressionTests
             for (int i = 0; i < 5000; i++) parser.ParseArgs(["x"]);
             Interlocked.Increment(ref ok);
         })).ToArray();
-        Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(60)));
+        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(60));
         Assert.Equal(8, ok);
     }
 

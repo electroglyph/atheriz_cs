@@ -175,7 +175,7 @@ public class PortedCriticalFixesTests
         using var env = GlobalTestEnv.Enter();
         // C# DTO gate: Python dill -> JSON, owning loop concept is Python asyncio-specific.
         // In C# BaseConnection uses AsyncThreadPool, not asyncio loop. Verify it does NOT require loop and EnqueueInput works without loop.
-        var conn = new FakeConnection("x");
+        var conn = new TestConnection("x");
         // Should not throw when enqueueing without loop
         var ex = Record.Exception(() => conn.EnqueueInput((Action<BaseConnection, List<object?>, Dictionary<string, object?>>)((c, a, k) => {}), new List<object?>(), new Dictionary<string, object?>()));
         Assert.Null(ex);
@@ -187,8 +187,8 @@ public class PortedCriticalFixesTests
     [Fact] public void ConnectionWithCapturedLoopReturnsIt()
     {
         using var env = GlobalTestEnv.Enter();
-        // Gate: verify FakeConnection captures thread and can resolve pool
-        var conn = new FakeConnection("s2");
+        // Gate: verify TestConnection captures thread and can resolve pool
+        var conn = new TestConnection("s2");
         Assert.Equal("s2", conn.SessionId);
         Assert.NotNull(conn.Session);
         Assert.True(conn.IsOnLoopThread());
@@ -198,7 +198,7 @@ public class PortedCriticalFixesTests
     [Fact] public void ConnectionCrossThreadResolvesToOwningLoop()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection("s3");
+        var conn = new TestConnection("s3");
         // cross-thread IsOnLoopThread should be false for worker thread, true for owning thread
         bool? workerResult = null;
         var t = new Thread(() => { workerResult = conn.IsOnLoopThread(); });

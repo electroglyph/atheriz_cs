@@ -13,17 +13,19 @@ public class PromptConcurrencyTests
     {
         // A second Prompt (Session.cs:244-295) completes the previous future with
         // "" and installs its own; answering the live future resolves it.
-        var conn = new FakeConnection("prompt-seq");
+        var conn = new TestConnection("prompt-seq");
         var sess = conn.Session;
         var first = sess.Prompt("first");
         Assert.False(first.IsCompleted);
         var second = sess.Prompt("second");
-        Assert.True(first.Wait(TimeSpan.FromSeconds(30)), "superseded prompt never completed");
+        var firstWinner = await Task.WhenAny(first, Task.Delay(TimeSpan.FromSeconds(30)));
+        Assert.True(firstWinner == first, "superseded prompt never completed");
         Assert.Equal("", await first);
         Assert.False(second.IsCompleted);
         Assert.NotNull(sess.InputFuture);
         sess.InputFuture!.TrySetResult("answer");
-        Assert.True(second.Wait(TimeSpan.FromSeconds(30)), "live prompt never completed");
+        var secondWinner = await Task.WhenAny(second, Task.Delay(TimeSpan.FromSeconds(30)));
+        Assert.True(secondWinner == second, "live prompt never completed");
         Assert.Equal("answer", await second);
     }
 
@@ -33,7 +35,7 @@ public class PromptConcurrencyTests
         // Two barrier-released Prompts serialize on the session lock
         // (Session.cs:251-269): the loser still completes, exactly one prompt
         // with "" and the surviving future with the client's answer.
-        var conn = new FakeConnection("prompt-par");
+        var conn = new TestConnection("prompt-par");
         var sess = conn.Session;
         using var barrier = new Barrier(3);
         var tasks = new Task<string>[2];
@@ -70,7 +72,8 @@ public class PromptConcurrencyTests
         Assert.Equal("", await done);
         Assert.NotNull(sess.InputFuture);
         sess.InputFuture!.TrySetResult("answer");
-        Assert.True(pending.Wait(TimeSpan.FromSeconds(30)), "live prompt never completed");
+        var pendingWinner = await Task.WhenAny(pending, Task.Delay(TimeSpan.FromSeconds(30)));
+        Assert.True(pendingWinner == pending, "live prompt never completed");
         Assert.Equal("answer", await pending);
     }
 }

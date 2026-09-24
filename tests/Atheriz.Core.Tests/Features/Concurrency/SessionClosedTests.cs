@@ -25,7 +25,7 @@ public class SessionClosedTests
     [Fact]
     public void TryAttach_ClosedSession_RefusesNotAvailable()
     {
-        var conn = new FakeConnection("closed-attach");
+        var conn = new TestConnection("closed-attach");
         conn.Session.AtDisconnect();
         var character = new GameObject { Name = "ClosedChar" };
 
@@ -40,7 +40,7 @@ public class SessionClosedTests
     public void TryAttach_OpenSession_Attaches()
     {
         // Positive control: the flag does not break normal attach.
-        var conn = new FakeConnection("open-attach");
+        var conn = new TestConnection("open-attach");
         var character = new GameObject { Name = "OpenChar" };
 
         Assert.True(SessionPuppetHelper.TryAttach(conn, character));
@@ -54,7 +54,7 @@ public class SessionClosedTests
         // A puppet reference landing on a dead session (attach/teardown race)
         // must not dispatch: late input is dropped.
         var funcs = new InputFuncs();
-        var conn = new FakeConnection("closed-text");
+        var conn = new TestConnection("closed-text");
         var character = new GameObject { Name = "ClosedText" };
         conn.Session.Puppet = character;
         conn.Session.AtDisconnect();

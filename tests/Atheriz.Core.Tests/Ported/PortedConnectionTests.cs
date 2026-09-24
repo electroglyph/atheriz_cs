@@ -180,17 +180,17 @@ public class PortedConnectionTests
         Assert.Contains("hello", args[0]?.ToString());
     }
 
-    // ----- TestFakeConnectionFromFakes -----
+    // ----- TestConnectionFromFakes -----
     [Fact] public void FakeInheritsBase()
     {
         using var env = GlobalTestEnv.Enter();
-        var fc = new FakeConnection();
+        var fc = new TestConnection();
         Assert.IsAssignableFrom<BaseConnection>(fc);
     }
     [Fact] public void FakeRecordsMsgs()
     {
         using var env = GlobalTestEnv.Enter();
-        var fc = new FakeConnection();
+        var fc = new TestConnection();
         fc.Msg("hello");
         Assert.Single(fc.Sent);
         Assert.Equal("text", fc.Sent[0].Cmd);
@@ -199,7 +199,7 @@ public class PortedConnectionTests
     [Fact] public void FakeClose()
     {
         using var env = GlobalTestEnv.Enter();
-        var fc = new FakeConnection();
+        var fc = new TestConnection();
         fc.Close();
         Assert.True(fc.Closed);
     }
@@ -308,7 +308,7 @@ public class PortedConnectionTests
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeManager();
-        var c = new FakeConnection();
+        var c = new TestConnection();
         Assert.True(mgr.RegisterConnection("c1", c));
         Assert.Same(c, mgr.ConnectionsSnapshot["c1"]);
         mgr.Atp.Stop(wait:false);
@@ -318,9 +318,9 @@ public class PortedConnectionTests
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeManager();
         Assert.Equal(0, mgr.ConnectionCount);
-        mgr.RegisterConnection("c1", new FakeConnection());
+        mgr.RegisterConnection("c1", new TestConnection());
         Assert.Equal(1, mgr.ConnectionCount);
-        mgr.RegisterConnection("c2", new FakeConnection());
+        mgr.RegisterConnection("c2", new TestConnection());
         Assert.Equal(2, mgr.ConnectionCount);
         mgr.Atp.Stop(wait:false);
     }
@@ -328,7 +328,7 @@ public class PortedConnectionTests
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeManager();
-        var c1 = new FakeConnection(); var c2 = new FakeConnection();
+        var c1 = new TestConnection(); var c2 = new TestConnection();
         mgr.RegisterConnection("c1", c1);
         mgr.RegisterConnection("c1", c2);
         Assert.Same(c2, mgr.ConnectionsSnapshot["c1"]);
@@ -339,7 +339,7 @@ public class PortedConnectionTests
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeManager();
-        var c = new FakeConnection();
+        var c = new TestConnection();
         mgr.RegisterConnection("c1", c);
         mgr.Disconnect(c);
         Assert.DoesNotContain("c1", mgr.ConnectionsSnapshot.Keys);
@@ -355,7 +355,7 @@ public class PortedConnectionTests
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeManager();
-        var c = new FakeConnection();
+        var c = new TestConnection();
         // Replace session with mock that records AtDisconnect (faithful to c.session.at_disconnect = MagicMock())
         var mockSess = new MockSession(c);
         // Copy timing and puppet state if needed
@@ -375,7 +375,7 @@ public class PortedConnectionTests
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeManager();
-        var c = new FakeConnection();
+        var c = new TestConnection();
         // Python sets c.session = None — set via reflection to null
         var sessField = typeof(BaseConnection).GetField("<Session>k__BackingField", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         sessField!.SetValue(c, null);
@@ -389,7 +389,7 @@ public class PortedConnectionTests
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeManager();
-        var c1 = new FakeConnection(); var c2 = new FakeConnection();
+        var c1 = new TestConnection(); var c2 = new TestConnection();
         mgr.RegisterConnection("c1", c1); mgr.RegisterConnection("c2", c2);
         Assert.Equal(2, mgr.ConnectionCount);
         mgr.Disconnect(c1);
@@ -400,7 +400,7 @@ public class PortedConnectionTests
     {
         using var env = GlobalTestEnv.Enter();
         var mgr = MakeManager();
-        var c = new FakeConnection();
+        var c = new TestConnection();
         mgr.Disconnect(c);
         Assert.Equal(0, mgr.ConnectionCount);
         mgr.Atp.Stop(wait:false);

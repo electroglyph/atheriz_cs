@@ -30,9 +30,9 @@ public class PortedMapEditWebSocketAuthRateLimitsTests
         using var env = GlobalTestEnv.Enter();
         var settings = new AtherizSettings { MaxConnectionsPerIp = 2 };
         var mgr = new ConnectionManager(settings: settings);
-        var c0 = new FakeConnection("c0"); c0.ClientHost = "1.1.1.1";
-        var c1 = new FakeConnection("c1"); c1.ClientHost = "1.1.1.1";
-        var c2 = new FakeConnection("c2"); c2.ClientHost = "?";
+        var c0 = new TestConnection("c0"); c0.ClientHost = "1.1.1.1";
+        var c1 = new TestConnection("c1"); c1.ClientHost = "1.1.1.1";
+        var c2 = new TestConnection("c2"); c2.ClientHost = "?";
         Assert.True(mgr.RegisterConnection("c0", c0));
         Assert.True(mgr.RegisterConnection("c1", c1));
         Assert.True(mgr.RegisterConnection("c2", c2));
@@ -56,7 +56,7 @@ public class PortedMapEditWebSocketAuthRateLimitsTests
         {
             InputFuncs.MapHandlerFactory = () => mh;
             InputFuncs.NodeHandlerFactory = () => new NodeHandler();
-            var nbConn = new FakeConnection("nb"); nbConn.ClientHost="1.2.3.4";
+            var nbConn = new TestConnection("nb"); nbConn.ClientHost="1.2.3.4";
             var nbPuppet = GameObject.Create("player"); nbPuppet.PrivilegeLevel=Privilege.Player;
             nbConn.Session.Puppet = nbPuppet;
             funcs.MapEditHandler(nbConn, new List<object?>{key, 0, new List<object?>{ new List<object?>{0,0,"x"}}}, new Dictionary<string,object?>());
@@ -81,7 +81,7 @@ public class PortedMapEditWebSocketAuthRateLimitsTests
         {
             InputFuncs.MapHandlerFactory = () => mh;
             InputFuncs.NodeHandlerFactory = () => new NodeHandler();
-            var conn = new FakeConnection("b"); conn.ClientHost="1.2.3.4";
+            var conn = new TestConnection("b"); conn.ClientHost="1.2.3.4";
             var puppet = GameObject.Create("builder"); puppet.PrivilegeLevel=Privilege.Builder;
             conn.Session.Puppet = puppet;
             funcs.MapEditHandler(conn, new List<object?>{key, 0, new List<object?>{ new List<object?>{0,0,"x"}}}, new Dictionary<string,object?>());
@@ -107,7 +107,7 @@ public class PortedMapEditWebSocketAuthRateLimitsTests
         {
             InputFuncs.MapHandlerFactory = () => mh;
             InputFuncs.NodeHandlerFactory = () => new NodeHandler();
-            var conn = new FakeConnection("nb2"); conn.ClientHost="1.2.3.4";
+            var conn = new TestConnection("nb2"); conn.ClientHost="1.2.3.4";
             var puppet = GameObject.Create("player2"); puppet.PrivilegeLevel=Privilege.Player;
             conn.Session.Puppet = puppet;
             // Call MapValidateMovesHandler with valid key and moves
@@ -164,7 +164,7 @@ public class PortedMapEditWebSocketAuthRateLimitsTests
             }
             Assert.False(checkCalled);
             // Also check that banned message would be sent and close called (simulate)
-            var fakeConn = new FakeConnection();
+            var fakeConn = new TestConnection();
             fakeConn.Msg("banned");
             Assert.Contains(fakeConn.Sent, s => s.Args.FirstOrDefault()?.ToString()?.ToLowerInvariant().Contains("banned") ?? false);
             acc.IsBanned = false;

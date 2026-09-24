@@ -345,7 +345,6 @@ public class PortedOpenExitMapNounSpamWanderTests
         var temp=env.TempPath;
         Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", temp);
         // ensure salt for account creation
-        global::Atheriz.Core.Tests.GlobalTestEnv.EnterAsync().Wait(); // not needed; we already in env with salt?
         // Run spam; it will use ObjectRegistry and SaveObjects saving to "save" path not temp? but we just check that accounts created in registry
         new SpamCommand().Run(c, pa);
         var accounts=ObjectRegistry.FilterBy(o=>o.IsAccount && o.Name.StartsWith("account"));

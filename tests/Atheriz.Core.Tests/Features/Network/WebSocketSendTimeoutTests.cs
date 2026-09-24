@@ -63,13 +63,13 @@ public sealed class WebSocketSendTimeoutTests
     }
 
     [Fact]
-    public void LockTimeout_DropsQuietly_WithoutAbortOrSend()
+    public async Task LockTimeout_DropsQuietly_WithoutAbortOrSend()
     {
         var socket = new InstantWebSocket();
         var conn = new WebSocketConnection(socket, "lockto", null, "9.9.9.9");
         var sendLock = (SemaphoreSlim)typeof(WebSocketConnection)
             .GetField("_sendLock", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(conn)!;
-        sendLock.Wait();
+        await sendLock.WaitAsync();
         try
         {
             conn.SendCommand("text", ["held"], []);

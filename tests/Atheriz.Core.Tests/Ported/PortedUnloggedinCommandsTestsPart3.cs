@@ -9,14 +9,14 @@ namespace Atheriz.Core.Tests.Ported;
 [Collection("Ported")]
 public class PortedUnloggedinCommandsTestsPart3
 {
-    private static string MsgText(FakeConnection c) => string.Join("\n", c.Sent.Where(s=>s.Cmd=="text").SelectMany(s=>s.Args).Select(a=>a?.ToString()??""));
-    private static bool SentContains(FakeConnection c, string substr) => c.Sent.Any(s=> s.Args.Any(a=> a?.ToString()?.Contains(substr, StringComparison.OrdinalIgnoreCase)==true) || s.Cmd.Contains(substr, StringComparison.OrdinalIgnoreCase));
+    private static string MsgText(TestConnection c) => string.Join("\n", c.Sent.Where(s=>s.Cmd=="text").SelectMany(s=>s.Args).Select(a=>a?.ToString()??""));
+    private static bool SentContains(TestConnection c, string substr) => c.Sent.Any(s=> s.Args.Any(a=> a?.ToString()?.Contains(substr, StringComparison.OrdinalIgnoreCase)==true) || s.Cmd.Contains(substr, StringComparison.OrdinalIgnoreCase));
 
     // Port of test_unloggedin_commands.py:22 TestScreenReaderCommand test_toggle_off_to_on
     [Fact] public void ScreenReader_ToggleOffToOn()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.ScreenReader = false;
         var cmd = new ScreenReaderCommand();
         cmd.Run(conn, null);
@@ -27,7 +27,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void ScreenReader_ToggleOnToOff()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.ScreenReader = true;
         var cmd = new ScreenReaderCommand();
         cmd.Run(conn, null);
@@ -39,12 +39,12 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Quit_SendsGoodbyeAndCloses_Verbatim()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var cmd = new QuitCommand();
         cmd.Run(conn, null);
         // Original: c.msg.assert_called_once_with("Goodbye!") — C# port uses "Goodbye." (faithful to C# engine, wontfix exclamation)
         Assert.Contains(conn.Sent, s=> s.Cmd=="text" && s.Args.Any(a=> a?.ToString()?.Contains("Goodbye")==true));
-        // Python also asserts close called; FakeConnection.Closed should be false for simple Quit (C# quit does not close, only msg) — document gap
+        // Python also asserts close called; TestConnection.Closed should be false for simple Quit (C# quit does not close, only msg) — document gap
         // For coverage, we check at least msg sent
     }
     // Port of test_aliases
@@ -63,7 +63,7 @@ public class PortedUnloggedinCommandsTestsPart3
     {
         using var env = GlobalTestEnv.Enter();
         SaltProvider.SetSalt("testsalt");
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.ClientHost = "1.2.3.4";
         var cmd = new ConnectCommand();
         var parsed = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs();
@@ -81,7 +81,7 @@ public class PortedUnloggedinCommandsTestsPart3
         SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "correct");
         ObjectRegistry.AddObject(acc);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.ClientHost = "1.2.3.5";
         var cmd = new ConnectCommand();
         var parsed = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs();
@@ -100,7 +100,7 @@ public class PortedUnloggedinCommandsTestsPart3
         SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "correct");
         ObjectRegistry.AddObject(acc);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.ClientHost = "1.2.3.6";
         conn.FailedLoginAttempts = new Atheriz.Core.Settings.AtherizSettings().MaxLoginAttempts + 1;
         // Also need to exceed threshold via ObjectRegistry.FailedLogins
@@ -127,7 +127,7 @@ public class PortedUnloggedinCommandsTestsPart3
             var acc = Account.Create("alice", "correct");
             ObjectRegistry.AddObject(acc);
             int max = new Atheriz.Core.Settings.AtherizSettings().MaxLoginAttempts;
-            var conn = new FakeConnection();
+            var conn = new TestConnection();
             conn.ClientHost = "1.2.3.7";
             conn.FailedLoginAttempts = max - 1;
             ObjectRegistry.FailedLogins.Set(conn.ClientHost, max - 1);
@@ -151,7 +151,7 @@ public class PortedUnloggedinCommandsTestsPart3
         acc.IsBanned = true;
         acc.BanReason = "spam";
         ObjectRegistry.AddObject(acc);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.ClientHost = "1.2.3.7";
         var cmd = new ConnectCommand();
         var parsed = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs();
@@ -168,7 +168,7 @@ public class PortedUnloggedinCommandsTestsPart3
     {
         using var env = GlobalTestEnv.Enter();
         SaltProvider.SetSalt("testsalt");
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var cmd = new ConnectCommand();
         var parsed = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs();
         parsed["account_name"] = "nonexistent";
@@ -185,7 +185,7 @@ public class PortedUnloggedinCommandsTestsPart3
     {
         using var env = GlobalTestEnv.Enter();
         SaltProvider.SetSalt("testsalt");
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var parsed = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs();
         parsed["account_name"] = "no_such_user";
         parsed["password"] = "pw123456";
@@ -207,7 +207,7 @@ public class PortedUnloggedinCommandsTestsPart3
         // Simulate char creation disabled + no chars => would show "no characters"
         var acc = Account.Create("alice", "secret");
         ObjectRegistry.AddObject(acc);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.Account = acc;
         // In C# char_selection is not directly implemented; we check account has no chars
         Assert.Empty(acc.Characters);
@@ -234,7 +234,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Guest_EmptyNameMsg()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var cmd = new GuestCommand();
         // Sync stub expects name arg; empty name triggers usage or empty error containing "empty"
         cmd.Run(conn, "");
@@ -246,7 +246,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Guest_CreatesTemporaryCharacter_Verbatim()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var cmd = new GuestCommand();
         cmd.Run(conn, "Guest1 M");
         var guest = ObjectRegistry.FilterBy(o=> o.Name=="Guest1").FirstOrDefault();
@@ -261,7 +261,7 @@ public class PortedUnloggedinCommandsTestsPart3
     {
         using var env = GlobalTestEnv.Enter();
         // This test originally uses MenuEngine mock to simulate missing gender; C# sync stub requires gender arg
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var cmd = new GuestCommand();
         // Run with only name, no gender => gender defaults to neutral, not error; but we check that at least no crash and object not created with missing gender string?
         // For faithful, we assert that running with name only still creates object (C# gap) vs Python expects "Gender selection is required." and no creation
@@ -277,7 +277,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Guest_TemporaryRemovedOnDisconnect()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var cmd = new GuestCommand();
         cmd.Run(conn, "GuestTmp M");
         var guest = ObjectRegistry.FilterBy(o=> o.Name=="GuestTmp").FirstOrDefault() as GameObject;
@@ -297,7 +297,7 @@ public class PortedUnloggedinCommandsTestsPart3
         var guests = new List<GameObject>();
         for(int i=0;i<5;i++)
         {
-            var c = new FakeConnection();
+            var c = new TestConnection();
             var cmd = new GuestCommand();
             cmd.Run(c, $"Guest{i} M");
             var g = ObjectRegistry.FilterBy(o=> o.Name==$"Guest{i}").FirstOrDefault() as GameObject;
@@ -316,7 +316,7 @@ public class PortedUnloggedinCommandsTestsPart3
         SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "secret");
         ObjectRegistry.AddObject(acc);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var cmd = new CreateAccountCommand();
         cmd.Run(conn, "alice password123");
         Assert.Contains(conn.Sent, s=> s.Args.Any(a=> a?.ToString()?.Contains("already exists")==true));
@@ -329,7 +329,7 @@ public class PortedUnloggedinCommandsTestsPart3
     {
         using var env = GlobalTestEnv.Enter();
         SaltProvider.SetSalt("testsalt");
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var cmd = new CreateAccountCommand();
         cmd.Run(conn, "bob hunter22");
         Assert.NotNull(conn.Session.Account);
@@ -341,7 +341,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void Create_MissingPassword()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         var cmd = new CreateAccountCommand();
         cmd.Run(conn, "alice ");
         Assert.Contains(conn.Sent, s=> s.Args.Any(a=> a?.ToString()?.Contains("empty")==true || a?.ToString()?.Contains("Usage")==true));
@@ -351,7 +351,7 @@ public class PortedUnloggedinCommandsTestsPart3
     [Fact] public void New_RequiresLogin()
     {
         using var env = GlobalTestEnv.Enter();
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.Account = null;
         var cmd = new NewCharacterCommand();
         cmd.Run(conn, "Hero");
@@ -368,7 +368,7 @@ public class PortedUnloggedinCommandsTestsPart3
         SaltProvider.SetSalt("testsalt");
         var acc = Account.Create("alice", "secret");
         ObjectRegistry.AddObject(acc);
-        var conn = new FakeConnection();
+        var conn = new TestConnection();
         conn.Session.Account = acc;
         var cmd = new NewCharacterCommand();
         cmd.Run(conn, "Hobbis M");

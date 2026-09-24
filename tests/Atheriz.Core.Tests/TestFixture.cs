@@ -1,5 +1,5 @@
+#pragma warning disable xUnit1031 // Enter/ExitSync expose a synchronous fixture API over async setup/teardown
 using System.Diagnostics;
-using System.Reflection;
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Network;
@@ -117,15 +117,7 @@ public static class GlobalTestEnv
         try { NodeHandler.SetCurrent(null); } catch { }
     }
 
-    private static string? GetCurrentSalt()
-    {
-        try
-        {
-            var f = typeof(SaltProvider).GetField("_salt", BindingFlags.NonPublic | BindingFlags.Static);
-            return f?.GetValue(null) as string;
-        }
-        catch { return null; }
-    }
+    private static string? GetCurrentSalt() => SaltProvider.CurrentSaltForTests;
 
     private static void ClearTickerIfExists()
     {

@@ -125,6 +125,21 @@ You can override with `appsettings.Development.json` or `ATHERIZ_` environment v
 
 Game folders require `GameSettings.cs` + `*.csproj` (created by `new`). Running a game-folder command outside a game folder will fail with `Cannot determine database path` — create a game folder first.
 
+### telnet_cs pin
+
+`telnet_cs` is pre-1.0 and ships breaking changes between minor versions (its README calls this out), so the
+package stays exact-pinned in `Directory.Packages.props` — float only deliberately. The Atheriz telnet adapter
+(`TelnetCsWriter` / `TelnetProtocol`) targets the 0.19.0 contract: the ECHO API (`ServerSession.SetEchoAsync` /
+`WriteWithEchoAsync`, new in 0.13.0), the clean-close guarantee (peer FIN / TLS close_notify unwind the
+session), the latched handshake-deadline mapping (`TimeoutException`, never raw OCE), the end-of-stream drain
+(no CR LF truncation), and the single verdict filter (`AcceptFilter` takes `AcceptDecision`; the bool form is
+gone). 0.17.0–0.19.0 add nothing the adapter uses: 0.17 adds a client-side `CreateAsync` factory and latches
+the TLS flag at session construction (MCCP correctly refused over TLS); 0.18 renames only client-side/relocated
+types (`BaseClient` to `TelnetSessionBase`, `MccpWriteFilter` to `telnet_cs.IO`, `DuplexEnd` top-level) and folds
+`ServerSession.SetTimeout` into the settable `Timeout` property (the adapter never calls it); 0.19 removes the
+blocking `Client` constructors (`CreateAsync`-only; the adapter never constructs a client). No wire, preset, or
+default changes.
+
 ## Project Layout
 
 ```
