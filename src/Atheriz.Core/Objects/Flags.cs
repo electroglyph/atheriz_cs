@@ -9,78 +9,22 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public sealed class Flags
 {
-    private bool _isPc;
-    private bool _isNpc;
-    private bool _isItem;
-    private bool _isMapable;
-    private bool _isContainer;
-    private bool _isScript;
-    private bool _isTickable;
-    private bool _isAccount;
-    private bool _isChannel;
-    private bool _isNode;
-    private bool _isModified = true; // FLAG_DEFAULTS["is_modified"] = True
-    private bool _isDeleted;
-    private bool _isConnected;
-    private bool _isTemporary;
-    private bool _isBanned;
-    private bool _canHear;
-
-    public bool IsPc { get => _isPc; set => _isPc = value; }
-    public bool IsNpc { get => _isNpc; set => _isNpc = value; }
-    public bool IsItem { get => _isItem; set => _isItem = value; }
-    public bool IsMapable { get => _isMapable; set => _isMapable = value; }
-    public bool IsContainer { get => _isContainer; set => _isContainer = value; }
-    public bool IsScript { get => _isScript; set => _isScript = value; }
-    public bool IsTickable { get => _isTickable; set => _isTickable = value; }
-    public bool IsAccount { get => _isAccount; set => _isAccount = value; }
-    public bool IsChannel { get => _isChannel; set => _isChannel = value; }
-    public bool IsNode { get => _isNode; set => _isNode = value; }
-    public bool IsModified { get => _isModified; set => _isModified = value; }
-    public bool IsDeleted { get => _isDeleted; set => _isDeleted = value; }
-    public bool IsConnected { get => _isConnected; set => _isConnected = value; }
-    public bool IsTemporary { get => _isTemporary; set => _isTemporary = value; }
-    public bool IsBanned { get => _isBanned; set => _isBanned = value; }
-    public bool CanHear { get => _canHear; set => _canHear = value; }
-
-    /// <summary>
-    /// Guard-set-return core for <see cref="TrySet"/>: assigns only when the
-    /// value actually changes, reporting whether a change happened.
-    /// </summary>
-    private static bool SetIfChanged(ref bool field, bool value)
-    {
-        if (field == value) return false;
-        field = value;
-        return true;
-    }
-
-    /// <summary>
-    /// Tries to set a flag by name (Python <c>__setattr__</c> / FLAG_DEFAULTS key).
-    /// Returns true if value changed. Mirrors dynamic flag loop in <c>base_flags.Flags.__init__</c>.
-    /// </summary>
-    public bool TrySet(string name, bool value)
-    {
-        switch (name)
-        {
-            case nameof(IsPc): case "is_pc": case "_isPc": return SetIfChanged(ref _isPc, value);
-            case nameof(IsNpc): case "is_npc": case "_isNpc": return SetIfChanged(ref _isNpc, value);
-            case nameof(IsItem): case "is_item": case "_isItem": return SetIfChanged(ref _isItem, value);
-            case nameof(IsMapable): case "is_mapable": case "_isMapable": return SetIfChanged(ref _isMapable, value);
-            case nameof(IsContainer): case "is_container": case "_isContainer": return SetIfChanged(ref _isContainer, value);
-            case nameof(IsScript): case "is_script": case "_isScript": return SetIfChanged(ref _isScript, value);
-            case nameof(IsTickable): case "is_tickable": case "_is_tickable": case "_isTickable": return SetIfChanged(ref _isTickable, value);
-            case nameof(IsAccount): case "is_account": case "_isAccount": return SetIfChanged(ref _isAccount, value);
-            case nameof(IsChannel): case "is_channel": case "_isChannel": return SetIfChanged(ref _isChannel, value);
-            case nameof(IsNode): case "is_node": case "_isNode": return SetIfChanged(ref _isNode, value);
-            case nameof(IsModified): case "is_modified": case "_isModified": return SetIfChanged(ref _isModified, value);
-            case nameof(IsDeleted): case "is_deleted": case "_isDeleted": return SetIfChanged(ref _isDeleted, value);
-            case nameof(IsConnected): case "is_connected": case "_isConnected": return SetIfChanged(ref _isConnected, value);
-            case nameof(IsTemporary): case "is_temporary": case "_isTemporary": return SetIfChanged(ref _isTemporary, value);
-            case nameof(IsBanned): case "is_banned": case "_isBanned": return SetIfChanged(ref _isBanned, value);
-            case nameof(CanHear): case "can_hear": case "_canHear": return SetIfChanged(ref _canHear, value);
-            default: return false;
-        }
-    }
+    public bool IsPc { get; set; }
+    public bool IsNpc { get; set; }
+    public bool IsItem { get; set; }
+    public bool IsMapable { get; set; }
+    public bool IsContainer { get; set; }
+    public bool IsScript { get; set; }
+    public bool IsTickable { get; set; }
+    public bool IsAccount { get; set; }
+    public bool IsChannel { get; set; }
+    public bool IsNode { get; set; }
+    public bool IsModified { get; set; } = true; // FLAG_DEFAULTS["is_modified"] = True
+    public bool IsDeleted { get; set; }
+    public bool IsConnected { get; set; }
+    public bool IsTemporary { get; set; }
+    public bool IsBanned { get; set; }
+    public bool CanHear { get; set; }
 
     public Flags Clone() => (Flags)MemberwiseClone();
 }

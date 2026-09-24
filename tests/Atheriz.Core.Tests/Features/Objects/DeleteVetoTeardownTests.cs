@@ -72,7 +72,7 @@ public class DeleteVetoTeardownTests
     [Fact]
     public void ConcurrentDelete_SingleWinner_NoDoubleTeardown()
     {
-        // Two racing Deletes both walked, both emitted GetDelOps, both tore
+        // Two racing Deletes both walked, both emitted delete ops, both tore
         // tore down (double session close / ticker remove). The atomic claim
         // lets exactly one winner through; losers see already-gone.
         ObjectRegistry.ClearAll();
@@ -95,7 +95,7 @@ public class DeleteVetoTeardownTests
             {
                 start.SignalAndWait();
                 var r = box.Delete(owner, recursive: true);
-                if (r != null) { System.Threading.Interlocked.Increment(ref winners); System.Threading.Interlocked.Add(ref totalOps, r.Value.ops.Count); }
+                if (r != null) { System.Threading.Interlocked.Increment(ref winners); System.Threading.Interlocked.Add(ref totalOps, r.Value.Operations.Count); }
             })).ToArray();
             Assert.True(Task.WaitAll(tasks, TimeSpan.FromSeconds(30)));
             Assert.Equal(1, winners);

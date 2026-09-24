@@ -298,7 +298,7 @@ public class PortedBanCommandTests
     [Fact] public void FailedLoginAttemptsBounded()
     {
         using var env = GlobalTestEnv.Enter();
-        var f = typeof(ObjectRegistry).GetField("FailedLoginAttempts", BindingFlags.NonPublic | BindingFlags.Static);
+        var f = typeof(IpBanStore).GetField("FailedLoginAttempts", BindingFlags.NonPublic | BindingFlags.Static);
         var bd = f!.GetValue(null);
         var clear = bd!.GetType().GetMethod("Clear")!;
         var set = bd.GetType().GetMethod("Set")!;
@@ -312,7 +312,7 @@ public class PortedBanCommandTests
     {
         using var env = GlobalTestEnv.Enter();
         // Clear via reflection
-        var f = typeof(ObjectRegistry).GetField("TempBannedIps", BindingFlags.NonPublic | BindingFlags.Static);
+        var f = typeof(IpBanStore).GetField("TempBannedIps", BindingFlags.NonPublic | BindingFlags.Static);
         var bd = f!.GetValue(null);
         bd!.GetType().GetMethod("Clear")!.Invoke(bd, null);
         var set = bd.GetType().GetMethod("Set")!;
@@ -324,7 +324,7 @@ public class PortedBanCommandTests
     [Fact] public void CreationCooldownsBounded()
     {
         using var env = GlobalTestEnv.Enter();
-        var f = typeof(ObjectRegistry).GetField("CreationCooldowns", BindingFlags.NonPublic | BindingFlags.Static);
+        var f = typeof(CreationCooldownStore).GetField("CreationCooldowns", BindingFlags.NonPublic | BindingFlags.Static);
         var bd = f!.GetValue(null);
         bd!.GetType().GetMethod("Clear")!.Invoke(bd, null);
         var set = bd.GetType().GetMethod("Set")!;
@@ -336,7 +336,7 @@ public class PortedBanCommandTests
     [Fact] public void FailedLoginAttemptsEvictionPreservesRecent()
     {
         using var env = GlobalTestEnv.Enter();
-        var f = typeof(ObjectRegistry).GetField("FailedLoginAttempts", BindingFlags.NonPublic | BindingFlags.Static);
+        var f = typeof(IpBanStore).GetField("FailedLoginAttempts", BindingFlags.NonPublic | BindingFlags.Static);
         var bd = f!.GetValue(null);
         bd!.GetType().GetMethod("Clear")!.Invoke(bd, null);
         var set = bd.GetType().GetMethod("Set")!;

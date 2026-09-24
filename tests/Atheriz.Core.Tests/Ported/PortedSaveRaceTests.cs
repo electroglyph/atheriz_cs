@@ -21,9 +21,9 @@ public class PortedSaveRaceTests
     private sealed class MutatingBeta : GameObject
     {
         public GameObject? Alpha;
-        public override (string Sql, object[] Params) GetSaveOpsClearing()
+        public override Persistence.Dto.SaveOperation GetSaveOperationClearing()
         {
-            var res = base.GetSaveOpsClearing();
+            var res = base.GetSaveOperationClearing();
             // Mutate alpha when beta is being serialized (as in Python racing_dumps for beta)
             if (Alpha != null)
             {
@@ -73,7 +73,7 @@ public class PortedSaveRaceTests
         // Replace obj in registry with failing wrapper for test
         ObjectRegistry.RemoveObject(obj);
         ObjectRegistry.AddObject(failing);
-        Assert.Throws<InvalidOperationException>(()=> failing.GetSaveOpsClearing());
+        Assert.Throws<InvalidOperationException>(()=> failing.GetSaveOperationClearing());
         Assert.True(failing.IsModified);
         // Restore
         ObjectRegistry.RemoveObject(failing);
@@ -84,7 +84,7 @@ public class PortedSaveRaceTests
     {
         private readonly GameObject _inner;
         public FailingGameObject(GameObject inner){ _inner = inner; Id = inner.Id; Name = inner.Name; IsModified = inner.IsModified; }
-        public override (string Sql, object[] Params) GetSaveOpsClearing() => throw new InvalidOperationException("serialize fail");
+        public override Persistence.Dto.SaveOperation GetSaveOperationClearing() => throw new InvalidOperationException("serialize fail");
     }
     [Fact] public void CleanFlag_PersistsAcrossRestart()
     {
@@ -104,10 +104,9 @@ public class PortedSaveRaceTests
         var obj = GameObject.Create("clearme"); ObjectRegistry.AddObject(obj);
         obj.Desc = "dirty";
         Assert.True(obj.IsModified);
-        var (_, parms) = obj.GetSaveOpsClearing();
+        var op = obj.GetSaveOperationClearing();
         Assert.False(obj.IsModified);
-        var json = (string)parms[1];
-        var dto = GameObjectDtoSerializer.FromJson(json);
+        var dto = GameObjectDtoSerializer.FromJson(op.Json);
         Assert.False(dto.IsModified);
     }
 }

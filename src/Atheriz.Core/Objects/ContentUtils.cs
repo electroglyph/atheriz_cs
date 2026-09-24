@@ -24,8 +24,8 @@ public static class ContentUtils
         "barracks","chassis","precis",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-// mutable for testing (mirrors monkeypatch in test_contents_search.py:340)
-    public static int MaxSearchDepth = 100;
+// Default depth cap for the recursive walks below (old settings/MAX_SEARCH_DEPTH 100).
+    public const int DefaultMaxSearchDepth = 100;
 
     // Lowered word set backing search matching, computed once per object per
     // search (never cached across searches — names change). Membership here
@@ -50,13 +50,18 @@ public static class ContentUtils
         return terms;
     }
 
+    public static IReadOnlyList<GameObject> FilterVisible(IEnumerable<GameObject> objs, GameObject? looker)
+    {
+        ArgumentNullException.ThrowIfNull(objs);
+        if (looker is null) return [.. objs];
+        return [.. objs.Where(o => o != looker && o.Access(looker, "view"))];
+    }
+
     public static List<GameObject> FilterVisible(List<GameObject> objs, GameObject? looker)
     {
-        // The null-looker path returns a copy: handing out the input list by
-        // reference lets a caller mutate the owner's collection through the
-        // result.
-        if (looker is null) return new List<GameObject>(objs);
-        return objs.Where(o => o != looker && o.Access(looker, "view")).ToList();
+        // Compat forwarder: List in, List out. New code uses the IEnumerable overload.
+        ArgumentNullException.ThrowIfNull(objs);
+        return FilterVisible((IEnumerable<GameObject>)objs, looker).ToList();
     }
 
     public static List<GameObject> FilterContents(GameObject obj, Func<GameObject, bool> predicate)
@@ -64,28 +69,34 @@ public static class ContentUtils
         return obj.ContentsSnapshot.Select(Globals.ObjectRegistry.GetSingle).OfType<GameObject>().Where(predicate).ToList();
     }
 
-    public static string GroupByName(List<GameObject> objs, GameObject? looker = null)
+    public static string GroupByName(IEnumerable<GameObject> objs, GameObject? looker = null)
     {
-        if (objs.Count == 0) return "";
+        ArgumentNullException.ThrowIfNull(objs);
+        bool any = false;
         // Case-insensitive grouping matches the case-folding search: "Sword"
         // and "sword" are found together, so they display as one stack.
         var groups = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
         foreach (var o in objs)
         {
+            any = true;
             var name = looker is not null ? o.GetDisplayName(looker) : o.Name;
             groups.TryGetValue(name, out var c);
             groups[name] = c + 1;
         }
+        if (!any) return "";
         return string.Join(", ", groups.Select(kv => kv.Value > 1 ? $"{kv.Key}({kv.Value})" : kv.Key));
     }
 
     /// <summary>
     /// Recursively gather contents, descending into is_container.
+    /// <paramref name="maxDepth"/> defaults to <see cref="DefaultMaxSearchDepth"/>
+    /// so tests shrink the walk per call instead of mutating shared state.
     /// </summary>
-    public static List<GameObject> GatherContents(GameObject root, Func<int, GameObject?> resolver, HashSet<int>? visited = null, int depth = 0, GameObject? looker = null)
+    public static List<GameObject> GatherContents(GameObject root, Func<int, GameObject?> resolver, HashSet<int>? visited = null, int depth = 0, GameObject? looker = null, int? maxDepth = null)
     {
         visited ??= [];
-        if (depth >= MaxSearchDepth) return [];
+        int limit = maxDepth ?? DefaultMaxSearchDepth;
+        if (depth >= limit) return [];
         List<GameObject> result = [];
         var ids = root.ContentsSnapshot;
         foreach (var id in ids)
@@ -104,7 +115,7 @@ public static class ContentUtils
             {
                 // one container's resolver failure must not drop the
                 // remaining siblings — log and continue, don't break.
-                try { result.AddRange(GatherContents(o, resolver, visited, depth + 1, looker)); }
+                try { result.AddRange(GatherContents(o, resolver, visited, depth + 1, looker, limit)); }
                 catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed ContentUtils.GatherContents: {ex.Message}", "ContentUtils"); }
             }
         }
@@ -113,14 +124,14 @@ public static class ContentUtils
 
     /// <summary>
     /// </summary>
-    public static List<GameObject> Search(GameObject obj, string query, Func<int, GameObject?> resolver, bool recursive = true, GameObject? looker = null)
+    public static List<GameObject> Search(GameObject obj, string query, Func<int, GameObject?> resolver, bool recursive = true, GameObject? looker = null, int? maxDepth = null)
     {
         if (query is null) return [];
         string q;
         try { q = query.ToLowerInvariant().Trim(); } catch { return []; }
         if (q == "me") return [obj];
 
-        var objs = recursive ? GatherContents(obj, resolver, looker: looker) : obj.ContentsSnapshot.Select(resolver).OfType<GameObject>().ToList();
+        var objs = recursive ? GatherContents(obj, resolver, looker: looker, maxDepth: maxDepth) : obj.ContentsSnapshot.Select(resolver).OfType<GameObject>().ToList();
         // The recursive walk already applied the looker view filter per
         // object; re-filter only the flat path, which resolves unfiltered.
         if (looker is not null && !recursive)
@@ -249,10 +260,8 @@ public static class ContentUtils
     public static void EmitToLocation(GameObject loc, string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, IEnumerable<GameObject>? exclude = null, string? msgType = null)
     {
         ArgumentNullException.ThrowIfNull(loc);
-        if (loc is Node node)
-            node.MsgContents(text, exclude: exclude, fromObj: fromObj, mapping: mapping, msgType: msgType);
-        else
-            loc.MsgContents(text, fromObj: fromObj, mapping: mapping, exclude: exclude, msgType: msgType);
+        // Virtual dispatch: Node carries catch-all fallback inside its override.
+        loc.BroadcastToContents(text, fromObj: fromObj, mapping: mapping, exclude: exclude, msgType: msgType);
     }
 
     /// <summary>

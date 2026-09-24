@@ -224,23 +224,16 @@ internal static class GameObjectDtoConverter
                 AtherizLogger.LogError($"Unknown __object_type '{typeName}' for object {dto.Id}; loading as base {dto.Type}.");
             }
         }
-        // Kind dispatch: the switch preserves the old if-chain's fall-through ORDER
-        // (first match wins on overlapping type names) and the OrdinalIgnoreCase
-        // comparisons — each kind loads through a named factory below.
-        switch (dto)
+        // Kind dispatch through the single EntityKind classify point: same
+        // precedence as the old if-chain (script, channel, account, node).
+        return Atheriz.Core.Persistence.Dto.EntityKinds.Classify(dto) switch
         {
-            case { } when string.Equals(dto.Type, "script", StringComparison.OrdinalIgnoreCase):
-                return LoadScript(dto, savedScriptType, hasScriptType);
-            case { } when string.Equals(dto.Type, "channel", StringComparison.OrdinalIgnoreCase):
-                return LoadChannel(dto);
-            case { } when string.Equals(dto.Type, "account", StringComparison.OrdinalIgnoreCase):
-                return Account.FromDto(dto);
-            case { IsNode: true }:
-            case { } when string.Equals(dto.Type, "node", StringComparison.OrdinalIgnoreCase):
-                return LoadNode(dto);
-            default:
-                return LoadPlain(dto!);
-        }
+            Atheriz.Core.Persistence.Dto.EntityKind.Script => LoadScript(dto, savedScriptType, hasScriptType),
+            Atheriz.Core.Persistence.Dto.EntityKind.Channel => LoadChannel(dto),
+            Atheriz.Core.Persistence.Dto.EntityKind.Account => Account.FromDto(dto),
+            Atheriz.Core.Persistence.Dto.EntityKind.Node => LoadNode(dto),
+            _ => LoadPlain(dto!),
+        };
     }
 
     // Script branch: preserve IsScript and subtype for hook fidelity (faithful to dill subclass preservation)
@@ -264,8 +257,7 @@ internal static class GameObjectDtoConverter
                 AtherizLogger.LogError($"Unknown __script_type '{typeName}' for object {dto.Id}; loading as base script.");
             }
         }
-        var s = new Script(GameObject.SkipIdDraw.Instance);
-        s.SetIdRaw(dto.Id);
+        var s = Script.CreateForLoad(dto.Id);
         GameObject.ApplyDtoFields(s, dto, null);
         s.IsScript = true;
         return s;
@@ -274,8 +266,7 @@ internal static class GameObjectDtoConverter
     // Channel branch: Type=="channel" -> create Channel instance and restore history
     private static GameObject LoadChannel(GameObjectDto dto)
     {
-        var ch = new Channel(GameObject.SkipIdDraw.Instance);
-        ch.SetIdRaw(dto.Id);
+        var ch = Channel.CreateForLoad(dto.Id);
         GameObject.ApplyDtoFields(ch, dto, null);
         ch.IsChannel = true;
         // Restore history if present; listeners intentionally not restored (excluded per __getstate__)
@@ -295,8 +286,7 @@ internal static class GameObjectDtoConverter
     private static GameObject LoadNode(GameObjectDto dto)
     {
         Coord coord = ExtractCoord(dto);
-        var node = Node.CreateForLoad(coord);
-        node.SetIdRaw(dto.Id);
+        var node = Node.CreateForLoad(dto.Id, coord);
         node.Desc = dto.Desc;
         node.IsModified = dto.IsModified;
         node.IsNode = true;
@@ -306,8 +296,7 @@ internal static class GameObjectDtoConverter
 
     private static GameObject LoadPlain(GameObjectDto dto)
     {
-        GameObject o = new(GameObject.SkipIdDraw.Instance);
-        o.SetIdRaw(dto.Id);
+        GameObject o = GameObject.CreateForLoad(dto.Id);
         GameObject.ApplyDtoFields(o, dto, isNodeOverride: null);
         return o;
     }
@@ -324,16 +313,14 @@ internal static class GameObjectDtoConverter
         return new Coord("limbo", 0, 0, 0);
     }
 
-    private const string SaveSql = "INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)";
+    public static Dto.SaveOperation GetSaveOperation(GameObject obj)
+        => GetSaveOperationCore(obj, clearing: false);
 
-    public static (string Sql, object[] Params) GetSaveOps(GameObject obj)
-        => GetSaveOpsCore(obj, clearing: false);
+    public static Dto.SaveOperation GetSaveOperationClearing(GameObject obj)
+        => GetSaveOperationCore(obj, clearing: true);
 
-    public static (string Sql, object[] Params) GetSaveOpsClearing(GameObject obj)
-        => GetSaveOpsCore(obj, clearing: true);
-
-    private static (string Sql, object[] Params) GetSaveOpsCore(GameObject obj, bool clearing)
-        => (SaveSql, [obj.Id, BuildSaveJson(obj, clearing)]);
+    private static Dto.SaveOperation GetSaveOperationCore(GameObject obj, bool clearing)
+        => new(obj.Id, BuildSaveJson(obj, clearing));
 
     private static string BuildSaveJson(GameObject obj, bool clearing)
     {

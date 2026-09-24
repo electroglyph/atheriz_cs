@@ -15,6 +15,10 @@ public class AsyncThreadPool : IDisposable
     private readonly TimeSpan _watchdogInterval;
 
     // Manual bounded queue (replaces BlockingCollection) — allows capacity expansion on stop like Python.
+    // No side counter: the queue itself is the count source of truth. Stop
+    // drains, sentinel requeues, and relief paths all mutate it outside
+    // AddInternal, so a parallel counter would fork on every path that
+    // forgets to update it.
     private readonly Queue<WorkItem?> _queue = new();
     private readonly object _queueLock = new();
     private int _queueLimit;
@@ -391,6 +395,13 @@ public class AsyncThreadPool : IDisposable
     }
     public virtual bool AddTask(Action action, string name) => AddInternal(() => { action(); return Task.CompletedTask; }, name);
     public virtual bool AddTask(Func<Task> asyncFunc, string name) => AddInternal(asyncFunc, name);
+    // Cancellable work: the token is captured at submit time and observed when
+    // the worker runs the item. No pool rewrite; the wrapper stays Func<Task>.
+    public virtual bool AddTask(Func<CancellationToken, Task> work, string? name = null, CancellationToken ct = default)
+    {
+        if (work is null) throw new ArgumentNullException(nameof(work));
+        return AddInternal(() => work(ct), name ?? work.Method.Name ?? "work");
+    }
 
     // For python test compat: bool AddTask(Delegate) etc.
     // Typed delegate binding (replaces DynamicInvoke): closed Action/Func shapes

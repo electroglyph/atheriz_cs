@@ -102,7 +102,7 @@ public class PortedChannelRaceTests
     {
         using var env = GlobalTestEnv.Enter();
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Core/Objects/Channel.cs");
-        var deleteStart = src.IndexOf("public override (int count, List<object> ops)? Delete", StringComparison.Ordinal);
+        var deleteStart = src.IndexOf("public override (int Count, List<DeleteOperation> Operations)? Delete", StringComparison.Ordinal);
         Assert.True(deleteStart >= 0);
         string delSrc = src.Substring(deleteStart, Math.Min(1500, src.Length - deleteStart));
         // Count lock occurrences in Delete method

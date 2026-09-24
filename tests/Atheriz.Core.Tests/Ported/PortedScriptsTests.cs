@@ -18,6 +18,11 @@ public class PortedScriptsTests
         GameObject.RegisterPersistedSubtype(typeof(DummyBeforeScript).FullName!, typeof(DummyBeforeScript), () => new DummyBeforeScript());
         GameObject.RegisterPersistedSubtype(typeof(DummyAfterScript).FullName!, typeof(DummyAfterScript), () => new DummyAfterScript());
     }
+    private static Dictionary<string, HashSet<Delegate>> HooksRaw(GameObject obj)
+    {
+        var reg = typeof(GameObject).GetField("_hookRegistry", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(obj)!;
+        return (Dictionary<string, HashSet<Delegate>>)reg.GetType().GetProperty("Raw", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(reg)!;
+    }
     // Port of test_scripts.py:23 DummyObj — hookable at_test_hook returns "original_result" and logs
     class DummyObj : GameObject
     {
@@ -90,12 +95,11 @@ public class PortedScriptsTests
         var script = new DummyBeforeScript(); script.Id = 101; ObjectRegistry.AddObject(script);
         script.InstallHooks(obj);
         Assert.Contains(script.Id, obj.ScriptsSnapshot);
-        var hooksField = typeof(GameObject).GetField("_hooks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
-        var hooks = (System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<Delegate>>)hooksField.GetValue(obj)!;
+        var hooks = HooksRaw(obj);
         Assert.True(hooks.TryGetValue("at_test_hook", out var set) && set.Count==1);
         script.RemoveHooks(obj);
         Assert.DoesNotContain(script.Id, obj.ScriptsSnapshot);
-        hooks = (System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<Delegate>>)hooksField.GetValue(obj)!;
+        hooks = HooksRaw(obj);
         Assert.True(!hooks.TryGetValue("at_test_hook", out var afterSet) || afterSet.Count==0);
     }
     // Port of test_scripts.py:88 test_before_hook — exact result == original_result and log == ["before: v1, v2","at_test_hook: v1, v2"] ; before does not abort (wontfix)
@@ -106,8 +110,7 @@ public class PortedScriptsTests
         var script = new DummyBeforeScript(); script.Id = 102; ObjectRegistry.AddObject(script);
         script.InstallHooks(obj);
         Assert.Contains(script.Id, obj.ScriptsSnapshot);
-        var hooksField = typeof(GameObject).GetField("_hooks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
-        var hooks = (System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<Delegate>>)hooksField.GetValue(obj)!;
+        var hooks = HooksRaw(obj);
         Assert.True(hooks.TryGetValue("at_test_hook", out var set) && set.Count==1);
         var res = obj.AtTestHook("v1", "v2");
         Assert.Equal(new[]{"before: v1, v2","at_test_hook: v1, v2"}, obj.Log);
@@ -142,8 +145,7 @@ public class PortedScriptsTests
         var obj = new DummyObj(); obj.Name="TestObj"; obj.Id=IdGenerator.GetUniqueId(); ObjectRegistry.AddObject(obj);
         var script = new DummyUnmarkedScript(); script.Id = 105; ObjectRegistry.AddObject(script);
         script.InstallHooks(obj);
-        var hooksField = typeof(GameObject).GetField("_hooks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
-        var hooks = (System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<Delegate>>)hooksField.GetValue(obj)!;
+        var hooks = HooksRaw(obj);
         Assert.True(!hooks.TryGetValue("at_test_hook", out var set) || set.Count==0);
         var ex = Record.Exception(()=> obj.AtTestHook("foo", "bar"));
         Assert.Null(ex);
@@ -198,12 +200,11 @@ public class PortedScriptsTests
         var script = new DummyBeforeScript(); script.Id = IdGenerator.GetUniqueId(); ObjectRegistry.AddObject(script);
         script.InstallHooks(node);
         Assert.Contains(script.Id, node.ScriptsSnapshot);
-        var hooksField = typeof(GameObject).GetField("_hooks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
-        var hooks = (System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<Delegate>>)hooksField.GetValue(node)!;
+        var hooks = HooksRaw(node);
         Assert.True(hooks.TryGetValue("at_test_hook", out var set) && set.Count==1);
         script.RemoveHooks(node);
         Assert.DoesNotContain(script.Id, node.ScriptsSnapshot);
-        hooks = (System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<Delegate>>)hooksField.GetValue(node)!;
+        hooks = HooksRaw(node);
         Assert.True(!hooks.TryGetValue("at_test_hook", out var afterSet) || afterSet.Count==0);
     }
     // Port of test_scripts.py:189 test_node_hooks
@@ -354,8 +355,7 @@ public class PortedScriptsTests
         var script = new DummyBeforeScript(); script.Id=IdGenerator.GetUniqueId(); script.Name="HookScript"; ObjectRegistry.AddObject(script);
         obj.AddScript(script);
         Assert.Equal(obj.Id, script.Child!.Id);
-        var hooksField = typeof(GameObject).GetField("_hooks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
-        var hooks = (Dictionary<string, HashSet<Delegate>>)hooksField.GetValue(obj)!;
+        var hooks = HooksRaw(obj);
         Assert.True(hooks.TryGetValue("at_test_hook", out var set) && set.Count==1);
         var dto = script.ToDto();
         var json = GameObjectDtoSerializer.ToJson(dto);

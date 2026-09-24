@@ -61,7 +61,7 @@ public partial class NodeHandler
         // render per (area,z)); after releasing Lock3, no lock nesting.
         try
         {
-            var mh = MapHandlerSingleton.Get();
+            var mh = GlobalServices.GetMapHandlerOrDefault();
             if (mh is not null && door.SymbolCoord is not null)
             {
                 HashSet<(string, int)> seen = [];
@@ -204,14 +204,14 @@ public partial class NodeHandler
         }
         finally { Lock.ExitWriteLock(); }
     }
-    public List<Node> GetNodes(List<Coord> coords)
+    public List<Node> GetNodes(IEnumerable<Coord> coords)
     {
         ArgumentNullException.ThrowIfNull(coords);
         // Single-hold batch lookup: one handler read scope for every coord
         // instead of one acquisition per coord. Same nesting as GetNode
         // (handler → area → grid, all recursion-capable), same order,
         // same null-skip — the snapshot is only more consistent.
-        List<Node> res = new(coords.Count);
+        List<Node> res = [];
         Lock.EnterReadLock();
         try
         {

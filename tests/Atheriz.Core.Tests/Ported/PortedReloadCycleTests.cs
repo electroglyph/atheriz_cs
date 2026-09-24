@@ -23,7 +23,7 @@ public class PortedReloadCycleTests
         Atheriz.Core.Globals.ObjectRegistry.AddObject(script);
         // Install and then remove — simulates reload cycle needing child link preserved
         script.InstallHooks(obj);
-        Assert.True(obj.HasHook("at_tick") || obj.GetType().GetField("_hooks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) != null);
+        Assert.True(obj.HasHook("at_tick") || obj.GetType().GetField("_hookRegistry", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) != null);
         script.RemoveHooks(obj);
         Assert.DoesNotContain(script.Id, obj.ScriptsSnapshot);
     }

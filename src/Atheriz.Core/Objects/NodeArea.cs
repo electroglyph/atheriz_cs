@@ -70,7 +70,7 @@ public sealed class NodeArea
         return h.ToHashCode();
     }
 
-    public List<Node> GetNodes(List<(int X, int Y, int Z)> coords)
+    public List<Node> GetNodes(IEnumerable<(int X, int Y, int Z)> coords)
     {
         List<Node> res = [];
         Lock.EnterReadLock();
@@ -90,8 +90,7 @@ public sealed class NodeArea
     }
     public List<Node> GetNodes(IEnumerable<Coord> coords)
     {
-        var list = coords.Select(c => (c.X, c.Y, c.Z)).ToList();
-        return GetNodes(list);
+        return GetNodes(coords.Select(c => (c.X, c.Y, c.Z)));
     }
 
     public List<Node> GetNodesInSphere((int X, int Y, int Z) center, double radius, bool ignoreCenter = false)
@@ -271,7 +270,7 @@ public sealed class NodeArea
         try { return _grids.TryGetValue(z, out var g) ? g : null; }
         finally { Lock.ExitReadLock(); }
     }
-    public NodeGrid GetOrCreateGrid(int z)
+    public NodeGrid GetOrAddGrid(int z)
     {
         Lock.EnterUpgradeableReadLock();
         try
@@ -294,7 +293,6 @@ public sealed class NodeArea
         }
         finally { Lock.ExitUpgradeableReadLock(); }
     }
-    public NodeGrid GetOrAddGrid(int z) => GetOrCreateGrid(z);
     public void RemoveGrid(int z)
     {
         Lock.EnterWriteLock();

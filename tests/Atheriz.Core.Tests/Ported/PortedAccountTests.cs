@@ -172,7 +172,7 @@ public class PortedAccountTests
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("ivy","pw");
         Assert.Contains(acc, ObjectRegistry.FilterBy(_=>true));
-        Assert.True(acc.Delete());
+        Assert.NotNull(acc.Delete());
         Assert.DoesNotContain(acc, ObjectRegistry.FilterBy(_=>true));
     }
     [Fact] public void DeleteMarksIsDeleted()
@@ -187,9 +187,8 @@ public class PortedAccountTests
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("kim","pw");
-        var (sql, pars)=acc.GetDelOps();
-        Assert.Equal("DELETE FROM objects WHERE id = ?", sql);
-        Assert.Equal(acc.Id, (int)pars[0]);
+        var op=acc.GetDeleteOperation();
+        Assert.Equal(acc.Id, op.Id);
     }
     [Fact] public void DeleteVetoedByAtDelete()
     {
@@ -197,7 +196,7 @@ public class PortedAccountTests
         var acc=MakeAccount("liam","pw");
         acc.InstallHook("at_delete", (Func<GameObject?, bool>)new VetoHooks().DenyDelete);
         var result=acc.Delete();
-        Assert.False(result);
+        Assert.Null(result);
         Assert.Contains(acc, ObjectRegistry.FilterBy(_=>true));
         Assert.False(acc.IsDeleted);
     }
@@ -212,11 +211,11 @@ public class PortedAccountTests
         Assert.Single(hook.Received);
         Assert.Same(caller, hook.Received[0]);
     }
-    [Fact] public void DeleteUnusedParamDoesNotBreakSignature()
+    [Fact] public void DeleteRecursiveParamAccepted()
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("noah","pw");
-        Assert.True(acc.Delete(unused:false));
+        Assert.NotNull(acc.Delete(recursive:false));
     }
     [Fact] public void DeleteVetoedNoDbOpsCalled()
     {

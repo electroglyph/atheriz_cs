@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Atheriz.Core.Commands.LoggedIn;
@@ -8,6 +9,13 @@ public sealed class DrawCommand : Command
     public override string Desc => "Open the AtheriZ map editor in a new browser tab.";
     public override bool UseParser => false;
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
+
+    // Wire options for legend entries: the shared persistence options drop
+    // nulls, but the launch_draw payload historically carries explicit nulls.
+    private static readonly JsonSerializerOptions LegendWireOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
 
     public override void Run(IMessageTarget caller, object? args)
     {
@@ -59,7 +67,7 @@ public sealed class DrawCommand : Command
             ["z"] = z,
             ["grid"] = new List<List<object?>>(),
             ["rooms"] = new List<Dictionary<string, object?>>(),
-            ["legend"] = new List<Dictionary<string, object?>>(),
+            ["legend"] = new List<JsonElement>(),
             ["playerSymbol"] = plain
         };
         if (mi.PreGrid.Count > 0)
@@ -118,9 +126,12 @@ public sealed class DrawCommand : Command
             foreach (var (coord, node) in extra)
                 roomsList.Add(RoomPayload(node));
         }
-        var legendList = (List<Dictionary<string, object?>>)payload["legend"]!;
+        // The record serializes directly: camelCase keys plus explicit nulls
+        // match the old hand-unrolled dict byte-for-byte on the wire, and the
+        // transport writes JsonElement values raw.
+        var legendList = (List<JsonElement>)payload["legend"]!;
         foreach (var e in mi.LegendEntries)
-            legendList.Add(e.ToPayload());
+            legendList.Add(JsonSerializer.SerializeToElement(e, LegendWireOptions));
 
         try
         {

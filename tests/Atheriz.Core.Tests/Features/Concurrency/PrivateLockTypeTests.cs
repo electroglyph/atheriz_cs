@@ -50,7 +50,7 @@ public sealed class PrivateLockTypeTests
     [Fact]
     public void BoundedDictionary_InternalLock_IsLockType()
     {
-        AssertPrivateLockFieldIsLock(typeof(ObjectRegistry.BoundedDictionary<string, string>), "_lock");
+        AssertPrivateLockFieldIsLock(typeof(BoundedDictionary<string, string>), "_lock");
     }
 
     [Fact]
@@ -155,10 +155,12 @@ public sealed class PrivateLockTypeTests
         AssertPrivateLockFieldIsLock(typeof(ServerEvents), "_charCreateLock");
     }
 
+    // Twin shims deleted: ticker/map readers go straight to GlobalServices,
+    // so there is no forwarder type left to pin.
     [Fact]
-    public void GlobalTickerHolder_TickerLock_IsLockType()
+    public void GlobalTickerHolder_Type_Removed()
     {
-        AssertPrivateLockFieldIsLock(typeof(GlobalTickerHolder), "_lock");
+        Assert.Null(typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.GlobalTickerHolder"));
     }
 
     [Fact]
@@ -168,9 +170,9 @@ public sealed class PrivateLockTypeTests
     }
 
     [Fact]
-    public void MapHandlerSingleton_InstanceLock_IsLockType()
+    public void MapHandlerSingleton_Type_Removed()
     {
-        AssertPrivateLockFieldIsLock(typeof(MapHandlerSingleton), "_lock");
+        Assert.Null(typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton"));
     }
 
     [Fact]

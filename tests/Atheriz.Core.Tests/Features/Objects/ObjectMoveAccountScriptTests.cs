@@ -13,35 +13,33 @@ namespace Atheriz.Core.Tests.Features.Objects;
 [Collection("Ported")]
 public class ObjectMoveAccountScriptTests
 {
-    // The singleton caches its GlobalServices fallback so node-moves after
-    // the first lookup skip the global lookup entirely.
+    // The twin shim is deleted: there is a single GlobalServices slot, so a
+    // later SetMapHandler can never fork into a stale world for move stamps
+    // and door paint/cleanup. Best-effort reads go through
+    // GetMapHandlerOrDefault.
     [Fact]
-    public void MapHandlerSingleton_Get_CachesFallback()
+    public void MapHandlerSingleton_Type_Removed()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Move.cs");
-        var region = SourceScan.Region(src, "public static MapHandler? Get()");
-        Assert.Contains("_instance = GlobalServices.GetMapHandler()", region);
+        Assert.Null(typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton"));
+        Assert.NotNull(typeof(GlobalServices).GetMethod("GetMapHandlerOrDefault"));
     }
 
     [Fact]
-    public void MapHandlerSingleton_Set_StillWinsOverFallback()
+    public void SetMapHandler_WinsOverFallback()
     {
-        var t = typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton");
-        Assert.NotNull(t);
-        var field = t.GetField("_instance", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        Assert.NotNull(field);
-        var prior = field.GetValue(null);
+        var priorGlobal = GlobalServices.TryGetMapHandler();
         try
         {
             var mh = new MapHandler(autoLoad: false);
-            var set = t.GetMethod("Set");
-            Assert.NotNull(set);
-            set.Invoke(null, new object[] { mh });
-            var get = t.GetMethod("Get");
-            Assert.NotNull(get);
-            Assert.Same(mh, get.Invoke(null, null));
+            GlobalServices.SetMapHandler(mh);
+            Assert.Same(mh, GlobalServices.TryGetMapHandler());
+            Assert.Same(mh, GlobalServices.GetMapHandlerOrDefault());
         }
-        finally { field.SetValue(null, prior); }
+        finally
+        {
+            if (priorGlobal is not null) GlobalServices.SetMapHandler(priorGlobal);
+            else GlobalServices.Reset();
+        }
     }
 
     // AddExits takes only its target: the old internalCall flag is gone, so
@@ -54,32 +52,25 @@ public class ObjectMoveAccountScriptTests
         Assert.Single(m.GetParameters());
     }
 
-    // SetMapHandler publishes the singleton twin like SetNodeHandler does:
-    // door paint/cleanup and move stamps read through MapHandlerSingleton.Get,
-    // so they must see the same world GlobalServices readers see.
+    // SetMapHandler publishes the single slot every reader uses: door
+    // paint/cleanup and move stamps (via GetMapHandlerOrDefault) see the
+    // same world GlobalServices readers see — no twin to fork.
     [Fact]
-    public void SetMapHandler_PublishesMapHandlerSingleton()
+    public void SetMapHandler_PublishesSingleSlot()
     {
-        var t = typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton");
-        Assert.NotNull(t);
-        var set = t.GetMethod("Set");
-        var get = t.GetMethod("Get");
-        Assert.NotNull(set);
-        Assert.NotNull(get);
-        var priorSingleton = get.Invoke(null, null);
-        var priorGlobal = GlobalServices.GetMapHandler();
+        var priorGlobal = GlobalServices.TryGetMapHandler();
         try
         {
             var stale = new MapHandler(autoLoad: false);
-            set.Invoke(null, new object[] { stale }); // pin a stale world first
+            GlobalServices.SetMapHandler(stale); // pin a stale world first
             var fresh = new MapHandler(autoLoad: false);
             GlobalServices.SetMapHandler(fresh);
-            Assert.Same(fresh, get.Invoke(null, null));
+            Assert.Same(fresh, GlobalServices.GetMapHandlerOrDefault());
         }
         finally
         {
             if (priorGlobal is not null) GlobalServices.SetMapHandler(priorGlobal);
-            set.Invoke(null, new object?[] { priorSingleton });
+            else GlobalServices.Reset();
         }
     }
 
@@ -118,7 +109,7 @@ public class ObjectMoveAccountScriptTests
         using var env = GlobalTestEnv.Enter();
         var acc = Account.Create("nullcaller", "pw");
         if (ObjectRegistry.Get(acc.Id).Count == 0) ObjectRegistry.AddObject(acc);
-        Assert.True(acc.Delete(null));
+        Assert.NotNull(acc.Delete(null));
         Assert.True(acc.IsDeleted);
     }
 
@@ -126,7 +117,7 @@ public class ObjectMoveAccountScriptTests
     public void AccountDelete_PassesCallerStraightThrough()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
-        var region = SourceScan.Region(src, "internal (int count, List<object> ops)? DeleteImmediate");
+        var region = SourceScan.Region(src, "internal (int Count, List<DeleteOperation> Operations)? DeleteImmediate");
         Assert.Contains("AtDelete(caller)", region);
         Assert.DoesNotContain("caller!", region);
     }

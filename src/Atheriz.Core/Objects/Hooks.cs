@@ -30,19 +30,15 @@ public partial class GameObject
         => Hookable(hookName.Name(), original, args);
 
     public T Hookable<T>(string funcName, Func<T> original, params object?[] args)
-    {        HashSet<Delegate>? hooksSnapshot = null;
-        bool hasHooks = false;
+    {
+        HashSet<Delegate>? hooksSnapshot;
         _lock.EnterReadLock();
         try
         {
-            if (_hooks.TryGetValue(funcName, out var hs) && hs.Count > 0)
-            {
-                hooksSnapshot = new HashSet<Delegate>(hs);
-                hasHooks = true;
-            }
+            hooksSnapshot = _hookRegistry.TrySnapshot(funcName);
         }
         finally { _lock.ExitReadLock(); }
-        if (!hasHooks) return original();
+        if (hooksSnapshot is null) return original();
 
         // marker classification cached per delegate (HookMarkerCache),
         // not reflected per dispatch. Single partition pass: each delegate is
@@ -53,7 +49,7 @@ public partial class GameObject
         var replaceHooks = new List<Delegate>();
         var beforeHooks = new List<Delegate>();
         var afterHooks = new List<Delegate>();
-        foreach (var d in hooksSnapshot!)
+        foreach (var d in hooksSnapshot)
         {
             var kind = HookMarkerCache.KindOf(d);
             if ((kind & HookKind.Replace) != 0) replaceHooks.Add(d);
@@ -106,9 +102,13 @@ public partial class GameObject
                 try { newResult = DelegateInvoker.Invoke(h, args); invoked = true; }
                 catch (TargetParameterCountException) { }
             }
-// an after-hook replaces the result
-            // unconditionally, including with null (reference types).
-            if (invoked && (newResult is T t || (newResult is null && default(T) is null))) result = (T)newResult!;
+// an after-hook replaces the result unconditionally, including with
+            // null for reference types. The ! covers the generic null case
+            // the compiler cannot see: newResult is null and default(T) is
+            // null means the null assignment is intended.
+            if (!invoked) continue;
+            if (newResult is T t) { result = t; continue; }
+            if (newResult is null && default(T) is null) { result = default!; continue; }
         }
         // Hooks present but none marked before/after/replace: silently run original
         // (adaptation — Python raised ValueError; aborting here would break game code).

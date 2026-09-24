@@ -189,139 +189,135 @@ public class PortedDatabaseTests
 
     private class DbHolder: GameObject { }
 
-    [Fact] public void SaveReturnsTupleOfSqlAndParams()
+    [Fact] public void SaveReturnsTypedOperationWithIdAndJson()
     {
         using var env=GlobalTestEnv.Enter();
         var obj=new DbHolder(); obj.Id=42;
-        var (sql, parms)=obj.GetSaveOps();
-        Assert.IsType<string>(sql); Assert.IsType<object[]>(parms);
-        Assert.Equal(2, parms.Length);
+        var op=obj.GetSaveOperation();
+        Assert.Equal(42, op.Id);
+        Assert.IsType<string>(op.Json);
     }
-    [Fact] public void SaveSqlIsInsertOrReplace()
+    [Fact] public void SaveJsonRoundTripsDto()
     {
         var obj=new DbHolder(); obj.Id=1;
-        var (sql, _)=obj.GetSaveOps();
-        Assert.Equal("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", sql);
+        var op=obj.GetSaveOperation();
+        var dto=GameObjectDtoSerializer.FromJson(op.Json);
+        Assert.Equal(1, dto.Id);
     }
-    [Fact] public void SaveParamsContainId()
+    [Fact] public void SaveOperationCarriesId()
     {
         var obj=new DbHolder(); obj.Id=99;
-        var (_, parms)=obj.GetSaveOps();
-        Assert.Equal(99, (int)parms[0]);
+        var op=obj.GetSaveOperation();
+        Assert.Equal(99, op.Id);
     }
-    [Fact] public void SaveParamsDataIsJsonString()
+    [Fact] public void SaveOperationJsonIsString()
     {
         var obj=new DbHolder(); obj.Id=1;
-        var (_, parms)=obj.GetSaveOps();
-        Assert.IsType<string>(parms[1]);
-        Assert.IsNotType<byte[]>(parms[1]);
+        var op=obj.GetSaveOperation();
+        Assert.IsType<string>(op.Json);
+        Assert.IsNotType<byte[]>(op.Json);
     }
     [Fact] public void SaveDataCanBeUnpickled()
     {
         var obj=new DbHolder(); obj.Id=1; obj.Name="test-label-wrapper";
-        var (_, parms)=obj.GetSaveOps();
-        var json=(string)parms[1];
-        var dto=GameObjectDtoSerializer.FromJson(json);
+        var op=obj.GetSaveOperation();
+        var dto=GameObjectDtoSerializer.FromJson(op.Json);
         Assert.Equal(1, dto.Id);
         Assert.Equal("test-label-wrapper", dto.Name);
     }
-    [Fact] public void GetSaveOpsDoesNotClearIsModified()
+    [Fact] public void GetSaveOperationDoesNotClearIsModified()
     {
         var obj=new DbHolder(); obj.Id=1; obj.IsModified=true;
-        obj.GetSaveOps();
+        obj.GetSaveOperation();
         Assert.True(obj.IsModified);
     }
     [Fact] public void SaveUsesLock()
     {
-        // GetSaveOps serializes under the object's write lock — proven behaviorally:
-        // a worker GetSaveOps blocks while this thread holds SyncRoot for write.
+        // GetSaveOperation serializes under the object's write lock — proven behaviorally:
+        // a worker GetSaveOperation blocks while this thread holds SyncRoot for write.
         // Real Thread (not Task.Run + blocking wait): the pool inlines an
         // unstarted task onto the waiting pool thread, which would
         // self-deadlock on the held write lock instead of blocking on it.
         var obj = new DbHolder(); obj.Id = 1;
         obj.SyncRoot.EnterWriteLock();
-        (string Sql, object[] Params)? result = null;
+        Persistence.Dto.SaveOperation? result = null;
         Exception? workerError = null;
         using var done = new ManualResetEventSlim(false);
         var thread = new System.Threading.Thread(() => {
-            try { result = obj.GetSaveOps(); }
+            try { result = obj.GetSaveOperation(); }
             catch (Exception ex) { workerError = ex; }
             finally { done.Set(); }
         }) { IsBackground = true };
         thread.Start();
         try
         {
-            Assert.False(done.Wait(TimeSpan.FromMilliseconds(300)), "GetSaveOps completed without acquiring the write lock");
+            Assert.False(done.Wait(TimeSpan.FromMilliseconds(300)), "GetSaveOperation completed without acquiring the write lock");
         }
         finally { obj.SyncRoot.ExitWriteLock(); }
-        Assert.True(done.Wait(TimeSpan.FromSeconds(10)), "GetSaveOps did not finish after the lock was released");
+        Assert.True(done.Wait(TimeSpan.FromSeconds(10)), "GetSaveOperation did not finish after the lock was released");
         Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
         Assert.Null(workerError);
         Assert.NotNull(result);
     }
-    [Fact] public void FlagStaysDirtyAcrossRepeatedSaveOps()
+    [Fact] public void FlagStaysDirtyAcrossRepeatedSaveOperations()
     {
         var obj=new DbHolder(); obj.Id=1; obj.IsModified=true;
-        obj.GetSaveOps(); Assert.True(obj.IsModified);
-        obj.GetSaveOps(); Assert.True(obj.IsModified);
+        obj.GetSaveOperation(); Assert.True(obj.IsModified);
+        obj.GetSaveOperation(); Assert.True(obj.IsModified);
     }
-    [Fact] public void DelReturnsTuple()
+    [Fact] public void DelReturnsDeleteOperation()
     {
         var obj=new DbHolder(); obj.Id=5;
-        var (sql, parms)=obj.GetDelOps();
-        Assert.IsType<string>(sql); Assert.IsType<object[]>(parms);
-        Assert.Single(parms);
+        var op=obj.GetDeleteOperation();
+        Assert.IsType<Atheriz.Core.Persistence.Dto.DeleteOperation>(op);
+        Assert.Equal(5, op.Id);
     }
-    [Fact] public void DelSqlIsDeleteById()
+    [Fact] public void DelOperationCarriesRowId()
     {
         var obj=new DbHolder(); obj.Id=5;
-        var (sql, _)=obj.GetDelOps();
-        Assert.Equal("DELETE FROM objects WHERE id = ?", sql);
+        Assert.Equal(5, obj.GetDeleteOperation().Id);
     }
     [Fact] public void DelParamsContainId()
     {
         var obj=new DbHolder(); obj.Id=5;
-        var (_, parms)=obj.GetDelOps();
-        Assert.Equal(5, (int)parms[0]);
+        Assert.Equal(5, obj.GetDeleteOperation().Id);
     }
     [Fact] public void DelOpsDoesNotChangeIsModified()
     {
         var obj=new DbHolder(); obj.Id=5; obj.IsModified=true;
-        obj.GetDelOps();
+        obj.GetDeleteOperation();
         Assert.True(obj.IsModified);
     }
     [Fact] public void DelOpsWorksWithNegativeId()
     {
         var obj=new DbHolder(); obj.Id=-1;
-        var (_, parms)=obj.GetDelOps();
-        Assert.Equal(-1, (int)parms[0]);
+        Assert.Equal(-1, obj.GetDeleteOperation().Id);
     }
     [Fact] public void SaveThenDelOperationsConsistent()
     {
         var obj=new DbHolder(); obj.Id=7;
-        var (saveSql, _)=obj.GetSaveOps();
-        var (delSql, delParms)=obj.GetDelOps();
-        Assert.Contains("INSERT OR REPLACE", saveSql);
-        Assert.Contains("DELETE", delSql);
-        Assert.Equal(7, (int)delParms[0]);
+        var op=obj.GetSaveOperation();
+        var del=obj.GetDeleteOperation();
+        Assert.Equal(7, op.Id);
+        Assert.Equal(7, del.Id);
     }
     [Fact] public void WorksWithRealObject()
     {
         using var env=GlobalTestEnv.Enter();
         var obj=GameObject.Create("real", isItem:true);
         obj.Id=123;
-        var (_, saveParms)=obj.GetSaveOps();
-        var (_, delParms)=obj.GetDelOps();
-        Assert.Equal(123, (int)saveParms[0]);
-        Assert.Equal(123, (int)delParms[0]);
+        var op=obj.GetSaveOperation();
+        var del=obj.GetDeleteOperation();
+        Assert.Equal(123, op.Id);
+        Assert.Equal(123, del.Id);
     }
     [Fact] public void ModificationsThenSave()
     {
         var obj=new DbHolder(); obj.Id=1; obj.IsModified=true;
-        obj.Name="a"; obj.GetSaveOps(); Assert.True(obj.IsModified);
-        obj.Name="b"; obj.GetSaveOps(); Assert.True(obj.IsModified);
-        var (_, parms)=obj.GetSaveOps();
-        var dto=GameObjectDtoSerializer.FromJson((string)parms[1]);
+        obj.Name="a"; obj.GetSaveOperation(); Assert.True(obj.IsModified);
+        obj.Name="b"; obj.GetSaveOperation(); Assert.True(obj.IsModified);
+        var op=obj.GetSaveOperation();
+        var dto=GameObjectDtoSerializer.FromJson(op.Json);
         Assert.Equal("b", dto.Name);
     }
     // Port of test_database.py:348 test_is_modified_stays_true_on_serialization_failure - faithful
@@ -333,11 +329,11 @@ public class PortedDatabaseTests
         GameObjectDtoSerializer.ToJsonHook = _ => throw new InvalidOperationException("serialize fail");
         try
         {
-            Assert.Throws<InvalidOperationException>(()=> obj.GetSaveOps());
+            Assert.Throws<InvalidOperationException>(()=> obj.GetSaveOperation());
             Assert.True(obj.IsModified);
-            // also test GetSaveOpsClearing via SaveObjects path uses same hook - ensure still true
+            // also test GetSaveOperationClearing via SaveObjects path uses same hook - ensure still true
             obj.IsModified=true;
-            Assert.Throws<InvalidOperationException>(()=> obj.GetSaveOpsClearing());
+            Assert.Throws<InvalidOperationException>(()=> obj.GetSaveOperationClearing());
             Assert.True(obj.IsModified);
         }
         finally { GameObjectDtoSerializer.ToJsonHook = origHook; }

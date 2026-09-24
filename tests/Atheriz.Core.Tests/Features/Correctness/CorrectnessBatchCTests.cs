@@ -87,16 +87,31 @@ public sealed class CorrectnessBatchCTests
     }
 
     [Fact]
-    public void LegendEntry_FromPayload_MalformedCoord_Throws()
+    public void LegendEntry_FromJson_MalformedCoord_Throws()
     {
-        static Dictionary<string, JsonElement> Dict(string json)
+        static JsonElement El(string json)
         {
             using var doc = JsonDocument.Parse(json);
-            return doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+            return doc.RootElement.Clone();
         }
-        Assert.Throws<JsonException>(() => LegendEntry.FromPayload(Dict("""{"symbol":"s","coord":[1,2,3]}""")));
-        Assert.Throws<JsonException>(() => LegendEntry.FromPayload(Dict("""{"symbol":"s","coord":[5]}""")));
-        Assert.Equal((1, 2), LegendEntry.FromPayload(Dict("""{"symbol":"s","coord":[1,2]}""")).Coord);
+        Assert.Throws<JsonException>(() => LegendEntry.FromJsonElement(El("""{"symbol":"s","coord":[1,2,3]}""")));
+        Assert.Throws<JsonException>(() => LegendEntry.FromJsonElement(El("""{"symbol":"s","coord":[5]}""")));
+        Assert.Equal((1, 2), LegendEntry.FromJsonElement(El("""{"symbol":"s","coord":[1,2]}""")).Coord);
+    }
+
+    [Fact]
+    public void LegendEntry_RecordEquality_IsByValue()
+    {
+        Assert.Equal(new LegendEntry("s", "d", (1, 2)), new LegendEntry("s", "d", (1, 2)));
+        Assert.NotEqual(new LegendEntry("s", "d", (1, 2)), new LegendEntry("s", "d", (1, 3)));
+    }
+
+    [Fact]
+    public void LegendEntry_JsonRoundTrip_PreservesFields()
+    {
+        var e = new LegendEntry("s", "d", (1, 2)) { Show = false, Fg = 3.5, Bg = 4.5 };
+        var back = LegendEntry.FromJson(e.ToJson());
+        Assert.Equal(e, back);
     }
 
     // After a cap shrink, consuming a still-valid key resolves first

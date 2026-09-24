@@ -116,6 +116,19 @@ public partial class GameObject
     /// sort_locks (NodeGrid→Node→GameObject), CheckMoves stub, _contents sets, Location, IsModified, MoveVerb, at_post_move, at_object_leave/receive,
     /// cross-node reverse_link, map MoveListener/MoveMapable, follow/wander invalidation stub, announce handling.
     /// </summary>
+    // Typed front doors: each forwards to the object core so callers get
+    // compiler-checked destinations instead of manual is-dispatch at call sites.
+    public bool MoveTo(GameObject? destination, GameObject? caller = null, bool force = false, bool announce = true, string? toExit = null)
+        => MoveTo((object?)destination, caller, force, announce, toExit);
+    public bool MoveTo(Coord destination, GameObject? caller = null, bool force = false, bool announce = true, string? toExit = null)
+        => MoveTo((object?)destination, caller, force, announce, toExit);
+    // Named (not an overload): a LocationRef overload would make MoveTo(null)
+    // ambiguous between GameObject? and LocationRef. LocationRef callers use
+    // this name or the object core.
+    public bool MoveToLocation(LocationRef destination, GameObject? caller = null, bool force = false, bool announce = true, string? toExit = null)
+        => MoveTo((object?)destination, caller, force, announce, toExit);
+    public bool MoveToNowhere(GameObject? caller = null, bool force = false, bool announce = true, string? toExit = null)
+        => MoveTo((object?)null, caller, force, announce, toExit);
     public bool MoveTo(object? destination, GameObject? caller = null, bool force = false, bool announce = true, string? toExit = null)
     {
         // Normalize destination to GameObject? (Node is subclass of GameObject)
@@ -461,7 +474,7 @@ public partial class GameObject
         {
             try
             {
-                var mapHandler = MapHandlerSingleton.Get(); // best-effort global singleton if exists
+                var mapHandler = GlobalServices.GetMapHandlerOrDefault(); // best-effort global singleton if exists
                 if (mapHandler is not null)
                 {
                     Coord? oldCoord = null;
@@ -574,24 +587,4 @@ public partial class GameObject
     {
         // This will be handled by Node.AddExits; stub for GameObject container
     }
-}
-
-// Tiny singleton helper for MapHandler access in MoveTo
-internal static class MapHandlerSingleton
-{
-    private static MapHandler? _instance;
-    private static readonly Lock _lock = new();
-    public static MapHandler? Get()
-    {
-        lock (_lock)
-        {
-            if (_instance is not null) return _instance;
-            // Cache the fallback: without this every node-move pays a full
-            // global lookup, and only Set() ever populated the slot.
-            try { _instance = GlobalServices.GetMapHandler(); }
-            catch { return null; }
-            return _instance;
-        }
-    }
-    public static void Set(MapHandler handler) { lock (_lock) { _instance = handler; } }
 }

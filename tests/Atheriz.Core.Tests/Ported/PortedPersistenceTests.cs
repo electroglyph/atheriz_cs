@@ -68,7 +68,7 @@ public class PortedPersistenceTests
         if(ObjectRegistry.Get(account.Id).Count==0) ObjectRegistry.AddObject(account);
         using(var db=new AtherizDbContext(env.TempPath)){ db.Database.EnsureCreated(); ObjectRegistry.SaveObjects(db); }
         Assert.Equal(1, RowCount(account.Id, env.TempPath));
-        Assert.True(account.Delete(caller));
+        Assert.True(account.Delete(caller) is not null);
         Assert.Empty(ObjectRegistry.Get(account.Id));
         Assert.True(account.IsDeleted);
         // The row death is journaled, not written mid-game (DB discipline:
@@ -349,7 +349,7 @@ public class PortedPersistenceTests
     private class ResurrectSpyObject : GameObject
     {
         public GameObject? Victim; public string? TempPath;
-        public override (string Sql, object[] Params) GetSaveOpsClearing()
+        public override Persistence.Dto.SaveOperation GetSaveOperationClearing()
         {
             if (Victim!=null && TempPath!=null)
             {
@@ -363,7 +363,7 @@ public class PortedPersistenceTests
                     if(row!=null){ db.Objects.Remove(row); db.SaveChanges(); }
                 } catch {}
             }
-            return base.GetSaveOpsClearing();
+            return base.GetSaveOperationClearing();
         }
     }
 
@@ -536,10 +536,10 @@ public class PortedPersistenceTests
     private class ThrowingSaveObject : GameObject
     {
         public bool ShouldThrow=false;
-        public override (string Sql, object[] Params) GetSaveOpsClearing()
+        public override Persistence.Dto.SaveOperation GetSaveOperationClearing()
         {
             if(ShouldThrow) throw new InvalidOperationException("injected serialization failure");
-            return base.GetSaveOpsClearing();
+            return base.GetSaveOperationClearing();
         }
     }
 
@@ -625,29 +625,24 @@ public class PortedPersistenceTests
     [Fact] public void RecursiveDeleteDepthTruncationLeak()
     {
         using var env=GlobalTestEnv.Enter();
-        var orig=GameObject.MaxSearchDepth;
-        GameObject.MaxSearchDepth=10;
-        try
-        {
-            var admin=GameObject.Create("AdminDel"); admin.PrivilegeLevel=Privilege.Admin; ObjectRegistry.AddObject(admin);
-            var root=GameObject.Create("Root", isContainer:true); ObjectRegistry.AddObject(root);
-            var cur=root;
-            var chain=new List<GameObject>{root};
-            for(int i=0;i<15;i++){ var nxt=GameObject.Create($"Cont{i}", isContainer:true); ObjectRegistry.AddObject(nxt); cur.AddObject(nxt); nxt.Location=new LocationRef.ObjectLocation(cur.Id); cur=nxt; chain.Add(cur); }
-            var leaf=GameObject.Create("Leaf"); ObjectRegistry.AddObject(leaf); cur.AddObject(leaf); leaf.Location=new LocationRef.ObjectLocation(cur.Id); chain.Add(leaf);
-            var allIds=chain.Select(o=>o.Id).ToList();
-            Assert.True(allIds.All(id=> ObjectRegistry.Get(id).Count>0));
-            var ops=root.Delete(admin, recursive:true);
-            Assert.NotNull(ops);
-            var remaining=allIds.Where(id=> ObjectRegistry.Get(id).Count>0).ToList();
-            Assert.Equal(7, remaining.Count);
-            var surv=ObjectRegistry.Get(chain[10].Id);
-            Assert.NotEmpty(surv);
-            Assert.True(surv[0].Location is LocationRef.NullLocation, "truncated survivor should be detached");
-            var deeper=ObjectRegistry.Get(chain[11].Id);
-            Assert.NotEmpty(deeper);
-            Assert.True(deeper[0].Location is LocationRef.ObjectLocation ol && ol.ObjectId==surv[0].Id);
-        } finally { GameObject.MaxSearchDepth=orig; }
+        var admin=GameObject.Create("AdminDel"); admin.PrivilegeLevel=Privilege.Admin; ObjectRegistry.AddObject(admin);
+        var root=GameObject.Create("Root", isContainer:true); ObjectRegistry.AddObject(root);
+        var cur=root;
+        var chain=new List<GameObject>{root};
+        for(int i=0;i<15;i++){ var nxt=GameObject.Create($"Cont{i}", isContainer:true); ObjectRegistry.AddObject(nxt); cur.AddObject(nxt); nxt.Location=new LocationRef.ObjectLocation(cur.Id); cur=nxt; chain.Add(cur); }
+        var leaf=GameObject.Create("Leaf"); ObjectRegistry.AddObject(leaf); cur.AddObject(leaf); leaf.Location=new LocationRef.ObjectLocation(cur.Id); chain.Add(leaf);
+        var allIds=chain.Select(o=>o.Id).ToList();
+        Assert.True(allIds.All(id=> ObjectRegistry.Get(id).Count>0));
+        var ops=root.Delete(admin, recursive:true, maxDepth:10);
+        Assert.NotNull(ops);
+        var remaining=allIds.Where(id=> ObjectRegistry.Get(id).Count>0).ToList();
+        Assert.Equal(7, remaining.Count);
+        var surv=ObjectRegistry.Get(chain[10].Id);
+        Assert.NotEmpty(surv);
+        Assert.True(surv[0].Location is LocationRef.NullLocation, "truncated survivor should be detached");
+        var deeper=ObjectRegistry.Get(chain[11].Id);
+        Assert.NotEmpty(deeper);
+        Assert.True(deeper[0].Location is LocationRef.ObjectLocation ol && ol.ObjectId==surv[0].Id);
     }
 
     // Port of test_persistence.py:880 test_nodegrid_overwrite_does_not_leak_old

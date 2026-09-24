@@ -87,7 +87,6 @@ public sealed class AtherizSettings
     public string FuncparserStartChar { get; set; } = "$";
     public string FuncparserEscapeChar { get; set; } = "\\";
     public int FuncparserMaxNesting { get; set; } = 20;
-    public int MaxSearchDepth { get; set; } = 100;
     public int MaxAstarIterations { get; set; } = 50000;
     public int ClientDefaultWidth { get; set; } = 78;
     public int ClientDefaultHeight { get; set; } = 45;

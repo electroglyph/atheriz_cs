@@ -30,9 +30,9 @@ public class ChannelSnapshotTests
             Assert.Equal("m2", history[1][2].GetString());
             Assert.Equal("Bob", history[1][1].GetString());
 
-            var (sql, pars) = ch.GetSaveOps();
-            Assert.StartsWith("INSERT OR REPLACE", sql);
-            string json = pars[1].ToString()!;
+            var op = ch.GetSaveOperation();
+            Assert.Equal(ch.Id, op.Id);
+            string json = op.Json;
             Assert.Contains("m1", json);
             Assert.Contains("m2", json);
 
@@ -79,8 +79,8 @@ public class ChannelSnapshotTests
             ch.ClearHistory();
 
             Assert.Equal(0, ch.ToDto().Extra["history"].GetArrayLength());
-            var (_, pars) = ch.GetSaveOps();
-            Assert.DoesNotContain("gone", pars[1].ToString());
+            var op = ch.GetSaveOperation();
+            Assert.DoesNotContain("gone", op.Json);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

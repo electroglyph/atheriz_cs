@@ -87,46 +87,42 @@ public class PortedAccountTestsPart2
     }
 
     // Port of test_account.py:423 TestAccountDbOps
-    [Fact] public void GetSaveOpsReturnsInsertOrReplace()
+    [Fact] public void GetSaveOperation_ReturnsIdAndJson()
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("gabe","pw");
-        var (sql, pars)=acc.GetSaveOps();
-        Assert.Equal("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", sql);
-        Assert.Equal(acc.Id, (int)pars[0]);
-        Assert.IsType<string>(pars[1]);
+        var op=acc.GetSaveOperation();
+        Assert.Equal(acc.Id, op.Id);
+        Assert.Equal(acc.Id, GameObjectDtoSerializer.FromJson(op.Json).Id);
     }
-    [Fact] public void GetSaveOpsDataCanBeUnpickled()
+    [Fact] public void GetSaveOperationDataCanBeUnpickled()
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("hope","pw");
-        var (_, pars)=acc.GetSaveOps();
-        var json=(string)pars[1];
-        var dto=GameObjectDtoSerializer.FromJson(json);
+        var op=acc.GetSaveOperation();
+        var dto=GameObjectDtoSerializer.FromJson(op.Json);
         Assert.Equal(acc.Id, dto.Id);
         Assert.Equal(acc.Name, dto.Name);
     }
-    [Fact] public void GetSaveOpsDoesNotClearIsModified()
+    [Fact] public void GetSaveOperationDoesNotClearIsModified()
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("inga","pw");
         Assert.True(acc.IsModified);
-        acc.GetSaveOps();
+        acc.GetSaveOperation();
         Assert.True(acc.IsModified);
     }
-    [Fact] public void GetDelOpsReturnsCorrectSql()
+    [Fact] public void GetDeleteOperationCarriesRowId()
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("juno","pw");
-        var (sql, pars)=acc.GetDelOps();
-        Assert.Equal("DELETE FROM objects WHERE id = ?", sql);
-        Assert.Equal(acc.Id, (int)pars[0]);
+        Assert.Equal(acc.Id, acc.GetDeleteOperation().Id);
     }
-    [Fact] public void GetDelOpsDoesNotChangeIsModified()
+    [Fact] public void GetDeleteOperationDoesNotChangeIsModified()
     {
         using var env=GlobalTestEnv.Enter();
         var acc=MakeAccount("kate","pw");
-        acc.GetDelOps();
+        acc.GetDeleteOperation();
         Assert.True(acc.IsModified);
     }
 
@@ -216,7 +212,7 @@ public class PortedAccountTestsPart2
         Assert.True(acc.CheckPassword("updated", "testsalt"));
         Assert.False(acc.CheckPassword("initial", "testsalt"));
         Assert.True(acc.Login("ruth","updated", "testsalt"));
-        Assert.True(acc.Delete());
+        Assert.NotNull(acc.Delete());
         Assert.True(acc.IsDeleted);
         Assert.DoesNotContain(acc, ObjectRegistry.FilterBy(_=>true));
     }
@@ -232,10 +228,10 @@ public class PortedAccountTestsPart2
         var a = Account.Create<ToggleAccount>("sam2","pw");
         if(ObjectRegistry.Get(a.Id).Count==0) ObjectRegistry.AddObject(a);
         a.AllowDelete = false;
-        Assert.False(a.Delete());
+        Assert.Null(a.Delete());
         Assert.Contains(a, ObjectRegistry.FilterBy(_=>true));
         a.AllowDelete = true;
-        Assert.True(a.Delete());
+        Assert.NotNull(a.Delete());
     }
 
     // Port of test_account.py:575 TestAccountRemoveCharacter

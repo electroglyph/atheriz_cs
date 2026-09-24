@@ -40,9 +40,9 @@ public class Session : Atheriz.Core.Commands.ISessionProvider
         get { lock (Lock) { return _puppetStack.ToList(); } }
     }
     internal void PushPuppetEntry(GameObject? prev, GameObject target) => _puppetStack.Add((prev, target));
-    internal bool TryPopPuppetEntry(out GameObject? prev, out GameObject target)
+    internal bool TryPopPuppetEntry(out GameObject? prev, out GameObject? target)
     {
-        if (_puppetStack.Count == 0) { prev = null; target = null!; return false; }
+        if (_puppetStack.Count == 0) { prev = null; target = null; return false; }
         var last = _puppetStack[^1];
         _puppetStack.RemoveAt(_puppetStack.Count - 1);
         prev = last.Prev;

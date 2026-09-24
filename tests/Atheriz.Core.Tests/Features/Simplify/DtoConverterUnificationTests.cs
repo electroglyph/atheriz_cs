@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Atheriz.Core;
+using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Persistence.Converters;
 using Atheriz.Core.Persistence.Dto;
@@ -52,6 +53,37 @@ public class DtoConverterUnificationTests
         var dto = GameObjectDto.Create(1003, "Both", "script");
         dto.IsNode = true;
         Assert.IsType<Script>(GameObjectDtoConverter.FromDto(dto));
+    }
+
+    // Load adopts stored ids without drawing generator ids: the watermark
+    // advances only at the registry swap (ObjectRegistry.LoadObjects), so a
+    // bare FromDto leaves it untouched while the object keeps its row id.
+    [Theory]
+    [InlineData("object", 2001)]
+    [InlineData("account", 2002)]
+    [InlineData("channel", 2003)]
+    [InlineData("script", 2004)]
+    public void FromDto_AdoptsRowId_WithoutDrawingGeneratorIds(string type, int rowId)
+    {
+        using var env = GlobalTestEnv.Enter();
+        int before = IdGenerator.GetId();
+        var dto = GameObjectDto.Create(rowId, "Loaded", type);
+        var obj = GameObjectDtoConverter.FromDto(dto);
+        Assert.Equal(rowId, obj.Id);
+        Assert.Equal(before, IdGenerator.GetId());
+    }
+
+    [Fact]
+    public void FromDto_NodeAdoptsRowId_WithoutDrawingGeneratorIds()
+    {
+        using var env = GlobalTestEnv.Enter();
+        int before = IdGenerator.GetId();
+        var dto = GameObjectDto.Create(2005, "LoadedNode", "node");
+        dto.IsNode = true;
+        dto.Location = new LocationRef.CoordLocation(new Coord("wmark", 0, 0, 0));
+        var node = Assert.IsType<Node>(GameObjectDtoConverter.FromDto(dto));
+        Assert.Equal(2005, node.Id);
+        Assert.Equal(before, IdGenerator.GetId());
     }
 
     [Fact]

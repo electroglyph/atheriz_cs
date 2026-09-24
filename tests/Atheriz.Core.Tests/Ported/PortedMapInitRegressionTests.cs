@@ -120,9 +120,7 @@ public class PortedMapInitRegressionTests
         mh.SetMapInfo("limbo", 4, mi);
         // Install as global handler for AtPostPuppet to find
         GlobalServices.Reset();
-        // Use reflection to inject mh as _mapHandler (since GetMapHandler is lazy)
-        var f = typeof(GlobalServices).GetField("_mapHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        f!.SetValue(null, mh);
+        GlobalServices.SetMapHandler(mh);
         // Create hero at limbo 4,4,4
         var hero = GameObject.Create("Hero", isPc: true);
         hero.Symbol = "X";
@@ -229,10 +227,8 @@ public class PortedMapInitRegressionTests
         }
         mi.PreRender();
         mh.SetMapInfo("limbo", 4, mi);
-        var fmh = typeof(GlobalServices).GetField("_mapHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        fmh!.SetValue(null, mh);
-        var fn = typeof(GlobalServices).GetField("_nodeHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        fn!.SetValue(null, nh);
+        GlobalServices.SetMapHandler(mh);
+        GlobalServices.SetNodeHandler(nh);
 
         var hero = GameObject.Create("Mover", isPc: true);
         hero.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(new Coord("limbo", 4, 4, 4));

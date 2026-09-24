@@ -17,11 +17,9 @@ public class PortedDeleteTickableTests
 
     private static void WireTicker()
     {
-        var ticker = GlobalServices.GetAsyncTicker();
-        // Node uses GlobalTickerHolder, not GlobalServices — wire for test
-        var holder = typeof(Node).Assembly.GetType("Atheriz.Core.Objects.GlobalTickerHolder");
-        var set = holder?.GetMethod("Set", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-        set?.Invoke(null, new object[] { ticker });
+        // Node reads the ticker straight from GlobalServices now (no shim):
+        // ensure the slot is populated.
+        GlobalServices.GetAsyncTicker();
     }
 
     [Fact]

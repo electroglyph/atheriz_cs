@@ -478,7 +478,7 @@ public class PortedDoorTestsPart2
         var caller = MakeCaller(startNode);
         var door = new ThrowingMapDoor(new Coord("TestArea", 0, 0, 0), new Coord("TestArea", 0, 0, 1));
         Assert.True(door.TryOpen(caller));
-        Assert.False(door.IsClosed);
+        Assert.False(door.Closed);
     }
 
     [Fact] public void TryClose_ThrowingMapStep_StillCloses()
@@ -489,7 +489,7 @@ public class PortedDoorTestsPart2
         var door = new ThrowingMapDoor(new Coord("TestArea", 0, 0, 0), new Coord("TestArea", 0, 0, 1));
         door.ForceOpen();
         Assert.True(door.TryClose(caller));
-        Assert.True(door.IsClosed);
+        Assert.True(door.Closed);
     }
 
     [Fact] public void GetNodes_PairedEndpointsSurviveConcurrentCoordRewrite()

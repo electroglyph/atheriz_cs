@@ -32,24 +32,12 @@ public class PortedMapMoveRegressionTests
     private static void InjectMapHandler(MapHandler mh)
     {
         GlobalServices.Reset();
-        var f = typeof(GlobalServices).GetField("_mapHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        f!.SetValue(null, mh);
-        try { GlobalServices.SetMapHandler(mh); } catch { }
-        // MapHandlerSingleton is internal; set via reflection
-        try
-        {
-            var t = typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton");
-            var m = t?.GetMethod("Set", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-            m?.Invoke(null, new object[] { mh });
-        }
-        catch { }
+        GlobalServices.SetMapHandler(mh);
     }
 
     private static void InjectNodeHandler(NodeHandler nh)
     {
-        NodeHandler.SetCurrent(nh);
-        var fn = typeof(GlobalServices).GetField("_nodeHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        fn!.SetValue(null, nh);
+        GlobalServices.SetNodeHandler(nh);
     }
 
     private static MapHandler CreateLimboMapHandler()

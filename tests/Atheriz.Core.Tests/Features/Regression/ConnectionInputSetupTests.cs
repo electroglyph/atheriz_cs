@@ -28,7 +28,7 @@ public class ConnectionInputSetupTests
         Assert.False(IsColor("red"));
         using var doc = JsonDocument.Parse("[255,0,0]");
         Assert.True(IsColor(doc.RootElement));
-        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "ConnectionManager.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "InputFuncs.cs");
         var region = SourceScan.Region(src, "private static bool IsColor(");
         Assert.DoesNotContain("lst.All", region);
         Assert.DoesNotContain("JsonElement case", region);
@@ -39,7 +39,7 @@ public class ConnectionInputSetupTests
     [Fact]
     public void MapEditHandler_KeyGuard_ShapesOnlyCells()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "ConnectionManager.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "InputFuncs.cs");
         var region = SourceScan.Region(src, "public void MapEditHandler(");
         Assert.DoesNotContain("key is not string", region);
         Assert.Contains("cellsObj is not List<object?>", region);

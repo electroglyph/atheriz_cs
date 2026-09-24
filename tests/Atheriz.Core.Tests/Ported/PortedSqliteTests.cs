@@ -180,20 +180,8 @@ public class PortedSqliteTests
         areaTS.GetGrid(0)!.AddNode(node);
         nh.Save(force:true);
 
-        // Unpatch the classes to simulate a fresh server start
-        GameObject._is_thread_safe = false;
-        Channel._is_thread_safe = false;
-        Account._is_thread_safe = false;
-        Script._is_thread_safe = false;
-        Node._is_thread_safe = false;
-        // Load objects from DB
+        // Load objects from DB into a cleared registry (fresh-start shape).
         ObjectRegistry.ClearAll();
-        // Simulate fresh load where ensure_thread_safe would be re-applied: set flags true again
-        GameObject._is_thread_safe = true;
-        Channel._is_thread_safe = true;
-        Account._is_thread_safe = true;
-        Script._is_thread_safe = true;
-        Node._is_thread_safe = true;
         ObjectRegistry.LoadObjects(env.TempPath);
         var nh2 = new NodeHandler();
         nh2.Load(new AtherizDbContext(env.TempPath));
@@ -202,17 +190,18 @@ public class PortedSqliteTests
         var loadedAcc = ObjectRegistry.Get(acc.Id).FirstOrDefault();
         var loadedScript = ObjectRegistry.Get(script.Id).FirstOrDefault();
         var loadedNode = nh2.GetNode(new Coord("TestAreaTS",10,10,0));
-        // Test if classes have had ensure_thread_safe applied — via _is_thread_safe
-        Assert.True(GameObject._is_thread_safe, "Object missing thread_safe patch!");
-        Assert.True(Channel._is_thread_safe, "Channel missing thread_safe patch!");
-        Assert.True(Account._is_thread_safe, "Account missing thread_safe patch!");
-        Assert.True(Script._is_thread_safe, "Script missing thread_safe patch!");
-        Assert.True(Node._is_thread_safe, "Node missing thread_safe patch!");
         // Also verify loaded instances exist
         Assert.NotNull(loadedObj);
         Assert.NotNull(loadedChan);
         Assert.NotNull(loadedAcc);
         Assert.NotNull(loadedScript);
         Assert.NotNull(loadedNode);
+        // Thread safety is structural: every loaded instance carries the base
+        // SyncRoot lock, so no patch step runs after load.
+        Assert.NotNull(loadedObj.SyncRoot);
+        Assert.NotNull(loadedChan.SyncRoot);
+        Assert.NotNull(loadedAcc.SyncRoot);
+        Assert.NotNull(loadedScript.SyncRoot);
+        Assert.NotNull(loadedNode.SyncRoot);
     }
 }

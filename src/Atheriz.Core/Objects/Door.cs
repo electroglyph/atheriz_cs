@@ -96,10 +96,10 @@ public class Door
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Door.MarkNodeDoorsModified: " + logEx.Message, "Door"); }
     }
 
-    private readonly Dictionary<string, List<LockEntry>> _locks = new();
-    // One lock-table row per entry (mirrors GameObject._locks): the policy is
-    // what persists in DoorDto, the predicate is what decides. Bare-lambda
-    // "custom" entries are kept in memory but dropped on save with a loud log.
+    private readonly LockTable _lockTable = new();
+    // One lock-table row per entry: the policy is what persists in DoorDto,
+    // the predicate is what decides. Bare-lambda "custom" entries are kept
+    // in memory but dropped on save with a loud log.
 
     // Magic mapping key for door announces + per-call construction helper. Each
     // call site still gets its own dict instance (MsgContents copies-then-mutates
@@ -148,17 +148,13 @@ public class Door
     public Door(Coord from, Coord to, string name)
         : this(from, to, name, name, null, "", "", false, false) { }
 
-    public bool IsClosed { get => Closed; set => Closed = value; }
-    public bool IsLocked { get => Locked; set => Locked = value; }
-
     public void AddLock(string name, Func<GameObject, bool> pred)
         => AddLock(name, pred, LockPolicies.Custom);
     public void AddLock(string name, Func<GameObject, bool> pred, string policy)
     {
         using (WriteScope())
         {
-            if (!_locks.TryGetValue(name, out var lst)) { lst = []; _locks[name] = lst; }
-            lst.Add(new LockEntry(LockPolicies.Classify(policy), pred));
+            _lockTable.AddRestored(name, new LockEntry(LockPolicies.Classify(policy), pred));
         }
     }
     public void AddLock(string name, Func<GameObject, bool> pred, LockPolicies.LockPolicy policy)
@@ -170,7 +166,7 @@ public class Door
         List<LockEntry> snap;
         using (ReadScope())
         {
-            if (!_locks.TryGetValue(lockName, out var lst) || lst.Count == 0) return true; snap = [.. lst];
+            if (!_lockTable.TrySnapshot(lockName, out snap)) return true;
         }
         foreach (var entry in snap)
         {
@@ -446,7 +442,7 @@ public class Door
         // (The old Default fallback + second Global check made the fallback dead.)
         var settings = AtherizSettings.Global;
         if (!settings.MapEnabled || SymbolCoord is null || FromCoord.Equals(default) || ToCoord.Equals(default)) return;
-        var mh = MapHandlerSingleton.Get();
+        var mh = GlobalServices.GetMapHandlerOrDefault();
         if (mh is null) return;
         HashSet<(string, int)> seen = [];
         foreach (var coord in new[] { FromCoord, ToCoord })
@@ -499,7 +495,7 @@ public class Door
                 Name = _name,
                 Desc = _doorDesc,
                 KeyId = _keyId,
-                Locks = _locks.Select(kv => new LockDefDto
+                Locks = _lockTable.SnapshotEntries().Select(kv => new LockDefDto
                 {
                     Name = kv.Key,
                     Policies = kv.Value.Select(e => e.Policy).ToList(),
@@ -545,23 +541,4 @@ public class Door
         }
         return d;
     }
-}
-
-public sealed class DoorDto
-{
-    public Coord FromCoord { get; set; }
-    public string FromExit { get; set; } = "";
-    public Coord ToCoord { get; set; }
-    public string ToExit { get; set; } = "";
-    public (int X, int Y)? SymbolCoord { get; set; }
-    public string ClosedSymbol { get; set; } = "";
-    public string OpenSymbol { get; set; } = "";
-    public bool Closed { get; set; } = true;
-    public bool Locked { get; set; } = false;
-    public string Name { get; set; } = "";
-    public string Desc { get; set; } = "";
-    public int? KeyId { get; set; }
-    // Persisted lock policies as typed LockDefDto rows (mirrors GameObject
-    // Locks; bare-lambda "custom" entries are dropped with a loud log).
-    public List<LockDefDto> Locks { get; set; } = [];
 }

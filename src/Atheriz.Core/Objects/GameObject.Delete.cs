@@ -8,21 +8,20 @@ public partial class GameObject
 {
     // Atomic delete claim. The IsDeleted probe below runs under a read lock and
     // the claiming write comes far too late, so two racing Deletes both walked,
-    // both emitted GetDelOps, both tore down. The loser of this claim returns
+    // both emitted delete ops, both tore down. The loser of this claim returns
     // null (already-gone) instead.
     private int _deleteClaimed;
 
 // caller optional for Account parity
-    public virtual (int count, List<object> ops)? Delete(GameObject? caller = null, bool recursive = false)
+    public virtual (int Count, List<DeleteOperation> Operations)? Delete(GameObject? caller = null, bool recursive = false, int maxDepth = ContentUtils.DefaultMaxSearchDepth)
     {
-        if (this is Account acc) return acc.DeleteImmediate(caller);
         if (caller is not null && !AtDelete(caller)) return null;
         // quick check already deleted
         _lock.EnterReadLock();
         try { if (_flags.IsDeleted) return null; }
         finally { _lock.ExitReadLock(); }
         if (System.Threading.Interlocked.Exchange(ref _deleteClaimed, 1) != 0) return null;
-        try { return DeleteCore(caller, recursive); }
+        try { return DeleteCore(caller, recursive, maxDepth); }
         catch
         {
             // A failed delete must stay deletable: release the claim so a later
@@ -32,15 +31,14 @@ public partial class GameObject
         }
     }
 
-    private (int count, List<object> ops)? DeleteCore(GameObject? caller, bool recursive)
+    private (int Count, List<DeleteOperation> Operations)? DeleteCore(GameObject? caller, bool recursive, int maxDepth)
     {
-        List<object> ops = [];
+        List<DeleteOperation> ops = [];
         List<GameObject> toDelete = [];
         int extraCount = 0;
 
         if (recursive)
         {
-            int maxDepth = MaxSearchDepth;
             HashSet<int> seen = [];
             var stack = new Stack<(GameObject obj, int depth)>();
             stack.Push((this, 0));
@@ -103,7 +101,7 @@ public partial class GameObject
                 finally { obj._lock.ExitReadLock(); }
                 if (!isTemp)
                 {
-                    ops.Add(obj.GetDelOps());
+                    ops.Add(obj.GetDeleteOperation());
                     // Journal the row death: the checkpoint drain executes it
                     // (DeleteCommand discards the returned ops, and SaveObjects
                     // only upserts live members).
@@ -199,14 +197,14 @@ public partial class GameObject
                         // AtDelete is a veto (fail-closed), never a propagation.
                         // A vetoed straggler survives in place — the walk's
                         // decision stands even at a deleted parent.
-                        (int count, List<object> ops)? r = null;
-                        try { r = straggler.Delete(caller, true); }
+                        (int Count, List<DeleteOperation> Operations)? r = null;
+                        try { r = straggler.Delete(caller, true, maxDepth); }
                         catch (Exception logEx)
                         {
                             AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject");
                             continue;
                         }
-                        if (r is not null) { ops.AddRange(r.Value.ops); extraCount += r.Value.count; }
+                        if (r is not null) { ops.AddRange(r.Value.Operations); extraCount += r.Value.Count; }
                         else if (straggler._flags.IsDeleted) continue;
                         else
                         {
@@ -272,8 +270,8 @@ public partial class GameObject
                         } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
                     }
                     // then collect recursively (delete content and its children)
-                    var r = content.Delete(caller, true);
-                    if (r is not null) { ops.AddRange(r.Value.ops); deletedKids += r.Value.count; }
+                    var r = content.Delete(caller, true, maxDepth);
+                    if (r is not null) { ops.AddRange(r.Value.Operations); deletedKids += r.Value.Count; }
                 }
                 else
                 {
@@ -325,7 +323,7 @@ public partial class GameObject
             } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
             if (!this.IsTemporary)
             {
-                ops.Add(this.GetDelOps());
+                ops.Add(this.GetDeleteOperation());
                 // Journal the row death (see the recursive path above).
                 ObjectRegistry.NoteDeleted(this.Id);
             }
@@ -380,7 +378,7 @@ public partial class GameObject
             {
                 try
                 {
-                    var ch = ObjectRegistry.Get(chId).FirstOrDefault() as Channel;
+                    var ch = ObjectRegistry.Get(chId).FirstOrDefault();
                     if (ch is not null) try { ch.RemoveListener(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
                 }
                 catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
@@ -405,9 +403,9 @@ public partial class GameObject
             }
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
-        try { Objects.GlobalTickerHolder.Get()?.RemoveCoro(obj.AtTick, obj.TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+        try { Globals.GlobalServices.TryGetTicker()?.RemoveCoro(obj.AtTick, obj.TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
         // leave no dangling residue — a deleted id must not stay
         // readable via PeekMessages/scans or keep installed hooks alive.
-        try { obj.Write(() => { obj._msgLog.Clear(); obj._hooks.Clear(); }); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+        try { obj.Write(() => { obj._msgLog.Clear(); obj._hookRegistry.Clear(); }); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
     }
 }

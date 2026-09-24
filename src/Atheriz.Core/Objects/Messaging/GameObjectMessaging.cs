@@ -228,6 +228,11 @@ public partial class GameObject
     /// <see cref="FuncParserHelpers.SafeFormatMap"/>.
     /// </summary>
     public void MsgContents(string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, IEnumerable<GameObject>? exclude = null, bool raiseErrors = false, string? msgType = null, Func<int, GameObject?>? resolver = null)
+        => BroadcastToContents(text, fromObj, mapping, exclude, raiseErrors, msgType, resolver);
+
+    // Virtual broadcast: Node overrides with live-contents + catch-all fallback.
+    // New code calls this polymorphically instead of testing `is Node`.
+    public virtual void BroadcastToContents(string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, IEnumerable<GameObject>? exclude = null, bool raiseErrors = false, string? msgType = null, Func<int, GameObject?>? resolver = null)
     {
         // Broadcast loop lives in ContentUtils.EmitToContents (shared with the
         // Node overload); only the receiver source stays here. Object delivery

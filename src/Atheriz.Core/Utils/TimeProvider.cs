@@ -33,23 +33,3 @@ public static class TimeProvider
     // code cannot swap the global clock.
     public static ITimeProvider Default { get; internal set; } = SystemDefault;
 }
-
-/// <summary>
-/// F015: mockable clock abstraction. Production default is <see cref="SystemTimeProvider"/>
-/// (monotonic stopwatch); tests can substitute a fake via <c>TimeProvider.Default = ...</c>.
-/// </summary>
-public interface ITimeProvider
-{
-    double MonotonicSeconds();
-    long MonotonicMilliseconds();
-    double Now();
-}
-
-public sealed class SystemTimeProvider : ITimeProvider
-{
-    // Reads the stopwatch directly (never the statics): this type IS the
-    // system clock even while Default points at a fake.
-    public double MonotonicSeconds() => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
-    public long MonotonicMilliseconds() => (long)(MonotonicSeconds() * 1000.0);
-    public double Now() => MonotonicSeconds();
-}

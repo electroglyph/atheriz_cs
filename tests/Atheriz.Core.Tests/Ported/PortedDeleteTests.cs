@@ -114,7 +114,7 @@ public class PortedDeleteTests
         Assert.Contains(item.Id, room.ContentsSnapshot);
         var result = room.Delete(caller, recursive: false);
         Assert.NotNull(result);
-        var ops = result!.Value.ops;
+        var ops = result!.Value.Operations;
         // item should be moved to home
         var loc = item.Location as Persistence.Dto.LocationRef.CoordLocation;
         Assert.NotNull(loc);
@@ -163,11 +163,11 @@ public class PortedDeleteTests
         var path = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH")!;
         using var db = new AtherizDbContext(path);
         db.Database.EnsureCreated();
-        var (sql, pars) = acc.GetSaveOps();
+        _ = acc.GetSaveOperation();
         // Use registry SaveObjects path instead of direct sql
         ObjectRegistry.SaveObjects(db, force:true);
         var res = acc.Delete(caller, false);
-        Assert.True(res);
+        Assert.NotNull(res);
         Assert.True(acc.IsDeleted);
         Assert.DoesNotContain(acc.Id, ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));
         // Deletes journal only; the row goes away at the next save checkpoint.
@@ -195,15 +195,9 @@ public class PortedDeleteTests
         Assert.NotNull(res);
         if (res != null)
         {
-            var ops = new List<(string Sql, object[] Params)>();
-            foreach (var o in res.Value.ops)
-            {
-                if (o is ValueTuple<string, object[]> vt) ops.Add((vt.Item1, vt.Item2));
-                else if (o is Tuple<string, object[]> tt) ops.Add((tt.Item1, tt.Item2));
-                else ops.Add(ch.GetDelOps());
-            }
-            if (ops.Count > 0) ObjectRegistry.DeleteObjects(db, ops.Select(o => Convert.ToInt32(o.Params[0])).ToList());
-            else ObjectRegistry.DeleteObjects(db, new List<int> { ch.Id });
+            var ids = res.Value.Operations.Select(o => o.Id).ToList();
+            if (ids.Count == 0) ids.Add(ch.Id);
+            ObjectRegistry.DeleteObjects(db, ids);
         }
         Assert.True(ch.IsDeleted);
         Assert.DoesNotContain(ch.Id, ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));
@@ -223,8 +217,7 @@ public class PortedDeleteTests
         ObjectRegistry.SaveObjects(db, force:true);
         using var dbCheck = new AtherizDbContext(path);
         Assert.NotNull(dbCheck.Objects.Find(item.Id));
-        var ops = new List<(string Sql, object[] Params)> { item.GetDelOps() };
-        ObjectRegistry.DeleteObjects(db, ops.Select(o => Convert.ToInt32(o.Params[0])).ToList());
+        ObjectRegistry.DeleteObjects(db, [item.GetDeleteOperation().Id]);
         using var db2 = new AtherizDbContext(path);
         Assert.Null(db2.Objects.Find(item.Id));
     }

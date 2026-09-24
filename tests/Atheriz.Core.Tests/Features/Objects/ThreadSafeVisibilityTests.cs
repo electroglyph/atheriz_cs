@@ -1,50 +1,51 @@
-// _is_thread_safe narrowed to internal: same-assembly tests read
-// the flags directly with no reflection.
+using System.Reflection;
 using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
+// Thread safety is structural, not a marker: every entity carries the base
+// SyncRoot lock, so the old _is_thread_safe patch flags are gone and these
+// pins assert the lock surface plus a live round-trip instead.
 [Collection("Ported")]
 public sealed class ThreadSafeVisibilityTests
 {
-    [Fact]
-    public void IsThreadSafe_AllTypes_TrueByDefault()
+    [Theory]
+    [InlineData(typeof(GameObject))]
+    [InlineData(typeof(Channel))]
+    [InlineData(typeof(Account))]
+    [InlineData(typeof(Script))]
+    [InlineData(typeof(Node))]
+    public void ThreadSafeMarker_IsGone(Type type)
     {
-        Assert.True(GameObject._is_thread_safe);
-        Assert.True(Channel._is_thread_safe);
-        Assert.True(Account._is_thread_safe);
-        Assert.True(Script._is_thread_safe);
-        Assert.True(Node._is_thread_safe);
+        Assert.Null(type.GetField("_is_thread_safe",
+            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.FlattenHierarchy));
+    }
+
+    [Theory]
+    [InlineData(typeof(GameObject))]
+    [InlineData(typeof(Channel))]
+    [InlineData(typeof(Account))]
+    [InlineData(typeof(Script))]
+    [InlineData(typeof(Node))]
+    public void SyncRoot_InheritedFromGameObject(Type type)
+    {
+        var prop = type.GetProperty("SyncRoot");
+        Assert.NotNull(prop);
+        Assert.Equal(typeof(GameObject), prop.DeclaringType);
+        Assert.Equal(typeof(ReaderWriterLockSlim), prop.PropertyType);
     }
 
     [Fact]
-    public void IsThreadSafe_DirectWrite_RoundTrips()
+    public void SyncRoot_LockRoundTrip_Works()
     {
-        GameObject._is_thread_safe = false;
-        Channel._is_thread_safe = false;
-        Account._is_thread_safe = false;
-        Script._is_thread_safe = false;
-        Node._is_thread_safe = false;
+        var obj = new GameObject();
+        obj.SyncRoot.EnterReadLock();
         try
         {
-            Assert.False(GameObject._is_thread_safe);
-            Assert.False(Channel._is_thread_safe);
-            Assert.False(Account._is_thread_safe);
-            Assert.False(Script._is_thread_safe);
-            Assert.False(Node._is_thread_safe);
+            Assert.True(obj.SyncRoot.IsReadLockHeld);
         }
-        finally
-        {
-            GameObject._is_thread_safe = true;
-            Channel._is_thread_safe = true;
-            Account._is_thread_safe = true;
-            Script._is_thread_safe = true;
-            Node._is_thread_safe = true;
-        }
-        Assert.True(GameObject._is_thread_safe);
-        Assert.True(Channel._is_thread_safe);
-        Assert.True(Account._is_thread_safe);
-        Assert.True(Script._is_thread_safe);
-        Assert.True(Node._is_thread_safe);
+        finally { obj.SyncRoot.ExitReadLock(); }
+        using (obj.WriteScope()) { }
+        using (obj.ReadScope()) { }
     }
 }

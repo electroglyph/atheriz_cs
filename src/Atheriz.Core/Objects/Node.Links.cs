@@ -309,7 +309,11 @@ public partial class Node
     // (nodeSemantics: true): any parser failure falls back to raw text and
     // raiseErrors never throws — unlike the base overload.
     public void MsgContents(string? text, IEnumerable<GameObject>? exclude = null, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, bool raiseErrors = false, string? msgType = null)
+        => BroadcastToContents(text, fromObj, mapping, exclude, raiseErrors, msgType);
+
+    public override void BroadcastToContents(string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, IEnumerable<GameObject>? exclude = null, bool raiseErrors = false, string? msgType = null, Func<int, GameObject?>? resolver = null)
     {
+        _ = resolver;
         ContentUtils.EmitToContents(GetContents(), this, text, fromObj, mapping, exclude, msgType, raiseErrors, nodeSemantics: true);
     }
 

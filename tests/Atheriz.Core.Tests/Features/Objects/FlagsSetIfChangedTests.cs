@@ -1,49 +1,49 @@
+using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
-// TrySet guard-set-return: every flag arm changes only on difference,
-// accepts all three name spellings, and rejects unknown names.
+// Typed flag setters guard-set: a change marks modified, re-setting the same
+// value is a no-op. Same change-detection the string TrySet had, without names.
 [Collection("Ported")]
 public class FlagsSetIfChangedTests
 {
-    private static readonly string[] AllFlags =
-    [
-        "is_pc", "is_npc", "is_item", "is_mapable", "is_container", "is_script",
-        "is_tickable", "is_account", "is_channel", "is_node", "is_modified",
-        "is_deleted", "is_connected", "is_temporary", "is_banned", "can_hear",
-    ];
+    private static void AssertGuarded(GameObject obj, Func<GameObject, bool> get, Action<GameObject, bool> set)
+    {
+        bool current = get(obj);
+        obj.IsModified = false;
+        set(obj, !current); // change: marks modified
+        Assert.Equal(!current, get(obj));
+        Assert.True(obj.IsModified);
+        obj.IsModified = false;
+        set(obj, !current); // same value: stays clean
+        Assert.False(obj.IsModified);
+        set(obj, current); // change back: marks modified
+        Assert.True(obj.IsModified);
+    }
 
     [Fact]
-    public void AllSixteenFlags_GuardSetReturn()
+    public void AllGuardedFlags_GuardSetReturn()
     {
-        var f = new Flags();
-        foreach (var name in AllFlags)
+        ObjectRegistry.ClearAll();
+        try
         {
-            // Fresh flags default false except is_modified (defaults true).
-            bool first = name != "is_modified";
-            Assert.True(f.TrySet(name, first));
-            Assert.False(f.TrySet(name, first));
-            Assert.True(f.TrySet(name, !first));
+            var obj = GameObject.Create("flagbox");
+            AssertGuarded(obj, o => o.IsPc, (o, v) => o.IsPc = v);
+            AssertGuarded(obj, o => o.IsNpc, (o, v) => o.IsNpc = v);
+            AssertGuarded(obj, o => o.IsItem, (o, v) => o.IsItem = v);
+            AssertGuarded(obj, o => o.IsContainer, (o, v) => o.IsContainer = v);
+            AssertGuarded(obj, o => o.IsScript, (o, v) => o.IsScript = v);
+            AssertGuarded(obj, o => o.IsTickable, (o, v) => o.IsTickable = v);
+            AssertGuarded(obj, o => o.IsAccount, (o, v) => o.IsAccount = v);
+            AssertGuarded(obj, o => o.IsChannel, (o, v) => o.IsChannel = v);
+            AssertGuarded(obj, o => o.IsNode, (o, v) => o.IsNode = v);
+            AssertGuarded(obj, o => o.IsDeleted, (o, v) => o.IsDeleted = v);
+            AssertGuarded(obj, o => o.IsConnected, (o, v) => o.IsConnected = v);
+            AssertGuarded(obj, o => o.IsTemporary, (o, v) => o.IsTemporary = v);
+            AssertGuarded(obj, o => o.IsBanned, (o, v) => o.IsBanned = v);
+            AssertGuarded(obj, o => o.CanHear, (o, v) => o.CanHear = v);
         }
-    }
-
-    [Fact]
-    public void AllThreeSpellings_HitSameField()
-    {
-        var f = new Flags();
-        Assert.True(f.TrySet("is_pc", true));
-        Assert.False(f.TrySet("IsPc", true));
-        Assert.False(f.TrySet("_isPc", true));
-        Assert.True(f.TrySet("IsPc", false));
-        Assert.True(f.TrySet("_is_tickable", true));
-        Assert.False(f.TrySet("is_tickable", true));
-    }
-
-    [Fact]
-    public void UnknownName_ReturnsFalse()
-    {
-        Assert.False(new Flags().TrySet("is_wizard", true));
-        Assert.False(new Flags().TrySet("", true));
+        finally { ObjectRegistry.ClearAll(); }
     }
 }

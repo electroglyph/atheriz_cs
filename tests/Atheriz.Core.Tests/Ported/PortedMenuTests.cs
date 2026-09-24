@@ -19,7 +19,7 @@ public class PortedMenuTests
     [Fact] public void MenuContextDefaults(){ using var env=GlobalTestEnv.Enter(); var ctx=new MenuContext("player"); Assert.Equal("player",ctx.Caller); Assert.Empty(ctx.State); }
     [Fact] public void ChoiceDefaults(){ var c=new Choice("1","Option"); Assert.Equal("1",c.Key); Assert.Null(c.GotoSync); }
     [Fact] public void EngineInit(){ var e=new MenuEngine("player",NStart); Assert.Equal(NStart,e.CurrentNodeSync); Assert.Contains("Welcome!",e.CurrentText); }
-    [Fact] public void EngineGetDisplay(){ var e=new MenuEngine("player",NStart); var d=e.GetDisplay(); Assert.Contains("Welcome!",d); Assert.Contains("[1]",d); }
+    [Fact] public void EngineGetDisplay(){ var e=new MenuEngine("player",NStart); var d=e.Display; Assert.Contains("Welcome!",d); Assert.Contains("[1]",d); }
     [Fact] public void EngineHandleInputTransitions(){ var e=new MenuEngine("player",NStart); Assert.True(e.HandleInput("1")); Assert.Equal(NConfirm,e.CurrentNodeSync); }
     [Fact] public void EngineHandleInputExits(){ var e=new MenuEngine("player",NStart); Assert.False(e.HandleInput("q")); Assert.Null(e.CurrentNodeSync); }
     [Fact] public void EngineHandleInputInvalidStays(){ var e=new MenuEngine("player",NStart); Assert.True(e.HandleInput("z")); Assert.Equal(NStart,e.CurrentNodeSync); }
@@ -28,16 +28,16 @@ public class PortedMenuTests
     [Fact] public void EngineStayExecutesCallbackAndStays(){ var e=new MenuEngine("player",NStay); e.HandleInput("1"); Assert.True((bool)e.Context.State["toggled"]!); Assert.Equal(NStay,e.CurrentNodeSync); }
     [Fact] public void EngineEmptyChoicesExits(){ var e=new MenuEngine("player",NEmpty); Assert.False(e.HandleInput("anything")); Assert.Null(e.CurrentNodeSync); }
     [Fact] public void EngineClose(){ var e=new MenuEngine("player",NStart); e.HandleInput("1"); e.Close(); Assert.Null(e.CurrentNodeSync); Assert.Empty(e.Context.State); }
-    [Fact] public void MenuDisplayUsesCrlfForTelnet(){ var e=new MenuEngine("player",NHello); var d=e.GetDisplay(); Assert.Contains("\r\n",d); }
+    [Fact] public void MenuDisplayUsesCrlfForTelnet(){ var e=new MenuEngine("player",NHello); var d=e.Display; Assert.Contains("\r\n",d); }
 
     // ---- missing ----
     [Fact] public void MenuContextWithState(){ var ctx=new MenuContext("player"); ctx.State["key"]="val"; Assert.Equal("val", ctx.State["key"]); var ctx2=new MenuContext("player"); ctx2.State["key"]="val"; Assert.Equal(new Dictionary<string,object?>{{"key","val"}}, ctx2.State); }
     // faithful to test_menucontext_with_state:63
     [Fact] public void ChoiceWithGotoAndCallback(){ Func<MenuContext,(string,List<Choice>)> gotoFunc=NStart; Action<MenuContext> cb=ctx=>{}; var c=new Choice("Y","Yes", gotoFunc, null, cb); Assert.Equal(gotoFunc, c.GotoSync); Assert.Equal(cb, c.CallbackSync); }
-    [Fact] public void EngineGetDisplayEmptyWhenClosed(){ var e=new MenuEngine("player",NStart); e.Close(); Assert.Equal("", e.GetDisplay()); var e2=new MenuEngine("player",NStart); e2.HandleInput("q"); Assert.Equal("", e2.GetDisplay()); }
+    [Fact] public void EngineGetDisplayEmptyWhenClosed(){ var e=new MenuEngine("player",NStart); e.Close(); Assert.Equal("", e.Display); var e2=new MenuEngine("player",NStart); e2.HandleInput("q"); Assert.Equal("", e2.Display); }
     [Fact] public void EngineHandleInputStripsWhitespace(){ var e=new MenuEngine("player",NStart); Assert.False(e.HandleInput("  q  ")); Assert.Null(e.CurrentNodeSync); }
     [Fact] public void EngineBackwardNavigation(){ var e=new MenuEngine("player",NStart); e.HandleInput("1"); Assert.Equal(NConfirm, e.CurrentNodeSync); e.HandleInput("n"); Assert.Equal(NStart, e.CurrentNodeSync); }
-    [Fact] public void EngineDisplayUpdatesAfterTransition(){ var e=new MenuEngine("player",NStart); Assert.Contains("Welcome!", e.GetDisplay()); e.HandleInput("1"); Assert.Contains("Are you sure?", e.GetDisplay()); }
+    [Fact] public void EngineDisplayUpdatesAfterTransition(){ var e=new MenuEngine("player",NStart); Assert.Contains("Welcome!", e.Display); e.HandleInput("1"); Assert.Contains("Are you sure?", e.Display); }
     [Fact] public void EngineStatePersistsAcrossNodes(){ var e=new MenuEngine("player",NStart); e.HandleInput("1"); Assert.Equal(true, e.Context.State["confirmed"]); e.HandleInput("n"); Assert.Equal(true, e.Context.State["confirmed"]); }
 
     private static System.Threading.Barrier MakeBarrier(int n) => new System.Threading.Barrier(n);

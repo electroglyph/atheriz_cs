@@ -19,14 +19,14 @@ public class PortedBehavioralRegressionsTests
         var obj = GameObject.Create("m03test");
         ObjectRegistry.AddObject(obj);
         obj.IsModified = true;
-        var (sql, _) = obj.GetSaveOps();
+        var op = obj.GetSaveOperation();
         Assert.True(obj.IsModified);
-        Assert.StartsWith("INSERT", sql);
+        Assert.Contains("m03test", op.Json);
     }
 
     private sealed class FailingGameObject : GameObject
     {
-        public override (string Sql, object[] Params) GetSaveOps()
+        public override SaveOperation GetSaveOperation()
         {
             // Simulate dill.dumps failure: set flag false then throw, ensure finally restores
             SyncRoot.EnterWriteLock();
@@ -40,7 +40,7 @@ public class PortedBehavioralRegressionsTests
             finally { SyncRoot.ExitWriteLock(); }
             throw new InvalidOperationException("boom");
         }
-        public override (string Sql, object[] Params) GetSaveOpsClearing()
+        public override SaveOperation GetSaveOperationClearing()
         {
             bool had = IsModified;
             SyncRoot.EnterWriteLock();
@@ -63,10 +63,10 @@ public class PortedBehavioralRegressionsTests
         obj.Name = "m03fail";
         obj.IsModified = true;
         ObjectRegistry.AddObject(obj);
-        var ex = Record.Exception(() => obj.GetSaveOps());
+        var ex = Record.Exception(() => obj.GetSaveOperation());
         Assert.NotNull(ex);
         Assert.True(obj.IsModified);
-        var ex2 = Record.Exception(() => obj.GetSaveOpsClearing());
+        var ex2 = Record.Exception(() => obj.GetSaveOperationClearing());
         Assert.NotNull(ex2);
         Assert.True(obj.IsModified);
     }
@@ -77,7 +77,7 @@ public class PortedBehavioralRegressionsTests
         var obj = GameObject.Create("m03clear");
         ObjectRegistry.AddObject(obj);
         obj.IsModified = true;
-        obj.GetSaveOpsClearing();
+        obj.GetSaveOperationClearing();
         Assert.False(obj.IsModified);
     }
 

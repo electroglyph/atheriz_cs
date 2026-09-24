@@ -37,7 +37,7 @@ public class ObjectDeletionTests
             Assert.True(k2.MoveTo(parent));
             var res = parent.Delete(null, recursive: true);
             Assert.NotNull(res);
-            Assert.Equal(3, res!.Value.count);
+            Assert.Equal(3, res!.Value.Count);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -55,7 +55,7 @@ public class ObjectDeletionTests
             Assert.True(item.MoveTo(node));
             var res = node.Delete(null, recursive: true);
             Assert.NotNull(res);
-            Assert.Equal(2, res!.Value.count);
+            Assert.Equal(2, res!.Value.Count);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -75,7 +75,7 @@ public class ObjectDeletionTests
             stuck.InstallHook("at_pre_move", (Func<GameObject?, string?, bool>)new VetoHooks().DenyAll);
             var res = parent.Delete(null, recursive: false);
             Assert.NotNull(res);
-            Assert.Equal(2, res!.Value.count);
+            Assert.Equal(2, res!.Value.Count);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

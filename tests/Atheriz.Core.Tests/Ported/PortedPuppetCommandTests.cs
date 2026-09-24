@@ -788,8 +788,7 @@ public class PortedPuppetCommandTests
         Assert.True(target.IsPc);
         Assert.Equal(Privilege.Builder, target.PrivilegeLevel);
         // In C# BuildDto should reflect original while puppeted (if engine patched) — check via GetSaveOps
-        var (_, parms)=target.GetSaveOps();
-        var json=(string)parms[1];
+        var json = target.GetSaveOperation().Json;
         var dto=Atheriz.Core.Persistence.Dto.GameObjectDtoSerializer.FromJson(json);
         Assert.False(dto.IsPc);
         Assert.Equal(Privilege.Guest, dto.PrivilegeLevel);
@@ -827,8 +826,7 @@ public class PortedPuppetCommandTests
         ObjectRegistry.AddObject(target);
         var cmd=new PuppetCommand();
         cmd.Run(caller, PArgs($"#{target.Id}"));
-        var (_, parms)=target.GetSaveOps();
-        var json=(string)parms[1];
+        var json = target.GetSaveOperation().Json;
         var dto=Atheriz.Core.Persistence.Dto.GameObjectDtoSerializer.FromJson(json);
         // Simulate dill.loads: loaded object should have original values
         Assert.False(dto.IsPc);
@@ -854,8 +852,7 @@ public class PortedPuppetCommandTests
         cmd.Run(caller, PArgs($"#{target.Id}"));
         // (no unpuppet / no at_disconnect — process "dies" now)
         Assert.NotNull(GetRestore(target));
-        var (_, parms)=target.GetSaveOps();
-        var json=(string)parms[1];
+        var json = target.GetSaveOperation().Json;
         var dto=Atheriz.Core.Persistence.Dto.GameObjectDtoSerializer.FromJson(json);
         Assert.False(dto.IsPc);
         Assert.Equal(Privilege.Guest, dto.PrivilegeLevel);
@@ -873,8 +870,7 @@ public class PortedPuppetCommandTests
         ObjectRegistry.AddObject(target);
         var cmd=new PuppetCommand();
         cmd.Run(caller, PArgs($"#{target.Id}"));
-        var (_, parms)=target.GetSaveOps();
-        var json=(string)parms[1];
+        var json = target.GetSaveOperation().Json;
         // unpuppet gracefully, then re-load what WOULD have been saved mid-puppet
         var unpuppet=new UnpuppetCommand();
         unpuppet.Run(target, null);

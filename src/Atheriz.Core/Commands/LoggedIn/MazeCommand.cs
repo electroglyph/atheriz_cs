@@ -87,7 +87,6 @@ public sealed class MazeCommand : Command
                 : picked;
         }
         catch { mh = MapHandlerFactory(); }
-        try { Atheriz.Core.Objects.MapHandlerSingleton.Set(mh); } catch (Exception) { }
         GlobalServices.SetMapHandler(mh);
         var maze1Exit = tuple1.grid.GetRandomNode();
         var maze2Exit = tuple2.grid.GetRandomNode();

@@ -475,17 +475,11 @@ public class PortedContentsTests
     public void SearchDepthLimitCapsRecursion()
     {
         using var env = GlobalTestEnv.Enter();
-        var orig = ContentUtils.MaxSearchDepth;
-        try
-        {
-            ContentUtils.MaxSearchDepth = 3;
-            var (bag, deepest) = BuildChain(4);
-            Assert.Empty(ContentUtils.Search(bag, "deepest", id=>ObjectRegistry.Get(id).FirstOrDefault()));
-            var coin = new GameObject(); coin.Id=999; coin.Name="coin"; ObjectRegistry.AddObject(coin); bag.AddObject(coin);
-            var res = ContentUtils.Search(bag, "coin", id=>ObjectRegistry.Get(id).FirstOrDefault());
-            Assert.Single(res); Assert.Same(coin, res[0]);
-        }
-        finally { ContentUtils.MaxSearchDepth = orig; }
+        var (bag, deepest) = BuildChain(4);
+        Assert.Empty(ContentUtils.Search(bag, "deepest", id=>ObjectRegistry.Get(id).FirstOrDefault(), maxDepth: 3));
+        var coin = new GameObject(); coin.Id=999; coin.Name="coin"; ObjectRegistry.AddObject(coin); bag.AddObject(coin);
+        var res = ContentUtils.Search(bag, "coin", id=>ObjectRegistry.Get(id).FirstOrDefault(), maxDepth: 3);
+        Assert.Single(res); Assert.Same(coin, res[0]);
     }
 
     // Port of test_contents_search.py:351 test_search_recursion_error_is_caught — RecursionError swallowed
@@ -494,18 +488,12 @@ public class PortedContentsTests
     public void SearchRecursionErrorIsCaught()
     {
         using var env = GlobalTestEnv.Enter();
-        var orig = ContentUtils.MaxSearchDepth;
-        try
-        {
-            ContentUtils.MaxSearchDepth = 10_000;
-            // Build chain depth 80 — would exceed Python recursionlimit 60; in C# depth is iterative via recursion but we catch exceptions
-            var (bag, deepest) = BuildChain(80);
-            var ex = Record.Exception(()=> ContentUtils.Search(bag, "deepest", id=>ObjectRegistry.Get(id).FirstOrDefault()));
-            Assert.Null(ex);
-            var result = ContentUtils.Search(bag, "deepest", id=>ObjectRegistry.Get(id).FirstOrDefault());
-            Assert.IsType<List<GameObject>>(result);
-        }
-        finally { ContentUtils.MaxSearchDepth = orig; }
+        // Build chain depth 80 — would exceed Python recursionlimit 60; in C# depth is iterative via recursion but we catch exceptions
+        var (bag, deepest) = BuildChain(80);
+        var ex = Record.Exception(()=> ContentUtils.Search(bag, "deepest", id=>ObjectRegistry.Get(id).FirstOrDefault(), maxDepth: 10_000));
+        Assert.Null(ex);
+        var result = ContentUtils.Search(bag, "deepest", id=>ObjectRegistry.Get(id).FirstOrDefault(), maxDepth: 10_000);
+        Assert.IsType<List<GameObject>>(result);
     }
 
     [Fact]

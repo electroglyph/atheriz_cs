@@ -144,7 +144,7 @@ public partial class GameObject
     {
         if (session is null) return false;
         GameObject? prev;
-        GameObject target;
+        GameObject? target;
         PuppetRestoreSnapshot? restore;
         // Single critical section : pop + restore-apply + rewire are
         // atomic — a concurrent Puppet/Unpuppet/AtDisconnect in the old gap
@@ -152,7 +152,7 @@ public partial class GameObject
         // state runs under the lock; game hooks fire after release.
         lock (session.Lock)
         {
-            if (!session.TryPopPuppetEntry(out var prevEntry, out target)) return false;
+            if (!session.TryPopPuppetEntry(out var prevEntry, out target) || target is null) return false;
             prev = prevEntry;
             // Read the restore here; applied after AtUnpuppet below so game
             // hooks observe the pre-restore target like puppet.py:164-192.

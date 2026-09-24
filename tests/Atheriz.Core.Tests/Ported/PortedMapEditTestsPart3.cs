@@ -1,4 +1,5 @@
 // Port of atheriz/tests/test_mapedit.py:1 part3 — legend, building, evict
+using System.Text.Json;
 using System.Threading;
 using Atheriz.Core;
 using Atheriz.Core.Globals;
@@ -90,14 +91,17 @@ public class PortedMapEditTestsPart3
         draw.Run(caller, null);
         var payload = ((FakeC)conn).Sent.First(s=>s.Cmd=="launch_draw").Args[1] as Dictionary<string,object?>;
         Assert.NotNull(payload);
-        var legend = payload!["legend"] as List<Dictionary<string,object?>>;
+        // The legend rides the wire as serialized record elements (camelCase
+        // keys, explicit nulls) instead of hand-unrolled dicts.
+        var legend = payload!["legend"] as List<JsonElement>;
         Assert.NotNull(legend); Assert.Single(legend!);
-        Assert.Equal("★", legend![0]["symbol"]);
-        Assert.Equal("shrine", legend![0]["desc"]);
-        Assert.Equal(new List<int>{2,3}, legend![0]["coord"] as List<int>);
-        Assert.Equal(true, legend![0]["show"]);
-        Assert.Equal(170.0, legend![0]["fg"]);
-        Assert.Null(legend![0]["bg"]);
+        var le0 = legend![0];
+        Assert.Equal("★", le0.GetProperty("symbol").GetString());
+        Assert.Equal("shrine", le0.GetProperty("desc").GetString());
+        Assert.Equal(new List<int>{2,3}, le0.GetProperty("coord").EnumerateArray().Select(x=>x.GetInt32()).ToList());
+        Assert.True(le0.GetProperty("show").GetBoolean());
+        Assert.Equal(170.0, le0.GetProperty("fg").GetDouble());
+        Assert.Equal(JsonValueKind.Null, le0.GetProperty("bg").ValueKind);
         Assert.Equal("🯅", payload!["playerSymbol"]);
     }
 
@@ -123,8 +127,8 @@ public class PortedMapEditTestsPart3
         var draw = new Atheriz.Core.Commands.LoggedIn.DrawCommand();
         draw.Run(caller, null);
         var payload = ((FakeC)conn).Sent.First(s=>s.Cmd=="launch_draw").Args[1] as Dictionary<string,object?>;
-        var legend = payload!["legend"] as List<Dictionary<string,object?>>;
-        Assert.Null(legend![0]["coord"]);
+        var legend = payload!["legend"] as List<JsonElement>;
+        Assert.Equal(JsonValueKind.Null, legend![0].GetProperty("coord").ValueKind);
         Assert.Equal("X", payload!["playerSymbol"]);
     }
 

@@ -33,19 +33,8 @@ public class PortedMazeBackgroundDoubleMapTests
 
     private static void InjectBoth(MapHandler mh, NodeHandler nh)
     {
-        NodeHandler.SetCurrent(nh);
-        var fm = typeof(GlobalServices).GetField("_mapHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        fm!.SetValue(null, mh);
-        var fn = typeof(GlobalServices).GetField("_nodeHandler", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        fn!.SetValue(null, nh);
-        try { GlobalServices.SetMapHandler(mh); } catch { }
-        try
-        {
-            var t = typeof(GameObject).Assembly.GetType("Atheriz.Core.Objects.MapHandlerSingleton");
-            var m = t?.GetMethod("Set", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-            m?.Invoke(null, new object[] { mh });
-        }
-        catch { }
+        GlobalServices.SetNodeHandler(nh);
+        GlobalServices.SetMapHandler(mh);
     }
 
     // Minimal client simulation matching webclient/src/webclient/main.ts handleMessage for map/background/unbackground

@@ -35,4 +35,20 @@ public class MenuChoiceBuildTests
         Assert.Equal(1, SourceScan.Count(src, "BuildChoices(List<Choice>"));
         Assert.Equal(2, SourceScan.Count(src, "=BuildChoices(cl)"));
     }
+
+    // The rendered menu text is a property, not a Java-style getter: pure,
+    // cheap, and side-effect free, so it reads as state.
+    [Fact]
+    public void Display_IsPropertyNotMethod()
+    {
+        using var env = GlobalTestEnv.Enter();
+        static (string, List<Choice>) Node(MenuContext ctx)
+            => ("hello", [new Choice("a", "first")]);
+        var engine = new MenuEngine(null, Node);
+        Assert.Contains("hello", engine.Display);
+        Assert.Contains("[a] first", engine.Display);
+        var src = SourceScan.Read("src", "Atheriz.Core", "Menu.cs");
+        Assert.DoesNotContain("GetDisplay()", src);
+        Assert.Contains("string Display", src);
+    }
 }

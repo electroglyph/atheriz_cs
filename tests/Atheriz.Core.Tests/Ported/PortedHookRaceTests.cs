@@ -20,9 +20,9 @@ public class PortedHookRaceTests
             SyncRoot.EnterWriteLock();
             try
             {
-                var f = typeof(GameObject).GetField("_hooks", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
-                var dict = (Dictionary<string, HashSet<Delegate>>)f.GetValue(this)!;
-                dict["run"] = set;
+                var reg = typeof(GameObject).GetField("_hookRegistry", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(this)!;
+                var raw = (Dictionary<string, HashSet<Delegate>>)reg.GetType().GetProperty("Raw", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(reg)!;
+                raw["run"] = set;
             }
             finally { SyncRoot.ExitWriteLock(); }
         }

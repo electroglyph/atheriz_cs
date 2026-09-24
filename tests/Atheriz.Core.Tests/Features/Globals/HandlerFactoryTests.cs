@@ -66,7 +66,7 @@ public sealed class HandlerFactoryTests
         Assert.Contains("new NodeHandler(autoLoad: true)", nodeCore);
         Assert.Contains("new NodeHandler(settings, autoLoad: true)", nodeCore);
         Assert.Contains("NodeHandler.SetCurrent(h)", nodeCore);
-        var mapParameterless = SourceScan.Region(src, "public static MapHandler GetMapHandler()");
-        Assert.Contains("AtherizSettings.Global", mapParameterless);
+        var mapAmbient = SourceScan.Region(src, "private static Lazy<MapHandler> FreshMapHandler()");
+        Assert.Contains("AtherizSettings.Global", mapAmbient);
     }
 }

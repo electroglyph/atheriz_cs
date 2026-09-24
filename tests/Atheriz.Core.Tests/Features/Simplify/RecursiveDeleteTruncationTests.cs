@@ -15,8 +15,6 @@ public class RecursiveDeleteTruncationTests
     public void DeleteRecursive_DetachesOverDepthSurvivors()
     {
         ObjectRegistry.ClearAll();
-        int prevDepth = GameObject.MaxSearchDepth;
-        GameObject.MaxSearchDepth = 4;
         try
         {
             var chain = new List<GameObject>();
@@ -29,7 +27,7 @@ public class RecursiveDeleteTruncationTests
             }
             var root = chain[0];
 
-            var result = root.Delete(null, recursive: true);
+            var result = root.Delete(null, recursive: true, maxDepth: 4);
 
             Assert.NotNull(result);
             Assert.True(root.IsDeleted);
@@ -42,7 +40,6 @@ public class RecursiveDeleteTruncationTests
         }
         finally
         {
-            GameObject.MaxSearchDepth = prevDepth;
             ObjectRegistry.ClearAll();
         }
     }

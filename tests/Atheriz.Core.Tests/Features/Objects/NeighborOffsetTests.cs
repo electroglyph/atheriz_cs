@@ -50,7 +50,7 @@ public class NeighborOffsetTests
         var area = new NodeArea("flat");
         area.AddGrid(new NodeGrid("flat", 0));
         var lone = new Node(new Coord("flat", 5, 5, 0));
-        area.GetOrCreateGrid(0).AddNode(lone);
+        area.GetOrAddGrid(0).AddNode(lone);
         Assert.Empty(area.GetNeighbors(new Coord("flat", 5, 5, 0)));
     }
 }

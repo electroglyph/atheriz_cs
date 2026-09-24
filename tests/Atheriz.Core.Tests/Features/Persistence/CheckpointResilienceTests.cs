@@ -76,7 +76,7 @@ public class CheckpointResilienceTests
             Name = "poison";
             IsModified = true;
         }
-        public override (string Sql, object[] Params) GetSaveOpsClearing()
+        public override global::Atheriz.Core.Persistence.Dto.SaveOperation GetSaveOperationClearing()
             => throw new InvalidOperationException("injected poison row");
     }
 

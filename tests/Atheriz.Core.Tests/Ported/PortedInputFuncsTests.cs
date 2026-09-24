@@ -113,7 +113,7 @@ public class PortedInputFuncsTests
     public void GetHandlers_HasNoReflectionDiscovery()
     {
         // Production must not scan methods/attributes to find handlers.
-        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "ConnectionManager.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "InputFuncs.cs");
         Assert.DoesNotContain("GetMethods(", src);
         Assert.DoesNotContain("GetCustomAttribute<", src);
         Assert.DoesNotContain("CreateDelegate(", src);

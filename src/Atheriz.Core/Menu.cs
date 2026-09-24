@@ -28,10 +28,10 @@ public sealed class MenuEngine{
    if(CurrentNodeAsync is not null)(t,cl)=await CurrentNodeAsync(Context).ConfigureAwait(false); else (t,cl)=CurrentNodeSync!(Context);
    _text=t;_choices=BuildChoices(cl);
   }
-  public string GetDisplay(){
-   if(CurrentNodeSync is null&&CurrentNodeAsync is null)return "";
-   var lines=new List<string>{$"\n{_text}"}; foreach(var c in _choices.Values)lines.Add($"  [{c.Key}] {c.Desc}"); return string.Join("\r\n",lines);
-  }
+   public string Display{get{
+    if(CurrentNodeSync is null&&CurrentNodeAsync is null)return "";
+    var lines=new List<string>{$"\n{_text}"}; foreach(var c in _choices.Values)lines.Add($"  [{c.Key}] {c.Desc}"); return string.Join("\r\n",lines);
+   }}
   // Shared input prefix for the sync/async handlers: normalization and lookup
   // (menu.py:81-82). Null means "no such key" (stay); the callback/goto/Stay
   // dispatch below stays per-handler (sync throws inline, async faults).
@@ -85,7 +85,7 @@ public static class MenuRunner{
  // prompt, handle, log-and-break, close. Render/handle ride as delegates —
  // the sync overload's ctor already rendered and its handler is sync.
  static async Task RunLoopAsync(MenuEngine e,object? caller,Func<string,Task<bool>> handle){
-  try{while(e.HasNode){var d=e.GetDisplay(); var sess=GetSess(caller); if(sess is null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to).ConfigureAwait(false); if(inp is null)break; try{var k=await handle(inp).ConfigureAwait(false); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}}
+  try{while(e.HasNode){var d=e.Display; var sess=GetSess(caller); if(sess is null)break; var to=TimeSpan.FromSeconds(AtherizSettings.Global.MenuPromptTimeout); var inp = await MenuPrompt.PromptWithTimeoutAsync(sess, d, to).ConfigureAwait(false); if(inp is null)break; try{var k=await handle(inp).ConfigureAwait(false); if(!k)break;}catch{try{AtherizLogger.LogError("menu handle_input failed");}catch{} break;}} }finally{e.Close();}}
  public static Task RunMenuAsync(object? caller,Func<MenuContext,(string,List<Choice>)> start){
   return Task.Run(async()=>{var e=new MenuEngine(caller,start); await RunLoopAsync(e,caller,s=>Task.FromResult(e.HandleInput(s))).ConfigureAwait(false);});}
  public static Task RunMenuAsync(object? caller,Func<MenuContext,Task<(string,List<Choice>)>> startA){

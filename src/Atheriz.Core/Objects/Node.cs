@@ -6,39 +6,8 @@ namespace Atheriz.Core.Objects;
 /// with on-disk JSON replacing dill.
 /// </summary>
 
-public sealed class NodeLink
-{
-    public string Name { get; set; } = "";
-    public Coord Coord { get; set; }
-    // Snapshot copy: readers mutate the copy freely (AddExits hands the list
-    // to ExitCommand), never the link's live list.
-    private List<string> _aliases = [];
-    public List<string> Aliases
-    {
-        get => new List<string>(_aliases);
-        set => _aliases = value is null ? [] : new List<string>(value);
-    }
-    public NodeLink() { }
-    public NodeLink(string name, Coord coord, List<string>? aliases = null)
-    {
-        Name = name;
-        Coord = coord;
-        Aliases = aliases ?? [];
-    }
-    public override bool Equals(object? obj) => obj is NodeLink o && Name == o.Name && Coord.Equals(o.Coord);
-    public override int GetHashCode()
-    {
-        var h = new HashCode();
-        h.Add(Name);
-        h.Add(Coord);
-        return h.ToHashCode();
-    }
-    public override string ToString() => $"NodeLink: {Name}, [{string.Join(",", Aliases)}], {Coord}";
-}
-
 public partial class Node : GameObject
 {
-    internal new static bool _is_thread_safe = true;
     // Single lock: Node shares the base SyncRoot (atheriz/objects/nodes.py uses one
     // self.lock; the split _nodeLock caused node->base vs base->node order inversions).
     // NodeLock/Lock are kept as aliases for existing callers (NodeGrid, Pathfind, tests).
@@ -65,11 +34,11 @@ public partial class Node : GameObject
     private List<NodeLink> _links = [];
     public List<NodeLink> Links
     {
-        get => Read(() => new List<NodeLink>(_links));
+        get => Read<List<NodeLink>>(() => [.. _links]);
         set
         {
             ArgumentNullException.ThrowIfNull(value);
-            Write(() => { _links = new List<NodeLink>(value); IsModified = true; });
+            Write(() => { _links = [.. value]; IsModified = true; });
         }
     }
     private Dictionary<string, string> _nouns = new(StringComparer.OrdinalIgnoreCase);
@@ -107,11 +76,15 @@ public partial class Node : GameObject
 
     public Node() : this(new Coord("limbo", 0, 0, 0)) { }
     // Load path: initializes defaults WITHOUT consuming an id (leave -1) and
-    // WITHOUT publishing to the registry (no phantom). Caller must SetIdRaw +
-    // explicit AddObject (via swap/second-phase) after filling fields.
-    internal static Node CreateForLoad(Coord coord)
+    // WITHOUT publishing to the registry (no phantom). Factories below adopt
+    // the stored id before publication.
+    internal static Node CreateForLoad(Coord coord) => new Node(coord);
+    // Id-adopting overload for the converter load path: fixes the hash
+    // snapshot together with the id so the node is publishable on return.
+    internal static Node CreateForLoad(int id, Coord coord)
     {
-        var n = new Node(NoIdMarker.Instance, coord);
+        var n = new Node(coord);
+        n.SetIdRaw(id);
         return n;
     }
 
@@ -122,7 +95,14 @@ public partial class Node : GameObject
     private static readonly Dictionary<string, Func<Coord, Node>> _persistedSubtypeFactories = new(StringComparer.Ordinal);
     private static readonly Dictionary<Type, string> _persistedSubtypeNames = new();
     private static readonly Lock _persistedSubtypeLock = new();
-    static Node() { _persistedSubtypeFactories[typeof(Node).FullName!] = c => CreateForLoad(c); _persistedSubtypeNames[typeof(Node)] = typeof(Node).FullName!; }
+    static Node()
+    {
+        // FullName is never null for this compiled type; fall back to Name so the
+        // compiler does not need a suppression.
+        string nodeName = typeof(Node).FullName ?? typeof(Node).Name;
+        _persistedSubtypeFactories[nodeName] = c => CreateForLoad(c);
+        _persistedSubtypeNames[typeof(Node)] = nodeName;
+    }
     public static void RegisterPersistedSubtype(string fullName, Type type, Func<Coord, Node> factory)
     {
         if (string.IsNullOrEmpty(fullName)) throw new ArgumentException("Subtype full name required.", nameof(fullName));
@@ -177,12 +157,7 @@ public partial class Node : GameObject
     }
     // Shared category and message prefix for suppressed-error logs below.
     private const string LogContext = "Node";
-    private sealed class NoIdMarker
-    {
-        public static readonly NoIdMarker Instance = new();
-        private NoIdMarker() { }
-    }
-    private Node(NoIdMarker _, Coord coord) : base(SkipIdDraw.Instance)
+    private Node(Coord coord) : base(-1)
     {
         Coord = coord;
         base.Name = "room";
@@ -200,8 +175,8 @@ public partial class Node : GameObject
         // leave Id == -1, do not AddObject
     }
     public Node(Coord coord, string name = "room", string desc = "", string? theme = null, string? symbol = null, string? legendDesc = null, List<NodeLink>? links = null, double tickSeconds = 1.0)
+        : this(coord)
     {
-        Coord = coord;
         base.Name = name;
         Desc = desc;
         Theme = theme ?? "";
@@ -213,8 +188,10 @@ public partial class Node : GameObject
         EnclosedAttenuation = 20.0;
         AmbientSoundLevel = 5.0;
         IsNode = true;
+        // Fresh id with a matching hash snapshot: the private core leaves -1
+        // and SetIdRaw fixes id + snapshot together (same as load paths).
+        SetIdRaw(IdGenerator.GetUniqueId());
         IsModified = true;
-        if (Id == -1) Id = IdGenerator.GetUniqueId();
         // no publication from the constructor. Python registers in
         // create(), not __init__ (base_obj.py:121+); publishing `this` here
         // leaks half-built subclass instances when a derived ctor throws.
@@ -252,7 +229,7 @@ public partial class Node : GameObject
         // must not abort relation resolution for the whole node.
         if (IsTickable)
         {
-            try { GlobalTickerHolder.Get()?.AddCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
+            try { Globals.GlobalServices.TryGetTicker()?.AddCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
         }
         HashSet<int> scripts = ScriptsSnapshot;
         foreach (var id in scripts)
@@ -282,7 +259,7 @@ public partial class Node : GameObject
                 base.TickSeconds = value;
                 if (doSwap)
                 {
-                    var at = GlobalTickerHolder.Get();
+                    var at = Globals.GlobalServices.TryGetTicker();
                     at?.RemoveCoro(AtTick, old);
                     at?.AddCoro(AtTick, value);
                 }
@@ -303,7 +280,7 @@ public partial class Node : GameObject
                 if (base.IsTickable == value) return;
                 double tick = base.TickSeconds;
                 base.IsTickable = value;
-                var at = GlobalTickerHolder.Get();
+                var at = Globals.GlobalServices.TryGetTicker();
                 if (value) at?.AddCoro(AtTick, tick);
                 else at?.RemoveCoro(AtTick, tick);
             }
@@ -368,27 +345,30 @@ public partial class Node : GameObject
     }
     public override void AtInit() => Hookable(HookName.AtInit, () => 0);
 
-    public override (int count, List<object> ops)? Delete(GameObject? caller, bool recursive = false)
+    // Node walks are uncapped by design (contents move home or die — nothing
+    // detaches as a depth-capped survivor the way the base walk does);
+    // maxDepth threads through to nested object deletes below.
+    public override (int Count, List<Persistence.Dto.DeleteOperation> Operations)? Delete(GameObject? caller, bool recursive = false, int maxDepth = ContentUtils.DefaultMaxSearchDepth)
     {
-        (List<object> ops, int count) execDeleteRecursive(Node obj)
+        (List<Persistence.Dto.DeleteOperation> ops, int count) execDeleteRecursive(Node obj)
         {
-            List<object> allOps = [];
+            List<Persistence.Dto.DeleteOperation> allOps = [];
             int count = 0;
             HashSet<int> seen = [];
             var contents = obj.GetContents();
             foreach (var content in contents)
             {
                 if (!seen.Add(content.Id)) continue;
-                var res = content.Delete(caller, true);
+                var res = content.Delete(caller, true, maxDepth);
                 if (res is null) continue;
-                allOps.AddRange(res.Value.ops);
-                count += res.Value.count;
+                allOps.AddRange(res.Value.Operations);
+                count += res.Value.Count;
             }
             return (allOps, count);
         }
-        (List<object> ops, int count) execMoveContents(Node obj)
+        (List<Persistence.Dto.DeleteOperation> ops, int count) execMoveContents(Node obj)
         {
-            List<object> allOps = [];
+            List<Persistence.Dto.DeleteOperation> allOps = [];
             int count = 0;
             var contents = obj.GetContents();
             foreach (var content in contents)
@@ -432,8 +412,8 @@ public partial class Node : GameObject
                         try { obj.RemoveObject(content); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
                         try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
                     }
-                    var res = content.Delete(caller, true);
-                    if (res is not null) { allOps.AddRange(res.Value.ops); count += res.Value.count; }
+                    var res = content.Delete(caller, true, maxDepth);
+                    if (res is not null) { allOps.AddRange(res.Value.Operations); count += res.Value.Count; }
                 }
             }
             return (allOps, count);
@@ -442,7 +422,7 @@ public partial class Node : GameObject
         {
             if (IsTickable)
             {
-                try { GlobalTickerHolder.Get()?.RemoveCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
+                try { Globals.GlobalServices.TryGetTicker()?.RemoveCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
             }
             try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
         }
@@ -463,7 +443,7 @@ public partial class Node : GameObject
         // remove when the handler already unregistered it.
         if (!IsTemporary)
         {
-            ops.Add(GetDelOps());
+            ops.Add(GetDeleteOperation());
             // Journal the row death so the checkpoint drain removes it.
             ObjectRegistry.NoteDeleted(Id);
         }
@@ -485,44 +465,4 @@ public partial class Node : GameObject
         }, caller);
     }
 
-}
-
-/// <summary>Holds global ticker singleton for Node tick wiring.</summary>
-internal static class GlobalTickerHolder
-{
-    private static Atheriz.Core.Concurrency.AsyncTicker? _instance;
-    private static readonly Lock _lock = new();
-    public static Atheriz.Core.Concurrency.AsyncTicker? Get() { lock (_lock) return _instance; }
-    public static void Set(Atheriz.Core.Concurrency.AsyncTicker ticker) { lock (_lock) _instance = ticker; }
-}
-
-public sealed class ExitCommand : Command
-{
-    public int CallerId { get; set; }
-    public Coord Location { get; set; }
-    public Coord Destination { get; set; }
-    private string _key = "";
-    public override string Key => _key;
-    public string ExitName { get; set; } = "";
-    private List<string> _aliases = [];
-    public override IReadOnlyList<string> Aliases => new List<string>(_aliases);
-    public void SetKey(string k) { _key = k; ExitName = k; }
-    // Copies: the caller (Node.AddExits) passes a live-list snapshot it keeps
-    // mutating, so the command must own its list.
-    public void SetAliases(List<string> a) => _aliases = a is null ? [] : new List<string>(a);
-    public override bool UseParser => false;
-    public override void Run(IMessageTarget caller, object? args)
-    {
-        if (caller is GameObject go)
-        {
-            var dest = NodeHandler.GetCurrent()?.GetNode(Destination);
-            if (dest is not null)
-            {
-                // through an exit breaks following like any other move.
-                try { Commands.LoggedIn.LoggedInExitCommand.ClearFollowing(go); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ExitCommand.Run: " + logEx.Message, "ExitCommand"); }
-                go.MoveTo(dest);
-            }
-            else go.Msg("You can't go that way.");
-        }
-    }
 }

@@ -165,8 +165,6 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
             $"TelnetConnectionTimeout must be >0 (was {options.TelnetConnectionTimeout}).");
         FailWhen(options.TelnetMaxLine <= 0,
             $"TelnetMaxLine must be >0 (was {options.TelnetMaxLine}).");
-        FailWhen(options.MaxSearchDepth <= 0,
-            $"MaxSearchDepth must be >0 (was {options.MaxSearchDepth}).");
         FailWhen(options.MaxAstarIterations <= 0,
             $"MaxAstarIterations must be >0 (was {options.MaxAstarIterations}).");
         FailWhen(string.IsNullOrWhiteSpace(options.LogLevel) || !ValidLogLevels.Contains(options.LogLevel.Trim()),

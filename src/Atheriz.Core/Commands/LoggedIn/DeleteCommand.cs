@@ -26,7 +26,7 @@ public sealed class DeleteCommand : Command
         var fullName = target.GetDisplayName(go);
         var result = target.Delete(go, pa.GetBool("recursive"));
         if (result is null) { go.Msg("Deletion aborted."); return; }
-        int count = result.Value.count;
+        int count = result.Value.Count;
         if (count > 1) go.Msg($"Deleted or moved {fullName}, {count} objects total.");
         else go.Msg($"Deleted {fullName}.");
     }

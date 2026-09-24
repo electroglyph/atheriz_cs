@@ -13,99 +13,81 @@ public class PortedCriticalFixesTests
     [Fact] public void RecursiveDeleteStopsAtDepthLimit()
     {
         using var env = GlobalTestEnv.Enter();
-        var saved = GameObject.MaxSearchDepth;
-        GameObject.MaxSearchDepth = 5;
-        try
+        var admin = GameObject.Create("admin");
+        admin.PrivilegeLevel = Privilege.Admin;
+        ObjectRegistry.AddObject(admin);
+        var root = GameObject.Create("root");
+        root.IsContainer = true;
+        ObjectRegistry.AddObject(root);
+        var prev = root;
+        var chain = new List<GameObject>();
+        for (int i = 0; i < 10; i++)
         {
-            var admin = GameObject.Create("admin");
-            admin.PrivilegeLevel = Privilege.Admin;
-            ObjectRegistry.AddObject(admin);
-            var root = GameObject.Create("root");
-            root.IsContainer = true;
-            ObjectRegistry.AddObject(root);
-            var prev = root;
-            var chain = new List<GameObject>();
-            for (int i = 0; i < 10; i++)
-            {
-                var child = GameObject.Create($"c{i}");
-                child.IsContainer = true;
-                ObjectRegistry.AddObject(child);
-                child.MoveTo(prev);
-                chain.Add(child);
-                prev = child;
-            }
-            var deepest = chain[^1];
-            var result = root.Delete(admin, recursive: true);
-            Assert.NotNull(result);
-            Assert.Empty(ObjectRegistry.Get(root.Id));
-            // deepest beyond limit should survive
-            Assert.NotEmpty(ObjectRegistry.Get(deepest.Id));
-            Assert.NotEmpty(ObjectRegistry.Get(chain[6].Id));
-            // survivors beyond depth remain linked among themselves, not orphaned to null
-            var survivor = ObjectRegistry.Get(chain[6].Id)[0];
-            Assert.IsType<LocationRef.ObjectLocation>(survivor.Location);
+            var child = GameObject.Create($"c{i}");
+            child.IsContainer = true;
+            ObjectRegistry.AddObject(child);
+            child.MoveTo(prev);
+            chain.Add(child);
+            prev = child;
         }
-        finally { GameObject.MaxSearchDepth = saved; }
+        var deepest = chain[^1];
+        var result = root.Delete(admin, recursive: true, maxDepth: 5);
+        Assert.NotNull(result);
+        Assert.Empty(ObjectRegistry.Get(root.Id));
+        // deepest beyond limit should survive
+        Assert.NotEmpty(ObjectRegistry.Get(deepest.Id));
+        Assert.NotEmpty(ObjectRegistry.Get(chain[6].Id));
+        // survivors beyond depth remain linked among themselves, not orphaned to null
+        var survivor = ObjectRegistry.Get(chain[6].Id)[0];
+        Assert.IsType<LocationRef.ObjectLocation>(survivor.Location);
     }
     [Fact] public void RecursiveDeleteTruncatesAtExactBoundary()
     {
         using var env = GlobalTestEnv.Enter();
-        var saved = GameObject.MaxSearchDepth;
-        GameObject.MaxSearchDepth = 5;
-        try
+        var admin = GameObject.Create("admin2");
+        admin.PrivilegeLevel = Privilege.Admin;
+        ObjectRegistry.AddObject(admin);
+        var root = GameObject.Create("root2");
+        root.IsContainer = true;
+        ObjectRegistry.AddObject(root);
+        var prev = root;
+        var chain = new List<GameObject>();
+        for (int i = 0; i < 7; i++)
         {
-            var admin = GameObject.Create("admin2");
-            admin.PrivilegeLevel = Privilege.Admin;
-            ObjectRegistry.AddObject(admin);
-            var root = GameObject.Create("root2");
-            root.IsContainer = true;
-            ObjectRegistry.AddObject(root);
-            var prev = root;
-            var chain = new List<GameObject>();
-            for (int i = 0; i < 7; i++)
-            {
-                var c = GameObject.Create($"b{i}");
-                c.IsContainer = true;
-                ObjectRegistry.AddObject(c);
-                c.MoveTo(prev);
-                chain.Add(c);
-                prev = c;
-            }
-            root.Delete(admin, recursive: true);
-            for (int i = 0; i < 4; i++)
-                Assert.Empty(ObjectRegistry.Get(chain[i].Id));
-            for (int i = 4; i < 7; i++)
-                Assert.NotEmpty(ObjectRegistry.Get(chain[i].Id));
+            var c = GameObject.Create($"b{i}");
+            c.IsContainer = true;
+            ObjectRegistry.AddObject(c);
+            c.MoveTo(prev);
+            chain.Add(c);
+            prev = c;
         }
-        finally { GameObject.MaxSearchDepth = saved; }
+        root.Delete(admin, recursive: true, maxDepth: 5);
+        for (int i = 0; i < 4; i++)
+            Assert.Empty(ObjectRegistry.Get(chain[i].Id));
+        for (int i = 4; i < 7; i++)
+            Assert.NotEmpty(ObjectRegistry.Get(chain[i].Id));
     }
     [Fact] public void RecursiveDeleteNonRecursiveLeavesChildren()
     {
         using var env = GlobalTestEnv.Enter();
-        var saved = GameObject.MaxSearchDepth;
-        GameObject.MaxSearchDepth = 100;
-        try
-        {
-            var admin = GameObject.Create("admin3");
-            admin.PrivilegeLevel = Privilege.Admin;
-            ObjectRegistry.AddObject(admin);
-            var root = GameObject.Create("root3");
-            root.IsContainer = true;
-            ObjectRegistry.AddObject(root);
-            var child = GameObject.Create("child3");
-            child.IsContainer = true;
-            ObjectRegistry.AddObject(child);
-            var grand = GameObject.Create("grand3");
-            grand.IsContainer = true;
-            ObjectRegistry.AddObject(grand);
-            grand.MoveTo(child);
-            child.MoveTo(root);
-            root.Delete(admin, recursive: false);
-            Assert.Empty(ObjectRegistry.Get(root.Id));
-            Assert.NotEmpty(ObjectRegistry.Get(child.Id));
-            Assert.NotEmpty(ObjectRegistry.Get(grand.Id));
-        }
-        finally { GameObject.MaxSearchDepth = saved; }
+        var admin = GameObject.Create("admin3");
+        admin.PrivilegeLevel = Privilege.Admin;
+        ObjectRegistry.AddObject(admin);
+        var root = GameObject.Create("root3");
+        root.IsContainer = true;
+        ObjectRegistry.AddObject(root);
+        var child = GameObject.Create("child3");
+        child.IsContainer = true;
+        ObjectRegistry.AddObject(child);
+        var grand = GameObject.Create("grand3");
+        grand.IsContainer = true;
+        ObjectRegistry.AddObject(grand);
+        grand.MoveTo(child);
+        child.MoveTo(root);
+        root.Delete(admin, recursive: false);
+        Assert.Empty(ObjectRegistry.Get(root.Id));
+        Assert.NotEmpty(ObjectRegistry.Get(child.Id));
+        Assert.NotEmpty(ObjectRegistry.Get(grand.Id));
     }
     [Fact] public void SubscribeAndChannelDeleteDoNotDeadlock()
     {

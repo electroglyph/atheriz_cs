@@ -184,8 +184,8 @@ public class GlobalRegressionTests
         var shutdown = SourceScan.Region(src, "internal static void ClearForShutdown()");
         Assert.Contains("ClearHoldersLocked()", shutdown);
         var holders = SourceScan.Region(src, "private static void ClearHoldersLocked()");
-        Assert.Contains("_loggedInCmdSet = null", holders);
-        Assert.Contains("_unloggedInCmdSet = null", holders);
+        Assert.Contains("_loggedInCmdSet = FreshLoggedInCmdSet()", holders);
+        Assert.Contains("_unloggedInCmdSet = FreshUnloggedInCmdSet()", holders);
     }
 
     // Stop(otherTicker) must not kill owned fallbacks out from under live use.
@@ -252,7 +252,7 @@ public class GlobalRegressionTests
     public void GameTimeFactory_ReadsVolatile()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "GlobalServices.cs");
-        var region = SourceScan.Region(src, "public static GameTime GetGameTime()");
+        var region = SourceScan.Region(src, "private static GameTime CreateGameTime");
         Assert.Contains("Volatile.Read(ref _asyncTicker)", region);
     }
 
@@ -443,7 +443,7 @@ public class GlobalRegressionTests
     [Fact]
     public void MalformedGridKey_Warns()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "MapHandler.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Globals", "MapInfo.cs");
         var region = SourceScan.Region(src, "public MapInfo ToDomain(");
         Assert.Contains("LogWarning", region);
     }
@@ -480,7 +480,8 @@ public class GlobalRegressionTests
 
     // Lock-hiding is wontfix per repo rules (external game code depends on
     // the public lock API). Pins the PUBLIC surface instead, mirroring
-    // LockExposureTests.
+    // LockExposureTests. The old GlobalServices.SingletonLock is gone
+    // (Lazy<T> publication needs no exposed lock); MapEdit.Lock stays public.
     [Fact]
     public void Locks_AreInternal()
     {
@@ -488,8 +489,7 @@ public class GlobalRegressionTests
             System.Reflection.BindingFlags.Static |
             System.Reflection.BindingFlags.NonPublic |
             System.Reflection.BindingFlags.Public);
-        Assert.NotNull(singletonLock);
-        Assert.True(singletonLock!.GetMethod!.IsPublic);
+        Assert.Null(singletonLock);
         var mapEditLock = typeof(MapEdit).GetField("Lock",
             System.Reflection.BindingFlags.Static |
             System.Reflection.BindingFlags.NonPublic |

@@ -1,4 +1,4 @@
-// Centralized lazy singleton getters with re-entrant double-checked locking.
+// Centralized lazy singletons via Lazy<T> (execution-and-publication).
 using Atheriz.Core.Concurrency;
 using Atheriz.Core.Network;
 
@@ -6,39 +6,55 @@ namespace Atheriz.Core.Globals;
 
 public static class GlobalServices
 {
-    private static readonly ReaderWriterLockSlim _singletonLock = new(LockRecursionPolicy.SupportsRecursion);
+    // Publication without a manual RWL: each slot is a Lazy<T> with
+    // ExecutionAndPublication (exactly-once factory, lock-free hot path).
+    // The reset gate is taken only to swap in fresh instances on
+    // Reset/ClearForShutdown and to arbitrate the settings-pinned
+    // first-creation race. Factories never run under the gate, so the old
+    // GetTicker-while-holding-the-lock nesting is gone by construction.
+    private static readonly Lock _resetGate = new();
 
-    private static AsyncThreadPool? _asyncThreadPool;
-    private static AsyncTicker? _asyncTicker;
-    private static NodeHandler? _nodeHandler;
-    private static MapHandler? _mapHandler;
-    private static GameTime? _gameTime;
+    private static Lazy<AsyncThreadPool> _asyncThreadPool = FreshPool();
+    private static Lazy<AsyncTicker> _asyncTicker = FreshTicker();
+    private static Lazy<NodeHandler> _nodeHandler = FreshNodeHandler();
+    private static Lazy<MapHandler> _mapHandler = FreshMapHandler();
+    private static Lazy<GameTime> _gameTime = FreshGameTime();
+    private static Lazy<CmdSet> _loggedInCmdSet = FreshLoggedInCmdSet();
+    private static Lazy<CmdSet> _unloggedInCmdSet = FreshUnloggedInCmdSet();
+    private static Lazy<ConnectionManager> _connectionManager = FreshConnectionManager();
+
+    // Ambient makers: the canonical uncreated slot for each singleton. The
+    // field initializers, Reset, the parameterless getters' fault-restore,
+    // and the pinned overloads' fault-restore all share these, so a faulted
+    // slot always falls back to the ambient factory — never to a foreign
+    // settings-pinned one and never to a cached exception.
+    private static Lazy<AsyncThreadPool> FreshPool() =>
+        new(CreatePool, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<AsyncTicker> FreshTicker() =>
+        new(() => new AsyncTicker(GetAsyncThreadPool()), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<NodeHandler> FreshNodeHandler() =>
+        new(() => CreateNodeHandler(null), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<MapHandler> FreshMapHandler() =>
+        new(() => CreateMapHandler(AtherizSettings.Global), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<GameTime> FreshGameTime() =>
+        new(() => CreateGameTime(AtherizSettings.Global), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<CmdSet> FreshLoggedInCmdSet() =>
+        new(() => CommandRegistry.LoggedIn, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<CmdSet> FreshUnloggedInCmdSet() =>
+        new(() => CommandRegistry.UnloggedIn, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<ConnectionManager> FreshConnectionManager() =>
+        new(CreateConnectionManager, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    // The server channel needs live-validation (a deleted/renamed channel
+    // must not be returned), so it stays a plain slot under the reset gate
+    // instead of a Lazy.
     private static GameObject? _serverChannel;
-    private static CmdSet? _loggedInCmdSet;
-    private static CmdSet? _unloggedInCmdSet;
-    private static ConnectionManager? _connectionManager;
 
     public static int GetId() => IdGenerator.GetId();
     public static void SetId(int id) => IdGenerator.SetId(id);
     public static int GetUniqueId() => IdGenerator.GetUniqueId();
 
-// double-checked locking with RWL (re-entrant)
-    private static T GetOrCreateSingleton<T>(ref T? field, Func<T> factory) where T : class
-    {
-        var snap = Volatile.Read(ref field);
-        if (snap is not null) return snap;
-        _singletonLock.EnterUpgradeableReadLock();
-        try
-        {
-            if (field is not null) return field;
-            _singletonLock.EnterWriteLock();
-            try { if (field is null) field = factory(); return field!; }
-            finally { _singletonLock.ExitWriteLock(); }
-        }
-        finally { _singletonLock.ExitUpgradeableReadLock(); }
-    }
-
-    public static AsyncThreadPool GetAsyncThreadPool() => GetOrCreateSingleton(ref _asyncThreadPool, () =>
+    private static AsyncThreadPool CreatePool()
     {
         var settings = AtherizSettings.Global;
         int limit = settings.ThreadpoolLimit ?? Environment.ProcessorCount;
@@ -49,13 +65,11 @@ public static class GlobalServices
             reliefLimit: settings.ThreadpoolReliefLimit,
             watchdogSeconds: TimeSpan.FromSeconds(settings.ThreadpoolWatchdogSeconds),
             watchdogInterval: TimeSpan.FromSeconds(settings.ThreadpoolWatchdogInterval));
-    });
+    }
 
-    public static AsyncTicker GetAsyncTicker() => GetOrCreateSingleton(ref _asyncTicker, () =>
-    {
-        var pool = GetAsyncThreadPool();
-        return new AsyncTicker(pool);
-    });
+    public static AsyncThreadPool GetAsyncThreadPool() => ReadSlot(ref _asyncThreadPool, FreshPool);
+
+    public static AsyncTicker GetAsyncTicker() => ReadSlot(ref _asyncTicker, FreshTicker);
 
     // the singleton owner publishes itself as current explicitly
     // (the ctor no longer hijacks it).
@@ -68,38 +82,80 @@ public static class GlobalServices
         NodeHandler.SetCurrent(h);
         return h;
     }
-    public static NodeHandler GetNodeHandler() => GetOrCreateSingleton(ref _nodeHandler, () => CreateNodeHandler(null));
+    public static NodeHandler GetNodeHandler() => ReadSlot(ref _nodeHandler, FreshNodeHandler);
     // Settings-pinned boot: first creation loads from settings.SavePath instead
     // of the ambient path, so DoStartup(settings) uses one database .
-    public static NodeHandler GetNodeHandler(AtherizSettings settings) => GetOrCreateSingleton(ref _nodeHandler, () => CreateNodeHandler(settings));
+    // First creation wins: a concurrent parameterless creation keeps the
+    // ambient slot, exactly like the old double-checked path.
+    public static NodeHandler GetNodeHandler(AtherizSettings settings) =>
+        GetOrCreatePinned(ref _nodeHandler, () => CreateNodeHandler(settings), FreshNodeHandler);
 
     private static MapHandler CreateMapHandler(AtherizSettings settings) => new(settings, autoLoad: true);
-    public static MapHandler GetMapHandler() => GetOrCreateSingleton(ref _mapHandler, () =>
-    {
-        var settings = AtherizSettings.Global;
-        return CreateMapHandler(settings);
-    });
-    public static MapHandler GetMapHandler(AtherizSettings settings) => GetOrCreateSingleton(ref _mapHandler, () => CreateMapHandler(settings));
+    public static MapHandler GetMapHandler() => ReadSlot(ref _mapHandler, FreshMapHandler);
+    public static MapHandler GetMapHandler(AtherizSettings settings) =>
+        GetOrCreatePinned(ref _mapHandler, () => CreateMapHandler(settings), FreshMapHandler);
 
-    public static GameTime GetGameTime() => GetOrCreateSingleton(ref _gameTime, () =>
+    // Best-effort map handler for paint/move paths: created on demand, but a
+    // creation failure yields null instead of throwing out of the paint path.
+    public static MapHandler? GetMapHandlerOrDefault()
     {
-        var settings = AtherizSettings.Global;
-        // volatile reads — these fields are written under the
-        // singleton lock by Reset/ClearForShutdown on other threads.
+        try { return TryGetMapHandler() ?? GetMapHandler(); }
+        catch { return null; }
+    }
+
+    private static GameTime CreateGameTime(AtherizSettings settings)
+    {
+        // volatile reads — these slots are swapped by Reset/ClearForShutdown on other threads.
         var ticker = Volatile.Read(ref _asyncTicker);
         var pool = Volatile.Read(ref _asyncThreadPool);
-        if (ticker is not null || pool is not null)
-            return new GameTime(settings, ticker, pool, autoLoad: true);
+        if (ticker.IsValueCreated || pool.IsValueCreated)
+            return new GameTime(settings, ticker.Value, pool.Value, autoLoad: true);
         return new GameTime(settings, autoLoad: true);
-    });
-    public static GameTime GetGameTime(AtherizSettings settings) => GetOrCreateSingleton(ref _gameTime, () =>
+    }
+    public static GameTime GetGameTime() => ReadSlot(ref _gameTime, FreshGameTime);
+    public static GameTime GetGameTime(AtherizSettings settings) =>
+        GetOrCreatePinned(ref _gameTime, () => CreateGameTime(settings), FreshGameTime);
+
+    // Fault-tolerant slot read. Lazy<T> caches factory exceptions, but the
+    // pre-Lazy manual singletons stored nothing on failure so later callers
+    // retried — DoStartup leans on that: it logs boot failures and carries
+    // on (a node handler whose database is briefly unavailable must stay
+    // retryable, not wedged for the life of the process). A faulted read
+    // therefore swaps in a fresh Lazy (only if nobody beat us to it) and
+    // rethrows the original failure.
+    private static T ReadSlot<T>(ref Lazy<T> slot, Func<Lazy<T>> fresh)
     {
-        var ticker = Volatile.Read(ref _asyncTicker);
-        var pool = Volatile.Read(ref _asyncThreadPool);
-        if (ticker is not null || pool is not null)
-            return new GameTime(settings, ticker, pool, autoLoad: true);
-        return new GameTime(settings, autoLoad: true);
-    });
+        var snap = Volatile.Read(ref slot);
+        try { return snap.Value; }
+        catch
+        {
+            Interlocked.CompareExchange(ref slot, fresh(), snap);
+            throw;
+        }
+    }
+
+    // First-creation-wins for the settings-pinned overloads. The gate is
+    // only taken while the slot is still uncreated; the created hot path
+    // stays a lock-free Lazy read. A failed pinned creation wins nothing:
+    // the slot falls back to the ambient maker so the next caller retries
+    // with its own factory instead of inheriting the cached exception or
+    // re-running the failed pinned factory (same contract as ReadSlot).
+    private static T GetOrCreatePinned<T>(ref Lazy<T> slot, Func<T> factory, Func<Lazy<T>> ambientFresh)
+    {
+        var snap = Volatile.Read(ref slot);
+        if (snap.IsValueCreated) return snap.Value;
+        lock (_resetGate)
+        {
+            if (!slot.IsValueCreated)
+                slot = new Lazy<T>(factory, LazyThreadSafetyMode.ExecutionAndPublication);
+            try { return slot.Value; }
+            catch
+            {
+                slot = ambientFresh();
+                throw;
+            }
+        }
+    }
 
     // One choke point for the fast-path and post-upgrade server-channel
     // validation below: same IsDeleted + name checks with the same nested
@@ -118,122 +174,91 @@ public static class GlobalServices
 
     public static GameObject? GetServerChannel()
     {
-        _singletonLock.EnterUpgradeableReadLock();
-        try
+        lock (_resetGate)
         {
-            if (_serverChannel is not null)
+            if (IsLiveServerChannel(_serverChannel)) return _serverChannel;
+            _serverChannel = null;
+            var c = ObjectRegistry.FilterBy(o =>
+                o.IsChannel && (o.Name is not null && o.Name.ToLowerInvariant() == "server") && !o.IsDeleted);
+            if (c.Count > 0)
             {
-                if (!IsLiveServerChannel(_serverChannel))
-                {
-                    _singletonLock.EnterWriteLock();
-                    try { _serverChannel = null; }
-                    finally { _singletonLock.ExitWriteLock(); }
-                }
-                else
-                {
-                    return _serverChannel;
-                }
+                _serverChannel = c[0];
             }
-            _singletonLock.EnterWriteLock();
-            try
+            else
             {
-                // Re-check after upgrade
-                if (_serverChannel is not null)
-                {
-                    if (IsLiveServerChannel(_serverChannel)) return _serverChannel;
-                    _serverChannel = null;
-                }
-                var c = ObjectRegistry.FilterBy(o =>
-                    o.IsChannel && (o.Name is not null && o.Name.ToLowerInvariant() == "server") && !o.IsDeleted);
-                if (c.Count > 0)
-                {
-                    _serverChannel = c[0];
-                }
-                else
-                {
-                    AtherizLogger.LogWarning("Server channel not found.");
-                    _serverChannel = null;
-                }
-                return _serverChannel;
+                AtherizLogger.LogWarning("Server channel not found.");
+                _serverChannel = null;
             }
-            finally { _singletonLock.ExitWriteLock(); }
+            return _serverChannel;
         }
-        finally { _singletonLock.ExitUpgradeableReadLock(); }
     }
 
-    public static CmdSet GetLoggedInCmdSet() => GetOrCreateSingleton(ref _loggedInCmdSet, () => CommandRegistry.LoggedIn);
+    public static CmdSet GetLoggedInCmdSet() => ReadSlot(ref _loggedInCmdSet, FreshLoggedInCmdSet);
 
-    public static CmdSet GetUnloggedInCmdSet() => GetOrCreateSingleton(ref _unloggedInCmdSet, () => CommandRegistry.UnloggedIn);
+    public static CmdSet GetUnloggedInCmdSet() => ReadSlot(ref _unloggedInCmdSet, FreshUnloggedInCmdSet);
 
-    public static ConnectionManager GetConnectionManager() => GetOrCreateSingleton(ref _connectionManager, () =>
+    private static ConnectionManager CreateConnectionManager()
     {
         var cm = ConnectionManager.GlobalInstance ?? new ConnectionManager();
         ConnectionManager.GlobalInstance = cm;
         return cm;
-    });
+    }
+    public static ConnectionManager GetConnectionManager() => ReadSlot(ref _connectionManager, FreshConnectionManager);
 
     // Overload allowing caller-provided pool/settings (for Startup wiring)
-    public static ConnectionManager GetConnectionManager(AtherizSettings settings, AsyncThreadPool pool)
-    {
-        var snap = Volatile.Read(ref _connectionManager);
-        if (snap is not null) return snap;
-        _singletonLock.EnterWriteLock();
-        try
+    public static ConnectionManager GetConnectionManager(AtherizSettings settings, AsyncThreadPool pool) =>
+        GetOrCreatePinned(ref _connectionManager, () =>
         {
-            if (_connectionManager is null)
-            {
-                _connectionManager = ConnectionManager.GlobalInstance ?? new ConnectionManager(pool, settings);
-                ConnectionManager.GlobalInstance = _connectionManager;
-            }
-            return _connectionManager;
-        }
-        finally { _singletonLock.ExitWriteLock(); }
-    }
+            var cm = ConnectionManager.GlobalInstance ?? new ConnectionManager(pool, settings);
+            ConnectionManager.GlobalInstance = cm;
+            return cm;
+        }, FreshConnectionManager);
 
-    // Call with _singletonLock write held. Clears more than the three Python
+    // Call with _resetGate held. Clears more than the three Python
     // names: world handlers must release so the next boot reloads instead of
     // resurrecting stale in-memory world, and command sets are rebuilt lazily
     // (reusing them across a world reload keeps references to discarded world).
     private static void ClearHoldersLocked()
     {
-        _asyncThreadPool = null;
-        _asyncTicker = null;
-        _nodeHandler = null;
-        _mapHandler = null;
-        _gameTime = null;
+        _asyncThreadPool = FreshPool();
+        _asyncTicker = FreshTicker();
+        _nodeHandler = FreshNodeHandler();
+        _mapHandler = FreshMapHandler();
+        _gameTime = FreshGameTime();
         _serverChannel = null;
-        _loggedInCmdSet = null;
-        _unloggedInCmdSet = null;
-        _connectionManager = null;
+        _loggedInCmdSet = FreshLoggedInCmdSet();
+        _unloggedInCmdSet = FreshUnloggedInCmdSet();
+        _connectionManager = FreshConnectionManager();
     }
 
     internal static void ClearForShutdown()
     {
-        _singletonLock.EnterWriteLock();
-        try
+        lock (_resetGate)
         {
             ClearHoldersLocked();
         }
-        finally { _singletonLock.ExitWriteLock(); }
     }
 
     // For tests / reset — clears all holders
     public static void Reset()
     {
-        _singletonLock.EnterWriteLock();
-        try
+        lock (_resetGate)
         {
             ClearHoldersLocked();
         }
-        finally { _singletonLock.ExitWriteLock(); }
         // Also reset underlying registries that are not singletons but global
         try { CommandRegistry.Reset(); } catch (Exception) { }
         try { ConnectionManager.GlobalInstance = null; } catch (Exception) { }
     }
 
-    private static T? TryRead<T>(ref T? field) where T : class
+    private static T? TryRead<T>(ref Lazy<T> slot) where T : class
     {
-        try { return Volatile.Read(ref field); } catch { return null; }
+        try
+        {
+            var snap = Volatile.Read(ref slot);
+            return snap.IsValueCreated ? snap.Value : null;
+        }
+        catch { return null; }
     }
 
     public static AsyncTicker? TryGetTicker() => TryRead(ref _asyncTicker);
@@ -243,29 +268,51 @@ public static class GlobalServices
     public static NodeHandler? TryGetNodeHandler() => TryRead(ref _nodeHandler);
     public static ConnectionManager? TryGetConnectionManager() => TryRead(ref _connectionManager);
 
-    // Typed singleton override (F001: replaces GlobalServices._nodeHandler/_mapHandler
-    // reflection writes in MazeCommand). Same-lock assignment, no behavior change.
+    // Swap core for the Set overrides below. The replacement is forced to
+    // created before publishing: TryGet paths treat a Set value as live
+    // (IsValueCreated), exactly like the old non-null field check.
+    // Call with _resetGate held.
+    private static void SwapCreated<T>(ref Lazy<T> slot, T value)
+    {
+        var fresh = new Lazy<T>(() => value, LazyThreadSafetyMode.ExecutionAndPublication);
+        var _ = fresh.Value;
+        Volatile.Write(ref slot, fresh);
+    }
+
+    // Typed singleton overrides. Same-gate swap, no behavior change.
+    public static void SetAsyncTicker(AsyncTicker ticker)
+    {
+        ArgumentNullException.ThrowIfNull(ticker);
+        lock (_resetGate)
+        {
+            SwapCreated(ref _asyncTicker, ticker);
+        }
+    }
+    public static void SetAsyncThreadPool(AsyncThreadPool pool)
+    {
+        ArgumentNullException.ThrowIfNull(pool);
+        lock (_resetGate)
+        {
+            SwapCreated(ref _asyncThreadPool, pool);
+        }
+    }
+    // Typed singleton override (replaces the old reflection writes in
+    // MazeCommand). Same-gate swap, no behavior change.
     public static void SetNodeHandler(NodeHandler nh)
     {
-        _singletonLock.EnterWriteLock();
-        try { _nodeHandler = nh; }
-        finally { _singletonLock.ExitWriteLock(); }
+        lock (_resetGate)
+        {
+            SwapCreated(ref _nodeHandler, nh);
+        }
         // Publish the twin slot too: NodeHandler.GetCurrent reads a separate
         // static, so setting only this slot would fork the two singletons.
         NodeHandler.SetCurrent(nh);
     }
     public static void SetMapHandler(MapHandler mh)
     {
-        _singletonLock.EnterWriteLock();
-        try { _mapHandler = mh; }
-        finally { _singletonLock.ExitWriteLock(); }
-        // Publish the twin slot too: MapHandlerSingleton.Get caches the first
-        // GlobalServices lookup forever, so setting only this slot forks the
-        // two singletons (door paint/cleanup and move stamps would read the
-        // stale world). Mirrors SetNodeHandler above.
-        MapHandlerSingleton.Set(mh);
+        lock (_resetGate)
+        {
+            SwapCreated(ref _mapHandler, mh);
+        }
     }
-
-    // Expose lock for StartStop faithful clearing (mirrors get_singleton._SINGLETON_LOCK)
-    public static ReaderWriterLockSlim SingletonLock => _singletonLock;
 }

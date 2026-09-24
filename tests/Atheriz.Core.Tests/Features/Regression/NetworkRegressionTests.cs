@@ -165,7 +165,7 @@ public class NetworkRegressionTests
     [Fact]
     public void HandlerDiscovery_UsesNoPerConstructionReflection()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "ConnectionManager.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "InputFuncs.cs");
         var region = SourceScan.Region(src, "public Dictionary<string, InputHandler> GetHandlers()");
         Assert.DoesNotContain("GetMethods", region);
     }
@@ -311,7 +311,7 @@ public class NetworkRegressionTests
     [Fact]
     public void JournalFailures_FailLoud()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Persistence", "DbTransactionHelper.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Persistence", "CheckpointJournal.cs");
         Assert.DoesNotContain("catch { return false; }", src);
     }
 
@@ -391,7 +391,7 @@ public class NetworkRegressionTests
     [Fact]
     public void LegendGetOrCreate_IsAtomic()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "ConnectionManager.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Network", "InputFuncs.cs");
         var region = SourceScan.Region(src, "mi = new MapInfo(result.Chain.Area);", @"\n        \}");
         Assert.Contains("GetOrAdd", region);
     }

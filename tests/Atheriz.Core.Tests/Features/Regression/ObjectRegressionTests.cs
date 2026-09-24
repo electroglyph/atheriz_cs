@@ -226,7 +226,7 @@ public class ObjectRegressionTests
             var node = new Node(new Coord("regdel", 0, 0, 0));
             var res = node.Delete(null, true);
             Assert.NotNull(res);
-            Assert.Contains(res.Value.ops, o => o is ValueTuple<string, object[]> t && t.Item1.StartsWith("DELETE"));
+            Assert.Contains(res.Value.Operations, o => o.Id == node.Id);
             Assert.Empty(ObjectRegistry.Get(node.Id));
         }
         finally { Reset(); }
@@ -350,10 +350,10 @@ public class ObjectRegressionTests
     public void SaveSerializes_AfterLockRelease()
     {
         var channel = SourceScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
-        var buildOps = SourceScan.Region(channel, "private (string Sql, object[] Params) BuildSaveOps");
+        var buildOps = SourceScan.Region(channel, "private SaveOperation BuildSaveOperation(bool clearing)");
         Assert.Contains("GameObjectDtoConverter.BuildSaveJson", buildOps);
         var account = SourceScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
-        var getOps = SourceScan.Region(account, "public override (string Sql, object[] Params) GetSaveOps()");
+        var getOps = SourceScan.Region(account, "public override SaveOperation GetSaveOperation()");
         Assert.Contains("GameObjectDtoConverter.BuildSaveJson", getOps);
         var conv = SourceScan.Read("src", "Atheriz.Core", "Persistence", "Converters", "GameObjectDtoConverter.cs");
         var core = SourceScan.Region(conv, "public static string BuildSaveJson(GameObject obj, Func<GameObjectDto> snapshotUnderLock, bool clearing)");
@@ -411,11 +411,15 @@ public class ObjectRegressionTests
         finally { Reset(); }
     }
 
-    // underscore aliases must be complete across flags.
+    // flags are typed auto-props with legacy defaults (modified clean-tracked).
     [Fact]
-    public void FlagAliases_AreComplete()
+    public void FlagDefaults_MatchLegacy()
     {
-        Assert.True(new Flags().TrySet("_isNpc", true));
+        var f = new Flags();
+        Assert.True(f.IsModified);
+        Assert.False(f.IsPc);
+        f.IsNpc = true;
+        Assert.True(f.IsNpc);
     }
 
     // type failures must surface as arity failures, not NRE/InvalidCast.

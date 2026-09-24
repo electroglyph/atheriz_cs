@@ -52,7 +52,7 @@ public static class PluginReloader
     // renamed them _-prefixed — so only the resolving spellings are listed:
     // a rename that stops resolving is caught by the field-coverage test.
     private static readonly HashSet<string> _transientFields = new(StringComparer.Ordinal)
-    { "_session","_listeners","_command","_lock","_hooks","_msgLog" };
+    { "_session","_listeners","_command","_lock","_hookRegistry","_msgLog" };
     // Shared exclusion check (also used by PluginLoader): exact filename match only.
     // Never substring-match the full path — "MySystem.Game.dll" must not match "System.*".
     internal static bool IsExcludedAssembly(string p)

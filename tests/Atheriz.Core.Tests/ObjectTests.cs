@@ -156,14 +156,13 @@ public class ObjectTests
     }
 
     [Fact]
-    public void GetSaveOpsClearing_ClearsIsModified()
+    public void GetSaveOperationClearing_ClearsIsModified()
     {
         var o = GameObject.Create("box");
         Assert.True(o.IsModified);
-        var (_, parms) = o.GetSaveOpsClearing();
+        var op = o.GetSaveOperationClearing();
         Assert.False(o.IsModified);
-        var json = (string)parms[1];
-        var dto = GameObjectDtoSerializer.FromJson(json);
+        var dto = GameObjectDtoSerializer.FromJson(op.Json);
         Assert.Equal("box", dto.Name);
         Assert.False(dto.IsModified);
         // further mutation re-raises
@@ -172,11 +171,11 @@ public class ObjectTests
     }
 
     [Fact]
-    public void GetSaveOps_DoesNotClear()
+    public void GetSaveOperation_DoesNotClear()
     {
         var o = GameObject.Create("box");
         o.IsModified = true;
-        var (_, _) = o.GetSaveOps();
+        o.GetSaveOperation();
         Assert.True(o.IsModified); // get_save_ops restores flag
     }
 

@@ -23,7 +23,7 @@ public class PortedCharacterLimitsTests
             // Ensure we don't duplicate area; clear and reuse
             if (!area.Grids.ContainsKey(4)) {}
         }
-        var grid = area!.GetOrCreateGrid(4);
+        var grid = area!.GetOrAddGrid(4);
         // Also ensure Z=4 grid has node at 4,4
         grid.AddNode(home);
         // Also ensure 0 grid exists for legacy tests but not needed
@@ -90,7 +90,7 @@ public class PortedCharacterLimitsTests
         var nh = GlobalServices.GetNodeHandler();
         var area = nh.GetArea("limbo") ?? new NodeArea("limbo");
         if (nh.GetArea("limbo") == null) nh.AddArea(area);
-        area.GetOrCreateGrid(0).AddNode(home);
+        area.GetOrAddGrid(0).AddNode(home);
         var orig = Atheriz.Core.Settings.AtherizSettings.Global.GuestEnabled;
         Atheriz.Core.Settings.AtherizSettings.Global.GuestEnabled = true;
         try

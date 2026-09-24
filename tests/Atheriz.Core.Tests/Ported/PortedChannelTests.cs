@@ -291,7 +291,7 @@ public class PortedChannelTests
         Assert.Contains(chan, ObjectRegistry.FilterBy(o => o.Id == chan.Id));
         var res = chan.Delete();
         Assert.NotNull(res);
-        Assert.Equal(1, res!.Value.count);
+        Assert.Equal(1, res!.Value.Count);
         Assert.Empty(ObjectRegistry.Get(chan.Id));
     }
 
@@ -320,7 +320,7 @@ public class PortedChannelTests
     }
     private sealed class VetoChannel : Channel
     {
-        public override (int count, List<object> ops)? Delete(GameObject? caller = null, bool recursive = false)
+        public override (int Count, List<Atheriz.Core.Persistence.Dto.DeleteOperation> Operations)? Delete(GameObject? caller = null, bool recursive = false, int maxDepth = ContentUtils.DefaultMaxSearchDepth)
         {
             return null;
         }
@@ -334,7 +334,7 @@ public class PortedChannelTests
         chan.IsTemporary = true;
         var res = chan.Delete();
         Assert.NotNull(res);
-        Assert.Empty(res!.Value.ops);
+        Assert.Empty(res!.Value.Operations);
     }
 
     // test_channel.py:278 test_delete_persistent_uses_db_ops
@@ -345,11 +345,9 @@ public class PortedChannelTests
         Assert.False(chan.IsTemporary);
         var res = chan.Delete();
         Assert.NotNull(res);
-        Assert.Single(res!.Value.ops);
-        var op = res.Value.ops[0];
-        var t = ((string, object[]))op;
-        Assert.Equal("DELETE FROM objects WHERE id = ?", t.Item1);
-        Assert.Equal(chan.Id, (int)t.Item2[0]);
+        Assert.Single(res!.Value.Operations);
+        var op = res.Value.Operations[0];
+        Assert.Equal(chan.Id, op.Id);
     }
 
     // test_channel.py:298 test_add_listener_stores_by_id

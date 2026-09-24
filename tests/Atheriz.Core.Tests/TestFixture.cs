@@ -131,11 +131,9 @@ public static class GlobalTestEnv
     {
         try
         {
-            var f = typeof(GlobalServices).GetField("_asyncTicker", BindingFlags.NonPublic | BindingFlags.Static);
-            var t = f?.GetValue(null) as AsyncTicker;
+            var t = GlobalServices.TryGetTicker();
             if (t != null) { try { t.Clear(); } catch { } try { t.Stop(); } catch { } }
-            var f2 = typeof(GlobalServices).GetField("_asyncThreadPool", BindingFlags.NonPublic | BindingFlags.Static);
-            var p = f2?.GetValue(null) as AsyncThreadPool;
+            var p = GlobalServices.TryGetPool();
             if (p != null) { try { p.Stop(wait: false); } catch { } }
         }
         catch { }

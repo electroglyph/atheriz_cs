@@ -38,12 +38,11 @@ public class DtoRoundTripTests
     }
 
     [Fact]
-    public void GetSaveOps_ConverterPath_ReferencesSameId()
+    public void GetSaveOperation_ConverterPath_ReferencesSameId()
     {
-        // Exercises the converter's internal DTO entry point (the kept twin).
         var o = GameObject.Create("saved");
-        var (sql, ps) = o.GetSaveOps();
-        Assert.Contains("objects", sql);
-        Assert.Contains(o.Id, ps.OfType<int>());
+        var op = o.GetSaveOperation();
+        Assert.Equal(o.Id, op.Id);
+        Assert.Equal(o.Id, GameObjectDtoSerializer.FromJson(op.Json).Id);
     }
 }

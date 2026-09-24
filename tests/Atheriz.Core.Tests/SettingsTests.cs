@@ -15,7 +15,6 @@ public class SettingsTests
         Assert.Equal(9999, s.WebserverPort);
         Assert.Equal(5, s.MaxCharacters);
         Assert.Equal(20, s.FuncparserMaxNesting);
-        Assert.Equal(100, s.MaxSearchDepth);
         Assert.Equal(50, s.ChannelHistoryLimit);
         Assert.Equal("limbo", s.DefaultHome.Area);
     }

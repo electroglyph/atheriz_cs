@@ -28,7 +28,7 @@ public sealed class DeleteOwnedListIterationTests
         var res = bag.Delete(admin, recursive: true);
 
         Assert.NotNull(res);
-        Assert.Equal(3, res.Value.count);
+        Assert.Equal(3, res.Value.Count);
         Assert.Empty(ObjectRegistry.Get(bag.Id));
         Assert.Empty(ObjectRegistry.Get(coin.Id));
         Assert.Empty(ObjectRegistry.Get(gem.Id));
@@ -71,7 +71,7 @@ public sealed class DeleteOwnedListIterationTests
         var res = node.Delete(admin, recursive: true);
 
         Assert.NotNull(res);
-        Assert.Equal(2, res.Value.count);
+        Assert.Equal(2, res.Value.Count);
         Assert.Empty(ObjectRegistry.Get(node.Id));
         Assert.Empty(ObjectRegistry.Get(kid.Id));
     }

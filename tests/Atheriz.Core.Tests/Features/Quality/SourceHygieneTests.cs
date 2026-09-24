@@ -182,8 +182,8 @@ public class SourceHygieneTests
         return File.Exists(p) || Directory.Exists(p);
     }
 
-    private static int ProdMatchCount(string[] areas, string pattern) =>
-        Scan(areas, pattern).Count;
+    private static int ProdMatchCount(string[] areas, string pattern, string? fileNameContains = null) =>
+        Scan(areas, pattern, fileNameContains: fileNameContains).Count;
 
     [Fact] public void Org_GameObjectDelete_SplitFromPuppet() =>
         Assert.True(ProdFileExists("Atheriz.Core", "Objects", "GameObject.Delete.cs"),
@@ -193,9 +193,12 @@ public class SourceHygieneTests
         Assert.True(ProdFileExists("Atheriz.Core", "Objects", "GameObject.Look.cs"),
             "ExecuteCommand/AtLook/ReturnAppearance must move out of GameObject.Move.cs");
 
-    [Fact] public void Org_Transition_MergedIntoNodeGrid() =>
-        Assert.False(ProdFileExists("Atheriz.Core", "Objects", "Transition.cs"),
-            "21-line Transition must merge into NodeGrid.cs");
+    [Fact] public void Org_Transition_SplitFromNodeGrid()
+    {
+        Assert.True(ProdFileExists("Atheriz.Core", "Objects", "Transition.cs"),
+            "Transition must live in its own file (file-per-type), not merged into NodeGrid.cs");
+        Assert.Equal(0, ProdMatchCount(Objects, @"\b(class|record|struct) Transition\b", fileNameContains: "NodeGrid"));
+    }
 
     [Fact] public void Org_NodeLinks_Renamed() =>
         Assert.True(ProdFileExists("Atheriz.Core", "Objects", "Node.Links.cs"),

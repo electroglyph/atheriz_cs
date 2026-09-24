@@ -210,12 +210,12 @@ public class NodeTests
         var from = new Coord("limbo", 0, 0, 0);
         var to = new Coord("limbo", 1, 0, 0);
         var door = new Door(from, to, "wooden door");
-        Assert.False(door.IsClosed);
+        Assert.False(door.Closed);
         door.Close();
-        Assert.True(door.IsClosed);
+        Assert.True(door.Closed);
         door.Open();
-        Assert.False(door.IsClosed);
-        door.IsLocked = true;
-        Assert.True(door.IsLocked);
+        Assert.False(door.Closed);
+        door.Locked = true;
+        Assert.True(door.Locked);
     }
 }

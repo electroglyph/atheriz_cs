@@ -34,7 +34,7 @@ public class AccountDeletionTests
             Assert.NotNull(db.Objects.Find(accBase.Id));
         }
 
-        Assert.True(accBool.Delete(caller, false));
+        Assert.NotNull(accBool.Delete(caller, false));
         GameObject asBase = accBase;
         var res = asBase.Delete(caller, recursive: false);
         Assert.NotNull(res);
@@ -71,7 +71,7 @@ public class AccountDeletionTests
         acc.AddFollower(follower.Id);
         var ch = Channel.Create("f15chan");
         acc.Subscribe(ch);
-        Assert.True(acc.Delete(null));
+        Assert.NotNull(acc.Delete(null));
         Assert.True(acc.IsDeleted);
         Assert.Empty(ObjectRegistry.Get(acc.Id));
         // Shared teardown ran: follows detached, channel memberships gone.

@@ -81,7 +81,7 @@ public class PortedDeadlocksTests
         var nh = GlobalServices.GetNodeHandler();
         var area = nh.GetArea("TestArea") ?? new NodeArea("TestArea");
         if (nh.GetArea("TestArea")==null) nh.AddArea(area);
-        var grid = area.GetOrCreateGrid(0);
+        var grid = area.GetOrAddGrid(0);
         grid.AddNode(room1); grid.AddNode(room2);
         var movers = new List<GameObject>();
         for(int i=0;i<5;i++){ var npc=GameObject.Create($"Mover-{i}", isNpc:true); npc.Id=10+i; ObjectRegistry.AddObject(npc); npc.InternalCmdSet=new CmdSet(); npc.MoveTo(room1); movers.Add(npc); }

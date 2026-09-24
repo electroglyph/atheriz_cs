@@ -78,30 +78,20 @@ public class PortedUtilsExtraTests
     {
         public ReaderWriterLockSlim @lock = new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion);
         public int x = 1;
-        public static bool _is_thread_safe = false;
-        // Simulate Python's __getattribute__/__setattr__ patch flags
-        public static Func<object?, string, object?>? _origGet = null!;
-        public static Action<object?, string, object?>? _origSet = null!;
     }
 
     [Fact] public void EnsureThreadSafe_Idempotent()
     {
         using var env = GlobalTestEnv.Enter();
         var obj = new Dummy();
-        // In Python, ensure_thread_safe patches class to copy-on-read and sets _is_thread_safe
-        // In C# port, it's explicit RWL + no patch, but we verify idempotent no throw and preserves behavior
+        // In Python, ensure_thread_safe patched the class to copy-on-read.
+        // In C# locking is explicit per instance, so the call is a no-op:
+        // it never throws, runs twice cleanly, and leaves behavior alone.
         var ex = Record.Exception(() => GameUtils.EnsureThreadSafe(typeof(Dummy)));
         Assert.Null(ex);
-        // Simulate that EnsureThreadSafe would set _is_thread_safe
-        Dummy._is_thread_safe = true;
-        var origGet = Dummy._origGet;
-        var origSet = Dummy._origSet;
         var ex2 = Record.Exception(() => GameUtils.EnsureThreadSafe(typeof(Dummy)));
         Assert.Null(ex2);
-        Assert.Equal(origGet, Dummy._origGet);
-        Assert.Equal(origSet, Dummy._origSet);
         obj.x = 5;
         Assert.Equal(5, obj.x);
-        Dummy._is_thread_safe = false;
     }
 }

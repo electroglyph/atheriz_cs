@@ -7,7 +7,6 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public class Channel : GameObject
 {
-    internal new static bool _is_thread_safe = true;
     private readonly Lock _histLock = new();
     // tuples. Listeners receive the FormatMessage form; History projects the
     // raw messages; GetHistory formats on replay — so replay matches live.
@@ -24,13 +23,15 @@ public class Channel : GameObject
         IsChannel = true;
         _historyLimit = historyLimit;
     }
-    // Load-path construction: skips the id draw (caller adopts the stored id
-    // via SetIdRaw before publication). See GameObject.SkipIdDraw.
-    internal Channel(SkipIdDraw skip, int historyLimit = 50) : base(skip)
+    // Load-path construction: no id draw (the factory adopts the stored id
+    // via the base core before publication, so the generator watermark is
+    // untouched by loads).
+    private Channel(int id, int historyLimit = 50) : base(id)
     {
         IsChannel = true;
         _historyLimit = historyLimit;
     }
+    internal static Channel CreateForLoad(int id, int historyLimit = 50) => new Channel(id, historyLimit);
 
     public static Channel Create(string name, GameObject? caller = null)
     {
@@ -75,7 +76,7 @@ public class Channel : GameObject
     /// <c>_flags.IsDeleted</c> directly (bypassing this override). Called with the
     /// restored value; takes only _histLock so no lock order is violated.
     /// </summary>
-    internal void SyncDeletedGuard(bool deleted)
+    internal override void SyncDeletedGuard(bool deleted)
     {
         lock (_histLock) { _channelDeleted = deleted; }
     }
@@ -111,7 +112,7 @@ public class Channel : GameObject
         }
         IsModified = true;
     }
-    public void RemoveListener(GameObject obj)
+    public override void RemoveListener(GameObject obj)
     {
         lock (_histLock) { _listeners.Remove(obj.Id); }
         IsModified = true;
@@ -166,7 +167,7 @@ public class Channel : GameObject
         }
     }
 
-    public override (int count, List<object> ops)? Delete(GameObject? caller = null, bool recursive = false)
+    public override (int Count, List<DeleteOperation> Operations)? Delete(GameObject? caller = null, bool recursive = false, int maxDepth = ContentUtils.DefaultMaxSearchDepth)
     {
         if (!AtDelete(caller)) return null;
         List<int> toDetach;
@@ -197,10 +198,10 @@ public class Channel : GameObject
             }
         }
         Globals.ObjectRegistry.RemoveObject(this);
-        List<object> ops = [];
+        List<DeleteOperation> ops = [];
         if (!this.IsTemporary)
         {
-            ops.Add(this.GetDelOps());
+            ops.Add(this.GetDeleteOperation());
             // Journal the row death so the checkpoint drain removes it.
             Globals.ObjectRegistry.NoteDeleted(this.Id);
         }
@@ -282,19 +283,19 @@ public class Channel : GameObject
     // Save ops never nest _histLock inside SyncRoot (or vice versa): history is
     // snapshotted under _histLock, then the modified-flag dance runs under
     // SyncRoot only. Fixed lock order everywhere is object -> channel.
-    public override (string Sql, object[] Params) GetSaveOps() => BuildSaveOps(clearing: false);
+    public override SaveOperation GetSaveOperation() => BuildSaveOperation(clearing: false);
 
-    public override (string Sql, object[] Params) GetSaveOpsClearing() => BuildSaveOps(clearing: true);
+    public override SaveOperation GetSaveOperationClearing() => BuildSaveOperation(clearing: true);
 
     private List<ChannelHistoryEntry> SnapshotHistory() { lock (_histLock) return _history.ToList(); }
 
-    private (string Sql, object[] Params) BuildSaveOps(bool clearing)
+    private SaveOperation BuildSaveOperation(bool clearing)
     {
         List<ChannelHistoryEntry> histSnap = SnapshotHistory();
         // Flag dance + post-release encode live in the shared converter core;
         // only the history-snapshot DTO body stays here.
         string json = Persistence.Converters.GameObjectDtoConverter.BuildSaveJson(this, () => BuildDto(histSnap), clearing);
-        return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", new object[] { Id, json });
+        return new SaveOperation(Id, json);
     }
 
     public override GameObjectDto ToDto()
@@ -331,9 +332,3 @@ public class Channel : GameObject
         }
     }
 }
-
-/// <summary>
-/// <c>(timestamp, sender, message)</c> tuples in
-/// <c>atheriz/objects/base_channel.py</c>.
-/// </summary>
-internal sealed record ChannelHistoryEntry(long Timestamp, string Sender, string Message);

@@ -6,149 +6,15 @@ using Microsoft.EntityFrameworkCore;
 namespace Atheriz.Core.Globals;
 
 /// <summary>
-/// Global object registry + temp bans + creation cooldowns.
+/// Global object registry: id -> object world state plus the save/delete
+/// plumbing. Classification state (IP bans, creation cooldowns) lives in
+/// IpBanStore / CreationCooldownStore; the registry forwards for call-site
+/// continuity.
 /// All access guarded by ReaderWriterLockSlim (mirrors Python RLock).
 /// Persistence via <see cref="AtherizDbContext"/> + JSON (replaces dill).
 /// </summary>
 public static class ObjectRegistry
 {
-    // --- bounded dict (FIFO eviction at 4000) ---
-    public sealed class BoundedDictionary<TKey, TValue> where TKey : notnull
-    {
-        private const int Limit = 4000;
-        private readonly Dictionary<TKey, TValue> _dict = new();
-        private readonly Queue<TKey> _order = new();
-        // Retired queue-entry counts for lazy FIFO deletes: each successful
-        // Remove retires exactly one queued entry, consumed positionally at
-        // eviction/compaction time. Keeps Remove O(1) instead of rebuilding
-        // the whole queue per remove. Guarded by _lock like everything else.
-        private readonly Dictionary<TKey, int> _dead = new();
-        private readonly Lock _lock = new();
-        private void EvictIfNeeded()
-        {
-            if (_order.Count > Limit * 2) CompactLocked();
-            if (_dict.Count <= Limit) return;
-            // Only newly-enqueued keys call this, and they land at the tail,
-            // so the head can never be the just-set key — dequeue (skipping
-            // retired heads) until one live head is evicted.
-            while (_dict.Count > Limit && _order.Count > 0)
-            {
-                var head = _order.Dequeue();
-                if (_dead.TryGetValue(head, out var n) && n > 0)
-                {
-                    if (n == 1) _dead.Remove(head);
-                    else _dead[head] = n - 1;
-                    continue;
-                }
-                _dict.Remove(head);
-            }
-        }
-        public void Set(TKey key, TValue value)
-        {
-            lock (_lock)
-            {
-                var isNew = !_dict.ContainsKey(key);
-                _dict[key] = value;
-                if (!isNew) return;
-                _order.Enqueue(key);
-                EvictIfNeeded();
-            }
-        }
-        /// <summary>Atomic read-modify-write under the dict lock (F005 login hot path).</summary>
-        public TValue AddOrUpdate(TKey key, Func<bool, TValue, TValue> updater)
-        {
-            lock (_lock)
-            {
-                var isNew = !_dict.ContainsKey(key);
-                var nv = updater(!isNew, isNew ? default! : _dict[key]);
-                _dict[key] = nv;
-                if (isNew)
-                {
-                    _order.Enqueue(key);
-                    EvictIfNeeded();
-                }
-                return nv;
-            }
-        }
-        /// <summary>
-        /// Atomic check-then-set under the dict lock: sets <paramref name="value"/> only when
-        /// <paramref name="allow"/> (exists, current-or-default) returns true.
-        /// </summary>
-        public bool CheckAndSet(TKey key, TValue value, Func<bool, TValue, bool> allow)
-        {
-            lock (_lock)
-            {
-                var exists = _dict.ContainsKey(key);
-                if (!allow(exists, exists ? _dict[key] : default!)) return false;
-                _dict[key] = value;
-                if (!exists)
-                {
-                    _order.Enqueue(key);
-                    EvictIfNeeded();
-                }
-                return true;
-            }
-        }
-        public TValue? Get(TKey key)
-        {
-            lock (_lock) return _dict.TryGetValue(key, out var v) ? v : default;
-        }
-        public bool Contains(TKey key) { lock (_lock) return _dict.ContainsKey(key); }
-        public bool TryGetValue(TKey key, out TValue? value) { lock (_lock) return _dict.TryGetValue(key, out value); }
-        public void Remove(TKey key)
-        {
-            lock (_lock)
-            {
-                // Retire exactly one queued entry, and only when a live entry
-                // actually died: an absent key has no queue entry to retire.
-                if (_dict.Remove(key)) NoteDeadLocked(key);
-            }
-        }
-        /// <summary>
-        /// Atomic remove-if-value-matches under the dict lock: expiry cleanup
-        /// must not delete a concurrently refreshed entry.
-        /// </summary>
-        public bool RemoveIfEqual(TKey key, TValue expected)
-        {
-            lock (_lock)
-            {
-                if (!_dict.TryGetValue(key, out var cur)) return false;
-                if (!EqualityComparer<TValue>.Default.Equals(cur, expected)) return false;
-                _dict.Remove(key);
-                NoteDeadLocked(key);
-                return true;
-            }
-        }
-        // Caller holds _lock and just removed a live entry: retire its queue
-        // slot lazily (consumed positionally by EvictIfNeeded/CompactLocked).
-        private void NoteDeadLocked(TKey key)
-        {
-            _dead[key] = _dead.TryGetValue(key, out var n) ? n + 1 : 1;
-        }
-        // Amortized rebuild for churn without eviction pressure: retired heads
-        // are otherwise only consumed by EvictIfNeeded, so a remove-heavy
-        // workload under the limit would grow the queue without bound.
-        private void CompactLocked()
-        {
-            if (_dead.Count == 0) return;
-            var kept = new Queue<TKey>(_order.Count);
-            foreach (var k in _order)
-            {
-                if (_dead.TryGetValue(k, out var n) && n > 0)
-                {
-                    if (n == 1) _dead.Remove(k);
-                    else _dead[k] = n - 1;
-                }
-                else kept.Enqueue(k);
-            }
-            _order.Clear();
-            foreach (var k in kept) _order.Enqueue(k);
-        }
-        public void Clear() { lock (_lock) { _dict.Clear(); _order.Clear(); _dead.Clear(); } }
-        public Dictionary<TKey, TValue> Snapshot() { lock (_lock) return new Dictionary<TKey, TValue>(_dict); }
-        public int Count { get { lock (_lock) return _dict.Count; } }
-    }
-
     // --- state ---
     internal static readonly ReaderWriterLockSlim AllLock = new(LockRecursionPolicy.SupportsRecursion);
     private static readonly Dictionary<int, GameObject> AllObjects = new();
@@ -194,59 +60,25 @@ public static class ObjectRegistry
         _keysByRef[obj] = obj.Id;
     }
 
-    private static readonly BoundedDictionary<string, double> TempBannedIps = new();
-    private static readonly BoundedDictionary<string, double> CreationCooldowns = new();
-    private static readonly BoundedDictionary<string, int> FailedLoginAttempts = new();
-
     public static bool AlwaysSaveAll { get; set; } = false;
 
-    // --- bans ---
-    public static bool IsIpBanned(string host, double? now = null)
-    {
-        var t = now ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        // Expiry cleanup is remove-if-equal: a BanIp landing between the read
-        // and the cleanup must not delete the fresh ban.
-        if (!TempBannedIps.TryGetValue(host, out var exp)) return false;
-        if (t < exp) return true;
-        TempBannedIps.RemoveIfEqual(host, exp);
-        return false;
-    }
-    public static void BanIp(string host, double? expires = null)
-    {
-        var exp = expires ?? double.PositiveInfinity;
-        TempBannedIps.Set(host, exp);
-    }
-    public static void UnbanIp(string host) => TempBannedIps.Remove(host);
+    // --- bans (canonical home: IpBanStore) ---
+    public static bool IsIpBanned(string host, double? now = null) => IpBanStore.IsIpBanned(host, now);
+    public static void BanIp(string host, double? expires = null) => IpBanStore.BanIp(host, expires);
+    public static void UnbanIp(string host) => IpBanStore.UnbanIp(host);
 
-    // --- creation cooldowns (unified per host, ? bypass) ---
-    public static bool CreationCooldownActive(string host, double now)
-    {
-        if (host == "?") return false;
-        if (!CreationCooldowns.TryGetValue(host, out var exp)) return false;
-        if (exp > now) return true;
-        CreationCooldowns.RemoveIfEqual(host, exp);
-        return false;
-    }
-    public static void ApplyCreationCooldown(string op, string host, double now, double cooldown)
-    {
-        if (host == "?" || cooldown <= 0) return;
-        CreationCooldowns.Set(host, now + cooldown);
-    }
-    public static bool TryReserveCreationCooldown(string op, string host, double now, double cooldown)
-    {
-        if (host == "?") return true;
-        if (cooldown <= 0) return !CreationCooldownActive(host, now);
-        // Atomic check+reserve on the dict's own lock (F005) — no snapshot, no outer lock.
-        return CreationCooldowns.CheckAndSet(host, now + cooldown, (exists, exp) => !exists || exp <= now);
-    }
-    public static void ClearCreationCooldown(string host)
-    {
-        if (host == "?") return;
-        CreationCooldowns.Remove(host);
-    }
+    // --- creation cooldowns (canonical home: CreationCooldownStore; unified per host, ? bypass) ---
+    public static bool CreationCooldownActive(string host, double now) =>
+        CreationCooldownStore.CreationCooldownActive(host, now);
+    public static void ApplyCreationCooldown(string op, string host, double now, double cooldown) =>
+        CreationCooldownStore.ApplyCreationCooldown(op, host, now, cooldown);
+    public static bool TryReserveCreationCooldown(string op, string host, double now, double cooldown) =>
+        CreationCooldownStore.TryReserveCreationCooldown(op, host, now, cooldown);
+    public static void ClearCreationCooldown(string host) =>
+        CreationCooldownStore.ClearCreationCooldown(host);
 
     // --- failed login map exposed for parity ---
-    public static BoundedDictionary<string, int> FailedLogins => FailedLoginAttempts;
+    public static BoundedDictionary<string, int> FailedLogins => IpBanStore.FailedLogins;
 
     // --- core registry ---
     public static List<GameObject> FilterBy(Func<GameObject, bool> predicate)
@@ -399,9 +231,8 @@ public static class ObjectRegistry
             }
             finally { AllLock.ExitWriteLock(); }
         }
-        TempBannedIps.Clear();
-        CreationCooldowns.Clear();
-        FailedLoginAttempts.Clear();
+        IpBanStore.Clear();
+        CreationCooldownStore.Clear();
     }
 
     public static int Count
@@ -649,10 +480,9 @@ public static class ObjectRegistry
             if (!IsStillSaveable(obj, forSave: true, force: force)) continue;
             try
             {
-                // atomic clear inside GetSaveOpsClearing
-                var (_, parms) = obj.GetSaveOpsClearing();
-                var json = (string)parms[1];
-                pending.Add((obj, json));
+                // atomic clear inside GetSaveOperationClearing
+                var op = obj.GetSaveOperationClearing();
+                pending.Add((obj, op.Json));
                 cleared.Add(obj);
             }
             catch (Exception)

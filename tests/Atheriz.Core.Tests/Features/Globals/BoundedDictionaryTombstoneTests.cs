@@ -13,7 +13,7 @@ public class BoundedDictionaryTombstoneTests
     [Fact]
     public void BoundedDictionary_Overflow_EvictsOldest()
     {
-        var d = new ObjectRegistry.BoundedDictionary<string, int>();
+        var d = new BoundedDictionary<string, int>();
         for (int i = 0; i < Limit + 1; i++) d.Set($"k{i}", i);
         Assert.Equal(Limit, d.Count);
         Assert.False(d.Contains("k0"));
@@ -23,7 +23,7 @@ public class BoundedDictionaryTombstoneTests
     [Fact]
     public void BoundedDictionary_RemoveThenOverflow_EvictsOldestLive()
     {
-        var d = new ObjectRegistry.BoundedDictionary<string, int>();
+        var d = new BoundedDictionary<string, int>();
         for (int i = 0; i < Limit; i++) d.Set($"k{i}", i);
         d.Remove("k0");
         d.Set("fresh", -1);
@@ -40,7 +40,7 @@ public class BoundedDictionaryTombstoneTests
     [Fact]
     public void BoundedDictionary_ReaddedKey_EvictsByNewestPosition()
     {
-        var d = new ObjectRegistry.BoundedDictionary<string, int>();
+        var d = new BoundedDictionary<string, int>();
         for (int i = 0; i < Limit; i++) d.Set($"k{i}", i);
         d.Remove("k0");
         d.Set("k0", 99);
@@ -54,7 +54,7 @@ public class BoundedDictionaryTombstoneTests
     [Fact]
     public void BoundedDictionary_RemoveAbsent_IsNoop()
     {
-        var d = new ObjectRegistry.BoundedDictionary<string, int>();
+        var d = new BoundedDictionary<string, int>();
         d.Set("a", 1);
         d.Remove("missing");
         Assert.Equal(1, d.Count);
@@ -69,7 +69,7 @@ public class BoundedDictionaryTombstoneTests
     [Fact]
     public void BoundedDictionary_RemoveIfEqual_IsAtomic()
     {
-        var d = new ObjectRegistry.BoundedDictionary<string, int>();
+        var d = new BoundedDictionary<string, int>();
         d.Set("k", 1);
         // A stale expiry value must not delete a concurrently refreshed entry.
         Assert.False(d.RemoveIfEqual("k", 2));
@@ -82,7 +82,7 @@ public class BoundedDictionaryTombstoneTests
     [Fact]
     public void BoundedDictionary_ConcurrentRemoves_StayConsistent()
     {
-        var d = new ObjectRegistry.BoundedDictionary<string, int>();
+        var d = new BoundedDictionary<string, int>();
         for (int i = 0; i < 1000; i++) d.Set($"c{i}", i);
         System.Threading.Tasks.Parallel.For(0, 500, i => d.Remove($"c{i}"));
         Assert.Equal(500, d.Count);

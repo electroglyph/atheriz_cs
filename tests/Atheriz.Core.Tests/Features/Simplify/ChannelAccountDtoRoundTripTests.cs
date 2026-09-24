@@ -33,9 +33,8 @@ public class ChannelAccountDtoRoundTripTests
             Assert.Equal("Bob", triple[1].GetString());
             Assert.Equal("hello", triple[2].GetString());
 
-            var (sql, pars) = ch.GetSaveOps();
-            Assert.StartsWith("INSERT OR REPLACE", sql);
-            Assert.Equal(4242, pars[0]);
+            var op = ch.GetSaveOperation();
+            Assert.Equal(4242, op.Id);
         }
         finally { ObjectRegistry.ClearAll(); }
     }
@@ -56,9 +55,8 @@ public class ChannelAccountDtoRoundTripTests
             Assert.Equal(acc.PasswordHash, back.PasswordHash);
             Assert.False(back.LoggedIn);
 
-            var (sql, pars) = acc.GetSaveOps();
-            Assert.StartsWith("INSERT OR REPLACE", sql);
-            Assert.Equal(acc.Id, pars[0]);
+            var op = acc.GetSaveOperation();
+            Assert.Equal(acc.Id, op.Id);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

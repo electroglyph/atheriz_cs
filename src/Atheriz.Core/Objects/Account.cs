@@ -10,7 +10,6 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public class Account : GameObject
 {
-    internal new static bool _is_thread_safe = true;
     public static bool GroupSave => false; // Fix for test_account.py:39
 
     private string _passwordHash = "";
@@ -22,12 +21,14 @@ public class Account : GameObject
     {
         IsAccount = true;
     }
-    // Load-path construction: skips the id draw (caller adopts the stored id
-    // via SetIdRaw before publication). See GameObject.SkipIdDraw.
-    internal Account(SkipIdDraw skip) : base(skip)
+    // Load-path construction: no id draw (the factory adopts the stored id
+    // via the base core before publication, so the generator watermark is
+    // untouched by loads).
+    private Account(int id) : base(id)
     {
         IsAccount = true;
     }
+    internal static new Account CreateForLoad(int id) => new Account(id);
     public override bool AtDelete(GameObject? caller)
     {
         // Unconditional true (test_account.py:88 — not access-gated like the base),
@@ -35,17 +36,16 @@ public class Account : GameObject
         return Hookable(HookName.AtDelete, () => true, caller);
     }
     public virtual bool AtPrePuppet(GameObject character) => Hookable(HookName.AtPrePuppet, () => true, character);
-    // Account-specific Delete returns bool (Python) — hides GameObject tuple version.
-    // NOTE: C# cannot override with a different return type, so a GameObject-typed
-    // reference dispatches to the base tuple Delete. That path converges via
-    // DeleteImmediate below (same immediate row delete), keeping both static types unified.
-    public new bool Delete(GameObject? caller = null, bool unused = true)
+    // Account deletes immediately (single row, no recursive walk): virtual
+    // dispatch so a GameObject-typed reference takes this path without the
+    // base naming the derived type.
+    public override (int Count, List<DeleteOperation> Operations)? Delete(GameObject? caller = null, bool recursive = false, int maxDepth = ContentUtils.DefaultMaxSearchDepth)
     {
-        return DeleteImmediate(caller) is not null;
+        return DeleteImmediate(caller);
     }
 
     // Shared immediate-delete core for both static types .
-    internal (int count, List<object> ops)? DeleteImmediate(GameObject? caller)
+    internal (int Count, List<DeleteOperation> Operations)? DeleteImmediate(GameObject? caller)
     {
         // DB write — the world lives in memory after startup and the DB is
         // written only on save checkpoints (mirrors Node.delete). The shared
@@ -59,7 +59,7 @@ public class Account : GameObject
         if (!IsTemporary) ObjectRegistry.NoteDeleted(Id);
         ObjectRegistry.RemoveObject(this);
         TeardownDeleted(this);
-        return (1, new List<object>());
+        return (1, []);
     }
 
     public string PasswordHash
@@ -198,17 +198,17 @@ public class Account : GameObject
         return acc;
     }
 
-    public override (string Sql, object[] Params) GetSaveOps()
+    public override SaveOperation GetSaveOperation()
     {
         // Flag dance + post-release encode live in the shared converter core;
         // only the account DTO snapshot stays here.
         string json = Persistence.Converters.GameObjectDtoConverter.BuildSaveJson(this, ToDto, clearing: false);
-        return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [Id, json]);
+        return new SaveOperation(Id, json);
     }
-    public override (string Sql, object[] Params) GetSaveOpsClearing()
+    public override SaveOperation GetSaveOperationClearing()
     {
         string json = Persistence.Converters.GameObjectDtoConverter.BuildSaveJson(this, ToDto, clearing: true);
-        return ("INSERT OR REPLACE INTO objects (id, data) VALUES (?, ?)", [Id, json]);
+        return new SaveOperation(Id, json);
     }
 
     // DTO extension: store account fields in Extra for persistence simplicity
@@ -235,8 +235,7 @@ public class Account : GameObject
 
     public new static Account FromDto(GameObjectDto dto)
     {
-        var acc = new Account(SkipIdDraw.Instance);
-        acc.SetIdRaw(dto.Id);
+        var acc = Account.CreateForLoad(dto.Id);
         // Use shared GameObject field copy (internal) to avoid recursion and duplication
         GameObject.ApplyDtoFields(acc, dto, null);
         // Ensure IsAccount flag true without leaving dirty flag if dto was clean

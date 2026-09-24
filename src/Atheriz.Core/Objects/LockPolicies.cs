@@ -44,15 +44,18 @@ public static class LockPolicies
 
     public static bool TryParseName(string? raw, out LockPolicy policy)
     {
-        var t = raw?.Trim();
-        if (string.Equals(t, Builder, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.Builder; return true; }
-        if (string.Equals(t, PcView, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.PcView; return true; }
-        if (string.Equals(t, NotSelf, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.NotSelf; return true; }
-        if (string.Equals(t, PuppetOwner, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.PuppetOwner; return true; }
-        if (string.Equals(t, Custom, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.Custom; return true; }
-        if (string.Equals(t, Denied, StringComparison.OrdinalIgnoreCase)) { policy = LockPolicy.Denied; return true; }
-        policy = LockPolicy.Custom;
-        return false;
+        var key = raw?.Trim().ToLowerInvariant();
+        policy = key switch
+        {
+            Builder => LockPolicy.Builder,
+            PcView => LockPolicy.PcView,
+            NotSelf => LockPolicy.NotSelf,
+            PuppetOwner => LockPolicy.PuppetOwner,
+            Custom => LockPolicy.Custom,
+            Denied => LockPolicy.Denied,
+            _ => LockPolicy.Custom,
+        };
+        return key is Builder or PcView or NotSelf or PuppetOwner or Custom or Denied;
     }
 
     // String authoring labels classify to the typed policy for storage. Known
@@ -73,22 +76,28 @@ public static class LockPolicies
     /// </summary>
     public static bool TryResolve(string policy, out Func<GameObject, bool> predicate)
     {
-        if (policy == Builder)
-        {
-            predicate = IsBuilder;
-            return true;
-        }
-        if (policy == Denied)
-        {
-            predicate = _ => false;
-            return true;
-        }
+        // Exact-match like the 2-arg overload: only canonical names resolve.
+        if (policy == Builder) return TryResolve(LockPolicy.Builder, out predicate);
+        if (policy == Denied) return TryResolve(LockPolicy.Denied, out predicate);
         predicate = _ => false;
         return false;
     }
 
     public static bool TryResolve(LockPolicy policy, out Func<GameObject, bool> predicate)
-        => TryResolve(Name(policy), out predicate);
+    {
+        switch (policy)
+        {
+            case LockPolicy.Builder:
+                predicate = IsBuilder;
+                return true;
+            case LockPolicy.Denied:
+                predicate = _ => false;
+                return true;
+            default:
+                predicate = _ => false;
+                return false;
+        }
+    }
     /// <summary>
     /// Resolves a persisted policy name to a predicate bound to <paramref name="target"/>.
     /// Returns false for unknown policies (caller must log loudly and skip).
@@ -130,4 +139,18 @@ public static class LockPolicies
 
     public static bool TryResolve(LockPolicy policy, GameObject target, out Func<GameObject, bool> predicate)
         => TryResolve(Name(policy), target, out predicate);
+
+    // Typed evaluation front door: switch expression over the enum so callers
+    // do not compare persisted policy strings. Custom has no static meaning
+    // and evaluates false; use TryResolve for executable predicates.
+    public static bool Evaluate(LockPolicy policy, GameObject accessing, GameObject? target) => policy switch
+    {
+        LockPolicy.Builder => accessing.IsBuilder,
+        LockPolicy.PcView => target is null ? false : (!target.IsPc || target.IsConnected || accessing.IsBuilder),
+        LockPolicy.NotSelf => target is null || accessing.Id != target.Id,
+        LockPolicy.PuppetOwner => target is not null && (target.IsNpc || accessing.IsSuperUser ||
+            (accessing.Session?.Account is Account acc && acc.Characters.Contains(target.Id))),
+        LockPolicy.Denied => false,
+        _ => false,
+    };
 }

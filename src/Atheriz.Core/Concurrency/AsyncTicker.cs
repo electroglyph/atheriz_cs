@@ -26,20 +26,26 @@ public sealed class AsyncTicker
     // For tests: direct accessor like Python dict
     public TimeSlot? GetSlot(double interval)
     {
-        lock (_lock) { _slots.TryGetValue(interval, out var s); return s; }
+        lock (_lock) { _slots.TryGetValue(QuantizeKey(TimeSpan.FromSeconds(interval)), out var s); return s; }
     }
     public bool TryGetSlot(double interval, out TimeSlot? slot)
     {
-        lock (_lock) return _slots.TryGetValue(interval, out slot);
+        lock (_lock) return _slots.TryGetValue(QuantizeKey(TimeSpan.FromSeconds(interval)), out slot);
     }
 
     public void AddCoro(Func<Task> coro, double interval) => AddCoro(coro, TimeSpan.FromSeconds(interval));
     public void AddCoro(Action coro, double interval) => AddCoro(coro, TimeSpan.FromSeconds(interval));
+    public void AddCoro(Func<CancellationToken, Task> coro, double interval) => AddCoro(coro, TimeSpan.FromSeconds(interval));
+    public void AddCoro(Func<CancellationToken, Task> coro, TimeSpan interval) => AddCore(coro, interval);
+
+    // Slot keys are millisecond-quantized so float dust (0.1+0.2 vs 0.3) maps
+    // to one slot instead of fragmenting into two.
+    private static double QuantizeKey(TimeSpan interval) => Math.Round(interval.TotalSeconds, 3);
 
     // Slot lookup-or-create core (call with _lock held).
     private TimeSlot GetOrCreateSlot(TimeSpan interval)
     {
-        double key = interval.TotalSeconds;
+        double key = QuantizeKey(interval);
         if (!_slots.TryGetValue(key, out var slot))
         {
             slot = new TimeSlot(interval, _pool);
@@ -63,7 +69,7 @@ public sealed class AsyncTicker
 
     private void RemoveCore(Delegate coro, TimeSpan interval)
     {
-        double key = interval.TotalSeconds;
+        double key = QuantizeKey(interval);
         lock (_lock)
         {
             if (_slots.TryGetValue(key, out var slot))
@@ -81,6 +87,10 @@ public sealed class AsyncTicker
     public void RemoveCoro(Func<Task> coro, TimeSpan interval) => RemoveCore(coro, interval);
 
     public void RemoveCoro(Action coro, TimeSpan interval) => RemoveCore(coro, interval);
+
+    public void RemoveCoro(Func<CancellationToken, Task> coro, double interval) => RemoveCoro(coro, TimeSpan.FromSeconds(interval));
+
+    public void RemoveCoro(Func<CancellationToken, Task> coro, TimeSpan interval) => RemoveCore(coro, interval);
 
     public void Clear()
     {
@@ -140,12 +150,15 @@ public sealed class AsyncTicker
 
         public void AddCoro(Func<Task> coro) => AddCoro((Delegate)coro);
         public void AddCoro(Action coro) => AddCoro((Delegate)coro);
+        public void AddCoro(Func<CancellationToken, Task> coro) => AddCoro((Delegate)coro);
         public void AddCoro(Delegate coro) { lock (_lock) _coros.Add(coro); }
         public bool ContainsCoro(Delegate coro) { lock (_lock) return _coros.Contains(coro); }
 
         public void RemoveCoro(Func<Task> coro) => RemoveCoro((Delegate)coro);
 
         public void RemoveCoro(Action coro) => RemoveCoro((Delegate)coro);
+
+        public void RemoveCoro(Func<CancellationToken, Task> coro) => RemoveCoro((Delegate)coro);
         public void RemoveCoro(Delegate coro)
         {
             lock (_lock)
@@ -204,7 +217,24 @@ public sealed class AsyncTicker
         {
             try
             {
-                if (coro is Func<Task> asyncFunc)
+                if (coro is Func<CancellationToken, Task> cancelFunc)
+                {
+                    var task = cancelFunc(CancellationToken.None);
+                    if (!task.IsCompleted)
+                    {
+                        _ = task.ContinueWith(t =>
+                        {
+                            Release(coro);
+                            if (t.IsFaulted) WriteFault(t.Exception);
+                        }, TaskScheduler.Default);
+                    }
+                    else
+                    {
+                        Release(coro);
+                        if (task.IsFaulted) WriteFault(task.Exception);
+                    }
+                }
+                else if (coro is Func<Task> asyncFunc)
                 {
                     var task = asyncFunc();
                     if (!task.IsCompleted)

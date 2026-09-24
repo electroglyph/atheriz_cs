@@ -8,19 +8,20 @@ namespace Atheriz.Core.Objects;
 /// </summary>
 public class Script : GameObject
 {
-    internal new static bool _is_thread_safe = true;
     private GameObject? _child;
 
     public Script()
     {
         IsScript = true;
     }
-    // Load-path construction: skips the id draw (caller adopts the stored id
-    // via SetIdRaw before publication). See GameObject.SkipIdDraw.
-    internal Script(SkipIdDraw skip) : base(skip)
+    // Load-path construction: no id draw (the factory adopts the stored id
+    // via the base core before publication, so the generator watermark is
+    // untouched by loads).
+    private Script(int id) : base(id)
     {
         IsScript = true;
     }
+    internal static new Script CreateForLoad(int id) => new Script(id);
 
     public GameObject? Child
     {

@@ -597,15 +597,17 @@ public class GameTime
         long calcDay = dayOfYear % _settings.DaysPerMonth;
         long dayInLunar = totalDays % _settings.LunarCycleDays;
         if (dayInLunar < 0) dayInLunar += _settings.LunarCycleDays;
-        string moonPhase;
-        if (dayInLunar == 0) moonPhase = "new";
-        else if (1 <= dayInLunar && dayInLunar <= 6) moonPhase = "waxing crescent";
-        else if (dayInLunar == 7) moonPhase = "first quarter";
-        else if (8 <= dayInLunar && dayInLunar <= 14) moonPhase = "waxing gibbous";
-        else if (dayInLunar == 15) moonPhase = "full";
-        else if (16 <= dayInLunar && dayInLunar <= 21) moonPhase = "waning gibbous";
-        else if (dayInLunar == 22) moonPhase = "third quarter";
-        else moonPhase = "waning crescent";
+        string moonPhase = dayInLunar switch
+        {
+            0 => "new",
+            >= 1 and <= 6 => "waxing crescent",
+            7 => "first quarter",
+            >= 8 and <= 14 => "waxing gibbous",
+            15 => "full",
+            >= 16 and <= 21 => "waning gibbous",
+            22 => "third quarter",
+            _ => "waning crescent",
+        };
 
         int finalYear = _settings.StartYear + (int)yearOffset;
         int finalMonth = (int)calcMonth + 1;

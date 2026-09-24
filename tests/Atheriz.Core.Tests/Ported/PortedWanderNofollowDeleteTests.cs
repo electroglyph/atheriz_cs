@@ -395,7 +395,6 @@ public class PortedWanderNofollowDeleteTests
     [Fact] public void Delete_DeepChain120_AllDeleted()
     {
         using var env=GlobalTestEnv.Enter();
-        GameObject.MaxSearchDepth=500;
         var admin=MakeAdmin();
         var outer=GameObject.Create("outer120", isContainer:true); ObjectRegistry.AddObject(outer);
         var chain=new List<GameObject>{outer}; var prev=outer;
@@ -403,30 +402,26 @@ public class PortedWanderNofollowDeleteTests
         var leaf=GameObject.Create("leaf120", isItem:true); ObjectRegistry.AddObject(leaf); leaf.MoveTo(prev);
         var allIds=chain.Select(o=>o.Id).Append(leaf.Id).ToList();
         foreach(var id in allIds) Assert.NotEmpty(ObjectRegistry.Get(id));
-        outer.Delete(admin, recursive:true);
+        outer.Delete(admin, recursive:true, maxDepth:500);
         foreach(var id in allIds){ Assert.Empty(ObjectRegistry.Get(id)); Assert.DoesNotContain(id, ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));}
         Assert.True(outer.IsDeleted);
         Assert.True(leaf.IsDeleted);
         Assert.Null(leaf.ResolveLocationObject());
-        GameObject.MaxSearchDepth=100;
     }
     [Fact] public void Delete_DeepChain200_AllDeleted()
     {
         using var env=GlobalTestEnv.Enter();
-        GameObject.MaxSearchDepth=500;
         var admin=MakeAdmin();
         var outer=GameObject.Create("outer200", isContainer:true); ObjectRegistry.AddObject(outer);
         var chain=new List<GameObject>{outer}; var prev=outer;
         for(int i=0;i<200;i++){ var c=GameObject.Create($"chain200_{i}", isContainer:true); ObjectRegistry.AddObject(c); c.MoveTo(prev); chain.Add(c); prev=c; }
         var allIds=chain.Select(o=>o.Id).ToList();
-        outer.Delete(admin, recursive:true);
+        outer.Delete(admin, recursive:true, maxDepth:500);
         foreach(var id in allIds) Assert.Empty(ObjectRegistry.Get(id));
-        GameObject.MaxSearchDepth=100;
     }
     [Fact] public void Delete_DeepChainExactBoundary()
     {
         using var env=GlobalTestEnv.Enter();
-        GameObject.MaxSearchDepth=500;
         var admin=MakeAdmin();
         foreach(var depth in new[]{100,101,102})
         {
@@ -434,34 +429,30 @@ public class PortedWanderNofollowDeleteTests
             var chain=new List<GameObject>{outer}; var prev=outer;
             for(int i=0;i<depth;i++){ var c=GameObject.Create($"b{depth}_{i}", isContainer:true); ObjectRegistry.AddObject(c); c.MoveTo(prev); chain.Add(c); prev=c; }
             var allIds=chain.Select(o=>o.Id).ToList();
-            outer.Delete(admin, recursive:true);
+            outer.Delete(admin, recursive:true, maxDepth:500);
             foreach(var id in allIds) Assert.Empty(ObjectRegistry.Get(id));
             Assert.True(outer.IsDeleted);
         }
-        GameObject.MaxSearchDepth=100;
     }
     [Fact] public void Delete_DeepChainTruncationSurvivorsDetachedNotLeaked()
     {
         using var env=GlobalTestEnv.Enter();
-        GameObject.MaxSearchDepth=5;
         var admin=MakeAdmin();
         var outer=GameObject.Create("outerTrunc", isContainer:true); ObjectRegistry.AddObject(outer);
         var chain=new List<GameObject>{outer}; var prev=outer;
         for(int i=0;i<10;i++){ var c=GameObject.Create($"trunc_{i}", isContainer:true); ObjectRegistry.AddObject(c); c.MoveTo(prev); chain.Add(c); prev=c; }
         var deepest=chain.Last();
-        outer.Delete(admin, recursive:true);
+        outer.Delete(admin, recursive:true, maxDepth:5);
         Assert.Empty(ObjectRegistry.Get(outer.Id));
         Assert.NotEmpty(ObjectRegistry.Get(deepest.Id));
         var survivor=ObjectRegistry.Get(chain[5].Id).First()!;
         Assert.Null(survivor.ResolveLocationObject());
         for(int i=0;i<4;i++) Assert.Empty(ObjectRegistry.Get(chain[i+1].Id));
         for(int i=5;i<10;i++) Assert.NotEmpty(ObjectRegistry.Get(chain[i+1].Id));
-        GameObject.MaxSearchDepth=100;
     }
     [Fact] public void Delete_DeepChainBranchingAllDeleted()
     {
         using var env=GlobalTestEnv.Enter();
-        GameObject.MaxSearchDepth=500;
         var admin=MakeAdmin();
         var outer=GameObject.Create("outerBranch", isContainer:true); ObjectRegistry.AddObject(outer);
         var branches=new List<GameObject>();
@@ -478,11 +469,10 @@ public class PortedWanderNofollowDeleteTests
         var deepest=tailPrev; while(deepest.ContentsSnapshot.Count>0){ var nxt=ObjectRegistry.Get(deepest.ContentsSnapshot.First()).FirstOrDefault(); if(nxt==null) break; deepest=nxt; }
         for(int i=0;i<60;i++){ var c=GameObject.Create($"tail_{i}", isContainer:true); ObjectRegistry.AddObject(c); c.MoveTo(deepest); deepest=c; }
         var before=new HashSet<int>(ObjectRegistry.FilterBy(_=>true).Select(o=>o.Id));
-        outer.Delete(admin, recursive:true);
+        outer.Delete(admin, recursive:true, maxDepth:500);
         Assert.True(outer.IsDeleted);
         var remaining=ObjectRegistry.FilterBy(_=>true).Select(o=>o.Name).ToList();
         Assert.DoesNotContain(remaining, n=>n.StartsWith("branch") || n.StartsWith("tail_"));
-        GameObject.MaxSearchDepth=100;
     }
     [Fact] public void Delete_CycleTwoNodesNoInfiniteLoop()
     {
@@ -525,7 +515,6 @@ public class PortedWanderNofollowDeleteTests
     [Fact] public void Delete_LocationClearedAfterDeepDelete()
     {
         using var env=GlobalTestEnv.Enter();
-        GameObject.MaxSearchDepth=500;
         var admin=MakeAdmin();
         var outer=GameObject.Create("outerLoc", isContainer:true); ObjectRegistry.AddObject(outer);
         var mid=GameObject.Create("midLoc", isContainer:true); ObjectRegistry.AddObject(mid); mid.MoveTo(outer);
@@ -533,10 +522,9 @@ public class PortedWanderNofollowDeleteTests
         var prev=leaf;
         for(int i=0;i<110;i++){ var c=GameObject.Create($"deepLeaf{i}", isContainer:true); ObjectRegistry.AddObject(c); c.MoveTo(prev); prev=c; }
         var deepest=prev; var deepestId=deepest.Id;
-        outer.Delete(admin, recursive:true);
+        outer.Delete(admin, recursive:true, maxDepth:500);
         foreach(var obj in new[]{outer,mid,leaf,deepest}){ Assert.True(obj.IsDeleted); Assert.Null(obj.ResolveLocationObject()); Assert.Empty(ObjectRegistry.Get(obj.Id));}
         Assert.Empty(ObjectRegistry.Get(deepestId));
-        GameObject.MaxSearchDepth=100;
     }
     [Fact] public void Delete_IsDeletedFlagAndGlobalsRemoval()
     {
@@ -560,9 +548,9 @@ public class PortedWanderNofollowDeleteTests
         Assert.Empty(ObjectRegistry.Get(inner.Id));
         Assert.NotEmpty(ObjectRegistry.Get(unrelated.Id));
     }
-    [Fact] public void Delete_MaxSearchDepthStill100()
+    [Fact] public void Delete_DefaultMaxSearchDepthIs100()
     {
-        Assert.Equal(100, GameObject.MaxSearchDepth);
+        Assert.Equal(100, ContentUtils.DefaultMaxSearchDepth);
     }
     [Fact] public void Delete_RecursiveUsesIterativeNotRecursionError()
     {
@@ -578,19 +566,17 @@ public class PortedWanderNofollowDeleteTests
     [Fact] public void Delete_OldGuardTruncationSurvivorsAreDetachedNotDangling()
     {
         using var env=GlobalTestEnv.Enter();
-        GameObject.MaxSearchDepth=5;
         var admin=MakeAdmin();
         var outer=GameObject.Create("outerLeakCheck", isContainer:true); ObjectRegistry.AddObject(outer);
         var chain=new List<GameObject>{outer}; var prev=outer;
         for(int i=0;i<10;i++){ var c=GameObject.Create($"leak{i}", isContainer:true); ObjectRegistry.AddObject(c); c.MoveTo(prev); chain.Add(c); prev=c; }
-        outer.Delete(admin, recursive:true);
+        outer.Delete(admin, recursive:true, maxDepth:5);
         for(int i=0;i<4;i++) Assert.Empty(ObjectRegistry.Get(chain[i+1].Id));
         for(int i=5;i<10;i++) Assert.NotEmpty(ObjectRegistry.Get(chain[i+1].Id));
         var firstSurvivor=ObjectRegistry.Get(chain[5].Id).First()!;
         Assert.Null(firstSurvivor.ResolveLocationObject());
         var deeper=ObjectRegistry.Get(chain[6].Id).First()!;
         Assert.Equal(firstSurvivor.Id, ((Persistence.Dto.LocationRef.ObjectLocation)deeper.Location).ObjectId);
-        GameObject.MaxSearchDepth=100;
     }
 
     // ===================================================================
