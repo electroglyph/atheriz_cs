@@ -379,4 +379,35 @@ public class PortedStartStopTests
         }
         finally { StartStop.Reset(); }
     }
+
+    [Fact] public void DoStartup_RegistersLoadedTickablesExactlyOnce()
+    {
+        // Fresh daemon boot: the ticker global is unmaterialized when rows
+        // convert. Startup must still leave every loaded tickable ticking —
+        // previously LoadObjects ran first and every AtTick registration was
+        // silently dropped (TryGetTicker null), killing combat, regen, NPC
+        // AI and effect ticks with no error. Exactly one delegate: startup
+        // registers through ResolveRelations only, never the reload sweep.
+        using var env = GlobalTestEnv.Enter();
+        StartStop.Reset();
+        GlobalServices.Reset();
+        var obj = Atheriz.Core.Objects.GameObject.Create("StartupTickCheck");
+        obj.IsTickable = true;
+        obj.TickSeconds = 60;
+        Atheriz.Core.Globals.ObjectRegistry.AddObject(obj);
+        using (var db = new Atheriz.Core.Persistence.AtherizDbContext(env.TempPath)) { db.Database.EnsureCreated(); Atheriz.Core.Globals.ObjectRegistry.SaveObjects(db); }
+        Atheriz.Core.Globals.ObjectRegistry.ClearAll();
+        GlobalServices.Reset(); // daemon boot: ticker not materialized yet
+        Assert.Null(GlobalServices.TryGetTicker());
+        var settings = new Atheriz.Core.Settings.AtherizSettings { SavePath = env.TempPath, TimeSystemEnabled = false, AutosaveMinutes = 0 };
+        StartStop.DoStartup(settings: settings);
+        var ticker = GlobalServices.TryGetTicker();
+        Assert.NotNull(ticker);
+        var single = Assert.Single(Atheriz.Core.Globals.ObjectRegistry.FilterBy(o => o.Name == "StartupTickCheck"));
+        int atTickCount = ticker!.Slots.Values.SelectMany(s => s.Coros)
+            .Count(d => d.Method.Name == "AtTick" && ReferenceEquals(d.Target, single));
+        Assert.Equal(1, atTickCount);
+        StartStop.Reset();
+        ticker.Clear();
+    }
 }

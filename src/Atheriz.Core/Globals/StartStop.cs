@@ -61,6 +61,16 @@ public static class StartStop
             catch (Exception ex) { AtherizLogger.LogError($"DoStartup game load failed:\n{ex}"); }
             try
             {
+                // The ticker must exist before rows convert: ResolveRelations
+                // registers each loaded object's AtTick through TryGetTicker,
+                // which stays null until the global is first created. Loading
+                // first leaves every object unticked with no error on fresh
+                // boots, and nothing re-registers them later.
+                ticker ??= GlobalServices.GetAsyncTicker();
+            }
+            catch (Exception ex) { AtherizLogger.LogError($"DoStartup GetAsyncTicker failed:\n{ex}"); }
+            try
+            {
                 // Use savePath overload which handles DB EnsureCreated
                 ObjectRegistry.LoadObjects(settings.SavePath);
             }
@@ -104,12 +114,6 @@ public static class StartStop
                 nodeHandler = GlobalServices.GetNodeHandler(settings);
             }
             catch (Exception ex) { AtherizLogger.LogError($"DoStartup GetNodeHandler failed:\n{ex}"); }
-
-            try
-            {
-                ticker ??= GlobalServices.GetAsyncTicker();
-            }
-            catch (Exception ex) { AtherizLogger.LogError($"DoStartup GetAsyncTicker failed:\n{ex}"); }
 
             try
             {
