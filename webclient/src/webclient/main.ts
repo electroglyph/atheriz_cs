@@ -74,6 +74,7 @@ const writer = new SequentialWriter(
     () => {
         left.write(BUFFER_FINAL_SEQUENCE);
         recorder.output('o', BUFFER_FINAL_SEQUENCE);
+        redrawPrompt();
     },
 );
 const DIVIDER_POSITION_KEY = 'xtermDividerPos';
@@ -91,7 +92,7 @@ installWebgl(left);
 installWebgl(right);
 write('\x1b[1;97mxtermia3\x1b[0m terminal emulator (made with xterm.js)\n');
 write(`version \x1b[1;97m${__WEBCLIENT_VERSION__}\x1b[0m\n`);
-write('Enter :help for a list of \x1b[1;97mxtermia2\x1b[0m commands');
+write('Enter :help for a list of \x1b[1;97mxtermia3\x1b[0m commands');
 
 const connection = new WebSocketConnection({
     onMessage: handleMessage,
@@ -490,8 +491,30 @@ function handleLaunchDraw(key: string | undefined, payload: unknown): void {
 }
 
 function writeText(text: string): void {
+    // Erases a live prompt but never reprints it here: stamping the prompt
+    // onto every text chunk seals one ">" per frame into scrollback (each
+    // drain's final newline commits the live line to history). The stored
+    // prompt is redrawn once per drain by redrawPrompt instead.
     write(formatTextOutput(text, left.cols, screenReaderEnabled, prompt, promptPrinted));
-    promptPrinted = prompt.length > 0;
+    promptPrinted = false;
+}
+
+// Redraws the stored server prompt on the live line after a drain, coalescing
+// bursts: N text frames produce one prompt, not N, and a server `prompt`
+// frame only updates the stored value plus its own redraw via setPrompt.
+// Bypasses the writer queue on purpose: enqueueing here would re-arm the
+// drain and loop. The queue is empty and no write is in flight at this point,
+// so direct order is preserved.
+function redrawPrompt(): void {
+    if (promptPrinted || prompt.length === 0) return;
+    const chunk = formatPrompt(prompt, prompt, false);
+    try {
+        left.write(chunk);
+    } catch {
+        return;
+    }
+    recorder.output('o', chunk);
+    promptPrinted = true;
 }
 
 function setPrompt(value: string): void {

@@ -48,6 +48,10 @@ export function normalizeServerText(input: string, width: number, screenReader: 
     return output.replaceAll(RESET, DEFAULT_TEXT_RESET).replaceAll(WHITE, DEFAULT_TEXT_COLOR).replaceAll(WHITE_BRIGHT, DEFAULT_TEXT_COLOR).replaceAll(WHITE_BRIGHT_BLACK, DEFAULT_TEXT_COLOR);
 }
 
+// Text frames erase a live prompt but never reprint it. The stored prompt is
+// redrawn once per writer drain instead (see redrawPrompt in main.ts), so a
+// burst of N texts leaves one prompt on the bottom line instead of sealing
+// one copy per frame into scrollback via the drain newline.
 export function formatTextOutput(
     input: string,
     width: number,
@@ -57,9 +61,9 @@ export function formatTextOutput(
 ): string {
     const output = normalizeServerText(input, width, screenReader);
     if (promptPrinted) {
-        return `\r${' '.repeat(promptVisibleLength(prompt))}\r${RESET}${output}${RESET}${prompt}`;
+        return `\r${' '.repeat(promptVisibleLength(prompt))}\r${RESET}${output}${RESET}`;
     }
-    return `${RESET}${output}${RESET}${prompt}`;
+    return `${RESET}${output}${RESET}`;
 }
 
 export function formatPrompt(prompt: string, oldPrompt: string, promptPrinted: boolean): string {

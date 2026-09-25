@@ -32,7 +32,7 @@ export class SessionRecorder {
         this.header = {
             version: 3,
             timestamp: Math.round(this.startedAt / 1000),
-            title: 'xtermia2 recording',
+            title: 'xtermia3 recording',
             left,
             right,
             divider_pct: dividerPct,

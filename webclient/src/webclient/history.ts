@@ -9,7 +9,7 @@ export class CommandHistory {
     private playerCommands: string[] = [];
     private completionMatches: string[] = [];
 
-    constructor(storageKey = 'xtermia2CommandHistory', maxSize = 2048) {
+    constructor(storageKey = 'xtermia3CommandHistory', maxSize = 2048) {
         this.storageKey = storageKey;
         this.maxSize = maxSize;
         this.history = this.load();

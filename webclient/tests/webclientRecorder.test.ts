@@ -12,7 +12,7 @@ describe('webclient session recorder', () => {
 
         expect(output).not.toBeNull();
         expect(output).toContain('"version":3');
-        expect(output).toContain('"title":"xtermia2 recording"');
+        expect(output).toContain('"title":"xtermia3 recording"');
         expect(output).toContain('[0,"o","hello"]');
         expect(recorder.active).toBe(false);
         vi.useRealTimers();
