@@ -1,5 +1,21 @@
 namespace Atheriz.Core.Commands.LoggedIn;
 
+// Shared already-there check for the bulk move loops below: an item
+// a concurrent bulk mover already placed must skip hooks/announce instead
+// of double-firing them for a no-op move.
+internal static class ItemMoveHelper
+{
+    public static bool AlreadyAt(GameObject obj, GameObject dest)
+    {
+        try
+        {
+            var cur = obj.ResolveLocationObject();
+            return cur is not null && cur.Id == dest.Id;
+        }
+        catch { return false; }
+    }
+}
+
 public sealed class DropCommand : LoggedInCommand
 {
     public override string Key => "drop";
@@ -26,8 +42,10 @@ public sealed class DropCommand : LoggedInCommand
             var contents = ObjectRegistry.Get(go.ContentsSnapshot);
             foreach (var obj in contents)
             {
+                if (ItemMoveHelper.AlreadyAt(obj, loc)) continue;
                 if (!obj.AtPreDrop(go)) continue;
-                if (!obj.MoveTo(loc)) { go.Msg($"You can't drop {obj.Name}."); continue; }
+                if (!obj.MoveTo(loc, null, false, true, null, out bool moved)) { go.Msg($"You can't drop {obj.Name}."); continue; }
+                if (!moved) continue;
                 ContentUtils.EmitToLocation(loc, $"{go.Name} dropped {obj.Name}.", fromObj: go, exclude: excludeSelf);
                 go.Msg($"You dropped: {obj.Name}");
                 obj.AtDrop(go);
@@ -101,7 +119,9 @@ public sealed class GetCommand : LoggedInCommand
                 // Parity with the named path (view-filtered search): a hidden
                 // item must not be swept up by `get all` (get.py:112-117).
                 if (!obj.AtPreGet(go) || obj.Id == go.Id || !obj.Access(go, "view")) continue;
-                if (!obj.MoveTo(go)) { go.Msg($"You can't get {obj.GetDisplayName(go)}."); continue; }
+                if (ItemMoveHelper.AlreadyAt(obj, go)) continue;
+                if (!obj.MoveTo(go, null, false, true, null, out bool moved)) { go.Msg($"You can't get {obj.GetDisplayName(go)}."); continue; }
+                if (!moved) continue;
                 var takeMapping = new Dictionary<string, object?> { ["giver"] = go, ["item"] = obj };
                 ContentUtils.EmitToLocation(loc, "$You(giver) $conj(take) $obj(item).", fromObj: go, mapping: takeMapping, exclude: excludeSelf, msgType: "get");
                 go.Msg($"You picked up: {obj.GetDisplayName(go)}");
@@ -256,8 +276,10 @@ public sealed class GiveCommand : LoggedInCommand
             if (obj.Id == target.Id) { go.Msg($"You can't give {obj.Name} to itself."); continue; }
 // a veto reports, then skips the item.
             if (!obj.AtPreGive(go, target)) { go.Msg($"You can't give {obj.GetDisplayName(go)} to {target.GetDisplayName(go)}."); continue; }
-            if (obj.MoveTo(target))
+            if (ItemMoveHelper.AlreadyAt(obj, target)) continue;
+            if (obj.MoveTo(target, null, false, true, null, out bool moved))
             {
+                if (!moved) continue;
                 obj.AtGive(go, target);
                 givenAny = true;
                 go.Msg($"You give {obj.Name} to {target.Name}.");
@@ -323,6 +345,13 @@ public sealed class PutCommand : LoggedInCommand
         if (!destObj.IsContainer || !destObj.Access(goCaller, "put")) { goCaller.Msg($"You can't put anything in {destObj.Name}!"); return; }
         bool IsLoop(GameObject obj, GameObject destC)
         {
+            // Advisory pre-check only: the up-chain walk reads Location
+            // hop-by-hop, so a concurrent move rewiring Location mid-walk can
+            // false-positive (benign refusal; retry succeeds) or
+            // false-negative. A false negative cannot commit a cycle:
+            // MoveTo re-runs the self/cycle guard under its held locks
+            // and refuses, landing in the "can't put" branch below. Each hop
+            // itself is atomic (locked Location read + registry lookup).
             var cur = destC;
             HashSet<int> seen = [];
             while (cur is not null && !cur.IsNode)

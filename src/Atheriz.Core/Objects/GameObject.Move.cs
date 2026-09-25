@@ -51,42 +51,74 @@ public partial class GameObject
     public void AddObject(GameObject obj)
     {
         if (obj is null) return;
-        _lock.EnterWriteLock();
+        // Ordered two-lock hold: the old container-then-child sequence
+        // (container write, release, child Location write) inverted MoveTo's
+        // CompareLockOrder set and deadlocked opposite-direction moves
+        // (ABBA). Both locks now join in the same global order MoveTo uses.
+        if (ReferenceEquals(obj, this))
+        {
+            _lock.EnterWriteLock();
+            try
+            {
+                if (_flags.IsDeleted) return;
+                _contents.Add(obj.Id); _flags.IsModified = true;
+            }
+            finally { _lock.ExitWriteLock(); }
+            return;
+        }
+        GameObject first = CompareLockOrder(this, obj) <= 0 ? this : obj;
+        GameObject second = ReferenceEquals(first, this) ? obj : this;
+        first.SyncRoot.EnterWriteLock();
         try
         {
-            // A deleted container accepts no new contents: without this, an add
-            // landing after a recursive-delete walk snapshot escapes deletion
-            // with a dangling location at a deleted parent. The child is left
-            // untouched at its previous location.
-            if (_flags.IsDeleted) return;
-            _contents.Add(obj.Id); _flags.IsModified = true;
+            second.SyncRoot.EnterWriteLock();
+            try
+            {
+                // A deleted container accepts no new contents: without this, an add
+                // landing after a recursive-delete walk snapshot escapes deletion
+                // with a dangling location at a deleted parent. The child is left
+                // untouched at its previous location.
+                if (_flags.IsDeleted) return;
+                _contents.Add(obj.Id); _flags.IsModified = true;
+                // Own write locks are held, so assign directly — no nested acquire.
+                if (!obj.IsNode)
+                    obj._location = new LocationRef.ObjectLocation(this.Id);
+            }
+            finally { second.SyncRoot.ExitWriteLock(); }
         }
-        finally { _lock.ExitWriteLock(); }
-        // Update obj's Location to this (if obj is not Node — Nodes use CoordLocation)
-        if (!obj.IsNode)
-        {
-            obj.Location = new LocationRef.ObjectLocation(this.Id);
-        }
+        finally { first.SyncRoot.ExitWriteLock(); }
     }
 
     public void RemoveObject(GameObject obj)
     {
         if (obj is null) return;
-        _lock.EnterWriteLock();
-        try { _contents.Remove(obj.Id); _flags.IsModified = true; }
-        finally { _lock.ExitWriteLock(); }
-        // Mirror AddObject: Location was pointed at this container, so clear
-        // it (base_obj.py leaves location alone, but C# maintains Location on
-        // add — leaving it would resolve a stale location via the registry).
-        if (!obj.IsNode)
+        // Ordered two-lock hold, mirror of AddObject: R6 pins only
+        // MoveTo-vs-MoveTo, while Remove-vs-MoveTo deadlocked the same way.
+        if (ReferenceEquals(obj, this))
         {
+            _lock.EnterWriteLock();
+            try { _contents.Remove(obj.Id); _flags.IsModified = true; }
+            finally { _lock.ExitWriteLock(); }
+            return;
+        }
+        GameObject first = CompareLockOrder(this, obj) <= 0 ? this : obj;
+        GameObject second = ReferenceEquals(first, this) ? obj : this;
+        first.SyncRoot.EnterWriteLock();
+        try
+        {
+            second.SyncRoot.EnterWriteLock();
             try
             {
-                if (obj.Location is LocationRef.ObjectLocation ol && ol.ObjectId == this.Id)
-                    obj.Location = LocationRef.NullLocation.Instance;
+                _contents.Remove(obj.Id); _flags.IsModified = true;
+                // Mirror AddObject: Location was pointed at this container, so clear
+                // it (base_obj.py leaves location alone, but C# maintains Location on
+                // add — leaving it would resolve a stale location via the registry).
+                if (!obj.IsNode && obj._location is LocationRef.ObjectLocation ol && ol.ObjectId == this.Id)
+                    obj._location = LocationRef.NullLocation.Instance;
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.RemoveObject: " + logEx.Message, "GameObject"); }
+            finally { second.SyncRoot.ExitWriteLock(); }
         }
+        finally { first.SyncRoot.ExitWriteLock(); }
     }
 
     /// <summary>
@@ -130,7 +162,14 @@ public partial class GameObject
     public bool MoveToNowhere(GameObject? caller = null, bool force = false, bool announce = true, string? toExit = null)
         => MoveTo((object?)null, caller, force, announce, toExit);
     public bool MoveTo(object? destination, GameObject? caller = null, bool force = false, bool announce = true, string? toExit = null)
+        => MoveTo(destination, caller, force, announce, toExit, out _);
+    // Churn-reporting overload for bulk movers: `changed` is true only
+    // when membership actually moved. A concurrent bulk mover's MoveTo on
+    // the same item then reports (true, false) instead of firing a second
+    // round of hooks/announces for a no-op.
+    public bool MoveTo(object? destination, GameObject? caller, bool force, bool announce, string? toExit, out bool changed)
     {
+        changed = false;
         // Normalize destination to GameObject? (Node is subclass of GameObject)
         GameObject? destObj = destination as GameObject;
         // Handle LocationRef or Coord destination for Node moves (allow Coord)
@@ -167,8 +206,8 @@ public partial class GameObject
             followPushed = true;
             bool preOk;
             try { preOk = AtPreMove(destObj, toExit); }
-            catch { FollowScript.CancelPendingPush(this); throw; }
-            if (!preOk) { FollowScript.CancelPendingPush(this); return false; }
+            catch { FollowScript.CancelPendingPush(this, destObj); throw; }
+            if (!preOk) { FollowScript.CancelPendingPush(this, destObj); return false; }
         }
 
         if (destObj is null)
@@ -188,9 +227,10 @@ public partial class GameObject
                     // moved between the resolve above and the acquire here,
                     // instead of removing from a stale room. Record
                     // value-compare against the pre-acquire snapshot.
-                    if (!Equals(_location, nullSnap)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+                    if (!Equals(_location, nullSnap)) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
                     locObj._contents.Remove(this.Id); locObj._flags.IsModified = true;
                     _location = LocationRef.NullLocation.Instance; _flags.IsModified = true;
+                    changed = true;
                 }
                 finally
                 {
@@ -211,7 +251,7 @@ public partial class GameObject
         // Python: if dest is not Node: walk chain via location until Node or None checking self
         // Note: no depth limit — seen set prevents infinite, and deep chains beyond 100 must still be detected (test_containment:105)
         // Self/cycle guard also applies to Node destinations .
-        if (ReferenceEquals(destObj, this) || destObj.Id == this.Id) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+        if (ReferenceEquals(destObj, this) || destObj.Id == this.Id) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
         if (!destObj.IsNode)
         {
             var cur = destObj;
@@ -222,8 +262,8 @@ public partial class GameObject
             bool reachedNode = false;
             while (cur is not null)
             {
-                if (cur == this || cur.Id == this.Id) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
-                if (!seen.Add(cur.Id)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; } // cycle
+                if (cur == this || cur.Id == this.Id) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
+                if (!seen.Add(cur.Id)) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; } // cycle
                 // Get next location in chain
                 var next = cur.ResolveLocationObject();
                 if (next is null) break;
@@ -248,7 +288,7 @@ public partial class GameObject
                 {
                     var cid = stack.Pop();
                     if (!visited.Add(cid)) continue;
-                    if (cid == destObj.Id) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+                    if (cid == destObj.Id) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
                     var obj = ObjectRegistry.GetSingle(cid);
                     if (obj is not null && obj.IsContainer)
                     {
@@ -271,32 +311,8 @@ public partial class GameObject
         // At most two locks are ever taken, so order the pair directly — no
         // List/sort. (Grid locks would precede Node locks; NodeGrid locks are
         // not resolvable here, so only GameObject/Node SyncRoots are taken.)
-        static int CompareLockOrder(GameObject a, GameObject b)
-        {
-            bool aNode = a.IsNode;
-            bool bNode = b.IsNode;
-            if (aNode != bNode) return aNode ? -1 : 1;
-            if (aNode)
-            {
-                var ac = (a as Node)?.Coord;
-                var bc = (b as Node)?.Coord;
-                if (ac.HasValue && bc.HasValue)
-                {
-                    var acv = ac.Value;
-                    var bcv = bc.Value;
-                    int c = string.Compare(acv.Area, bcv.Area, StringComparison.Ordinal);
-                    if (c != 0) return c;
-                    c = acv.X.CompareTo(bcv.X);
-                    if (c != 0) return c;
-                    c = acv.Y.CompareTo(bcv.Y);
-                    if (c != 0) return c;
-                    c = acv.Z.CompareTo(bcv.Z);
-                    if (c != 0) return c;
-                }
-                return a.Id.CompareTo(b.Id);
-            }
-            return a.Id.CompareTo(b.Id);
-        }
+        // Shared with AddObject/RemoveObject so every multi-lock hold in this
+        // file follows one global order.
         List<GameObject> toLock = new(3);
         // Own lock joins the ordered set (dedupe by instance): acquiring
         // self after dest/old inverts the global Node->Object/Id order and
@@ -323,11 +339,11 @@ public partial class GameObject
         // that staging, not these arms).
         if (oldLoc is not null && oldLoc.IsNode)
         {
-            if (!oldLoc.AtPreObjectLeave(destObj, toExit)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+            if (!oldLoc.AtPreObjectLeave(destObj, toExit)) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
         }
         if (destObj.IsNode)
         {
-            if (!destObj.AtPreObjectReceive(oldLoc, null)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+            if (!destObj.AtPreObjectReceive(oldLoc, null)) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
         }
 
         // Snapshot the live location BEFORE the re-verify below: the
@@ -349,7 +365,7 @@ public partial class GameObject
             var curLoc = ResolveLocationObject();
             bool sameLoc = (curLoc is null && oldLoc is null)
                 || (curLoc is not null && oldLoc is not null && curLoc.Id == oldLoc.Id);
-            if (!sameLoc) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+            if (!sameLoc) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
         }
 
         // Try to acquire locks in order (deadlock avoidance)
@@ -364,7 +380,44 @@ public partial class GameObject
         bool installExits = false;
         try
         {
-            if (destObj.IsDeleted) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+            // A deleted mover must not re-home into room contents:
+            // AtPostPuppet re-MoveTo(force:true) and any racing thread
+            // would otherwise plant a ghost member in a live room.
+            if (destObj.IsDeleted || IsDeleted) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
+            // Re-run the self/cycle guard under the held locks. The
+            // lock-free walk above can lose to a graft landing between the
+            // guard and the acquire; only an under-lock re-check closes the
+            // window. Reads are re-entrant under the held write locks.
+            {
+                var walk = destObj;
+                HashSet<int> walkSeen = [];
+                bool walkNode = false;
+                while (walk is not null)
+                {
+                    if (walk.Id == Id) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
+                    if (!walkSeen.Add(walk.Id)) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
+                    var nextWalk = walk.ResolveLocationObject();
+                    if (nextWalk is null) break;
+                    if (nextWalk.IsNode) { walkNode = true; break; }
+                    walk = nextWalk;
+                }
+                if (IsContainer && !walkNode)
+                {
+                    HashSet<int> downSeen = [];
+                    var downStack = new Stack<int>(ContentsSnapshot);
+                    while (downStack.Count > 0)
+                    {
+                        var cid = downStack.Pop();
+                        if (!downSeen.Add(cid)) continue;
+                        if (cid == destObj.Id) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
+                        var downObj = ObjectRegistry.GetSingle(cid);
+                        if (downObj is not null && downObj.IsContainer)
+                        {
+                            foreach (var sub in downObj.ContentsSnapshot) downStack.Push(sub);
+                        }
+                    }
+                }
+            }
             // No grid-presence probe here: the old probe's arms both fell through
             // to the move (dead block paying a registry lookup per move for no
             // decision), so unregistered-but-live nodes stay movable.
@@ -382,19 +435,27 @@ public partial class GameObject
             // so any concurrent relocation aborts instead of
             // double-inserting (an unresolvable source is NOT nowhere —
             // oldLoc null with a live _location must still proceed).
-            if (!Equals(_location, locSnapshot)) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+            if (!Equals(_location, locSnapshot)) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
+            // Same-id grafts stay id-compared, never instance-compared: a
+            // hook may swap the location object for a fresh instance with
+            // the same id mid-move (hot-reload shape), which is still the
+            // same location, not a concurrent move (pinned by
+            // MoveToGraftedOriginTests). Mutating the resolved instance is
+            // safe there — the unregistered stale copy has no other holders.
             if (oldLoc is not null && !ReferenceEquals(destObj, oldLoc))
             {
                 oldLoc._contents.Remove(this.Id);
                 destObj._contents.Add(this.Id);
                 oldLoc.IsModified = true;
                 destObj.IsModified = true;
+                changed = true;
             }
             else if (oldLoc is null)
             {
                 // No old loc — just add to destination
                 destObj._contents.Add(this.Id);
                 destObj.IsModified = true;
+                changed = true;
             }
 
             // Deferred until after both location locks release (see below):
@@ -427,7 +488,7 @@ public partial class GameObject
             }
         }
 
-        if (!success) { if (followPushed) FollowScript.CancelPendingPush(this); return false; }
+        if (!success) { if (followPushed) FollowScript.CancelPendingPush(this, destObj); return false; }
 
         // Deferred exit installation : runs after both location
         // locks released, alongside the leave/receive hooks below.
@@ -512,6 +573,36 @@ public partial class GameObject
         }
 
         return true;
+    }
+
+    // Global lock order for every multi-lock hold in this file:
+    // NodeGrid before Node before GameObject (Id/Coord ordering).
+    // In Python: def get_key(o): if is_node: return (0, o.coord) else (1, o.id)
+    private static int CompareLockOrder(GameObject a, GameObject b)
+    {
+        bool aNode = a.IsNode;
+        bool bNode = b.IsNode;
+        if (aNode != bNode) return aNode ? -1 : 1;
+        if (aNode)
+        {
+            var ac = (a as Node)?.Coord;
+            var bc = (b as Node)?.Coord;
+            if (ac.HasValue && bc.HasValue)
+            {
+                var acv = ac.Value;
+                var bcv = bc.Value;
+                int c = string.Compare(acv.Area, bcv.Area, StringComparison.Ordinal);
+                if (c != 0) return c;
+                c = acv.X.CompareTo(bcv.X);
+                if (c != 0) return c;
+                c = acv.Y.CompareTo(bcv.Y);
+                if (c != 0) return c;
+                c = acv.Z.CompareTo(bcv.Z);
+                if (c != 0) return c;
+            }
+            return a.Id.CompareTo(b.Id);
+        }
+        return a.Id.CompareTo(b.Id);
     }
 
     private string? GetReverseLinkName(Node from, Node to)

@@ -672,6 +672,10 @@ public class PortedMapTests
         handler.SetMapInfo("a",0,miA); handler.SetMapInfo("b",0,miB);
         var listener = GameObject.Create("listener"); listener.Id=1; listener.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(locA); ObjectRegistry.AddObject(listener);
         handler.AddListener(listener);
+        // Well-formed cross-area move: the object's committed location leads
+        // (a move whose destination mismatches the live location is stale
+        // and skips — B8).
+        listener.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(locB);
         handler.MoveListener(listener, locB, locA);
         Assert.Equal(1, miA.RenderCalls); Assert.False(miA.LastForce);
         Assert.Equal(1, miB.RenderCalls); Assert.True(miB.LastForce);
@@ -688,6 +692,10 @@ public class PortedMapTests
         handler.SetMapInfo("a",0,miA); handler.SetMapInfo("b",0,miB);
         var obj = GameObject.Create("obj"); obj.Id=1; obj.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(locA); ObjectRegistry.AddObject(obj);
         handler.AddMapable(obj);
+        // Well-formed cross-area move: the object's committed location leads
+        // (a move whose destination mismatches the live location is stale
+        // and skips — B8).
+        obj.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(locB);
         handler.MoveMapable(obj, locB, locA);
         Assert.Equal(1, miA.RenderCalls); Assert.False(miA.LastForce);
         Assert.Equal(1, miB.RenderCalls); Assert.True(miB.LastForce);

@@ -158,7 +158,8 @@ public sealed class NodeGrid
         // Enumerate a node-locked snapshot — the raw list used to be walked here
         // with no lock at all.
         var linksSnap = node?.GetLinks() ?? [];
-        SyncCrossAreaTransitions(linksSnap, default, isAdd: false);
+        var removedCoord = node?.Coord ?? default;
+        SyncCrossAreaTransitions(linksSnap, removedCoord, isAdd: false);
     }
     // Cross-area transition sync shared by AddNode/RemoveNode, parametrized by
     // direction because the loops differ: adds publish a transition from the
@@ -174,7 +175,7 @@ public sealed class NodeGrid
             if (Area != l.Coord.Area)
             {
                 if (isAdd) nh.AddTransition(new Transition(coordSnap, l.Coord, l.Name));
-                else nh.RemoveTransition(l.Coord);
+                else nh.RemoveTransition(coordSnap, l.Coord);
             }
     }
     public Node? GetNode((int X, int Y) coord)

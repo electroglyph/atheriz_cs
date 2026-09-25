@@ -233,6 +233,8 @@ public partial class NodeHandler
     }
     // Destination-only removal drops every fan-in edge to dest (previously at
     // most one could exist); tombstones record the exact (from,to) keys.
+    // Prefer the exact-key overload below: bulk removal by destination alone
+    // deletes fresh edges from other sources added concurrently.
     public void RemoveTransition(Coord dest)
     {
         Lock2.EnterWriteLock();
@@ -245,6 +247,22 @@ public partial class NodeHandler
                 _transitions.Remove(k);
                 _removedTrans.Add(k);
             }
+            _modified2 = true;
+            _transGen++;
+        }
+        finally { Lock2.ExitWriteLock(); }
+    }
+    // Exact-key removal for link teardown: removes only the (from, dest)
+    // edge, so a concurrent AddLink from another source to the same dest
+    // survives. Callers tearing down a known link must use this.
+    public void RemoveTransition(Coord from, Coord dest)
+    {
+        Lock2.EnterWriteLock();
+        try
+        {
+            var key = (from, dest);
+            if (_transitions.Remove(key))
+                _removedTrans.Add(key);
             _modified2 = true;
             _transGen++;
         }

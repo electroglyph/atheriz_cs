@@ -338,7 +338,7 @@ public class ObjectRegressionTests
     public void EmitSoundReject_Logs()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.Hear.cs");
-        var region = SourceScan.Region(src, "public void EmitSound(");
+        var region = SourceScan.Region(src, "public bool EmitSound(");
         Assert.DoesNotContain("// log warning", region);
     }
 
@@ -545,7 +545,7 @@ public class ObjectRegressionTests
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
         var region = SourceScan.Region(src, "public void ClearHistory()");
-        Assert.Matches(@"lock\s*\(_histLock\)\s*\{\s*_history\.Clear\(\);\s*\}", region);
+        Assert.Matches(@"lock\s*\(_histLock\)\s*\{\s*_history\.Clear\(\);\s*_mutGen\+\+;\s*\}", region);
     }
 
     // HasLinkName and GetLinkByName must agree on casing.

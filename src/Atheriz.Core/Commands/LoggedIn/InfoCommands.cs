@@ -292,8 +292,8 @@ public sealed class MapCommand : LoggedInCommand
     public override bool UseParser => false;
     protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
     {
-        go.MapEnabled = !go.MapEnabled;
-        if (go.MapEnabled)
+        bool enabled = go.ToggleMapEnabled();
+        if (enabled)
         {
             go.Msg("Map enabled.");
             try { go.Session?.Connection?.SendCommand("map_enable", new List<object?> { "" }, null); } catch (Exception) { }

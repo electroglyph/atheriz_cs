@@ -327,9 +327,8 @@ public class PortedBanCommandTests
         var f = typeof(CreationCooldownStore).GetField("CreationCooldowns", BindingFlags.NonPublic | BindingFlags.Static);
         var bd = f!.GetValue(null);
         bd!.GetType().GetMethod("Clear")!.Invoke(bd, null);
-        var set = bd.GetType().GetMethod("Set")!;
         double now = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 60;
-        for (int i = 0; i < 6000; i++) set.Invoke(bd, new object[] { $"account:host-{i}", now });
+        for (int i = 0; i < 6000; i++) CreationCooldownStore.TryReserveCreationCooldown("account", $"host-{i}", now, 60);
         int size = (int)bd.GetType().GetProperty("Count")!.GetValue(bd)!;
         Assert.True(size < 5000, $"CREATION_COOLDOWNS unbounded: {size}");
     }

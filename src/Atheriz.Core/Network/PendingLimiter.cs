@@ -58,6 +58,10 @@ public sealed class PendingLimiter
     private bool TryReserveCoreLocked(Task? task, int nb)
     {
         if (!CanReserveLocked(nb)) return false;
+        // A second reserve on an already-tracked task would double-count
+        // bytes/count against a single Release. Refuse the duplicate
+        // so one Release always balances exactly one reserve.
+        if (task is not null && _byTask.ContainsKey(task)) return false;
         _pendingBytes += nb;
         _pendingCount++;
         if (task is not null) _byTask[task] = nb;

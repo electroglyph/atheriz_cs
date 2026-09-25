@@ -72,6 +72,13 @@ public static class ServerEvents
         // do cold-start Load() disk I/O (server_events.py:47 has no creation
         // lock at all); serializing creators on I/O stalls every signup.
         var settings = settingsOverride ?? AtherizSettings.Global;
+        // Verify the password BEFORE taking the creation lock. PBKDF2 is
+        // ~100ms of CPU; holding the global lock across it serializes every
+        // concurrent signup (~N x cost). The in-lock path re-checks the hash
+        // generation and only re-hashes on rotation (rare).
+        Account? preAcc = RegistryFindFirst(o => o.IsAccount && (o.Name ?? "").ToLowerInvariant() == accountName.ToLowerInvariant() && o is Account) as Account;
+        string? preHash = preAcc?.PasswordHash;
+        bool prePwOk = preAcc is not null && preAcc.CheckPassword(password);
         // C# tests use real Nodes without handler indexing (no mocks), so also consult the live registry.
         Node? home = GlobalServices.GetNodeHandler().GetNode(settings.DefaultHome);
         home ??= ObjectRegistry.FilterBy(o => o is Node n && n.Coord.Equals(settings.DefaultHome)).FirstOrDefault() as Node;
@@ -81,8 +88,8 @@ public static class ServerEvents
             return;
         }
         // no console I/O under the creation lock — error paths capture
-        // their message and print after the lock releases (CheckPassword I/O
-        // stays: it is part of the check-then-insert critical section).
+        // their message and print after the lock releases (the password is
+        // verified pre-lock; only a hash rotation re-hashes inside).
         string? failMsg = null;
         List<string> progressMsgs = [];
         // Local section: `return` below exits the lock, not the method —
@@ -103,7 +110,11 @@ public static class ServerEvents
         var existing = RegistryFindFirst(o => o.IsAccount && (o.Name ?? "").ToLowerInvariant() == accountName.ToLowerInvariant() && o is Account);
         if (existing is Account acc)
         {
-            if (!acc.CheckPassword(password))
+            // Fast path: the password was verified pre-lock against
+            // this same hash generation — no second PBKDF2 under the lock.
+            // A rotation landing in between falls back to an in-lock verify.
+            bool pwOk = prePwOk && preHash is not null && acc.PasswordHash == preHash;
+            if (!pwOk && !acc.CheckPassword(password))
             {
                 failMsg = $"Account '{accountName}' already exists with a different password...";
                 return;
@@ -116,7 +127,15 @@ public static class ServerEvents
             var character = GameObject.Create(charName, isPc: true);
             ObjectRegistry.AddObject(character);
             character.Home = Persistence.Dto.LocationRef.FromCoord(home.Coord);
-            acc.AddCharacter(character);
+            // Atomic cap reserve: the advisory count check above can
+            // lose to a concurrent creator; this decides under the account
+            // write lock.
+            if (!acc.TryAddCharacter(character, settings.MaxCharacters))
+            {
+                ObjectRegistry.RemoveObject(character);
+                failMsg = $"Account '{accountName}' already has {settings.MaxCharacters} characters...";
+                return;
+            }
             if (LostPcNameRace(existsLc, character.Id))
             {
                 acc.RemoveCharacter(character);

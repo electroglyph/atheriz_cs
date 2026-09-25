@@ -284,7 +284,8 @@ public class ServerRegressionTests
     public void GameWebCustomizations_Win()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "AssetPathResolver.cs");
-        int cwd = src.IndexOf("Directory.GetCurrentDirectory(), subA", StringComparison.Ordinal);
+        Assert.Contains("cwd = Directory.GetCurrentDirectory()", src);
+        int cwd = src.IndexOf("Path.Combine(cwd, subA)", StringComparison.Ordinal);
         int root = src.IndexOf("Path.Combine(contentRoot, subA)", StringComparison.Ordinal);
         Assert.True(cwd >= 0 && root >= 0 && cwd < root);
     }

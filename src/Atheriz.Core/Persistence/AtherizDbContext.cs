@@ -39,10 +39,16 @@ public sealed class AtherizDbContext : DbContext
         lock (_initLock) _closed = true;
     }
 
-    // Instance close mirrors Python Database.close() via static flag
+    // Instance close is instance-scoped: it closes this context's own
+    // connection only. The old static-flag flip poisoned the whole process —
+    // every later `new AtherizDbContext` on any thread threw, tearing
+    // mid-checkpoint saves. Process-wide maintenance still uses the static
+    // CloseDatabase/ReopenDatabase pair (reset command).
+    private bool _instanceClosed;
+    public bool IsInstanceClosed { get { lock (_initLock) return _instanceClosed; } }
     public void Close()
     {
-        lock (_initLock) _closed = true;
+        lock (_initLock) _instanceClosed = true;
         try { Database.CloseConnection(); } catch (Exception) { }
     }
 

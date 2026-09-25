@@ -29,6 +29,17 @@ namespace Atheriz.Core.Commands.UnloggedIn
     // plus the atomic session-puppet attach (also used a 4th time by ConnectCommand).
     public static class CreationCooldownHelper
     {
+        // Owner tokens per caller-identity: a validation failure clears
+        // only its own reservation — never another drain's live hold on the
+        // same host key. Keyed by connection session (unique per drain), with
+        // an identity-hash fallback for non-connection callers.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Guid> _owners = new();
+        private static string OwnerKey(IMessageTarget caller)
+        {
+            if (caller is BaseConnection bc && bc.SessionId is not null) return "conn:" + bc.SessionId;
+            if (caller is null) return "?";
+            return "obj:" + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(caller);
+        }
         public static string RateKey(IMessageTarget caller)
         {
 // host string when available, else id(caller).
@@ -50,20 +61,26 @@ namespace Atheriz.Core.Commands.UnloggedIn
         {
             var settings = Settings.AtherizSettings.Global;
             double now = Utils.GameClock.MonotonicSeconds();
-            if (!ObjectRegistry.TryReserveCreationCooldown(kind, RateKey(caller), now, settings.CreationCooldown))
+            var token = ObjectRegistry.TryReserveCreationCooldown(kind, RateKey(caller), now, settings.CreationCooldown);
+            if (token is null)
             { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return false; }
+            _owners[OwnerKey(caller)] = token.Value;
             return true;
         }
 
         // Mirrors clear_creation_cooldown on every validation-failure return.
         public static void Clear(IMessageTarget caller)
-            => ObjectRegistry.ClearCreationCooldown(RateKey(caller));
+        {
+            if (_owners.TryRemove(OwnerKey(caller), out var token))
+                ObjectRegistry.ClearCreationCooldown(RateKey(caller), token);
+        }
 
         // Mirrors apply_creation_cooldown on success.
         public static void Apply(IMessageTarget caller, string kind)
         {
             var settings = Settings.AtherizSettings.Global;
             ObjectRegistry.ApplyCreationCooldown(kind, RateKey(caller), Utils.GameClock.MonotonicSeconds(), settings.CreationCooldown);
+            _owners.TryRemove(OwnerKey(caller), out _);
         }
     }
 }

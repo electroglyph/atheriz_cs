@@ -30,14 +30,16 @@ public sealed class BanCommand : BuilderCommand
         if (account && acct is not null)
         {
             kickTargets = acct is Account ? acctChars : [target];
-            if (acct is Account ac) { ac.IsBanned = true; if (!string.IsNullOrEmpty(reason)) ac.BanReason = reason; }
-            foreach (var c in kickTargets) { c.IsBanned = true; if (!string.IsNullOrEmpty(reason)) BanReasonHelper.SetBanReason(c, reason); }
+            // Atomic scope apply: account + members commit together.
+            // A non-Account holder keeps the old shape (members only).
+            var banScope = new List<GameObject>(kickTargets);
+            if (acct is Account) banScope.Add(acct);
+            BanHelper.ApplyScopeState(banScope, true, string.IsNullOrEmpty(reason) ? null : reason);
         }
         else
         {
             kickTargets = [target];
-            target.IsBanned = true;
-            if (!string.IsNullOrEmpty(reason)) BanReasonHelper.SetBanReason(target, reason);
+            BanHelper.ApplyScopeState([target], true, string.IsNullOrEmpty(reason) ? null : reason);
         }
         string? kickedIp = null;
         if (ip)
@@ -50,9 +52,15 @@ public sealed class BanCommand : BuilderCommand
         {
             try
             {
-                var sess = t.Session;
-                var conn = sess?.Connection;
-                if (conn is not null)
+                // Atomic live-conn snapshot: never Msg+Close a torn
+                // session/connection pair across a reconnect swap. An offline
+                // target (no session) skips silently as before — only a live
+                // target whose snapshot failed reports.
+                if (!BanHelper.TryGetLiveConn(t, out _, out var conn) || conn is null)
+                {
+                    if (t.Session is not null) failed.Add(t.Name);
+                    continue;
+                }
                 {
                     string msg = string.IsNullOrEmpty(reason) ? "You have been banned." : $"You have been banned. Reason: {reason}";
                     conn.Msg(msg);
@@ -281,9 +289,11 @@ public sealed class BuildCommand : BuilderCommand
             var mi = mh.EnsureMapInfo(newCoord.Area, newCoord.Z);
             using (mi.BatchUpdate())
             {
+                // One settings generation for the whole cell: the room/
+                // road/path arms below must not mix generations on a swap.
+                var sset = AtherizSettings.Global;
                 if (room)
                 {
-                    var sset = AtherizSettings.Global;
                     // Precedence matches the old if-chain (single > double >
                     // rounded > none > default outline); mutual exclusion is
                     // enforced above, so at most one arm can fire either way.
@@ -303,7 +313,10 @@ public sealed class BuildCommand : BuilderCommand
                     };
                     if (!string.IsNullOrEmpty(ch))
                     {
-                        var roomPH = AtherizSettings.Global.RoomPlaceholder;
+                        // Single-generation reads: sset was captured
+                        // once above — re-reading Global here could mix two
+                        // settings generations in one command.
+                        var roomPH = sset.RoomPlaceholder;
                         mi.UpdateGrid((newCoord.X, newCoord.Y), roomPH);
                         mi.PlaceWalls((newCoord.X, newCoord.Y), ch);
                         var (nn, ss, ee, ww) = GetRoomDirs(mi, (newCoord.X, newCoord.Y));
@@ -312,12 +325,12 @@ public sealed class BuildCommand : BuilderCommand
                 }
                 else if (road)
                 {
-                    var roadPH = AtherizSettings.Global.RoadPlaceholder;
+                    var roadPH = sset.RoadPlaceholder;
                     mi.UpdateGrid((newCoord.X, newCoord.Y), roadPH);
                 }
                 else if (path)
                 {
-                    var pathPH = AtherizSettings.Global.PathPlaceholder;
+                    var pathPH = sset.PathPlaceholder;
                     mi.UpdateGrid((newCoord.X, newCoord.Y), pathPH);
                     mi.PlaceWalls((newCoord.X, newCoord.Y), pathPH);
                 }
@@ -519,6 +532,12 @@ public sealed class DoorCommand : BuilderCommand
         // apply): without -a, a missing destination for a LATER direction must
         // fail before ANY door is created, not after earlier ones were applied
         // with success messages already sent. Mirrors the in-loop message.
+        // Scope note: directions apply sequentially, not all-or-none —
+        // a node deleted between the pre-check and a later direction's apply
+        // refuses that direction cleanly (no door ever references a missing
+        // node) but keeps earlier directions. Rolling back applied directions
+        // would need a transaction across occupant MoveTo hooks; per-direction
+        // refusal is fail-closed and safe.
         if (!auto)
         {
             foreach (var def in defs)
@@ -599,13 +618,27 @@ public sealed class DoorCommand : BuilderCommand
     {
         var node = nh.GetNode(doorCoord);
         if (node is null) return;
-        foreach (var obj in node.GetContents().ToList())
+        // Sweep until empty, bounded: a joiner arriving between the
+        // snapshot and RemoveNode would otherwise stay homed in the removed
+        // node. Adversarial joiners cannot stall the command forever.
+        for (int sweep = 0; sweep < 3; sweep++)
         {
-            obj.MoveTo(fallback, force:true, announce:false);
-            // Python moves occupants silently; tell them what happened.
-            // (Authorization is the command-level builder gate; per-occupant
-            // consent hooks don't exist in either codebase.)
-            try { obj.Msg($"A door is being placed where you stand; you are moved to {fallback.Name}."); } catch (Exception) { }
+            var occupants = node.GetContents().ToList();
+            if (occupants.Count == 0) break;
+            foreach (var obj in occupants)
+            {
+                obj.MoveTo(fallback, force: true, announce: false);
+                // Python moves occupants silently; tell them what happened.
+                // (Authorization is the command-level builder gate; per-occupant
+                // consent hooks don't exist in either codebase.)
+                try { obj.Msg($"A door is being placed where you stand; you are moved to {fallback.Name}."); } catch (Exception) { }
+            }
+        }
+        // Fail closed rather than stranding a live occupant in a removed node.
+        if (node.GetContents().ToList().Count != 0)
+        {
+            caller.Msg($"Could not clear the node at {doorCoord}; occupants remain.");
+            return;
         }
         nh.RemoveNode(doorCoord);
         caller.Msg($"Removed node at {doorCoord} since a door is being placed there.");
@@ -1103,6 +1136,9 @@ public sealed class SetCommand : BuilderCommand
     public override string Key => "set";
     public override string Desc => "Set an attribute on an object.";
     public override string Category => "Building";
+    // Serializes PC renames: check-then-SetAttr must not straddle a
+    // rival rename to the same fresh name.
+    private static readonly Lock RenameLock = new();
     protected override void SetupParser(GameArgumentParser p)
     {
         p.AddArgument(ParsedArgKeys.Target, help: "Object to modify (name, #id, 'me', or 'here').");
@@ -1272,6 +1308,33 @@ public sealed class SetCommand : BuilderCommand
             if (nameErr is not null) { go.Msg(nameErr); return; }
             bool sameAsSelf = target.IsPc && target.Name.Equals(newName, StringComparison.OrdinalIgnoreCase);
             if (!sameAsSelf && CreationValidation.PcNameExists(newName)) { go.Msg($"Character with this name ({newName}) already exists."); return; }
+            // Atomic rename reserve: the check above and the SetAttr
+            // below must not straddle a rival rename to the same fresh name.
+            // Both serialize on RenameLock with a re-check inside, so two
+            // concurrent renames cannot both pass. No other path takes this
+            // lock (RenameLock -> object order only), so it cannot deadlock.
+            lock (RenameLock)
+            {
+                bool stillSelf = target.IsPc && target.Name.Equals(newName, StringComparison.OrdinalIgnoreCase);
+                if (!stillSelf && CreationValidation.PcNameExists(newName)) { go.Msg($"Character with this name ({newName}) already exists."); return; }
+                try
+                {
+                    SetHelper.SetAttr(target, attr, value);
+                    target.IsModified = true;
+                }
+                catch (InvalidOperationException) { go.Msg($"'{attr}' is a read-only attribute and cannot be set."); return; }
+                catch (InvalidCastException) { go.Msg($"'{attr}' cannot be set from text."); return; }
+                catch (Exception ex) { go.Msg($"Could not set '{attr}': {ex.Message}"); return; }
+            }
+            string renameRepr = value switch
+            {
+                null => "None",
+                string s => $"'{s}'",
+                bool b => b ? "True" : "False",
+                _ => ReprJson(value),
+            };
+            go.Msg($"Set {target.Name}.{attr} = {renameRepr}");
+            return;
         }
         try
         {
@@ -1322,10 +1385,13 @@ public sealed class UnbanCommand : BuilderCommand
             return;
         if (account && acct is not null)
         {
-            if (acct is Account ac) { ac.IsBanned = false; ac.BanReason = ""; }
-            foreach (var c in acctChars) { c.IsBanned = false; BanReasonHelper.ClearBanReason(c); }
+            // Atomic scope apply, mirror of the ban path (a non-Account
+            // holder keeps the members-only shape on both verbs).
+            var unbanScope = new List<GameObject>(acctChars);
+            if (acct is Account) unbanScope.Add(acct);
+            BanHelper.ApplyScopeState(unbanScope, false, "");
         }
-        else { target.IsBanned = false; BanReasonHelper.ClearBanReason(target); }
+        else { BanHelper.ApplyScopeState([target], false, ""); }
         if (ip)
         {
             if (host is null) go.Msg("Target is not online; cannot clear IP ban by reference.");
@@ -1436,6 +1502,11 @@ public sealed class WanderCommand : BuilderCommand
             if (randomNode is null) continue;
             var npc = SpawnUniqueWanderer();
             npc.MoveTo(randomNode);
+            // Spawn-vs-remove race: the node may have been removed
+            // between the pick and the move. An NPC homed in an unregistered
+            // node is a limbo ghost — fall back to the spawner's room.
+            if (!ReferenceEquals(ObjectRegistry.GetSingle(randomNode.Id), randomNode))
+                npc.MoveTo(loc, force: true, announce: false);
         }
         sw.Stop();
         go.Msg($"Spawned {count} NPCs across area '{loc.Coord.Area}' in {sw.Elapsed.TotalMilliseconds:F2} milliseconds");

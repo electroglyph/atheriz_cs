@@ -55,7 +55,7 @@ public class ScreenReaderShutdownExitTests
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "MovementCommands.cs");
         Assert.Contains("internal static void RestoreClosedDoor(", src);
-        Assert.Equal(2, SourceScan.Count(src, "RestoreClosedDoor(door, c);"));
+        Assert.Equal(3, SourceScan.Count(src, "RestoreClosedDoor(door, c);"));
         Assert.Equal(1, SourceScan.Count(src, "door.TryClose(c); } catch { closedOk = false; }"));
     }
 

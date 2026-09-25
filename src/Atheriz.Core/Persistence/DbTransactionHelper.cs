@@ -25,11 +25,13 @@ public static class DbTransactionHelper
         // transaction owns atomicity; SaveChanges joins it. (Caller must EnsureCreated.)
         if (db.Database.CurrentTransaction is not null)
         {
-            // A throwing work must still invoke onRollback (cleared save
-            // flags / tombstones are restored by the hook) — same contract
-            // as the owned-transaction path below. The hook is idempotent
-            // (re-marking dirty flags), so an outer onRollback re-running
-            // it is harmless. Rethrow preserves the failure.
+            // Gate the ambient path too: the old early return ran
+            // work+SaveChanges with zero exclusion, so two ambient-txn
+            // callers ran concurrently despite the gate contract. Re-entrant
+            // on the owning flow (the checkpoint holds it outside), bounded
+            // fail-loud otherwise — same shape as below, minus BeginTransaction.
+            if (!DbWriteGate.TryEnter(TimeSpan.FromSeconds(30)))
+                throw new TimeoutException("DbWriteGate held for over 30s; refusing to hang the save.");
             try
             {
                 work(db);
@@ -39,6 +41,10 @@ public static class DbTransactionHelper
             {
                 try { onRollback?.Invoke(); } catch (Exception) { }
                 throw;
+            }
+            finally
+            {
+                DbWriteGate.Exit();
             }
             return;
         }

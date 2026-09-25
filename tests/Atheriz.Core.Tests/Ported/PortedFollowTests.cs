@@ -175,16 +175,13 @@ public class PortedFollowTests
         var leader = MakePc("Leader", tup.n1);
         var fs = new FollowScript();
         fs.InstallHooks(leader);
-        var stack = (System.Collections.Concurrent.ConcurrentStack<GameObject?>)typeof(FollowScript)
-            .GetField("_oldLocStack", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .GetValue(fs)!;
         // failed move: null destination still pops the pre-move push
         fs.at_pre_move(null);
         fs.at_post_move(null);
-        Assert.True(stack.IsEmpty);
+        Assert.Null(fs.OldLoc);
         // follower-less move: teardown path still pops the pre-move push
         fs.at_pre_move(tup.n2);
         fs.at_post_move(tup.n2);
-        Assert.True(stack.IsEmpty);
+        Assert.Null(fs.OldLoc);
     }
 }

@@ -271,8 +271,12 @@ public abstract class Command
     // returns early without running the wrapped action.
     private static Action<IMessageTarget, object?> WrapWithLagCheck(Action<IMessageTarget, object?> orig)
     {
-        if (GlobalLagCheck is null) return orig;
-        return (c, a) => { if (GlobalLagCheck(c)) return; orig(c, a); };
+        // Capture once: re-reading GlobalLagCheck at invoke time lets
+        // an install/remove landing between wrap and run throw NRE on a
+        // nulled gate or apply the wrong generation.
+        var gate = GlobalLagCheck;
+        if (gate is null) return orig;
+        return (c, a) => { if (gate(c)) return; orig(c, a); };
     }
 
     /// <summary>

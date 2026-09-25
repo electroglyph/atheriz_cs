@@ -56,7 +56,17 @@ public sealed class NodeArea
             if (!otherGrids.TryGetValue(kv.Key, out var g) || !kv.Value.Equals(g)) return false;
         foreach (var kv in myData)
             if (!otherData.TryGetValue(kv.Key, out var je) || kv.Value.GetRawText() != je.GetRawText()) return false;
-        return (LinkedAreas is null && o.LinkedAreas is null) || (LinkedAreas is not null && o.LinkedAreas is not null && LinkedAreas.SetEquals(o.LinkedAreas));
+        // Snapshot both link sets under their own read locks: the old
+        // lock-free SetEquals threw when a link mutated mid-enumeration.
+        HashSet<string>? myLinked;
+        Lock.EnterReadLock();
+        try { myLinked = LinkedAreas is null ? null : new HashSet<string>(LinkedAreas, LinkedAreas.Comparer); }
+        finally { Lock.ExitReadLock(); }
+        HashSet<string>? otherLinked;
+        o.Lock.EnterReadLock();
+        try { otherLinked = o.LinkedAreas is null ? null : new HashSet<string>(o.LinkedAreas, o.LinkedAreas.Comparer); }
+        finally { o.Lock.ExitReadLock(); }
+        return (myLinked is null && otherLinked is null) || (myLinked is not null && otherLinked is not null && myLinked.SetEquals(otherLinked));
     }
     public override int GetHashCode()
     {
@@ -66,7 +76,11 @@ public sealed class NodeArea
         var grids = Grids; var data = Data;
         foreach (var k in grids.Keys.OrderBy(k => k)) { h.Add(k); h.Add(grids[k]); }
         foreach (var k in data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(data[k].GetRawText()); }
-        if (LinkedAreas is not null) foreach (var a in LinkedAreas.OrderBy(a => a, StringComparer.Ordinal)) h.Add(a);
+        HashSet<string>? linked;
+        Lock.EnterReadLock();
+        try { linked = LinkedAreas is null ? null : new HashSet<string>(LinkedAreas, LinkedAreas.Comparer); }
+        finally { Lock.ExitReadLock(); }
+        if (linked is not null) foreach (var a in linked.OrderBy(a => a, StringComparer.Ordinal)) h.Add(a);
         return h.ToHashCode();
     }
 
@@ -250,9 +264,58 @@ public sealed class NodeArea
     }
     public void AddGrid(NodeGrid grid)
     {
-        grid.Area = Name;
+        ArgumentNullException.ThrowIfNull(grid);
+        // Detach from the prior owner atomically: publishing Area
+        // while the old area keeps the grid dual-homes it — readers then
+        // see the grid under two areas (~50% wrong-owner reads). The owner
+        // plan is re-verified under both area locks (taken in name order;
+        // no other path holds two area locks, so this cannot deadlock) and
+        // retried when the grid moved meanwhile.
+        for (int attempt = 0; attempt < 8; attempt++)
+        {
+            var cur = grid.Area;
+            NodeArea? owner = cur is null || cur == Name ? null : NodeHandler.GetCurrent()?.GetArea(cur);
+            if (owner is null || ReferenceEquals(owner, this))
+            {
+                Lock.EnterWriteLock();
+                try
+                {
+                    if (grid.Area != Name && grid.Area != cur) continue;
+                    grid.Area = Name; _grids[grid.Z] = grid; IsModified = true;
+                    return;
+                }
+                finally { Lock.ExitWriteLock(); }
+            }
+            else
+            {
+                NodeArea first = string.Compare(Name, owner.Name, StringComparison.Ordinal) < 0 ? this : owner;
+                NodeArea second = ReferenceEquals(first, this) ? owner : this;
+                first.Lock.EnterWriteLock();
+                try
+                {
+                    second.Lock.EnterWriteLock();
+                    try
+                    {
+                        if (grid.Area != cur) continue;
+                        if (owner._grids.TryGetValue(grid.Z, out var existing) && ReferenceEquals(existing, grid))
+                        {
+                            owner._grids.Remove(grid.Z);
+                            owner.IsModified = true;
+                        }
+                        grid.Area = Name;
+                        _grids[grid.Z] = grid;
+                        IsModified = true;
+                        return;
+                    }
+                    finally { second.Lock.ExitWriteLock(); }
+                }
+                finally { first.Lock.ExitWriteLock(); }
+            }
+        }
+        // Pathological churn fallback (best effort; the loop above converges
+        // in practice since each attempt is microseconds).
         Lock.EnterWriteLock();
-        try { _grids[grid.Z] = grid; IsModified = true; }
+        try { grid.Area = Name; _grids[grid.Z] = grid; IsModified = true; }
         finally { Lock.ExitWriteLock(); }
     }
     // Lock-free insert for load/hydrate paths that already hold the area
@@ -300,6 +363,23 @@ public sealed class NodeArea
         {
             if (_grids.Remove(z, out var m)) m.Clear();
             IsModified = true;
+        }
+        finally { Lock.ExitWriteLock(); }
+    }
+    // Instance-conditional remove for AddGrid's prior-owner detach:
+    // evicts only when the slot still points at this exact grid, so a
+    // successor installed concurrently is never removed.
+    public void RemoveGridIf(NodeGrid grid)
+    {
+        ArgumentNullException.ThrowIfNull(grid);
+        Lock.EnterWriteLock();
+        try
+        {
+            if (_grids.TryGetValue(grid.Z, out var cur) && ReferenceEquals(cur, grid))
+            {
+                _grids.Remove(grid.Z);
+                IsModified = true;
+            }
         }
         finally { Lock.ExitWriteLock(); }
     }

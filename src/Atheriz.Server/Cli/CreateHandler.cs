@@ -52,6 +52,19 @@ public static class CreateHandler
             Atheriz.Core.Globals.ObjectRegistry.LoadObjects(savePath);
         }
         catch (Exception ex) { Console.WriteLine($"Load failed: {ex.Message}"); return 1; }
+        // Re-verify the liveness backstop after the load: a server
+        // started in the gap runs a live in-memory world, and these
+        // direct-DB writes would tear its SQLite file underneath.
+        try
+        {
+            var pidFile2 = Path.Combine(savePath, "server.pid");
+            if (Infrastructure.PidFile.IsLiveClaim(pidFile2, out int ownerPid2))
+            {
+                Console.WriteLine($"A live server owns this world (verified server.pid {ownerPid2}); stop it first instead of offline create.");
+                return 1;
+            }
+        }
+        catch { }
         ServerEvents.AtCharCreate(accName, charName, pw);
         return 0;
     }

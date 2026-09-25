@@ -347,8 +347,34 @@ public class MapHandler
         toMap = GetOrCreate(toCoord.Area, toCoord.Z);
     }
 
+    // Supersede guard for concurrent same-object moves: two movers
+    // racing to different (area,Z) share a stale fromCoord, so both dests
+    // add while only the shared source is removed (dual-homed presence).
+    // The object's committed location decides — a move whose destination no
+    // longer matches the live location lost to a newer move and skips
+    // itself instead of re-adding a stale presence. Unlocated objects
+    // (null/NullLocation) carry no superseding generation, so their moves
+    // always apply; a container location can never match a node-coordinate
+    // destination (committed moves always land CoordLocation), so it reads
+    // as superseded.
+    private static bool IsMoveCurrent(GameObject obj, Coord toCoord)
+    {
+        try
+        {
+            var loc = obj.Location;
+            if (loc is null) return true;
+            if (loc is Persistence.Dto.LocationRef.NullLocation) return true;
+            if (loc is Persistence.Dto.LocationRef.CoordLocation cl) return cl.Coord.Equals(toCoord);
+            return false;
+        }
+        catch { return true; }
+    }
+
     public void MoveListener(GameObject listener, Coord toCoord, Coord? fromCoord = null)
     {
+        // Stale cross-map moves skip themselves: see IsMoveCurrent.
+        if (fromCoord is not null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z) && !IsMoveCurrent(listener, toCoord))
+            return;
         bool areaChanged = fromCoord is not null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
         ResolveMoveMaps(fromCoord, toCoord, out var fromMap, out var toMap);
         fromMap?.RemoveListener(listener);
@@ -365,6 +391,9 @@ public class MapHandler
 
     public void MoveMapable(GameObject mapable, Coord toCoord, Coord? fromCoord = null)
     {
+        // Stale cross-map moves skip themselves: see IsMoveCurrent.
+        if (fromCoord is not null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z) && !IsMoveCurrent(mapable, toCoord))
+            return;
         if (fromCoord is not null && fromCoord.Value.Area == toCoord.Area && fromCoord.Value.Z == toCoord.Z)
         {
             var cur = GetOrCreate(toCoord.Area, toCoord.Z);
@@ -390,6 +419,10 @@ public class MapHandler
             return;
         }
         bool areaChanged = fromCoord is not null && (fromCoord.Value.Area != toCoord.Area || fromCoord.Value.Z != toCoord.Z);
+        // Stale cross-map moves skip themselves: see IsMoveCurrent.
+        // The same-map path above returns earlier and never reaches here.
+        if (areaChanged && !IsMoveCurrent(obj, toCoord))
+            return;
         // Snapshot under the handler lock, then mutate via each MapInfo's own
         // lock: the old code wrote fromMap/toMap.Listeners/Objects directly
         // while holding only the handler lock, racing Render/AddMapable which

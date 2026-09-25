@@ -247,6 +247,53 @@ public sealed class PidFile : IDisposable
     // prose copy (a comment copy once let a grep-pin pass while the live
     // message lived here).
     internal const string AlreadyRunningMessagePrefix = "Server is already running with PID:";
+    public const string WipeLockFileName = ".wipe-lock";
+    // Freshness bound for a wipe lock: wipes complete in seconds, so an
+    // older file is a crashed wiper, not a live one.
+    public static readonly TimeSpan WipeLockFreshFor = TimeSpan.FromMinutes(5);
+
+    public static string WipeLockPath(string savePath) => Path.Combine(savePath, WipeLockFileName);
+
+    // True when a fresh wipe lock is held: reset and new
+    // --overwrite hold this across their irreversible deletes so a starter
+    // claiming pid/DB in the recheck-to-delete gap is refused instead of
+    // shredded.
+    public static bool IsWipeLocked(string savePath)
+    {
+        try
+        {
+            var info = new FileInfo(WipeLockPath(savePath));
+            if (!info.Exists) return false;
+            return DateTimeOffset.UtcNow - info.LastWriteTimeUtc < WipeLockFreshFor;
+        }
+        catch { return false; }
+    }
+
+    // Exclusive wipe hold, or null when another wipe is live. The handle
+    // must stay open until the wipe + setup complete; a crashed holder
+    // stops refreshing nothing (mtime only) and ages out via IsWipeLocked.
+    public static FileStream? TryAcquireWipeLock(string savePath)
+    {
+        try
+        {
+            if (IsWipeLocked(savePath)) return null;
+            Directory.CreateDirectory(savePath);
+            // OpenOrCreate (never truncate): exclusion comes from FileShare.None,
+            // freshness from mtime — a stale crashed-wipe file is simply old.
+            return new FileStream(WipeLockPath(savePath), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch { return null; }
+    }
+
+    // Clean release of a wipe hold: disposes the handle AND
+    // deletes the lock file so the replacement start right after setup is
+    // not refused. Only crashes leave the file behind (stale-aged), and
+    // abort paths deliberately keep it (fail closed for five minutes).
+    public static void ReleaseWipeLock(FileStream? handle, string savePath)
+    {
+        try { handle?.Dispose(); } catch { }
+        try { File.Delete(WipeLockPath(savePath)); } catch { }
+    }
     public static bool TryAcquire(string savePath, out PidFile? pidFile, out string? reason, int webserverPort = 9999)
     {
         pidFile = null;
@@ -255,6 +302,15 @@ public sealed class PidFile : IDisposable
         // Guard — atheriz/atheriz.py:508-512 + PathGuards (Core; Server wrapper deleted as redundant)
         Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath);
         Atheriz.Core.Utils.PathGuards.EnsureSaveDirectory(savePath);
+
+        // Wipe mutual exclusion: a reset/new --overwrite wiper
+        // holds this from its liveness re-check through setup; starting
+        // into it would shred a live database mid-write.
+        if (IsWipeLocked(savePath))
+        {
+            reason = "A wipe is in progress for this world; refusing to start into it.";
+            return false;
+        }
 
         var pidPath = Path.Combine(savePath, "server.pid");
 
@@ -399,16 +455,46 @@ public sealed class PidFile : IDisposable
     /// </summary>
     public static bool ReleaseIfOwner(string pidPath, int expectedPid)
     {
+        // Atomic-claim delete: Exists + read + Delete are three separate
+        // syscalls — a successor claiming between the read and the delete
+        // loses its live file. Instead atomically rename the file aside
+        // first: a successor racing us creates a FRESH pidPath the moment we
+        // move it, so deleting our renamed copy can never touch the live
+        // claim. A non-matching file is moved back unless a successor
+        // already claimed (then ours was stale — drop it).
+        string sidecar = pidPath + $".releasing-{Environment.ProcessId}";
         try
         {
-            if (File.Exists(pidPath) && TryReadPid(pidPath) == expectedPid)
+            if (!File.Exists(pidPath)) return false;
+            try { File.Move(pidPath, sidecar); }
+            catch { return false; }
+        }
+        catch { return false; }
+        try
+        {
+            if (TryReadPid(sidecar) == expectedPid)
             {
-                File.Delete(pidPath);
+                try { File.Delete(sidecar); } catch { }
                 return true;
             }
+            try { File.Move(sidecar, pidPath); }
+            catch
+            {
+                // A successor claimed pidPath meanwhile: our copy is stale.
+                try { File.Delete(sidecar); } catch { }
+            }
+            return false;
         }
-        catch { }
-        return false;
+        catch
+        {
+            try
+            {
+                if (File.Exists(sidecar) && !File.Exists(pidPath)) File.Move(sidecar, pidPath);
+                else if (File.Exists(sidecar)) File.Delete(sidecar);
+            }
+            catch { }
+            return false;
+        }
     }
 
     public void Dispose()

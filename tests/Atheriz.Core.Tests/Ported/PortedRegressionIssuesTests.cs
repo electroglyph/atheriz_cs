@@ -13,27 +13,31 @@ public class PortedRegressionIssuesTests
         using var env = GlobalTestEnv.Enter();
         var host = "1.2.3.4";
         var now = 1000.0;
-        ObjectRegistry.ClearCreationCooldown(host);
-        Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest", host, now, 60));
+        CreationCooldownStore.Clear();
+        var t1 = ObjectRegistry.TryReserveCreationCooldown("guest", host, now, 60);
+        Assert.NotNull(t1);
         Assert.True(ObjectRegistry.CreationCooldownActive(host, now + 1));
-        Assert.False(ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60));
-        ObjectRegistry.ClearCreationCooldown(host);
+        Assert.Null(ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60));
+        ObjectRegistry.ClearCreationCooldown(host, t1.Value);
         Assert.False(ObjectRegistry.CreationCooldownActive(host, now + 1));
         Assert.False(ObjectRegistry.CreationCooldownActive(host, now + 1));
-        Assert.True(ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60));
-        ObjectRegistry.ClearCreationCooldown(host);
+        var t2 = ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60);
+        Assert.NotNull(t2);
+        ObjectRegistry.ClearCreationCooldown(host, t2.Value);
     }
     [Fact] public void CreationCooldown_ValidationFailure_DoesNotLeak()
     {
         using var env = GlobalTestEnv.Enter();
         var host = "5.6.7.8";
         var now = 2000.0;
-        ObjectRegistry.ClearCreationCooldown(host);
-        Assert.True(ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60));
-        ObjectRegistry.ClearCreationCooldown(host);
+        CreationCooldownStore.Clear();
+        var t1 = ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60);
+        Assert.NotNull(t1);
+        ObjectRegistry.ClearCreationCooldown(host, t1.Value);
         Assert.False(ObjectRegistry.CreationCooldownActive(host, now + 1));
-        Assert.True(ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60));
-        ObjectRegistry.ClearCreationCooldown(host);
+        var t2 = ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60);
+        Assert.NotNull(t2);
+        ObjectRegistry.ClearCreationCooldown(host, t2.Value);
     }
     [Fact] public void Set_Protects_AccessTags_Name_ButNotAliasesDesc()
     {

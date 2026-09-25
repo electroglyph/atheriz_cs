@@ -21,6 +21,10 @@ public static class SessionPuppetHelper
             // already unwound the old one, so attaching here would orphan the
             // character on a dead session.
             if (session.Closed) notAvailable = true;
+            // Session-side single-puppet gate: the character side is
+            // checked above, but two concurrent attaches for different
+            // characters must not both succeed on one session.
+            else if (session.Puppet is not null) notAvailable = true;
             else
             {
                 character.SyncRoot.EnterWriteLock();

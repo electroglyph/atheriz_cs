@@ -7,7 +7,35 @@ public sealed class SocialsCommand : LoggedInCommand
     // mutable static dictionary with no change notification: game code can add or
     // remove entries directly, so there is no single invalidation point where a
     // cached snapshot could be refreshed. Caching here would serve stale aliases.
-    public override IReadOnlyList<string> Aliases => SocialsDict.Keys.ToList();
+    // The snapshot is taken under SocialsLock; legacy direct writes racing
+    // the copy retry boundedly instead of throwing mid-dispatch.
+    private static readonly Lock SocialsLock = new();
+    public override IReadOnlyList<string> Aliases => SnapshotSocialNames();
+    // Cooperative mutation: locked, so dispatch-table reads never tear.
+    public static void AddSocial(string name, (string self, string target) templates)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        lock (SocialsLock) SocialsDict[name] = templates;
+    }
+    public static bool RemoveSocial(string name)
+    {
+        lock (SocialsLock) return SocialsDict.Remove(name);
+    }
+    internal static List<string> SnapshotSocialNames()
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                lock (SocialsLock) return SocialsDict.Keys.ToList();
+            }
+            catch (InvalidOperationException) when (attempt < 64) { continue; }
+        }
+    }
+    internal static bool TryGetSocial(string verb, out (string self, string target) templates)
+    {
+        lock (SocialsLock) return SocialsDict.TryGetValue(verb, out templates);
+    }
     public override string Desc => "Social commands. Use 'help socials' for list.";
     public override string Category => "Socials";
     public static readonly Dictionary<string, (string self, string target)> SocialsDict = new(StringComparer.OrdinalIgnoreCase)
@@ -80,7 +108,7 @@ public sealed class SocialsCommand : LoggedInCommand
         // CmdString on directly-constructed ParsedArgs.
         string verb = pa.CmdString ?? "";
         if (string.IsNullOrEmpty(verb)) return;
-        if (!SocialsDict.TryGetValue(verb, out var templates))
+        if (!TryGetSocial(verb, out var templates))
         {
             go.Msg($"This command is meant to be invoked via one of its aliases: {string.Join(", ", Aliases)}");
             return;

@@ -16,6 +16,11 @@ public static class ServerLifecycle
     // (Monitor is re-entrant; nesting is safe). the alias is gone —
     // one name, one lock.
     private static bool _shutdownCompleted = false;
+    // Startup generation: DoStartup runs long and unlocked, so a
+    // shutdown completing mid-flight (or a second startup) must invalidate
+    // the trailing `_startupSucceeded = true`. The commit at the end only
+    // lands for the latest generation with no shutdown since.
+    private static long _startupGen;
     // Readiness flag for /ready (liveness stays /health per AGENTS webclient constraint).
     // Set only after DoStartup runs to completion; cleared when a new startup begins.
     private static volatile bool _startupSucceeded = false;
@@ -28,7 +33,8 @@ public static class ServerLifecycle
     public static void DoStartup(AtherizSettings? settings = null)
     {
         settings ??= AtherizSettings.Global;
-        lock (StartStop.WorldLock) _shutdownCompleted = false;
+        long gen;
+        lock (StartStop.WorldLock) { _shutdownCompleted = false; gen = ++_startupGen; }
         _startupSucceeded = false;
 
         // Guard paths — atheriz/atheriz.py:508 etc already done in Program, but repeat for direct calls
@@ -53,7 +59,13 @@ public static class ServerLifecycle
         }
 
         AtherizLogger.LogInformation("[Lifecycle] DoStartup completed.");
-        _startupSucceeded = true;
+        // Generation commit: a shutdown that completed mid-flight, or
+        // a newer startup, leaves success false — /ready must not report ok
+        // on a shut-down world.
+        lock (StartStop.WorldLock)
+        {
+            _startupSucceeded = gen == Volatile.Read(ref _startupGen) && !_shutdownCompleted;
+        }
     }
 
     /// <summary>
@@ -101,7 +113,7 @@ public static class ServerLifecycle
     /// </summary>
     public static void Reset()
     {
-        lock (StartStop.WorldLock) _shutdownCompleted = false;
+        lock (StartStop.WorldLock) { _shutdownCompleted = false; _startupGen++; }
         _startupSucceeded = false;
         try { StartStop.Reset(); } catch { }
     }

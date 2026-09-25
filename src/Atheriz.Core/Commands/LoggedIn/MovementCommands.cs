@@ -334,6 +334,10 @@ public sealed class LoggedInExitCommand : Command
                 if (door.Closed && door.TryOpen(c))
                 {
                     ClearFollowing(c);
+                    // Re-validate the open verdict: a close/remove/
+                    // relock landing between TryOpen and MoveTo must not be
+                    // walked through.
+                    if (door.Closed) { RestoreClosedDoor(door, c); return; }
                     bool moved = false;
                     try { moved = c.MoveTo(dest, null, false, true, lookup); }
                     catch
@@ -354,6 +358,8 @@ public sealed class LoggedInExitCommand : Command
                 else if (!door.Closed)
                 {
                     ClearFollowing(c);
+                    // Same re-validation as the TryOpen path.
+                    if (door.Closed) return;
                     c.MoveTo(dest, null, false, true, lookup);
                     return;
                 }

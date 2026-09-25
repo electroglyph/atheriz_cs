@@ -13,6 +13,10 @@ public partial class GameObject
     /// </summary>
     public virtual void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null)
     {
+        // Deleted receivers take no delivery: a Delete landing
+        // between the broadcast snapshot and this call must not grow a
+        // dead object's log or forward on a detached session.
+        if (IsDeleted) return;
         // Resolve parsed text if funcparser tokens present
         string parsed = text;
         if (!string.IsNullOrEmpty(parsed) && (parsed.Contains('$') || parsed.Contains('{')))
@@ -49,6 +53,9 @@ public partial class GameObject
         // Bounded like Channel history (see MsgLogLimit = 200).
         try
         {
+            // Re-check under the hold: the early return above can lose to
+            // a concurrent Delete.
+            if (_flags.IsDeleted) return;
             _msgLog.Add(parsed); while (_msgLog.Count > MsgLogLimit) _msgLog.RemoveAt(0);
             sess = _session;
         }

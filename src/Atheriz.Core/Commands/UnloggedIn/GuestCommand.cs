@@ -77,19 +77,18 @@ public sealed class GuestCommand : Command
         {
             var settings = Settings.AtherizSettings.Global;
             if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Guest accounts are not enabled."); return; }
-            string rateKey = CreationCooldownHelper.RateKey(caller);
             if (!CreationCooldownHelper.TryReserve(caller, "guest")) return;
             string name = await caller.Session.Prompt("Enter a name for your guest character:", false, ct).ConfigureAwait(false);
             name = name.Trim();
             var err = Validation.ValidateCharacterName(name);
-            if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+            if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
             string gender = await caller.Session.Prompt("Enter your character's gender:", false, ct).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(gender)) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg("Gender cannot be empty."); return; }
+            if (string.IsNullOrWhiteSpace(gender)) { CreationCooldownHelper.Clear(caller); caller.Msg("Gender cannot be empty."); return; }
             gender = gender.Trim();
-            if (string.IsNullOrEmpty(gender)) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg("Gender cannot be empty."); return; }
+            if (string.IsNullOrEmpty(gender)) { CreationCooldownHelper.Clear(caller); caller.Msg("Gender cannot be empty."); return; }
             string desc = await caller.Session.Prompt("Enter a short description of your character:", false, ct).ConfigureAwait(false);
             if (CreationValidation.PcNameExists(name))
-            { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg($"Character with this name ({name}) already exists."); return; }
+            { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
             var character = GameObject.Create(name, desc, isPc: true);
             character.IsTemporary = true;
             character.Gender = gender;
@@ -99,13 +98,12 @@ public sealed class GuestCommand : Command
             }
             catch (InvalidOperationException ex)
             {
-                ObjectRegistry.ClearCreationCooldown(rateKey);
+                CreationCooldownHelper.Clear(caller);
                 caller.Msg(ex.Message);
                 try { character.IsDeleted = true; } catch (Exception) { }
                 return;
             }
-            double now2 = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
-            ObjectRegistry.ApplyCreationCooldown("guest", rateKey, now2, settings.CreationCooldown);
+            CreationCooldownHelper.Apply(caller, "guest");
             // puppet with lock mirroring Python
             if (!CharacterPuppetSetup.AttachAndHome(caller, character)) return;
             caller.Msg($"Guest {name} created.");

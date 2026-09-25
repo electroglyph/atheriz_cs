@@ -77,6 +77,10 @@ public class InputFuncs
             TaskCompletionSource<string>? future = null;
             bool masked = false;
             bool closed;
+            // Single-section snapshot: closed/future/puppet must come
+            // from one hold — the old split reads let AtDisconnect land
+            // between them and route late input to ResolveUnloggedIn.
+            Atheriz.Core.Objects.GameObject? puppet = null;
             lock (session.Lock)
             {
                 closed = session.Closed;
@@ -92,6 +96,7 @@ public class InputFuncs
                     future = null;
                     masked = false;
                 }
+                puppet = session.Puppet;
             }
             // A session past AtDisconnect dispatches nothing: its puppet is
             // unwound and its teardown already ran, so late input is dropped
@@ -107,10 +112,6 @@ public class InputFuncs
                 return;
             }
             if (string.IsNullOrEmpty(text)) return;
-
-            // snapshot puppet once — inputfuncs.py:284-286
-            Atheriz.Core.Objects.GameObject? puppet = null;
-            lock (session.Lock) puppet = session.Puppet;
 
             if (puppet is not null)
             {
@@ -410,6 +411,13 @@ public class InputFuncs
         if (result.Status == Globals.MapEditStatus.Reject)
         {
             connection.SendCommand("map_edit_reject", new List<object?>{ result.Reason }, []);
+            // A dead key (grant→disconnect race) fails closed with no
+            // hint — tell the user to reopen the editor. The wire reason is
+            // unchanged for older clients.
+            if (result.Reason == "unknown_key")
+            {
+                try { connection.Msg("The map editor session expired. Reopen the editor with the draw command."); } catch (Exception) { }
+            }
             return null;
         }
         return result;
@@ -590,9 +598,16 @@ public class InputFuncs
                 var failed = grid.ApplyMoves(roomMoves);
                 // already validated — a refusal here means a cross-message
                 // validate->apply TOCTOU or a stale chain, worth one line).
+                // Surface the refusal to the client as moves_denied
+                // (the draw editor rolls denied moves back) instead of only
+                // logging — otherwise the client keeps showing a move the
+                // server never applied (silent partial apply).
                 if (failed.Count > 0)
+                {
                     try { Atheriz.Core.AtherizLogger.LogWarning($"[MapEdit] ApplyMoves refused {failed.Count}/{roomMoves.Count} moves on {result.Chain.Area} z={result.Chain.Z}: {string.Join(";", failed.Take(5))}"); }
                     catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.MapEditHandler: " + logEx.Message, "ConnectionManager"); }
+                    try { connection.SendCommand("moves_denied", new List<object?> { seq, result.NewKey, failed }, []); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.MapEditHandler: " + logEx.Message, "ConnectionManager"); }
+                }
             }
         }
         connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);

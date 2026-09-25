@@ -42,6 +42,9 @@ public class Door
     // RemapDoors' Lock3 -> door order would be an ABBA edge. The single
     // release-then-mark at the end of SetEndpoints replaces them.
     private bool _deferMark; // only touched under the write hold
+    // Mark generation for the suppression check below: dirty flags are
+    // idempotent, so only "no mark fired at all" loses a change.
+    private long _markGen;
     public Coord FromCoord
     {
         get { using (ReadScope()) return field; }
@@ -53,7 +56,7 @@ public class Door
                 changed = !EqualityComparer<Coord>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     // Paired endpoint publish: the two setters above are single-field (kept for
@@ -73,7 +76,7 @@ public class Door
             }
             finally { _deferMark = false; }
         }
-        if (changed) MarkNodeDoorsModified();
+        if (changed) SendDoorsModifiedMark();
     }
     public string FromExit
     {
@@ -87,7 +90,7 @@ public class Door
                 changed = !EqualityComparer<string>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     public Coord ToCoord
@@ -101,7 +104,7 @@ public class Door
                 changed = !EqualityComparer<Coord>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     public string ToExit
@@ -116,7 +119,7 @@ public class Door
                 changed = !EqualityComparer<string>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     public (int X, int Y)? SymbolCoord
@@ -130,7 +133,7 @@ public class Door
                 changed = !EqualityComparer<(int X, int Y)?>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     public string ClosedSymbol
@@ -145,7 +148,7 @@ public class Door
                 changed = !EqualityComparer<string>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     public string OpenSymbol
@@ -160,7 +163,7 @@ public class Door
                 changed = !EqualityComparer<string>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     public bool Closed
@@ -174,7 +177,7 @@ public class Door
                 changed = !EqualityComparer<bool>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     } = true;
     public bool Locked
@@ -188,7 +191,7 @@ public class Door
                 changed = !EqualityComparer<bool>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     public string Name
@@ -203,7 +206,7 @@ public class Door
                 changed = !EqualityComparer<string>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     public string DoorDesc
@@ -218,7 +221,7 @@ public class Door
                 changed = !EqualityComparer<string>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     public int? KeyId
@@ -232,7 +235,7 @@ public class Door
                 changed = !EqualityComparer<int?>.Default.Equals(field, value);
                 if (changed) field = value;
             }
-            if (changed && !_deferMark) MarkNodeDoorsModified();
+            MarkAfterWrite(changed);
         }
     }
     /// <summary>
@@ -250,6 +253,28 @@ public class Door
             try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); }
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Door.MarkNodeDoorsModified: " + logEx.Message, "Door"); }
+    }
+
+    // Mark send + generation bump.
+    private void SendDoorsModifiedMark()
+    {
+        Interlocked.Increment(ref _markGen);
+        MarkNodeDoorsModified();
+    }
+
+    // Post-release mark with suppression-generation check: a concurrent
+    // defer window (SetEndpoints) observed here may close without marking
+    // (unchanged endpoints mark nothing), which would lose this write's
+    // mark. A mark fired after this write started already covers it (dirty
+    // flags are idempotent), so suppress only then; otherwise mark
+    // (possibly redundantly — never lost).
+    private void MarkAfterWrite(bool changed)
+    {
+        if (!changed) return;
+        bool suppress;
+        long gen;
+        using (ReadScope()) { suppress = _deferMark; gen = Volatile.Read(ref _markGen); }
+        if (!suppress || Volatile.Read(ref _markGen) == gen) SendDoorsModifiedMark();
     }
 
     private readonly LockTable _lockTable = new();
@@ -406,7 +431,7 @@ public class Door
         finally { _lock.ExitWriteLock(); }
         if (status == "opened")
         {
-            MarkNodeDoorsModified();
+            SendDoorsModifiedMark();
         }
         if (status == "already_open")
         {
@@ -455,7 +480,7 @@ public class Door
             }
         }
         finally { _lock.ExitWriteLock(); }
-        if (opened) MarkNodeDoorsModified();
+        if (opened) SendDoorsModifiedMark();
         return true;
     }
 
@@ -479,7 +504,7 @@ public class Door
         finally { _lock.ExitWriteLock(); }
         if (status == "closed")
         {
-            MarkNodeDoorsModified();
+            SendDoorsModifiedMark();
         }
         if (status == "already_closed")
         {
@@ -520,7 +545,7 @@ public class Door
             }
         }
         finally { _lock.ExitWriteLock(); }
-        if (closed) MarkNodeDoorsModified();
+        if (closed) SendDoorsModifiedMark();
         return true;
     }
 
@@ -548,7 +573,7 @@ public class Door
         finally { _lock.ExitWriteLock(); }
         if (status == "locked")
         {
-            MarkNodeDoorsModified();
+            SendDoorsModifiedMark();
         }
         if (status == "no_access")
         {
@@ -599,7 +624,7 @@ public class Door
         finally { _lock.ExitWriteLock(); }
         if (status == "unlocked")
         {
-            MarkNodeDoorsModified();
+            SendDoorsModifiedMark();
         }
         if (status == "no_access")
         {

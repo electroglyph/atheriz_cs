@@ -55,21 +55,42 @@ public static class ServerHost
         return settings;
     }
 
+    private static readonly Lock _shutdownLock = new();
+    private static IDisposable? _stoppingReg;
+    private static EventHandler? _exitHandler;
+    private static ConsoleCancelEventHandler? _cancelHandler;
+
     private static void RegisterShutdown(IHostApplicationLifetime lifetime, AtherizSettings settings, PidFile? pidFile, bool withToken)
     {
-        lifetime.ApplicationStopping.Register(() =>
+        // Single owner: every run used to append another
+        // ApplicationStopping/ProcessExit/CancelKeyPress registration with no
+        // unregister, so a second host in one process fired N x DoShutdown,
+        // N x pidFile.Release and deleted a different generation's token per
+        // stale closure. Re-registering replaces the previous owner's hooks.
+        Action stopping = () =>
         {
             try { ServerLifecycle.DoShutdown(settings); } catch { }
             try { pidFile?.Release(); } catch { }
             if (withToken) try { AdminToken.DeleteToken(settings.SecretPath); } catch { }
             Console.WriteLine("Server stopped.");
-        });
-        AppDomain.CurrentDomain.ProcessExit += (s, e) =>
+        };
+        EventHandler onExit = (s, e) =>
         {
             try { pidFile?.Release(); } catch { }
             if (withToken) try { AdminToken.DeleteToken(settings.SecretPath); } catch { }
         };
-        Console.CancelKeyPress += (s, e) => { e.Cancel = true; lifetime.StopApplication(); };
+        ConsoleCancelEventHandler onCancel = (s, e) => { e.Cancel = true; lifetime.StopApplication(); };
+        lock (_shutdownLock)
+        {
+            if (_stoppingReg is not null) { try { _stoppingReg.Dispose(); } catch { } _stoppingReg = null; }
+            if (_exitHandler is not null) { try { AppDomain.CurrentDomain.ProcessExit -= _exitHandler; } catch { } _exitHandler = null; }
+            if (_cancelHandler is not null) { try { Console.CancelKeyPress -= _cancelHandler; } catch { } _cancelHandler = null; }
+            _stoppingReg = lifetime.ApplicationStopping.Register(stopping);
+            _exitHandler = onExit;
+            AppDomain.CurrentDomain.ProcessExit += _exitHandler;
+            _cancelHandler = onCancel;
+            Console.CancelKeyPress += _cancelHandler;
+        }
     }
 
     public static async Task<int> RunForegroundAsync(int? portOverride, string? hostOverride, int? telnetOverride)

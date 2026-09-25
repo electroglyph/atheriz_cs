@@ -91,7 +91,7 @@ public class Section3BatchEPinsTests
         {
             ObjectRegistry.ApplyCreationCooldown("account", "10.0.0.2", 1000, 60);
             Assert.True(CreationCooldownStore.CreationCooldownActive("10.0.0.2", 1010));
-            CreationCooldownStore.ClearCreationCooldown("10.0.0.2");
+            CreationCooldownStore.Clear();
             Assert.False(ObjectRegistry.CreationCooldownActive("10.0.0.2", 1010));
         }
         finally { ObjectRegistry.ClearAll(); }

@@ -51,9 +51,10 @@ public sealed class MapEditLegendNormalizationTests
         // consume (unknown key) — not the entry check — rejects it.
         var ok = new TestConnection();
         funcs.MapEditLegendHandler(ok, ["nope", 1, new List<object?> { Je("{\"symbol\":\"@\"}") }], []);
-        Assert.Single(ok.Sent);
+        Assert.Equal(2, ok.Sent.Count);
         Assert.Equal("map_edit_reject", ok.Sent[0].Cmd);
         Assert.Equal("unknown_key", ok.Sent[0].Args[0]);
+        Assert.Equal("text", ok.Sent[1].Cmd);
         // Invalid JsonElement object is rejected at its index.
         var bad = new TestConnection();
         funcs.MapEditLegendHandler(bad, ["k", 1, new List<object?> { Je("{\"symbol\":\"\"}") }], []);

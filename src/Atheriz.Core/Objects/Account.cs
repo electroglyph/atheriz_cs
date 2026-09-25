@@ -132,6 +132,28 @@ public class Account : GameObject
         PasswordHash = HashPassword(password, saltOverride);
     }
 
+    // Atomic verify-and-set for future change-password flows: the
+    // split CheckPassword-then-SetPassword lets an interleaved rotation get
+    // blindly overwritten. Hashes outside the lock (PBKDF2 is ~100ms);
+    // the write lock only commits when the stored hash still matches the
+    // verified generation. Contrast Login's under-write-lock re-verify.
+    public bool ChangePassword(string currentPassword, string newPassword, string? saltOverride = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(newPassword);
+        string currentHash = HashPassword(currentPassword, saltOverride);
+        string newHash = HashPassword(newPassword, saltOverride);
+        SyncRoot.EnterWriteLock();
+        try
+        {
+            if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(currentHash), Encoding.UTF8.GetBytes(_passwordHash)))
+                return false;
+            _passwordHash = newHash;
+            IsModified = true;
+            return true;
+        }
+        finally { SyncRoot.ExitWriteLock(); }
+    }
+
     public bool Login(string name, string password, string? saltOverride = null)
     {
         // Snapshot under a read lock, verify outside: PBKDF2 is ~100ms of CPU and
@@ -176,6 +198,22 @@ public class Account : GameObject
     {
         SyncRoot.EnterWriteLock();
         try { if (!_characters.Contains(character.Id)) { _characters.Add(character.Id); IsModified = true; } }
+        finally { SyncRoot.ExitWriteLock(); }
+    }
+    // Atomic limit-aware reserve for character creation: the old
+    // check (Count >= MaxCharacters at the call site) then AddCharacter
+    // let two concurrent creates both pass and exceed the cap.
+    // Returns false when the cap is already reached (character not added).
+    public bool TryAddCharacter(GameObject character, int maxCharacters)
+    {
+        SyncRoot.EnterWriteLock();
+        try
+        {
+            if (_characters.Contains(character.Id)) return true;
+            if (_characters.Count >= maxCharacters) return false;
+            _characters.Add(character.Id); IsModified = true;
+            return true;
+        }
         finally { SyncRoot.ExitWriteLock(); }
     }
     public void RemoveCharacter(GameObject character)

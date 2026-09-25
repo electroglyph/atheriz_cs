@@ -4,10 +4,14 @@ public static class ConnectionScreen
 {
     // Shared gate for the unlogged-in hint lines: a hint must agree with the
     // dispatch gate (IsUnloggedInEnabled), not just the display setting.
-    private static string HintText(bool enabled, Commands.Command cmd, string text)
+    // Single-generation: the gate probe shares one captured dispatch pair,
+    // so a settings swap mid-render cannot advertise a disabled path (or
+    // hide an enabled one) with a torn half-old hint. The display flag stays
+    // the caller's settings; the gate legs stay the dispatcher's.
+    private static string HintText(bool enabled, Commands.Command cmd, string text, AtherizSettings dispatch, AtherizSettings live)
     {
         if (!enabled) return "";
-        try { if (!Commands.CommandDispatcher.IsUnloggedInEnabled(cmd)) return ""; } catch { }
+        try { if (!Commands.CommandDispatcher.IsUnloggedInEnabled(cmd, dispatch, live)) return ""; } catch { }
         return text;
     }
     // Static gate probes: the commands are stateless (Key/Desc get-only,
@@ -19,9 +23,17 @@ public static class ConnectionScreen
     // hints must agree with the dispatch gate, not just the display
     // settings — the gate also requires the dispatcher snapshot.
     private static string GuestText(AtherizSettings? s = null)
-        => HintText((s ?? AtherizSettings.Global).GuestEnabled, GuestProbe, "enter 'guest' to create a temporary character");
+    {
+        var settings = s ?? AtherizSettings.Global;
+        var live = AtherizSettings.Global;
+        return HintText(settings.GuestEnabled, GuestProbe, "enter 'guest' to create a temporary character", Commands.CommandDispatcher.SnapshotSettings(), live);
+    }
     private static string CreateText(AtherizSettings? s = null)
-        => HintText((s ?? AtherizSettings.Global).AccountCreationEnabled, CreateProbe, "enter 'create' to make a new account");
+    {
+        var settings = s ?? AtherizSettings.Global;
+        var live = AtherizSettings.Global;
+        return HintText(settings.AccountCreationEnabled, CreateProbe, "enter 'create' to make a new account", Commands.CommandDispatcher.SnapshotSettings(), live);
+    }
 
     private const string Screen = """
        _____   __  .__                 .____________

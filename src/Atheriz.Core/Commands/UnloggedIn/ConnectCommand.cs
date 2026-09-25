@@ -91,6 +91,14 @@ public sealed class ConnectCommand : Command
         string host2 = (caller as BaseConnection)?.ClientHost ?? "?";
         if (host2 != "?") ObjectRegistry.FailedLogins.Remove(host2);
         try { if (caller is BaseConnection bc) bc.FailedLoginAttempts = 0; } catch (Exception) { }
+        // Re-verify the ban after the PBKDF2 window: a ban landing
+        // mid-hash must not bind with the stale pre-hash clearance above.
+        if (account.IsBanned)
+        {
+            caller.Msg($"You have been banned from this server. Reason: {account.BanReason ?? "None specified"}");
+            if (caller is BaseConnection conn2) conn2.Close();
+            return null;
+        }
         return account;
     }
 

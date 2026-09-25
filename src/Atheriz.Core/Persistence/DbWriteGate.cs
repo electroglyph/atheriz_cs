@@ -36,6 +36,12 @@ public static class DbWriteGate
     // a fork — refused fail-fast, like the sync fork path.
     private static long _claimSource;
     private static readonly AsyncLocal<long> _asyncClaim = new();
+    // Outstanding async take per flow: a second EnterAsync landing
+    // while the first still pends nests behind it (sync-Enter parity)
+    // instead of overwriting _asyncClaim and blinding the nested
+    // fast-path below. Single slot, overwritten per take; a completed
+    // task reads as no-outstanding.
+    private static readonly AsyncLocal<Task<WriteHold>?> _asyncPending = new();
     private static long _asyncHolder;
     private static int _asyncHolderThread;
 
@@ -130,9 +136,26 @@ public static class DbWriteGate
             return Task.FromResult(WriteHold.Owned(0));
         }
         if (_recursion.Value > 0) return Task.FromResult(WriteHold.Nested());
+        // Outstanding take on this flow: nest behind it instead of
+        // issuing a second claim that clobbers _asyncClaim. Sync Enter()
+        // re-enters on count>0; the async take chains on the pending
+        // acquisition and completes Nested when the outer holds the permit
+        // (no second semaphore take, no token overwrite).
+        var pending = _asyncPending.Value;
+        if (pending is not null && !pending.IsCompleted)
+        {
+            return pending.ContinueWith(t =>
+            {
+                if (t.Status == TaskStatus.RanToCompletion) return WriteHold.Nested();
+                if (t.Exception is not null) throw t.Exception.InnerException ?? t.Exception;
+                throw new TaskCanceledException(t);
+            }, ct, TaskContinuationOptions.DenyChildAttach, TaskScheduler.Default);
+        }
         long claim = Interlocked.Increment(ref _claimSource);
         _asyncClaim.Value = claim;
-        return EnterAsyncCore(claim, ct);
+        var take = EnterAsyncCore(claim, ct);
+        _asyncPending.Value = take;
+        return take;
     }
 
     private static async Task<WriteHold> EnterAsyncCore(long claim, CancellationToken ct)

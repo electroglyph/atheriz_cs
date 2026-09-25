@@ -1,4 +1,5 @@
 using Atheriz.Core.Commands.LoggedIn;
+using Atheriz.Core.Network;
 using Atheriz.Core.Persistence.Dto;
 
 namespace Atheriz.Core.Objects;
@@ -32,8 +33,16 @@ public partial class GameObject
     // identically, so routing it through the 3-arg overload is wire-identical.
     private void SendSessionCommand(string command, List<object?>? args = null, Dictionary<string, object?>? kwargs = null)
     {
+        // Atomic per-send snapshot: Session then Connection under that
+        // session's lock, so a swap mid-login cannot send on a replaced
+        // connection. A session swap after the snapshot
+        // sends on the captured session, never a torn mix.
         var sess = Session;
-        var conn = sess?.Connection;
+        BaseConnection? conn = null;
+        if (sess is not null)
+        {
+            lock (sess.Lock) { conn = sess.Connection; }
+        }
         if (conn is not null)
             conn.SendCommand(command, args, kwargs);
     }
@@ -87,6 +96,12 @@ public partial class GameObject
         if ((npc.Session is not null && npc.Session != session) || npc.IsDeleted) return false;
         lock (session.Lock)
         {
+            // Single-puppet gate: a stale caller puppeteering while
+            // another puppet is live would overwrite the restore slot wiring
+            // and strand privilege. Stacking stays legal — the live puppet
+            // puppets onward (this == session.Puppet) — as does a fresh
+            // attach after unwind (session.Puppet null).
+            if (session.Puppet is not null && !ReferenceEquals(session.Puppet, this)) return false;
             npc.SyncRoot.EnterReadLock();
             PuppetRestoreSnapshot snapshot;
             Privilege callerPriv;
@@ -109,6 +124,15 @@ public partial class GameObject
             {
                 if (npc.Session is not null && npc.Session != session) { ReattachCaller(session); return false; }
                 if (npc.IsDeleted) { ReattachCaller(session); return false; }
+                // Re-push gate: this target is already live on this
+                // session — pushing again would snapshot the elevated
+                // in-puppet state, so a concurrent Unpuppet's restore
+                // observes pollution and privilege sticks. The restore-pending
+                // half covers the pop-then-restore gap, when the entry has
+                // left the stack but the elevated state is not yet restored.
+                // Refuse without rewiring: the live entry's unwind restores
+                // the caller.
+                if (session.HasPuppetEntryFor(npc) || session.IsRestorePending(npc)) return false;
                 session.PushPuppetEntry(this, npc);
                 npc.SetPuppetRestore(snapshot);
                 npc.IsPc = true;
@@ -152,12 +176,25 @@ public partial class GameObject
         // state runs under the lock; game hooks fire after release.
         lock (session.Lock)
         {
+            // Ownership gate: pop only an entry this caller owns — the
+            // live target unwinding itself or the originator reclaiming its
+            // puppet. Popping whatever sits on top lets a concurrent
+            // Unpuppet steal another puppet's entry and skip its restore
+            // (stuck privilege).
+            if (!session.TryPeekPuppetEntry(out var topPrev, out var top) || top is null)
+                return false;
+            if (!ReferenceEquals(top, this) && !ReferenceEquals(topPrev, this))
+                return false;
             if (!session.TryPopPuppetEntry(out var prevEntry, out target) || target is null) return false;
             prev = prevEntry;
             // Read the restore here; applied after AtUnpuppet below so game
             // hooks observe the pre-restore target like puppet.py:164-192.
             restore = target.GetPuppetRestore();
             target.Session = null;
+            // Hold the restore-pending marker until the tail below commits
+            // or stands down: without it a push landing in the
+            // pop-then-restore gap snapshots pollution.
+            session.MarkRestorePending(target);
             if (prev is null || prev.IsDeleted)
             {
                 session.Puppet = null;
@@ -170,7 +207,9 @@ public partial class GameObject
         }
         // prev is never null in practice (Puppet always pushes a live
         // origin), so the fallback only satisfies the type system.
-        Suppress("Unpuppet", () => target.AtUnpuppet(prev ?? target));
+        try
+        {
+            Suppress("Unpuppet", () => target.AtUnpuppet(prev ?? target));
         // Ownership re-check: a concurrent Puppet during AtUnpuppet owns the target
         // now. A stolen target skips BOTH the stale
         // restore and AtDisconnect — tearing down another session's live puppet is
@@ -214,6 +253,8 @@ public partial class GameObject
         if (prev is not null && !prev.IsDeleted)
             Suppress("Unpuppet", () => prev.AtPostPuppet());
         return true;
+        }
+        finally { lock (session.Lock) { session.ClearRestorePending(target); } }
     }
 
     // at_post_puppet, at_puppet, at_unpuppet
@@ -228,6 +269,9 @@ public partial class GameObject
             List<int> channelsCopy = ChannelsSnapshot;
             foreach (var c in channelsCopy)
             {
+                // A Delete landing mid-login must not resurrect this puppet
+                // as a listener: skip re-adds once deleted.
+                if (IsDeleted) break;
                 Suppress("AtPostPuppet", () =>
                 {
                     var ch = ObjectRegistry.GetSingle(c);
@@ -265,7 +309,7 @@ public partial class GameObject
         });
         Suppress("AtPostPuppet", () =>
         {
-            foreach (var key in SocialsCommand.SocialsDict.Keys)
+            foreach (var key in SocialsCommand.SnapshotSocialNames())
                 commands.Add(key);
         });
         Suppress("AtPostPuppet", () => SendSessionCommand("player_commands", new List<object?> { commands }, null));

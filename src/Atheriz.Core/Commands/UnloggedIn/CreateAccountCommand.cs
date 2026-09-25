@@ -75,20 +75,18 @@ public sealed class CreateAccountCommand : Command
         {
             var settings = Settings.AtherizSettings.Global;
             if (!CommandDispatcher.IsUnloggedInEnabled(this)) { caller.Msg("Account creation is not enabled."); return; }
-            string rateKey = CreationCooldownHelper.RateKey(caller);
             if (!CreationCooldownHelper.TryReserve(caller, "account")) return;
             string name = await caller.Session.Prompt("Enter an account name:", false, ct).ConfigureAwait(false);
             name = name.Trim();
             var err = ValidateInputs(name);
-            if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+            if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
             string password = await caller.Session.Prompt("Enter a password:", false, ct).ConfigureAwait(false);
             err = ValidateInputs(name, password);
-            if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+            if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
             try
             {
                 var account = Account.Create(name, password);
-                double now2 = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
-                ObjectRegistry.ApplyCreationCooldown("account", rateKey, now2, settings.CreationCooldown);
+                CreationCooldownHelper.Apply(caller, "account");
                 caller.Session.Account = account;
                 caller.SendCommand("logged_in");
                 if (settings.CharCreationEnabled)
@@ -101,7 +99,7 @@ public sealed class CreateAccountCommand : Command
                     caller.Msg("Account created. Character creation is not enabled.");
                 }
             }
-            catch (Exception ex) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(ex.Message); }
+            catch (Exception ex) { CreationCooldownHelper.Clear(caller); caller.Msg(ex.Message); }
         }
         catch (OperationCanceledException) { return; }
     }

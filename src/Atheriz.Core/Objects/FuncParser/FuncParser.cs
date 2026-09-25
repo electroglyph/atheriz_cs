@@ -61,6 +61,44 @@ public class FuncParser
 
     public static readonly Dictionary<string, ParserCallable> FuncParserCallables;
     public static readonly Dictionary<string, ParserCallable> ActorStanceCallables;
+    // Guards cooperative mutation through the helpers below. Raw writes
+    // straight to the tables still work (back-compat) but race readers; the
+    // static Parse path snapshots under this lock, with a bounded retry for
+    // legacy direct writes landing mid-copy.
+    private static readonly Lock CallableLock = new();
+    // Cooperative custom-$func registration: locked, so pool-thread
+    // parses never observe a half-mutated table.
+    public static void AddFuncParserCallable(string name, ParserCallable fn)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentNullException.ThrowIfNull(fn);
+        lock (CallableLock) FuncParserCallables[name] = fn;
+    }
+    public static bool RemoveFuncParserCallable(string name)
+    {
+        lock (CallableLock) return FuncParserCallables.Remove(name);
+    }
+    public static void AddActorStanceCallable(string name, ParserCallable fn)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentNullException.ThrowIfNull(fn);
+        lock (CallableLock) ActorStanceCallables[name] = fn;
+    }
+    public static bool RemoveActorStanceCallable(string name)
+    {
+        lock (CallableLock) return ActorStanceCallables.Remove(name);
+    }
+    internal static Dictionary<string, ParserCallable> SnapshotActorStanceCallables()
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                lock (CallableLock) return new Dictionary<string, ParserCallable>(ActorStanceCallables, StringComparer.Ordinal);
+            }
+            catch (InvalidOperationException) when (attempt < 64) { continue; }
+        }
+    }
 
     // Per-instance configuration and callable table.
     private readonly Dictionary<string, ParserCallable> _callables;
@@ -429,12 +467,14 @@ public class FuncParser
         if (!hasFunc && !hasDirector) return text;
         string afterFunc = text;
         if(hasFunc){
-            // Actor-stance `$` pass over the shared static table.
+            // Actor-stance `$` pass over a snapshot of the shared static
+            // table: game code registering a custom $func mid-parse
+            // must not tear the reader.
             var reserved = new Dictionary<string, object?>(StringComparer.Ordinal);
             if(actor is not null) reserved["caller"]=actor;
             if(receiver is not null) reserved["receiver"]=receiver;
             if(mapping is not null) reserved["mapping"]=mapping;
-            var obj = ParseInternal(text, raiseErrors, escape, strip, true, reserved, ActorStanceCallables, StartChar, EscapeChar, MaxNesting, new Dictionary<string, object?>(StringComparer.Ordinal));
+            var obj = ParseInternal(text, raiseErrors, escape, strip, true, reserved, SnapshotActorStanceCallables(), StartChar, EscapeChar, MaxNesting, new Dictionary<string, object?>(StringComparer.Ordinal));
             afterFunc = obj?.ToString() ?? "";
         }
         if (hasDirector && mapping is not null)

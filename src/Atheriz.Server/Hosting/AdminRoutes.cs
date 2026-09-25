@@ -118,13 +118,25 @@ public static class AdminRoutes
 
             try
             {
-                // return its printed output (StringWriter = redirect_stdout).
-                var sb = new StringBuilder();
-                using var sw = new StringWriter(sb);
-                ServerEvents.AtCharCreate(accountName, charName, password, sw);
-                var message = sb.ToString().Trim();
-                if (string.IsNullOrEmpty(message)) message = "Account created.";
+                // Offloaded to the pool with a watchdog: AtCharCreate
+                // runs validation, PBKDF2, MoveTo and SaveObjects disk I/O
+                // inline — parking a Kestrel worker 100 ms+ per create lets a
+                // burst of creates starve legit admin traffic (head-of-line
+                // blocking). Same 60 s watchdog shape as hot_reload above.
+                string message = await Task.Run(() =>
+                {
+                    var sb = new StringBuilder();
+                    using var sw = new StringWriter(sb);
+                    ServerEvents.AtCharCreate(accountName, charName, password, sw);
+                    var m = sb.ToString().Trim();
+                    return string.IsNullOrEmpty(m) ? "Account created." : m;
+                }).WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false);
                 return AdminOk(message);
+            }
+            catch (TimeoutException)
+            {
+                AtherizLogger.LogError("[CreateAccount] Create exceeded 60s watchdog; continuing in background.");
+                return AdminError("Create timed out after 60s; still running in background.");
             }
             catch (Exception ex)
             {

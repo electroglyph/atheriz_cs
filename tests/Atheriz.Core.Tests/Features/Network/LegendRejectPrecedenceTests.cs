@@ -77,9 +77,13 @@ public sealed class LegendRejectPrecedenceTests
             var conn = Conn();
             new InputFuncs().MapEditLegendHandler(conn,
                 ["bogus-key", 1, new List<object?> { Entry("@") }], []);
-            Assert.Single(conn.Sent);
+            // Unknown-key rejects also carry the reopen hint; the
+            // wire reason stays first and unchanged for older clients.
+            Assert.Equal(2, conn.Sent.Count);
             Assert.Equal("map_edit_reject", conn.Sent[0].Cmd);
             Assert.Equal("unknown_key", conn.Sent[0].Args[0]);
+            Assert.Equal("text", conn.Sent[1].Cmd);
+            Assert.Contains("Reopen the editor", conn.Sent[1].Args[0]?.ToString());
         }
         finally { ResetChains(); }
     }
@@ -113,9 +117,13 @@ public sealed class LegendRejectPrecedenceTests
             for (int i = 0; i < 200; i++) many.Add(Entry("@"));
             var conn = Conn();
             new InputFuncs().MapEditLegendHandler(conn, ["bogus-key", 1, many], []);
-            Assert.Single(conn.Sent);
+            // 200 entries pass the count check, so consume runs and the
+            // unknown key rejects with the reopen hint.
+            Assert.Equal(2, conn.Sent.Count);
             Assert.Equal("map_edit_reject", conn.Sent[0].Cmd);
             Assert.Equal("unknown_key", conn.Sent[0].Args[0]);
+            Assert.Equal("text", conn.Sent[1].Cmd);
+            Assert.Contains("Reopen the editor", conn.Sent[1].Args[0]?.ToString());
         }
         finally { ResetChains(); }
     }

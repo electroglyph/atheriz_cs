@@ -215,6 +215,17 @@ public sealed class AsyncTicker
 
         private void TickOnce(Delegate coro)
         {
+            // Membership re-check: a RemoveCoro landing after the batch
+            // submit must not fire the removed delegate. Drop the pending
+            // mark and return without invoking.
+            lock (_lock)
+            {
+                if (!_coros.Contains(coro))
+                {
+                    _pending.Remove(coro);
+                    return;
+                }
+            }
             try
             {
                 if (coro is Func<CancellationToken, Task> cancelFunc)

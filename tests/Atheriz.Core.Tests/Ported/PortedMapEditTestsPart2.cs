@@ -119,9 +119,13 @@ public class PortedMapEditTestsPart2
         Reset();
         var conn = MakeConn();
         new InputFuncs().MapEditHandler(conn, new List<object?>{"bogus",1,new List<object?>()}, new Dictionary<string,object?>());
-        Assert.Single(((FakeConn2)conn).Sent);
+        // The wire reject is unchanged for older clients; the dead key also
+        // carries the reopen hint.
+        Assert.Equal(2, ((FakeConn2)conn).Sent.Count);
         Assert.Equal("map_edit_reject", ((FakeConn2)conn).Sent[0].Cmd);
         Assert.Equal("unknown_key", ((FakeConn2)conn).Sent[0].Args[0] as string);
+        Assert.Equal("text", ((FakeConn2)conn).Sent[1].Cmd);
+        Assert.Contains("reopen", ((FakeConn2)conn).Sent[1].Args[0] as string ?? "", StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact] public void MapEditRejectReplay()

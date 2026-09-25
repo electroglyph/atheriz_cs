@@ -26,6 +26,8 @@ public sealed class TelnetSessionReader : TextReader
     // does the work everywhere. Exactly once per connection; later FEFF is data.
     private bool _preamble = true;
 
+    private int _activeReaders;
+
     public TelnetSessionReader(ServerSession session, CancellationToken stopping = default)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -56,40 +58,49 @@ public sealed class TelnetSessionReader : TextReader
             return 0;
         }
 
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_stopping, callerToken);
-        while (true)
+        // Single-consumer guard: the carry/pos/preamble state is pump
+        // state — concurrent readers interleave and duplicate input. Fail
+        // fast instead of corrupting both streams.
+        if (Interlocked.CompareExchange(ref _activeReaders, 1, 0) != 0)
+            throw new InvalidOperationException("TelnetSessionReader supports a single concurrent reader.");
+        try
         {
-            if (_pos < _carry.Length)
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(_stopping, callerToken);
+            while (true)
             {
-                int n = Math.Min(_carry.Length - _pos, destination.Length);
-                _carry.AsSpan(_pos, n).CopyTo(destination.Span);
-                _pos += n;
-                return n;
-            }
-
-            _carry = string.Empty;
-            _pos = 0;
-            string slice = await _session.ReadAsync(ReadSlice, linked.Token).ConfigureAwait(false);
-            if (!string.IsNullOrEmpty(slice))
-            {
-                if (_preamble)
+                if (_pos < _carry.Length)
                 {
-                    _preamble = false;
-                    if (slice[0] == '\uFEFF')
-                    {
-                        slice = slice[1..];
-                    }
+                    int n = Math.Min(_carry.Length - _pos, destination.Length);
+                    _carry.AsSpan(_pos, n).CopyTo(destination.Span);
+                    _pos += n;
+                    return n;
                 }
-                _carry = slice;
-                continue;
-            }
 
-            if (!_session.IsConnected || linked.Token.IsCancellationRequested)
-            {
-                return 0;
-            }
+                _carry = string.Empty;
+                _pos = 0;
+                string slice = await _session.ReadAsync(ReadSlice, linked.Token).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(slice))
+                {
+                    if (_preamble)
+                    {
+                        _preamble = false;
+                        if (slice[0] == '\uFEFF')
+                        {
+                            slice = slice[1..];
+                        }
+                    }
+                    _carry = slice;
+                    continue;
+                }
 
-            // Live but quiet: keep blocking like a socket read instead of reporting EOF.
+                if (!_session.IsConnected || linked.Token.IsCancellationRequested)
+                {
+                    return 0;
+                }
+
+                // Live but quiet: keep blocking like a socket read instead of reporting EOF.
+            }
         }
+        finally { Volatile.Write(ref _activeReaders, 0); }
     }
 }

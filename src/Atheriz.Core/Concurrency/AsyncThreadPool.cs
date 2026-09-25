@@ -335,11 +335,18 @@ public class AsyncThreadPool : IDisposable
         {
             bool stopped;
             int busy;
-            lock (_lock) { stopped = _stopped; busy = _busy; }
-            if (stopped) return;
             int qsize;
             int limit;
-            lock (_queueLock) { qsize = _queue.Count; limit = _queueLimit; }
+            // Fused snapshot: busy (T0) and queue/limit (T1) taken under
+            // one _lock→_queueLock hold describe one instant — the old split
+            // reads fused states that never coexisted. The order matches
+            // AddInternal, so no new lock inversion.
+            lock (_lock)
+            {
+                stopped = _stopped; busy = _busy;
+                lock (_queueLock) { qsize = _queue.Count; limit = _queueLimit; }
+            }
+            if (stopped) return;
             // use actual queue limit for saturated check, not capped view
             bool saturated = qsize > 0 && (busy >= _maxThreads - 1 || (limit != 0 && qsize >= limit));
             double now = Atheriz.Core.Utils.GameClock.MonotonicSeconds();

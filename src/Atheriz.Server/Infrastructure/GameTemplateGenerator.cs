@@ -108,11 +108,34 @@ public static class GameTemplateGenerator
         // stale save dir with no DB markers (aborted setup) still wipes, and
         // the pre-existing integration test pins stale.txt removal for
         // exactly that shape.
+        FileStream? overwriteWipe = null;
         if (overwrite && folderExistsInitially)
         {
+            // Wipe hold: a starter claiming pid/DB between the liveness
+            // probe below and the deletes would get its save shredded
+            // mid-write. Starters refuse while this is fresh. The hold lasts
+            // through setup below (released after RunSetup or on any abort).
+            var saveDirForLock = Path.Combine(folderPath, "save");
+            overwriteWipe = Infrastructure.PidFile.TryAcquireWipeLock(saveDirForLock);
+            if (overwriteWipe is null)
+            {
+                Console.Error.WriteLine($"Error: another wipe looks to own '{targetPath}'; refusing --overwrite into it.");
+                return false;
+            }
             if (IsLiveServerFolder(folderPath))
             {
                 Console.Error.WriteLine($"Error: a live server looks to own '{targetPath}' (verified server.pid); stop it before --overwrite.");
+                try { overwriteWipe.Dispose(); } catch { }
+                return false;
+            }
+            // Post-hold re-verify: the check above ran after the hold,
+            // but a starter could still claim between it and the deletes
+            // below. Re-check immediately before the first delete so the
+            // check->wipe gap is one step, not the whole probe+setup span.
+            if (IsLiveServerFolder(folderPath))
+            {
+                Console.Error.WriteLine($"Error: a live server claimed '{targetPath}' after the wipe hold; stop it before --overwrite.");
+                try { overwriteWipe.Dispose(); } catch { }
                 return false;
             }
             try
@@ -143,9 +166,14 @@ public static class GameTemplateGenerator
                     try { if (File.Exists(f)) File.Delete(f); } catch { }
             } catch { }
         }
+        void ReleaseWipe()
+        {
+            try { Infrastructure.PidFile.ReleaseWipeLock(overwriteWipe, Path.Combine(folderPath, "save")); } catch { }
+            overwriteWipe = null;
+        }
         Console.WriteLine($"Creating game folder: {targetPath}");
         Directory.CreateDirectory(folderPath);
-        try { Scaffold(folderPath, gName); } catch (Exception ex) { Console.Error.WriteLine($"Error scaffolding game folder: {ex.Message}"); return false; }
+        try { Scaffold(folderPath, gName); } catch (Exception ex) { Console.Error.WriteLine($"Error scaffolding game folder: {ex.Message}"); ReleaseWipe(); return false; }
 // copy web (templates + static)
         try { CopyWebFolder(folderPath); } catch (Exception ex) { Console.Error.WriteLine($"Warning: could not copy web folder: {ex.Message}"); }
         var savePath = Path.Combine(folderPath, "save"); Directory.CreateDirectory(savePath);
@@ -160,9 +188,9 @@ public static class GameTemplateGenerator
             // Success banner below names the superuser — never print it
             // for credentials that cannot produce one (E1).
             var errU = Atheriz.Core.Commands.UnloggedIn.Validation.ValidateAccountName(username);
-            if (errU is not null) { Console.WriteLine($"Error: invalid superuser username: {errU}"); return false; }
+            if (errU is not null) { Console.WriteLine($"Error: invalid superuser username: {errU}"); ReleaseWipe(); return false; }
             var errP = Atheriz.Core.Commands.UnloggedIn.Validation.ValidatePassword(password!);
-            if (errP is not null) { Console.WriteLine($"Error: invalid superuser password: {errP}"); return false; }
+            if (errP is not null) { Console.WriteLine($"Error: invalid superuser password: {errP}"); ReleaseWipe(); return false; }
         }
         if (shouldSetup)
         {
@@ -186,8 +214,10 @@ public static class GameTemplateGenerator
                 // through to the Success banner and `return true` (E1).
                 Console.Error.WriteLine($"Error: initial world setup failed: {ex.Message}");
                 Console.WriteLine("  Run `create` to add superuser later or set ATHERIZ_SUPERUSER_USERNAME/PASSWORD and re-run.");
+                ReleaseWipe();
                 return false;
             }
+            ReleaseWipe();
         }
         Console.WriteLine($"\nSuccess! Game folder '{targetPath}' created/updated with:");
         Console.WriteLine("  Template files:");

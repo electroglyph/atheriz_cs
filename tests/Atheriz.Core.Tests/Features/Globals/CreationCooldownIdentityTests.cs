@@ -12,16 +12,17 @@ public sealed class CreationCooldownIdentityTests
     {
         using var env = GlobalTestEnv.Enter();
         const string host = "10.9.9.1";
-        ObjectRegistry.ClearCreationCooldown(host);
+        CreationCooldownStore.Clear();
         try
         {
-            Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest", host, 1000, 60));
+            var t1 = ObjectRegistry.TryReserveCreationCooldown("guest", host, 1000, 60);
+            Assert.NotNull(t1);
             Assert.True(ObjectRegistry.CreationCooldownActive(host, 1001));
-            Assert.False(ObjectRegistry.TryReserveCreationCooldown("account", host, 1001, 60));
+            Assert.Null(ObjectRegistry.TryReserveCreationCooldown("account", host, 1001, 60));
         }
         finally
         {
-            ObjectRegistry.ClearCreationCooldown(host);
+            CreationCooldownStore.Clear();
         }
     }
 
@@ -30,18 +31,17 @@ public sealed class CreationCooldownIdentityTests
     {
         using var env = GlobalTestEnv.Enter();
         const string host = "CaseHost-Verbatim";
-        ObjectRegistry.ClearCreationCooldown(host);
-        ObjectRegistry.ClearCreationCooldown(host.ToLowerInvariant());
+        CreationCooldownStore.Clear();
         try
         {
-            Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest", host, 1000, 60));
+            var t1 = ObjectRegistry.TryReserveCreationCooldown("guest", host, 1000, 60);
+            Assert.NotNull(t1);
             Assert.True(ObjectRegistry.CreationCooldownActive(host, 1001));
             Assert.False(ObjectRegistry.CreationCooldownActive(host.ToLowerInvariant(), 1001));
         }
         finally
         {
-            ObjectRegistry.ClearCreationCooldown(host);
-            ObjectRegistry.ClearCreationCooldown(host.ToLowerInvariant());
+            CreationCooldownStore.Clear();
         }
     }
 
@@ -50,18 +50,22 @@ public sealed class CreationCooldownIdentityTests
     {
         using var env = GlobalTestEnv.Enter();
         const string host = "CaseHost-10.8.8.2";
-        ObjectRegistry.ClearCreationCooldown(host);
+        CreationCooldownStore.Clear();
         try
         {
-            Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest", host, 1000, 60));
-            ObjectRegistry.ClearCreationCooldown(host.ToUpperInvariant());
+            var t1 = ObjectRegistry.TryReserveCreationCooldown("guest", host, 1000, 60);
+            Assert.NotNull(t1);
+            ObjectRegistry.ClearCreationCooldown(host.ToUpperInvariant(), Guid.NewGuid());
             Assert.True(ObjectRegistry.CreationCooldownActive(host, 1001));
-            ObjectRegistry.ClearCreationCooldown(host);
+            // Exact host but a foreign token also clears nothing.
+            ObjectRegistry.ClearCreationCooldown(host, Guid.NewGuid());
+            Assert.True(ObjectRegistry.CreationCooldownActive(host, 1001));
+            ObjectRegistry.ClearCreationCooldown(host, t1.Value);
             Assert.False(ObjectRegistry.CreationCooldownActive(host, 1001));
         }
         finally
         {
-            ObjectRegistry.ClearCreationCooldown(host);
+            CreationCooldownStore.Clear();
         }
     }
 }

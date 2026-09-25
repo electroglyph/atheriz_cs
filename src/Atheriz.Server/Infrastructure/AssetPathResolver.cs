@@ -46,15 +46,19 @@ public static class AssetPathResolver
         => ResolveEngineDir(Path.Combine("web", "templates"), null);
 
     // Single ordered resolution table: each row is (base selector, sub-path).
-    // Bases resolve lazily per call (CWD can move); rows keep game-before-install order
+    // Bases resolve lazily per call. CWD is snapshotted once per call:
+    // two live reads could straddle a same-process directory change and mix
+    // game/install rows. Rows keep game-before-install order
     // CWD (game) > contentRoot (install) > engine > appBaseDir: the server
     // runs with CWD set to the game folder, so per-game web customizations
     // win over shipped install assets. Dups collapse in ResolveCandidates
     // via Distinct. Sub-path "" means the base itself.
     private static IEnumerable<string?> ResolveTable(string contentRoot, string appBaseDir, string? engineDir, string subA, string subB)
     {
-        yield return Path.Combine(Directory.GetCurrentDirectory(), subA);
-        yield return Path.Combine(Directory.GetCurrentDirectory(), subB);
+        string cwd;
+        try { cwd = Directory.GetCurrentDirectory(); } catch { cwd = ""; }
+        yield return Path.Combine(cwd, subA);
+        yield return Path.Combine(cwd, subB);
         yield return Path.Combine(contentRoot, subA);
         yield return Path.Combine(contentRoot, subB);
         if (engineDir is not null) yield return engineDir;

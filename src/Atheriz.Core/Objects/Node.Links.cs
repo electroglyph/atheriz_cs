@@ -139,8 +139,17 @@ public partial class Node
     }
     public NodeLink? GetRandomLink()
     {
+        // Snapshot copy under the read lock: callers read Name/Coord
+        // off-lock, which tore against a concurrent transition remap. The
+        // copy observes one full generation; identity with the live link is
+        // not preserved (compare by value).
         SyncRoot.EnterReadLock();
-        try { return _links.Count == 0 ? null : _links[Random.Shared.Next(_links.Count)]; }
+        try
+        {
+            if (_links.Count == 0) return null;
+            var live = _links[Random.Shared.Next(_links.Count)];
+            return new NodeLink(live.Name, live.Coord, live.Aliases);
+        }
         finally { SyncRoot.ExitReadLock(); }
     }
     // Insert core shared with AddLinkIfAbsent: caller holds the write lock.
@@ -227,7 +236,7 @@ public partial class Node
         if (found is not null && Coord.Area != found.Coord.Area)
         {
             var nh = NodeHandler.GetCurrent();
-            nh?.RemoveTransition(found.Coord);
+            nh?.RemoveTransition(Coord, found.Coord);
         }
         // also remove exits from occupants
         if (found is not null)
@@ -266,6 +275,9 @@ public partial class Node
         SyncRoot.EnterWriteLock();
         try
         {
+            // Same deleted-parent refusal as the singular path: a deleted
+            // node accepts no new contents.
+            if (IsDeleted) return;
             foreach (var o in objs) AddContent(o.Id);
             IsModified = true;
             foreach (var o in objs) { o.IsModified = true; }
@@ -378,6 +390,7 @@ public partial class Node
     public override string ReturnAppearance(GameObject? looker = null)
     {
         if (looker is null) return "You see nothing here.";
+        if (IsDeleted) return "You see nothing here.";
         // Hookable like the base: game code overriding return_appearance must
         // see node renders too.
         return Hookable(HookName.ReturnAppearance, () =>

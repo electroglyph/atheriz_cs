@@ -386,9 +386,10 @@ public class PortedUnloggedinCommandsTestsPart3
     {
         using var env = GlobalTestEnv.Enter();
         var host = "198.51.100.99";
-        ObjectRegistry.ClearCreationCooldown(host);
-        Assert.True(ObjectRegistry.TryReserveCreationCooldown("account", host, 1000, 60));
+        CreationCooldownStore.Clear();
+        var t1 = ObjectRegistry.TryReserveCreationCooldown("account", host, 1000, 60);
+        Assert.NotNull(t1);
         Assert.True(ObjectRegistry.CreationCooldownActive(host, 1001));
-        ObjectRegistry.ClearCreationCooldown(host);
+        ObjectRegistry.ClearCreationCooldown(host, t1.Value);
     }
 }

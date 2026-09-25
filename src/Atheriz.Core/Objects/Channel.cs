@@ -14,9 +14,23 @@ public class Channel : GameObject
     private readonly Dictionary<int, GameObject> _listeners = new();
     private readonly int _historyLimit;
     private bool _channelDeleted = false;
+    // Mutation generation for the checkpoint flag-dance: every
+    // _listeners/_history/_channelDeleted mutation under _histLock bumps
+    // this. BuildSaveOperation snapshots it with the history and re-dirties
+    // when it moved, so a Msg landing between the history snapshot and the
+    // save flag-clear cannot lose a checkpoint entry.
+    private long _mutGen = 0;
     private Atheriz.Core.Commands.Command? _command;
 
-    public int CreatedBy { get; set; } = -1;
+    private int _createdBy = -1;
+    // Locked: the group kick/leave paths read-modify this across
+    // awaits' worth of interleaving — a plain auto-prop also risks a torn
+    // leadership transfer observation on weak-memory hardware.
+    public int CreatedBy
+    {
+        get { lock (_histLock) return _createdBy; }
+        set { lock (_histLock) _createdBy = value; }
+    }
 
     /// <inheritdoc/>
     public override bool IsKnownProperty(string name) => name switch
@@ -138,12 +152,13 @@ public class Channel : GameObject
         {
             if (_channelDeleted) return;
             _listeners[obj.Id] = obj;
+            _mutGen++;
         }
         IsModified = true;
     }
     public override void RemoveListener(GameObject obj)
     {
-        lock (_histLock) { _listeners.Remove(obj.Id); }
+        lock (_histLock) { _listeners.Remove(obj.Id); _mutGen++; }
         IsModified = true;
     }
     /// <summary>
@@ -182,7 +197,16 @@ public class Channel : GameObject
         {
             // Invalidate the cached command on rename (old cache ignored Name/Desc).
             if (_command is not null && _commandKey == key && _commandDesc == desc) return _command;
-            Atheriz.Core.Commands.BaseChannelCommand cmd = new(this);
+        }
+        // Construct outside the channel lock: the ctor takes the
+        // channel's object read scope, which nests channel -> object — the
+        // inverse of Delete's object -> channel order (ABBA deadlock when a
+        // listener reads its own channel concurrently with its teardown).
+        Atheriz.Core.Commands.BaseChannelCommand cmd = new(this);
+        lock (_histLock)
+        {
+            // Re-check: another thread may have installed meanwhile.
+            if (_command is not null && _commandKey == key && _commandDesc == desc) return _command;
             _command = cmd;
             _commandKey = key;
             _commandDesc = desc;
@@ -200,6 +224,7 @@ public class Channel : GameObject
             _channelDeleted = true;
             toDetach = _listeners.Keys.ToList();
             _listeners.Clear();
+            _mutGen++;
         }
         try { SetIsDeletedRaw(true); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Delete: " + logEx.Message, "Channel"); }
         foreach (var lid in toDetach)
@@ -252,8 +277,15 @@ public class Channel : GameObject
             _history.AddLast(entry);
             while (_history.Count > _historyLimit) _history.RemoveFirst();
             listeners = _listeners.Values.ToList();
+            _mutGen++;
         }
         IsModified = true;
+        // A Delete landing between the snapshot above and this loop
+        // cleared the listeners and detached the peers — delivering now
+        // would ghost-deliver a dead-channel message to detached peers.
+        // The history entry stays (harmless on a deleted channel); only
+        // delivery is dropped. Volatile read, no lock (never nests).
+        if (IsDeletedSnapshot()) return;
         foreach (var listener in listeners)
         {
             // FormatMessage is a pure function of (timestamp, sender, text), so
@@ -299,6 +331,7 @@ public class Channel : GameObject
         lock (_histLock)
         {
             _history.Clear();
+            _mutGen++;
         }
         IsModified = true;
     }
@@ -314,10 +347,22 @@ public class Channel : GameObject
 
     private SaveOperation BuildSaveOperation(bool clearing)
     {
-        List<ChannelHistoryEntry> histSnap = SnapshotHistory();
+        List<ChannelHistoryEntry> histSnap;
+        long genSnap;
+        lock (_histLock) { histSnap = _history.ToList(); genSnap = _mutGen; }
         // Flag dance + post-release encode live in the shared converter core;
         // only the history-snapshot DTO body stays here.
         string json = Persistence.Converters.GameObjectDtoConverter.BuildSaveJson(this, () => BuildDto(histSnap), clearing);
+        if (clearing)
+        {
+            // Checkpoint-miss half: a Msg/Add/Remove/Clear landing
+            // between the snapshot above and the converter's flag-clear set
+            // IsModified before the clear and is lost. The generation moved,
+            // so re-dirty (outside _histLock — no channel->object nesting).
+            bool moved;
+            lock (_histLock) { moved = (_mutGen != genSnap); }
+            if (moved) IsModified = true;
+        }
         return new SaveOperation(Id, json);
     }
 
@@ -352,6 +397,7 @@ public class Channel : GameObject
             _history.Clear();
             foreach (var h in hist) _history.AddLast(h);
             while (_history.Count > _historyLimit) _history.RemoveFirst();
+            _mutGen++;
         }
     }
 }

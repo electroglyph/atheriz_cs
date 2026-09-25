@@ -81,7 +81,62 @@ public static class AtherizDbContextFactory
     // Transition incl. FromCoord). Undecodable rows (e.g. Python dill
     // blobs — a separate format boundary, JSON vs dill) are dropped with a
     // loud warning; the row loader skips them anyway.
+    // Cross-process guard: DbWriteGate is process-local, but this DDL
+    // is cross-process-visible — two starters would both CREATE/DROP/RENAME
+    // and one would throw. A save-dir lock file serializes starters.
+    // Timed-wait gate for the backoff below (no Thread.Sleep — hygiene rule).
+    private static readonly object MigrationBackoff = new();
     public static void MigrateTransitionsTable(AtherizDbContext ctx)
+    {
+        string? lockDir = null;
+        try
+        {
+            if (ctx.Database.GetDbConnection() is Microsoft.Data.Sqlite.SqliteConnection sqliteConn
+                && !string.IsNullOrEmpty(sqliteConn.DataSource)
+                && sqliteConn.DataSource != ":memory:")
+                lockDir = Path.GetDirectoryName(Path.GetFullPath(sqliteConn.DataSource));
+        }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MigrateTransitionsTable lock-dir resolve: " + logEx.Message, "AtherizDbContextFactory"); }
+        if (lockDir is null)
+        {
+            MigrateTransitionsTableCore(ctx);
+            return;
+        }
+        string lockPath = Path.Combine(lockDir, "migration.lock");
+        // Bounded wait like the gate: a stuck holder fails loud instead of
+        // hanging boot forever. The file persists (deleting it would reopen
+        // the race for the next contender on platforms without delete
+        // semantics tied to the open handle).
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (true)
+        {
+            FileStream? held = null;
+            try
+            {
+                try { Directory.CreateDirectory(lockDir); } catch (Exception) { }
+                // Exclusive open (FileShare.None): the second starter gets a
+                // sharing violation while the first holds the migration.
+                held = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) { held = null; }
+            catch (UnauthorizedAccessException) { held = null; }
+            if (held is not null)
+            {
+                using (held)
+                {
+                    MigrateTransitionsTableCore(ctx);
+                    return;
+                }
+            }
+            if (DateTimeOffset.UtcNow >= deadline)
+                throw new TimeoutException($"Timed out waiting for migration lock at {lockPath}.");
+            // Brief backoff before retrying the exclusive open: timed wait on
+            // a gate nothing signals, so the timeout is the backoff.
+            lock (MigrationBackoff) Monitor.Wait(MigrationBackoff, TimeSpan.FromMilliseconds(20));
+        }
+    }
+
+    private static void MigrateTransitionsTableCore(AtherizDbContext ctx)
     {
         DbWriteGate.Enter();
         try
@@ -117,7 +172,7 @@ public static class AtherizDbContextFactory
                 }
                 int dropped = 0;
                 using var txn = conn.BeginTransaction();
-                ExecuteNonQuery(conn, txn, "CREATE TABLE \"transitions_new\" (\"FromArea\" TEXT NOT NULL, \"FromX\" INTEGER NOT NULL, \"FromY\" INTEGER NOT NULL, \"FromZ\" INTEGER NOT NULL, \"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"FromArea\",\"FromX\",\"FromY\",\"FromZ\",\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))");
+                ExecuteNonQuery(conn, txn, "CREATE TABLE IF NOT EXISTS \"transitions_new\" (\"FromArea\" TEXT NOT NULL, \"FromX\" INTEGER NOT NULL, \"FromY\" INTEGER NOT NULL, \"FromZ\" INTEGER NOT NULL, \"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"FromArea\",\"FromX\",\"FromY\",\"FromZ\",\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))");
                 // One INSERT command for the whole loop, rebound per row: minting a
                 // command + eight parameters per row dominated large migrations.
                 // Every parameter is rebound for EVERY row below — a stale binding

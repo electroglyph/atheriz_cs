@@ -19,6 +19,9 @@ public partial class GameObject
         return Hookable(HookName.AtLook, () =>
         {
             if (target is null) return "You see nothing here.";
+            // A Delete landing between the gate and the render must not leak
+            // the appearance of a deleted object: fail closed.
+            if (target.IsDeleted) return "You see nothing here.";
             if (!target.Access(this, "view")) return $"You can't look at '{target.GetDisplayName(this)}'.";
             // Virtual dispatch already reaches the Node override — no type test needed.
             string desc = target.ReturnAppearance(this);
@@ -32,6 +35,7 @@ public partial class GameObject
         return Hookable(HookName.ReturnAppearance, () =>
         {
             if (looker is null) return "";
+            if (IsDeleted) return "You see nothing here.";
             // Simplified appearance: name + desc + things
             var name = GetDisplayName(looker);
             var desc = Desc;

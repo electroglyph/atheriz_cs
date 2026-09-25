@@ -15,6 +15,10 @@ public static class PluginReloader
 {
     public static readonly HashSet<string> ExcludedAssemblies = new(StringComparer.OrdinalIgnoreCase)
     { "Microsoft.*", "System.*", "Atheriz.Core", "netstandard", "xunit.*" };
+    // Guards cooperative mutation through the helpers below. Raw writes
+    // straight to the field still work (back-compat) but race readers;
+    // the reader retries those, while helper-driven writes never tear.
+    private static readonly Lock _excludedLock = new();
     // _gate serializes concurrent *reloads* only (TryEnter = skip when busy,
     // pinned by Reloads_AreSerialized_MaxOverlapOne — NOT a bounded wait, so a stuck
     // reload can never wedge admin threads). It does NOT exclude world mutation:
@@ -63,11 +67,48 @@ public static class PluginReloader
     { "_session","_listeners","_command","_lock","_hookRegistry","_msgLog" };
     // Shared exclusion check (also used by PluginLoader): exact filename match only.
     // Never substring-match the full path — "MySystem.Game.dll" must not match "System.*".
+    // The set is public mutable (game code may add entries) and reloaded
+    // while scans run on other threads, so a live enumeration can throw
+    // mid-scan. Cooperative writers use the helpers below (locked);
+    // the copy here is taken under the same lock, and a bounded retry
+    // covers legacy raw-field writes landing mid-copy.
+    public static void AddExcludedAssembly(string pattern)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pattern);
+        lock (_excludedLock) ExcludedAssemblies.Add(pattern);
+    }
+    public static bool RemoveExcludedAssembly(string pattern)
+    {
+        lock (_excludedLock) return ExcludedAssemblies.Remove(pattern);
+    }
     internal static bool IsExcludedAssembly(string p)
     {
         var n = Path.GetFileNameWithoutExtension(p) ?? "";
-        foreach (var pat in ExcludedAssemblies)
+        string[] snapshot = [];
+        for (int attempt = 0; ; attempt++)
         {
+            try
+            {
+                lock (_excludedLock) snapshot = [.. ExcludedAssemblies];
+                break;
+            }
+            // Any corruption shape from an unsynchronized legacy raw-write
+            // racing the copy (InvalidOperationException, ArgumentException
+            // from a torn count, ...): the copy is side-effect-free, so a
+            // bounded retry on any failure is safe. Cooperative writers use
+            // the locked helpers and never trip this.
+            catch (Exception) when (attempt < 64)
+            {
+                continue;
+            }
+        }
+        foreach (var pat in snapshot)
+        {
+            // Null-tolerant: an unsynchronized legacy raw-write racing
+            // the copy can corrupt the set's buckets so the snapshot yields a
+            // null slot — skip it instead of throwing. Cooperative writers use
+            // the locked helpers above and never plant nulls.
+            if (pat is null) continue;
             if (pat.EndsWith(".*", StringComparison.Ordinal))
             { var pre = pat[..^2]; if (n.StartsWith(pre, StringComparison.OrdinalIgnoreCase)) return true; }
             else if (string.Equals(n, pat, StringComparison.OrdinalIgnoreCase)) return true;

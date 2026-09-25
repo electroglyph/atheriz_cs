@@ -18,18 +18,26 @@ public class TelnetConnection : BaseConnection
     private readonly PendingLimiter _limiter; // sole accounting (single source of truth)
     private readonly AtherizSettings _settings;
     private int _inflight; // offloaded writes not yet finished (Dispose waits, bounded)
+    // Parked-task shed bound: see ScheduleWrite.
+    private const int MaxScheduledWrites = 32;
     // Dispose joins in-flight writes via this event instead of a
     // 250ms spin that loses to 2-5s write/TLS timeouts and aborts mid-write.
     private readonly ManualResetEventSlim _drained = new(true);
-    // Async twin of _drained for DisposeAsync: re-armed alongside the event
-    // so the async join observes the same signal without parking a thread.
-    private volatile TaskCompletionSource<bool> _drainTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    // Async waiter registry for DisposeAsync: the old single TCS was
+    // replaced on every ScheduleWrite, orphaning the previous waiter's
+    // signal (DisposeAsync stalled the full 10 s despite a completed
+    // drain). Every arm registers; every drain-completion releases all.
+    private readonly Lock _drainLock = new();
+    private readonly List<TaskCompletionSource<bool>> _drainWaiters = new();
     private int _disposeManaged;
     // Bound covers the longest write/TLS timeouts above (2-5s) with headroom.
     private static readonly TimeSpan DisposeJoinTimeout = TimeSpan.FromSeconds(10);
     // Close flag (with _limiter.IsClosing forms IsClosing). Pending-byte
     // accounting lives solely in PendingLimiter — no mirrors.
-    private bool _closing;
+    // Volatile: written on the closer thread, read from arbitrary
+    // senders with no other barrier — a plain bool allows unbounded
+    // visibility delay on weak-memory hardware.
+    private volatile bool _closing;
     // Per-connection 5s throttle for the overlong-input-drop warning.
     // The holder lives here (not on TelnetProtocol, whose session pump is
     // static) so one connection's burst never silences another's warning.
@@ -58,7 +66,13 @@ public class TelnetConnection : BaseConnection
         if (disposing)
         {
             // Join in-flight offloaded writes (bounded) before disposing the writer.
-            try { _drained.Wait(DisposeJoinTimeout); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); }
+            // Re-checks _inflight past the event: a ScheduleWrite arming
+            // after the event snapshot would otherwise run past teardown.
+            var deadline = DateTimeOffset.UtcNow + DisposeJoinTimeout;
+            while (Volatile.Read(ref _inflight) != 0 && DateTimeOffset.UtcNow < deadline)
+            {
+                try { _drained.Wait(deadline - DateTimeOffset.UtcNow); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.Dispose: " + logEx.Message, "TelnetConnection"); break; }
+            }
             DisposeManaged();
         }
         base.Dispose(disposing);
@@ -68,7 +82,20 @@ public class TelnetConnection : BaseConnection
     {
         // Async join: awaits the drain signal instead of parking the caller.
         // A timeout proceeds past the bound, mirroring the sync Wait above.
-        try { await _drainTcs.Task.WaitAsync(DisposeJoinTimeout).ConfigureAwait(false); }
+        // Registers alongside ScheduleWrite's arms, so a write armed
+        // after this call still releases this waiter on completion.
+        Task waitTask;
+        lock (_drainLock)
+        {
+            if (_drainWaiters.Count == 0) waitTask = Task.CompletedTask;
+            else
+            {
+                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _drainWaiters.Add(tcs);
+                waitTask = tcs.Task;
+            }
+        }
+        try { await waitTask.WaitAsync(DisposeJoinTimeout).ConfigureAwait(false); }
         catch (TimeoutException) { }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetConnection.DisposeAsync: " + logEx.Message, "TelnetConnection"); }
         DisposeManaged();
@@ -89,13 +116,15 @@ public class TelnetConnection : BaseConnection
     private void ArmDrained()
     {
         try { _drained.Reset(); } catch (ObjectDisposedException) { /* Dispose already joined; write still runs below. */ }
-        _drainTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_drainLock) _drainWaiters.Add(new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
     }
 
     private void SignalDrained()
     {
         try { _drained.Set(); } catch (ObjectDisposedException) { }
-        _drainTcs.TrySetResult(true);
+        List<TaskCompletionSource<bool>> done;
+        lock (_drainLock) { done = new List<TaskCompletionSource<bool>>(_drainWaiters); _drainWaiters.Clear(); }
+        foreach (var tcs in done) try { tcs.TrySetResult(true); } catch { }
     }
 
     // buffer sources in priority order (transport → writer → _transport).
@@ -181,9 +210,25 @@ public class TelnetConnection : BaseConnection
     // _inflight lets Dispose wait for pending writes (bounded) before disposing.
     private void ScheduleWrite(Action write, int nb)
     {
-        if (IsClosing) { if (nb != 0) _limiter.ReleaseSync(nb); return; }
-        Interlocked.Increment(ref _inflight);
+        // Refuse writes past teardown: a ScheduleWrite landing after
+        // DisposeManaged would run against a disposed writer.
+        if (IsClosing || Volatile.Read(ref _disposeManaged) != 0) { if (nb != 0) _limiter.ReleaseSync(nb); return; }
+        // Shed past the parked-task bound: each scheduled write parks
+        // its task up to WriteTimeout on a wedged peer, so N wedged peers x
+        // fan-out would park unbounded threads (the limiter bounds bytes,
+        // not tasks). Past the bound the message is dropped for this peer —
+        // a healthy peer drains in ms and never reaches it; a wedged one is
+        // closed by the limiter/buffer checks anyway.
+        if (Volatile.Read(ref _inflight) >= MaxScheduledWrites)
+        {
+            if (nb != 0) _limiter.ReleaseSync(nb);
+            Atheriz.Core.AtherizLogger.LogDebug($"Suppressed TelnetProtocol.ScheduleWrite: shed write for {ClientHost} ({MaxScheduledWrites} parked)", "TelnetProtocol");
+            return;
+        }
+        // Arm before counting: a Dispose snapshotting between the
+        // increment and the arm would otherwise miss this write entirely.
         ArmDrained();
+        Interlocked.Increment(ref _inflight);
         try
         {
             Task.Run(() => { try { write(); } finally { if (Interlocked.Decrement(ref _inflight) == 0) SignalDrained(); } })
@@ -334,7 +379,24 @@ Atheriz.Core.AtherizLogger.LogError($"[Telnet] write failed for {ClientHost}: {e
         try
         {
             if (IsOnLoopThread()) WriterClose();
-            else { var _t = Task.Run((Action)WriterClose); _ = _t.ContinueWith(t => { if (t.IsFaulted && t.Exception is not null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] Close fault: {t.Exception}"); }, TaskScheduler.Default); }
+            else
+            {
+                // Track the off-loop close like a write: neither the
+                // drain event nor the async waiter covers it otherwise, so
+                // close bytes race teardown.
+                ArmDrained();
+                Interlocked.Increment(ref _inflight);
+                try
+                {
+                    var _t = Task.Run((Action)WriterClose);
+                    _ = _t.ContinueWith(t => { try { if (Interlocked.Decrement(ref _inflight) == 0) SignalDrained(); } catch { } if (t.IsFaulted && t.Exception is not null) Atheriz.Core.AtherizLogger.LogError($"[Telnet] Close fault: {t.Exception}"); }, TaskScheduler.Default);
+                }
+                catch
+                {
+                    try { if (Interlocked.Decrement(ref _inflight) == 0) SignalDrained(); } catch { }
+                    throw;
+                }
+            }
         }
         catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error closing connection: {e}"); }
     }

@@ -180,8 +180,10 @@ public partial class GameObject
         }, soundDesc, soundMsg, loudness, isSay);
     }
 
-    public void EmitSound(string soundDesc, string soundMsg, double loudness, bool isSay = false)
+    public bool EmitSound(string soundDesc, string soundMsg, double loudness, bool isSay = false)
     {
+        // Explicit drop accounting: a pool rejection warns AND reports
+        // false so callers can react — never a silent loss.
         try
         {
             var pool = GlobalServices.GetAsyncThreadPool();
@@ -190,12 +192,14 @@ public partial class GameObject
                 if (!pool.AddTask(() => AtEmitSound(soundDesc, soundMsg, loudness, isSay)))
                 {
                     AtherizLogger.LogWarning($"[Sound] Task queue full; sound from {this} dropped.");
+                    return false;
                 }
-                return;
+                return true;
             }
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.EmitSound: " + logEx.Message, "GameObject"); }
         AtEmitSound(soundDesc, soundMsg, loudness, isSay);
+        return true;
     }
 
 }

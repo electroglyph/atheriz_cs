@@ -502,7 +502,10 @@ public class ConnectionManager
         }
         if (handler is not null)
         {
-            connection.EnqueueInput(handler, args, kwargs);
+            // Copy caller-owned collections at entry: the drain invokes
+            // the handler on a pool thread after return, so a caller
+            // mutating post-return would corrupt args mid-dispatch.
+            connection.EnqueueInput(handler, new List<object?>(args), new Dictionary<string, object?>(kwargs));
         }
         else
         {

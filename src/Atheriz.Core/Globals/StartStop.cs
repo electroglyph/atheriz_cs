@@ -378,6 +378,13 @@ public static class StartStop
         settings ??= AtherizSettings.Global;
         lock (_worldLock)
         {
+            // Single ticker resolve: every step below used to resolve
+            // `ticker ?? TryGetTicker() ?? GetAsyncTicker()` independently, so
+            // a Reset/ClearForShutdown landing between two steps (or a
+            // fault-restore swap inside GetAsyncTicker) cleared one ticker
+            // while registering on a discarded/new one — ticks silently lost.
+            // One local observes a single generation for the whole reload.
+            var tick = ticker ?? TryGetTicker() ?? GlobalServices.GetAsyncTicker();
             AnnounceChannel("Server is reloading...");
 
             AtherizLogger.LogInformation("Starting reload sequence...");
@@ -393,22 +400,19 @@ public static class StartStop
             {
                 try
                 {
-                    var t = ticker ?? TryGetTicker();
-                    if (t is not null) Autosave.StopAutosave(t);
+                    Autosave.StopAutosave(tick);
                 }
                 catch (Exception) { }
             });
 
             ShutdownStep("ticker_clear", () =>
             {
-                var t = ticker ?? TryGetTicker() ?? GlobalServices.GetAsyncTicker();
-                t.Clear();
+                tick.Clear();
             });
 
             ShutdownStep("reregister_ticks", () =>
             {
-                var t = ticker ?? TryGetTicker() ?? GlobalServices.GetAsyncTicker();
-                ReregisterTicks(t);
+                ReregisterTicks(tick);
             });
 
             if (settings.TimeSystemEnabled)
@@ -421,8 +425,7 @@ public static class StartStop
                         // ambient global would give the wrong SavePath/cadence on
                         // an explicit-settings reload.
                         var gt = GlobalServices.GetGameTime(settings);
-                        var t = ticker ?? TryGetTicker() ?? GlobalServices.GetAsyncTicker();
-                        gt.Start(t);
+                        gt.Start(tick);
                     }
                     catch (Exception ex) { AtherizLogger.LogError($"game_time start failed:\n{ex}"); }
                 });
@@ -437,11 +440,10 @@ public static class StartStop
                 {
                     if (settings.AutosaveMinutes != 0)
                     {
-                        var t = ticker ?? TryGetTicker() ?? GlobalServices.GetAsyncTicker();
                         var mh = TryGetMapHandler();
                         var nh = TryGetNodeHandler();
                         var gt = settings.TimeSystemEnabled ? TryGetGameTime() : null;
-                        Autosave.StartAutosave(t, settings, mh, nh, gt);
+                        Autosave.StartAutosave(tick, settings, mh, nh, gt);
                     }
                 }
                 catch (Exception) { }

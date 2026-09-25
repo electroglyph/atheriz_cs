@@ -17,7 +17,10 @@ public static class AtherizLogger
     // a foreign factory from Configure() only records, so Write() still
     // echoes + appends after logging there.
     private static bool _ownsFactory;
-    private static LogLevel _level = LogLevel.Information;
+    // Volatile: read lock-free on the logging hot path, written under
+    // _lock in ApplySettings — a plain field allows indefinite stale
+    // filtering on weak-memory hardware.
+    private static volatile LogLevel _level = LogLevel.Information;
     // Built once (frozen, case-insensitive): ApplySettings runs on settings
     // change, but there is no reason to allocate the 5-entry map per call.
     // The lock takes in ApplySettings stay split (four separate holds):
@@ -51,18 +54,29 @@ public static class AtherizLogger
         SetupLogger();
     }
 
+    // Atomic pair snapshot: path and level publish together, so a
+    // reader observes one generation exactly — never a mixed pair.
+    internal static (string SavePath, LogLevel Level) SnapshotSettings()
+    {
+        lock (_lock) return (_savePath, _level);
+    }
+
     // LEVEL CONTRACT: debug/info/warning/error/critical map case-insensitively; anything else
     // falls back to Information here, but AtherizSettingsValidator rejects unknown LogLevel
     // strings at config load — so an unknown level can only arrive via direct assignment.
     public static void ApplySettings(AtherizSettings? settings = null)
     {
         var s = settings ?? AtherizSettings.Global;
-        // Published with the level/factory state under one hold so a
-        // concurrent ApplySettings cannot interleave path and level.
-        lock (_lock) { _savePath = s.SavePath ?? "save"; }
+        // Publish path and level in ONE hold: the old split holds let a
+        // concurrent ApplySettings interleave a mixed path/level generation.
+        // The factory refresh stays outside (SetupLogger takes the
+        // non-reentrant _lock itself — holding it across would self-deadlock).
+        var path = s.SavePath ?? "save";
+        var level = LevelMap.TryGetValue(s.LogLevel ?? "info", out var lv) ? lv : LogLevel.Information;
         lock (_lock)
         {
-            _level = LevelMap.TryGetValue(s.LogLevel ?? "info", out var lv) ? lv : LogLevel.Information;
+            _savePath = path;
+            _level = level;
             // Factory-refresh: the console provider (and minimum level) freeze at first
             // construction, so a changed level rebuilds the factory instead of silently
             // sticking. Write() also re-checks _level per call, so in-flight writers stay correct.

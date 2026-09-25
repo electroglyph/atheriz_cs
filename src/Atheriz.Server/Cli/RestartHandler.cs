@@ -40,11 +40,20 @@ public static class RestartHandler
         }
         else await Task.Delay(500).ConfigureAwait(false);
 
-        // Wait for the old server to release the port before binding the
-        // replacement, so the new bind does not race the old listener.
+        // Wait for the old server to release the ports before binding the
+        // replacement, so the new bind does not race the old listener. The
+        // webserver port alone is not enough: the replacement claims
+        // its pid before the telnet bind, so an old server still holding
+        // telnet throws mid-startup on a claimed pid.
         if (!await WaitForPortFreeAsync(portVal, TimeSpan.FromSeconds(10)).ConfigureAwait(false))
         {
             Console.WriteLine($"Error: port {portVal} still listening after stop; aborting restart.");
+            return 1;
+        }
+        int telnetVal = telnetPort ?? StopHandler.EffectiveSettingsValue.TelnetPort;
+        if (StopHandler.EffectiveSettingsValue.TelnetEnabled && !await WaitForPortFreeAsync(telnetVal, TimeSpan.FromSeconds(10)).ConfigureAwait(false))
+        {
+            Console.WriteLine($"Error: telnet port {telnetVal} still listening after stop; aborting restart.");
             return 1;
         }
 

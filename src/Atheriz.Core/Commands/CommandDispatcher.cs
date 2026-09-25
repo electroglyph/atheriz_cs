@@ -14,6 +14,10 @@ public static class CommandDispatcher
 
     private static AtherizSettings _settings = new();
     public static void SetSettings(AtherizSettings s) => _settings = s;
+    // Test seam: capture the dispatch generation so a render/gate
+    // agreement test can restore it. The slot is swap-only (never mutated in
+    // place), so the reference is the generation.
+    internal static AtherizSettings SnapshotSettings() => _settings;
     private static AsyncThreadPool? _pool;
     public static void SetThreadPool(AsyncThreadPool pool) => _pool = pool;
 
@@ -223,12 +227,20 @@ public static class CommandDispatcher
     // Run honors the same gate as dispatch (SetSettings snapshot && Global).
     internal static bool IsUnloggedInEnabled(Command cmd)
     {
-        var g = AtherizSettings.Global;
+        return IsUnloggedInEnabled(cmd, _settings, AtherizSettings.Global);
+    }
+    // Single-generation overload: the gate's two legs share one captured
+    // pair, so a swap landing inside the probe cannot tear the hint.
+    // Dispatch keeps reading live (a swap between hint and dispatch can
+    // still differ for one render — the hint is internally consistent,
+    // never torn).
+    internal static bool IsUnloggedInEnabled(Command cmd, AtherizSettings dispatchSettings, AtherizSettings live)
+    {
         return cmd switch
         {
-            UnloggedIn.CreateAccountCommand => _settings.AccountCreationEnabled && g.AccountCreationEnabled,
-            UnloggedIn.NewCharacterCommand => _settings.CharCreationEnabled && g.CharCreationEnabled,
-            UnloggedIn.GuestCommand => _settings.GuestEnabled && g.GuestEnabled,
+            UnloggedIn.CreateAccountCommand => dispatchSettings.AccountCreationEnabled && live.AccountCreationEnabled,
+            UnloggedIn.NewCharacterCommand => dispatchSettings.CharCreationEnabled && live.CharCreationEnabled,
+            UnloggedIn.GuestCommand => dispatchSettings.GuestEnabled && live.GuestEnabled,
             _ => true,
         };
     }

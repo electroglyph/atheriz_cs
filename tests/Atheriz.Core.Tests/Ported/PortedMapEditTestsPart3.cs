@@ -306,8 +306,11 @@ public class PortedMapEditTestsPart3
         foreach(var args in malformed){
             new InputFuncs().MapEditLegendHandler(conn3, args, new Dictionary<string,object?>());
         }
-        Assert.Equal(6, ((FakeC)conn3).Sent.Count);
-        Assert.All(((FakeC)conn3).Sent, s=> Assert.Equal("map_edit_reject", s.Cmd));
+        Assert.Equal(7, ((FakeC)conn3).Sent.Count);
+        Assert.Equal(6, ((FakeC)conn3).Sent.Count(s => s.Cmd == "map_edit_reject"));
+        // The ungranted-key reject also carries the reopen hint.
+        var hint = Assert.Single(((FakeC)conn3).Sent.Where(s => s.Cmd == "text").ToList());
+        Assert.Contains("reopen", hint.Args[0]?.ToString() ?? "", StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact] public void MapEditLegendCreatesMapinfoIfMissing()

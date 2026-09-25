@@ -33,10 +33,11 @@ public class PortedUnloggedinCommandsTestsPart2
     {
         using var env = GlobalTestEnv.Enter();
         var host="203.0.113.5";
-        ObjectRegistry.ClearCreationCooldown(host);
-        Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest",host,1000,60));
+        CreationCooldownStore.Clear();
+        var t1 = ObjectRegistry.TryReserveCreationCooldown("guest",host,1000,60);
+        Assert.NotNull(t1);
         Assert.True(ObjectRegistry.CreationCooldownActive(host,1001));
-        ObjectRegistry.ClearCreationCooldown(host);
+        ObjectRegistry.ClearCreationCooldown(host, t1.Value);
     }
     [Fact] public void CharSelection_HintWithChars()
     {

@@ -169,6 +169,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public bool CanHear { get => Read(() => _flags.CanHear); set => SetFlag(() => _flags.CanHear, v => _flags.CanHear = v, value); }
     public bool Quelled { get => Read(() => _quelled); set => Write(() => { _quelled = value; _flags.IsModified = true; }); }
     public bool MapEnabled { get => Read(() => _mapEnabled); set => Write(() => { _mapEnabled = value; _flags.IsMapable = value; _flags.IsModified = true; }); }
+    // Atomic read-modify-write for the map toggle: two concurrent toggles
+    // must not both read the same value and write it back.
+    // Returns the new value.
+    public bool ToggleMapEnabled() => Write(() => { _mapEnabled = !_mapEnabled; _flags.IsMapable = _mapEnabled; _flags.IsModified = true; return _mapEnabled; });
     public double? LastMapTime { get => Read(() => _lastMapTime); set => Write(() => _lastMapTime = value); }
     public string Gender { get => Read(() => _gender); set => SetIfChanged(ref _gender, value); }
     public virtual double TickSeconds { get => Read(() => _tickSeconds); set => Write(() => { _tickSeconds = value; _flags.IsModified = true; }); }
@@ -280,6 +284,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         set => Write(() => _secondsPlayed = value);
     }
     internal double RawSecondsPlayed { get => Read(() => _secondsPlayed); set => Write(() => _secondsPlayed = value); }
+    // Atomic add for disconnect accounting: the old get-plus-set split
+    // two holds and lost updates under concurrent disconnects.
+    public void AddSecondsPlayed(double delta) => Write(() => _secondsPlayed += delta);
     public bool NoFollow { get => Read(() => _noFollow); set => Write(() => { _noFollow = value; _flags.IsModified = true; }); }
     public int? Following { get => Read(() => _following); set => Write(() => { _following = value; _flags.IsModified = true; }); }
     // No-lock write for callers that already hold this object's write lock
@@ -495,9 +502,31 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         finally { _lock.ExitWriteLock(); }
         if (removed)
         {
-            // Channel locks only (see Subscribe) — never under the peer lock.
-            try { var cmd = channel.GetCommand(); if (cmd is not null) InternalCmdSet?.Remove(cmd); }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unsubscribe: " + logEx.Message, "GameObject"); }
+            // Mirror Subscribe's stale-install rollback (R3): fetch the
+            // command outside the peer lock (channel locks only, never
+            // under the peer lock), then re-check membership before
+            // removing. The old unconditional remove let a concurrent
+            // Subscribe re-add membership + install between GetCommand
+            // and Remove, and deleted the newcomer.
+            Commands.Command? cmd = null;
+            try { cmd = channel.GetCommand(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unsubscribe: " + logEx.Message, "GameObject"); }
+            if (cmd is not null)
+            {
+                // Re-check membership and remove atomically under the peer
+                // write hold: a Subscribe re-add landing between the check
+                // and the remove would otherwise lose its fresh install.
+                // Only the CmdSet lock joins this hold (never the
+                // channel lock — GetCommand already returned), so no
+                // peer → channel nesting is introduced.
+                _lock.EnterWriteLock();
+                try
+                {
+                    if (!_channels.Contains(channel.Id))
+                        try { InternalCmdSet?.Remove(cmd); }
+                        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unsubscribe: " + logEx.Message, "GameObject"); }
+                }
+                finally { _lock.ExitWriteLock(); }
+            }
         }
     }
 

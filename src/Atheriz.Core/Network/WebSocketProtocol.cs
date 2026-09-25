@@ -14,8 +14,13 @@ public sealed class WebSocketConnection : BaseConnection
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly PendingLimiter _limiter; // sole accounting (single source of truth)
     // Close flag (with _limiter.IsClosing forms IsClosing).
-    private bool _closing;
+    // Volatile: written on the closer thread, read from arbitrary
+    // senders with no other barrier.
+    private volatile bool _closing;
     private int _disposeManaged;
+    // Sends parked between Task.Run and Track: the disposer must not
+    // snapshot the task list inside this gap and miss them.
+    private int _startingSends;
 
     private readonly AtherizSettings _settings;
 
@@ -45,6 +50,7 @@ public sealed class WebSocketConnection : BaseConnection
             // proceeds mid-write and hides the loss in ObjectDisposedException.
             try
             {
+                DrainStartingSends();
                 var pending = _limiter.SnapshotTasks().ToArray();
                 if (pending.Length != 0) Task.WhenAll(pending).Wait(TimeSpan.FromSeconds(10));
             }
@@ -61,6 +67,7 @@ public sealed class WebSocketConnection : BaseConnection
         // Wait above (which ignores the return and proceeds).
         try
         {
+            DrainStartingSends();
             var pending = _limiter.SnapshotTasks().ToArray();
             if (pending.Length != 0) await Task.WhenAll(pending).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
         }
@@ -73,6 +80,15 @@ public sealed class WebSocketConnection : BaseConnection
 
     // Socket/semaphore teardown shared by both dispose paths (idempotent:
     // async and sync dispose may race, and Dispose may run twice).
+    // Waits out sends parked between Task.Run and Track: snapshotting
+    // the task list inside that gap misses the send entirely. The gap is
+    // nanoseconds, so this spins briefly and proceeds past the bound.
+    private void DrainStartingSends()
+    {
+        long start = Environment.TickCount64;
+        while (Volatile.Read(ref _startingSends) != 0 && Environment.TickCount64 - start < 100)
+            Thread.SpinWait(100);
+    }
     private void DisposeManaged()
     {
         if (Interlocked.Exchange(ref _disposeManaged, 1) != 0) return;
@@ -135,6 +151,10 @@ public sealed class WebSocketConnection : BaseConnection
         if (cmd == "prompt_masked") cmd = "prompt";
         args ??= [];
         kwargs ??= [];
+        // Snapshot caller-owned collections before serializing: a caller
+        // mutating them during the serialize would tear the payload.
+        args = new List<object?>(args);
+        kwargs = new Dictionary<string, object?>(kwargs);
         // Single UTF8 pass: serialize straight to bytes and reuse the length
         // for the reservation (was GetByteCount + GetBytes). Wire bytes are
         // identical — same payload shape, same options.
@@ -149,9 +169,11 @@ public sealed class WebSocketConnection : BaseConnection
             return;
         }
         Task? task = null;
+        // Count the Run→Track gap so disposers never snapshot inside it.
+        Interlocked.Increment(ref _startingSends);
         try
         {
-// reserve -> schedule -> Track in one
+            // reserve -> schedule -> Track in one
             // guarded span: if Track itself throws, the reservation is released
             // and the task observed (the old split leaked the limiter slot).
             task = Task.Run(() => LockedSendAsync(bytes));
@@ -171,11 +193,13 @@ public sealed class WebSocketConnection : BaseConnection
             Atheriz.Core.AtherizLogger.LogError($"[WebSocket] Error sending command: {e}");
             return;
         }
+        finally { Interlocked.Decrement(ref _startingSends); }
     }
 
 // now via limiter snapshot
     private async Task CloseWebSocketAsync()
     {
+        DrainStartingSends();
         List<Task> pending = _limiter.SnapshotTasks();
         if (pending.Count > 0)
         {

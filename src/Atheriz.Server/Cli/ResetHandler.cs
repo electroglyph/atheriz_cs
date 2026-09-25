@@ -65,9 +65,28 @@ public static class ResetHandler
             }
         }
 
+        // Wipe hold: a starter claiming pid/DB between the re-check
+        // above and the delete below would get its live database unlinked.
+        // Hold the wipe lock from here through setup; starters refuse while
+        // it is fresh. The recursive delete below takes the lock file with
+        // it, so it is re-armed right after the re-create.
+        var wipeA = Infrastructure.PidFile.TryAcquireWipeLock(savePath);
+        if (wipeA is null) { Console.WriteLine("Another wipe is in progress; aborting reset."); return 1; }
+        var absSave = Path.GetFullPath(savePath);
+
+        // Saver exclusion across the close/wipe/reopen sandwich: the
+        // close below flips the process-global closed flag, so a concurrent
+        // checkpoint saver would throw "database is closed" mid-sandwich.
+        // Holding the write gate parks savers instead of failing them; a
+        // 30 s bound fails closed rather than hanging the CLI.
+        using var wipeCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        Atheriz.Core.Persistence.DbWriteGate.WriteHold? wipeGate = null;
+        try { wipeGate = await Atheriz.Core.Persistence.DbWriteGate.EnterAsync(wipeCts.Token).ConfigureAwait(false); }
+        catch (Exception ex) { Console.WriteLine($"Could not park savers for wipe: {ex.Message}"); return 1; }
+        using (wipeGate)
+        {
         try { Atheriz.Core.Persistence.AtherizDbContextFactory.CloseDatabase(); } catch { }
 
-        var absSave = Path.GetFullPath(savePath);
         Console.WriteLine($"Deleting game data at {absSave}...");
         // Nothing to wipe (fresh folder): skip the world-membership gate —
         // GuardWipePath demands markers precisely so a live/foreign dir is
@@ -83,37 +102,57 @@ public static class ResetHandler
         }
         try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
         Directory.CreateDirectory(savePath);
-        Atheriz.Core.Utils.FsUtil.TryChmod0700(savePath);
-        // Fail closed: never run setup over a half-wiped world — a failed
-        // delete above (or a concurrent writer) must abort loudly instead of
-        // layering a fresh world on top of surviving data.
-        try
-        {
-            if (Directory.EnumerateFileSystemEntries(savePath).Any())
-            {
-                Console.WriteLine($"Wipe incomplete, entries remain under {absSave}; aborting before setup.");
-                return 1;
-            }
-        }
-        catch (Exception ex) { Console.WriteLine($"Could not verify wipe of {absSave}: {ex.Message}"); return 1; }
-
+        // Reopen before any setup write, still under the saver exclusion:
+        // the closed-flag window ends here, not after setup.
         try { Atheriz.Core.Persistence.AtherizDbContextFactory.ReopenDatabase(); } catch { }
-
-        // Load the game (if any) so setup below dispatches to it; best-effort
-        // and never fatal — without a game the template setup still runs.
-        Atheriz.Core.IGameSetup? game = null;
-        try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings, out game); }
-        catch (Exception ex) { Console.Error.WriteLine($"[reset] Game load failed ({ex.Message}); using template setup."); }
-
-        Console.WriteLine("Setting up new world...");
-        try
+        } // end saver-exclusion: savers resume past the reopen
+        // Re-arm the wipe hold (the delete above took it) before any setup
+        // write; abort loudly if anything barged the micro-gap. The old
+        // lock file is deleted first — freshness alone would refuse
+        // ourselves.
+        try { wipeA.Dispose(); } catch { }
+        try { File.Delete(Infrastructure.PidFile.WipeLockPath(savePath)); } catch { }
+        FileStream? wipeB;
+        wipeB = Infrastructure.PidFile.TryAcquireWipeLock(savePath);
+        if (wipeB is null) { Console.WriteLine("Another wipe is in progress; aborting reset."); return 1; }
+        using (wipeB)
         {
-            // Explicit no-prompt creds: reset must never interactively
-            // ask for a superuser mid-wipe; env creds still apply when set.
-            Atheriz.Core.InitialSetup.RunSetup(new Atheriz.Core.SetupOptions(savePath, Prompt: false), game);
-            Console.WriteLine("Success! New world created.");
+            Atheriz.Core.Utils.FsUtil.TryChmod0700(savePath);
+            // Fail closed: never run setup over a half-wiped world — a failed
+            // delete above (or a concurrent writer) must abort loudly instead of
+            // layering a fresh world on top of surviving data.
+            try
+            {
+                if (Directory.EnumerateFileSystemEntries(savePath).Any(f => Path.GetFileName(f) != Infrastructure.PidFile.WipeLockFileName))
+                {
+                    Console.WriteLine($"Wipe incomplete, entries remain under {absSave}; aborting before setup.");
+                    return 1;
+                }
+            }
+            catch (Exception ex) { Console.WriteLine($"Could not verify wipe of {absSave}: {ex.Message}"); return 1; }
+
+            // (Database was reopened right after the re-create above, still
+            // under the saver exclusion — setup below runs unparked.)
+
+            // Load the game (if any) so setup below dispatches to it; best-effort
+            // and never fatal — without a game the template setup still runs.
+            Atheriz.Core.IGameSetup? game = null;
+            try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings, out game); }
+            catch (Exception ex) { Console.Error.WriteLine($"[reset] Game load failed ({ex.Message}); using template setup."); }
+
+            Console.WriteLine("Setting up new world...");
+            try
+            {
+                // Explicit no-prompt creds: reset must never interactively
+                // ask for a superuser mid-wipe; env creds still apply when set.
+                Atheriz.Core.InitialSetup.RunSetup(new Atheriz.Core.SetupOptions(savePath, Prompt: false), game);
+                Console.WriteLine("Success! New world created.");
+            }
+            catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); return 1; }
+            // Clean release: the replacement start below must not be
+            // refused by our own just-finished wipe.
+            Infrastructure.PidFile.ReleaseWipeLock(wipeB, savePath);
         }
-        catch (Exception ex) { Console.WriteLine($"Setup failed: {ex.Message}"); return 1; }
 
         Console.WriteLine("Starting server...");
         if (!foreground) return await DaemonSpawner.SpawnStart(Directory.GetCurrentDirectory(), portOverride, null, telnetOverride).ConfigureAwait(false);

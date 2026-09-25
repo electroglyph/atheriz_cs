@@ -216,6 +216,10 @@ public sealed class GroupCommand : LoggedInCommand
             var tgt = ResolveMember(go, targetName, "You can't kick yourself!");
             if (tgt is null) return;
             channel.Msg($"{go.GetDisplayName(null)} kicked {tgt.GetDisplayName(null)} from the group.");
+            // Re-verify leadership after the announce: a LeaveOp
+            // transfer landing between the check above and this removal lets
+            // an ex-leader's kick succeed.
+            if (channel.CreatedBy != go.Id) { go.Msg("You are not the leader of this group."); return; }
             channel.RemoveListener(tgt);
             try { tgt.RemoveGroupChannel(); } catch { ClearGroupChannel(tgt); }
             return;
@@ -233,12 +237,15 @@ public sealed class GroupCommand : LoggedInCommand
             channel.RemoveListener(go);
             ClearGroupChannel(go);
             // if was leader and remaining, pick new leader
-            if (wasLeader && channel.Listeners.Count > 0)
+            // Single snapshot: Count-then-First across two reads can
+            // throw on an emptied channel or crown a departed member.
+            var remaining = channel.Listeners;
+            if (wasLeader && remaining.Count > 0)
             {
-                var newLeader = channel.Listeners.First();
+                var newLeader = remaining.First();
                 channel.CreatedBy = newLeader;
             }
-            if (channel.Listeners.Count == 0)
+            if (remaining.Count == 0)
             {
                 try { channel.Delete(); } catch { try { channel.IsDeleted = true; ObjectRegistry.RemoveObject(channel); } catch (Exception) { } }
             }

@@ -466,12 +466,20 @@ public class GameTime
 
         var after = GetTime();
         List<((string Hour, string Minute) Key, AlarmEntry Entry)> callers = [];
-        using (ReadScope())
+        using (WriteScope())
         {
             void Collect(string h, string m)
             {
                 if (_alarms.TryGetValue((h, m), out var list))
-                    foreach (var a in list) callers.Add(((h, m), a));
+                {
+                    foreach (var a in list.ToList()) callers.Add(((h, m), a));
+                    // Claim non-repeat entries in the same hold that
+                    // collected them: two overlapping OnTicks must not both
+                    // dispatch the same one-shot alarm.
+                    for (int i = list.Count - 1; i >= 0; i--)
+                        if (!list[i].Repeat) list.RemoveAt(i);
+                    if (list.Count == 0) _alarms.Remove((h, m));
+                }
             }
             // `after` is a fixed snapshot, so both values are loop-invariant.
             var hourStr = after.Hour.ToString();
@@ -488,7 +496,6 @@ public class GameTime
             var pool = _poolOverride ?? GlobalServices.TryGetPool() ?? OwnedPool();
             foreach (var (key, entry) in callers)
             {
-                if (!entry.Repeat) RemoveAlarmEntry(key.Hour, key.Minute, entry);
                 var target = ObjectRegistry.GetSingle(entry.CallerId);
                 if (target is not null)
                 {

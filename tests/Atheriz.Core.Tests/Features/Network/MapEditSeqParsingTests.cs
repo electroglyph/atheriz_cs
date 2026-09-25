@@ -30,7 +30,9 @@ public sealed class MapEditSeqParsingTests
         {
             var conn = new TestConnection();
             funcs.MapEditHandler(conn, ["nope", seq, DrawCells()], []);
-            Assert.Single(conn.Sent);
+            // The seq parsed (consume ran) and the unknown key rejects with
+            // the wire reason plus the reopen hint.
+            Assert.Equal(2, conn.Sent.Count);
             Assert.Equal("map_edit_reject", conn.Sent[0].Cmd);
         }
     }
@@ -56,8 +58,9 @@ public sealed class MapEditSeqParsingTests
         List<object?> Moves() => [new List<object?> { 0, 0, 1, 1 }];
         var ok = new TestConnection();
         funcs.MapValidateMovesHandler(ok, ["nope", 1, Moves()], []);
-        Assert.Single(ok.Sent);
+        Assert.Equal(2, ok.Sent.Count);
         Assert.Equal("map_edit_reject", ok.Sent[0].Cmd);
+        Assert.Equal("text", ok.Sent[1].Cmd);
         var bad = new TestConnection();
         funcs.MapValidateMovesHandler(bad, ["nope", "1", Moves()], []);
         Assert.Empty(bad.Sent);
@@ -84,8 +87,9 @@ public sealed class MapEditSeqParsingTests
         // unknown key (not the payload) is the reject reason.
         var conn = new TestConnection();
         funcs.MapEditLegendHandler(conn, ["nope", Je("7"), new List<object?>()], []);
-        Assert.Single(conn.Sent);
+        Assert.Equal(2, conn.Sent.Count);
         Assert.Equal("map_edit_reject", conn.Sent[0].Cmd);
         Assert.Equal("unknown_key", conn.Sent[0].Args[0]);
+        Assert.Equal("text", conn.Sent[1].Cmd);
     }
 }

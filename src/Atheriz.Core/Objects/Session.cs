@@ -10,19 +10,28 @@ namespace Atheriz.Core.Objects;
 
 /// <summary>
 /// Thread-safe via <see cref="Lock"/> (mirrors Python RLock) guarding Puppet / PuppetStack / InputFuture.
-/// Scalar fields Term/Map dims + ScreenReader are atomic (no lock required) but writes are lock-guarded for consistency.
+/// Scalar fields Term/Map dims + ScreenReader are plain atomic stores (no lock required):
+/// int/bool reads and writes are tear-free on every platform, so a concurrent
+/// reader observes a recent generation, never garbage.
 /// </summary>
 public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Commands.IMessageTarget
 {
     // Guards puppet / puppet_stack / input_future, which are written by game workers and read by per-connection input drain (#31).
-    // Scalar fields (term/map dims, screenreader) are single atomic stores under the GIL and need no lock — we still guard writes.
+    // Scalar display fields (term/map dims, screenreader) are plain atomic
+    // stores: int/bool reads and writes are tear-free on every platform,
+    // so a concurrent reader observes a recent generation, never garbage.
+    // Writes are NOT lock-guarded despite older comments claiming so — only
+    // staleness-tolerant readers consume them (TryCoerceSize clamps before
+    // writing; Render ignores dims except ScreenReader).
     public readonly object Lock = new();
     public Account? Account
     {
-        get => _account;
+        // Paired with AccountId under one hold: the old unlocked
+        // setter let readers observe a new account with the previous id.
+        get { lock (Lock) return _account; }
         // Spec extra mirror: keep AccountId in sync (it is otherwise set only
         // in the ctor and goes stale on later swaps).
-        set { _account = value; AccountId = value?.Id; }
+        set { lock (Lock) { _account = value; AccountId = value?.Id; } }
     }
     private Account? _account;
     public int? AccountId; // Spec extra: mirror Account.Id for quick lookup (Python stores object, C# stores both)
@@ -40,6 +49,40 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
         get { lock (Lock) { return _puppetStack.ToList(); } }
     }
     internal void PushPuppetEntry(GameObject? prev, GameObject target) => _puppetStack.Add((prev, target));
+    // Restore-pending markers for Unpuppet's pop-then-restore gap: the
+    // entry leaves the stack before AtUnpuppet runs, so a concurrent push
+    // would snapshot the still-elevated target and strand privilege. Every
+    // method here runs under session.Lock (callers hold it), so no lock is
+    // taken here.
+    internal bool IsRestorePending(GameObject target) => _restorePending.Contains(target.Id);
+    internal void MarkRestorePending(GameObject target) => _restorePending.Add(target.Id);
+    internal void ClearRestorePending(GameObject target) => _restorePending.Remove(target.Id);
+    private readonly HashSet<int> _restorePending = new();
+    // Live-entry probe for Puppet's re-push gate: every caller holds
+    // session.Lock, so no lock is taken here.
+    internal bool HasPuppetEntryFor(GameObject target)
+    {
+        int id = target.Id;
+        foreach (var e in _puppetStack)
+            if (e.Target.Id == id) return true;
+        return false;
+    }
+    // LIFO peek for Unpuppet's ownership gate: every caller holds
+    // session.Lock, so no lock is taken here.
+    internal bool TryPeekPuppetEntry(out GameObject? prev, out GameObject? target)
+    {
+        if (_puppetStack.Count == 0) { prev = null; target = null; return false; }
+        var last = _puppetStack[^1];
+        prev = last.Prev;
+        target = last.Target;
+        return true;
+    }
+    // Atomic account/id pair snapshot: separate reads can straddle a
+    // swap and observe a new account with the previous id.
+    public (Account? Account, int? AccountId) GetAccountPair()
+    {
+        lock (Lock) return (_account, AccountId);
+    }
     internal bool TryPopPuppetEntry(out GameObject? prev, out GameObject? target)
     {
         if (_puppetStack.Count == 0) { prev = null; target = null; return false; }
@@ -118,15 +161,14 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
 
     public virtual void AtConnect()
     {
-        ConnTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        ConnectedAt = DateTime.UtcNow;
-        lock (Lock) { Closed = false; }
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        lock (Lock) { ConnTime = now; ConnectedAt = DateTime.UtcNow; Closed = false; }
     }
 
     // Spec variant: AtConnect(Connection) for callers passing connection explicitly
     public virtual void AtConnect(BaseConnection connection)
     {
-        Connection = connection;
+        lock (Lock) { Connection = connection; }
         AtConnect();
     }
 
@@ -190,14 +232,21 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
         // (unwind itself runs inside the lock above).
         if (puppet is not null)
         {
-            double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - ConnTime;
-            if (ConnTime > 0.0 && elapsed > 0)
+            // Snapshot ConnTime under the lock, add under the lock: the old
+            // unlocked `SecondsPlayed += elapsed` lost updates on
+            // double-disconnect and tore on 32-bit.
+            double connTime;
+            lock (Lock) { connTime = ConnTime; }
+            double elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - connTime;
+            if (connTime > 0.0 && elapsed > 0)
             {
                 puppet.Session = null;
                 // NOTE: Session is nulled first so the SecondsPlayed getter returns
                 // the stored base (no live elapsed), matching Python's += elapsed.
-                puppet.SecondsPlayed = puppet.SecondsPlayed + elapsed;
-                SecondsPlayed += elapsed;
+                // Atomic adds: the old get-plus-set RMW lost updates
+                // under concurrent disconnects.
+                puppet.AddSecondsPlayed(elapsed);
+                lock (Lock) { SecondsPlayed += elapsed; }
             }
             puppet.AtDisconnect();
             if (puppet.IsTemporary)
@@ -259,9 +308,13 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
     // a msgType becomes the command (mirrors connection.py popping the kwarg key).
     public void Msg(string text, string? msgType = null)
     {
-        if (Connection is null) return;
-        if (msgType is null) Connection.Msg(text);
-        else Connection.MsgKw(new Dictionary<string, object?> { [msgType] = text });
+        // Drop sends on a dead session: AtDisconnect may have run
+        // between the caller's liveness check and this send.
+        BaseConnection? conn;
+        lock (Lock) { if (Closed) return; conn = Connection; }
+        if (conn is null) return;
+        if (msgType is null) conn.Msg(text);
+        else conn.MsgKw(new Dictionary<string, object?> { [msgType] = text });
     }
 
     /// <summary>

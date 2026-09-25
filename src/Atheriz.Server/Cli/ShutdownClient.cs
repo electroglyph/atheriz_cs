@@ -117,6 +117,13 @@ public static class ShutdownClient
         if (File.Exists(cand)) return cand;
         try
         {
+            // Snapshot CWD once: the old loop re-read
+            // GetCurrentDirectory per iteration while NewHandler's foreground
+            // start shifts the process-global CWD — mixing directories
+            // mid-walk and returning game B's token for game A's intent.
+            // One snapshot makes the walk atomic per call (a CWD shift
+            // between calls still re-roots the next call; same-process admin
+            // callers should prefer absolute secret paths).
             var cur = new DirectoryInfo(Directory.GetCurrentDirectory());
             for (int i = 0; i < 6 && cur is not null; i++) { var p = Path.Combine(cur.FullName, "secret", "admin.token"); if (File.Exists(p)) return p; var p2 = Path.Combine(cur.FullName, "save", "..", "secret", "admin.token"); if (File.Exists(Path.GetFullPath(p2))) return Path.GetFullPath(p2); cur = cur.Parent; }
         }

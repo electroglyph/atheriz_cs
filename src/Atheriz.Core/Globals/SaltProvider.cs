@@ -13,14 +13,14 @@ public static class SaltProvider
     // per-path dict below: a single global slot would serve pathA's salt for
     // a later GetSalt(pathB) (Python has no such hazard — it reads one global
     // SECRET_PATH).
-    private static string? _salt;
+    private static volatile string? _salt;
     private static readonly Dictionary<string, string> _salts = new(StringComparer.Ordinal);
     private static readonly Lock _lock = new();
 
-    // Test seam: current default salt without reflection (lock-free volatile
-    // read — a reference load is atomic, and a lock-free seam keeps the
+    // Test seam: current default salt without reflection (volatile field —
+    // a reference load is atomic, and a lock-free seam keeps the
     // SaltRng_RunsOutsideLock positional pin green).
-    internal static string? CurrentSaltForTests => Volatile.Read(ref _salt);
+    internal static string? CurrentSaltForTests => _salt;
 
     // Full-path keying for explicit arguments; the default invocation uses a
     // fixed key (single static salt is an intentional wontfix).
@@ -52,68 +52,100 @@ public static class SaltProvider
         // RNG runs outside the global lock (RNG is thread-safe;
         // holding _lock over it serializes all salt callers for no reason).
         var preVal = CryptoRandom.UInt64String();
-        lock (_lock)
+        // Path validation is pure (no I/O): outside the lock.
+        var isAbs = Path.IsPathRooted(secretPath);
+        if (!isAbs && !GameUtils.IsInGameFolder())
+            throw new InvalidOperationException(
+                $"Cannot determine salt: SECRET_PATH ({secretPath}) is not absolute and we're not in a game folder. Run 'atheriz new' or set SECRET_PATH.");
+
+        // File I/O runs outside the global lock: every salt caller
+        // used to serialize behind disk latency. Only the cache probe and
+        // the store below take the lock; CreateNew stays atomic at the OS
+        // level (O_EXCL), and losers read back the winner.
+        var saltFile = Path.Combine(secretPath, "salt.txt");
+        if (File.Exists(saltFile))
         {
-            if (TryGetCachedLocked(key, isDefault, out var cached) && cached is not null) return cached;
-            var isAbs = Path.IsPathRooted(secretPath);
-            if (!isAbs && !GameUtils.IsInGameFolder())
-                throw new InvalidOperationException(
-                    $"Cannot determine salt: SECRET_PATH ({secretPath}) is not absolute and we're not in a game folder. Run 'atheriz new' or set SECRET_PATH.");
-
-            var saltFile = Path.Combine(secretPath, "salt.txt");
-            if (File.Exists(saltFile))
+            FsUtil.TryChmod0600(saltFile);
+            var raw = File.ReadAllText(saltFile).Trim();
+            if (string.IsNullOrWhiteSpace(raw))
+                throw new InvalidOperationException($"Corrupt salt file {saltFile}: empty/whitespace. Restore secret/salt.txt from backup.");
+            lock (_lock)
             {
-                FsUtil.TryChmod0600(saltFile);
-                var raw = File.ReadAllText(saltFile).Trim();
-                if (string.IsNullOrWhiteSpace(raw))
-                    throw new InvalidOperationException($"Corrupt salt file {saltFile}: empty/whitespace. Restore secret/salt.txt from backup.");
+                if (TryGetCachedLocked(key, isDefault, out var cached) && cached is not null) return cached;
                 Store(key, isDefault, raw);
                 return raw;
             }
+        }
 
-            var val = preVal;
-            // Ensure parent exists
-            Directory.CreateDirectory(secretPath);
-            FsUtil.TryChmod0700(secretPath);
-            // atomic create O_EXCL 0o600
-            try
+        var val = preVal;
+        // Ensure parent exists
+        Directory.CreateDirectory(secretPath);
+        FsUtil.TryChmod0700(secretPath);
+        // atomic create O_EXCL 0o600
+        try
+        {
+            using var fs = new FileStream(saltFile, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using var sw = new StreamWriter(fs);
+            sw.Write(val);
+            // fsync before the file becomes the live salt: a crash between
+            // write and OS flush must not leave a truncated salt behind.
+            sw.Flush();
+            fs.Flush(true);
+        }
+        catch (IOException) // FileExists
+        {
+            // The winner may still be flushing its bytes: bounded wait for a
+            // valid read before declaring corruption.
+            string? raw = null;
+            SpinWait.SpinUntil(() =>
             {
-                using var fs = new FileStream(saltFile, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                using var sw = new StreamWriter(fs);
-                sw.Write(val);
-                // fsync before the file becomes the live salt: a crash between
-                // write and OS flush must not leave a truncated salt behind.
-                sw.Flush();
-                fs.Flush(true);
-            }
-            catch (IOException) // FileExists
+                try { raw = File.ReadAllText(saltFile).Trim(); } catch (Exception) { raw = null; }
+                return !string.IsNullOrWhiteSpace(raw);
+            }, TimeSpan.FromMilliseconds(50));
+            if (string.IsNullOrWhiteSpace(raw))
+                throw new InvalidOperationException($"Corrupt salt file {saltFile} after concurrent create.");
+            lock (_lock)
             {
-                var raw = File.ReadAllText(saltFile).Trim();
-                if (string.IsNullOrWhiteSpace(raw))
-                    throw new InvalidOperationException($"Corrupt salt file {saltFile} after concurrent create.");
+                if (TryGetCachedLocked(key, isDefault, out var cached) && cached is not null) return cached;
                 Store(key, isDefault, raw);
                 return raw;
             }
-            catch (UnauthorizedAccessException)
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // error (permissions/FS) falls back to a plain write rather
+            // than propagating. Read any peer-persisted salt
+            // BEFORE overwriting — a concurrent process may have created
+            // the file between our failed O_EXCL create and now, and
+            // overwriting it would fork the salt. Then verify: a
+            // swallowed failed write would cache a salt that is not on
+            // disk, silently invalidating every password hash on restart.
+            // Re-read (or throw) instead of trusting the write.
+            var peer = TryReadSalt(saltFile);
+            if (peer is not null)
             {
-                // error (permissions/FS) falls back to a plain write rather
-                // than propagating. Read any peer-persisted salt
-                // BEFORE overwriting — a concurrent process may have created
-                // the file between our failed O_EXCL create and now, and
-                // overwriting it would fork the salt. Then verify: a
-                // swallowed failed write would cache a salt that is not on
-                // disk, silently invalidating every password hash on restart.
-                // Re-read (or throw) instead of trusting the write.
-                var peer = TryReadSalt(saltFile);
-                if (peer is not null) { Store(key, isDefault, peer); return peer; }
-                try { File.WriteAllText(saltFile, val); } catch (Exception) { }
-                var back = TryReadSalt(saltFile);
-                if (back is null || !CryptographicEquals(back, val))
-                    throw new InvalidOperationException($"Salt fallback write to {saltFile} could not be verified; refusing to cache an unverified salt.");
+                lock (_lock)
+                {
+                    if (TryGetCachedLocked(key, isDefault, out var cached) && cached is not null) return cached;
+                    Store(key, isDefault, peer);
+                    return peer;
+                }
+            }
+            try { File.WriteAllText(saltFile, val); } catch (Exception) { }
+            var back = TryReadSalt(saltFile);
+            if (back is null || !CryptographicEquals(back, val))
+                throw new InvalidOperationException($"Salt fallback write to {saltFile} could not be verified; refusing to cache an unverified salt.");
+            lock (_lock)
+            {
+                if (TryGetCachedLocked(key, isDefault, out var cached) && cached is not null) return cached;
                 Store(key, isDefault, val);
                 return val;
             }
-            FsUtil.TryChmod0600(saltFile);
+        }
+        FsUtil.TryChmod0600(saltFile);
+        lock (_lock)
+        {
+            if (TryGetCachedLocked(key, isDefault, out var cached) && cached is not null) return cached;
             Store(key, isDefault, val);
             return val;
         }

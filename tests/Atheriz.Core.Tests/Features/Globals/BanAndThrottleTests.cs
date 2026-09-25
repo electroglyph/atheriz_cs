@@ -69,7 +69,7 @@ public class BanAndThrottleTests
                 var refresh = Task.Run(() => { start.SignalAndWait(); ObjectRegistry.ApplyCreationCooldown("create", host, 1000.0, 100.0); });
                 await Task.WhenAll(check, refresh);
                 if (!ObjectRegistry.CreationCooldownActive(host, 1000.0)) lost++;
-                ObjectRegistry.ClearCreationCooldown(host);
+                CreationCooldownStore.Clear();
             }
             Assert.Equal(0, lost);
         }

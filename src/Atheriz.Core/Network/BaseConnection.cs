@@ -19,7 +19,7 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     public int ThreadId { get; }
     public readonly object Lock = new();
     public int FailedLoginAttempts;
-    private bool _disposed;
+    private volatile bool _disposed; // Locked publish in Dispose, volatile fast-path read in EnqueueInput
     // Lifetime for the awaited retry/re-arm loops below: cancelled on
     // Dispose so a pending Task.Delay dies quietly instead of firing into a
     // cleared queue. Never disposed (Token must stay readable post-cancel).
@@ -46,7 +46,9 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     {
         if (disposing)
         {
-            _disposed = true;
+            // Publish under the lock so the EnqueueInput re-check (which
+            // holds it) observes teardown.
+            lock (Lock) { _disposed = true; }
             try { _retryCts.Cancel(); } catch { }
             try { ClearPendingInput(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed BaseConnection.Dispose: " + logEx.Message, "BaseConnection"); }
         }
@@ -271,7 +273,9 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     {
         lock (Lock)
         {
-            if (_disconnected) return;
+            // Never arm a drain past dispose (DrainInput would drop it
+            // anyway, but arming schedules pool work that can only drop).
+            if (_disconnected || _disposed) return;
             if (_inputQueue.Count == 0 || _inputRunning) return;
             _inputRunning = true;
         }
@@ -303,8 +307,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             Dictionary<string, object?> kwargs;
             lock (Lock)
             {
-                if (_inputQueue.Count == 0) { _inputRunning = false; return; }
-                if (_disconnected) { _inputQueue.Clear(); _inputRunning = false; return; }
+                // Post-dispose input is dropped: an enqueue that slipped
+                // past Dispose's clear must not run its handler on teardown.
+                if (_inputQueue.Count == 0 || _disconnected || _disposed)
+                {
+                    if (_disconnected || _disposed) _inputQueue.Clear();
+                    _inputRunning = false;
+                    return;
+                }
                 var item = _inputQueue.Dequeue();
                 handler = item.Handler;
                 args = item.Args;

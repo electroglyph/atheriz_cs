@@ -20,10 +20,15 @@ public static class GameClock
     // game clocks actually drive every reader.
     private static readonly SystemTimeProvider SystemDefault = new();
 
-    public static double MonotonicSeconds() =>
-        ReferenceEquals(Default, SystemDefault)
+    public static double MonotonicSeconds()
+    {
+        // Single read: the old double read could mix clocks when the
+        // seam swapped mid-call.
+        var clock = Default;
+        return ReferenceEquals(clock, SystemDefault)
             ? Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency
-            : Default.MonotonicSeconds();
+            : clock.MonotonicSeconds();
+    }
 
     public static long MonotonicMilliseconds() => (long)(MonotonicSeconds() * 1000.0);
 

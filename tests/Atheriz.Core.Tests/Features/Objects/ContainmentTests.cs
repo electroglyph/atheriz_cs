@@ -176,10 +176,10 @@ public class ContainmentTests
     }
 
     [Fact]
-    public void MoveTo_DeletedMover_IsAllowed_LikePython()
+    public void MoveTo_DeletedMover_Refused_NoGhost()
     {
-        // Python parity (base_obj.py:1233: only destination.is_deleted is
-        // checked): a deleted mover can still move.
+        // A deleted mover must not re-home into room contents
+        // as a ghost member — MoveTo refuses instead of returning true.
         ObjectRegistry.ClearAll();
         try
         {
@@ -188,8 +188,8 @@ public class ContainmentTests
             RegisterAll(dst, item);
             Assert.NotNull(item.Delete(null, recursive: false));
             Assert.True(item.IsDeleted);
-            Assert.True(item.MoveTo(dst));
-            Assert.Contains(item.Id, dst.ContentsSnapshot);
+            Assert.False(item.MoveTo(dst));
+            Assert.DoesNotContain(item.Id, dst.ContentsSnapshot);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

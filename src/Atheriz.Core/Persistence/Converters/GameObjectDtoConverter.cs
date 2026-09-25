@@ -151,10 +151,12 @@ internal static class GameObjectDtoConverter
 
     public static GameObject FromDto(GameObjectDto dto)
     {
-        // Copy-on-read for subtype markers: load from a one-off clone of Extra with
-        // __object_type / __script_type stripped, so the caller's dict is never
-        // mutated — a double-load of the same DTO instance keeps its subtype the
-        // second time. Loads only read from the clone.
+        // Read-only view for subtype markers: the old code swapped
+        // dto.Extra to a stripped clone and restored it in `finally`, so two
+        // threads loading the same dto instance raced — one thread's clone
+        // stripped the other's markers (silent subtype downgrade) and restore
+        // interleaving leaked clones. Now the input is never mutated: loads
+        // run on a one-off record copy whose Extra is the stripped clone.
         JsonElement savedObjectType = default;
         bool hasObjectType = false;
         JsonElement savedScriptType = default;
@@ -178,17 +180,10 @@ internal static class GameObjectDtoConverter
                 clone = new Dictionary<string, JsonElement>(originalExtra);
                 clone.Remove("__object_type");
                 clone.Remove("__script_type");
-                dto.Extra = clone;
             }
         }
-        try
-        {
-            return FromDtoCore(dto, savedObjectType, hasObjectType, savedScriptType, hasScriptType);
-        }
-        finally
-        {
-            if (clone is not null && originalExtra is not null) dto.Extra = originalExtra;
-        }
+        var view = dto with { Extra = clone ?? originalExtra ?? new Dictionary<string, JsonElement>() };
+        return FromDtoCore(view, savedObjectType, hasObjectType, savedScriptType, hasScriptType);
     }
 
     private static GameObject FromDtoCore(GameObjectDto dto, JsonElement savedObjectType, bool hasObjectType, JsonElement savedScriptType, bool hasScriptType)

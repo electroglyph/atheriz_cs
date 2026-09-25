@@ -59,10 +59,12 @@ public sealed class MapEditCellParsingTests
             new List<object?> { 5, 6, "y", new List<object?> { 1, 2, 3 }, new List<object?> { -1, -1, -1 }, new List<object?> { "bold" } },
         ]);
         // Validation passed, so consume ran and rejected the unknown key
-        // (instead of the silent validation return).
-        Assert.Single(conn.Sent);
+        // (instead of the silent validation return), plus the reopen hint.
+        Assert.Equal(2, conn.Sent.Count);
         Assert.Equal("map_edit_reject", conn.Sent[0].Cmd);
         Assert.Equal("unknown_key", conn.Sent[0].Args[0]);
+        Assert.Equal("text", conn.Sent[1].Cmd);
+        Assert.Contains("Reopen the editor", conn.Sent[1].Args[0]?.ToString());
     }
 
     [Fact]
@@ -71,7 +73,8 @@ public sealed class MapEditCellParsingTests
         using var env = GlobalTestEnv.Enter();
         var conn = new TestConnection();
         CallMapEdit(conn, [new List<object?> { 1, 2, "" }]);
-        Assert.Single(conn.Sent);
+        Assert.Equal(2, conn.Sent.Count);
         Assert.Equal("map_edit_reject", conn.Sent[0].Cmd);
+        Assert.Equal("text", conn.Sent[1].Cmd);
     }
 }

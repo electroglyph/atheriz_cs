@@ -163,12 +163,25 @@ public sealed class GameArgumentParser
         return builder;
     }
 
+    // Def-list snapshot for readers: AddArgument mutates _defs under
+    // _cacheLock while ParseArgs/help readers enumerate it — a lock-free
+    // walk throws mid-parse when the two overlap. The snapshot shares def
+    // instances (no clone): post-publish Builder writes touch only
+    // atomic-sized fields (bool Required, enum Nargs, string Help — Names is
+    // assign-once at construction), so a concurrent tweak can stale one
+    // parse's flag at worst, never throw or tear. The version bump rides
+    // _cacheLock with the add.
+    private List<ArgumentDef> SnapshotDefs()
+    {
+        lock (_cacheLock) return _defs.ToList();
+    }
+
     // usage names positionals (argparse shape), shared by help/usage.
     private string BuildUsage()
     {
         var sb = new StringBuilder($"usage: {Prog}");
         if (AddHelp) sb.Append(" [-h]");
-        foreach (var d in _defs)
+        foreach (var d in SnapshotDefs())
         {
             if (d.IsHelp || d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))) continue;
             sb.Append(d.Nargs switch
@@ -189,7 +202,7 @@ public sealed class GameArgumentParser
         sb.AppendLine(BuildUsage());
         if (!string.IsNullOrEmpty(Description)) sb.AppendLine(Description);
         sb.AppendLine("options:");
-        foreach (var d in _defs)
+        foreach (var d in SnapshotDefs())
         {
             var names = string.Join(", ", d.Names);
             sb.AppendLine($"  {names,-20} {d.Help}");
@@ -348,7 +361,7 @@ public sealed class GameArgumentParser
         // swallow --help once a positional has started).
         // init defaults
         var result = new ParsedArgs();
-        foreach (var d in _defs)
+        foreach (var d in SnapshotDefs())
         {
             if (d.DefaultValue is not null) result.Set(d.Dest, d.DefaultValue);
             else if (d.Action == ArgAction.StoreTrue) result.Set(d.Dest, false);
@@ -564,7 +577,7 @@ public sealed class GameArgumentParser
         }
         // check required optionals: presence on the command line is required
         // (bool defaults make a null-check undetectable for store_true).
-        foreach (var od in _defs.Where(d => d.Required && d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))))
+        foreach (var od in SnapshotDefs().Where(d => d.Required && d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))))
         {
             if (!seen.Contains(od.Dest)) throw new CommandError($"the following arguments are required: {string.Join("/", od.Names)}");
         }

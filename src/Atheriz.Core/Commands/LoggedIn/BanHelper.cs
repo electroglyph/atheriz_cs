@@ -36,21 +36,51 @@ internal static class BanHelper
 
     internal static GameObject? FindAccount(GameObject target)
     {
+        // Atomic session/account read: the old sess-then-Account
+        // two-step could mix generations across a swap. One snapshot pair.
         var sess = target.Session;
-        var acct = sess?.Account as GameObject;
-        if (acct is not null) return acct;
+        if (sess is not null)
+        {
+            var (acct, _) = sess.GetAccountPair();
+            if (acct is GameObject go) return go;
+        }
         var accounts = ObjectRegistry.FilterBy(x => x.IsAccount && (x as Account)?.Characters.Contains(target.Id) == true);
         return accounts.FirstOrDefault();
     }
 
     internal static string? GetHost(GameObject target)
     {
+        // Atomic session/connection read: the old three-step could hand
+        // a fresh connection's host for a stale session's ban (wrong-IP ban
+        // on reconnect). The pair below never mixes generations.
         var sess = target.Session;
-        var conn = sess?.Connection;
+        if (sess is null) return null;
+        Atheriz.Core.Network.BaseConnection? conn;
+        lock (sess.Lock) { conn = sess.Connection; }
         if (conn is null) return null;
         var host = conn.ClientHost;
         if (string.IsNullOrEmpty(host) || host == "?") return null;
         return host;
+    }
+
+    // Atomic live-connection snapshot for the ban kick: the old
+    // Session-then-Connection two-step could Msg+Close a swapped-in fresh
+    // connection, or miss the kick entirely. Fails closed (false) when the
+    // target re-homed mid-kick or the session died — the caller reports it
+    // instead of acting on a torn pair. Lock order is session -> object
+    // (same as Puppet/Unpuppet/AtDisconnect).
+    internal static bool TryGetLiveConn(GameObject t, out Atheriz.Core.Objects.Session? sess, out Atheriz.Core.Network.BaseConnection? conn)
+    {
+        sess = t.Session;
+        conn = null;
+        if (sess is null) return false;
+        lock (sess.Lock)
+        {
+            if (!ReferenceEquals(t.Session, sess)) return false;
+            if (sess.Closed) return false;
+            conn = sess.Connection;
+            return conn is not null;
+        }
     }
 
     // Single home for the account-characters fetch repeated across the
@@ -59,6 +89,33 @@ internal static class BanHelper
     // empty list the old inline `as Account` guards produced.
     internal static List<GameObject> GetAccountChars(GameObject acct)
         => acct is Account acc ? ObjectRegistry.Get(acc.Characters.ToList()) : [];
+
+    // Atomic scope-state apply: ban-vs-unban interleaves used to set
+    // each member under its own hold, leaving half-banned accounts. All
+    // members share one ordered write hold (Id order, matching the object
+    // leg of MoveTo's CompareLockOrder), so concurrent scopes serialize.
+    internal static void ApplyScopeState(List<GameObject> scope, bool banned, string? reason)
+    {
+        var ordered = scope.Where(o => o is not null).Distinct().OrderBy(o => o.Id).ToList();
+        foreach (var o in ordered) o.SyncRoot.EnterWriteLock();
+        try
+        {
+            foreach (var o in ordered)
+            {
+                o.IsBanned = banned;
+                if (reason is not null)
+                {
+                    o.BanReason = reason;
+                    if (reason.Length == 0) o.TryRemoveExtraJson("ban_reason");
+                }
+            }
+        }
+        finally
+        {
+            for (int i = ordered.Count - 1; i >= 0; i--)
+                try { ordered[i].SyncRoot.ExitWriteLock(); } catch (Exception) { }
+        }
+    }
 
     // Single-peer privilege gate behind the direct target check and the
     // account-member loop. The verb word reproduces each verb's refusal

@@ -530,8 +530,9 @@ public class PortedConnectionTestsPart2
         ObjectRegistry.ClearAll();
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var host="203.0.113.10";
-        Assert.True(ObjectRegistry.TryReserveCreationCooldown("guest", host, now, 60));
-        Assert.True(ObjectRegistry.CreationCooldownActive(host, now) || !ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60));
+        var t1 = ObjectRegistry.TryReserveCreationCooldown("guest", host, now, 60);
+        Assert.NotNull(t1);
+        Assert.True(ObjectRegistry.CreationCooldownActive(host, now) || ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60) is null);
         ObjectRegistry.ClearAll();
     }
 

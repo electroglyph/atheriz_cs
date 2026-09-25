@@ -36,13 +36,30 @@ public static class AdminToken
 
         var tokenFile = Path.Combine(secretPath, TokenFileName);
 
-        // If exists, read — similar to reading after creation
+        // If exists, read — similar to reading after creation.
+        // A zero-byte file is poison: a crash between CreateNew and
+        // Flush leaves it permanently wedged (every future call collides on
+        // CreateNew, re-reads empty, throws). Tokens are never empty, so
+        // after a bounded wait for a concurrent writer, delete and
+        // regenerate instead of throwing forever.
         if (File.Exists(tokenFile))
         {
             var existing = TryReadTokenFile(tokenFile);
             if (!string.IsNullOrEmpty(existing))
             {
                 return existing;
+            }
+            if (existing is not null)
+            {
+                // Bounded wait for a concurrent writer to finish flushing:
+                // spin until the file reads non-empty or ~100ms elapse, then
+                // take one final read (no Thread.Sleep — hygiene rule).
+                if (string.IsNullOrEmpty(existing)
+                    && SpinWait.SpinUntil(() => !string.IsNullOrEmpty(TryReadTokenFile(tokenFile)), TimeSpan.FromMilliseconds(100)))
+                    existing = TryReadTokenFile(tokenFile);
+                if (!string.IsNullOrEmpty(existing)) return existing;
+                try { File.Delete(tokenFile); }
+                catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed AdminToken poison cleanup: " + logEx.Message, "AdminToken"); }
             }
         }
 
@@ -64,7 +81,9 @@ public static class AdminToken
         {
             // Race: another process created it — read back the winner, never truncate
             // a valid token (truncating here would DoS the running server's token).
-            var raced = TryReadTokenFile(tokenFile);
+            // Bounded wait: the winner may still be mid-write (empty-read).
+            string? raced = null;
+            SpinWait.SpinUntil(() => !string.IsNullOrEmpty(raced = TryReadTokenFile(tokenFile)), TimeSpan.FromMilliseconds(100));
             if (!string.IsNullOrEmpty(raced)) return raced;
             var late = TryReadTokenFile(tokenFile);
             if (!string.IsNullOrEmpty(late)) return late;

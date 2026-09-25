@@ -79,10 +79,10 @@ public static class ObjectRegistry
         CreationCooldownStore.CreationCooldownActive(host, now);
     public static void ApplyCreationCooldown(string op, string host, double now, double cooldown) =>
         CreationCooldownStore.ApplyCreationCooldown(op, host, now, cooldown);
-    public static bool TryReserveCreationCooldown(string op, string host, double now, double cooldown) =>
+    public static Guid? TryReserveCreationCooldown(string op, string host, double now, double cooldown) =>
         CreationCooldownStore.TryReserveCreationCooldown(op, host, now, cooldown);
-    public static void ClearCreationCooldown(string host) =>
-        CreationCooldownStore.ClearCreationCooldown(host);
+    public static void ClearCreationCooldown(string host, Guid owner) =>
+        CreationCooldownStore.ClearCreationCooldown(host, owner);
 
     // --- failed login map exposed for parity ---
     public static BoundedDictionary<string, int> FailedLogins => IpBanStore.FailedLogins;

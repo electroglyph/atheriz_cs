@@ -11,12 +11,14 @@ public static class CommandRegistry
     private static CmdSet? _loggedIn;
     private static CmdSet? _unloggedIn;
 
-    // One home for the double-checked lazy init: first check is the fast
-    // path, the lock re-checks before building so concurrent first touches
-    // still register exactly once.
+    // One home for the double-checked lazy init: the fast path reads via
+    // Volatile (a plain read can observe a half-published instance on
+    // weak-memory hardware — C10); the lock re-checks before building so
+    // concurrent first touches still register exactly once.
     private static CmdSet GetOrCreate(ref CmdSet? field, Action<CmdSet> register)
     {
-        if (field is not null) return field;
+        var snap = Volatile.Read(ref field);
+        if (snap is not null) return snap;
         lock (Lock)
         {
             if (field is not null) return field;

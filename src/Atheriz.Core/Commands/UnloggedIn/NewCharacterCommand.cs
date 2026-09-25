@@ -55,7 +55,16 @@ public sealed class NewCharacterCommand : Command
                 return;
             }
             CreationCooldownHelper.Apply(caller, "character");
-            acc.AddCharacter(character);
+            // Atomic cap reserve: the pre-check above is advisory; this
+            // decides under the account write lock.
+            if (!acc.TryAddCharacter(character, settings.MaxCharacters))
+            {
+                CreationCooldownHelper.Clear(caller);
+                caller.Msg($"You already have {settings.MaxCharacters} characters.");
+                try { character.IsDeleted = true; } catch (Exception) { }
+                try { ObjectRegistry.RemoveObject(character); } catch (Exception) { }
+                return;
+            }
             if (!CharacterPuppetSetup.AttachAndHome(conn, character)) return;
             caller.Msg($"Character {name} created.");
         }
@@ -88,18 +97,17 @@ public sealed class NewCharacterCommand : Command
             var account = caller.Session.Account as Account;
             if (account is null) { caller.Msg("You must be logged in first."); return; }
             if (account.Characters.Count >= settings.MaxCharacters) { caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
-            string rateKey = CreationCooldownHelper.RateKey(caller);
             if (!CreationCooldownHelper.TryReserve(caller, "character")) return;
             string name = await caller.Session.Prompt("Enter a name for your character:", false, ct).ConfigureAwait(false);
             name = name.Trim();
             var err = Validation.ValidateCharacterName(name);
-            if (err is not null) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg(err); return; }
+            if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
             string gender = await caller.Session.Prompt("Enter your character's gender:", false, ct).ConfigureAwait(false);
             gender = gender.Trim();
-            if (string.IsNullOrEmpty(gender)) { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg("Gender cannot be empty."); return; }
+            if (string.IsNullOrEmpty(gender)) { CreationCooldownHelper.Clear(caller); caller.Msg("Gender cannot be empty."); return; }
             string desc = await caller.Session.Prompt("Enter a short description of your character:", false, ct).ConfigureAwait(false);
             if (CreationValidation.PcNameExists(name))
-            { ObjectRegistry.ClearCreationCooldown(rateKey); caller.Msg($"Character with this name ({name}) already exists."); return; }
+            { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
             var character = GameObject.Create(name, desc, isPc: true);
             character.Gender = gender;
             try
@@ -108,14 +116,22 @@ public sealed class NewCharacterCommand : Command
             }
             catch (InvalidOperationException ex)
             {
-                ObjectRegistry.ClearCreationCooldown(rateKey);
+                CreationCooldownHelper.Clear(caller);
                 caller.Msg(ex.Message);
                 try { character.IsDeleted = true; } catch (Exception) { }
                 return;
             }
-            double now2 = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
-            ObjectRegistry.ApplyCreationCooldown("character", rateKey, now2, settings.CreationCooldown);
-            account.AddCharacter(character);
+            CreationCooldownHelper.Apply(caller, "character");
+            // Atomic cap reserve: the pre-check above is advisory; this
+            // decides under the account write lock.
+            if (!account.TryAddCharacter(character, settings.MaxCharacters))
+            {
+                CreationCooldownHelper.Clear(caller);
+                caller.Msg($"You already have {settings.MaxCharacters} characters.");
+                try { character.IsDeleted = true; } catch (Exception) { }
+                try { ObjectRegistry.RemoveObject(character); } catch (Exception) { }
+                return;
+            }
             if (!CharacterPuppetSetup.AttachAndHome(caller, character)) return;
             caller.Msg($"Character {name} created and puppeted.");
         }

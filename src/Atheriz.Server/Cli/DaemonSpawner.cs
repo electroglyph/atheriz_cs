@@ -71,6 +71,11 @@ public static class DaemonSpawner
             try
             {
                 bool ready = false, died = false;
+                // The readiness claim must name OUR child: a rival
+                // starter winning the gap would otherwise satisfy this poll
+                // and declare ready for a server we did not start.
+                int childPid;
+                try { childPid = child.Id; } catch { childPid = -1; }
                 while (!timeoutCts.Token.IsCancellationRequested)
                 {
                     try
@@ -79,7 +84,8 @@ public static class DaemonSpawner
                     }
                     catch { died = true; break; }
                     int? claim = PidFile.TryReadPid(pidPath);
-                    bool claimOk = claim is int c && c != parentPid && PidFile.IsServerProcess(c);
+                    bool claimOk = false;
+                    try { claimOk = claim is int c && c == childPid && childPid != -1 && PidFile.IsServerProcess(c); } catch { }
                     bool portOk = !webEnabled || PidFile.IsPortListening(expectedPort);
                     if (claimOk && portOk) { ready = true; break; }
                     try { await Task.Delay(PollCadence, timeoutCts.Token).ConfigureAwait(false); }

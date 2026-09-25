@@ -5,17 +5,22 @@ namespace Atheriz.Core.Persistence.Dto;
 public static class GameObjectDtoSerializer
 {
     private static JsonSerializerOptions JsonOpts => JsonOptions.Default;
-    public static Func<GameObjectDto, string>? ToJsonHook;
-    public static Func<string, GameObjectDto>? FromJsonHook;
+    // Volatile + single capture: a seam swap between the null check
+    // and the invoke NREs, and a mid-checkpoint swap serializes rows in two
+    // dialects. Each call observes exactly one generation.
+    public static volatile Func<GameObjectDto, string>? ToJsonHook;
+    public static volatile Func<string, GameObjectDto>? FromJsonHook;
 
     public static string ToJson(GameObjectDto dto)
     {
-        if (ToJsonHook is not null) return ToJsonHook(dto);
+        var hook = ToJsonHook;
+        if (hook is not null) return hook(dto);
         return JsonSerializer.Serialize(dto, JsonOpts);
     }
     public static GameObjectDto FromJson(string json)
     {
-        if (FromJsonHook is not null) return FromJsonHook(json);
+        var hook = FromJsonHook;
+        if (hook is not null) return hook(json);
         return JsonSerializer.Deserialize<GameObjectDto>(json, JsonOpts)
             ?? throw new InvalidDataException("Failed to deserialize GameObjectDto");
     }

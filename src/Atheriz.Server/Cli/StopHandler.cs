@@ -5,9 +5,31 @@ namespace Atheriz.Server.Cli;
 public static class StopHandler
 {
     internal static AtherizSettings EffectiveSettingsValue => EffectiveSettings;
+    // Guarded lazy publish: the old `??=` could double-load (benign
+    // discard) or hand a half-published/stale generation across an
+    // Invalidate, and StopAsync's port/secret/savedir triple mixed
+    // generations. One lock + volatile fast path; StopAsync snapshots once.
+    private static readonly Lock _effLock = new();
     private static AtherizSettings? _effectiveCache;
-    private static AtherizSettings EffectiveSettings => _effectiveCache ??= LoadSettingsFor(Directory.GetCurrentDirectory());
-    internal static void InvalidateEffectiveSettings() => _effectiveCache = null;
+    private static AtherizSettings EffectiveSettings
+    {
+        get
+        {
+            var snap = Volatile.Read(ref _effectiveCache);
+            if (snap is not null) return snap;
+            lock (_effLock)
+            {
+                snap = _effectiveCache;
+                if (snap is null)
+                {
+                    snap = LoadSettingsFor(Directory.GetCurrentDirectory());
+                    Volatile.Write(ref _effectiveCache, snap);
+                }
+                return snap;
+            }
+        }
+    }
+    internal static void InvalidateEffectiveSettings() { lock (_effLock) { _effectiveCache = null; } }
 
     // Config-only load scoped to a game folder (no DB touch): the background
     // parent resolves the child's expected port/banners from the target game
@@ -58,6 +80,16 @@ public static class StopHandler
             return 1;
         }
         Console.WriteLine($"Stopping server process with PID: {pid}...");
+        // Terminal re-verify (mirroring RestartHandler's escalation
+        // gate): the pid may have been recycled between the checks above
+        // and the kill below — confirm file and process still agree.
+        bool stillOurs = false;
+        try { stillOurs = PidFile.TryReadPid(pidFilePath) == pid && PidFile.IsServerProcess(pid); } catch { }
+        if (!stillOurs)
+        {
+            Console.WriteLine($"PID {pid} no longer names a verified server process; aborting kill.");
+            return 1;
+        }
         await ProcessHelper.TerminateAsync(proc).ConfigureAwait(false);
         if (File.Exists(pidFilePath))
         {
@@ -79,9 +111,12 @@ public static class StopHandler
 
     public static async Task<int> StopAsync(int? portOverride)
     {
-        var port = portOverride ?? EffectiveSettings.WebserverPort;
-        var secretPath = EffectiveSettings.SecretPath;
-        var tlsOn = !string.IsNullOrEmpty(EffectiveSettings.SslCertFile);
+        // Single-generation snapshot: port/secret/savedir must come from
+        // one settings load, never a mix across a concurrent invalidate.
+        var effective = EffectiveSettings;
+        var port = portOverride ?? effective.WebserverPort;
+        var secretPath = effective.SecretPath;
+        var tlsOn = !string.IsNullOrEmpty(effective.SslCertFile);
         switch (await ShutdownClient.TryRequestShutdownAsync(port, secretPath, tlsOn).ConfigureAwait(false))
         {
             case ShutdownRequestResult.Accepted:
@@ -92,7 +127,7 @@ public static class StopHandler
                 return 1;
             default: break;
         }
-        var savePath = EffectiveSettings.SavePath;
+        var savePath = effective.SavePath;
         var pidFilePath = PidFile.LocateServerPidFile(savePath);
         if (!File.Exists(pidFilePath))
         {

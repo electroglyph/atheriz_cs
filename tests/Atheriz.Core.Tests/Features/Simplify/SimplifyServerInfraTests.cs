@@ -397,9 +397,9 @@ public class VerifiedKillFunnelTests
 
 // Merged from TokenFileEmptySemanticsTests.cs
 // One token-file read shared by the five admin-token sites. Empty-file
-// semantics stay per-site: EnsureToken throws on an unusable file (minting
-// a silent replacement would invalidate the running server's token),
-// ReadToken/CheckAdmin let it flow into the comparison.
+// semantics stay per-site: EnsureToken self-heals an unusable file (a crash
+// between CreateNew and Flush leaves a zero-byte wedge that would otherwise
+// throw forever — F15), ReadToken/CheckAdmin let it flow into the comparison.
 [Collection("Ported")]
 public class TokenFileEmptySemanticsTests
 {
@@ -425,16 +425,19 @@ public class TokenFileEmptySemanticsTests
     }
 
     [Fact]
-    public void EnsureToken_EmptyFile_Throws()
+    public void EnsureToken_EmptyFile_Regenerates()
     {
         var dir = NewSecretDir();
         try
         {
             File.WriteAllText(Path.Combine(dir, "admin.token"), "   \n");
-            // Exists-but-empty: the atomic create loses the race to the
-            // existing file and there is no winner to read back, so
-            // EnsureToken throws instead of minting a silent replacement.
-            Assert.Throws<InvalidOperationException>(() => AdminToken.EnsureToken(dir));
+            // Exists-but-empty (crash between CreateNew and Flush): after a
+            // bounded wait for a concurrent writer, EnsureToken deletes the
+            // poison and mints a fresh token instead of wedging forever.
+            string token = AdminToken.EnsureToken(dir);
+            Assert.Equal(64, token.Length);
+            Assert.Matches("^[0-9a-f]+$", token);
+            Assert.Equal(token, AdminToken.EnsureToken(dir));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
