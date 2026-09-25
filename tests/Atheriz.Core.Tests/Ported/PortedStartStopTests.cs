@@ -385,9 +385,9 @@ public class PortedStartStopTests
         // Fresh daemon boot: the ticker global is unmaterialized when rows
         // convert. Startup must still leave every loaded tickable ticking —
         // previously LoadObjects ran first and every AtTick registration was
-        // silently dropped (TryGetTicker null), killing combat, regen, NPC
-        // AI and effect ticks with no error. Exactly one delegate: startup
-        // registers through ResolveRelations only, never the reload sweep.
+        // silently dropped (TryGetTicker null), so no object received ticks
+        // until the next reload. Exactly one delegate: startup registers
+        // through ResolveRelations only, never the reload sweep.
         using var env = GlobalTestEnv.Enter();
         StartStop.Reset();
         GlobalServices.Reset();
