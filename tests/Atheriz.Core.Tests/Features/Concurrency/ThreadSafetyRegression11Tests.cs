@@ -150,10 +150,16 @@ public sealed class ThreadSafetyRegression11Tests
                 ch.GetSaveOperationClearing();
         });
         await Task.WhenAll([writer, saver]).WaitAsync(TimeSpan.FromSeconds(30));
-        string json = "";
         for (int i = 0; i < 50 && ch.IsModified; i++)
-            json = ch.GetSaveOperationClearing().Json;
+            ch.GetSaveOperationClearing();
         Assert.False(ch.IsModified);
+        // Read the verdict from a fresh snapshot, not the last drain
+        // output: the saver's final clearing save may already have captured
+        // every message and quiesced the flag, leaving the drain loop with
+        // nothing to persist (empty json) — that is correct server behavior,
+        // not data loss. A non-clearing save always reflects the converged
+        // history.
+        string json = ch.GetSaveOperation().Json;
         for (int i = 0; i < total; i++)
             Assert.Contains($"a16msg-{i:D3}", json, StringComparison.Ordinal);
     }

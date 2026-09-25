@@ -54,11 +54,18 @@ public sealed class ThreadSafetyRegression9Tests
     }
 
     // Channel command churn beside delete churn never deadlocks.
+    // The two sides free-run (no per-round rendezvous): a Barrier(2) here
+    // phase-locks the workers so the fatal Subscribe-vs-detach overlap
+    // rarely aligns and the ABBA hides. Free-running back-to-back
+    // iterations over 200 rounds explore the overlap deterministically:
+    // pre-fix this stalled the 60 s watchdog most runs; post-fix it
+    // completes in milliseconds. (Subscribe/RemoveListener used to read
+    // the peer id under the channel lock — channel -> peer — against
+    // Delete-detach's peer -> channel order.)
     [Fact]
     public async Task GetCommand_Delete_Churn_Completes()
     {
         using var env = GlobalTestEnv.Enter();
-        using var barrier = new Barrier(2);
         for (int round = 0; round < 200; round++)
         {
             var ch = Channel.Create("a8chan" + round);
@@ -67,7 +74,6 @@ public sealed class ThreadSafetyRegression9Tests
             try { ObjectRegistry.AddObject(peer); } catch { }
             var t1 = Task.Run(() =>
             {
-                barrier.SignalAndWait();
                 for (int i = 0; i < 10; i++)
                 {
                     peer.Subscribe(ch);
@@ -77,7 +83,6 @@ public sealed class ThreadSafetyRegression9Tests
             });
             var t2 = Task.Run(() =>
             {
-                barrier.SignalAndWait();
                 for (int i = 0; i < 10; i++)
                 {
                     try { ch.Delete(); } catch { }

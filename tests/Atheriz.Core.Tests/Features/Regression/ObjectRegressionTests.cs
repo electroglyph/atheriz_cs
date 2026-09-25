@@ -360,6 +360,21 @@ public class ObjectRegressionTests
         Assert.True(core.IndexOf("ExitWriteLock", StringComparison.Ordinal) < core.IndexOf("EncodeSaveJson(obj, dto, had)", StringComparison.Ordinal));
     }
 
+    // Channel clearing saves re-dirty when the mutation generation moved
+    // between the history snapshot and the flag clear: a Msg landing in
+    // that window sets IsModified before the clear and would otherwise be
+    // lost to the checkpoint. The churn test pins convergence behaviorally;
+    // this pins the guard itself — a timing window no behavioral test can
+    // hit deterministically.
+    [Fact]
+    public void ChannelClearingSave_ReDirtiesOnGenerationMove()
+    {
+        var channel = SourceScan.Read("src", "Atheriz.Core", "Objects", "Channel.cs");
+        var buildOps = SourceScan.Region(channel, "private SaveOperation BuildSaveOperation(bool clearing)");
+        Assert.Contains("genSnap", buildOps);
+        Assert.Contains("if (moved) IsModified = true;", buildOps);
+    }
+
     // AtPostPuppet ignores the MoveTo result and always enables the map
     // once the flags hold (base_obj.py:1479-1485).
     [Fact]

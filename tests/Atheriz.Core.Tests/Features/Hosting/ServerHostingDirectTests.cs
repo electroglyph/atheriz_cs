@@ -30,7 +30,7 @@ public class ServerHostingDirectTests
         }
     }
 
-    private static async Task<Booted> BootAsync(bool withWwwroot = false, bool withDrawEntry = false)
+    private static async Task<Booted> BootAsync(bool withWwwroot = false, bool withDrawEntry = false, bool withStaleRootIndex = false)
     {
         var tmp = Path.Combine(Path.GetTempPath(), "ahost_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmp);
@@ -48,6 +48,13 @@ public class ServerHostingDirectTests
             var drawDir = Path.Combine(tmp, "wwwroot", "atheriz_draw");
             Directory.CreateDirectory(drawDir);
             await File.WriteAllTextAsync(Path.Combine(drawDir, "index.html"), "<html><body>DrawEntryMarker</body></html>");
+        }
+        if (withStaleRootIndex)
+        {
+            // A stale Draw build once sat at wwwroot/index.html: / must
+            // ignore it (landing page is a template, never a static file).
+            Directory.CreateDirectory(Path.Combine(tmp, "wwwroot"));
+            await File.WriteAllTextAsync(Path.Combine(tmp, "wwwroot", "index.html"), "<html><body>Atheriz Draw</body></html>");
         }
         var settings = new AtherizSettings
         {
@@ -116,15 +123,19 @@ public class ServerHostingDirectTests
     }
 
     [Fact]
-    public async Task StaticFile_IndexNoFiles_NoCacheHeadersAndFallbackBody()
+    public async Task StaticFile_IndexNoFiles_NoCacheHeadersAndLandingPage()
     {
         await using var b = await BootAsync();
         var resp = await b.Client.GetAsync("/");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Contains("no-store", resp.Headers.GetValues("Cache-Control").First());
         Assert.Contains("no-cache", resp.Headers.GetValues("Pragma").First());
-        // No wwwroot files: the fallback names the configured server.
-        Assert.Contains("TestSrv", await resp.Content.ReadAsStringAsync());
+        // "/" is the landing template (shipped web/templates/index.html),
+        // never a Draw build; the inline fallback below names the server
+        // only when no template resolves at all.
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("Play", body);
+        Assert.DoesNotContain("Atheriz Draw", body);
     }
 
     [Fact]
@@ -197,6 +208,20 @@ public class ServerHostingDirectTests
             Assert.True(resp.StatusCode == HttpStatusCode.Found, path);
             Assert.Equal("/webclient/index.html", resp.Headers.Location?.ToString());
         }
+    }
+
+    [Fact]
+    public async Task StaticFile_Root_IgnoresStaleWwwrootIndex_ServesLanding()
+    {
+        // Regression pin: wwwroot/index.html once held a stale Draw build
+        // that "/" served instead of the landing page. The landing page is
+        // a template, so a static root index must never win.
+        await using var b = await BootAsync(withStaleRootIndex: true);
+        var resp = await b.Client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("Play", body);
+        Assert.DoesNotContain("Atheriz Draw", body);
     }
 
     [Fact]

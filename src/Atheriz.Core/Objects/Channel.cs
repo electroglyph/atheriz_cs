@@ -148,17 +148,27 @@ public class Channel : GameObject
 
     public void AddListener(GameObject obj)
     {
+        // Snapshot the id before taking the channel lock: Id is a locked
+        // property (peer's SyncRoot), so reading it under _histLock nests
+        // channel -> peer — the inverse of the fixed object -> channel order
+        // (Delete detaches under the peer lock) and ABBA-deadlocks.
+        // The snapshot loses nothing: _histLock never protected the peer's
+        // id to begin with, and ids are assigned once at creation.
+        int id = obj.Id;
         lock (_histLock)
         {
             if (_channelDeleted) return;
-            _listeners[obj.Id] = obj;
+            _listeners[id] = obj;
             _mutGen++;
         }
         IsModified = true;
     }
     public override void RemoveListener(GameObject obj)
     {
-        lock (_histLock) { _listeners.Remove(obj.Id); _mutGen++; }
+        // Same channel -> peer inversion as AddListener (obj.Id under
+        // _histLock): snapshot first, mutate under the channel lock only.
+        int id = obj.Id;
+        lock (_histLock) { _listeners.Remove(id); _mutGen++; }
         IsModified = true;
     }
     /// <summary>
@@ -167,10 +177,12 @@ public class Channel : GameObject
     /// </summary>
     public void ReplaceListener(GameObject replacement)
     {
+        // Id snapshot precedes the channel lock (see AddListener).
+        int id = replacement.Id;
         lock (_histLock)
         {
-            if (_listeners.TryGetValue(replacement.Id, out var cur) && !ReferenceEquals(cur, replacement))
-                _listeners[replacement.Id] = replacement;
+            if (_listeners.TryGetValue(id, out var cur) && !ReferenceEquals(cur, replacement))
+                _listeners[id] = replacement;
         }
     }
 

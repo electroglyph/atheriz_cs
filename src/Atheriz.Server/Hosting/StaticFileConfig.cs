@@ -84,7 +84,14 @@ public static partial class StaticFileConfig
         app.MapGet("/", (HttpContext ctx) =>
         {
             SetNoCache(ctx.Response);
-            var idx = staticCandidate is not null ? Path.Combine(staticCandidate, "index.html") : null;
+            // Landing page is a template, never a static file: the Python
+            // original serves web/templates/index.html via Jinja here, with
+            // the game folder's web/templates overriding the shipped one.
+            // (A stale Draw build once sat at wwwroot/index.html and this
+            // branch served it at / — deploy.py never writes a root
+            // index.html, and the Python static dir has none either.)
+            var templateCandidate = AssetPathResolver.ResolveTemplates(app.Environment.ContentRootPath, AppContext.BaseDirectory);
+            var idx = templateCandidate is not null ? Path.Combine(templateCandidate, "index.html") : null;
             if (idx is not null && File.Exists(idx)) return Results.File(idx, contentType: "text/html");
             return Results.Content($"<h1>{settings.ServerName}</h1><p><a href=\"/webclient/index.html\">Play</a></p>", "text/html");
         });

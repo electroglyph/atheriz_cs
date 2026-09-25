@@ -57,4 +57,17 @@ public class AssetPidStaticFileTests
         Assert.Contains("partial Regex HashedBundlePattern()", src);
         Assert.DoesNotContain("new Regex(", src);
     }
+
+    // No root index.html may live in wwwroot: a stale Draw build committed
+    // there was once served at "/" instead of the landing page. The Draw
+    // entry lives at atheriz_draw/index.html; the landing page is the
+    // web/templates/index.html template. (Belt and braces beside the
+    // behavioral pin — the "/" route no longer consults wwwroot at all, so
+    // a stray file could only surface inertly under /static/index.html.)
+    [Fact]
+    public void Wwwroot_HasNoRootIndexHtml()
+    {
+        var stray = Path.Combine(SourceScan.RepoRoot(), "src", "Atheriz.Server", "wwwroot", "index.html");
+        Assert.False(File.Exists(stray), "wwwroot/index.html must not exist — Draw entry is atheriz_draw/index.html, landing is web/templates/index.html");
+    }
 }
