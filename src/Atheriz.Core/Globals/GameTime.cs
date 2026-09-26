@@ -586,7 +586,9 @@ public class GameTime
         long current;
         using (ReadScope()) { current = _ticks; }
 
-        double tickDurationSeconds = _settings.TickMinutes * _settings.SecondsPerMinute;
+        double tickMinutes = _settings.TickMinutes;
+        if (double.IsNaN(tickMinutes) || double.IsInfinity(tickMinutes) || tickMinutes <= 0) tickMinutes = 1;
+        double tickDurationSeconds = tickMinutes * _settings.SecondsPerMinute;
         double totalSeconds = current * tickDurationSeconds;
         // negative ticks (C# (long)(a/b) rounds toward zero).
         long totalDays = (long)Math.Floor(totalSeconds / _settings.SecondsPerDay);
@@ -602,8 +604,9 @@ public class GameTime
         long dayOfYear = totalDays - yearOffset * _settings.DaysPerYear;
         long calcMonth = dayOfYear / _settings.DaysPerMonth;
         long calcDay = dayOfYear % _settings.DaysPerMonth;
-        long dayInLunar = totalDays % _settings.LunarCycleDays;
-        if (dayInLunar < 0) dayInLunar += _settings.LunarCycleDays;
+        int lunarCycleDays = _settings.LunarCycleDays <= 0 ? 1 : _settings.LunarCycleDays;
+        long dayInLunar = totalDays % lunarCycleDays;
+        if (dayInLunar < 0) dayInLunar += lunarCycleDays;
         string moonPhase = dayInLunar switch
         {
             0 => "new",
@@ -654,7 +657,8 @@ public class GameTime
                 : (daysPerYear - winterStart) + dayOfYear;
         }
 
-        int weekOfSeason = (int)(dayInSeason / _settings.DaysPerWeek) + 1;
+        int daysPerWeek = _settings.DaysPerWeek <= 0 ? 1 : _settings.DaysPerWeek;
+        int weekOfSeason = (int)(dayInSeason / daysPerWeek) + 1;
 
         string OrdinalDay(int d)
         {
@@ -713,7 +717,13 @@ public class GameTime
         // default G15 shortest form ("0.1") is Python str()'s equivalent.
         // Doubles re-enter only at the final minutes formatting, exactly
         // like float() in Python.
-        decimal tickMinutes = decimal.Parse(_settings.TickMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
+        // NaN and Infinity have no decimal representation: Parse would
+        // throw FormatException before the clamp below ever runs. Screen
+        // them as doubles first (GetTime's clamp at :590 already does).
+        double tickRaw = _settings.TickMinutes;
+        decimal tickMinutes = (double.IsNaN(tickRaw) || double.IsInfinity(tickRaw) || tickRaw <= 0) ? 1
+            : decimal.Parse(tickRaw.ToString(System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
+        if (tickMinutes <= 0) tickMinutes = 1;
         decimal tph = _settings.MinutesPerHour / tickMinutes;
         decimal tpd = tph * _settings.HoursPerDay;
         decimal tpw = tpd * _settings.DaysPerWeek;
@@ -728,6 +738,7 @@ public class GameTime
         // division/modulo, same ", " join, same singular/plural suffix.
         void AppendUnit(decimal unit, ref int slot, string one, string many)
         {
+            if (unit <= 0) return;
             if (dleftover >= unit)
             {
                 if (formatted != "") formatted += ", ";

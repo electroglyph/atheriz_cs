@@ -19,9 +19,15 @@ public class StartupFailureTests
         // and swallowed (return), so startup reports success with no world.
         // A save path nested under a regular file can never be created, which
         // forces EnsureCreated to throw deterministically on any machine.
+        // Poison the RESOLVED path: startup resolves ATHERIZ_SAVE_PATH first,
+        // so the override must point at the uncreatable location too, or the
+        // test would exercise the fixture's valid scratch dir instead.
         using var env = GlobalTestEnv.Enter();
         var file = Path.GetTempFileName();
-        var settings = new AtherizSettings { SavePath = Path.Combine(file, "save") };
+        var poisoned = Path.Combine(file, "save");
+        var settings = new AtherizSettings { SavePath = poisoned };
+        var origEnv = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
+        Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", poisoned);
         try
         {
             var ex = Record.Exception(() => ServerLifecycle.DoStartup(settings));
@@ -30,6 +36,7 @@ public class StartupFailureTests
         }
         finally
         {
+            Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", origEnv);
             ServerLifecycle.Reset();
             try { File.Delete(file); } catch { }
         }

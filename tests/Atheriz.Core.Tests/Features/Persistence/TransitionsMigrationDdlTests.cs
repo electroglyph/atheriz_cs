@@ -97,6 +97,52 @@ public class TransitionsMigrationDdlTests
     }
 
     [Fact]
+    public void MigrateTransitionsTable_NullFromArea_CountsAsDropped()
+    {
+        // Audit 10 finding 4: a Data payload without fromCoord decodes to a
+        // Transition whose FromCoord.Area is null, which violates the new
+        // table's NOT NULL. The row must be counted as dropped, not logged
+        // as migrated (INSERT OR IGNORE silently skipped it).
+        using var env = GlobalTestEnv.Enter();
+        var dir = Path.Combine(Path.GetTempPath(), "atheriz-migrate-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            AtherizDbContextFactory.DoSetup(dir);
+            var missingFrom = "{\"name\":\"n\",\"toCoord\":{\"area\":\"B\",\"x\":0,\"y\":2,\"z\":0}}";
+            var cs = new SqliteConnectionStringBuilder { DataSource = Path.Combine(dir, "database.sqlite3") }.ToString();
+            using (var conn = new SqliteConnection(cs))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "DROP TABLE \"transitions\"; CREATE TABLE \"transitions\" (\"to_area\" TEXT NOT NULL, \"to_x\" INTEGER NOT NULL, \"to_y\" INTEGER NOT NULL, \"to_z\" INTEGER NOT NULL, \"data\" TEXT, PRIMARY KEY (\"to_area\",\"to_x\",\"to_y\",\"to_z\"))";
+                cmd.ExecuteNonQuery();
+                cmd.CommandText = "INSERT INTO \"transitions\" VALUES ('B',0,2,0,@d)";
+                cmd.Parameters.AddWithValue("@d", missingFrom);
+                cmd.ExecuteNonQuery();
+            }
+            string log;
+            using (var cap = new CaptureAtherizLog())
+            {
+                using (var ctx = AtherizDbContextFactory.Create(dir))
+                {
+                    AtherizDbContextFactory.MigrateTransitionsTable(ctx);
+                }
+                log = cap.Read();
+            }
+            Assert.Contains("migrated 0/1 rows, dropped 1 undecodable", log);
+            using (var conn = new SqliteConnection(cs))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT COUNT(*) FROM \"transitions\"";
+                Assert.Equal(0L, (long)cmd.ExecuteScalar()!);
+            }
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
     public void MigrationDdl_ThreeSitesShareHelper_InsLoopUntouched()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Persistence", "AtherizDbContextFactory.cs");

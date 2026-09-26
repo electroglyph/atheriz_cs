@@ -108,7 +108,16 @@ public partial class Node : GameObject
         if (string.IsNullOrEmpty(fullName)) throw new ArgumentException("Subtype full name required.", nameof(fullName));
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(factory);
-        lock (_persistedSubtypeLock) { _persistedSubtypeFactories[fullName] = factory; _persistedSubtypeNames[type] = fullName; }
+        lock (_persistedSubtypeLock)
+        {
+            _persistedSubtypeFactories[fullName] = factory;
+            // Prune superseded Type keys for this name: holding a Type roots
+            // its AssemblyLoadContext, so without this every re-registration
+            // pins the previous plugin generation forever.
+            foreach (var k in _persistedSubtypeNames.Where(kv => kv.Value == fullName && kv.Key != type).Select(kv => kv.Key).ToList())
+                _persistedSubtypeNames.Remove(k);
+            _persistedSubtypeNames[type] = fullName;
+        }
     }
     internal static string? RegisteredNameFor(Type t)
     {

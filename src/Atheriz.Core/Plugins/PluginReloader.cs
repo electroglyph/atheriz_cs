@@ -161,7 +161,12 @@ public static class PluginReloader
         => EvictStaleCommands(oldAssembly, CommandRegistry.LoggedIn, CommandRegistry.UnloggedIn);
     public static int EvictStaleCommands(System.Reflection.Assembly? oldAssembly, params CmdSet[] sets)
     {
-        if (oldAssembly is null || sets is null || sets.Length == 0) return 0;
+        if (oldAssembly is null)
+        {
+            Console.Error.WriteLine("[HotReload] EvictStaleCommands: no prior assembly (first boot or failed load with nothing live); nothing to evict.");
+            return 0;
+        }
+        if (sets is null || sets.Length == 0) return 0;
         int evicted = 0;
         foreach (var set in sets)
         {
@@ -216,9 +221,14 @@ public static class PluginReloader
         var full = Path.GetFullPath(assemblyPath);
         if (!File.Exists(full)) { Console.Error.WriteLine($"[HotReload] Not found: {full}"); return false; }
         var oldAsm = _loader?.LoadedAssembly;
+        // Load into a fresh loader BEFORE touching the live one: if the load
+        // fails, the old loader (and its assembly, the next reload's
+        // eviction key) stays in place, so the stale generation can still be
+        // evicted afterwards. Assign only on success.
+        var newLoader = new PluginLoader();
+        try { newLoader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
         if (_loader is not null) { try{_loader.Unload();}catch (Exception logEx) { Suppress("ReloadAsync", logEx); } _loader=null; GC.Collect(); }
-        _loader = new PluginLoader();
-        try { _loader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
+        _loader = newLoader;
         Console.Error.WriteLine($"[HotReload] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
         // A previous load already converted the world when live instances
         // carry plugin types (non-Core assembly deriving a pair base):
@@ -720,14 +730,20 @@ public static class PluginReloader
                 try
                 {
                     var full = Path.GetFullPath(p);
-                    if (_loader is not null) { try { _loader.Unload(); } catch (Exception logEx) { Suppress("LoadGameAssembliesAtBoot", logEx); } _loader = null; GC.Collect(); }
-                    _loader = new PluginLoader();
+                    // Load into a fresh loader BEFORE displacing the live
+                    // one: a failed candidate must not discard the previous
+                    // generation (same rule as ReloadCoreAsync — the next
+                    // reload's eviction key stays valid).
+                    var newLoader = new PluginLoader();
+                    IGameSetup? discovered;
                     try
                     {
-                        var discovered = _loader.Load(full);
-                        if (discovered is not null) gameSetup = discovered;
+                        discovered = newLoader.Load(full);
                     }
                     catch (Exception ex) { Console.Error.WriteLine($"[Boot] Load failed: {ex.Message}"); continue; }
+                    if (_loader is not null) { try { _loader.Unload(); } catch (Exception logEx) { Suppress("LoadGameAssembliesAtBoot", logEx); } _loader = null; GC.Collect(); }
+                    _loader = newLoader;
+                    if (discovered is not null) gameSetup = discovered;
                     Console.Error.WriteLine($"[Boot] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
                     lock (StartStop.WorldLock)
                     {

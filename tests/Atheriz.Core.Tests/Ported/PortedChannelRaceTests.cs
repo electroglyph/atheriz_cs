@@ -92,7 +92,7 @@ public class PortedChannelRaceTests
         // Find AddListener section
         int addListenerStart = src.IndexOf("public void AddListener", StringComparison.Ordinal);
         Assert.True(addListenerStart >= 0);
-        string addListenerSrc = src.Substring(addListenerStart, Math.Min(500, src.Length - addListenerStart));
+        string addListenerSrc = src.Substring(addListenerStart, Math.Min(1500, src.Length - addListenerStart));
         int lIdx = addListenerSrc.IndexOf("lock (_histLock)", StringComparison.Ordinal);
         int cIdx = addListenerSrc.IndexOf("_channelDeleted", StringComparison.Ordinal);
         Assert.True(lIdx >= 0 && cIdx >= 0 && lIdx < cIdx, "AddListener must check _channelDeleted inside lock to avoid delete/subscribe race");

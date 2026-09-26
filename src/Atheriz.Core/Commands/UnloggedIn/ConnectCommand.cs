@@ -20,6 +20,11 @@ public sealed class ConnectCommand : Command
         if (account is null) return;
         if (caller is BaseConnection conn2 && conn2.Session is not null)
         {
+            // One wizard per session: a second `connect` arriving before the
+            // first wizard reaches its prompt would otherwise start a second
+            // CharSelectionAsync loop, and the two loops force-complete each
+            // other's prompt slot with "" forever.
+            if (!conn2.Session.TryStartWizard()) { conn2.Msg("A character selection is already in progress."); return; }
             conn2.Session.Account = account;
             conn2.SendCommand("logged_in");
 // fire-and-forget async, bound to the connection lifetime: a disconnect
@@ -33,6 +38,7 @@ public sealed class ConnectCommand : Command
                 {
                     try { await CharSelectionAsync(conn2, account, wizardCts.Token).ConfigureAwait(false); }
                     catch (Exception ex) { AtherizLogger.LogError($"[Connect] char_selection failed: {ex}"); }
+                    finally { conn2.Session.EndWizard(); }
                 }
             });
         }
@@ -115,11 +121,13 @@ public sealed class ConnectCommand : Command
         if (pa is null) { conn.Msg("Invalid arguments."); return; }
         var account = TryAuthenticate(conn, pa);
         if (account is null) return;
+        if (!conn.Session.TryStartWizard()) { conn.Msg("A character selection is already in progress."); return; }
         conn.Session.Account = account;
         conn.SendCommand("logged_in");
         using var wizardCts = CancellationTokenSource.CreateLinkedTokenSource(ct, conn.RetryLifetimeToken);
         try { await CharSelectionAsync(conn, account, wizardCts.Token).ConfigureAwait(false); }
         catch (Exception ex) { AtherizLogger.LogError($"[Connect] char_selection failed: {ex}"); }
+        finally { conn.Session.EndWizard(); }
     }
 
     internal static async Task CharSelectionAsync(BaseConnection caller, Account account, CancellationToken ct = default)

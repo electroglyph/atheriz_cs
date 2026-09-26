@@ -63,7 +63,7 @@ public sealed class AtherizDbContext : DbContext
         _dbPath = Path.Combine(_savePath, "database.sqlite3");
     }
 
-    public AtherizDbContext(AtherizSettings settings) : this(settings.SavePath) { }
+    public AtherizDbContext(AtherizSettings settings) : this(AtherizDbContextFactory.ResolveSavePath(settings)) { }
 
     // For testing — in-memory or temp file via options (bypasses _closed guard)
     public AtherizDbContext(DbContextOptions<AtherizDbContext> options) : base(options)

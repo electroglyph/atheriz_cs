@@ -384,14 +384,17 @@ public sealed class LoggedInExitCommand : Command
     }
 
     // Best-effort re-close after a refused or failed move through an opened
-    // door: TryClose first, forced flag + map step when it refuses or throws.
+    // door: TryClose first, forced close + map step when it refuses or
+    // throws. The forced path goes through ForceClose (not a raw flag write)
+    // so the doors-modified mark fires and the revert checkpoint persists.
     internal static void RestoreClosedDoor(Door door, GameObject c)
     {
         bool closedOk = false;
         try { closedOk = door.TryClose(c); } catch { closedOk = false; }
         if (!closedOk)
         {
-            try { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } } catch (Exception) { }
+            try { door.ForceClose(); }
+            catch { try { door.Lock.EnterWriteLock(); try { if (!door.Closed) door.Closed = true; } finally { door.Lock.ExitWriteLock(); } } catch (Exception) { } }
             try { door.MapClose(); } catch (Exception) { }
         }
     }

@@ -184,4 +184,51 @@ public class ResetContainmentTests
         }
         finally { try { Directory.Delete(root, true); } catch { } }
     }
+
+    [Fact]
+    public void CreateGameFolder_Overwrite_KeepsWipeLockUntilRelease()
+    {
+        // Audit 10 finding 12: the overwrite sweep must not delete its own
+        // .wipe-lock mid-wipe. Poll IsWipeLocked from a second thread for the
+        // whole call: once the hold is taken it must stay taken until the
+        // final release. A false sample in the middle means the sweep
+        // deleted the lock and a concurrent start could claim the world.
+        var root = Path.Combine(Path.GetTempPath(), "atheriz_newwl_" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(root, "wipelockgame");
+        var saveDir = Path.Combine(target, "save");
+        Directory.CreateDirectory(saveDir);
+        File.WriteAllText(Path.Combine(saveDir, "stale.txt"), "stale");
+        var samples = new List<(DateTime At, bool Locked)>();
+        var done = false;
+        bool ok = false;
+        try
+        {
+            var worker = new Thread(() =>
+            {
+                WithSuperuserEnv(() => { ok = GameTemplateGenerator.CreateGameFolder(target, "wipelockgame", overwrite: true); });
+                Volatile.Write(ref done, true);
+            })
+            { IsBackground = true };
+            worker.Start();
+            while (!Volatile.Read(ref done))
+            {
+                lock (samples) samples.Add((DateTime.UtcNow, PidFile.IsWipeLocked(saveDir)));
+                Thread.Sleep(1);
+            }
+            worker.Join(120000);
+            var end = DateTime.UtcNow;
+            Assert.True(ok);
+            Assert.False(File.Exists(Path.Combine(saveDir, "stale.txt")));
+            List<(DateTime At, bool Locked)> snap;
+            lock (samples) snap = samples.ToList();
+            Assert.Contains(snap, s => s.Locked);
+            var firstHeld = snap.Where(s => s.Locked).Min(s => s.At);
+            // The hold may legitimately read false before it is taken and in
+            // the instant ReleaseWipe deletes it at the very end — never in
+            // the middle of the call.
+            var midGap = snap.Where(s => !s.Locked && s.At > firstHeld && (end - s.At) > TimeSpan.FromSeconds(1)).ToList();
+            Assert.Empty(midGap);
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
 }

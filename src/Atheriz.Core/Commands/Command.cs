@@ -163,6 +163,9 @@ public abstract class Command
     {
         ArgumentNullException.ThrowIfNull(text);
         if (headCount < 0) throw new ArgumentOutOfRangeException(nameof(headCount));
+        // headCount 0 selects no head tokens: the whole text is the tail.
+        // Without this, ends[headCount - 1] below indexes ends[-1].
+        if (headCount == 0) return ([], text);
         var (values, ends, origin, balanced) = Tokenize(text);
         if (!balanced)
         {

@@ -271,6 +271,12 @@ public class Door
     private void MarkAfterWrite(bool changed)
     {
         if (!changed) return;
+        // A held door write lock means this write runs inside a compound
+        // window (ForceClose/SetEndpoints/Try*): the outer hold is still
+        // held (the lock is recursive), so never mark here — marking takes
+        // Lock3, which against RemapDoors' Lock3 -> door order is an AB-BA
+        // edge. The compound path marks once after release instead.
+        if (_lock.IsWriteLockHeld) return;
         bool suppress;
         long gen;
         using (ReadScope()) { suppress = _deferMark; gen = Volatile.Read(ref _markGen); }
@@ -294,9 +300,12 @@ public class Door
         (int, int)? symbolCoord = null, string closedSymbol = "", string openSymbol = "",
         bool closed = true, bool locked = false)
     {
-        // Suppressed publish: a fresh door must not mark the handler dirty.
-        // The marking setters take the same (uncontended — the door is not
-        // published yet) lock; the scope only silences the mark.
+        // Construction/restore runs each setter outside any door write
+        // hold, so per-setter marks still fire when a handler is current
+        // (MarkAfterWrite only skips while the write lock is held). That is
+        // accepted noise: the door is unpublished / being rebuilt, marks are
+        // idempotent dirty flags, and no lock order is violated — SuppressMarks
+        // here only groups the writes, it does not silence the marks.
         using (SuppressMarks())
         {
             FromCoord = from; ToCoord = to; FromExit = fromExit; ToExit = toExit;
@@ -720,7 +729,9 @@ public class Door
     public static Door FromDto(DoorDto dto)
     {
         var d = new Door(dto.FromCoord, dto.ToCoord, dto.FromExit, dto.ToExit, dto.SymbolCoord, dto.ClosedSymbol, dto.OpenSymbol, dto.Closed, dto.Locked);
-        // Suppressed restore: a loaded door must not mark the handler dirty.
+        // Restore runs each setter outside any door write hold, so these
+        // marks still fire when a handler is current (same accepted noise
+        // as construction above: idempotent, lock-order safe).
         using (d.SuppressMarks())
         {
             d.Name = dto.Name ?? dto.FromExit;

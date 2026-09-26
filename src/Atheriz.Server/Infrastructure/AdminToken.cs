@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Atheriz.Server.Infrastructure;
 
@@ -94,14 +96,18 @@ public static class AdminToken
     /// <summary>
     /// Validates a provided token against expected using constant-time compare.
     /// Mirrors <c>hmac.compare_digest((token or "").encode(), expected_token.encode())</c> at atheriz.py:61.
-    /// Uses <c>CryptographicOperations.FixedTimeEquals</c>.
+    /// Blank on either side never validates: hashing alone would not close
+    /// that hole (<c>SHA256("") == SHA256("")</c>), so blank is rejected
+    /// first and the hash comparison then runs over fixed 32-byte digests,
+    /// which is also what makes the compare constant-time across lengths
+    /// (audit 10 findings 1 and 14).
     /// </summary>
     public static bool ValidateToken(string? provided, string expected)
     {
-        var a = Encoding.UTF8.GetBytes(provided ?? "");
-        var b = Encoding.UTF8.GetBytes(expected ?? "");
-        // FixedTimeEquals returns false on length mismatch, so one call
-        // covers both shapes with no dummy dance.
+        if (string.IsNullOrWhiteSpace(provided) || string.IsNullOrWhiteSpace(expected))
+            return false;
+        var a = SHA256.HashData(Encoding.UTF8.GetBytes(provided));
+        var b = SHA256.HashData(Encoding.UTF8.GetBytes(expected));
         return CryptographicOperations.FixedTimeEquals(a, b);
     }
 
@@ -142,7 +148,7 @@ public static class AdminToken
         if (!File.Exists(tokenFile))
             return "Token file not found.";
         var expected = TryReadTokenFile(tokenFile);
-        if (expected is null)
+        if (string.IsNullOrWhiteSpace(expected))
             return "Token file not found.";
 
         if (!ValidateToken(providedToken, expected))

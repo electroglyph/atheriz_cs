@@ -24,6 +24,13 @@ internal static class GameObjectDtoConverter
         lock (_subtypeLock)
         {
             _subtypeFactories[fullName] = factory;
+            // Prune superseded Type keys for this name: holding a Type roots
+            // its AssemblyLoadContext, so without this every re-registration
+            // pins the previous plugin generation forever (the old factory
+            // delegate is released by the overwrite above, the old Type key
+            // never was).
+            foreach (var k in _subtypeNames.Where(kv => kv.Value == fullName && kv.Key != type).Select(kv => kv.Key).ToList())
+                _subtypeNames.Remove(k);
             _subtypeNames[type] = fullName;
         }
     }

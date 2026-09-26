@@ -108,6 +108,14 @@ public sealed class AtherizSettingsValidator : IValidateOptions<AtherizSettings>
             failures.Add($"DaysPerMonth must be >0 (was {options.DaysPerMonth}).");
         if (options.MonthsPerYear <= 0)
             failures.Add($"MonthsPerYear must be >0 (was {options.MonthsPerYear}).");
+        if (options.DaysPerWeek <= 0)
+            failures.Add($"DaysPerWeek must be >0 (was {options.DaysPerWeek}).");
+        if (options.LunarCycleDays <= 0)
+            failures.Add($"LunarCycleDays must be >0 (was {options.LunarCycleDays}).");
+        // NaN fails every comparison, so !(x > 0) is the only spelling
+        // that also rejects NaN (NaN <= 0 is false and would pass).
+        if (!(options.TickMinutes > 0))
+            failures.Add($"TickMinutes must be >0 (was {options.TickMinutes}).");
         // Fail closed on TLS: a configured cert file must exist (missing is
         // always a config error). Loading happens once at host startup,
         // fail-fast there — validation does not pay crypto-load cost or

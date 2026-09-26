@@ -91,8 +91,13 @@ public sealed class CreateAccountCommand : Command
                 caller.SendCommand("logged_in");
                 if (settings.CharCreationEnabled)
                 {
+                    // Same per-session wizard token as `connect`: a `connect`
+                    // line arriving mid-wizard is refused instead of starting
+                    // a second loop on the shared prompt slot.
+                    if (!caller.Session.TryStartWizard()) { caller.Msg("A character selection is already in progress."); return; }
                     try { await ConnectCommand.CharSelectionAsync(caller, account, ct).ConfigureAwait(false); }
                     catch (Exception ex) { AtherizLogger.LogError($"[Create] char_selection failed: {ex}"); }
+                    finally { caller.Session.EndWizard(); }
                 }
                 else
                 {

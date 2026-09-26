@@ -71,8 +71,10 @@ public static class StartStop
             catch (Exception ex) { AtherizLogger.LogError($"DoStartup GetAsyncTicker failed:\n{ex}"); }
             try
             {
-                // Use savePath overload which handles DB EnsureCreated
-                ObjectRegistry.LoadObjects(settings.SavePath);
+                // Use savePath overload which handles DB EnsureCreated.
+                // Env-resolved: boot must read the same file every
+                // checkpoint writes (ATHERIZ_SAVE_PATH override first).
+                ObjectRegistry.LoadObjects(AtherizDbContextFactory.ResolveSavePath(settings));
             }
             catch (Exception ex)
             {
@@ -84,7 +86,7 @@ public static class StartStop
             // Boot continues (availability), but the torn state is surfaced loudly.
             try
             {
-                if (Persistence.CheckpointJournal.IsDirty(settings.SavePath))
+                if (Persistence.CheckpointJournal.IsDirty(AtherizDbContextFactory.ResolveSavePath(settings)))
                 {
                     var msg = "Torn checkpoint detected: previous save did not complete; world tables may be inconsistent.";
                     try { AtherizLogger.LogError(msg); } catch { Console.Error.WriteLine(msg); }
@@ -284,7 +286,7 @@ public static class StartStop
                 {
                     // In C# AtherizDbContext is per-call, not singleton; ensure gate released
                     // Simulate get_database().close by disposing a factory context
-                    using var db = new AtherizDbContext(settings.SavePath);
+                    using var db = new AtherizDbContext(AtherizDbContextFactory.ResolveSavePath(settings));
                     try { db.Database.CloseConnection(); } catch (Exception) { }
                 }
                 catch (Exception) { }

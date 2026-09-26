@@ -137,10 +137,23 @@ public sealed class GameArgumentParser
         // In that case 'help' looks like an option (starts with -), treat as second alias rather than help text.
         // Guard requires BOTH strings to be option-like so genuine help text
         // starting with '-' on a positional is never misread as an alias.
-        if (name.StartsWith("-", StringComparison.Ordinal) && IsOptionLike(help) && string.IsNullOrEmpty(nargs) && string.IsNullOrEmpty(action) && type is null && defaultValue is null && choices is null && required != true)
+        // The pair keeps every trailing attribute (type/default/choices/
+        // required/nargs/action): a "-n"/"--num" declared with any of them
+        // must still expose both aliases.
+        if (name.StartsWith("-", StringComparison.Ordinal) && IsOptionLike(help))
         {
             // treat as AddArgument(params ["-f","--flag"]) — same Dest derivation.
-            return AddArgument([name, help]);
+            // The pair detection runs before the type check so a typed option
+            // keeps both aliases; every trailing attribute is re-applied to
+            // the pair def.
+            var aliased = AddArgument([name, help]);
+            if (type is not null) aliased.Type(type);
+            if (defaultValue is not null) aliased.Default(defaultValue);
+            if (choices is not null) aliased.Choices(choices);
+            if (required == true) aliased.Required(true);
+            if (!string.IsNullOrEmpty(nargs)) aliased.Nargs(nargs);
+            if (!string.IsNullOrEmpty(action)) aliased.Action(action switch { "store_true" => ArgAction.StoreTrue, "store_false" => ArgAction.StoreFalse, "append" => ArgAction.Append, _ => ArgAction.Store });
+            return aliased;
         }
         var def = new ArgumentDef
         {

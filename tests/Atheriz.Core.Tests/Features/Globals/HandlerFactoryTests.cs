@@ -17,23 +17,36 @@ public sealed class HandlerFactoryTests
     public void GetNodeHandler_Settings_LoadsFromPinnedPath()
     {
         using var env = GlobalTestEnv.Enter();
-        var dirA = Path.Combine(env.TempPath, "pinnedA");
-        Directory.CreateDirectory(dirA);
-        var seed = new NodeHandler(autoLoad: false);
-        seed.AddArea(new NodeArea("pinnedA"));
-        using (var db = new AtherizDbContext(dirA))
+        // Settings-pinning is exercised with the env override cleared:
+        // with ATHERIZ_SAVE_PATH set, the override wins everywhere by
+        // design (one database), so the pinned path only discriminates
+        // when the override is absent.
+        var orig = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
+        Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", null);
+        try
         {
-            db.Database.EnsureCreated();
-            seed.Save(db, force: true);
+            var dirA = Path.Combine(env.TempPath, "pinnedA");
+            Directory.CreateDirectory(dirA);
+            var seed = new NodeHandler(autoLoad: false);
+            seed.AddArea(new NodeArea("pinnedA"));
+            using (var db = new AtherizDbContext(dirA))
+            {
+                db.Database.EnsureCreated();
+                seed.Save(db, force: true);
+            }
+
+            GlobalServices.Reset();
+            var settingsA = new AtherizSettings { SavePath = dirA };
+            var h = GlobalServices.GetNodeHandler(settingsA);
+
+            Assert.NotNull(h.GetArea("pinnedA"));
+            Assert.Same(h, NodeHandler.GetCurrent());
+            Assert.Same(h, GlobalServices.TryGetNodeHandler());
         }
-
-        GlobalServices.Reset();
-        var settingsA = new AtherizSettings { SavePath = dirA };
-        var h = GlobalServices.GetNodeHandler(settingsA);
-
-        Assert.NotNull(h.GetArea("pinnedA"));
-        Assert.Same(h, NodeHandler.GetCurrent());
-        Assert.Same(h, GlobalServices.TryGetNodeHandler());
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", orig);
+        }
     }
 
     [Fact]

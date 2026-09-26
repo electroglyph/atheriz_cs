@@ -122,6 +122,11 @@ public class Section3BatchEPinsTests
     {
         using var env = GlobalTestEnv.Enter();
         GlobalServices.Reset();
+        // The fault (invalid SavePath) is exercised with the env override
+        // cleared: with ATHERIZ_SAVE_PATH set, the override resolves to a
+        // valid directory and the pinned creation no longer faults.
+        var orig = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
+        Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", null);
         try
         {
             // Default settings carry an invalid SavePath outside a game
@@ -131,13 +136,19 @@ public class Section3BatchEPinsTests
             Assert.Throws<InvalidOperationException>(() => GlobalServices.GetNodeHandler(bad));
             // The fault stores nothing ...
             Assert.Null(GlobalServices.TryGetNodeHandler());
-            // ... and the next ambient read retries instead of rethrowing.
+            // ... and the next ambient read retries instead of rethrowing
+            // (with the override restored, so the ambient path resolves).
+            Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", orig);
             var h = GlobalServices.GetNodeHandler();
             Assert.NotNull(h);
             // First success wins: the pinned overload now sees the ambient one.
             Assert.Same(h, GlobalServices.GetNodeHandler(bad));
         }
-        finally { GlobalServices.Reset(); }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ATHERIZ_SAVE_PATH", orig);
+            GlobalServices.Reset();
+        }
     }
 }
 

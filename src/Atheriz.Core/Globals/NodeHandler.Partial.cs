@@ -188,21 +188,26 @@ public partial class NodeHandler
     }
     public void RemoveNode(Coord coord)
     {
-        // resolve + remove + evict under one write hold. The old
-        // GetNode/GetArea/RemoveNode ran in 3 separate acquisitions, so a
-        // coord replaced mid-sequence leaked one instance / dropped the other.
-        // (SupportsRecursion: the nested read locks below are re-entrant.)
+        // Resolve + grid-remove stay under one write hold (split
+        // acquisitions let a mid-sequence coord replace leak one instance
+        // and drop the other), but the registry eviction runs after
+        // release: RemoveObject takes the registry AllLock, so evicting
+        // inside the hold inverts the handler -> registry order that
+        // ReplaceArea() and Clear() keep. (SupportsRecursion: the nested
+        // read locks below are re-entrant.)
+        Node? node;
         Lock.EnterWriteLock();
         try
         {
-            var node = GetNode(coord);
+            node = GetNode(coord);
             var area = GetArea(coord.Area);
             var grid = area?.GetGrid(coord.Z);
             grid?.RemoveNode((coord.X, coord.Y));
-            if (node is not null) ObjectRegistry.RemoveObject(node);
             _modified = true; _areaGen++;
         }
         finally { Lock.ExitWriteLock(); }
+        if (node is not null)
+            try { ObjectRegistry.RemoveObject(node); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemoveNode: " + logEx.Message, "NodeHandler"); }
     }
     public List<Node> GetNodes(IEnumerable<Coord> coords)
     {

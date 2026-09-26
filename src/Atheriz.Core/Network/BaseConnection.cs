@@ -298,8 +298,14 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     }
 
     // Worker-side: run queued input handlers FIFO until queue empties.
+    // The outer finally keeps the pipeline drainable: the catch below
+    // logs through the robust path, but any future throw out of this
+    // loop must still release _inputRunning or every later EnqueueInput
+    // queues behind a drain that will never run again.
     private void DrainInput()
     {
+        try
+        {
         while (true)
         {
             InputHandler handler;
@@ -329,8 +335,17 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
             catch (Exception ex)
             {
                 var name = handler.Method.Name;
-                Atheriz.Core.AtherizLogger.LogError($"[Network] Input handler '{name}' failed: {ex}");
+                // Robust path: Write() calls _factory.CreateLogger outside
+                // any try (Logger.cs), so a throwing factory would escape
+                // this catch, fault the pool task with _inputRunning stuck
+                // true, and wedge the connection's input pipeline for life.
+                Atheriz.Core.AtherizLogger.LogErrorRobust($"[Network] Input handler '{name}' failed: {ex}");
             }
+        }
+        }
+        finally
+        {
+            lock (Lock) { _inputRunning = false; }
         }
     }
 

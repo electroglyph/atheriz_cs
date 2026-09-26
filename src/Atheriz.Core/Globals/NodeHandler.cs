@@ -43,6 +43,7 @@ public partial class NodeHandler
     private readonly HashSet<string> _removedAreas = new();
     private readonly HashSet<(Coord From, Coord To)> _removedTrans = new();
     private readonly HashSet<Coord> _removedDoors = new();
+    private readonly AtherizSettings _settings;
 
     // Shared tombstone snapshot / revalidate / clear core for the three
     // domains (areas/transitions/doors). The domain lock arrives as a
@@ -97,12 +98,13 @@ public partial class NodeHandler
 
     // ctors never touch the process-global current — constructing a
     // helper handler must not hijack it. Owners publish via SetCurrent.
-    public NodeHandler() { Load(); }
-    public NodeHandler(bool autoLoad) { if (autoLoad) Load(); }
+    public NodeHandler() : this(null, true) { }
+    public NodeHandler(bool autoLoad) : this(null, autoLoad) { }
     // Settings-pinned load: boots from settings.SavePath instead of the ambient
     // factory path, so DoStartup(settings) uses one database everywhere .
     public NodeHandler(AtherizSettings? settings, bool autoLoad = true)
     {
+        _settings = settings ?? AtherizSettings.Global;
         if (autoLoad)
         {
             if (settings is null) Load();
@@ -111,7 +113,7 @@ public partial class NodeHandler
     }
 
     // --- load ---
-    public void Load() => Load(global::Atheriz.Core.Persistence.AtherizDbContextFactory.Create());
+    public void Load() => Load(global::Atheriz.Core.Persistence.AtherizDbContextFactory.CreateForSettings(_settings));
 
     public void Load(AtherizDbContext db)
     {
@@ -414,7 +416,7 @@ public partial class NodeHandler
     public virtual void Save(bool force = false)
     {
         if (!force && !ObjectRegistry.AlwaysSaveAll && !IsDirty()) return;
-        try { Save(global::Atheriz.Core.Persistence.AtherizDbContextFactory.Create(), force); }
+        try { Save(global::Atheriz.Core.Persistence.AtherizDbContextFactory.CreateForSettings(_settings), force); }
         catch (Exception ex)
         {
             // Closed-DB guard is the IsClosed flag (no message sniffing):

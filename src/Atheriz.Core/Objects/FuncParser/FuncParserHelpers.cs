@@ -202,6 +202,12 @@ public static partial class FuncParserHelpers
     {
         private readonly string _s;
         private int _pos;
+        // Nesting cap: parentheses (and unary-sign chains) recurse one frame
+        // per level. _SafeEval falls back here when the literal parser
+        // rejects, so an uncapped literal alone would merely move a deep
+        // input's stack overflow into this parser — cap both.
+        private const int MaxNesting = 32;
+        private int _depth;
         public SafeArithParser(string s) { _s = s; _pos = 0; }
         public double Parse() { var v = ParseExpr(); Skip(); if (_pos != _s.Length) throw new ArgumentException($"unsupported node at {_pos}"); return v; }
         private void Skip() { while (_pos < _s.Length && char.IsWhiteSpace(_s[_pos])) _pos++; }
@@ -255,13 +261,13 @@ public static partial class FuncParserHelpers
         }
         private double ParseUnary()
         {
-            Skip(); if (_pos < _s.Length && (_s[_pos] == '+' || _s[_pos] == '-')) { char op=_s[_pos++]; var v=ParseUnary(); return op=='-' ? -v : v; }
+            Skip(); if (_pos < _s.Length && (_s[_pos] == '+' || _s[_pos] == '-')) { char op=_s[_pos++]; if (++_depth > MaxNesting) throw new ArgumentException("too deeply nested"); try { var v=ParseUnary(); return op=='-' ? -v : v; } finally { _depth--; } }
             return ParsePow();
         }
         private double ParsePrimary()
         {
             Skip(); if (_pos >= _s.Length) throw new ArgumentException("unexpected end");
-            if (_s[_pos] == '(') { _pos++; var v=ParseExpr(); Skip(); if (_pos >= _s.Length || _s[_pos] != ')') throw new ArgumentException("missing )"); _pos++; return v; }
+            if (_s[_pos] == '(') { _pos++; if (++_depth > MaxNesting) throw new ArgumentException("too deeply nested"); try { var v=ParseExpr(); Skip(); if (_pos >= _s.Length || _s[_pos] != ')') throw new ArgumentException("missing )"); _pos++; return v; } finally { _depth--; } }
             // number
             int start=_pos;
             bool dot=false;
@@ -345,8 +351,13 @@ public static partial class FuncParserHelpers
         throw new FuncParser.ParsingError($"Errors converting '{s}' to python: literal_eval raised, arith_eval raised");
     }
 
-    private static object? _TryLiteralEval(string inp)
+    private static object? _TryLiteralEval(string inp, int depth = 0)
     {
+        // Nesting cap: each tuple level re-scans via SplitTopLevel, so
+        // unbounded depth is O(depth x len) work plus a stack frame per
+        // level. Past the cap, throw so _SafeEval falls through to the
+        // (also capped) arithmetic parser and then to the raw echo.
+        if (depth > 32) throw new ArgumentException("too deeply nested");
         var t = inp.Trim();
         // int
         if(int.TryParse(t, out var iv)) return iv;
@@ -368,7 +379,7 @@ public static partial class FuncParserHelpers
             if(elems is not null){
                 List<object?> res = [];
                 foreach(var e in elems){
-                    var ev = _TryLiteralEval(e);
+                    var ev = _TryLiteralEval(e, depth + 1);
                     res.Add(ev ?? e);
                 }
                 return res;
@@ -386,7 +397,7 @@ public static partial class FuncParserHelpers
                 if(parts is null) throw new ArgumentException("nested fail");
                 List<object?> list = [];
                 foreach(var p in parts){
-                    var v=_TryLiteralEval(p.Trim());
+                    var v=_TryLiteralEval(p.Trim(), depth + 1);
                     if(v is null) throw new ArgumentException("fail");
                     list.Add(v);
                 }

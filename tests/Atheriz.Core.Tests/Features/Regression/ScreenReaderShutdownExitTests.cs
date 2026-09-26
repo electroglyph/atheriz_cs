@@ -37,14 +37,18 @@ public class ScreenReaderShutdownExitTests
         finally { ObjectRegistry.ClearAll(); }
     }
 
-    // Shutdown reuses one client on a pool thread: no per-call socket pool,
-    // no raw OS thread per invocation.
+    // Shutdown dials the admin endpoint with the same scheme the server
+    // listens on (SslCertFile set => https), tolerates loopback
+    // self-signed certs, and retries once with the flipped scheme — on a
+    // pool thread, with no raw OS thread per invocation.
     [Fact]
-    public void Shutdown_ReusesSharedClient_PoolThread()
+    public void Shutdown_SelectsSchemeAndToleratesLoopbackCert_PoolThread()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminCommands.cs");
-        Assert.Contains("SharedShutdownClient", src);
-        Assert.DoesNotContain("new HttpClient()", src);
+        Assert.Contains("SslCertFile", src);
+        Assert.Contains("ServerCertificateCustomValidationCallback", src);
+        Assert.DoesNotContain("http://localhost:", src);
+        Assert.DoesNotContain("SharedShutdownClient", src);
         Assert.DoesNotContain("new Thread(", src);
     }
 

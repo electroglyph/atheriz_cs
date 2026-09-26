@@ -18,10 +18,16 @@ public static class ObjectRegistry
     // --- state ---
     // Single non-reentrant hold: every take below is a leaf (enter, touch the
     // dicts, exit) — no path takes AllLock twice, so recursion is never
-    // needed. Uniqueness predicates (AddObjectUnique) must only read object
-    // properties, never touch the registry.
+    // needed. Uniqueness predicates (AddObjectUnique) run outside the hold
+    // (snapshot-then-check) so a predicate reading object state never nests
+    // AllLock -> object-lock against MoveTo's object -> AllLock order.
     internal static readonly Lock AllLock = new();
     private static readonly Dictionary<int, GameObject> AllObjects = new();
+    // Membership version for the optimistic AddObjectUnique loop: bumped on
+    // every insert/remove/clear/swap under AllLock. The loop snapshots
+    // (members, version), checks the predicate outside, and only inserts
+    // when the version is unchanged — no predicate ever runs under AllLock.
+    private static long _version;
 
     // reverse index (reference -> key) so re-keying an already
     // registered reference is O(1). Replaces the old per-insert O(n) scan
@@ -65,6 +71,7 @@ public static class ObjectRegistry
             _keysByRef.Remove(prev);
         AllObjects[obj.Id] = obj;
         _keysByRef[obj] = obj.Id;
+        _version++;
     }
 
     public static bool AlwaysSaveAll { get; set; } = false;
@@ -184,14 +191,27 @@ public static class ObjectRegistry
 
     public static void AddObjectUnique(GameObject obj, Func<GameObject, bool> predicate, string error)
     {
-        // Single hold covering check+insert (F005) — no read-check/write-recheck spin.
-        // Safe: uniqueness predicates only read object properties (no registry
-        // re-entry — the hold is non-reentrant, so a registry-touching
-        // predicate would deadlock instead of merely racing).
-        lock (AllLock)
+        ArgumentNullException.ThrowIfNull(obj);
+        ArgumentNullException.ThrowIfNull(predicate);
+        // Optimistic check-then-insert with no nesting: snapshot under
+        // AllLock, run the predicate outside (object locks only), and insert
+        // only when the membership version is unchanged. A concurrent
+        // add/remove bumps the version and retries, so the duplicate-create
+        // race still resolves to exactly one winner. In-place renames racing
+        // the check are benign (the old single-hold shape interleaved reads
+        // across objects the same way).
+        while (true)
         {
-            if (AllObjects.Values.Any(predicate)) throw new InvalidOperationException(error);
-            IndexInsert(obj);
+            List<GameObject> snap;
+            long v0;
+            lock (AllLock) { snap = AllObjects.Values.ToList(); v0 = _version; }
+            if (snap.Any(predicate)) throw new InvalidOperationException(error);
+            lock (AllLock)
+            {
+                if (_version != v0) continue;
+                IndexInsert(obj);
+                return;
+            }
         }
     }
 
@@ -201,11 +221,13 @@ public static class ObjectRegistry
         {
             // Remove the live entry only when it is this object — the id
             // may have been overwritten by a different occupant since.
+            bool removed = false;
             if (AllObjects.TryGetValue(obj.Id, out var cur) && ReferenceEquals(cur, obj))
-                AllObjects.Remove(obj.Id);
+                removed = AllObjects.Remove(obj.Id);
             // Drop the reverse entry only if it points at the removed key —
             // AllObjects[obj.Id] may have been a different occupant.
             if (_keysByRef.TryGetValue(obj, out var k) && k == obj.Id) _keysByRef.Remove(obj);
+            if (removed) _version++;
         }
     }
 
@@ -219,6 +241,7 @@ public static class ObjectRegistry
                 AllObjects.Clear();
                 _keysByRef.Clear();
                 _pendingDeletions.Clear();
+                _version++;
                 // Already holding IdGenerator.LockObj; SetId is safe (Monitor is re-entrant).
                 IdGenerator.SetId(-1);
             }
@@ -235,25 +258,35 @@ public static class ObjectRegistry
     private static bool IsStillSaveable(GameObject obj, bool forSave = false, bool force = false)
     {
         var id = obj.Id;
-        // lock coupling — the obj read lock is taken BEFORE AllLock
-        // is released, so the registry-membership check and the flag reads
-        // are atomic (no evict/delete/re-key can interleave). The coupling is
-        // one scope, not nesting: the obj lock is taken inside the AllLock
-        // hold and outlives it, and callers never hold obj locks into this
-        // method.
+        // No lock nesting: the AllLock hold and the object read hold never
+        // overlap. An earlier shape took the object read lock inside the
+        // AllLock hold, which deadlocks against MoveTo (object write locks
+        // held across GetSingle/FindNodeByCoord, which take AllLock).
+        // Membership is checked twice — before the flag reads and after —
+        // and a move/evict/re-key in between drops the row instead of
+        // saving a stale one. A delete racing between the flag reads and
+        // the re-check can at worst save one already-dead object, which
+        // the next checkpoint skips; that benign race buys a real hang.
         lock (AllLock)
         {
             if (!AllObjects.TryGetValue(id, out var cur) || !ReferenceEquals(cur, obj)) return false;
-            obj.SyncRoot.EnterReadLock();
         }
-        // need obj lock
+        bool deleted, temporary, modified;
+        obj.SyncRoot.EnterReadLock();
         try
         {
-            if (obj.IsDeleted) return false;
-            if (obj.IsTemporary) return false;
-            if (forSave && !AlwaysSaveAll && !force && !obj.IsModified) return false;
+            deleted = obj.IsDeleted;
+            temporary = obj.IsTemporary;
+            modified = obj.IsModified;
         }
         finally { obj.SyncRoot.ExitReadLock(); }
+        if (deleted) return false;
+        if (temporary) return false;
+        if (forSave && !AlwaysSaveAll && !force && !modified) return false;
+        lock (AllLock)
+        {
+            if (!AllObjects.TryGetValue(id, out var cur) || !ReferenceEquals(cur, obj)) return false;
+        }
         return true;
     }
 
@@ -333,6 +366,7 @@ public static class ObjectRegistry
                 // discarded world (un-saved deletes come back with the load).
                 _pendingDeletions.Clear();
                 foreach (var kv in objects) { AllObjects[kv.Key] = kv.Value; _keysByRef[kv.Value] = kv.Key; }
+                _version++;
             }
 
             if (maxId > IdGenerator.GetId())

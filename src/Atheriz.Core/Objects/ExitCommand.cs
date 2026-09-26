@@ -20,14 +20,26 @@ public sealed class ExitCommand : Command
     {
         if (ctx.Caller is GameObject go)
         {
-            var dest = NodeHandler.GetCurrent()?.GetNode(Destination);
-            if (dest is not null)
+            var nh = NodeHandler.GetCurrent();
+            var dest = nh?.GetNode(Destination);
+            if (dest is null)
             {
-                // through an exit breaks following like any other move.
-                try { Commands.LoggedIn.LoggedInExitCommand.ClearFollowing(go); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ExitCommand.Run: " + logEx.Message, "ExitCommand"); }
-                go.MoveTo(dest);
+                go.Msg("You can't go that way.");
+                return;
             }
-            else go.Msg("You can't go that way.");
+            // Delegate to the door-aware state machine: AddExits installs
+            // this type for its per-exit Key/Aliases/Tag support, while
+            // LoggedInExitCommand owns the TryOpen/move/TryClose sequence
+            // (auto-open closed-unlocked doors with announces, refuse locked
+            // ones with the door's own message). A closed-unlocked door must
+            // traverse, not refuse.
+            var twin = new Commands.LoggedIn.LoggedInExitCommand
+            {
+                Location = Location,
+                Destination = Destination,
+                ExitName = ExitName,
+            };
+            twin.DoMove(go);
         }
     }
 }

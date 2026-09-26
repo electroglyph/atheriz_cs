@@ -110,9 +110,39 @@ public sealed class ShutdownCommand : LoggedInCommand
     public override bool Hide => true;
     public override bool UseParser => false;
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
-    // One shared client: a fresh HttpClient per shutdown burns a socket
-    // pool per invocation and strands sockets in TIME_WAIT after dispose.
-    private static readonly HttpClient SharedShutdownClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+    // Loopback-tolerant client factory (mirrors ShutdownClient.PostAdminAsync
+    // in Atheriz.Server, which Core cannot reference): self-signed dev certs
+    // cannot chain-verify, so chain/name errors are tolerated ONLY on a
+    // loopback host — never blind-trust a non-loopback peer.
+    private static HttpClient CreateLoopbackClient()
+    {
+        var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (req, cert, chain, errors) =>
+        {
+            if (req.RequestUri is not Uri u) return false;
+            bool loopback = u.Host == "localhost" || u.Host == "127.0.0.1" || u.Host == "::1";
+            if (errors == System.Net.Security.SslPolicyErrors.None) return true;
+            if (!loopback || cert is null) return false;
+            const System.Net.Security.SslPolicyErrors tolerated =
+                System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors | System.Net.Security.SslPolicyErrors.RemoteCertificateNameMismatch;
+            return (errors & ~tolerated) == 0;
+        } };
+        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+    }
+    // One shutdown POST attempt over the given scheme. Null on any failure
+    // so the caller can retry with the flipped scheme.
+    private static async Task<(bool Ok, int StatusCode, string Body)?> TryPostShutdownAsync(string scheme, int port, string token)
+    {
+        try
+        {
+            using var client = CreateLoopbackClient();
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{scheme}://localhost:{port}/_internal/shutdown");
+            req.Headers.Add("X-Admin-Token", token);
+            using var resp = await client.SendAsync(req).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+            return (resp.IsSuccessStatusCode, (int)resp.StatusCode, body);
+        }
+        catch { return null; }
+    }
     protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
     {
         go.Msg("Initiating server shutdown...");
@@ -128,11 +158,26 @@ public sealed class ShutdownCommand : LoggedInCommand
         string token;
         try { token = File.ReadAllText(tokenFile).Trim(); }
         catch (Exception ex) { go.Msg($"Error reading token: {ex.Message}"); return; }
-        string url = $"http://localhost:{port}/_internal/shutdown";
+        // Fail-closed on blank (zero-byte/whitespace) token file: posting an
+        // empty bearer only earns a server-side "Invalid token." after
+        // "Initiating..." — refuse locally with the same shape as a missing
+        // file. Core cannot reference the Server-side TryReadTokenFile
+        // helper (that would circularize), so the trim+blank check is
+        // duplicated here and must stay in sync with it.
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            go.Msg("Error: admin.token not found.");
+            return;
+        }
+        // Scheme follows the same setting the server listens on
+        // (SslCertFile set => https), with one flipped-scheme retry so a
+        // stale setting never dials a live server on the wrong scheme.
         // capture go for thread
         var capturedGo = go;
         var capturedToken = token;
-        var capturedUrl = url;
+        bool tlsOn = !string.IsNullOrEmpty(settings.SslCertFile);
+        string first = tlsOn ? "https" : "http";
+        string second = tlsOn ? "http" : "https";
         try
         {
             // Task pool thread, not a raw Thread: same background semantics
@@ -143,18 +188,20 @@ public sealed class ShutdownCommand : LoggedInCommand
             {
                 try
                 {
-                    var client = SharedShutdownClient;
-                    var req = new HttpRequestMessage(HttpMethod.Post, capturedUrl);
-                    req.Headers.Add("X-Admin-Token", capturedToken);
-                    var resp = await client.SendAsync(req).ConfigureAwait(false);
-                    if (resp.IsSuccessStatusCode)
+                    var attempt = await TryPostShutdownAsync(first, port, capturedToken).ConfigureAwait(false)
+                        ?? await TryPostShutdownAsync(second, port, capturedToken).ConfigureAwait(false);
+                    if (attempt is null)
                     {
-                        // fire the stop hooks only once the shutdown
-                        // is confirmed. Python runs at_server_stop() eagerly
-                        // (shutdown.py:53, before the request); if the request
-                        // then fails, hooks already ran for a live server.
-                        try { Atheriz.Core.ServerEvents.AtServerStop(); } catch (Exception) { }
-                        var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        capturedGo.Msg("Error connecting to shutdown endpoint: no response (tried http and https).");
+                        return;
+                    }
+                    var (ok, statusCode, body) = attempt.Value;
+                    if (ok)
+                    {
+                        // No eager AtServerStop here: the route's own
+                        // DoShutdown fires at_server_stop exactly once. The
+                        // old eager call ran the hooks a second time — and
+                        // ran them even when the request then failed.
                         try
                         {
                             using var doc = System.Text.Json.JsonDocument.Parse(body);
@@ -176,10 +223,9 @@ public sealed class ShutdownCommand : LoggedInCommand
                     }
                     else
                     {
-                        capturedGo.Msg($"Shutdown failed with HTTP {(int)resp.StatusCode}");
+                        capturedGo.Msg($"Shutdown failed with HTTP {statusCode}");
                     }
                 }
-                catch (HttpRequestException ex) { capturedGo.Msg($"Error connecting to shutdown endpoint: {ex.Message}"); }
                 catch (Exception ex) { capturedGo.Msg($"Shutdown error: {ex.Message}"); }
             });
         }
@@ -247,7 +293,7 @@ public sealed class SpamCommand : LoggedInCommand
         // single save after the loop, not O(n) saves inside it.
         // Best-effort: spam's job is creating the accounts in-registry; a
         // bad save path reports instead of discarding the created accounts.
-        try { ObjectRegistry.SaveObjects(settings.SavePath); }
+        try { ObjectRegistry.SaveObjects(Atheriz.Core.Persistence.AtherizDbContextFactory.ResolveSavePath(settings)); }
         catch (Exception ex) { go.Msg($"Save failed: {ex.Message}"); }
         var credsFile = Path.Combine(settings.SavePath, "spam_accounts.txt");
         try

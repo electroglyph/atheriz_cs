@@ -48,11 +48,11 @@ public class PersistenceSaveLoadContractTests
     }
 
     [Fact]
-    public void MapHandler_ParameterlessSave_UsesDefaultSavePath()
+    public void MapHandler_ParameterlessSave_UsesConstructedSettings()
     {
-        // Same process-default contract as GameTime.Save: the parameterless
-        // call resolves ATHERIZ_SAVE_PATH else Global.SavePath; per-instance
-        // targeting uses Save(db).
+        // Load/save symmetry: a handler constructed with settings reads and
+        // writes that database (ATHERIZ_SAVE_PATH still wins when set —
+        // pinned separately). Per-instance targeting uses Save(db).
         using var env = GlobalTestEnv.Enter();
         var origEnv = Environment.GetEnvironmentVariable("ATHERIZ_SAVE_PATH");
         var origSave = AtherizSettings.Global.SavePath;
@@ -68,7 +68,7 @@ public class PersistenceSaveLoadContractTests
             var mh = new MapHandler(settings, autoLoad: false);
             mh.SetMapInfo("zona", 0, new MapInfo());
             mh.Save();
-            using var db = new AtherizDbContext(globalDir);
+            using var db = new AtherizDbContext(customDir);
             var probe = new MapHandler(settings, autoLoad: false);
             probe.Load(db);
             Assert.NotNull(probe.GetMapInfo("zona", 0));

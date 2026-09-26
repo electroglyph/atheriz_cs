@@ -56,7 +56,10 @@ public class MapHandler
 
     public void Load()
     {
-        try { Load(AtherizDbContextFactory.Create()); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
+        // Settings-pinned load, mirroring NodeHandler: the handler was
+        // constructed with settings, so it must read that same database
+        // rather than the ambient factory path (audit 10 finding 3).
+        try { using var db = new AtherizDbContext(_settings); Load(db); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
     }
     public void Load(AtherizDbContext db)
     {
@@ -115,7 +118,7 @@ public class MapHandler
 
     public virtual void Save(bool force = false)
     {
-        try { Save(AtherizDbContextFactory.Create(), force); }
+        try { Save(AtherizDbContextFactory.CreateForSettings(_settings), force); }
         catch (Exception ex)
         {
             // Python: catches Exception around get_database and around save, restores flags

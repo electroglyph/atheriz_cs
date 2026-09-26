@@ -460,8 +460,9 @@ public partial class GameObject
 
             // Deferred until after both location locks release (see below):
             // AddExitsForObject nests node->object and must not extend the
-            // two-lock hold .
-            if (destObj.IsNode && oldLoc is not null)
+            // two-lock hold. Every node arrival installs exits, including
+            // from nowhere: a room member with no exit commands cannot move.
+            if (destObj.IsNode)
                 installExits = true;
 
             LocationRef newLocRef;

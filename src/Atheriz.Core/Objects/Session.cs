@@ -123,6 +123,13 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
             }
         }
     }
+    // Character-selection wizard re-entrancy guard: two `connect` lines on
+    // one socket started two CharSelectionAsync loops sharing the one
+    // InputFuture slot, force-completing each other's prompts with ""
+    // forever. Checked and set under Lock; cleared when the wizard ends.
+    private bool _wizardActive;
+    internal bool TryStartWizard() { lock (Lock) { if (_wizardActive) return false; _wizardActive = true; return true; } }
+    internal void EndWizard() { lock (Lock) { _wizardActive = false; } }
     // Wontfix: puppet snapshot incomplete — only is_pc/privilege_level per puppet.py:110,138-142.
     public int TermWidth;
     public int TermHeight;

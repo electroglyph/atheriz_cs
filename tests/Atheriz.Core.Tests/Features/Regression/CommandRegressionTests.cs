@@ -771,12 +771,17 @@ public class CommandRegressionTests
         Assert.NotEqual(CreationCooldownHelper.RateKey(a), CreationCooldownHelper.RateKey(b));
     }
 
-    // AtServerStop must run after the shutdown is confirmed.
+    // AtServerStop fires exactly once, from the server shutdown path after
+    // the shutdown is confirmed — never eagerly from the shutdown command
+    // (the old eager call ran every hook a second time, and ran them even
+    // when the request then failed).
     [Fact]
     public void ServerStop_RunsAfterConfirmation()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminCommands.cs");
-        Assert.True(src.IndexOf("AtServerStop()", StringComparison.Ordinal) > src.IndexOf("IsSuccessStatusCode", StringComparison.Ordinal));
+        Assert.DoesNotContain("ServerEvents.AtServerStop()", src);
+        var stop = SourceScan.Read("src", "Atheriz.Core", "Globals", "StartStop.cs");
+        Assert.Contains("ShutdownStep(\"at_server_stop\"", stop);
     }
 
     // reload must not block on async work and must surface first causes.

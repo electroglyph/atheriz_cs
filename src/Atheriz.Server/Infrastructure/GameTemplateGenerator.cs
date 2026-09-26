@@ -150,7 +150,14 @@ public static class GameTemplateGenerator
                 if (Directory.Exists(saveDirForWipe))
                 {
                     foreach (var f in Directory.GetFiles(saveDirForWipe, "*", SearchOption.AllDirectories))
+                    {
+                        // Never sweep the wipe hold itself: deleting
+                        // .wipe-lock mid-wipe flips IsWipeLocked to false
+                        // while the wipe is still running (audit 10 finding 12).
+                        if (string.Equals(Path.GetFileName(f), Infrastructure.PidFile.WipeLockFileName, StringComparison.Ordinal))
+                            continue;
                         try { File.Delete(f); } catch { }
+                    }
                 }
                 // A stale secret/admin.token would survive as the "fresh"
                 // game's credential: delete it so setup regenerates a fresh

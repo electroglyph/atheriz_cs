@@ -15,7 +15,16 @@ public partial class GameObject
 // caller optional for Account parity
     public virtual (int Count, List<DeleteOperation> Operations)? Delete(GameObject? caller = null, bool recursive = false, int maxDepth = ContentUtils.DefaultMaxSearchDepth)
     {
-        if (caller is not null && !AtDelete(caller)) return null;
+        // A throwing AtDelete on the entry object is a veto (fail-closed),
+        // matching the child-probe contract below: a buggy hook must not
+        // escape mid-delete and strand partially processed children.
+        if (caller is not null)
+        {
+            bool vetoed;
+            try { vetoed = !AtDelete(caller); }
+            catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
+            if (vetoed) return null;
+        }
         // quick check already deleted
         _lock.EnterReadLock();
         try { if (_flags.IsDeleted) return null; }
@@ -247,6 +256,31 @@ public partial class GameObject
             // the exact move-or-delete path.
             void MoveOrDelete(GameObject content)
             {
+                // Delete-veto probe BEFORE containment is touched: the
+                // recursive walk treats a throwing AtDelete as a veto
+                // (fail-closed), and this path must honor the same contract.
+                // Probing only inside content.Delete below lets the answer
+                // escape after the child is already detached to NullLocation,
+                // stranding it at nowhere with the parent delete aborted.
+                if (caller is not null)
+                {
+                    bool vetoed = false;
+                    try { vetoed = !content.AtDelete(caller); }
+                    catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
+                    if (vetoed)
+                    {
+                        // A vetoed child survives (walk semantics): detach it
+                        // to nowhere without deleting.
+                        try { this.RemoveContent(content.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                        try
+                        {
+                            content._lock.EnterWriteLock();
+                            try { content._location = LocationRef.NullLocation.Instance; content._flags.IsModified = true; }
+                            finally { content._lock.ExitWriteLock(); }
+                        } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                        return;
+                    }
+                }
                 bool moved = false;
                 try { moved = content.MoveTo(loc, force: false, announce: false); } catch { moved = false; }
                 if (!moved)
@@ -269,8 +303,14 @@ public partial class GameObject
                             finally { content._lock.ExitWriteLock(); }
                         } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
                     }
-                    // then collect recursively (delete content and its children)
-                    var r = content.Delete(caller, true, maxDepth);
+                    // then collect recursively (delete content and its children).
+                    // Guarded: the pre-detach probe above already passed, but a
+                    // non-idempotent hook can throw on the second call inside
+                    // Delete (now a veto returning null). An escape here must
+                    // not abort the sibling loop with the parent half-processed.
+                    (int Count, List<DeleteOperation> Operations)? r = null;
+                    try { r = content.Delete(caller, true, maxDepth); }
+                    catch (Exception logEx) { AtherizLogger.LogWarning("GameObject.Delete re-delete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
                     if (r is not null) { ops.AddRange(r.Value.Operations); deletedKids += r.Value.Count; }
                 }
                 else
@@ -400,7 +440,29 @@ public partial class GameObject
                 // rewire the session onto a deleted object.
                 try { lock (sess.Lock) { sess.RemovePuppetEntriesFor(obj); } } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
                 try { lock (sess.Lock) { if (ReferenceEquals(sess.Puppet, obj)) sess.Puppet = null; if (ReferenceEquals(sess.LastPuppet, obj)) sess.LastPuppet = null; } } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                // A deleted PC must free its account character slot, or the
+                // cap keeps rejecting new characters for a PC that is gone.
+                // RemoveCharacter is a no-op when the id is not listed, so
+                // non-character deletions pass through unchanged.
+                try { sess.Account?.RemoveCharacter(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
             }
+            // Offline fallback: a PC deleted while unpuppeted (Session null)
+            // or whose session carries no account never entered the block
+            // above, leaking its slot against the cap. Scan for the owning
+            // account and free it. FilterBy snapshots under AllLock and runs
+            // the predicate outside it, so no registry/object nesting.
+            try
+            {
+                if (sess?.Account is null && obj.IsPc)
+                {
+                    List<Account> owners;
+                    try { owners = ObjectRegistry.FilterBy(o => o is Account a && a.Characters.Contains(obj.Id)).OfType<Account>().ToList(); }
+                    catch { owners = []; }
+                    foreach (var owner in owners)
+                        try { owner.RemoveCharacter(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                }
+            }
+            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
         try { Globals.GlobalServices.TryGetTicker()?.RemoveCoro(obj.AtTick, obj.TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }

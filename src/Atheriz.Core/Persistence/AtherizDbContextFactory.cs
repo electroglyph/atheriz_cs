@@ -179,7 +179,7 @@ public static class AtherizDbContextFactory
                 // would silently write the previous row's values.
                 using var ins = conn.CreateCommand();
                 ins.Transaction = txn;
-                ins.CommandText = "INSERT OR IGNORE INTO \"transitions_new\" VALUES (@fa,@fx,@fy,@fz,@ta,@tx,@ty,@tz,@d)";
+                ins.CommandText = "INSERT INTO \"transitions_new\" VALUES (@fa,@fx,@fy,@fz,@ta,@tx,@ty,@tz,@d)";
                 var pFa = AddParam(ins, "@fa", DBNull.Value);
                 var pFx = AddParam(ins, "@fx", DBNull.Value);
                 var pFy = AddParam(ins, "@fy", DBNull.Value);
@@ -208,12 +208,13 @@ public static class AtherizDbContextFactory
                     pTy.Value = row.ToY;
                     pTz.Value = row.ToZ;
                     pD.Value = (object?)row.Data ?? DBNull.Value;
-                    ins.ExecuteNonQuery();
+                    try { ins.ExecuteNonQuery(); }
+                    catch { dropped++; }
                 }
                 ExecuteNonQuery(conn, txn, "DROP TABLE \"transitions\"");
                 ExecuteNonQuery(conn, txn, "ALTER TABLE \"transitions_new\" RENAME TO \"transitions\"");
                 txn.Commit();
-                AtherizLogger.LogWarning($"MigrateTransitionsTable: rebuilt destination-only table, migrated {rows.Count - dropped}/{rows.Count} rows, dropped {dropped} undecodable.");
+                AtherizLogger.LogWarning($"MigrateTransitionsTable: rebuilt destination-only table, migrated {rows.Count - dropped}/{rows.Count} rows, dropped {dropped} undecodable or constraint-violating.");
             }
             finally { if (wasClosed) conn.Close(); }
         }
@@ -275,9 +276,10 @@ public static class AtherizDbContextFactory
     }
 
     // Parameterless overload using default settings SavePath
+    // (env-resolved like every other entry point).
     public static void DoSetup()
     {
-        var savePath = AtherizSettings.Global.SavePath;
+        var savePath = ResolveSavePath(AtherizSettings.Global);
         DoSetup(savePath);
     }
 }

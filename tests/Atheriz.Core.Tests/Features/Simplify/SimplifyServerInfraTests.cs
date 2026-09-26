@@ -462,7 +462,9 @@ public class TokenFileEmptySemanticsTests
         try
         {
             File.WriteAllText(Path.Combine(dir, "admin.token"), "\n");
-            Assert.Equal("Invalid token.", AdminToken.CheckAdmin(dir, "127.0.0.1", "anything", "test"));
+            // A blank file fails closed before any comparison, whatever the
+            // candidate token is (audit 10 finding 1).
+            Assert.Equal("Token file not found.", AdminToken.CheckAdmin(dir, "127.0.0.1", "anything", "test"));
             Assert.Equal("Token file not found.", AdminToken.CheckAdmin(Path.Combine(dir, "nodir"), "127.0.0.1", "anything", "test"));
         }
         finally { try { Directory.Delete(dir, true); } catch { } }

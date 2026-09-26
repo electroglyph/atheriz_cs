@@ -164,6 +164,14 @@ public class InputFuncs
                 v = iv;
                 return true;
             case long lv:
+                // Narrowing without a range check wraps (e.g. 2^32+1 becomes
+                // 1 and defeats the caller's lower-bound guard), so reject
+                // values outside Int32 exactly like the JsonElement arm does.
+                if (lv < int.MinValue || lv > int.MaxValue)
+                {
+                    v = 0;
+                    return false;
+                }
                 v = (int)lv;
                 return true;
             case JsonElement je when je.ValueKind == JsonValueKind.Number:
@@ -308,8 +316,10 @@ public class InputFuncs
             {
                 if (lst.Count!=2) return false;
                 foreach (var x in lst)
-                    // Cells accept int/long coords, so legend entries do too.
+                    // Cells accept int/long coords, so legend entries do too —
+                    // but a long outside Int32 must reject, not wrap in ToInt.
                     if (x is not int && x is not long) return false;
+                    else if (x is long ll && (ll < int.MinValue || ll > int.MaxValue)) return false;
             }
             else if (coord is System.Text.Json.JsonElement je2 && je2.ValueKind==System.Text.Json.JsonValueKind.Array)
             {
@@ -367,6 +377,10 @@ public class InputFuncs
                 seq = si;
                 return true;
             case long sl:
+                // Same unchecked-narrowing shape as TryCoerceInt's long arm:
+                // a seq that does not fit Int32 must be rejected, not
+                // wrapped (the wrap would echo/look up the wrong chain).
+                if (sl < int.MinValue || sl > int.MaxValue) { seq = 0; return false; }
                 seq = (int)sl;
                 return true;
             case System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var jsi):
@@ -381,7 +395,11 @@ public class InputFuncs
     private static int ToInt(object? o)
     {
         if (o is int i) return i;
-        if (o is long l) return (int)l;
+        // Same unchecked-narrowing shape as TryCoerceInt: a long outside
+        // Int32 must never wrap to a small coord (fail-closed throw; every
+        // coordinate validation loop above rejects such values first, so
+        // this is unreachable in normal flow and only fires on future misuse).
+        if (o is long l) return checked((int)l);
         if (o is double d) return (int)d;
         if (o is string s && int.TryParse(s, out var iv)) return iv;
         if (o is System.Text.Json.JsonElement je && je.ValueKind==System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var jv)) return jv;
@@ -465,6 +483,7 @@ public class InputFuncs
                     var v = cell[i];
                     if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) { failIndex = idx; return false; } }
                     else if (v is not int && v is not long) { failIndex = idx; return false; }
+                    else if (v is long lroom && (lroom < int.MinValue || lroom > int.MaxValue)) { failIndex = idx; return false; }
                 }
                 parsed.Add(new MapEditCell(true, ToInt(cell[1]), ToInt(cell[2]), ToInt(cell[3]), ToInt(cell[4]), "", null, null, null, false));
                 continue;
@@ -476,6 +495,7 @@ public class InputFuncs
                 var v = cell[i];
                 if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) { failIndex = idx; return false; } }
                 else if (v is not int && v is not long) { failIndex = idx; return false; }
+                else if (v is long lxy && (lxy < int.MinValue || lxy > int.MaxValue)) { failIndex = idx; return false; }
             }
             if (cell[2] is not string)
             {
@@ -630,6 +650,7 @@ public class InputFuncs
                 var v=m[i];
                 if (v is System.Text.Json.JsonElement jeM && jeM.ValueKind==System.Text.Json.JsonValueKind.Number) { if (!jeM.TryGetInt32(out _)) return; }
                 else if (v is not int && v is not long) return;
+                else if (v is long lm && (lm < int.MinValue || lm > int.MaxValue)) return;
             }
         }
         List<((int X,int Y) src,(int X,int Y) dst)>? context=null;
@@ -647,6 +668,7 @@ public class InputFuncs
                     var v=ctx[i];
                     if (v is System.Text.Json.JsonElement jeC && jeC.ValueKind==System.Text.Json.JsonValueKind.Number) { if (!jeC.TryGetInt32(out _)) return; }
                     else if (v is not int && v is not long) return;
+                    else if (v is long lc && (lc < int.MinValue || lc > int.MaxValue)) return;
                 }
                 context.Add(((ToInt(ctx[0]), ToInt(ctx[1])), (ToInt(ctx[2]), ToInt(ctx[3]))));
             }

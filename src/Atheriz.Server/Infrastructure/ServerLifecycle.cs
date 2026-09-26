@@ -42,7 +42,7 @@ public static class ServerLifecycle
         // Ensure DB created — mirrors get_database() at database_setup.py:66-88
         try
         {
-            using var db = new AtherizDbContext(settings.SavePath);
+            using var db = new AtherizDbContext(AtherizDbContextFactory.ResolveSavePath(settings));
             db.Database.EnsureCreated();
         }
         catch (Exception ex) { AtherizLogger.LogError($"DoStartup EnsureCreated failed: {ex}"); _startupSucceeded = false; throw; }

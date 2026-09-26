@@ -45,7 +45,10 @@ public static class StopHandler
                 .AddJsonFile("appsettings.json", optional: true)
                 .AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production"}.json", optional: true)
                 .AddEnvironmentVariables();
-            try { builder.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true); } catch { }
+            // The engine's own appsettings.json (next to the binaries) must
+            // NOT override the game folder's file: configuration is
+            // later-provider-wins, so a last engine source silently repoints
+            // the CLI at the wrong world (wrong port, wrong token).
             var cfg = builder.Build();
             var s = cfg.GetSection("Atheriz").Get<AtherizSettings>();
             if (s is not null) return s;

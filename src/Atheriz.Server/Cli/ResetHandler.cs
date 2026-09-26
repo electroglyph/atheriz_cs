@@ -68,9 +68,13 @@ public static class ResetHandler
         // Wipe hold: a starter claiming pid/DB between the re-check
         // above and the delete below would get its live database unlinked.
         // Hold the wipe lock from here through setup; starters refuse while
-        // it is fresh. The recursive delete below takes the lock file with
-        // it, so it is re-armed right after the re-create.
-        var wipeA = Infrastructure.PidFile.TryAcquireWipeLock(savePath);
+        // it is fresh. On POSIX the recursive delete below takes the lock
+        // file with it (open-file unlink works), so it is re-armed right
+        // after the re-create. On Windows an open FileShare.None handle
+        // blocks the recursive delete with a sharing violation, so the
+        // sweep there skips the lock file and the hold is released only at
+        // the re-arm below.
+        FileStream? wipeA = Infrastructure.PidFile.TryAcquireWipeLock(savePath);
         if (wipeA is null) { Console.WriteLine("Another wipe is in progress; aborting reset."); return 1; }
         var absSave = Path.GetFullPath(savePath);
 
@@ -96,7 +100,31 @@ public static class ResetHandler
             try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
             try
             {
-                Directory.Delete(savePath, recursive: true);
+                if (OperatingSystem.IsWindows())
+                {
+                    // Windows cannot unlink an open FileShare.None handle, so
+                    // sweep everything except the held lock file. The hold
+                    // stays acquired through the wipe (no barge gap); the
+                    // lock file itself is released and deleted at the re-arm
+                    // below. Directories are removed deepest-first so a
+                    // recursive delete never touches the open handle.
+                    foreach (var f in Directory.GetFiles(savePath, "*", SearchOption.AllDirectories))
+                    {
+                        if (string.Equals(Path.GetFileName(f), Infrastructure.PidFile.WipeLockFileName, StringComparison.Ordinal))
+                            continue;
+                        File.Delete(f);
+                    }
+                    foreach (var d in Directory.GetDirectories(savePath, "*", SearchOption.AllDirectories).OrderByDescending(s => s.Length))
+                    {
+                        try { Directory.Delete(d, recursive: false); }
+                        catch (IOException) { /* left for the wipe-incomplete check below */ }
+                        catch (UnauthorizedAccessException) { /* left for the wipe-incomplete check below */ }
+                    }
+                }
+                else
+                {
+                    Directory.Delete(savePath, recursive: true);
+                }
             }
             catch (Exception ex) { Console.WriteLine($"Failed to delete save: {ex.Message}"); return 1; }
         }
@@ -106,11 +134,11 @@ public static class ResetHandler
         // the closed-flag window ends here, not after setup.
         try { Atheriz.Core.Persistence.AtherizDbContextFactory.ReopenDatabase(); } catch { }
         } // end saver-exclusion: savers resume past the reopen
-        // Re-arm the wipe hold (the delete above took it) before any setup
-        // write; abort loudly if anything barged the micro-gap. The old
-        // lock file is deleted first — freshness alone would refuse
-        // ourselves.
-        try { wipeA.Dispose(); } catch { }
+        // Re-arm the wipe hold (the POSIX delete above took it; on Windows
+        // the sweep skipped it) before any setup write; abort loudly if
+        // anything barged the micro-gap. The old lock file is deleted first
+        // — freshness alone would refuse ourselves.
+        try { wipeA?.Dispose(); } catch { }
         try { File.Delete(Infrastructure.PidFile.WipeLockPath(savePath)); } catch { }
         FileStream? wipeB;
         wipeB = Infrastructure.PidFile.TryAcquireWipeLock(savePath);
