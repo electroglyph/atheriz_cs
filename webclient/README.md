@@ -19,6 +19,10 @@ To deploy into a game web directory, run:
 
 `python deploy.py game --web-root /path/to/game/web`
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
 ## Google Fonts
 
 The Text tool bundles 50 featured fonts (top 10 per Google category) under

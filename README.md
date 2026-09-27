@@ -2,7 +2,7 @@
 
 # AtheriZ — C# Port
 
-C# port of `atheriz` (Python MUD server, v0.9.0) on **.NET 10** (C# 14, `net10.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included.
+C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included — see the [webclient changelog](webclient/CHANGELOG.md).
 
 ## Prereqs
 
