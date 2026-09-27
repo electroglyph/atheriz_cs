@@ -88,6 +88,31 @@ describe('draw launch command', () => {
         expect(readDrawGrant()).toEqual({ key: 'k2', payload: { area: 'A' } });
     });
 
+    it('removes the popup fallback after ten seconds', () => {
+        vi.setSystemTime(60000);
+        vi.spyOn(window, 'open').mockReturnValue(null);
+        expect(launchDraw()).toBe('blocked');
+        expect(document.querySelector('.popup-fallback')).not.toBeNull();
+        vi.advanceTimersByTime(9999);
+        expect(document.querySelector('.popup-fallback')).not.toBeNull();
+        vi.advanceTimersByTime(1);
+        expect(document.querySelector('.popup-fallback')).toBeNull();
+    });
+
+    it('restarts the ten-second fallback clock on a repeated block', () => {
+        vi.setSystemTime(80000);
+        vi.spyOn(window, 'open').mockReturnValue(null);
+        expect(launchDraw()).toBe('blocked');
+        vi.advanceTimersByTime(9000);
+        expect(document.querySelector('.popup-fallback')).not.toBeNull();
+        __resetLaunchThrottleForTests();
+        expect(launchDraw()).toBe('blocked');
+        vi.advanceTimersByTime(9000);
+        expect(document.querySelector('.popup-fallback')).not.toBeNull();
+        vi.advanceTimersByTime(1000);
+        expect(document.querySelector('.popup-fallback')).toBeNull();
+    });
+
     it('round-trips grants and rejects malformed ones', () => {
         vi.setSystemTime(20000);
         localStorage.setItem('atheriz_draw_grant', JSON.stringify({ key: 'k', payload: { area: 'a' } }));

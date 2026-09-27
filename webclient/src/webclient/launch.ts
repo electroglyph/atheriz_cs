@@ -5,8 +5,17 @@ const GRANT_TTL_MS = 60000;
 
 let lastLaunchAt = 0;
 
+// The popup-blocked fallback banner dismisses itself after 10 seconds;
+// repeated blocks restart the clock.
+const FALLBACK_TTL_MS = 10000;
+let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+
 export function __resetLaunchThrottleForTests(): void {
     lastLaunchAt = 0;
+    if (fallbackTimer !== undefined) {
+        clearTimeout(fallbackTimer);
+        fallbackTimer = undefined;
+    }
 }
 
 export interface DrawGrant {
@@ -54,9 +63,15 @@ export function launchDraw(key?: string, payload?: unknown): LaunchDrawResult {
         document.body.append(fallback);
     }
     // Repeated blocks reuse the same div, so scroll it into view every time
-    // or the user never finds the link (no-op where unsupported).
+    // or the user never finds the link (no-op where unsupported). Every block
+    // also restarts the 10-second auto-dismiss so the banner never lingers.
     const fallback = document.querySelector('.popup-fallback');
     if (typeof fallback?.scrollIntoView === 'function') fallback.scrollIntoView();
+    if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
+    fallbackTimer = setTimeout(() => {
+        document.querySelector('.popup-fallback')?.remove();
+        fallbackTimer = undefined;
+    }, FALLBACK_TTL_MS);
     return 'blocked';
 }
 
