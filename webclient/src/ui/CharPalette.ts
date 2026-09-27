@@ -142,4 +142,9 @@ export class CharPalette {
         this.charCells.clear();
         this.render();
     }
+
+    /** Copy of the user-added Custom group for editor-settings saves. */
+    public getCustomChars(): string[] {
+        return [...(this.groups.find((group) => group.name === 'Custom')?.chars ?? [])];
+    }
 }

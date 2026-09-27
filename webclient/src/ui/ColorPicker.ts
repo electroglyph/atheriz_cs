@@ -1,5 +1,5 @@
 import { Color, AppState } from '../types';
-import { rgbToHex, hexToRgb, colorEquals, cssColor } from '../utils/colors';
+import { rgbToHex, hexToRgb, colorEquals, cssColor, isValidColor } from '../utils/colors';
 import { ColorPickerModal } from './ColorPickerModal';
 
 /** Min/max for an 8-bit color channel. */
@@ -20,9 +20,7 @@ export function parseColorChannel(value: string): number | null {
 }
 
 /** True when every channel of the tuple is a finite 0-255 integer. */
-export function isValidColor(c: Color): boolean {
-    return c.length === 3 && c.every((v) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 255);
-}
+export { isValidColor } from '../utils/colors';
 
 export class ColorPicker {
     private appState: AppState;
@@ -90,6 +88,20 @@ export class ColorPicker {
             this.history.pop();
             this.updateUI();
         }
+    }
+
+    /** Copy of the color-slot history for editor-settings saves. */
+    public getHistory(): Color[] {
+        return this.history.map((c) => [...c] as Color);
+    }
+
+    /** Replace the color-slot history (editor-settings restore). Invalid
+     * entries are dropped; the list is padded/truncated to 8 slots. */
+    public setHistory(colors: Color[]) {
+        const valid = colors.filter(isValidColor).map((c) => [...c] as Color);
+        while (valid.length < 8) valid.push([0, 0, 0]);
+        this.history = valid.slice(0, 8);
+        this.updateUI();
     }
 
     private render() {

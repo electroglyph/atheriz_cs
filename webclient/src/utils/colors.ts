@@ -30,6 +30,13 @@ export function colorEquals(c1: Color, c2: Color): boolean {
     return c1[0] === c2[0] && c1[1] === c2[1] && c1[2] === c2[2];
 }
 
+/** True when the value is an [r, g, b] triple of finite 0-255 integers. */
+export function isValidColor(c: unknown): c is Color {
+    return Array.isArray(c)
+        && c.length === 3
+        && c.every((v) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 255);
+}
+
 export function cellEquals(a: Cell, b: Cell): boolean {
     return a.char === b.char
         && colorEquals(a.fg, b.fg)

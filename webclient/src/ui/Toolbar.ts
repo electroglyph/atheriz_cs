@@ -262,6 +262,34 @@ export class Toolbar {
         window.removeEventListener('keydown', this.boundKeyDown);
     }
 
+    /** Push appState back into the selects, tool buttons, and font select
+     * (editor-settings restore). A saved font family with no matching
+     * option gets one so the select shows the live value. */
+    public syncFromState() {
+        this.typeStyleSel.value = this.appState.typeStyle;
+        this.rectModeSel.value = this.appState.rectMode;
+        this.ovalModeSel.value = this.appState.ovalMode;
+        this.lineModeSel.value = this.appState.lineMode;
+        this.gradientTargetSel.value = this.appState.gradientTarget;
+        this.fillModeSel.value = this.appState.fillMode;
+        this.eyedropperTargetSel.value = this.appState.eyedropperTarget;
+        this.selectModeSel.value = this.appState.selectMode;
+        this.rotateModeSel.value = this.appState.rotateMode;
+
+        const diagonalCheckbox = document.getElementById('line-diagonal-checkbox') as HTMLInputElement | null;
+        if (diagonalCheckbox) diagonalCheckbox.checked = !!this.appState.lineDiagonal;
+
+        if (!Array.from(this.fontSelect.options).some((o) => o.value === this.appState.fontFamily)) {
+            const opt = document.createElement('option');
+            opt.value = this.appState.fontFamily;
+            opt.textContent = this.appState.fontFamily;
+            this.fontSelect.appendChild(opt);
+        }
+        this.fontSelect.value = this.appState.fontFamily;
+
+        this.updateToolButtons();
+    }
+
     private updateToolButtons() {
         this.btnBrush.classList.remove('active');
         this.btnErase.classList.remove('active');

@@ -59,8 +59,14 @@ public class GameBuildScaffoldTests
                 Assert.Contains("--web-root", shText);
                 Assert.Contains("--no-web", shText);
                 Assert.Contains("--reload", shText);
+                Assert.Contains("--no-engine", shText);
                 Assert.Contains("ATHERIZ_ROOT", shText);
                 Assert.Contains("atheriz.sh\" reload", shText);
+                // The plugin loads into the server process, so the wrapper
+                // rebuilds a stale engine server (Release) before the plugin:
+                // missing/older server dll than the engine sources.
+                Assert.Contains("Atheriz.Server.csproj", shText);
+                Assert.Contains("engine_stale", shText);
                 // The baked fallback is relative and resolves from the game
                 // folder to the engine checkout that generated it.
                 var baked = System.Text.RegularExpressions.Regex.Match(shText, "ENGINE_ROOT=\"\\$GAME_DIR/([^\"]*)\"");
@@ -94,8 +100,13 @@ public class GameBuildScaffoldTests
                 Assert.Contains("--web-root", cmdText);
                 Assert.Contains("--no-web", cmdText);
                 Assert.Contains("--reload", cmdText);
+                Assert.Contains("--no-engine", cmdText);
                 Assert.Contains("ATHERIZ_ROOT", cmdText);
                 Assert.Contains("atheriz.cmd\" reload", cmdText);
+                // Same engine-first step as the shell twin: stale server dll
+                // (missing, or older than the engine sources) is rebuilt.
+                Assert.Contains("Atheriz.Server.csproj", cmdText);
+                Assert.Contains("ensure_engine", cmdText);
                 // Raw-string templates are literal: a doubled backslash
                 // would leak into the batch file (regression: BuildCmd once
                 // emitted \\ throughout while single-\ asserts still passed

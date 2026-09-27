@@ -14,7 +14,9 @@ export interface DrawGrant {
     payload: unknown;
 }
 
-export function launchDraw(key?: string, payload?: unknown): boolean {
+export type LaunchDrawResult = 'opened' | 'throttled' | 'blocked';
+
+export function launchDraw(key?: string, payload?: unknown): LaunchDrawResult {
     // The grant is stored before the throttle gate so a throttled retry never
     // orphans the newest server-minted key; the tab opens the stored grant.
     if (key && payload) {
@@ -27,32 +29,35 @@ export function launchDraw(key?: string, payload?: unknown): boolean {
     }
 
     const now = Date.now();
-    if (now - lastLaunchAt < 1000) return false;
+    if (now - lastLaunchAt < 1000) return 'throttled';
     lastLaunchAt = now;
 
     const drawUrl = new URL(DRAW_PATH, window.location.origin).href;
     const opened = window.open(drawUrl, '_blank', 'noopener,noreferrer');
     if (opened) {
-        return true;
+        return 'opened';
     }
 
     // Popup blocked: reuse a single fallback div (max 1) instead of
     // appending a new one on every blocked attempt.
-    if (document.querySelector('.popup-fallback')) {
-        return false;
+    if (!document.querySelector('.popup-fallback')) {
+        const link = document.createElement('a');
+        link.href = drawUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Open AtheriZ Draw in a new tab';
+        link.style.color = '#7dd3fc';
+        const fallback = document.createElement('div');
+        fallback.className = 'popup-fallback';
+        fallback.setAttribute('role', 'alert');
+        fallback.append(document.createTextNode('Popup blocked. '), link);
+        document.body.append(fallback);
     }
-    const link = document.createElement('a');
-    link.href = drawUrl;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = 'Open AtheriZ Draw in a new tab';
-    link.style.color = '#7dd3fc';
-    const fallback = document.createElement('div');
-    fallback.className = 'popup-fallback';
-    fallback.setAttribute('role', 'alert');
-    fallback.append(document.createTextNode('Popup blocked. '), link);
-    document.body.append(fallback);
-    return false;
+    // Repeated blocks reuse the same div, so scroll it into view every time
+    // or the user never finds the link (no-op where unsupported).
+    const fallback = document.querySelector('.popup-fallback');
+    if (typeof fallback?.scrollIntoView === 'function') fallback.scrollIntoView();
+    return 'blocked';
 }
 
 export function readDrawGrant(): DrawGrant | null {

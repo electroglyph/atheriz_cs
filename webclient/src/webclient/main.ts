@@ -15,7 +15,7 @@ import { MAP_CLEAR_SEQUENCE, mergeBackgrounds, parseBackground, renderMap as ren
 import { mapLayout, recordingDividerPct, resizeWidth } from './layout';
 import { inputHeight, shouldClearSubmittedInput, shouldNavigateHistory, submissionFeedback } from './input';
 import { formatPrompt, formatTextOutput, stripAnsiBroad } from './text';
-import { BUFFER_FINAL_SEQUENCE, SequentialWriter } from './buffer';
+import { SequentialWriter, chunkEndsWithNewline, drainTrailer } from './buffer';
 import { playAudio as playAudioElement } from './audio';
 import { screenReaderFeedback, settingFeedback } from './feedback';
 import { shouldResetSession } from './session';
@@ -59,6 +59,11 @@ let censorInput = true;
 let connected = false;
 let mapPayload: MapPayload | null = null;
 let pendingBackground: MapPayload['background'];
+// Whether the most recently enqueued chunk ended in a newline. The drain
+// trailer commits the live line only when it did not (prompt-only and raw
+// `buffer` drains); after a newline-terminated drain (every server `text`
+// frame) the extra newline would print a blank line.
+let lastChunkEndedNewline = false;
 let audio: HTMLAudioElement | null = null;
 let autosaveSetting = readBooleanSetting('autosave', false);
 let commandSubmitted = false;
@@ -72,8 +77,9 @@ const writer = new SequentialWriter(
         }
     },
     () => {
-        left.write(BUFFER_FINAL_SEQUENCE);
-        recorder.output('o', BUFFER_FINAL_SEQUENCE);
+        const trailer = drainTrailer(lastChunkEndedNewline);
+        left.write(trailer);
+        recorder.output('o', trailer);
         redrawPrompt();
     },
 );
@@ -364,6 +370,7 @@ function fitAndReportSize(): void {
 }
 
 function write(text: string): void {
+    lastChunkEndedNewline = chunkEndsWithNewline(text);
     writer.enqueue(text);
     recorder.output('o', text);
 }
@@ -481,13 +488,17 @@ function handleMessage(message: WireMessage): void {
 }
 
 function handleLaunchDraw(key: string | undefined, payload: unknown): void {
-    const fallbacks = document.querySelectorAll('.popup-fallback').length;
-    if (launchDraw(key, payload)) return;
-    // launchDraw appends a fallback link when the popup is blocked; any other
-    // refusal is the launch throttle, which keeps the newest grant stored.
-    if (document.querySelectorAll('.popup-fallback').length === fallbacks) {
-        write('\r\nDraw launch throttled; the latest grant was saved. Wait a moment and use :draw to retry.\r\n');
+    const result = launchDraw(key, payload);
+    if (result === 'opened') return;
+    if (result === 'blocked') {
+        // window.open fails outside a user gesture (server-push launches), so
+        // the popup blocker — not the throttle — is what bites on every retry.
+        // The local draw command is NOT the retry: it only reopens the last
+        // stored grant with no fresh data. A real retry needs a fresh grant.
+        write('\r\nPopup blocked. Click the "Open AtheriZ Draw in a new tab" link, or allow popups for this site and run mapedit again for a fresh editor.\r\n');
+        return;
     }
+    write('\r\nDraw launch throttled; the latest grant was saved. Wait a moment and run mapedit again.\r\n');
 }
 
 function writeText(text: string): void {
@@ -527,6 +538,7 @@ function setPrompt(value: string): void {
 function writeBuffer(args: unknown[]): void {
     const chunks = args.filter((value): value is string => typeof value === 'string');
     for (const chunk of chunks) {
+        lastChunkEndedNewline = chunkEndsWithNewline(chunk);
         writer.enqueue(chunk);
         recorder.output('o', chunk);
     }
@@ -682,7 +694,7 @@ const internalCommandHelp = [
     ':stop = Stop session recording',
     ':autosave = Toggle automatic history saving',
     ':reset = Reset client settings',
-    ':draw = Open AtheriZ Draw',
+    ':draw = Open AtheriZ Draw with the last saved grant',
 ];
 
 function saveTerminalHistory(): void {

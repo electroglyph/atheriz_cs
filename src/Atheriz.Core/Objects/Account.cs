@@ -16,6 +16,9 @@ public class Account : GameObject
     private List<int> _characters = [];
     private string _banReason = "";
     private bool _loggedIn;
+    // Normalized map-editor settings JSON from the last save-to-server ("" =
+    // never saved). Written raw under the "mapEditorSettings" extra key.
+    private string _mapEditorSettingsJson = "";
 
     public Account()
     {
@@ -77,6 +80,8 @@ public class Account : GameObject
         "BanReason" or "ban_reason" or "_ban_reason" => true,
         "PasswordHash" or "password_hash" or "_password_hash" => true,
         "LoggedIn" or "logged_in" or "_logged_in" => true,
+        "MapEditorSettings" or "mapEditorSettings" or "map_editor_settings"
+            or "_mapEditorSettingsJson" => true,
         _ => base.IsKnownProperty(name),
     };
 
@@ -93,7 +98,9 @@ public class Account : GameObject
                 return true;
             case "Characters" or "characters" or "_characters"
                 or "PasswordHash" or "password_hash" or "_password_hash"
-                or "LoggedIn" or "logged_in" or "_logged_in":
+                or "LoggedIn" or "logged_in" or "_logged_in"
+                or "MapEditorSettings" or "mapEditorSettings" or "map_editor_settings"
+                or "_mapEditorSettingsJson":
                 error = $"'{name}' is a read-only attribute.";
                 return false;
             default:
@@ -103,6 +110,25 @@ public class Account : GameObject
     // LoggedIn is transient session state, not persisted save data — intentionally not marked modified.
     public bool LoggedIn { get => Read(() => _loggedIn); private set => Write(() => _loggedIn = value); }
 
+    /// <summary>
+    /// Normalized map-editor settings JSON from the last save-to-server
+    /// ("" when never saved). Read-only: written via
+    /// <see cref="SetMapEditorSettings"/> by the map_edit handler.
+    /// </summary>
+    public string MapEditorSettingsJson => Read(() => _mapEditorSettingsJson);
+
+    /// <summary>
+    /// Stores validated, normalized editor settings and marks the account
+    /// dirty so the next checkpoint persists them. The JSON must already be
+    /// validated (see <c>MapEditorSettings.TryParse</c>); only emptiness is
+    /// guarded here.
+    /// </summary>
+    public void SetMapEditorSettings(string normalizedJson)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(normalizedJson);
+        Write(() => { _mapEditorSettingsJson = normalizedJson; IsModified = true; });
+    }
+
     public override IEnumerable<(string name, object? value, bool isProperty)> GetExamMembers()
     {
         foreach (var m in base.GetExamMembers()) yield return m;
@@ -110,6 +136,7 @@ public class Account : GameObject
         yield return ("Characters", Safe(() => (object?)Characters), true);
         yield return ("BanReason", Safe(() => (object?)BanReason), true);
         yield return ("LoggedIn", Safe(() => (object?)LoggedIn), true);
+        yield return ("MapEditorSettings", Safe(() => string.IsNullOrEmpty(MapEditorSettingsJson) ? (object?)"(none)" : MapEditorSettingsJson), true);
     }
 
     public static string HashPassword(string password, string? saltOverride = null)
@@ -292,6 +319,18 @@ public class Account : GameObject
         WriteExtra(extra, "characters", _characters);
         WriteExtra(extra, "banReason", _banReason);
         WriteExtra(extra, "loggedIn", false);
+        if (!string.IsNullOrEmpty(_mapEditorSettingsJson))
+        {
+            // Raw object form, not a quoted string: only well-formed JSON is
+            // ever stored (the map_edit handler validates first), but a save
+            // must never throw, so corruption skips loudly instead.
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(_mapEditorSettingsJson);
+                extra["mapEditorSettings"] = doc.RootElement.Clone();
+            }
+            catch (Exception ex) { AtherizLogger.LogError($"Account {Id} has corrupt mapEditorSettings; skipping persist: {ex.Message}"); }
+        }
     }
 
     public override void LoadExtra(IReadOnlyDictionary<string, System.Text.Json.JsonElement> extra)
@@ -313,6 +352,9 @@ public class Account : GameObject
         }
         else if (!extra.ContainsKey("characters")) _characters = [];
         if (extra.TryGetValue("banReason", out var br)) _banReason = ReadExtraString(br);
+        if (extra.TryGetValue("mapEditorSettings", out var ms) && ms.ValueKind == System.Text.Json.JsonValueKind.Object)
+            _mapEditorSettingsJson = ms.GetRawText();
+        else if (!extra.ContainsKey("mapEditorSettings")) _mapEditorSettingsJson = "";
         _loggedIn = extra.TryGetValue("loggedIn", out var li) && li.ValueKind == System.Text.Json.JsonValueKind.True;
     }
 

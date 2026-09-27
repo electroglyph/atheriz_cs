@@ -47,7 +47,7 @@ export class SidebarResizer {
         if (!this.isResizing) return;
         // Inverted: dragging left makes right panel wider
         const dx = this.inverted ? this.startX - e.clientX : e.clientX - this.startX;
-        const newWidth = Math.max(150, Math.min(800, this.startWidth + dx));
+        const newWidth = Math.max(150, Math.min(1800, this.startWidth + dx));
         this.sidebar.style.width = `${newWidth}px`;
     }
 

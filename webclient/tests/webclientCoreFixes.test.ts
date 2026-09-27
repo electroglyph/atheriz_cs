@@ -167,8 +167,8 @@ describe('launchDraw stores the grant before the throttle gate', () => {
 
   it('a throttled second launch still stores the newest grant and opens once', () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
-    expect(launchDraw('k1', { room: 1 })).toBe(true);
-    expect(launchDraw('k2', { room: 2 })).toBe(false);
+    expect(launchDraw('k1', { room: 1 })).toBe('opened');
+    expect(launchDraw('k2', { room: 2 })).toBe('throttled');
     expect(openSpy).toHaveBeenCalledTimes(1);
     expect(readDrawGrant()).toEqual({ key: 'k2', payload: { room: 2 } });
   });
@@ -242,5 +242,22 @@ describe('webclient/main.ts regression wiring (source pins)', () => {
     const drawMain = fs.readFileSync(path.resolve(import.meta.dirname, '../src/main.ts'), 'utf-8');
     expect(drawMain).toContain('pendingMoveCheckpoints');
     expect(drawMain).toContain('undoTo(checkpoint)');
+  });
+
+  it('blocked draw launches blame the popup blocker, never the throttle', () => {
+    expect(main).toContain("if (result === 'blocked')");
+    expect(main).toContain('Popup blocked. Click the "Open AtheriZ Draw in a new tab" link');
+    // :draw only reopens the last stored grant, so it must never be sold as
+    // the retry for a failed mapedit launch; the retry is a fresh mapedit.
+    expect(main).toContain('run mapedit again for a fresh editor');
+    const blockedMsg = main.slice(main.indexOf("if (result === 'blocked')"), main.indexOf("if (result === 'blocked')") + 900);
+    expect(blockedMsg).not.toContain(':draw');
+  });
+
+  it('draw-tab restore reads the editorSettings key the server embeds', () => {
+    const drawMain = fs.readFileSync(path.resolve(import.meta.dirname, '../src/main.ts'), 'utf-8');
+    const mapeditSrc = fs.readFileSync(path.resolve(import.meta.dirname, '../src/mapedit.ts'), 'utf-8');
+    expect(mapeditSrc).toContain('editorSettings?: EditorSettings');
+    expect(drawMain).toContain('mapPayload?.editorSettings');
   });
 });

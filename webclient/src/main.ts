@@ -41,6 +41,8 @@ import { PreviewWindow } from './ui/PreviewWindow';
 import { GradientPicker } from './ui/GradientPicker';
 import { readDrawGrant, clearDrawGrant } from './webclient/launch';
 import { loadMapPayload, MapEditSession, MapEditPayload, MapEditOrigin, MapLegendEntry, logRoomData } from './mapedit';
+import { buildEditorSettings } from './editorSettings';
+import { applyEditorSettings } from './applyEditorSettings';
 import { toCssFontFamily } from './utils/cssFont';
 import { LegendEditorDialog } from './ui/LegendEditorDialog';
 
@@ -206,15 +208,15 @@ async function initApp() {
         charPalette.addCustomChars(chars);
     });
 
-    new ColorPicker('fg-picker-container', true, appState, () => {
+    const fgPicker = new ColorPicker('fg-picker-container', true, appState, () => {
         if (appState.activeToolId === 'erase') appState.activeToolId = 'brush';
     });
 
-    new ColorPicker('bg-picker-container', false, appState, () => {
+    const bgPicker = new ColorPicker('bg-picker-container', false, appState, () => {
         if (appState.activeToolId === 'erase') appState.activeToolId = 'brush';
     });
 
-    new GradientPicker('gradient-picker-container', appState);
+    const gradientPicker = new GradientPicker('gradient-picker-container', appState);
 
     const layerManager = new LayerManager('layer-manager-container', canvasState, undoStack);
 
@@ -296,6 +298,22 @@ async function initApp() {
         }
     });
 
+    // Shared font-change path: the toolbar select and settings-restore
+    // both funnel through here so metrics, CSS var, and palette repaint.
+    const handleFontChange = async (fontFamily: string) => {
+        if (document.fonts) {
+            const fam = toCssFontFamily(fontFamily);
+            try { await document.fonts.load(`${currentFontSize}px ${fam}`, ' '); } catch {}
+            try { await document.fonts.load(`${currentFontSize}px ${fam}`, 'M'); } catch {}
+        }
+        metrics = measureCellMetrics(fontFamily, currentFontSize);
+        controller.updateMetrics(metrics);
+        renderer.updateMetrics(metrics);
+
+        document.documentElement.style.setProperty('--main-font', toCssFontFamily(fontFamily));
+        charPalette.reRender();
+    };
+
     const toolbarInst = new Toolbar(appState, undoStack, () => {
         AnsiExporter.download(canvasState, 'art.ans');
     }, (newState: CanvasState) => {
@@ -306,17 +324,7 @@ async function initApp() {
         // Undo/redo swaps the canvas object: keep the session bound to it.
         mapEditSession?.rebindCanvas(canvasState);
     }, async (fontFamily: string) => {
-        if (document.fonts) {
-            const fam = toCssFontFamily(fontFamily);
-            try { await document.fonts.load(`${currentFontSize}px ${fam}`, ''); } catch {}
-            try { await document.fonts.load(`${currentFontSize}px ${fam}`, 'M'); } catch {}
-        }
-        metrics = measureCellMetrics(fontFamily, currentFontSize);
-        controller.updateMetrics(metrics);
-        renderer.updateMetrics(metrics);
-        
-        document.documentElement.style.setProperty('--main-font', toCssFontFamily(fontFamily));
-        charPalette.reRender();
+        await handleFontChange(fontFamily);
     }, () => {
         textToolDialog.open();
     });
@@ -365,6 +373,31 @@ async function initApp() {
         });
     });
     applyRoomColor();
+
+    // Settings saved by an earlier Save-to-server ride the launch_draw
+    // grant: restore them now that every widget exists. Older servers send
+    // no settings, which is a no-op here.
+    if (mapPayload?.editorSettings) {
+        await applyEditorSettings(mapPayload.editorSettings, {
+            appState,
+            fgPicker,
+            bgPicker,
+            gradientPicker,
+            charPalette,
+            toolbar: toolbarInst,
+            setFontSize: (size) => { currentFontSize = size; },
+            applyFont: (family) => handleFontChange(family),
+            applyRoom: (color, visible) => {
+                roomColor = [...color] as Color;
+                roomVisible = visible;
+                if (btnRoomToggle) {
+                    btnRoomToggle.textContent = roomVisible ? 'Hide Room Color' : 'Show Room Color';
+                }
+                applyRoomColor();
+                renderer.setRoomVisible(roomVisible);
+            },
+        });
+    }
 
     new NewCanvasDialog((w, h) => {
         // New means a cleared map; the reset helper owns the full sequence
@@ -442,7 +475,15 @@ async function initApp() {
             mapErrorDialog.show(msg);
             return;
         }
-        mapEditSession.saveToServer();
+        mapEditSession.saveToServer(buildEditorSettings({
+            appState,
+            fgSlots: fgPicker.getHistory(),
+            bgSlots: bgPicker.getHistory(),
+            customChars: charPalette.getCustomChars(),
+            fontSize: currentFontSize,
+            roomColor: [...roomColor] as Color,
+            roomVisible,
+        }));
     });
 
     ansiUpload?.addEventListener('change', () => {

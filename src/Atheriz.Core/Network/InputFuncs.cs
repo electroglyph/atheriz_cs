@@ -540,6 +540,19 @@ public class InputFuncs
             connection.SendCommand("map_edit_reject", new List<object?> { $"Invalid map edit cell at index {failIndex}." }, []);
             return;
         }
+        // Optional editor-settings fourth arg (explicit save-to-server only):
+        // validated before consume so a bad payload never burns a seq, and
+        // rejected loudly like bad cells/legend entries. Absent (or JSON
+        // null) means an autosync or a settings-less save — nothing to store.
+        MapEditorSettings? editorSettings = null;
+        if (args.Count >= 4 && args[3] is not null)
+        {
+            if (!MapEditorSettings.TryParse(args[3], out editorSettings, out var settingsError))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?> { $"Invalid map editor settings: {settingsError}" }, []);
+                return;
+            }
+        }
         var result = ConsumeOrReply(connection, key, seq);
         if (result is null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
@@ -629,6 +642,14 @@ public class InputFuncs
                     try { connection.SendCommand("moves_denied", new List<object?> { seq, result.NewKey, failed }, []); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.MapEditHandler: " + logEx.Message, "ConnectionManager"); }
                 }
             }
+        }
+        if (editorSettings is not null)
+        {
+            // The editor socket is unauthenticated, so the settings belong to
+            // the granting (game) session's account, not this connection's.
+            // Only Processed reaches here: retries ack without re-saving, and
+            // a missing account (tests, logged-out grant) ack without storing.
+            result.Chain!.Session?.Account?.SetMapEditorSettings(editorSettings.ToJson());
         }
         connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
     }

@@ -1,5 +1,5 @@
 import { Color, AppState } from '../types';
-import { cssColor, sampleGradient, colorEquals } from '../utils/colors';
+import { cssColor, sampleGradient, colorEquals, isValidColor } from '../utils/colors';
 import { ColorPickerModal } from './ColorPickerModal';
 
 export class GradientPicker {
@@ -25,6 +25,15 @@ export class GradientPicker {
 
     private get stops(): Color[] {
         return this.appState.gradientStops;
+    }
+
+    /** Replace the gradient stops (editor-settings restore); ignored unless
+     * at least two valid colors are given. */
+    public setStops(stops: Color[]) {
+        const valid = stops.filter(isValidColor).map((c) => [...c] as Color);
+        if (valid.length < 2) return;
+        this.appState.gradientStops = valid;
+        this.updateUI();
     }
 
     private render() {

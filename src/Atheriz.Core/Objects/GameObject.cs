@@ -909,6 +909,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     //   // Wrong: mutating the getter result directly never saves:
     //   //   var tags = obj.GetPersisted<List<string>>("tags", []);
     //   //   tags.Add("seen"); // detached copy, IsModified stays false.
+    //   obj.RemovePersisted("hitPoints"); // true when a value was present; dirties only then.
     public bool HasPersisted(string key) => Read(() => _extra.ContainsKey(key));
     public bool TryGetPersisted<T>(string key, [NotNullWhen(true)] out T? value)
     {
@@ -946,6 +947,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         SetPersisted(key, next);
         return next;
     }
+    /// <summary>
+    /// Removes a persisted extra. Returns true when a value was present;
+    /// marks <c>IsModified</c> only then. Type-agnostic (removal carries no
+    /// value), so this shares the <c>TryRemoveExtraJson</c> implementation.
+    /// </summary>
+    public bool RemovePersisted(string key) => TryRemoveExtraJson(key);
 
     // Persistence hooks: subtypes override SaveExtra/LoadExtra instead of the
     // whole DTO path. ToDto/GetSaveOperation stay virtual as the escape hatch

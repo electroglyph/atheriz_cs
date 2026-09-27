@@ -2,6 +2,7 @@ import { WebSocketConnection, WebSocketLike } from './webclient/connection';
 import { ConnectionState, WireMessage } from './webclient/types';
 import { CanvasState } from './state/CanvasState';
 import { Cell, Color } from './types';
+import { EditorSettings } from './editorSettings';
 import { parseAnsiSymbol, stripAnsi, wrapLegendSymbol, DEFAULT_FG, TRANSPARENT } from './utils/ansiParser';
 
 export interface MapEditExit {
@@ -33,6 +34,8 @@ export interface MapEditPayload {
     rooms?: MapRoom[];
     legend?: MapLegendEntry[];
     playerSymbol?: string;
+    /** Saved editor chrome from a previous save; restored on open. */
+    editorSettings?: EditorSettings;
 }
 
 /** One edited cell sent back to the engine:
@@ -146,7 +149,7 @@ function cellAttrs(cell: Cell | null): string[] {
 }
 
 type QueueItem =
-    | { kind: 'edit'; cells: MapEditOp[]; isSave: boolean }
+    | { kind: 'edit'; cells: MapEditOp[]; isSave: boolean; settings?: EditorSettings }
     | { kind: 'validate'; serverMoves: RoomMove[]; clientMoves: RoomMove[]; context: RoomMove[] }
     | { kind: 'legend'; legend: MapLegendEntry[] };
 
@@ -263,19 +266,21 @@ export class MapEditSession {
     }
 
     /** Send all unsnapshotted glyph changes plus every validated room move
-     * to the server in a single batch. The server is only updated here. */
-    public saveToServer(): void {
+     * to the server in a single batch. The server is only updated here.
+     * Editor settings ride along as a fourth map_edit arg when provided,
+     * even when the map itself is unchanged (settings-only save). */
+    public saveToServer(settings?: EditorSettings): void {
         if (this.stopped) return;
         const cells = this.computeDiff();
         const ops: MapEditOp[] = [
             ...cells,
             ...this.pendingMoves.map((m) => ['room', m.fromX, m.fromY, m.toX, m.toY] as MapEditOp),
         ];
-        if (ops.length === 0) {
+        if (ops.length === 0 && settings === undefined) {
             this.listener?.({ type: 'error', message: 'Nothing to save.' });
             return;
         }
-        this.queue.push({ kind: 'edit', cells: ops, isSave: true });
+        this.queue.push({ kind: 'edit', cells: ops, isSave: true, settings });
         this.flush();
     }
 
@@ -397,7 +402,10 @@ export class MapEditSession {
                 };
             })]);
         } else {
-            return this.conn.send('map_edit', [this.key, seq, item.cells]);
+            const args: unknown[] = item.kind === 'edit' && item.settings !== undefined
+                ? [this.key, seq, item.cells, item.settings]
+                : [this.key, seq, item.cells];
+            return this.conn.send('map_edit', args);
         }
     }
 

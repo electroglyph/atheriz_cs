@@ -71,6 +71,22 @@ public sealed class PersistRecommendationsTests
     }
 
     [Fact]
+    public void RemovePersisted_RemovesAndDirtiesOnlyWhenPresent()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var obj = GameObject.Create("rm");
+        ObjectRegistry.AddObject(obj);
+        obj.IsModified = false;
+        Assert.False(obj.RemovePersisted("missing"));
+        Assert.False(obj.IsModified);
+        obj.SetPersisted("hp", 100);
+        obj.IsModified = false;
+        Assert.True(obj.RemovePersisted("hp"));
+        Assert.True(obj.IsModified);
+        Assert.False(obj.HasPersisted("hp"));
+    }
+
+    [Fact]
     public void Facade_Register_RoundTripsSubtype_WithVersionAndMigrate()
     {
         using var env = GlobalTestEnv.Enter();

@@ -532,9 +532,9 @@ canvas {
 }
 
 #right-sidebar {
-  width: 250px;
+  width: 600px;
   min-width: 150px;
-  max-width: 600px;
+  max-width: 1800px;
   background-color: #252526;
   border-left: 1px solid #444;
   display: flex;

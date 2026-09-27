@@ -1,5 +1,26 @@
 export const BUFFER_FINAL_SEQUENCE = '\x1b[0m\x1b[?25h\n';
 
+// Drain trailer without the committing newline: reset + show-cursor only.
+// Server `text` frames already end in \r\n, so appending another newline
+// after such a drain prints a blank line. The full BUFFER_FINAL_SEQUENCE
+// is still needed when the drain's last chunk did not end in a newline
+// (prompt-only and raw `buffer` drains), where it commits the live line.
+export const BUFFER_DRAIN_RESET = '\x1b[0m\x1b[?25h';
+
+export function drainTrailer(lastChunkEndedNewline: boolean): string {
+    return lastChunkEndedNewline ? BUFFER_DRAIN_RESET : BUFFER_FINAL_SEQUENCE;
+}
+
+// Trailing SGR color/reset sequences (formatTextOutput wraps every chunk in
+// RESET...RESET): a chunk "ends in a newline" when the last non-SGR content
+// is \n. A bare endsWith('\n') check is always false here, which made the
+// drain emit the committing newline after every text drain (blank line).
+const TRAILING_NEWLINE_IGNORING_SGR = /\n(\x1b\[[0-9;]*m)*$/;
+
+export function chunkEndsWithNewline(chunk: string): boolean {
+    return TRAILING_NEWLINE_IGNORING_SGR.test(chunk);
+}
+
 // Fallback delay for a stalled terminal write callback (e.g. disposed renderer).
 export const BUFFER_WRITE_FALLBACK_MS = 100;
 

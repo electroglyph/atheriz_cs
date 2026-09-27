@@ -39,7 +39,7 @@ describe('launch draw grant persistence and throttling', () => {
         vi.setSystemTime(1000);
         vi.spyOn(window, 'open').mockReturnValue({} as Window);
         const payload = { area: 'TestArea', z: 0, grid: [] };
-        expect(launchDraw('secret-key', payload)).toBe(true);
+        expect(launchDraw('secret-key', payload)).toBe('opened');
         // grant must still be readable until TTL or reader clears
         expect(readDrawGrant()).toEqual({ key: 'secret-key', payload });
         // reader side clears
@@ -51,19 +51,19 @@ describe('launch draw grant persistence and throttling', () => {
         vi.setSystemTime(2000);
         vi.spyOn(window, 'open').mockReturnValue(null);
         const payload = { area: 'A', z: 0, grid: [] };
-        expect(launchDraw('k', payload)).toBe(false);
+        expect(launchDraw('k', payload)).toBe('blocked');
         expect(readDrawGrant()).toEqual({ key: 'k', payload });
     });
 
     it('throttle returns false (not lying true)', () => {
         vi.setSystemTime(3000);
         const opened = vi.spyOn(window, 'open').mockReturnValue({} as Window);
-        expect(launchDraw()).toBe(true);
+        expect(launchDraw()).toBe('opened');
         vi.setSystemTime(3500);
-        expect(launchDraw()).toBe(false);
+        expect(launchDraw()).toBe('throttled');
         expect(opened).toHaveBeenCalledTimes(1);
         vi.setSystemTime(5000);
-        expect(launchDraw()).toBe(true);
+        expect(launchDraw()).toBe('opened');
         expect(opened).toHaveBeenCalledTimes(2);
     });
 
@@ -73,11 +73,11 @@ describe('launch draw grant persistence and throttling', () => {
         vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Quota', 'QuotaExceededError'); });
         // should not throw, should still open
         expect(() => launchDraw('k', { a: 1 })).not.toThrow();
-        expect(launchDraw('k2', { a: 1 })).toBe(false); // throttled second immediate call => false due to throttle
+        expect(launchDraw('k2', { a: 1 })).toBe('throttled'); // throttled second immediate call due to throttle
         // even without throttle, first call with exception still returns true
         __resetLaunchThrottleForTests();
         vi.setSystemTime(7000);
-        expect(launchDraw('k3', { a: 1 })).toBe(true);
+        expect(launchDraw('k3', { a: 1 })).toBe('opened');
     });
 
     it('expires grant when timestamp missing (corrupt entry)', () => {

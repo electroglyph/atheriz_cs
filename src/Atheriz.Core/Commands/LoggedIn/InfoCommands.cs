@@ -134,6 +134,22 @@ public sealed class DrawCommand : Command
         var legendList = (List<JsonElement>)payload["legend"]!;
         foreach (var e in mi.LegendEntries)
             legendList.Add(JsonSerializer.SerializeToElement(e, LegendWireOptions));
+        // Previously saved editor settings ride the grant so a fresh editor
+        // tab restores colors, slots, palette, font, and tool modes. Stored
+        // JSON was normalized at save time; re-validate before embedding so
+        // a corrupt account value can never poison the client. Corrupt or
+        // absent settings simply open a default editor.
+        string? savedSettings = session?.Account?.MapEditorSettingsJson;
+        if (!string.IsNullOrEmpty(savedSettings))
+        {
+            try
+            {
+                using var settingsDoc = JsonDocument.Parse(savedSettings);
+                if (Atheriz.Core.Network.MapEditorSettings.TryParse(settingsDoc.RootElement, out _, out _))
+                    payload["editorSettings"] = settingsDoc.RootElement.Clone();
+            }
+            catch (JsonException) { }
+        }
 
         try
         {

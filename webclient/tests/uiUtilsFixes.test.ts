@@ -147,9 +147,9 @@ describe('U3 launch storage guards and popup cap', () => {
         launch.__resetLaunchThrottleForTests();
         vi.spyOn(window, 'open').mockReturnValue(null);
         launch.__resetLaunchThrottleForTests();
-        expect(launch.launchDraw()).toBe(false);
+        expect(launch.launchDraw()).toBe('blocked');
         launch.__resetLaunchThrottleForTests();
-        expect(launch.launchDraw()).toBe(false);
+        expect(launch.launchDraw()).toBe('blocked');
         expect(document.querySelectorAll('.popup-fallback').length).toBe(1);
     });
 });
