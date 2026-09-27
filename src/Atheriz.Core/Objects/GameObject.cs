@@ -792,6 +792,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 }
             }
         }
+        // Subtype hook restore runs last: fields above are settled, _extra is
+        // assigned, and the object is still unpublished on the load path.
+        try { o.LoadExtra(dto.Extra ?? new()); } catch (Exception ex) { AtherizLogger.LogError($"LoadExtra failed for object {dto.Id}; extra-backed fields left default.", ex); }
     }
 
     /// <summary>
@@ -893,6 +896,83 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // Raw IsModified access without re-entering lock (caller must hold write lock) — used by GetSaveOps.
     internal bool GetIsModifiedRawNoLock() => _flags.IsModified;
     internal void SetIsModifiedRawNoLock(bool v) => _flags.IsModified = v;
+
+    // Typed persisted-extra API (cookbook): getters take the read lock and never
+    // dirty; only SetPersisted/SetExtraJson/ModifyPersisted mark IsModified.
+    // Detached copies do NOT write back — mutate through ModifyPersisted, which
+    // snapshots under read, runs the update fn outside the locks, and writes
+    // back under write. The JsonElement path below stays for untyped access.
+    // Example:
+    //   obj.SetPersisted("hitPoints", 12);
+    //   int hp = obj.GetPersisted("hitPoints", 0);
+    //   obj.ModifyPersisted<List<string>>("tags", tags => { tags.Add("seen"); return tags; }, seed: []);
+    //   // Wrong: mutating the getter result directly never saves:
+    //   //   var tags = obj.GetPersisted<List<string>>("tags", []);
+    //   //   tags.Add("seen"); // detached copy, IsModified stays false.
+    public bool HasPersisted(string key) => Read(() => _extra.ContainsKey(key));
+    public bool TryGetPersisted<T>(string key, [NotNullWhen(true)] out T? value)
+    {
+        System.Text.Json.JsonElement? hit = Read(() => _extra.TryGetValue(key, out var v) ? v : (System.Text.Json.JsonElement?)null);
+        value = default;
+        if (hit is null) return false;
+        try
+        {
+            var decoded = System.Text.Json.JsonSerializer.Deserialize<T>(hit.Value.GetRawText(), Persistence.JsonOptions.Default);
+            if (decoded is null) return false;
+            value = decoded;
+            return true;
+        }
+        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed GameObject.TryGetPersisted({key}): {ex.Message}", "GameObject"); return false; }
+    }
+    public T? GetPersisted<T>(string key) => TryGetPersisted<T>(key, out var v) ? v : default;
+    public T GetPersisted<T>(string key, T defaultValue) => TryGetPersisted<T>(key, out var v) && v is not null ? v : defaultValue;
+    public void SetPersisted<T>(string key, T value) => SetExtraJson(key, Persistence.JsonOptions.ToElement(value));
+    public T ModifyPersisted<T>(string key, Func<T, T> update, T seed = default!)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        T current;
+        _lock.EnterReadLock();
+        try
+        {
+            current = seed;
+            if (_extra.TryGetValue(key, out var el))
+            {
+                try { current = System.Text.Json.JsonSerializer.Deserialize<T>(el.GetRawText(), Persistence.JsonOptions.Default) ?? seed; }
+                catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed GameObject.ModifyPersisted({key}): {ex.Message}", "GameObject"); }
+            }
+        }
+        finally { _lock.ExitReadLock(); }
+        T next = update(current);
+        SetPersisted(key, next);
+        return next;
+    }
+
+    // Persistence hooks: subtypes override SaveExtra/LoadExtra instead of the
+    // whole DTO path. ToDto/GetSaveOperation stay virtual as the escape hatch
+    // (sealing waits for a major); the hooks are the documented spelling.
+    // SaveExtra runs under the object lock (read or write); LoadExtra runs on
+    // the load path before publication. Channel keeps its own snapshot-first
+    // save (history under _histLock must never nest inside SyncRoot — Msg
+    // delivery takes the opposite order) and is the reference impl for that.
+    public virtual int PersistedTypeVersion => 1;
+    public virtual void OnLoadMigrate(int savedVersion) { }
+    public virtual void SaveExtra(Dictionary<string, System.Text.Json.JsonElement> extra) { }
+    public virtual void LoadExtra(IReadOnlyDictionary<string, System.Text.Json.JsonElement> extra) { }
+    protected static void WriteExtra<T>(Dictionary<string, System.Text.Json.JsonElement> extra, string key, T value)
+        => extra[key] = Persistence.JsonOptions.ToElement(value);
+    protected static bool ReadExtra<T>(IReadOnlyDictionary<string, System.Text.Json.JsonElement> extra, string key, [NotNullWhen(true)] out T? value)
+    {
+        value = default;
+        if (!extra.TryGetValue(key, out var el)) return false;
+        try
+        {
+            var decoded = System.Text.Json.JsonSerializer.Deserialize<T>(el.GetRawText(), Persistence.JsonOptions.Default);
+            if (decoded is null) return false;
+            value = decoded;
+            return true;
+        }
+        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed GameObject.ReadExtra({key}): {ex.Message}", "GameObject"); return false; }
+    }
 
     // Typed extra helpers for GrottoObject (replaces reflection on _extra)
     public bool TryGetExtraJson(string key, out System.Text.Json.JsonElement value)

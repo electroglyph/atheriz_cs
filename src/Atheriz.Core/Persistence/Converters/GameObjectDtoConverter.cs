@@ -15,6 +15,15 @@ internal static class GameObjectDtoConverter
     private static readonly Lock _subtypeLock = new();
     private static readonly Dictionary<string, Func<GameObject>> _subtypeFactories = new(StringComparer.Ordinal);
     private static readonly Dictionary<Type, string> _subtypeNames = new();
+    // Types that intentionally never persist (opt-out via PersistedTypes):
+    // still downgrade to their base kind, but without the loud log.
+    private static readonly HashSet<Type> _transientTypes = new();
+
+    internal static void MarkTransient(Type type)
+    {
+        ArgumentNullException.ThrowIfNull(type);
+        lock (_subtypeLock) { _transientTypes.Add(type); }
+    }
 
     internal static void RegisterSubtype(string fullName, Type type, Func<GameObject> factory)
     {
@@ -24,15 +33,23 @@ internal static class GameObjectDtoConverter
         lock (_subtypeLock)
         {
             _subtypeFactories[fullName] = factory;
-            // Prune superseded Type keys for this name: holding a Type roots
-            // its AssemblyLoadContext, so without this every re-registration
-            // pins the previous plugin generation forever (the old factory
-            // delegate is released by the overwrite above, the old Type key
-            // never was).
-            foreach (var k in _subtypeNames.Where(kv => kv.Value == fullName && kv.Key != type).Select(kv => kv.Key).ToList())
+            // Duplicate keys are loud: the same key for a different Type is a
+            // game wiring bug (or a hot-reload generation swap) and must show
+            // in the log. Same-Type re-registration stays silent (idempotent
+            // startup). The prune below still releases the old Type key so a
+            // re-registration never pins the previous plugin generation.
+            var superseded = _subtypeNames.Where(kv => kv.Value == fullName && kv.Key != type).Select(kv => kv.Key).ToList();
+            if (superseded.Count > 0)
+                AtherizLogger.LogError($"Persisted subtype key '{fullName}' re-registered from {string.Join(",", superseded.Select(t => t.FullName))} to {type.FullName}; old mapping replaced.");
+            foreach (var k in superseded)
                 _subtypeNames.Remove(k);
             _subtypeNames[type] = fullName;
         }
+    }
+
+    internal static Dictionary<string, string> SnapshotSubtypeNames()
+    {
+        lock (_subtypeLock) { return _subtypeNames.ToDictionary(kv => kv.Value, kv => kv.Key.FullName ?? kv.Key.Name); }
     }
 
     internal static bool TryCreateSubtype(string fullName, out GameObject? instance)
@@ -40,16 +57,38 @@ internal static class GameObjectDtoConverter
         // Snapshot the factory under the lock, invoke it outside: factories are
         // game-registered callbacks and must never run while the registry lock
         // is held (a factory creating another subtype would re-enter).
+        // Exact match first; then an assembly-qualified fallback (old rows
+        // stored "FullName, Assembly"): strip from the first comma and retry
+        // the registry. Anything else is a corrupt row, not an old save.
         Func<GameObject>? factory;
         lock (_subtypeLock) { _subtypeFactories.TryGetValue(fullName, out factory); }
+        if (factory is null)
+        {
+            string stripped = StripAssemblySuffix(fullName);
+            if (!string.Equals(stripped, fullName, StringComparison.Ordinal))
+                lock (_subtypeLock) { _subtypeFactories.TryGetValue(stripped, out factory); }
+        }
         if (factory is not null) { instance = factory(); return true; }
         instance = null;
         return false;
     }
 
+    internal static string StripAssemblySuffix(string key)
+    {
+        int comma = key.IndexOf(',');
+        return comma < 0 ? key : key.Substring(0, comma).Trim();
+    }
+
     private static string? RegisteredNameFor(Type t)
     {
         lock (_subtypeLock) { return _subtypeNames.TryGetValue(t, out var n) ? n : null; }
+    }
+
+    // Key lookup for the node save path: node doubles registered in the shared
+    // registry (instead of the node registry) round-trip under their key.
+    internal static bool TryGetRegisteredName(Type t, out string? name)
+    {
+        lock (_subtypeLock) { return _subtypeNames.TryGetValue(t, out name); }
     }
 
     public static GameObjectDto BuildDto(GameObject obj)
@@ -127,12 +166,40 @@ internal static class GameObjectDtoConverter
                 WriteSubtypeMarker(obj, dto, "__object_type", "object", type);
         }
 
+        bool hadObjectMarker = dto.Extra.TryGetValue(markerObjectType, out var savedObjectMarker);
+        bool hadObjectVersion = dto.Extra.TryGetValue(markerObjectType + "_version", out var savedObjectVersion);
+        bool hadScriptMarker = dto.Extra.TryGetValue(markerScriptType, out var savedScriptMarker);
+        bool hadScriptVersion = dto.Extra.TryGetValue(markerScriptType + "_version", out var savedScriptVersion);
+        obj.SaveExtra(dto.Extra);
+        // SaveExtra must not clobber the subtype markers above: a game hook
+        // writing "__object_type" would silently rekey the row. Restore the
+        // markers if they were removed or changed and say so loudly.
+        RestoreMarker(dto, markerObjectType, hadObjectMarker, savedObjectMarker);
+        RestoreMarker(dto, markerObjectType + "_version", hadObjectVersion, savedObjectVersion);
+        RestoreMarker(dto, markerScriptType, hadScriptMarker, savedScriptMarker);
+        RestoreMarker(dto, markerScriptType + "_version", hadScriptVersion, savedScriptVersion);
         return dto;
+    }
+
+    private const string markerObjectType = "__object_type";
+    private const string markerScriptType = "__script_type";
+
+    private static void RestoreMarker(GameObjectDto dto, string markerKey, bool hadMarker, System.Text.Json.JsonElement markerValue)
+    {
+        // Only markers written by WriteSubtypeMarker are guarded: unregistered
+        // subtypes have no marker and SaveExtra stays free to use its own keys.
+        if (!hadMarker) return;
+        if (dto.Extra.TryGetValue(markerKey, out var current) && current.GetRawText() == markerValue.GetRawText())
+            return;
+        dto.Extra[markerKey] = markerValue;
+        AtherizLogger.LogError($"SaveExtra overwrote {markerKey} for object {dto.Id}; marker restored.");
     }
 
     // Shared writer for the __script_type / __object_type persistence markers: the
     // RegisteredNameFor + SerializeToElement + error-log shape is identical for both.
     // Both marker NAMES are preserved — they are the on-disk persistence format.
+    // The per-type version rides a sibling "<marker>_version" key (default 1 for
+    // old rows); FromDto hands it to the instance OnLoadMigrate hook.
     private static void WriteSubtypeMarker(GameObject obj, GameObjectDto dto, string markerKey, string kindWord, string savedAs)
     {
         var t = obj.GetType();
@@ -140,10 +207,14 @@ internal static class GameObjectDtoConverter
         if (registered is not null)
         {
             dto.Extra[markerKey] = JsonOptions.ToElement(registered);
+            dto.Extra[markerKey + "_version"] = JsonOptions.ToElement(obj.PersistedTypeVersion);
         }
         else
         {
-            AtherizLogger.LogError($"Unregistered {kindWord} subtype {t.FullName} (id {obj.Id}) saved as base {savedAs}; register it via GameObject.RegisterPersistedSubtype to preserve the subtype.");
+            bool transient;
+            lock (_subtypeLock) { transient = _transientTypes.Contains(t); }
+            if (!transient)
+                AtherizLogger.LogError($"Unregistered {kindWord} subtype {t.FullName} (id {obj.Id}) saved as base {savedAs}; register it via GameObject.RegisterPersistedSubtype to preserve the subtype.");
         }
     }
 
@@ -195,9 +266,12 @@ internal static class GameObjectDtoConverter
 
     private static GameObject FromDtoCore(GameObjectDto dto, JsonElement savedObjectType, bool hasObjectType, JsonElement savedScriptType, bool hasScriptType)
     {
-        // Explicit subtype registry only (F004): a registered full name restores the subtype,
-        // anything else (including old AssemblyQualifiedName markers) loads as its base kind
-        // with a loud log — save data is never allowed to pick a type to instantiate.
+        // Explicit subtype registry only (F004): a registered key restores the subtype,
+        // anything else loads as its base kind with a loud log — save data is
+        // never allowed to pick a type to instantiate.
+        // The sibling "<marker>_version" key (absent = 1, old rows) is handed to
+        // the fresh instance OnLoadMigrate hook; base-kind fallback loads get no
+        // hook (there is no subtype instance to migrate).
         if (hasObjectType)
         {
             string? typeName = savedObjectType.ValueKind == JsonValueKind.String ? savedObjectType.GetString() : null;
@@ -217,10 +291,12 @@ internal static class GameObjectDtoConverter
                         GameObject.ApplyDtoFields(inst, dto, isNodeOverride: true);
                         subNode.Coord = subCoord;
                         inst.IsNode = true;
+                        inst.OnLoadMigrate(ReadMarkerVersion(dto.Extra, "__object_type_version"));
                         return inst;
                     }
                     inst.SetIdRaw(dto.Id);
                     GameObject.ApplyDtoFields(inst, dto, null);
+                    inst.OnLoadMigrate(ReadMarkerVersion(dto.Extra, "__object_type_version"));
                     return inst;
                 }
                 AtherizLogger.LogError($"Unknown __object_type '{typeName}' for object {dto.Id}; loading as base {dto.Type}.");
@@ -236,6 +312,15 @@ internal static class GameObjectDtoConverter
             Atheriz.Core.Persistence.Dto.EntityKind.Node => LoadNode(dto),
             _ => LoadPlain(dto!),
         };
+    }
+
+    // Sibling "<marker>_version" key for OnLoadMigrate: absent or
+    // non-numeric means version 1.
+    private static int ReadMarkerVersion(Dictionary<string, JsonElement> extra, string versionKey)
+    {
+        if (extra.TryGetValue(versionKey, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var v) && v > 0)
+            return v;
+        return 1;
     }
 
     // Script branch: preserve IsScript and subtype for hook fidelity (faithful to dill subclass preservation)
@@ -254,6 +339,7 @@ internal static class GameObjectDtoConverter
                     scoped.SetIdRaw(dto.Id);
                     GameObject.ApplyDtoFields(scoped, dto, null);
                     scoped.IsScript = true;
+                    scoped.OnLoadMigrate(ReadMarkerVersion(dto.Extra, "__script_type_version"));
                     return scoped;
                 }
                 AtherizLogger.LogError($"Unknown __script_type '{typeName}' for object {dto.Id}; loading as base script.");
@@ -303,15 +389,10 @@ internal static class GameObjectDtoConverter
         return o;
     }
 
-    /// <summary>Coord for node instantiation: Location first, then Extra "Coord", then limbo origin.</summary>
+    /// <summary>Coord for node instantiation: Location, else limbo origin.</summary>
     internal static Coord ExtractCoord(GameObjectDto dto)
     {
         if (dto.Location is LocationRef.CoordLocation cl) return cl.Coord;
-        if (dto.Extra is not null && dto.Extra.TryGetValue("Coord", out var ce))
-        {
-            try { return ce.Deserialize<Coord>(JsonOptions.Default)!; }
-            catch (Exception ex) { AtherizLogger.LogError($"Bad Extra Coord for object {dto.Id}; using limbo origin.", ex); }
-        }
         return new Coord("limbo", 0, 0, 0);
     }
 
@@ -379,19 +460,14 @@ internal static class GameObjectDtoConverter
     }
 
     // History entries persist as [timestamp, sender, message] triples mirroring
-    // the Python (timestamp, sender, message) tuples. Pre-triple saves stored
-    // plain strings; those restore as sender-less entries (timestamp 0).
+    // the Python (timestamp, sender, message) tuples.
     private static List<ChannelHistoryEntry> ParseChannelHistory(JsonElement he)
     {
         List<ChannelHistoryEntry> entries = [];
         if (he.ValueKind != JsonValueKind.Array) return entries;
         foreach (var el in he.EnumerateArray())
         {
-            if (el.ValueKind == JsonValueKind.String)
-            {
-                entries.Add(new ChannelHistoryEntry(0, "", el.GetString() ?? ""));
-            }
-            else if (el.ValueKind == JsonValueKind.Array)
+            if (el.ValueKind == JsonValueKind.Array)
             {
                 var parts = el.EnumerateArray().ToList();
                 long ts = parts.Count > 0 && parts[0].ValueKind == JsonValueKind.Number && parts[0].TryGetInt64(out var t) ? t : 0;

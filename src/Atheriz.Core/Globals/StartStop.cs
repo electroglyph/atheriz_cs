@@ -57,6 +57,9 @@ public static class StartStop
             try
             {
                 Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings);
+                // Game assemblies register their own persisted subtypes on load;
+                // log the full set once they are in.
+                try { Atheriz.Core.Persistence.PersistedTypes.LogRegisteredTypes(); } catch (Exception ex) { AtherizLogger.LogError($"DoStartup subtype log failed:\n{ex}"); }
             }
             catch (Exception ex) { AtherizLogger.LogError($"DoStartup game load failed:\n{ex}"); }
             try
@@ -465,80 +468,17 @@ public static class StartStop
     // Faithful: uses ShutdownStep per save, mirroring Python _shutdown_step
     private static void SaveWorld(AtherizSettings settings)
     {
-        // Crash-consistency journal: see AutosaveTick.
-        string savePath = Persistence.AtherizDbContextFactory.ResolveSavePath(settings);
-        Persistence.CheckpointJournal.MarkDirty(savePath);
-        bool ok = true;
-        // One transaction for all three groups. WithGateAndTransaction joins an
-        // ambient transaction instead of opening its own, so opening one here
-        // makes the checkpoint atomic: a crash (or a failing group) rolls back
-        // objects+map+node together instead of tearing between groups. The gate
-        // is held for the whole checkpoint because the inner saves skip their
-        // own gate take once the ambient transaction exists — without this a
-        // concurrent tick could interleave mid-checkpoint.
-        // Bounded take: on timeout the checkpoint still runs (old shape, journal
-        // still detects) rather than skipping the shutdown save entirely.
-        bool atomic = DbWriteGate.TryEnter(TimeSpan.FromSeconds(30));
-        if (!atomic)
-            AtherizLogger.LogWarning("checkpoint gate busy; saving without atomic transaction (journal still detects).");
-        try
+        // One atomic checkpoint for all sections including time (see
+        // CheckpointWriter): shutdown saves what autosave saves, so a
+        // restart never loses the clock while keeping the map.
+        ShutdownStep("save_world", () =>
         {
-            using var db = new AtherizDbContext(savePath);
-            db.Database.EnsureCreated();
-            if (atomic)
-            {
-                using var tx = db.Database.BeginTransaction();
-                RunCheckpointSteps(db, ref ok);
-                if (ok) tx.Commit();
-                // !ok: dispose uncommitted = rollback; the journal stays dirty.
-            }
-            else RunCheckpointSteps(db, ref ok);
-        }
-        catch (Exception ex) { ok = false; AtherizLogger.LogError($"checkpoint context failed:\n{ex}"); }
-        finally { if (atomic) DbWriteGate.Exit(); }
-        if (ok) Persistence.CheckpointJournal.MarkClean(savePath);
-    }
-
-    // The three save groups shared by the atomic and fallback shapes above.
-    // A step retry reuses the SAME context: a separate context's writes would
-    // hit SQLITE_BUSY against the open outer transaction (and break the very
-    // atomicity the checkpoint exists for). The tracker is cleared first — a
-    // failed SaveChanges may have left it poisoned (mirrors
-    // WithGateAndTransaction's own retry hygiene); the save re-fetches
-    // everything via Find. The primary path still commits once.
-    private static void RunCheckpointSteps(AtherizDbContext db, ref bool ok)
-    {
-        bool localOk = true;
-        ShutdownStep("save_objects", () =>
-            {
-                try { ObjectRegistry.SaveObjects(db); }
-                catch (Exception ex) { localOk = false; AtherizLogger.LogError($"save_objects failed:\n{ex}"); }
-            });
-        // Twin retry for the map/node saves: fetch the handler, save, and on
-        // failure re-fetch + clear the tracker + save once more (same
-        // context, per the method comment above). save_objects is NOT
-        // wrapped: ObjectRegistry.SaveObjects retries internally, so an outer
-        // retry would only double-write — deliberate asymmetry, not omission.
-        void ShutdownSaveStep<THandler>(string name, Func<THandler> getHandler, Action<AtherizDbContext, THandler> save)
-        {
-            ShutdownStep(name, () =>
-            {
-                try { save(db, getHandler()); }
-                catch
-                {
-                    try
-                    {
-                        var h = getHandler();
-                        db.ChangeTracker.Clear();
-                        save(db, h);
-                    }
-                    catch { localOk = false; }
-                }
-            });
-        }
-        ShutdownSaveStep("map_save", () => GlobalServices.GetMapHandler(), (ctx, mh) => mh.Save(ctx));
-        ShutdownSaveStep("node_save", () => GlobalServices.GetNodeHandler(), (ctx, nh) => nh.Save(ctx));
-        if (!localOk) ok = false;
+            var failures = Persistence.CheckpointWriter.WriteCheckpoint(
+                settings, "shutdown",
+                includeTime: settings.TimeSystemEnabled);
+            foreach (var f in failures)
+                AtherizLogger.LogError($"save_world: {f.Name} failed: {f.Message}");
+        });
     }
 
     // Helpers to avoid creating singletons unnecessarily during shutdown

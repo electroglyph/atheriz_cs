@@ -232,13 +232,19 @@ public class ObjectRegressionTests
         finally { Reset(); }
     }
 
-    // Account.ToDto must snapshot fields under SyncRoot.
+    // Account persistence snapshots fields under SyncRoot via the callers:
+    // ToDto holds the read lock across BuildDto/SaveExtra, and the save core
+    // (BuildSaveJson) holds the write lock — so SaveExtra itself takes no
+    // lock and never relies on lock recursion.
     [Fact]
     public void AccountToDto_TakesLock()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Account.cs");
-        var region = SourceScan.Region(src, "public override GameObjectDto ToDto()");
-        Assert.True(region.Contains("EnterReadLock") || region.Contains("ReadScope") || region.Contains("ReadChars()"));
+        var gameObject = SourceScan.Read("src", "Atheriz.Core", "Objects", "GameObject.cs");
+        var toDto = SourceScan.Region(gameObject, "public virtual GameObjectDto ToDto()");
+        Assert.Contains("Read(", toDto);
+        var converter = SourceScan.Read("src", "Atheriz.Core", "Persistence", "Converters", "GameObjectDtoConverter.cs");
+        var saveCore = SourceScan.Region(converter, "public static string BuildSaveJson(");
+        Assert.Contains("EnterWriteLock", saveCore);
     }
 
     // The Python original clears the flag on failure (base_account.py:198-203,

@@ -92,16 +92,16 @@ public class ScreenReaderShutdownExitTests
         finally { mgr.Atp.Stop(wait: false); }
     }
 
-    // Externally-produced camelCase coord JSON parses under the shared
-    // persistence options instead of falling back to limbo.
+    // Coord resolution reads Location only: an Extra Coord element
+    // (even camelCase) is ignored instead of parsed.
     [Fact]
     public void ExtractCoord_CamelCase_Parses()
     {
-        var dto = new GameObjectDto { Id = 1 };
+        var dto = new GameObjectDto { Id = 1, Location = LocationRef.FromCoord(new Coord("locarea", 1, 2, 3)) };
         using var doc = JsonDocument.Parse("{\"area\":\"coordarea\",\"x\":1,\"y\":2,\"z\":3}");
         dto.Extra["Coord"] = doc.RootElement.Clone();
         var coord = GameObjectDtoConverter.ExtractCoord(dto);
-        Assert.Equal("coordarea", coord.Area);
+        Assert.Equal("locarea", coord.Area);
         Assert.Equal((1, 2, 3), (coord.X, coord.Y, coord.Z));
     }
 }

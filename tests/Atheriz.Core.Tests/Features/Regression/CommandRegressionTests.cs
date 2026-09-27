@@ -47,7 +47,9 @@ public class CommandRegressionTests
     private sealed class BoomMap : MapHandler
     {
         public BoomMap() : base(autoLoad: false) { }
-        public override void Save(bool force = false) => throw new InvalidOperationException("map-boom");
+        // Saves now run through CheckpointWriter on the db overload; the
+        // bool-only throw no longer intersects the save path.
+        public override void Save(Atheriz.Core.Persistence.AtherizDbContext db, bool force = false) => throw new InvalidOperationException("map-boom");
     }
 
     // nested secrets must stay redacted through dict/enumerable recursion.

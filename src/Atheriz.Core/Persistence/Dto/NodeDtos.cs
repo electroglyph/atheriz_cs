@@ -15,6 +15,7 @@ internal sealed record NodeDto
     public int Id { get; set; }
     public HashSet<int> Scripts { get; set; } = new();
     public string? ObjectType { get; set; }
+    public int ObjectTypeVersion { get; set; } = 1;
 
     // Centralized null backfill mirroring GameObjectDtoSerializer.Migrate: an
     // explicit JSON null overwrites the property initializers above, and old
@@ -29,5 +30,6 @@ internal sealed record NodeDto
         Links ??= [];
         Nouns ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         Scripts ??= [];
+        if (ObjectTypeVersion <= 0) ObjectTypeVersion = 1;
     }
 }

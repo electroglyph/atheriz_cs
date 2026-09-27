@@ -193,6 +193,8 @@ public class PortedPersistenceTests
         Assert.NotNull(loaded);
         Assert.NotNull(loaded.TagsSnapshot);
     }
+    // A poison row no longer aborts the checkpoint: it is skipped, logged, and
+    // left dirty for the next checkpoint, while healthy rows still commit.
     [Fact] public void RollbackSavePreservesDirtyFlags()
     {
         using var env=GlobalTestEnv.Enter();
@@ -202,8 +204,9 @@ public class PortedPersistenceTests
         Assert.False(obj1.IsModified); Assert.False(obj2.IsModified);
         obj1.Name="changed-one"; obj2.Name="changed-two"; obj2.ShouldThrow=true;
         Assert.True(obj1.IsModified); Assert.True(obj2.IsModified);
-        Assert.Throws<InvalidOperationException>(()=> ObjectRegistry.SaveObjects(env.TempPath));
-        Assert.True(obj1.IsModified); Assert.True(obj2.IsModified);
+        var ex = Record.Exception(()=> ObjectRegistry.SaveObjects(env.TempPath));
+        Assert.Null(ex);
+        Assert.False(obj1.IsModified); Assert.True(obj2.IsModified);
     }
     [Fact] public void ScriptAttachmentMarksObjectModified()
     {
@@ -543,7 +546,9 @@ public class PortedPersistenceTests
         }
     }
 
-    // Port of test_persistence.py:743 test_dill_dumps_failure_restores_is_modified
+    // Port of test_persistence.py:743 test_dill_dumps_failure_restores_is_modified.
+    // Skewed to skip semantics: the poison row keeps its old committed data
+    // and stays dirty; the healthy row commits its new data.
     [Fact] public void DillDumpsFailureRestoresIsModified()
     {
         using var env=GlobalTestEnv.Enter();
@@ -553,10 +558,12 @@ public class PortedPersistenceTests
         Assert.False(obj1.IsModified); Assert.False(obj2.IsModified);
         obj1.Name="changed-one"; obj2.Name="changed-two"; obj2.ShouldThrow=true;
         Assert.True(obj1.IsModified); Assert.True(obj2.IsModified);
-        Assert.Throws<InvalidOperationException>(()=> ObjectRegistry.SaveObjects(env.TempPath));
-        Assert.True(obj1.IsModified); Assert.True(obj2.IsModified);
+        var ex = Record.Exception(()=> ObjectRegistry.SaveObjects(env.TempPath));
+        Assert.Null(ex);
+        Assert.False(obj1.IsModified); Assert.True(obj2.IsModified);
         Assert.Equal(1, RowCount(obj1.Id, env.TempPath));
-        using(var db=new AtherizDbContext(env.TempPath)){ var row=db.Objects.First(o=>o.Id==obj1.Id); var dto=GameObjectDtoSerializer.FromJson(row.Data); Assert.NotEqual("changed-one", dto.Name); }
+        using(var db=new AtherizDbContext(env.TempPath)){ var row=db.Objects.First(o=>o.Id==obj1.Id); var dto=GameObjectDtoSerializer.FromJson(row.Data); Assert.Equal("changed-one", dto.Name); }
+        using(var db2=new AtherizDbContext(env.TempPath)){ var row2=db2.Objects.First(o=>o.Id==obj2.Id); var dto2=GameObjectDtoSerializer.FromJson(row2.Data); Assert.Equal("two", dto2.Name); }
     }
 
     // Port of test_persistence.py:774 test_guest_temporary_removed_on_disconnect

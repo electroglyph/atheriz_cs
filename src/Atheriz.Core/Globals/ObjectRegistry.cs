@@ -490,6 +490,7 @@ public static class ObjectRegistry
 
         List<(GameObject obj, string json)> pending = [];
         List<GameObject> cleared = [];
+        List<GameObject> skipped = [];
         foreach (var obj in filtered)
         {
             if (!IsStillSaveable(obj, forSave: true, force: force)) continue;
@@ -500,16 +501,16 @@ public static class ObjectRegistry
                 pending.Add((obj, op.Json));
                 cleared.Add(obj);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // row aborts the whole checkpoint — nothing has been written yet,
-                // so restore every cleared flag and rethrow (the transaction
-                // below never runs).
-                Restore(cleared.Append(obj));
-                RestoreTombstones();
-                throw;
+                // Row-level skip-and-report: a poison row is logged and left
+                // dirty for the next checkpoint instead of aborting the whole
+                // checkpoint (healthy rows still commit below).
+                try { AtherizLogger.LogError($"Skipping unserializable object {obj.Id}; still dirty for next checkpoint:\n{ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ObjectRegistry.SaveObjects poison log: " + logEx.Message, "BoundedDictionary"); }
+                skipped.Add(obj);
             }
         }
+        Restore(skipped);
 
         if (pending.Count == 0 && tombstones.Count == 0) return;
 

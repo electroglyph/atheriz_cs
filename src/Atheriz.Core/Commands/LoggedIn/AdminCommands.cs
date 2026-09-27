@@ -72,33 +72,47 @@ public sealed class ReloadCommand : LoggedInCommand
 public sealed class SaveCommand : LoggedInCommand
 {
     public override string Key => "save";
-    public override string Desc => "Save all the things.";
+    public override string Desc => "Save all the things. `save export <file>` dumps the object rows to a JSON file.";
     public override string Category => "Admin";
-    public override bool Hide => true;
+    public override bool Hide => false;
     public override bool UseParser => false;
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
     protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
     {
+        // Uses the live singletons (never throwaway instances) and settings.SavePath (never hardcoded "save").
+        if (TryExport(go, raw)) return;
         go.Msg("Saving...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        // Uses the live singletons (never throwaway instances) and settings.SavePath (never hardcoded "save").
-        // each save is guarded so one failure neither skips the
-        // remaining saves nor leaves "Saving..." with no follow-up.
-        int failures = 0;
-        failures += TrySave(go, "objects", () => ObjectRegistry.SaveObjects());
-        failures += TrySave(go, "map", () => GlobalServices.GetMapHandler().Save());
-        failures += TrySave(go, "nodes", () => GlobalServices.GetNodeHandler().Save(force: true));
-        if (AtherizSettings.Global.TimeSystemEnabled)
-            failures += TrySave(go, "gametime", () => GlobalServices.GetGameTime().Save());
+        // One atomic checkpoint (see CheckpointWriter): each section is
+        // guarded inside, so one failure neither skips the remaining sections
+        // nor leaves "Saving..." with no follow-up.
+        var settings = AtherizSettings.Global;
+        var failures = Persistence.CheckpointWriter.WriteCheckpoint(
+            settings, "save",
+            forceNodes: true,
+            includeTime: settings.TimeSystemEnabled);
+        foreach (var f in failures) go.Msg($"Save {f.Name} failed: {f.Message}");
         sw.Stop();
-        if (failures == 0) go.Msg($"Saved in {sw.Elapsed.TotalMilliseconds} milliseconds.");
-        else go.Msg($"Save completed with {failures} error(s) in {sw.Elapsed.TotalMilliseconds} milliseconds.");
+        if (failures.Count == 0) go.Msg($"Saved in {sw.Elapsed.TotalMilliseconds} milliseconds.");
+        else go.Msg($"Save completed with {failures.Count} error(s) in {sw.Elapsed.TotalMilliseconds} milliseconds.");
     }
 
-    private static int TrySave(IMessageTarget go, string what, Action save)
+    private static bool TryExport(IMessageTarget go, string raw)
     {
-        try { save(); return 0; }
-        catch (Exception ex) { go.Msg($"Save {what} failed: {ex.Message}"); return 1; }
+        var arg = (raw ?? "").Trim();
+        if (arg.StartsWith("export", StringComparison.OrdinalIgnoreCase))
+            arg = arg.Substring("export".Length).Trim();
+        else
+            return false;
+        arg = arg.Trim().Trim('"');
+        if (string.IsNullOrEmpty(arg)) { go.Msg("Usage: save export <file>."); return true; }
+        try
+        {
+            int count = Persistence.WorldExport.ExportToFile(arg);
+            go.Msg($"Exported {count} objects to {arg}.");
+        }
+        catch (Exception ex) { go.Msg($"Export failed: {ex.Message}"); }
+        return true;
     }
 }
 

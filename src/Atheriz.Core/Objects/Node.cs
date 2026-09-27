@@ -111,10 +111,16 @@ public partial class Node : GameObject
         lock (_persistedSubtypeLock)
         {
             _persistedSubtypeFactories[fullName] = factory;
+            // Duplicate keys are loud: same key for a different Type is a
+            // game wiring bug and must show in the log. Same-Type
+            // re-registration stays silent (idempotent startup).
+            var superseded = _persistedSubtypeNames.Where(kv => kv.Value == fullName && kv.Key != type).Select(kv => kv.Key).ToList();
+            if (superseded.Count > 0)
+                AtherizLogger.LogError($"Persisted node subtype key '{fullName}' re-registered from {string.Join(",", superseded.Select(t => t.FullName))} to {type.FullName}; old mapping replaced.");
             // Prune superseded Type keys for this name: holding a Type roots
             // its AssemblyLoadContext, so without this every re-registration
             // pins the previous plugin generation forever.
-            foreach (var k in _persistedSubtypeNames.Where(kv => kv.Value == fullName && kv.Key != type).Select(kv => kv.Key).ToList())
+            foreach (var k in superseded)
                 _persistedSubtypeNames.Remove(k);
             _persistedSubtypeNames[type] = fullName;
         }
@@ -123,29 +129,26 @@ public partial class Node : GameObject
     {
         lock (_persistedSubtypeLock) { return _persistedSubtypeNames.TryGetValue(t, out var n) ? n : null; }
     }
+    internal static Dictionary<string, string> SnapshotSubtypeNames()
+    {
+        lock (_persistedSubtypeLock) { return _persistedSubtypeNames.ToDictionary(kv => kv.Value, kv => kv.Key.FullName ?? kv.Key.Name); }
+    }
     internal static bool TryCreatePersistedSubtype(string objectType, Coord coord, out Node? node)
     {
-        // Legacy saves store AssemblyQualifiedName; registrations use FullName:
-        // strip the ", Assembly..." suffix to normalize (type names never
-        // contain a bare comma).
-        string key = objectType;
-        int comma = key.IndexOf(',');
-        if (comma > 0) key = key.Substring(0, comma).Trim();
+        // Exact match first; then an assembly-qualified fallback (old rows
+        // stored "FullName, Assembly"): strip from the first comma and retry.
         // Snapshot the factory under the lock, invoke it outside: factories are
         // game-registered callbacks and must never run while the registry lock
         // is held (a factory creating another persisted subtype would re-enter).
         Func<Coord, Node>? factory = null;
         lock (_persistedSubtypeLock)
         {
-            if (!_persistedSubtypeFactories.TryGetValue(key, out factory))
+            _persistedSubtypeFactories.TryGetValue(objectType, out factory);
+            if (factory is null)
             {
-                // Short-name fallback (mirrors the old scan matching x.Name).
-                foreach (var kv in _persistedSubtypeFactories)
-                {
-                    var rkey = kv.Key;
-                    var shortName = rkey.Substring(rkey.LastIndexOfAny(['.', '+']) + 1);
-                    if (shortName == key) { factory = kv.Value; break; }
-                }
+                string stripped = Persistence.Converters.GameObjectDtoConverter.StripAssemblySuffix(objectType);
+                if (!string.Equals(stripped, objectType, StringComparison.Ordinal))
+                    _persistedSubtypeFactories.TryGetValue(stripped, out factory);
             }
         }
         if (factory is not null) { node = factory(coord); return true; }
@@ -154,7 +157,7 @@ public partial class Node : GameObject
         // Hydration below overwrites the placeholder coord.
         try
         {
-            if (Persistence.Converters.GameObjectDtoConverter.TryCreateSubtype(key, out var shared) && shared is Node sharedNode)
+            if (Persistence.Converters.GameObjectDtoConverter.TryCreateSubtype(objectType, out var shared) && shared is Node sharedNode)
             {
                 node = sharedNode;
                 return true;

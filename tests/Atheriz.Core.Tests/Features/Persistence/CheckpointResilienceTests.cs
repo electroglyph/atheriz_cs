@@ -83,11 +83,9 @@ public class CheckpointResilienceTests
     [Fact]
     public void SaveObjects_PoisonRow_AbortsCheckpointAndRestoresFlags()
     {
-        // Python parity (objects.py:save_objects two-phase save): a
-        // serialization failure aborts the whole checkpoint — nothing is
-        // written, every cleared flag is restored, and the error propagates.
-        // The earlier skip-and-report read of this path was refuted against
-        // save_objects(); the pin now guards the abort behavior instead.
+        // A poison row is skipped and reported: healthy rows still commit
+        // (clean), the poison row is never written and stays dirty, and the
+        // error does not propagate.
         using var env = GlobalTestEnv.Enter();
         var a = GameObject.Create("healthy-a");
         ObjectRegistry.AddObject(a);
@@ -98,15 +96,17 @@ public class CheckpointResilienceTests
         using (var db = new AtherizDbContext(env.TempPath)) { db.Database.EnsureCreated(); }
         using (var db = new AtherizDbContext(env.TempPath))
         {
-            Assert.Throws<InvalidOperationException>(() => ObjectRegistry.SaveObjects(db, force: true));
+            var ex = Record.Exception(() => ObjectRegistry.SaveObjects(db, force: true));
+            Assert.Null(ex);
         }
-        Assert.True(a.IsModified);
-        Assert.True(b.IsModified);
+        Assert.False(a.IsModified);
+        Assert.False(b.IsModified);
         Assert.True(poison.IsModified);
         using (var probe = new AtherizDbContext(env.TempPath))
         {
-            Assert.Null(probe.Objects.Find(a.Id));
-            Assert.Null(probe.Objects.Find(b.Id));
+            Assert.NotNull(probe.Objects.Find(a.Id));
+            Assert.NotNull(probe.Objects.Find(b.Id));
+            Assert.Null(probe.Objects.Find(poison.Id));
         }
     }
 

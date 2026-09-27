@@ -280,43 +280,26 @@ public class Account : GameObject
         return new SaveOperation(Id, json);
     }
 
-    // DTO extension: store account fields in Extra for persistence simplicity
-    // Fix for test_persistence.py:227 logged_in not persisted — mirrors __getstate__ setting logged_in=False
-    public override GameObjectDto ToDto()
+    // DTO extension: account fields persist in Extra (logged_in is never
+    // persisted true). Hook impl: base ToDto snapshots + SaveExtra, base
+    // ApplyDtoFields restores + LoadExtra — no ToDto/FromDto body here.
+    public override void SaveExtra(Dictionary<string, System.Text.Json.JsonElement> extra)
     {
-        var dto = base.ToDto();
-        dto.Type = "account";
-        // Snapshot fields under SyncRoot : concurrent SetPassword /
-        // AddCharacter must not tear the checkpoint. Recursion-safe: the
-        // checkpoint path holds the write lock and the lock supports it.
-        // Stash account extras via Extra dictionary (JSON) — never persist logged_in true
-        SyncRoot.EnterReadLock();
-        try
-        {
-            dto.Extra["password"] = Persistence.JsonOptions.ToElement(_passwordHash);
-            dto.Extra["characters"] = Persistence.JsonOptions.ToElement(_characters);
-            dto.Extra["banReason"] = Persistence.JsonOptions.ToElement(_banReason);
-        }
-        finally { SyncRoot.ExitReadLock(); }
-        dto.Extra["loggedIn"] = Persistence.JsonOptions.ToElement(false);
-        return dto;
+        // No lock take here: SaveExtra runs under the object lock (read or
+        // write), so direct field reads are already guarded. Taking another
+        // read lock would only work because the lock allows recursion.
+        WriteExtra(extra, "password", _passwordHash);
+        WriteExtra(extra, "characters", _characters);
+        WriteExtra(extra, "banReason", _banReason);
+        WriteExtra(extra, "loggedIn", false);
     }
 
-    public new static Account FromDto(GameObjectDto dto)
+    public override void LoadExtra(IReadOnlyDictionary<string, System.Text.Json.JsonElement> extra)
     {
-        var acc = Account.CreateForLoad(dto.Id);
-        // Use shared GameObject field copy (internal) to avoid recursion and duplication
-        GameObject.ApplyDtoFields(acc, dto, null);
-        // Ensure IsAccount flag true without leaving dirty flag if dto was clean
-        bool wantModified = dto.IsModified;
-        acc.IsAccount = true;
-        acc.IsModified = wantModified;
-        // restore account extras if present (private fields direct, no dirty mark)
-        if (dto.Extra.TryGetValue("password", out var pw))
-        {
-            acc._passwordHash = ReadExtraString(pw);
-        }
-        if (dto.Extra.TryGetValue("characters", out var ch) && ch.ValueKind == System.Text.Json.JsonValueKind.Array)
+        // One shared string reader: strings take their value, anything else
+        // takes the raw text (a corrupt row still loads).
+        if (extra.TryGetValue("password", out var pw)) _passwordHash = ReadExtraString(pw);
+        if (extra.TryGetValue("characters", out var ch) && ch.ValueKind == System.Text.Json.JsonValueKind.Array)
         {
             // One corrupt entry must not abort the whole account load:
             // keep the valid ids, skip the rest.
@@ -326,18 +309,24 @@ public class Account : GameObject
                 if (e.ValueKind == System.Text.Json.JsonValueKind.Number && e.TryGetInt32(out var v))
                     list.Add(v);
             }
-            acc._characters = list;
+            _characters = list;
         }
-        else if (!dto.Extra.ContainsKey("characters")) acc._characters = [];
-        if (dto.Extra.TryGetValue("banReason", out var br))
-        {
-            acc._banReason = ReadExtraString(br);
-        }
-        if (dto.Extra.TryGetValue("loggedIn", out var li) && li.ValueKind == System.Text.Json.JsonValueKind.True) acc._loggedIn = true;
-        else acc._loggedIn = false;
-        acc.IsModified = wantModified;
-        return acc;
+        else if (!extra.ContainsKey("characters")) _characters = [];
+        if (extra.TryGetValue("banReason", out var br)) _banReason = ReadExtraString(br);
+        _loggedIn = extra.TryGetValue("loggedIn", out var li) && li.ValueKind == System.Text.Json.JsonValueKind.True;
     }
 
     private static string ReadExtraString(System.Text.Json.JsonElement el) => el.ValueKind == System.Text.Json.JsonValueKind.String ? el.GetString() ?? "" : el.GetRawText().Trim('"');
+
+    public new static Account FromDto(GameObjectDto dto)
+    {
+        var acc = Account.CreateForLoad(dto.Id);
+        // Shared field copy (runs the LoadExtra hook above); the IsAccount
+        // setter dirties, so restore the dto flag afterwards.
+        GameObject.ApplyDtoFields(acc, dto, null);
+        bool wantModified = dto.IsModified;
+        acc.IsAccount = true;
+        acc.IsModified = wantModified;
+        return acc;
+    }
 }

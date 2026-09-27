@@ -1,7 +1,5 @@
-// Pins for the ExtractCoord direct-deserialize path: an Extra Coord element
-// (camelCase payload from the shared options) parses without a string
-// round-trip, while corrupt or missing Coord data still falls back to the
-// limbo origin with the same error log.
+// ExtractCoord reads Location only: an Extra Coord element is ignored, and
+// a missing/non-coord Location falls back to the limbo origin.
 using System.Text.Json;
 using Atheriz.Core.Persistence;
 using Atheriz.Core.Persistence.Converters;
@@ -13,30 +11,22 @@ namespace Atheriz.Core.Tests.Features.Persistence;
 public sealed class ExtractCoordDirectTests
 {
     [Fact]
-    public void ExtractCoord_ExtraCoordElement_RoundTripsCoord()
+    public void ExtractCoord_Location_WinsOverExtraCoord()
     {
         using var env = GlobalTestEnv.Enter();
         var dto = GameObjectDto.Create(2001, "CoordCarrier");
-        var coord = new Coord("roundtrip", 4, 5, 6);
-        dto.Extra["Coord"] = JsonOptions.ToElement(coord);
-        Assert.Equal(coord, GameObjectDtoConverter.ExtractCoord(dto));
+        dto.Location = LocationRef.FromCoord(new Coord("loc", 1, 2, 3));
+        dto.Extra["Coord"] = JsonOptions.ToElement(new Coord("stale", 9, 9, 9));
+        Assert.Equal(new Coord("loc", 1, 2, 3), GameObjectDtoConverter.ExtractCoord(dto));
     }
 
     [Fact]
-    public void ExtractCoord_CorruptExtraCoord_FallsBackToLimboOrigin()
+    public void ExtractCoord_ExtraCoordAlone_FallsBackToLimboOrigin()
     {
         using var env = GlobalTestEnv.Enter();
-        var dto = GameObjectDto.Create(2002, "CoordCorrupt");
-        dto.Extra["Coord"] = JsonDocument.Parse("\"not-a-coord\"").RootElement.Clone();
-        string log;
-        Coord got;
-        using (var cap = new CaptureAtherizLog())
-        {
-            got = GameObjectDtoConverter.ExtractCoord(dto);
-            log = cap.Read();
-        }
-        Assert.Equal(new Coord("limbo", 0, 0, 0), got);
-        Assert.Contains("Bad Extra Coord for object 2002", log);
+        var dto = GameObjectDto.Create(2002, "CoordStale");
+        dto.Extra["Coord"] = JsonOptions.ToElement(new Coord("stale", 9, 9, 9));
+        Assert.Equal(new Coord("limbo", 0, 0, 0), GameObjectDtoConverter.ExtractCoord(dto));
     }
 
     [Fact]

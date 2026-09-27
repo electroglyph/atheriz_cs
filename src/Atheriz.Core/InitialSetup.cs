@@ -55,9 +55,10 @@ public static class InitialSetup
     /// </summary>
     internal static void RegisterPersistedSubtypes()
     {
-        GameObject.RegisterPersistedSubtype(typeof(AlarmObject).FullName ?? nameof(AlarmObject), typeof(AlarmObject), () => new AlarmObject());
-        GameObject.RegisterPersistedSubtype(typeof(Objects.FollowScript).FullName ?? nameof(Objects.FollowScript), typeof(Objects.FollowScript), () => new Objects.FollowScript());
-        GameObject.RegisterPersistedSubtype(typeof(Commands.LoggedIn.WanderCommand.WandererNpc).FullName ?? nameof(Commands.LoggedIn.WanderCommand.WandererNpc), typeof(Commands.LoggedIn.WanderCommand.WandererNpc), () => new Commands.LoggedIn.WanderCommand.WandererNpc());
+        Persistence.PersistedTypes.Register<AlarmObject>();
+        Persistence.PersistedTypes.Register<Objects.FollowScript>();
+        Persistence.PersistedTypes.Register(() => new Commands.LoggedIn.WanderCommand.WandererNpc());
+        Persistence.PersistedTypes.LogRegisteredTypes();
     }
 
     /// <summary>

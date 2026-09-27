@@ -546,12 +546,21 @@ public partial class NodeHandler
                             wasNode = n.IsModified;
                             HashSet<int> scriptsSnap;
                             string? objType = null;
+                            int objTypeVersion = 1;
                             try
                             {
                                 scriptsSnap = n.ScriptsSet;
                                 var t = n.GetType();
                                 if (t != typeof(Node))
-                                    objType = Node.RegisteredNameFor(t) ?? t.AssemblyQualifiedName ?? t.FullName;
+                                {
+                                    objType = Node.RegisteredNameFor(t);
+                                    if (objType is null)
+                                        Persistence.Converters.GameObjectDtoConverter.TryGetRegisteredName(t, out objType);
+                                    if (objType is null)
+                                        AtherizLogger.LogError($"Unregistered node subtype {t.FullName} (id {n.Id}) saved as base node; register it via Node.RegisterPersistedSubtype to preserve the subtype.");
+                                    else
+                                        objTypeVersion = n.PersistedTypeVersion;
+                                }
                             }
                             catch { scriptsSnap = []; }
                             dto = new NodeDto
@@ -567,6 +576,7 @@ public partial class NodeHandler
                                 Id = n.Id,
                                 Scripts = scriptsSnap,
                                 ObjectType = objType,
+                                ObjectTypeVersion = objTypeVersion,
                             };
                             if (wasNode) { n.IsModified = false; localNodes.Add(n); }
                         }

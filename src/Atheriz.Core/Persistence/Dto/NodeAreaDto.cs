@@ -33,6 +33,7 @@ internal sealed record NodeAreaDto
                     try { ObjectRegistry.RemoveObject(inst); } catch (Exception) { }
                     inst.Coord = nd.Coord;
                     HydrateNode(inst, nd);
+                    inst.OnLoadMigrate(nd.ObjectTypeVersion);
                     node = inst;
                 }
                 else

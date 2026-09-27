@@ -32,9 +32,6 @@ public static class Autosave
 
     private static double IntervalSeconds(AtherizSettings s) => s.AutosaveMinutes * 60.0;
 
-    private static T Resolve<T>(T? arg, ref T? cached, Func<T> getter) where T : class
-        => arg ?? Volatile.Read(ref cached) ?? getter();
-
     /// <summary>
     /// Mirrors <c>autosave_tick</c>: saves objects, map, node, time.
     /// Failures are collected and logged; channel msg stubbed.
@@ -58,78 +55,39 @@ public static class Autosave
     public static void AutosaveTick(AtherizSettings? settings, MapHandler? mapHandler = null, NodeHandler? nodeHandler = null, GameTime? gameTime = null)
     {
         settings ??= Volatile.Read(ref _cachedSettings) ?? AtherizSettings.Global;
-        List<string> failures = [];
 
-        // Crash-consistency journal: dirty before tables, clean
-        // after all commit. A crash between tables leaves dirty behind.
-        // Journal, objects, and all handler saves below honor explicit
-        // settings (each section commits independently to the same DB).
-        // ResolveSavePath is pure (env override else settings path), so one
-        // resolution serves the whole tick; each section still opens its own
-        // commit so one failing domain does not poison the others.
-        string savePath = AtherizDbContextFactory.ResolveSavePath(settings);
-        CheckpointJournal.MarkDirty(savePath);
-
-        // One funnel for the four save sections: open an explicit-settings
-        // context, run the section save, record the name + log on failure.
-        // Message shapes are byte-identical to the old per-section blocks.
-        void SaveSection(string name, Action<AtherizDbContext> save, bool ensureCreated = false)
+        // Snapshot the caches without resolving: handler construction can
+        // throw (no database yet) and must land in the section report, not
+        // escape the tick. The writer resolves nulls inside each guarded
+        // section, matching the old per-section tolerance.
+        MapHandler? cachedMap;
+        NodeHandler? cachedNodes;
+        GameTime? cachedTime;
+        lock (_lock)
         {
-            try
-            {
-                using var db = AtherizDbContextFactory.CreateForSettings(settings);
-                if (ensureCreated) db.Database.EnsureCreated();
-                save(db);
-            }
-            catch (Exception ex)
-            {
-                failures.Add(name);
-                AtherizLogger.LogErrorRobust($"Autosave failed for {name}:\n{ex}");
-            }
+            cachedMap = mapHandler ?? _cachedMap;
+            cachedNodes = nodeHandler ?? _cachedNodes;
+            cachedTime = gameTime ?? _cachedTime;
         }
 
-        // objects (the only section that creates tables: every Load(db)
-        // path already calls EnsureCreated, so this single call covers saves)
-        SaveSection("objects", db => ObjectRegistry.SaveObjects(db), ensureCreated: true);
-
-        SaveSection("map", db =>
-        {
-            // volatile read — written under _lock by Start/Stop on
-            // other threads; a torn read would save via a stale handler.
-            var mh = Resolve(mapHandler, ref _cachedMap, GlobalServices.GetMapHandler);
-            // Save into the explicit-settings DB, not the ambient one.
-            // The parameterless Save() persists singleton state via the ambient
-            // path — under explicit settings that tore the world (objects in
-            // DB-A, handlers in DB-B). Each section keeps its own commit so a
-            // single failing domain still doesn't block the others.
-            mh.Save(db);
-        });
-
-        SaveSection("node", db =>
-        {
-            var nh = Resolve(nodeHandler, ref _cachedNodes, GlobalServices.GetNodeHandler);
-            // Explicit-settings DB (see map section above).
-            nh.Save(db);
-        });
-
-        if (settings.TimeSystemEnabled)
-        {
-            SaveSection("time", db =>
-            {
-                var gt = Resolve(gameTime, ref _cachedTime, GlobalServices.GetGameTime);
-                // Explicit-settings DB (see map section above).
-                gt.Save(db);
-            });
-        }
+        // One atomic checkpoint for all sections (see CheckpointWriter): the
+        // journal, transaction, and hold-time logging live there; only the
+        // user-facing report stays here. Message shapes are unchanged.
+        var failures = CheckpointWriter.WriteCheckpoint(
+            settings, "autosave",
+            map: cachedMap,
+            nodes: cachedNodes,
+            time: cachedTime,
+            includeTime: settings.TimeSystemEnabled);
 
         if (failures.Count > 0)
         {
-            AtherizLogger.LogErrorRobust($"Autosave failed for: {string.Join(", ", failures)}");
-            try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg($"Autosave failed for: {string.Join(", ", failures)}"); } catch (Exception) { }
+            var names = string.Join(", ", failures.Select(f => f.Name));
+            AtherizLogger.LogErrorRobust($"Autosave failed for: {names}");
+            try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg($"Autosave failed for: {names}"); } catch (Exception) { }
         }
         else
         {
-            CheckpointJournal.MarkClean(savePath);
             AtherizLogger.LogInformationRobust("Autosave completed.");
             try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg("Autosave completed."); } catch (Exception) { }
         }

@@ -6,42 +6,33 @@ using Atheriz.Core.Tests;
 
 namespace Atheriz.Core.Tests.Features.Globals;
 
-// Autosave handler resolution is explicit arg, then cached, then singleton
-// getter; an explicit tick still journals and ends clean.
+// Checkpoint handler resolution is cached handler, then singleton getter;
+// an explicit tick still journals and ends clean.
 [Collection("Ported")]
 public class AutosaveResolveTests
 {
-    private static string? InvokeResolve(string? arg, string? cached, Func<string> getter, out string? cachedAfter)
+    private static string? InvokeResolve(string? cached, Func<string> getter)
     {
-        var method = typeof(Autosave).GetMethod("Resolve", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var method = typeof(CheckpointWriter).GetMethod("Resolve", BindingFlags.NonPublic | BindingFlags.Static)!;
         var generic = method.MakeGenericMethod(typeof(string));
-        object?[] args = [arg, cached, getter];
-        var result = (string?)generic.Invoke(null, args);
-        cachedAfter = (string?)args[1];
-        return result;
+        object?[] args = [cached, getter];
+        return (string?)generic.Invoke(null, args);
     }
 
     [Fact]
-    public void Resolve_ExplicitArg_WinsOverCachedAndGetter()
+    public void Resolve_Cached_WinsOverGetter()
     {
-        string? cached = "cached";
         bool getterCalled = false;
-        var result = InvokeResolve("explicit", cached, () => { getterCalled = true; return "getter"; }, out _);
-        Assert.Equal("explicit", result);
+        var result = InvokeResolve("cached", () => { getterCalled = true; return "getter"; });
+        Assert.Equal("cached", result);
         Assert.False(getterCalled);
     }
 
     [Fact]
-    public void Resolve_NullArg_FallsBackToCachedThenGetter()
+    public void Resolve_NullCached_FallsBackToGetter()
     {
-        string? cached = "cached";
-        bool getterCalled = false;
-        var fromCache = InvokeResolve(null, cached, () => { getterCalled = true; return "getter"; }, out _);
-        Assert.Equal("cached", fromCache);
-        Assert.False(getterCalled);
-
-        var fromGetter = InvokeResolve(null, null, () => "getter", out _);
-        Assert.Equal("getter", fromGetter);
+        var result = InvokeResolve(null, () => "getter");
+        Assert.Equal("getter", result);
     }
 
     [Fact]

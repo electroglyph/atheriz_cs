@@ -351,6 +351,10 @@ public class Channel : GameObject
     // Save ops never nest _histLock inside SyncRoot (or vice versa): history is
     // snapshotted under _histLock, then the modified-flag dance runs under
     // SyncRoot only. Fixed lock order everywhere is object -> channel.
+    // This snapshot-first shape is why Channel keeps its own save path instead
+    // of the SaveExtra hook (which runs under SyncRoot): taking _histLock
+    // there would nest channel-inside-object, the inverse of Msg delivery's
+    // channel -> peer order. Reference impl for lock-ordered saves.
     public override SaveOperation GetSaveOperation() => BuildSaveOperation(clearing: false);
 
     public override SaveOperation GetSaveOperationClearing() => BuildSaveOperation(clearing: true);
