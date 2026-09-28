@@ -123,12 +123,12 @@ public class ServerEventFanoutTests
     }
 
     [Fact]
-    public void AtServerStart_WithoutSender_SkipsSenderArityHook()
+    public void AtServerStart_WithoutSender_SkipsSenderArgCountHook()
     {
         ObjectRegistry.ClearAll();
         try
         {
-            var obj = GameObject.Create("hook-target-arity");
+            var obj = GameObject.Create("hook-target-argcount");
             ObjectRegistry.AddObject(obj);
             var hook = new StartHook();
             obj.InstallHook("at_server_start", hook.Call);

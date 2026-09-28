@@ -354,7 +354,7 @@ public class FactoryPassThroughTests
 
 // Merged from DelegateInvokerCacheTests.cs
 // Delegate invocation: parameter metadata is snapshotted on first use, so
-// repeat calls reuse it and arity/type mismatches keep throwing the same
+// repeat calls reuse it and arg-count/type mismatches keep throwing the same
 // exception as the uncached path.
 [Collection("Ported")]
 public class DelegateInvokerCacheTests
@@ -369,7 +369,7 @@ public class DelegateInvokerCacheTests
     }
 
     [Fact]
-    public void Invoke_MismatchedArityOrType_ThrowsParameterCount()
+    public void Invoke_MismatchedArgCountOrType_ThrowsParameterCount()
     {
         Func<int, int> f = x => x * 2;
 

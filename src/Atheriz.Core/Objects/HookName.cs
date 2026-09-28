@@ -4,7 +4,7 @@ namespace Atheriz.Core.Objects;
 // the exact runtime hook string (the HookNames constant). Dispatch and attach
 // sites take HookName, so a typo is a compile error instead of a silently
 // skipped hook; the string overloads stay for custom (game-defined) hooks.
-// Attach-time arity validation (InstallHook) uses DispatchArities: the exact
+// Attach-time arg-count check (InstallHook) uses DispatchArgCounts: the exact
 // argument counts each hook's dispatch sites pass today.
 public enum HookName
 {
@@ -148,7 +148,7 @@ internal static class HookNameExtensions
     // Exact dispatch argument counts per hook, read off the Hookable call
     // sites. AtSay has two shapes (AtSay 2, AtSayFull 8); every other hook
     // dispatches one shape everywhere.
-    internal static IReadOnlyList<int> DispatchArities(this HookName name) => name switch
+    internal static IReadOnlyList<int> DispatchArgCounts(this HookName name) => name switch
     {
         HookName.AtSay => [2, 8],
         HookName.AtAlarm => [2],
@@ -194,13 +194,13 @@ internal static class HookNameExtensions
         _ => [],
     };
 
-    // Attach-time arity check mirroring DelegateInvoker: a delegate can take
+    // Attach-time arg-count check mirroring DelegateInvoker: a delegate can take
     // a call of L args exactly when RequiredCount <= L <= Types.Length
     // (required counts stop at the first optional/defaulted parameter, same
     // rule as the invoker). Before/replace hooks run with the dispatch args;
     // after hooks also run with args+result, and unmarked delegates can land
     // in either list, so those accept one extra parameter.
-    internal static bool AcceptsArity(this HookName name, Delegate hook, HookKind kind)
+    internal static bool AcceptsHookArgs(this HookName name, Delegate hook, HookKind kind)
     {
         var ps = hook.Method.GetParameters();
         int required = 0;
@@ -211,7 +211,7 @@ internal static class HookNameExtensions
         }
         int total = ps.Length;
         bool afterStyle = kind == HookKind.None || (kind & HookKind.After) != 0;
-        foreach (var n in name.DispatchArities())
+        foreach (var n in name.DispatchArgCounts())
         {
             if (required <= n && n <= total) return true;
             if (afterStyle && required <= n + 1 && n + 1 <= total) return true;

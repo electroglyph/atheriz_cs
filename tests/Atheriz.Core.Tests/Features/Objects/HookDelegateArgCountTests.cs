@@ -3,11 +3,11 @@ using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Objects;
 
-// Hook delegate binding covers arities 0-16 through the BCL factories and
+// Hook delegate binding covers 0-16 args through the BCL factories and
 // keeps the >16-params divergence: unbindable hooks are skipped loudly (no
 // hook installed, original path runs) instead of crashing InstallHooks.
 [Collection("Ported")]
-public class HookDelegateArityTests
+public class HookDelegateArgCountTests
 {
     private sealed class ZeroHookScript : Script
     {

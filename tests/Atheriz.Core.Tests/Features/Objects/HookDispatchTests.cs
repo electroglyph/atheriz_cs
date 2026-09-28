@@ -4,7 +4,7 @@ namespace Atheriz.Core.Tests.Features.Objects;
 
 // Hook dispatch needs one contract: hook failures surface as the hook's own
 // error and a bad replace delegate never takes down the op. Known hooks get
-// attach-time arity validation: a delegate that cannot take any dispatch
+// attach-time arg-count check: a delegate that cannot take any dispatch
 // shape is refused loudly at InstallHook, so the op runs hook-free.
 [Collection("Ported")]
 public class HookDispatchTests
@@ -15,10 +15,10 @@ public class HookDispatchTests
         public string FailBefore(GameObject? target) => throw new InvalidOperationException("boom-before");
 
         [Replace]
-        public int WrongArity(GameObject? a, GameObject? b, GameObject? c) => 99;
+        public int WrongArgCount(GameObject? a, GameObject? b, GameObject? c) => 99;
 
         [Before]
-        public string BeforeWrongArity(GameObject? a, GameObject? b, GameObject? c) => "never";
+        public string BeforeWrongArgCount(GameObject? a, GameObject? b, GameObject? c) => "never";
 
         [After]
         public string AfterBoom(GameObject? target) => throw new InvalidOperationException("boom-after");
@@ -43,32 +43,32 @@ public class HookDispatchTests
     }
 
     [Fact]
-    public void ReplaceHook_ArityMismatch_RefusedAtAttach()
+    public void ReplaceHook_ArgCountMismatch_RefusedAtAttach()
     {
         // A replace delegate that cannot take the call args is refused at
         // attach (loud log, no install), so the original runs hook-free.
         var obj = new GameObject();
-        obj.InstallHook("at_look", HookFor("WrongArity", typeof(Func<GameObject?, GameObject?, GameObject?, int>)));
+        obj.InstallHook("at_look", HookFor("WrongArgCount", typeof(Func<GameObject?, GameObject?, GameObject?, int>)));
         Assert.False(obj.HasHook("at_look"));
         Assert.Equal("orig", obj.Hookable<string>("at_look", () => "orig", (GameObject?)null));
     }
 
     [Fact]
-    public void BeforeHook_ArityMismatch_RefusedAtAttach()
+    public void BeforeHook_ArgCountMismatch_RefusedAtAttach()
     {
         // A mis-signed before hook is refused at attach instead of
         // installing and skipping at every dispatch: MoveTo-style callers
         // see a normal return with no hook installed.
         var obj = new GameObject();
-        obj.InstallHook("at_look", HookFor("BeforeWrongArity", typeof(Func<GameObject?, GameObject?, GameObject?, string>)));
+        obj.InstallHook("at_look", HookFor("BeforeWrongArgCount", typeof(Func<GameObject?, GameObject?, GameObject?, string>)));
         Assert.False(obj.HasHook("at_look"));
         Assert.Equal("orig", obj.Hookable<string>("at_look", () => "orig", (GameObject?)null));
     }
 
     [Fact]
-    public void AfterHook_ThrowOnArgsOnlyArity_Propagates()
+    public void AfterHook_ThrowOnArgsOnlyMismatch_Propagates()
     {
-        // The hook skips the args+result attempt on arity, matches the
+        // The hook skips the args+result attempt on arg-count, matches the
         // args-only attempt, and throws there: the error propagates instead
         // of being swallowed by the fallback's old catch-all.
         var obj = new GameObject();

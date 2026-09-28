@@ -59,4 +59,14 @@ public sealed class CliParsingTests
         Assert.NotEqual(0, await AtherizCli.InvokeAsync(["create"]));
         Assert.NotEqual(0, await AtherizCli.InvokeAsync(["new"]));
     }
+
+    [Fact]
+    public void TestCommand_ZeroOrMoreArgs_ParseWithoutErrors()
+    {
+        // The pass-through collector takes any number of values (none
+        // included); only the parse is pinned here, the action never runs.
+        Assert.Empty(AtherizCli.Build().Parse(["test"]).Errors);
+        Assert.Empty(AtherizCli.Build().Parse(["test", "core"]).Errors);
+        Assert.Empty(AtherizCli.Build().Parse(["test", "a", "b", "c"]).Errors);
+    }
 }

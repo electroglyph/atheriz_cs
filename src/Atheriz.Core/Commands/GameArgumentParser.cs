@@ -108,7 +108,7 @@ public sealed class GameArgumentParser
         "+" => NargsKind.OneOrMore,
         "REMAINDER" or "..." => NargsKind.Remainder,
         // Unknown strings must fail loudly: silently compiling to
-        // single-value changes arity/requiredness (a "REMINDER" typo stops
+        // single-value changes arg-count/requiredness (a "REMINDER" typo stops
         // capturing remainders with no error).
         _ => throw new ArgumentException($"Unknown nargs value: '{s}'. Expected one of '?', '*', '+', 'REMAINDER', '...'.", nameof(s))
     };

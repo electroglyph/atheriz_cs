@@ -106,7 +106,7 @@ public class Script : GameObject
                 continue;
             }
             // Parse to the typed name when this is a known engine hook so
-            // attach-time arity validation applies; custom names ride the
+            // attach-time arg-count check applies; custom names ride the
             // string overload unvalidated.
             if (HookNameExtensions.TryParseName(name) is { } hookName)
                 child.InstallHook(hookName, del);
@@ -157,8 +157,8 @@ public class Script : GameObject
         }
     }
 
-    // Arity → Action<...>/Func<...> mapping via the BCL factories, which
-    // produce the identical runtime types for arities 0-16. Past 16 params
+    // Arg count → Action<...>/Func<...> mapping via the BCL factories, which
+    // produce the identical runtime types for 0-16 args. Past 16 params
     // the BCL throws while the old hand-rolled switch returned null — both
     // spellings funnel into the same outcome because CreateHookDelegate above
     // converts any failure into a loud-log-and-skip (null), so hook call

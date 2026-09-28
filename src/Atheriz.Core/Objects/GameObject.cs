@@ -573,12 +573,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
 
     public virtual void InstallHook(string funcName, Delegate hook)
     {
-        // Attach-time arity validation for known hooks: a delegate that
+        // Attach-time arg-count check for known hooks: a delegate that
         // cannot take any dispatch shape is refused loudly instead of
         // installing and skipping at every dispatch. Unknown (custom hook)
         // names bypass validation — game code defines their own shapes.
         if (HookNameExtensions.TryParseName(funcName) is { } name
-            && !name.AcceptsArity(hook, HookMarkerCache.KindOf(hook)))
+            && !name.AcceptsHookArgs(hook, HookMarkerCache.KindOf(hook)))
         {
             AtherizLogger.LogError($"GameObject.InstallHook refused {funcName} hook with mismatched signature ({hook.Method}); hook skipped.");
             return;

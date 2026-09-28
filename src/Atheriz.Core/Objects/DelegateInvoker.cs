@@ -8,7 +8,7 @@ namespace Atheriz.Core.Objects;
 /// Typed invocation for engine-registered <see cref="Delegate"/>s (hooks, parser
 /// callables, value converters) without DynamicInvoke: each delegate is compiled
 /// once to a <c>Func&lt;object?[], object?&gt;</c> and cached per delegate.
-/// Arity mismatches throw <see cref="TargetParameterCountException"/> (callers keep
+/// Arg-count mismatches throw <see cref="TargetParameterCountException"/> (callers keep
 /// their historical fallback behavior); delegate errors propagate unwrapped.
 /// Params-array delegates are not supported (none exist in the engine).
 /// </summary>
@@ -17,7 +17,7 @@ public static class DelegateInvoker
     // First-use metadata snapshot per delegate instance (delegates are immutable,
     // so the snapshot never goes stale): parameter types + defaults + required
     // count + compiled invoker. Replaces the per-invoke Method.GetParameters()
-    // reflection on the hook hot path; the arity/type checks below reproduce the
+    // reflection on the hook hot path; the arg-count/type checks below reproduce the
     // exact same TargetParameterCountException behavior as before.
     private sealed class DelegateMetadata(Type[] types, object?[] defaults, int requiredCount, Func<object?[], object?> invoker)
     {
@@ -32,7 +32,7 @@ public static class DelegateInvoker
     {
         var meta = _cache.GetValue(d, static del => Create(del));
         if (args.Length < meta.RequiredCount || args.Length > meta.Types.Length) throw new TargetParameterCountException();
-        // surface type failures as arity failures. Without this the
+        // surface type failures as arg-count failures. Without this the
         // compiled Convert throws NullReference/InvalidCast at invoke time.
         // Only caller-supplied args are checked; filled defaults are trusted.
         for (int i = 0; i < args.Length; i++)

@@ -1,6 +1,6 @@
 // Pins for U3 (BuildSignature reflection-shim removal): production code must
 // not expose the reflection shim anymore, while the explicit MethodInfo API
-// it deferred to keeps its shape (varargs/optional-arity introspection).
+// it deferred to keeps its shape (varargs/optional-arg-count introspection).
 using Atheriz.Core.Utils;
 
 namespace Atheriz.Core.Tests.Features.Utils;

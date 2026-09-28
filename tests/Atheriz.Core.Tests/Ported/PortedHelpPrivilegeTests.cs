@@ -662,7 +662,7 @@ public class PortedHelpPrivilegeTests
         Assert.True(new MoveCommand().Access(c));
     }
     [Fact]
-    public void Move_WrongArity()
+    public void Move_WrongArgCount()
     {
         using var env=GlobalTestEnv.Enter();
         var c=MakeCaller(builder:true);

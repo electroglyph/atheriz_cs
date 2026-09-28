@@ -1,8 +1,8 @@
-> **⚠️ WORK IN PROGRESS — EXPERIMENT: this project is still a work in progress and an experiment, and everything here is 100% clanker generated.**
-
 # AtheriZ — C# Port
 
-C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included — see the [webclient changelog](webclient/CHANGELOG.md).
+(everything here is 100% clanker generated, but i've tried to do it as sanely as possible)
+
+C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included — see the [webclient changelog](webclient/CHANGELOG.md). User guides (install, game creation, commands, hosting, saves, plugins) live in [docs/](docs/README.md).
 
 ## Prereqs
 
@@ -123,7 +123,7 @@ Ports and paths are in `src/Atheriz.Server/appsettings.json` (`Atheriz:` section
 
 You can override with `appsettings.Development.json` or `ATHERIZ_` environment variables (e.g. `ATHERIZ_SSL_CERTFILE` for TLS, `ATHERIZ_SUPERUSER_USERNAME` / `ATHERIZ_SUPERUSER_PASSWORD` for the initial superuser).
 
-Game folders require `GameSettings.cs` + `*.csproj` (created by `new`). Running a game-folder command outside a game folder will fail with `Cannot determine database path` — create a game folder first.
+Game folders require `GameSettings.cs` + `*.csproj` (created by `new`). Running a game-folder command outside a game folder will fail with `Cannot determine save path ...` — create a game folder first.
 
 ### telnet_cs pin
 

@@ -117,7 +117,9 @@ public static class AtherizCli
             TelnetPortOrEnv(pr.GetValue(newTelnet)), pr.GetValue(overwrite), pr.GetValue(newFg)));
 
         var test = new Command("test", "Run tests. Runs game tests by default, or core tests with 'test core'.");
-        var testArgs = new Argument<string[]>("args") { Arity = ArgumentArity.ZeroOrMore, Description = "Passed to dotnet test" };
+        // No Arity setting: array arguments already take zero or more
+        // values, so restating the default would only add a name to keep.
+        var testArgs = new Argument<string[]>("args") { Description = "Passed to dotnet test" };
         test.Arguments.Add(testArgs);
         test.SetAction((ParseResult pr) => Task.FromResult(TestHandler.HandleTest(pr.GetValue(testArgs) ?? [])));
 

@@ -443,9 +443,9 @@ public class ObjectRegressionTests
         Assert.True(f.IsNpc);
     }
 
-    // type failures must surface as arity failures, not NRE/InvalidCast.
+    // type failures must surface as arg-count failures, not NRE/InvalidCast.
     [Fact]
-    public void InvokerTypeFailure_IsArityFailure()
+    public void InvokerTypeFailure_IsArgCountFailure()
     {
         Action<int> f = _ => { };
         Assert.Throws<TargetParameterCountException>(() => DelegateInvoker.Invoke(f, new object?[] { null }));

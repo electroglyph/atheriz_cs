@@ -72,7 +72,7 @@ public class TypedDispatchTests
     [Fact]
     public void LockPolicy_Denied_ResolvesToDeny()
     {
-        // The fail-closed marker resolves (both arities) to a predicate that
+        // The fail-closed marker resolves (both overloads) to a predicate that
         // denies everyone, so persisted deny entries decide identically.
         var accessor = GameObject.Create("denied_accessor");
         try

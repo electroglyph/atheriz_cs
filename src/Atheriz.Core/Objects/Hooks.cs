@@ -18,7 +18,7 @@ public partial class GameObject
     /// Hookable wrapper: advisory before (ignore return), replace (first only), after (can mutate result).
     /// Mirrors <c>base_obj.hookable</c> semantics where before cannot abort.
     /// Hooks run through a compiled, statically-typed invoker (no DynamicInvoke):
-    /// before/replace arity mismatches are skipped with a warning and after
+    /// before/replace arg-count mismatches are skipped with a warning and after
     /// hooks fall back from args+result to args-only, so call sites keep their
     /// fallback behavior; genuine hook errors propagate unwrapped.
     /// </summary>
@@ -64,7 +64,7 @@ public partial class GameObject
             }
             catch (TargetParameterCountException)
             {
-                // Arity mismatch: ignore the bad replace hook, run original path.
+                // Arg-count mismatch: ignore the bad replace hook, run original path.
             }
         }
 
@@ -72,7 +72,7 @@ public partial class GameObject
         {
             // Advisory: return ignored. Hook errors propagate raw (previously
             // TIE-unwrapped — same observable, no reflection wrapper).
-            // Arity mismatches get the replace-hook treatment (skip + loud
+            // Arg-count mismatches get the replace-hook treatment (skip + loud
             // log): a mis-signed before hook must not throw out of the entry
             // point (e.g. AtPreMove failing MoveTo with an exception instead
             // of a false return).
@@ -94,8 +94,8 @@ public partial class GameObject
             }
             catch (TargetParameterCountException) { }
             // A throwing after-hook propagates instead of nulling the
-            // result — and the args-only fallback below is arity-only for the
-            // same reason: genuine hook errors surface, only a second arity
+            // result — and the args-only fallback below is arg-count-only for the
+            // same reason: genuine hook errors surface, only a second arg-count
             // mismatch falls through to the original result.
             if (!invoked)
             {

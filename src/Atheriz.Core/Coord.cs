@@ -22,7 +22,7 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
         => TryParse(s.AsSpan(), commaOnly: true, out coord, out _);
 
     // Detailed parse shared by the bool wrappers and by `MoveCommand`'s
-    // diagnostics (arity vs bad-number need different messages). `commaOnly`
+    // diagnostics (part-count vs bad-number need different messages). `commaOnly`
     // selects the strict grammar above; false selects the wide grammar below.
     // Splits a span on commas into the caller's range buffer (no Split
     // array); -1 when more segments than the buffer holds.
@@ -47,7 +47,7 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
         coord = new Coord(string.Empty, 0, 0, 0);
         if (commaOnly)
         {
-            failure = CoordParseFailure.Arity;
+            failure = CoordParseFailure.WrongPartCount;
             if (s.IsEmpty) { failure = CoordParseFailure.Empty; return false; }
             ReadOnlySpan<char> inner = s;
             if (inner.Length >= 2 && inner[0] == '(' && inner[^1] == ')') inner = inner[1..^1];
@@ -66,7 +66,7 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
             return true;
         }
         if (s.IsEmpty || s.IsWhiteSpace()) { failure = CoordParseFailure.Empty; return false; }
-        failure = CoordParseFailure.Arity;
+        failure = CoordParseFailure.WrongPartCount;
         // Span parse: no Trim copy, no Split arrays, no range-slice allocs.
         // Accepted inputs and failure contract (false, never throw) match the
         // split-based parse this replaced — span int.TryParse accepts the same
@@ -144,7 +144,7 @@ public readonly record struct Coord(string Area, int X, int Y, int Z)
 
 /// <summary>
 /// Why a coord parse failed: nothing there (<see cref="Empty"/>), wrong
-/// shape (<see cref="Arity"/>), or four parts with non-integer numbers
+/// part count (<see cref="WrongPartCount"/>), or four parts with non-integer numbers
 /// (<see cref="Number"/>). `MoveCommand` maps these to Usage vs the
 /// integers message; success is <see cref="None"/>.
 /// </summary>
@@ -152,6 +152,6 @@ public enum CoordParseFailure
 {
     None,
     Empty,
-    Arity,
+    WrongPartCount,
     Number,
 }

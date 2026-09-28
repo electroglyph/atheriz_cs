@@ -100,7 +100,7 @@ public class ScriptHookBindTests
     }
 
     [Fact]
-    public void InstallHooks_OverwideActionArity_SkipsAndRunsOriginal()
+    public void InstallHooks_OverwideActionArgCount_SkipsAndRunsOriginal()
     {
         ObjectRegistry.ClearAll();
         try
@@ -117,7 +117,7 @@ public class ScriptHookBindTests
     }
 
     [Fact]
-    public void InstallHooks_OverwideFuncArity_SkipsAndRunsOriginal()
+    public void InstallHooks_OverwideFuncArgCount_SkipsAndRunsOriginal()
     {
         ObjectRegistry.ClearAll();
         try
