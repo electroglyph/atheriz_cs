@@ -1,5 +1,6 @@
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
+using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Features.Utils;
 
@@ -136,5 +137,14 @@ public class ServerEventFanoutTests
             Assert.Empty(hook.Seen);
         }
         finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
+    public void ServerEvents_HasNoSnakeToPascalDispatch()
+    {
+        // Lifecycle dispatch names its hooks through the HookName enum, not a
+        // snake-to-Pascal string conversion.
+        var src = SourceScan.Read("src", "Atheriz.Core", "ServerEvents.cs");
+        Assert.DoesNotContain("ToPascal", src);
     }
 }

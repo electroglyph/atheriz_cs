@@ -166,6 +166,8 @@ Town Square
 
 A handler declaring the wrong number of arguments is refused at install (logged and skipped), not at fire time. Bool-returning sites honor replacement results where the site allows refusal (delete, pre-move); handlers are partitioned per object — one object's handlers never leak into another's. Game-defined custom hooks bypass install-time validation: name them with a plain string and define their own shapes.
 
+Overriding an `At*` virtual carries one rule: call `base` (or route through `Hookable`) or the override silently drops every installed script hook on that site. `AtMsgReceive`/`AtMsgSend` are not virtual at all — message receive/send is customized with hooks, never overrides.
+
 ## 7. Example: a follower (FollowScript)
 
 Following is leader-side state, not a pet object: `follow <target>` records your id in the leader's follower set and installs one parameterless `FollowScript` on the leader, which moves every follower along on post-move. `FollowScript` is sealed — custom trailing behavior is a separate `Script` subclass on the leader using the same `[After] at_post_move` hook shape, reading `Child` (the leader it is installed on):
@@ -349,7 +351,21 @@ Threading recap (one line): hook and tick handlers run on pool/ticker threads �
 
 Where to go next: [Commands](06-commands.md) owns the verb catalog and the permission call sites behind the one-gate rule; [World and maps](04-world-maps.md) owns tick re-registration and alarms; [Custom code and hot reload](11-custom-code-plugins.md) owns the never-touch list (no assembly scan, no production reflection, explicit `Add`).
 
-Hook-site quick index (see §1 table for when each fires): `AtObjectReceive`, `AtObjectLeave`, `AtPreObjectReceive`, `AtPreObjectLeave`, `AtPreMove`, `AtPostMove`, `AtLook`, `AtDesc`, `AtDelete`, `AtSay`, `AtPreSay`, `AtTick`. Both the `HookName` enum and the `HookNames` static class name the same sites — use whichever reads better at the call site.
+Hook-site map (see §1 table for when each fires; the number is the handler argument count the site passes — install refuses anything else). The `HookName` enum is generated from these same declarations, so the enum and the `HookNames` constants cannot drift apart:
+
+| Area | Hooks |
+|---|---|
+| Move | `AtPreMove`(2), `AtPostMove`(2), `AtPreObjectReceive`(2), `AtObjectReceive`(2), `AtPreObjectLeave`(2), `AtObjectLeave`(2) |
+| Speech/hearing | `AtSay`(2, 8), `AtPreSay`(1), `AtHear`(5), `AtPreHear`(5), `AtEmitSound`(4), `AtPreEmitSound`(5), `AtMsgReceive`(3), `AtMsgSend`(3) |
+| Look/desc | `AtLook`(1), `AtDesc`(1), `ReturnAppearance`(1), `AtPreMapRender`(1) |
+| Carry | `AtPreGet`(1), `AtGet`(1), `AtPreDrop`(1), `AtDrop`(1), `AtPrePut`(2), `AtPut`(2), `AtPreGive`(2), `AtGive`(2) |
+| Lifecycle | `AtCreate`(0), `AtInit`(0), `AtInstall`(0), `AtDelete`(1), `AtDisconnect`(0) |
+| Puppet | `AtPrePuppet`(1), `AtPuppet`(1), `AtPostPuppet`(0), `AtUnpuppet`(1) |
+| Time/events | `AtTick`(0), `AtAlarm`(2), `AtSolarEvent`(1), `AtLunarEvent`(1) |
+| Map | `AtMapUpdate`(6), `AtLegendUpdate`(3) |
+| Server | `AtServerStart`(0–1), `AtServerStop`(0–1), `AtServerReload`(0–1) |
+
+Server hooks fire on every object with zero args, or one sender arg when a sender is known. Both the `HookName` enum and the `HookNames` static class name the same sites — use whichever reads better at the call site.
 
 Conventions recap: `$func()` for actor-aware text, `Conjugate` for verbs, `Pronouns` for case, `MenuContext`/`Choice`/`MenuEngine` for multi-step input, `IMessageTarget` as the receiver contract. Text helpers never touch the database; they render from live objects only.
 

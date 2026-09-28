@@ -196,7 +196,7 @@ public class Script : GameObject
                 var hooksDict = child.HooksRawNoLock;
         foreach (var (name, _, _) in atFuncs)
                     {
-                        if (hooksDict.TryGetValue(name, out var set))
+                        if (hooksDict.TryGetValue(name, out var list))
                         {
                             // The old two-loop shape (exact method+target, then
                             // any remaining target) unions to "target is this",
@@ -205,7 +205,8 @@ public class Script : GameObject
                             // Id-equality, and same-Id distinct instances exist
                             // after hot-reload rewire — == would detach a
                             // replacement instance's hooks along with ours.
-                            set.RemoveWhere(d => ReferenceEquals(d.Target, this));
+                            for (int i = list.Count - 1; i >= 0; i--)
+                                if (ReferenceEquals(list[i].Target, this)) list.RemoveAt(i);
                         }
                     }
             }

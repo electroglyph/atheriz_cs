@@ -18,10 +18,10 @@ public class PortedScriptsTests
         GameObject.RegisterPersistedSubtype(typeof(DummyBeforeScript).FullName!, typeof(DummyBeforeScript), () => new DummyBeforeScript());
         GameObject.RegisterPersistedSubtype(typeof(DummyAfterScript).FullName!, typeof(DummyAfterScript), () => new DummyAfterScript());
     }
-    private static Dictionary<string, HashSet<Delegate>> HooksRaw(GameObject obj)
+    private static Dictionary<string, List<Delegate>> HooksRaw(GameObject obj)
     {
         var reg = typeof(GameObject).GetField("_hookRegistry", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(obj)!;
-        return (Dictionary<string, HashSet<Delegate>>)reg.GetType().GetProperty("Raw", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(reg)!;
+        return (Dictionary<string, List<Delegate>>)reg.GetType().GetProperty("Raw", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(reg)!;
     }
     // Port of test_scripts.py:23 DummyObj — hookable at_test_hook returns "original_result" and logs
     class DummyObj : GameObject

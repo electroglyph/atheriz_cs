@@ -1,4 +1,3 @@
-using System.Reflection;
 using Atheriz.Core.Persistence;
 
 namespace Atheriz.Core;
@@ -12,20 +11,20 @@ public static class ServerEvents
     private static readonly Lock _charCreateLock = new();
     public static void AtServerStart() => AtServerStart(null);
     // Python is pass (silent); the hook walk stays as the game-code extension point.
-    private static void Fire(string hookName, object? sender)
+    private static void Fire(HookName hookName, object? sender)
     {
         if (sender is not null) InvokeHooks(hookName, sender);
         else InvokeHooks(hookName);
     }
-    public static void AtServerStart(object? sender) => Fire("at_server_start", sender);
+    public static void AtServerStart(object? sender) => Fire(HookName.AtServerStart, sender);
 
     public static void AtServerStop() => AtServerStop(null);
     // Python is pass (silent); the hook walk stays as the game-code extension point.
-    public static void AtServerStop(object? sender) => Fire("at_server_stop", sender);
+    public static void AtServerStop(object? sender) => Fire(HookName.AtServerStop, sender);
 
     public static void AtServerReload() => AtServerReload(null);
     // Python is pass (silent); the hook walk stays as the game-code extension point.
-    public static void AtServerReload(object? sender) => Fire("at_server_reload", sender);
+    public static void AtServerReload(object? sender) => Fire(HookName.AtServerReload, sender);
 
     // Early-exit existence/single lookups over the registry. Same shape as
     // ObjectRegistry.FilterBy: snapshot under the read lock, predicates run
@@ -204,40 +203,33 @@ public static class ServerEvents
         AtherizLogger.LogInformation($"Character '{character.Name}' created for account '{account.Name}'.");
     }
 
-    private static void InvokeHooks(string hookName, params object?[] args)
+    private static void InvokeHooks(HookName hookName, params object?[] args)
     {
         args ??= Array.Empty<object?>();
-        // Also try virtual overrides named AtServerStart etc (PascalCase)
-        var pascal = ToPascal(hookName);
+        string name = hookName.Name();
         try
         {
             // Single registry walk: hook fan-out + virtual dispatch per object.
             foreach (var o in ObjectRegistry.FilterBy(_ => true))
             {
-                if (o.HasHook(hookName))
+                if (o.HasHook(name))
                 {
-                    try { o.Hookable(hookName, () => 0, args); } catch (Exception ex) { AtherizLogger.LogWarning($"Hook '{hookName}' failed on '{o.Name}': {ex.Message}"); }
+                    try { o.Hookable(name, () => 0, args); } catch (Exception ex) { AtherizLogger.LogWarning($"Hook '{name}' failed on '{o.Name}': {ex.Message}"); }
                 }
                 try
                 {
-                    switch (pascal)
+                    switch (hookName)
                     {
-                        case "AtServerStart": o.AtServerStart(args.FirstOrDefault()); break;
-                        case "AtServerStop": o.AtServerStop(args.FirstOrDefault()); break;
-                        case "AtServerReload": o.AtServerReload(args.FirstOrDefault()); break;
+                        case HookName.AtServerStart: o.AtServerStart(args.FirstOrDefault()); break;
+                        case HookName.AtServerStop: o.AtServerStop(args.FirstOrDefault()); break;
+                        case HookName.AtServerReload: o.AtServerReload(args.FirstOrDefault()); break;
                         default: break;
                     }
                 }
-                catch (Exception ex) { AtherizLogger.LogWarning($"Hook '{hookName}' failed on '{o.Name}': {ex.Message}"); }
+                catch (Exception ex) { AtherizLogger.LogWarning($"Hook '{name}' failed on '{o.Name}': {ex.Message}"); }
             }
         }
-        catch (Exception ex) { AtherizLogger.LogWarning($"Hook dispatch '{hookName}' failed: {ex.Message}"); }
-
-        static string ToPascal(string snake)
-        {
-            var parts = snake.Split('_', StringSplitOptions.RemoveEmptyEntries);
-            return string.Concat(parts.Select(p => char.ToUpperInvariant(p[0]) + p.Substring(1)));
-        }
+        catch (Exception ex) { AtherizLogger.LogWarning($"Hook dispatch '{name}' failed: {ex.Message}"); }
     }
 
 }

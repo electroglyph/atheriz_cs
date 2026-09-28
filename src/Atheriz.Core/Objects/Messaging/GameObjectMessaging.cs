@@ -36,7 +36,7 @@ public partial class GameObject
         // at_msg_receive hook (advisory) — if it returns false, abort
         try
         {
-            // Hookable wrapper would be used in real port; we call directly and honour false
+            // AtMsgReceive runs through Hookable (below); a false return aborts the message.
             if (!AtMsgReceive(parsed, fromObj, msgType)) return;
         }
         catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }

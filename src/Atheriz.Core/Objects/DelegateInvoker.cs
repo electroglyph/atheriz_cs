@@ -57,15 +57,34 @@ public static class DelegateInvoker
         return meta.Invoker(args);
     }
 
-    private static DelegateMetadata Create(Delegate del)
+    // Single home for the required-parameter rule shared with
+    // HookName.AcceptsHookArgs: required counts stop at the first
+    // optional/defaulted parameter.
+    internal static int RequiredParameterCount(ParameterInfo[] parameters)
     {
-        var ps = del.Method.GetParameters();
         int required = 0;
-        foreach (var p in ps)
+        foreach (var p in parameters)
         {
             if (p.IsOptional || p.HasDefaultValue) break;
             required++;
         }
+        return required;
+    }
+
+    // Arity probe for the after-hook branch (GameObject.Hookable): true when the
+    // delegate can take exactly `count` args (required <= count <= total),
+    // from the same cached metadata as Invoke. Count-only on purpose — type
+    // mismatches still throw out of Invoke as genuine hook errors.
+    internal static bool AcceptsArgCount(Delegate d, int count)
+    {
+        var meta = _cache.GetValue(d, static del => Create(del));
+        return count >= meta.RequiredCount && count <= meta.Types.Length;
+    }
+
+    private static DelegateMetadata Create(Delegate del)
+    {
+        var ps = del.Method.GetParameters();
+        int required = RequiredParameterCount(ps);
         var types = new Type[ps.Length];
         var defaults = new object?[ps.Length];
         for (int i = 0; i < ps.Length; i++) { types[i] = ps[i].ParameterType; defaults[i] = ps[i].DefaultValue; }

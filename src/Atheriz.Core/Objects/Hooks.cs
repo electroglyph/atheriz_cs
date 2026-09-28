@@ -17,6 +17,9 @@ public partial class GameObject
     /// <summary>
     /// Hookable wrapper: advisory before (ignore return), replace (first only), after (can mutate result).
     /// Mirrors <c>base_obj.hookable</c> semantics where before cannot abort.
+    /// Subclass At* overrides must call base (or route through Hookable) to
+    /// keep installed script hooks firing; an override that replaces the body
+    /// drops them.
     /// Hooks run through a compiled, statically-typed invoker (no DynamicInvoke):
     /// before/replace arg-count mismatches are skipped with a warning and after
     /// hooks fall back from args+result to args-only, so call sites keep their
@@ -31,7 +34,7 @@ public partial class GameObject
 
     public T Hookable<T>(string funcName, Func<T> original, params object?[] args)
     {
-        HashSet<Delegate>? hooksSnapshot;
+        List<Delegate>? hooksSnapshot;
         _lock.EnterReadLock();
         try
         {
@@ -84,25 +87,25 @@ public partial class GameObject
 
         foreach (var h in afterHooks)
         {
-            // after hooks: try args+result then args only (faithful to Python where after hook receives same args, not extra result)
+            // after hooks: args+result first, then args-only (faithful to
+            // Python where after hook receives same args, not extra result).
+            // The branch reads the cached arity — no exception probing: a
+            // throwing after-hook propagates instead of nulling the result,
+            // and only an arity miss on both shapes falls through to the
+            // original result.
             object? newResult = null;
             bool invoked = false;
-            try
+            if (DelegateInvoker.AcceptsArgCount(h, args.Length + 1))
             {
                 newResult = DelegateInvoker.Invoke(h, args.Append((object?)result).ToArray());
                 invoked = true;
             }
-            catch (TargetParameterCountException) { }
-            // A throwing after-hook propagates instead of nulling the
-            // result — and the args-only fallback below is arg-count-only for the
-            // same reason: genuine hook errors surface, only a second arg-count
-            // mismatch falls through to the original result.
-            if (!invoked)
+            else if (DelegateInvoker.AcceptsArgCount(h, args.Length))
             {
-                try { newResult = DelegateInvoker.Invoke(h, args); invoked = true; }
-                catch (TargetParameterCountException) { }
+                newResult = DelegateInvoker.Invoke(h, args);
+                invoked = true;
             }
-// an after-hook replaces the result unconditionally, including with
+            // an after-hook replaces the result unconditionally, including with
             // null for reference types. The ! covers the generic null case
             // the compiler cannot see: newResult is null and default(T) is
             // null means the null assignment is intended.

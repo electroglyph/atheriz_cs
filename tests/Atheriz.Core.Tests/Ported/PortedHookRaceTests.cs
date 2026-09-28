@@ -15,14 +15,14 @@ public class PortedHookRaceTests
     }
     private sealed class HookTarget : GameObject
     {
-        public HookTarget(HashSet<Delegate> set)
+        public HookTarget(List<Delegate> list)
         {
             SyncRoot.EnterWriteLock();
             try
             {
                 var reg = typeof(GameObject).GetField("_hookRegistry", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(this)!;
-                var raw = (Dictionary<string, HashSet<Delegate>>)reg.GetType().GetProperty("Raw", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(reg)!;
-                raw["run"] = set;
+                var raw = (Dictionary<string, List<Delegate>>)reg.GetType().GetProperty("Raw", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(reg)!;
+                raw["run"] = list;
             }
             finally { SyncRoot.ExitWriteLock(); }
         }
@@ -36,8 +36,8 @@ public class PortedHookRaceTests
         var holder = new HookHolder();
         var first = (Delegate)Delegate.CreateDelegate(typeof(Action), holder, typeof(HookHolder).GetMethod(nameof(HookHolder.FirstHook))!);
         var second = (Delegate)Delegate.CreateDelegate(typeof(Action), holder, typeof(HookHolder).GetMethod(nameof(HookHolder.SecondHook))!);
-        var hookSet = new HashSet<Delegate> { first };
-        var target = new HookTarget(hookSet);
+        var hookList = new List<Delegate> { first };
+        var target = new HookTarget(hookList);
 
         var errors = new List<Exception>();
         var worker = new Thread(() =>
@@ -47,7 +47,7 @@ public class PortedHookRaceTests
         });
         var mutator = new Thread(() =>
         {
-            try { for(int i=0;i<100;i++) { target.SyncRoot.EnterWriteLock(); try { hookSet.Add(second); } finally { target.SyncRoot.ExitWriteLock(); } Thread.Sleep(1); } }
+            try { for(int i=0;i<100;i++) { target.SyncRoot.EnterWriteLock(); try { if (!hookList.Contains(second)) hookList.Add(second); } finally { target.SyncRoot.ExitWriteLock(); } Thread.Sleep(1); } }
             catch (Exception ex) { lock(errors) errors.Add(ex); }
         });
         worker.Start();

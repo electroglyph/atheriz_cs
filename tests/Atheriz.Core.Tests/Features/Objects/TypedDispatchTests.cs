@@ -36,8 +36,23 @@ public class TypedDispatchTests
         Assert.Equal("at_emit_sound", HookNames.AtEmitSound);
         Assert.Equal("at_pre_emit_sound", HookNames.AtPreEmitSound);
         Assert.Equal("at_pre_hear", HookNames.AtPreHear);
-        Assert.Equal(41, typeof(HookNames).GetFields(
+        Assert.Equal("at_server_start", HookNames.AtServerStart);
+        Assert.Equal("at_server_stop", HookNames.AtServerStop);
+        Assert.Equal("at_server_reload", HookNames.AtServerReload);
+        Assert.Equal(44, typeof(HookNames).GetFields(
             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static).Length);
+    }
+
+    [Fact]
+    public void HookMap_GeneratedCoversEveryConstant()
+    {
+        // The source-generated HookName enum must cover every HookNames
+        // constant 1:1: a constant without a generated member (or vice
+        // versa) fails here, not as a silently unvalidated hook.
+        Assert.Equal(
+            typeof(HookNames).GetFields(
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static).Length,
+            Enum.GetValues<HookName>().Length);
     }
 
     [Theory]

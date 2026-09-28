@@ -58,7 +58,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     private readonly HookRegistry _hookRegistry = new();
     // Typed hooks access for Script.RemoveHooks (replaces _hooks reflection).
     // Caller must hold the write lock; name mirrors the RawNoLock convention.
-    internal Dictionary<string, HashSet<Delegate>> HooksRawNoLock => _hookRegistry.Raw;
+    internal Dictionary<string, List<Delegate>> HooksRawNoLock => _hookRegistry.Raw;
 
     private Dictionary<string, JsonElement> _extra = [];
     private CmdSet? _internalCmdSet;
@@ -577,12 +577,17 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         // cannot take any dispatch shape is refused loudly instead of
         // installing and skipping at every dispatch. Unknown (custom hook)
         // names bypass validation — game code defines their own shapes.
+        var kind = HookMarkerCache.KindOf(hook);
         if (HookNameExtensions.TryParseName(funcName) is { } name
-            && !name.AcceptsHookArgs(hook, HookMarkerCache.KindOf(hook)))
+            && !name.AcceptsHookArgs(hook, kind))
         {
             AtherizLogger.LogError($"GameObject.InstallHook refused {funcName} hook with mismatched signature ({hook.Method}); hook skipped.");
             return;
         }
+        // Unmarked delegates install but never dispatch (Hookable partition
+        // contract): warn once here, never per dispatch.
+        if (kind == HookKind.None)
+            AtherizLogger.LogWarning($"GameObject.InstallHook installed unmarked {funcName} hook ({hook.Method}); it never dispatches — mark it Before/After/Replace.", "GameObject");
         Write(() => _hookRegistry.Add(funcName, hook));
     }
     public void InstallHook(HookName hookName, Delegate hook) => InstallHook(hookName.Name(), hook);
