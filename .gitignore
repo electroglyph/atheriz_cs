@@ -232,6 +232,7 @@ save/
 *.md
 !README.md
 !readme.md
+!docs/**
 .vscode/
 webclient/.webclient-revision.json
 **/bin/
