@@ -233,6 +233,7 @@ save/
 !README.md
 !readme.md
 !docs/**
+docs/upgrade-10-done.md
 .vscode/
 webclient/.webclient-revision.json
 **/bin/

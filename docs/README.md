@@ -70,7 +70,7 @@ docs/                    # these docs
 - `webclient/` — Browser client source: terminal client plus the drawing and map editor.
 - `atheriz.sh` / `atheriz.cmd` — Launch wrappers; per-game copies forward to the engine.
 - `build.sh` / `build.cmd` — Build the webclient and the server (`build.sh` builds Release and Debug; `build.cmd` builds Release only).
-- `docs/` — These guides, plus the .NET 10 upgrade record in the appendix.
+- `docs/` — These guides.
 
 What `new` creates next to that tree — a game folder is separate from the repo:
 
@@ -98,9 +98,5 @@ User-relevant root files, one line each — the new guides above are the curated
 - [Telnet notes](../telnet.md) — Telnet negotiation behavior on the wire.
 - [Webclient notes](../webclient.md) — Webclient behavior notes and fixes.
 - [Background process notes](../background.md) — Start and stop behavior details.
-
-## 6. Appendix
-
-- [upgrade-10-done.md](upgrade-10-done.md) — Record of the net8.0/C#12 to net10.0/C#14 upgrade.
 
 Start: [Getting started](01-getting-started.md)
