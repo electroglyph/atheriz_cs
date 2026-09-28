@@ -1,5 +1,6 @@
 
 using System.Collections.Frozen;
+using Atheriz.Core.Commands;
 
 namespace Atheriz.Core.Objects;
 
@@ -139,7 +140,9 @@ public static class ContentUtils
 
         if (q.StartsWith("#", StringComparison.Ordinal))
         {
-            if (!int.TryParse(q[1..], out var id)) return [];
+            // Single truth for #id parsing (digits only): a bare int.TryParse
+            // would also accept signs and whitespace ("#+5", "# 5").
+            if (!CommandHelpers.TryParseIdRef(q, out var id)) return [];
             foreach (var o in objs) if (o.Id == id) return [o];
             return [];
         }

@@ -121,6 +121,43 @@ public class StopSafetyTests
     }
 
     [Fact]
+    public void IsServerProcess_RejectsAtherizPrefixedImpostor()
+    {
+        // A live binary merely named `atheriz*` is not the server: the gate
+        // must demand the exact module name or command-line evidence.
+        if (!OperatingSystem.IsLinux()) return; // module + cmdline checks are Linux-only
+        const string source = "/bin/sleep";
+        if (!File.Exists(source)) return; // no sleep(1): nothing to prove
+        var dir = Path.Combine(Path.GetTempPath(), "atheriz_impostor_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var impostor = Path.Combine(dir, "atherizfake_probe");
+        try { File.Copy(source, impostor); }
+        catch { try { Directory.Delete(dir, true); } catch { } return; }
+        if (OperatingSystem.IsLinux())
+        {
+            try
+            {
+                var mode = File.GetUnixFileMode(impostor);
+                File.SetUnixFileMode(impostor, mode | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+            }
+            catch { try { Directory.Delete(dir, true); } catch { } return; }
+        }
+        Process? proc = null;
+        try
+        {
+            try { proc = Process.Start(new ProcessStartInfo { FileName = impostor, Arguments = "30", UseShellExecute = false }); }
+            catch { return; } // staged copy is not executable: nothing to prove
+            Assert.NotNull(proc);
+            Assert.False(PidFile.IsServerProcess(proc!.Id));
+        }
+        finally
+        {
+            try { proc?.Kill(); proc?.Dispose(); } catch { }
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
     public void IsPortListening_MatchesBoundListener()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

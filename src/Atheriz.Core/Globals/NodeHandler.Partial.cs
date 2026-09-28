@@ -6,13 +6,13 @@ public partial class NodeHandler
     public Dictionary<string,Door>? GetDoors(Coord coord)
     {
         Lock3.EnterReadLock();
-        try { return _doors.TryGetValue(coord,out var d) ? new Dictionary<string,Door>(d): null; }
+        try { return _doors.TryGetValue(coord,out var d) ? new Dictionary<string,Door>(d, StringComparer.OrdinalIgnoreCase): null; }
         finally { Lock3.ExitReadLock(); }
     }
     // The caller holds Lock3 write; this helper takes none.
     private Dictionary<string,Door> GetOrCreateDoorDictLocked(Coord c)
     {
-        if (!_doors.TryGetValue(c,out var d)) { d=new(); _doors[c]=d; }
+        if (!_doors.TryGetValue(c,out var d)) { d=new(StringComparer.OrdinalIgnoreCase); _doors[c]=d; }
         return d;
     }
     public void AddDoor(Door door)

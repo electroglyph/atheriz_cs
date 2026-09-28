@@ -38,30 +38,32 @@ public sealed class PidFile : IDisposable
                 if (proc.HasExited) return false; // mirrors psutil.STATUS_ZOMBIE
             }
             catch { }
-            string name;
-            try { name = proc.ProcessName ?? ""; }
-            catch { return false; }
-            var lower = name.ToLowerInvariant();
             // Only this engine's processes are ever servers, so only its
-            // shapes are trusted: single-file publishes (module filename
-            // below) and `dotnet Atheriz.Server.dll` (command line below).
-            // Bare process-name prefixes (python*/atheriz*) are NOT trusted:
+            // shapes are trusted: single-file publishes (exact module
+            // filename below) and processes whose command line names the
+            // server assembly (dotnet host, renamed binaries). A bare
+            // filename prefix (atherizfake, atheriz-backup) is NOT trusted:
             // a stale pid reused by an unrelated process would otherwise pass
             // the stop gates straight to SIGTERM/SIGKILL.
-            // Fallback: check main module filename if available (helps when process name truncated)
+            // Main-module filename check (helps when process name truncated).
             try
             {
                 var mod = proc.MainModule?.FileName ?? "";
                 var fileName = Path.GetFileName(mod).ToLowerInvariant();
-                if (fileName.StartsWith("atheriz", StringComparison.Ordinal))
+                // Strip a Windows extension before comparing: the publish
+                // output is extensionless on Linux, `.exe` on Windows.
+                var stem = fileName.EndsWith(".exe", StringComparison.Ordinal)
+                    ? fileName[..^4]
+                    : fileName;
+                if (stem is "atheriz.server" or "atheriz")
                     return true;
-                // dotnet host: only trust when the command line names the server
-                // assembly itself. A bare "Atheriz" substring is NOT enough: the
-                // test host loads Atheriz.Server.dll but its command line names
-                // the test assembly, so `stop` can never terminate a test run
-                // on pid reuse.
-                if (fileName.Contains("dotnet") || lower.Contains("dotnet"))
-                    return HasServerCmdline(pid);
+                // Any other shape passes only with command-line evidence
+                // naming the server assembly itself — the same strictness the
+                // dotnet branch always applied. A bare "Atheriz" substring is
+                // NOT enough: the test host loads Atheriz.Server.dll but its
+                // command line names the test assembly, so `stop` can never
+                // terminate a test run on pid reuse.
+                return HasServerCmdline(pid);
             }
         catch { }
         return false;

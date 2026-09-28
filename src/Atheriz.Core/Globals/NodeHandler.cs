@@ -206,7 +206,9 @@ public partial class NodeHandler
             JsonTableLoader.LoadInto(db.Doors, Lock3, json => JsonSerializer.Deserialize<Dictionary<string, Door>>(json, JsonOptions.Default), (dto, row) =>
             {
                 var key = new Coord(row.Area, row.X, row.Y, row.Z);
-                _doors[key] = dto;
+                // The serializer builds a case-sensitive dict; rebuild with
+                // the store comparer so lookups agree after a reload.
+                _doors[key] = new Dictionary<string, Door>(dto, StringComparer.OrdinalIgnoreCase);
                 _removedDoors.Remove(key);
             });
             // Evict rows deleted from the DB (full-table load): absent keys must

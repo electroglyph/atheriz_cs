@@ -431,8 +431,12 @@ public class PortedCriticalFixesTests
         using var env = GlobalTestEnv.Enter();
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Infrastructure/PidFile.cs");
         Assert.Contains("IsServerProcess", src);
-        Assert.Contains("ProcessName", src);
-        Assert.Contains("python", src.ToLower(), StringComparison.OrdinalIgnoreCase);
+        // Current shape: no process-name gate remains — identity is the exact
+        // module name plus server-assembly command-line evidence, so an
+        // unrelated listener (python or otherwise) passes nothing.
+        Assert.Contains("HasServerCmdline", src);
+        Assert.Contains("Atheriz.Server.dll", src);
+        Assert.DoesNotContain("StartsWith(\"python\")", src);
     }
 
     [Fact] public void StopServerFallbackKillsVerifiedDotnetListenerOnly()
