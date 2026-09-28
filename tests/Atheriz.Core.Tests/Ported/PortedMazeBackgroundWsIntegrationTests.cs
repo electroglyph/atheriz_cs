@@ -83,7 +83,7 @@ public class PortedMazeBackgroundWsIntegrationTests
             var outSb = new StringBuilder();
             server = StartServer(dll,
                 ["new", game, "--port", port.ToString(), "--telnet-port", telnetPort.ToString(), "--overwrite"],
-                repoRoot, env, outSb);
+                tmp, env, outSb);
             Assert.True(await WaitHealth(port,30000), $"health failed {outSb} log:{TryLog(game)}");
             // WS connect
             using var ws=new ClientWebSocket();

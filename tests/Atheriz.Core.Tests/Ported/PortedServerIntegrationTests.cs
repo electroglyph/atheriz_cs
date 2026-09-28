@@ -149,7 +149,7 @@ public class PortedServerIntegrationTests
             // 1. start the server backgrounded (foreground CLI): health gates progress
             using var server = BackgroundServer.Start(dll,
                 ["new", gameFolder, "--port", port.ToString(), "--telnet-port", telnetPort.ToString(), "--overwrite"],
-                repoRoot, env);
+                tmp, env);
             Assert.True(await WaitForHealthAsync(port, 30000), $"Server did not become healthy on {port}. Output: {server.ReadOutput()}\nLog: {TryReadLog(gameFolder)}");
             // Health needs only the port; the parent prints banners after the
             // pid claim lands too, so poll for the banner text (bounded) instead
@@ -270,7 +270,7 @@ public class PortedServerIntegrationTests
         {
             var newOut = await RunProcessAsync("dotnet",
                 $"{dll} new \"{gameFolder}\" --port {port} --telnet-port {telnetPort} --overwrite",
-                repoRoot, env, 90000);
+                tmp, env, 90000);
             Assert.Contains("Creating game folder", newOut);
             Assert.Contains("Web server listening", newOut);
             Assert.True(await WaitForHealthAsync(port, 15000), $"Daemon not healthy on {port}. Output: {newOut}\nLog: {TryReadLog(gameFolder)}");
