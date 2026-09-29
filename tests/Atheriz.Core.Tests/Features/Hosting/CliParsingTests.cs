@@ -61,6 +61,15 @@ public sealed class CliParsingTests
     }
 
     [Fact]
+    public void StopForce_ParsesWithoutErrors()
+    {
+        // -f/--force must be accepted on stop (the action never runs here).
+        Assert.Empty(AtherizCli.Build().Parse(["stop"]).Errors);
+        Assert.Empty(AtherizCli.Build().Parse(["stop", "-f"]).Errors);
+        Assert.Empty(AtherizCli.Build().Parse(["stop", "--force"]).Errors);
+    }
+
+    [Fact]
     public void TestCommand_ZeroOrMoreArgs_ParseWithoutErrors()
     {
         // The pass-through collector takes any number of values (none

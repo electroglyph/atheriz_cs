@@ -150,6 +150,122 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
+    /// PIDs holding a LISTEN socket on <paramref name="port"/>. Discovery
+    /// is per-OS (Linux /proc scan, macOS lsof, Windows netstat) and every
+    /// path fails closed: empty means "unidentified" — unreadable tables,
+    /// missing helper, or nothing listening — never "nobody listening".
+    /// Callers must not treat empty as permission to signal blindly.
+    /// </summary>
+    public static List<int> FindPidsListeningOnPort(int port)
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux()) return FindPidsLinux(port);
+            if (OperatingSystem.IsMacOS()) return FindPidsLsof(port);
+            if (OperatingSystem.IsWindows()) return FindPidsNetstat(port);
+        }
+        catch { }
+        return [];
+    }
+
+    private static List<int> FindPidsLinux(int port)
+    {
+        SortedSet<int> found = [];
+        try
+        {
+            var targetInodes = GetListeningInodes(port, out bool tablesRead);
+            if (!tablesRead || targetInodes.Count == 0) return [];
+            foreach (var procDir in Directory.GetDirectories("/proc"))
+            {
+                if (!int.TryParse(Path.GetFileName(procDir), out var pid)) continue;
+                var fdDir = Path.Combine(procDir, "fd");
+                if (!Directory.Exists(fdDir)) continue;
+                string[] fds;
+                try { fds = Directory.GetFiles(fdDir); }
+                catch { continue; }
+                foreach (var fd in fds)
+                {
+                    string link;
+                    try { link = File.ResolveLinkTarget(fd, true)?.ToString() ?? ""; }
+                    catch { continue; }
+                    foreach (var ino in targetInodes)
+                    {
+                        if (link.Contains($"socket:[{ino}]", StringComparison.Ordinal)) { found.Add(pid); break; }
+                    }
+                    if (found.Contains(pid)) break;
+                }
+            }
+        }
+        catch { }
+        return [.. found];
+    }
+
+    // macOS ships lsof: "COMMAND PID USER FD ..." rows, PID second column.
+    // Absent/unparsable lsof output degrades to unidentified, not to a guess.
+    private static List<int> FindPidsLsof(int port)
+    {
+        SortedSet<int> found = [];
+        try
+        {
+            foreach (var line in RunTool("lsof", $"-iTCP:{port} -sTCP:LISTEN -Pn"))
+            {
+                var cols = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+                if (cols.Length < 2 || cols[0] == "COMMAND") continue;
+                if (int.TryParse(cols[1], out var pid)) found.Add(pid);
+            }
+        }
+        catch { }
+        return [.. found];
+    }
+
+    // Windows netstat rows look like
+    // "TCP 0.0.0.0:9999 0.0.0.0:0 LISTENING 1234" (proto local foreign
+    // state pid). State names localize; anything unparsable degrades to
+    // unidentified rather than risking a wrong pid.
+    private static List<int> FindPidsNetstat(int port)
+    {
+        SortedSet<int> found = [];
+        try
+        {
+            foreach (var line in RunTool("netstat", "-ano -p TCP"))
+            {
+                var cols = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+                if (cols.Length < 5 || !cols[0].StartsWith("TCP", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!cols[1].EndsWith($":{port}", StringComparison.Ordinal)) continue;
+                if (!cols[3].Equals("LISTENING", StringComparison.OrdinalIgnoreCase)) continue;
+                if (int.TryParse(cols[4], out var pid)) found.Add(pid);
+            }
+        }
+        catch { }
+        return [.. found];
+    }
+
+    /// <summary>
+    /// Run a helper tool with no shell, capturing stdout lines. Any failure
+    /// (missing binary, timeout, bad exit) yields no lines so discovery
+    /// degrades to unidentified.
+    /// </summary>
+    private static List<string> RunTool(string exe, string args)
+    {
+        try
+        {
+            using var proc = new System.Diagnostics.Process();
+            proc.StartInfo.FileName = exe;
+            proc.StartInfo.Arguments = args;
+            proc.StartInfo.UseShellExecute = false;
+            proc.StartInfo.RedirectStandardOutput = true;
+            proc.StartInfo.RedirectStandardError = true;
+            proc.Start();
+            if (!proc.WaitForExit(5000)) { try { proc.Kill(); } catch { } return []; }
+            if (proc.ExitCode != 0) return [];
+            return proc.StandardOutput.ReadToEnd()
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+        }
+        catch { return []; }
+    }
+
+    /// <summary>
     /// Verify pid actually holds LISTEN on port. Fail closed: when per-PID
     /// verification is unavailable (no /proc tables on non-Linux,
     /// unreadable fd dir, unexpected errors) the answer is "not verified",

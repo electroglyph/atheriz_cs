@@ -99,9 +99,9 @@ public class PortedContentsTests
     public void GroupByNameUsesDisplayNameWhenLookerGiven()
     {
         using var env = GlobalTestEnv.Enter();
-        var a = new TestDisplayObj("apple") { DisplayName = "The Apple" };
+        var a = new TestDisplayObj("apple") { ShownName = "The Apple" };
         ObjectRegistry.AddObject(a);
-        var b = new TestDisplayObj("banana") { DisplayName = "A Banana" };
+        var b = new TestDisplayObj("banana") { ShownName = "A Banana" };
         ObjectRegistry.AddObject(b);
         var looker = MakeObj("looker");
         var res = ContentUtils.GroupByName(new List<GameObject>{a,b}, looker);
@@ -110,9 +110,10 @@ public class PortedContentsTests
 
     private sealed class TestDisplayObj : GameObject
     {
-        public string DisplayName;
-        public TestDisplayObj(string n) { Name=n; DisplayName=n; }
-        public override string GetDisplayName(GameObject? looker) => DisplayName;
+        // Named ShownName: DisplayName is now a real GameObject property.
+        public string ShownName;
+        public TestDisplayObj(string n) { Name=n; ShownName=n; }
+        public override string GetDisplayName(GameObject? looker) => ShownName;
     }
 
     [Fact]

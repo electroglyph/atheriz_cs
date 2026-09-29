@@ -56,6 +56,7 @@ internal sealed record NodeAreaDto
     {
         nd.Migrate();
         node.Name = nd.Name;
+        node.DisplayName = nd.DisplayName;
         node.Desc = nd.Desc;
         node.Theme = nd.Theme;
         node.Symbol = nd.Symbol;

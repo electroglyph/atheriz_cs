@@ -14,8 +14,30 @@ export interface MapEditExit {
 export interface MapRoom {
     x: number;
     y: number;
+    /** Custom display name when set, else the coord-derived node name. */
+    name?: string;
     desc?: string;
     exits: MapEditExit[];
+}
+
+/** One exit in a set-exits save: full replacement entry for a room link. */
+export interface MapExitEdit {
+    name: string;
+    aliases: string[];
+    coord: [string, number, number, number];
+}
+
+/** Exit-coord textbox format, matching the engine's Coord shape:
+ * `(Area,x,y,z)`. Round-trips through parseExitCoord. */
+export function formatExitCoord(area: string, x: number, y: number, z: number): string {
+    return `(${area},${x},${y},${z})`;
+}
+
+/** Parse a `(Area,x,y,z)` coord textbox back, or null when malformed. */
+export function parseExitCoord(text: string): { area: string; x: number; y: number; z: number } | null {
+    const match = /^\(([^,()]+),(-?\d+),(-?\d+),(-?\d+)\)$/.exec(text.trim());
+    if (!match) return null;
+    return { area: match[1], x: Number(match[2]), y: Number(match[3]), z: Number(match[4]) };
 }
 
 export interface MapLegendEntry {
@@ -65,9 +87,17 @@ export type MapEditEvent =
     | { type: 'reject'; reason: string }
     | { type: 'error'; message: string }
     | { type: 'moves_denied'; moves: RoomMove[] }
-    | { type: 'moves_accepted' }
+    | { type: 'moves_accepted'; moves: RoomMove[] }
     | { type: 'saved' }
-    | { type: 'legend_saved' };
+    | { type: 'legend_saved' }
+    | { type: 'room_saved' }
+    | { type: 'room_denied'; reason: string }
+    | { type: 'exits_saved'; x: number; y: number }
+    | { type: 'exits_denied'; x: number; y: number; reason: string }
+    | { type: 'created'; rooms: { x: number; y: number }[] }
+    | { type: 'create_denied'; rooms: { x: number; y: number }[]; reason: string }
+    | { type: 'deleted'; rooms: { x: number; y: number }[] }
+    | { type: 'delete_denied'; rooms: { x: number; y: number }[]; reason: string };
 
 export type MapEditListener = (event: MapEditEvent) => void;
 
@@ -123,7 +153,8 @@ export function logRoomData(payload: MapEditPayload): void {
         const exits = room.exits
             .map((e) => `${e.name} -> ${e.coord[1]},${e.coord[2]} (${e.coord[0]}, z=${e.coord[3]})`)
             .join(', ');
-        console.log(`(${room.x}, ${room.y}): ${room.desc ?? '(no description)'} | exits: ${exits || 'none'}`);
+        const label = room.name ? `(${room.x}, ${room.y}) ${room.name}: ${room.desc ?? '(no description)'}` : `(${room.x}, ${room.y}): ${room.desc ?? '(no description)'}`;
+        console.log(`${label} | exits: ${exits || 'none'}`);
     }
 }
 
@@ -151,7 +182,11 @@ function cellAttrs(cell: Cell | null): string[] {
 type QueueItem =
     | { kind: 'edit'; cells: MapEditOp[]; isSave: boolean; settings?: EditorSettings }
     | { kind: 'validate'; serverMoves: RoomMove[]; clientMoves: RoomMove[]; context: RoomMove[] }
-    | { kind: 'legend'; legend: MapLegendEntry[] };
+    | { kind: 'legend'; legend: MapLegendEntry[] }
+    | { kind: 'room'; x: number; y: number; name: string | null; desc: string | null }
+    | { kind: 'exits'; x: number; y: number; exits: MapExitEdit[] }
+    | { kind: 'create'; rooms: { x: number; y: number; name: string | null; desc: string | null }[]; exits: { x: number; y: number; exits: MapExitEdit[] }[] }
+    | { kind: 'delete'; rooms: { x: number; y: number; fallback: { x: number; y: number } | null }[] };
 
 const coordKey = (x: number, y: number): string => `${x},${y}`;
 
@@ -305,12 +340,99 @@ export class MapEditSession {
         this.flush();
     }
 
+    /** Queue one room's name/description for the server. Null name/desc
+     * leaves that server property unchanged; the room must already exist. */
+    public saveRoom(x: number, y: number, name: string | null, desc: string | null): void {
+        if (this.stopped) return;
+        if (!Number.isInteger(x) || !Number.isInteger(y)) {
+            this.listener?.({ type: 'error', message: 'Invalid room coordinates.' });
+            return;
+        }
+        this.queue.push({ kind: 'room', x, y, name, desc });
+        this.flush();
+    }
+
+    /** Queue a full exit-list replacement for one room. The list is the
+     * room's entire link set after the edit (delete/rename/relink all
+     * express as a replacement); the room must already exist. */
+    public setExits(x: number, y: number, exits: MapExitEdit[]): void {
+        if (this.stopped) return;
+        if (!Number.isInteger(x) || !Number.isInteger(y) || !Array.isArray(exits)) {
+            this.listener?.({ type: 'error', message: 'Invalid exits payload.' });
+            return;
+        }
+        this.queue.push({ kind: 'exits', x, y, exits: exits.map((e) => ({ ...e, aliases: [...e.aliases], coord: [...e.coord] as [string, number, number, number] })) });
+        this.flush();
+    }
+
+    /** Queue a room-creation batch: new rooms plus full exit-list
+     * replacements for every room that gains a link (new rooms and
+     * affected pre-existing neighbors alike). */
+    public createRooms(
+        rooms: { x: number; y: number; name: string | null; desc: string | null }[],
+        exits: { x: number; y: number; exits: MapExitEdit[] }[],
+    ): void {
+        if (this.stopped) return;
+        const validRooms = Array.isArray(rooms) && rooms.length > 0 && rooms.length <= 256
+            && rooms.every((r) => r && Number.isInteger(r.x) && Number.isInteger(r.y));
+        const validExits = Array.isArray(exits)
+            && exits.every((e) => e && Number.isInteger(e.x) && Number.isInteger(e.y) && Array.isArray(e.exits));
+        if (!validRooms || !validExits) {
+            this.listener?.({ type: 'error', message: 'Invalid create payload.' });
+            return;
+        }
+        this.queue.push({
+            kind: 'create',
+            rooms: rooms.map((r) => ({ x: r.x, y: r.y, name: r.name, desc: r.desc })),
+            exits: exits.map((e) => ({
+                x: e.x,
+                y: e.y,
+                exits: e.exits.map((x) => ({ ...x, aliases: [...x.aliases], coord: [...x.coord] as [string, number, number, number] })),
+            })),
+        });
+        this.flush();
+    }
+
+    /** Queue a room-deletion batch: every listed room is removed server-side
+     * (occupants evacuate to that entry's fallback, or the entry is denied
+     * when occupied without one). Missing rooms are skipped idempotently. */
+    public deleteRooms(rooms: { x: number; y: number; fallback: { x: number; y: number } | null }[]): void {
+        if (this.stopped) return;
+        const valid = Array.isArray(rooms) && rooms.length > 0 && rooms.length <= 256
+            && rooms.every((r) => r && Number.isInteger(r.x) && Number.isInteger(r.y)
+                && (r.fallback == null || (Number.isInteger(r.fallback.x) && Number.isInteger(r.fallback.y))));
+        if (!valid) {
+            this.listener?.({ type: 'error', message: 'Invalid delete payload.' });
+            return;
+        }
+        this.queue.push({
+            kind: 'delete',
+            rooms: rooms.map((r) => ({
+                x: r.x,
+                y: r.y,
+                fallback: r.fallback ? { x: r.fallback.x, y: r.fallback.y } : null,
+            })),
+        });
+        this.flush();
+    }
+
     /** Current world coords of all known rooms (after validated moves). */
     public currentRoomCoords(): { x: number; y: number }[] {
         return Array.from(this.roomPositions.values()).map((key) => {
             const [x, y] = key.split(',').map(Number);
             return { x, y };
         });
+    }
+
+    /** Drop tracked rooms (create-rooms undo): the server keeps the shells,
+     * but the session must mirror the local room list or move validation
+     * and coord sync drift out of step with it. Matches original or current
+     * coords so a validated move in between does not orphan the entry. */
+    public forgetRooms(coords: { x: number; y: number }[]): void {
+        const wanted = new Set(coords.map((c) => coordKey(c.x, c.y)));
+        for (const [orig, current] of Array.from(this.roomPositions.entries())) {
+            if (wanted.has(orig) || wanted.has(current)) this.roomPositions.delete(orig);
+        }
     }
 
     public dispose(): void {
@@ -401,6 +523,45 @@ export class MapEditSession {
                     bg: null,
                 };
             })]);
+        } else if (item.kind === 'room') {
+            return this.conn.send('map_edit_room', [
+                this.key,
+                seq,
+                { x: item.x, y: item.y, name: item.name, desc: item.desc },
+            ]);
+        } else if (item.kind === 'exits') {
+            return this.conn.send('map_edit_exits', [
+                this.key,
+                seq,
+                {
+                    x: item.x,
+                    y: item.y,
+                    exits: item.exits.map((e) => ({ name: e.name, aliases: [...e.aliases], coord: [...e.coord] })),
+                },
+            ]);
+        } else if (item.kind === 'create') {
+            return this.conn.send('map_create_rooms', [
+                this.key,
+                seq,
+                {
+                    rooms: item.rooms.map((r) => ({ x: r.x, y: r.y, name: r.name, desc: r.desc })),
+                    exits: item.exits.map((e) => ({
+                        x: e.x,
+                        y: e.y,
+                        exits: e.exits.map((x) => ({ name: x.name, aliases: [...x.aliases], coord: [...x.coord] })),
+                    })),
+                },
+            ]);
+        } else if (item.kind === 'delete') {
+            return this.conn.send('map_delete_rooms', [
+                this.key,
+                seq,
+                {
+                    rooms: item.rooms.map((r) => r.fallback
+                        ? { x: r.x, y: r.y, fallback: { x: r.fallback.x, y: r.fallback.y } }
+                        : { x: r.x, y: r.y }),
+                },
+            ]);
         } else {
             const args: unknown[] = item.kind === 'edit' && item.settings !== undefined
                 ? [this.key, seq, item.cells, item.settings]
@@ -440,10 +601,38 @@ export class MapEditSession {
         if (message.command === 'map_ack') {
             if (typeof args[0] !== 'number' || typeof args[1] !== 'string') return;
             if (this.inFlight && args[0] === this.inFlight.seq) {
-                if (this.inFlight.item.kind === 'legend') {
+                if (this.inFlight.item.kind === 'legend' || this.inFlight.item.kind === 'room' || this.inFlight.item.kind === 'exits') {
+                    const kind = this.inFlight.item.kind;
+                    const saved = kind === 'legend' ? { type: 'legend_saved' } as const
+                        : kind === 'room' ? { type: 'room_saved' } as const
+                        : { type: 'exits_saved', x: this.inFlight.item.x, y: this.inFlight.item.y } as const;
                     this.key = args[1];
                     this.inFlight = null;
-                    this.listener?.({ type: 'legend_saved' });
+                    this.listener?.(saved);
+                    this.listener?.({ type: 'synced' });
+                    this.flush();
+                    return;
+                }
+                if (this.inFlight.item.kind === 'create') {
+                    const created = this.inFlight.item.rooms.map((r) => ({ x: r.x, y: r.y }));
+                    this.key = args[1];
+                    this.inFlight = null;
+                    // The rooms are server-side now: track them like loaded
+                    // rooms so moves validate and coord sync stays aligned.
+                    for (const c of created) this.roomPositions.set(coordKey(c.x, c.y), coordKey(c.x, c.y));
+                    this.listener?.({ type: 'created', rooms: created });
+                    this.listener?.({ type: 'synced' });
+                    this.flush();
+                    return;
+                }
+                if (this.inFlight.item.kind === 'delete') {
+                    const deleted = this.inFlight.item.rooms.map((r) => ({ x: r.x, y: r.y }));
+                    this.key = args[1];
+                    this.inFlight = null;
+                    // The rooms are gone server-side: stop tracking them so
+                    // moves validate and coord sync stay aligned.
+                    this.forgetRooms(deleted);
+                    this.listener?.({ type: 'deleted', rooms: deleted });
                     this.listener?.({ type: 'synced' });
                     this.flush();
                     return;
@@ -465,6 +654,86 @@ export class MapEditSession {
                 this.inFlight = null;
                 this.listener?.({ type: 'legend_saved' });
                 this.listener?.({ type: 'synced' });
+                this.flush();
+            }
+        } else if (message.command === 'room_ok') {
+            if (typeof args[0] !== 'number' || typeof args[1] !== 'string') return;
+            if (this.inFlight && this.inFlight.item.kind === 'room' && args[0] === this.inFlight.seq) {
+                this.key = args[1];
+                this.inFlight = null;
+                this.listener?.({ type: 'room_saved' });
+                this.listener?.({ type: 'synced' });
+                this.flush();
+            }
+        } else if (message.command === 'room_denied') {
+            if (typeof args[0] !== 'number' || typeof args[1] !== 'string' || typeof args[2] !== 'string') return;
+            if (this.inFlight && this.inFlight.item.kind === 'room' && args[0] === this.inFlight.seq) {
+                this.key = args[1];
+                const reason = args[2];
+                this.inFlight = null;
+                this.listener?.({ type: 'room_denied', reason });
+                this.flush();
+            }
+        } else if (message.command === 'exits_ok') {
+            if (typeof args[0] !== 'number' || typeof args[1] !== 'string') return;
+            if (this.inFlight && this.inFlight.item.kind === 'exits' && args[0] === this.inFlight.seq) {
+                const { x, y } = this.inFlight.item;
+                this.key = args[1];
+                this.inFlight = null;
+                this.listener?.({ type: 'exits_saved', x, y });
+                this.listener?.({ type: 'synced' });
+                this.flush();
+            }
+        } else if (message.command === 'exits_denied') {
+            if (typeof args[0] !== 'number' || typeof args[1] !== 'string' || typeof args[2] !== 'string') return;
+            if (this.inFlight && this.inFlight.item.kind === 'exits' && args[0] === this.inFlight.seq) {
+                const { x, y } = this.inFlight.item;
+                this.key = args[1];
+                const reason = args[2];
+                this.inFlight = null;
+                this.listener?.({ type: 'exits_denied', x, y, reason });
+                this.flush();
+            }
+        } else if (message.command === 'create_ok') {
+            if (typeof args[0] !== 'number' || typeof args[1] !== 'string') return;
+            if (this.inFlight && this.inFlight.item.kind === 'create' && args[0] === this.inFlight.seq) {
+                const created = this.inFlight.item.rooms.map((r) => ({ x: r.x, y: r.y }));
+                this.key = args[1];
+                this.inFlight = null;
+                for (const c of created) this.roomPositions.set(coordKey(c.x, c.y), coordKey(c.x, c.y));
+                this.listener?.({ type: 'created', rooms: created });
+                this.listener?.({ type: 'synced' });
+                this.flush();
+            }
+        } else if (message.command === 'create_denied') {
+            if (typeof args[0] !== 'number' || typeof args[1] !== 'string' || typeof args[2] !== 'string') return;
+            if (this.inFlight && this.inFlight.item.kind === 'create' && args[0] === this.inFlight.seq) {
+                this.key = args[1];
+                const reason = args[2];
+                const deniedRooms = this.inFlight.item.rooms.map((r) => ({ x: r.x, y: r.y }));
+                this.inFlight = null;
+                this.listener?.({ type: 'create_denied', rooms: deniedRooms, reason });
+                this.flush();
+            }
+        } else if (message.command === 'delete_ok') {
+            if (typeof args[0] !== 'number' || typeof args[1] !== 'string') return;
+            if (this.inFlight && this.inFlight.item.kind === 'delete' && args[0] === this.inFlight.seq) {
+                const deleted = this.inFlight.item.rooms.map((r) => ({ x: r.x, y: r.y }));
+                this.key = args[1];
+                this.inFlight = null;
+                this.forgetRooms(deleted);
+                this.listener?.({ type: 'deleted', rooms: deleted });
+                this.listener?.({ type: 'synced' });
+                this.flush();
+            }
+        } else if (message.command === 'delete_denied') {
+            if (typeof args[0] !== 'number' || typeof args[1] !== 'string' || typeof args[2] !== 'string') return;
+            if (this.inFlight && this.inFlight.item.kind === 'delete' && args[0] === this.inFlight.seq) {
+                this.key = args[1];
+                const reason = args[2];
+                const deniedRooms = this.inFlight.item.rooms.map((r) => ({ x: r.x, y: r.y }));
+                this.inFlight = null;
+                this.listener?.({ type: 'delete_denied', rooms: deniedRooms, reason });
                 this.flush();
             }
         } else if (message.command === 'moves_ok') {
@@ -491,7 +760,7 @@ export class MapEditSession {
                     }
                     this.roomPositions.set(original, dest);
                 }
-                this.listener?.({ type: 'moves_accepted' });
+                this.listener?.({ type: 'moves_accepted', moves: clientMoves });
                 this.flush();
             }
         } else if (message.command === 'moves_denied') {

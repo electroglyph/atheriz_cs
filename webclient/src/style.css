@@ -557,6 +557,190 @@ canvas {
   gap: 4px;
 }
 
+#room-editor-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.room-editor-empty {
+  font-size: 12px;
+  color: #888;
+}
+
+.room-editor-picking {
+  font-size: 12px;
+  color: #ffe082;
+  background-color: #3d3413;
+  border: 1px solid #8a7325;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.room-editor-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #888;
+  letter-spacing: 0.05em;
+}
+
+.room-editor-name {
+  background-color: #333;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.room-editor-desc {
+  background-color: #333;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: normal;
+  resize: vertical;
+}
+
+.room-editor-exits {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #ccc;
+}
+
+.room-editor-no-exits {
+  color: #888;
+}
+
+.room-editor-exit {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  gap: 4px;
+  align-items: center;
+  background-color: #2d2d2d;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.room-editor-exit-name,
+.room-editor-exit-coord {
+  background-color: #333;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.room-editor-exit-link {
+  background-color: #333;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.room-editor-exit-link:hover {
+  background-color: #444;
+}
+
+.room-editor-exit-delete {
+  background-color: #3a1212;
+  color: #ff5555;
+  border: 1px solid #662222;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.room-editor-exit-delete:hover {
+  background-color: #4d1818;
+}
+
+/* Toolbar delete-rooms button: same red palette as the per-exit
+   delete buttons, sized by the toolbar button rule. */
+#btn-delete-rooms {
+  background-color: #3a1212;
+  color: #ff5555;
+  border: 1px solid #662222;
+}
+
+#btn-delete-rooms:hover {
+  background-color: #4d1818;
+}
+
+.room-editor-exit-aliases {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #888;
+}
+
+.room-editor-exit-aliases-input {
+  flex: 1;
+  background-color: #333;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.room-editor-exit-add {
+  background-color: #333;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 6px;
+}
+
+.room-editor-exit-add:hover {
+  background-color: #444;
+}
+
+.room-editor-save {
+  background-color: #2e7d32;
+  color: #fff;
+  border: 1px solid #388e3c;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.room-editor-save:hover {
+  background-color: #388e3c;
+}
+
+.room-editor-status {
+  font-size: 12px;
+  color: #9ccc9c;
+  min-height: 1em;
+}
+
 .layer-item {
   display: flex;
   align-items: center;

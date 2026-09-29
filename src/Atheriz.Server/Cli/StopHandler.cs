@@ -63,36 +63,45 @@ public static class StopHandler
 
     // Verified kill for the pid-file path: the IsServerProcess gate runs
     // before signalling anything (a dropped gate would kill a foreign
-    // process on pid reuse); release is owner-verified. Returns the exit code.
-    internal static async Task<int> KillVerifiedPidAsync(int pid, int port, string pidFilePath)
+    // process on pid reuse); release is owner-verified. With force the
+    // caller accepts the pid-reuse risk and the gates are skipped.
+    // Returns the exit code.
+    internal static async Task<int> KillVerifiedPidAsync(int pid, int port, string pidFilePath, bool force = false)
     {
         Process? proc;
         try { proc = Process.GetProcessById(pid); }
         catch (ArgumentException) { Console.WriteLine("Process from PID file not found; removing stale PID file."); PidFile.ReleaseIfOwner(pidFilePath, pid); return 0; }
         catch (Exception ex) { Console.WriteLine($"Could not inspect PID {pid}: {ex.Message}"); return 1; }
-        if (!PidFile.IsServerProcess(pid))
+        if (!force)
         {
-            Console.WriteLine($"PID {pid} is not a verified Atheriz server process; refusing to terminate an unverified process.");
-            return 1;
+            if (!PidFile.IsServerProcess(pid))
+            {
+                Console.WriteLine($"PID {pid} is not a verified Atheriz server process; refusing to terminate an unverified process. Re-run with -f/--force to kill it anyway.");
+                return 1;
+            }
+            // Per-PID hold: the port being listened on by *someone* while this
+            // pid is a server must never implicate this pid. Fail closed.
+            if (!PidFile.IsProcessListeningOnPort(pid, port))
+            {
+                Console.WriteLine($"PID {pid} is not listening on port {port}; refusing to terminate an unverified process. Re-run with -f/--force to kill it anyway.");
+                return 1;
+            }
+            // Terminal re-verify (mirroring RestartHandler's escalation
+            // gate): the pid may have been recycled between the checks above
+            // and the kill below — confirm file and process still agree.
+            bool stillOurs = false;
+            try { stillOurs = PidFile.TryReadPid(pidFilePath) == pid && PidFile.IsServerProcess(pid); } catch { }
+            if (!stillOurs)
+            {
+                Console.WriteLine($"PID {pid} no longer names a verified server process; aborting kill. Re-run with -f/--force to kill it anyway.");
+                return 1;
+            }
         }
-        // Per-PID hold: the port being listened on by *someone* while this
-        // pid is a server must never implicate this pid. Fail closed.
-        if (!PidFile.IsProcessListeningOnPort(pid, port))
+        else
         {
-            Console.WriteLine($"PID {pid} is not listening on port {port}; refusing to terminate an unverified process.");
-            return 1;
+            Console.WriteLine($"Force-stopping PID {pid} without verification...");
         }
         Console.WriteLine($"Stopping server process with PID: {pid}...");
-        // Terminal re-verify (mirroring RestartHandler's escalation
-        // gate): the pid may have been recycled between the checks above
-        // and the kill below — confirm file and process still agree.
-        bool stillOurs = false;
-        try { stillOurs = PidFile.TryReadPid(pidFilePath) == pid && PidFile.IsServerProcess(pid); } catch { }
-        if (!stillOurs)
-        {
-            Console.WriteLine($"PID {pid} no longer names a verified server process; aborting kill.");
-            return 1;
-        }
         await ProcessHelper.TerminateAsync(proc).ConfigureAwait(false);
         if (File.Exists(pidFilePath))
         {
@@ -112,7 +121,38 @@ public static class StopHandler
         return 0;
     }
 
-    public static async Task<int> StopAsync(int? portOverride)
+    // Force kill for the no-pid-file path: signal every process holding a
+    // LISTEN socket on the port. Only reachable via -f/--force — the
+    // default path reports the stray listener instead of guessing.
+    internal static async Task<int> KillPortListenersAsync(int port, Func<int, List<int>>? findPids = null)
+    {
+        findPids ??= PidFile.FindPidsListeningOnPort;
+        var pids = findPids(port);
+        if (pids.Count == 0)
+        {
+            Console.WriteLine($"Port {port} is listening but no owning process could be identified; nothing killed.");
+            return 1;
+        }
+        bool allDead = true;
+        foreach (var pid in pids)
+        {
+            Process proc;
+            try { proc = Process.GetProcessById(pid); }
+            catch (ArgumentException) { continue; }
+            catch (Exception ex) { Console.WriteLine($"Could not inspect PID {pid}: {ex.Message}"); allDead = false; continue; }
+            Console.WriteLine($"Force-stopping listener PID {pid} on port {port}...");
+            await ProcessHelper.TerminateAsync(proc).ConfigureAwait(false);
+            try
+            {
+                if (!proc.HasExited) { Console.WriteLine($"Warning: PID {pid} still exists after kill."); allDead = false; }
+            }
+            catch { }
+        }
+        if (allDead) { Console.WriteLine("Done."); return 0; }
+        return 1;
+    }
+
+    public static async Task<int> StopAsync(int? portOverride, bool force = false)
     {
         // Single-generation snapshot: port/secret/savedir must come from
         // one settings load, never a mix across a concurrent invalidate.
@@ -134,18 +174,23 @@ public static class StopHandler
         var pidFilePath = PidFile.LocateServerPidFile(savePath);
         if (!File.Exists(pidFilePath))
         {
-            // No pid file, so no pid to verify: never signal. A listening
-            // port without an owner is reported, not killed.
+            // No pid file, so no pid to verify: never signal by default. A
+            // listening port without an owner is reported, not killed —
+            // unless force accepts the guess.
             if (PidFile.IsPortListening(port))
             {
-                Console.WriteLine($"Port {port} is listening but no pid file names its owner; refusing to terminate an unverified process.");
-                return 1;
+                if (!force)
+                {
+                    Console.WriteLine($"Port {port} is listening but no pid file names its owner; refusing to terminate an unverified process. Re-run with -f/--force to kill the listener anyway.");
+                    return 1;
+                }
+                return await KillPortListenersAsync(port).ConfigureAwait(false);
             }
             Console.WriteLine("No server process found.");
             return 1;
         }
         int? pid = PidFile.TryReadPid(pidFilePath);
         if (pid is null) { Console.WriteLine("Invalid PID file content."); return 1; }
-        return await KillVerifiedPidAsync(pid.Value, port, pidFilePath).ConfigureAwait(false);
+        return await KillVerifiedPidAsync(pid.Value, port, pidFilePath, force).ConfigureAwait(false);
     }
 }

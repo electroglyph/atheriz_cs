@@ -378,12 +378,16 @@ public partial class Node
     public override string GetDisplayName(GameObject? looker = null)
     {
         // read the looker's flag BEFORE taking the node lock (self->looker
-        // nesting under concurrency). The builder bit decides everything.
-        if (looker is null || !looker.IsBuilder) return "";
+        // nesting under concurrency). Builders see name plus coord;
+        // everyone else sees just the name.
+        bool isBuilder = looker is not null && looker.IsBuilder;
         SyncRoot.EnterReadLock();
         try
         {
-            return GameUtils.WrapTruecolor($"({Coord.Area},{Coord.X},{Coord.Y},{Coord.Z})\n", fg: 170);
+            var name = string.IsNullOrEmpty(DisplayName) ? Coord.ToString() : DisplayName;
+            if (!isBuilder) return name + "\n";
+            if (string.IsNullOrEmpty(DisplayName)) return GameUtils.WrapTruecolor($"({Coord.Area},{Coord.X},{Coord.Y},{Coord.Z})\n", fg: 170);
+            return name + " " + GameUtils.WrapTruecolor($"({Coord.Area},{Coord.X},{Coord.Y},{Coord.Z})\n", fg: 170);
         }
         finally { SyncRoot.ExitReadLock(); }
     }

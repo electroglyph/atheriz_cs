@@ -70,6 +70,13 @@ public class CliExitCodeTests
         Assert.Equal(1, await StopHandler.StopAsync(FindFreePort()));
     }
 
+    [Fact]
+    public async Task Stop_Force_NoServer_StillSignalsFailure()
+    {
+        // Force changes nothing when nobody listens: still a clean refusal.
+        Assert.Equal(1, await StopHandler.StopAsync(FindFreePort(), true));
+    }
+
     private static void SetEffectiveSettings(AtherizSettings? settings)
     {
         var f = typeof(StopHandler).GetField("_effectiveCache", BindingFlags.NonPublic | BindingFlags.Static);

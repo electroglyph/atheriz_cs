@@ -569,6 +569,7 @@ public partial class NodeHandler
                             {
                                 Coord = n.Coord,
                                 Name = n.Name,
+                                DisplayName = n.DisplayName,
                                 Desc = n.Desc,
                                 Theme = n.Theme,
                                 Symbol = n.Symbol,

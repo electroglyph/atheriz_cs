@@ -94,6 +94,24 @@ export class SelectionTool implements Tool, SelectionSync {
         return this.selectedCells.size > 0;
     }
 
+    /** Snapshot of the selected canvas cells ("col,row"). */
+    public getSelectedCells(): Set<string> {
+        return new Set(this.selectedCells);
+    }
+
+    /** Selection-change feed for side panels (e.g. the room editor follows
+     * the selected room). Fired from every committed mutation. */
+    public onSelectionChange(listener: (cells: Set<string>) => void): void {
+        this.selectionListeners.add(listener);
+    }
+
+    private selectionListeners = new Set<(cells: Set<string>) => void>();
+
+    private notifySelection(): void {
+        const snapshot = this.getSelectedCells();
+        for (const listener of this.selectionListeners) listener(snapshot);
+    }
+
     private getInkColor(cell: Cell): Color {
         const hasBg = cell.bg[0] !== -1;
         if (!cell.char || cell.char.trim() === '') {
@@ -117,6 +135,7 @@ export class SelectionTool implements Tool, SelectionSync {
             this.selectedCells = newCells;
         }
         ctx.renderer.setSelection(this.selectedCells);
+        this.notifySelection();
     }
 
     onMouseDown(ctx: ToolContext, cell: Point): void {
@@ -202,9 +221,7 @@ export class SelectionTool implements Tool, SelectionSync {
                     this.clearSelection(ctx);
                 }
             } else {
-                const raw = this.getRectCells(anchor, cell);
-                const filtered = this.filterNonEmpty(ctx, raw);
-                this.applyModifiers(ctx, filtered);
+                this.applyModifiers(ctx, this.getRectCells(anchor, cell));
             }
             this.anchor = null;
         } else if (mode === 'lasso') {
@@ -213,9 +230,7 @@ export class SelectionTool implements Tool, SelectionSync {
                 // mouseup before pendingMode existed): fall back to a
                 // rectangle from the anchor so we never dereference
                 // lassoPath[0].x on undefined.
-                const raw = this.getRectCells(anchor, cell);
-                const filtered = this.filterNonEmpty(ctx, raw);
-                this.applyModifiers(ctx, filtered);
+                this.applyModifiers(ctx, this.getRectCells(anchor, cell));
             } else {
                 const last = this.lassoPath[this.lassoPath.length - 1];
                 if (last && (cell.x !== last.x || cell.y !== last.y)) {
@@ -233,8 +248,7 @@ export class SelectionTool implements Tool, SelectionSync {
                     }
                 }
                 const raw = this.scanlineFill(this.lassoPath);
-                const filtered = this.filterNonEmpty(ctx, raw);
-                this.applyModifiers(ctx, filtered);
+                this.applyModifiers(ctx, raw);
             }
             this.anchor = null;
             this.lassoPath = [];
@@ -266,31 +280,13 @@ export class SelectionTool implements Tool, SelectionSync {
         return false;
     }
 
-    private filterNonEmpty(ctx: ToolContext, cells: Set<string>): Set<string> {
-        // room cells are meaningful even without ink — never drop them
-        const roomCells = ctx.renderer.getRoomCells?.() ?? new Set<string>();
-        const result = new Set<string>();
-        for (const k of cells) {
-            if (roomCells.has(k)) {
-                result.add(k);
-                continue;
-            }
-            const parsed = parseCellKey(k);
-            if (!parsed) continue;
-            const cell = ctx.state.getCell(parsed.col, parsed.row);
-            if (cell && ((cell.char && cell.char.trim() !== '') || (cell.bg[0] !== -1 && !(cell.bg[0] === 0 && cell.bg[1] === 0 && cell.bg[2] === 0)))) {
-                result.add(k);
-            }
-        }
-        return result;
-    }
-
     public clearSelection(ctx?: ToolContext): void {
         this.selectedCells = new Set();
         const renderer = ctx?.renderer ?? this.lastRenderer;
         if (renderer) {
             renderer.clearSelection();
         }
+        this.notifySelection();
     }
 
     /**
@@ -301,6 +297,7 @@ export class SelectionTool implements Tool, SelectionSync {
     public setSelection(cells: Set<string>): void {
         this.selectedCells = new Set(cells);
         this.lastRenderer?.setSelection(this.selectedCells);
+        this.notifySelection();
     }
 
     private getRectCells(from: Point, to: Point): Set<string> {
@@ -433,7 +430,7 @@ export class SelectionTool implements Tool, SelectionSync {
             }
         }
 
-        return this.filterNonEmpty(ctx, visited);
+        return visited;
     }
 
     private colorSelectCells(ctx: ToolContext, cell: Point, fuzzy: boolean): Set<string> {

@@ -102,6 +102,9 @@ public sealed class DrawCommand : Command
             {
                 ["x"] = node.Coord.X,
                 ["y"] = node.Coord.Y,
+                // The editor's name field, empty when unset — never the
+                // coord-derived Name, so blank stays blank on screen.
+                ["name"] = node.DisplayName,
                 ["desc"] = node.Desc,
                 ["exits"] = exits
             };

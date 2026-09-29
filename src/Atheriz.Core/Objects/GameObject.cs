@@ -27,6 +27,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // instances arranged before first hashing still hash equal.
     private string _name = "";
     private string _desc = "";
+    // Room display name for nodes (plain Node.Name stays coord-derived by
+    // pin; this is the settable name the editor and look show instead).
+    private string _displayName = "";
     private string _symbol = "X";
     private string _moveVerb = "walk";
     private List<string> _aliases = [];
@@ -147,6 +150,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public int Id { get => Read(() => _id); set => SetIfChanged(ref _id, value); }
     public virtual string Name { get => Read(() => _name); set => SetIfChanged(ref _name, value); }
     public string Desc { get => Read(() => _desc); set => SetIfChanged(ref _desc, value); }
+    public string DisplayName { get => Read(() => _displayName); set => SetIfChanged(ref _displayName, value); }
     public virtual string Symbol { get => Read(() => _symbol); set => SetIfChanged(ref _symbol, value); }
     public string MoveVerb { get => Read(() => _moveVerb); set => Write(() => { _moveVerb = value; _flags.IsModified = true; }); }
     public Privilege PrivilegeLevel { get => Read(() => _privilege); set => SetIfChanged(ref _privilege, value); }
@@ -726,6 +730,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     {
         o._name = dto.Name;
         o._desc = dto.Desc;
+        o._displayName = dto.DisplayName;
         o._aliases = new List<string>(dto.Aliases ?? []);
         o._tags = new HashSet<string>(dto.Tags ?? []);
         o._flags.IsPc = dto.IsPc;

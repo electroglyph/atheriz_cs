@@ -7,6 +7,7 @@ export class UndoStack {
     private currentState: CanvasState | null = null;
     
     private listeners: Set<() => void> = new Set();
+    private pushListeners: Set<() => void> = new Set();
 
     public setCurrentState(state: CanvasState) {
         this.currentState = state;
@@ -22,6 +23,7 @@ export class UndoStack {
         }
         this.redoStack = []; // Clear redo stack on new action
         this.notify();
+        for (const l of this.pushListeners) l();
     }
 
     public canUndo(): boolean {
@@ -90,6 +92,13 @@ export class UndoStack {
 
     public onChange(listener: () => void) {
         this.listeners.add(listener);
+    }
+
+    /** Fired after every push (which also clears the redo stack): lets
+     * non-canvas undo journals (e.g. room-exit edits) drop their redo
+     * entries in lockstep so stale depths can never false-match. */
+    public onPush(listener: () => void) {
+        this.pushListeners.add(listener);
     }
 
     private notify() {

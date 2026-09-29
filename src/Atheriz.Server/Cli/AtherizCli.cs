@@ -76,8 +76,12 @@ public static class AtherizCli
 
         var stop = new Command("stop", "Stop the AtheriZ server");
         var stopPort = PortOption();
-        stop.Options.Add(stopPort);
-        stop.SetAction((ParseResult pr) => StopHandler.StopAsync(pr.GetValue(stopPort)));
+        var stopForce = new Option<bool>("--force", "-f")
+        {
+            Description = "Kill without verifying the process is an Atheriz server; also kills the port listener when no pid file names it"
+        };
+        stop.Options.Add(stopPort); stop.Options.Add(stopForce);
+        stop.SetAction((ParseResult pr) => StopHandler.StopAsync(pr.GetValue(stopPort), pr.GetValue(stopForce)));
 
         var restart = new Command("restart", "Restart the AtheriZ server");
         var restartPort = PortOption(); var restartHost = HostOption(); var restartTelnet = TelnetPortOption(); var restartFg = ForegroundOption();

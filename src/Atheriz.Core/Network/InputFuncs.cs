@@ -30,7 +30,7 @@ public class InputFuncs
         // attribute name plus the method name when they differ (no triplication:
         // the derived lowercase form is covered by the comparer itself).
         var handlers = new Dictionary<string, InputHandler>(StringComparer.OrdinalIgnoreCase);
-        // explicit registration list — the eight known handlers bind
+        // explicit registration list — the twelve known handlers bind
         // with no per-construction reflection (method-group delegates).
         // Subclasses add extras by overriding RegisterExtraHandlers and
         // calling AddInputHandler explicitly (no attribute scanning).
@@ -42,6 +42,10 @@ public class InputFuncs
         AddInputHandler(handlers, "map_edit", MapEditHandler, nameof(MapEditHandler));
         AddInputHandler(handlers, "map_validate_moves", MapValidateMovesHandler, nameof(MapValidateMovesHandler));
         AddInputHandler(handlers, "map_edit_legend", MapEditLegendHandler, nameof(MapEditLegendHandler));
+        AddInputHandler(handlers, "map_edit_room", MapEditRoomHandler, nameof(MapEditRoomHandler));
+        AddInputHandler(handlers, "map_edit_exits", MapEditExitsHandler, nameof(MapEditExitsHandler));
+        AddInputHandler(handlers, "map_create_rooms", MapCreateRoomsHandler, nameof(MapCreateRoomsHandler));
+        AddInputHandler(handlers, "map_delete_rooms", MapDeleteRoomsHandler, nameof(MapDeleteRoomsHandler));
         RegisterExtraHandlers(handlers);
         return handlers;
     }
@@ -367,7 +371,7 @@ public class InputFuncs
     }
 
     // Shared seq coercion for the map_edit family (map_edit,
-    // map_validate_moves, map_edit_legend). Returns false on bad input; each
+    // map_validate_moves, map_edit_legend, map_edit_room, map_edit_exits, map_create_rooms, map_delete_rooms). Returns false on bad input; each
     // caller keeps its own failure path (silent return vs map_edit_reject).
     private static bool TryGetSeq(object? o, out int seq)
     {
@@ -420,7 +424,7 @@ public class InputFuncs
     }
 
     // Shared seq/key consume + reject-reply cycle for the map_edit family
-    // (map_edit, map_validate_moves, map_legend). Returns null after sending
+    // (map_edit, map_validate_moves, map_edit_legend, map_edit_room, map_edit_exits, map_create_rooms, map_delete_rooms). Returns null after sending
     // map_edit_reject; otherwise the consume result for Retry-ack or processing.
     private static Globals.MapEditResult? ConsumeOrReply(BaseConnection connection, string? key, int seq)
     {
@@ -826,5 +830,618 @@ public class InputFuncs
         mi.RenderLegend();
         connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
         connection.SendCommand("legend_ok", new List<object?>{ seq, result.NewKey }, []);
+    }
+
+    // Room-coordinate coercion for map_edit_room: int/long/JSON-number only,
+    // range-checked like the moves validator (a long outside Int32 rejects,
+    // never wraps to a wrong room).
+    private static bool TryGetRoomCoord(Dictionary<string, object?> room, string field, out int value)
+    {
+        value = 0;
+        if (!room.TryGetValue(field, out var o) || o is null) return false;
+        if (o is int i) { value = i; return true; }
+        if (o is long l)
+        {
+            if (l < int.MinValue || l > int.MaxValue) return false;
+            value = (int)l;
+            return true;
+        }
+        if (o is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var jv))
+        {
+            value = jv;
+            return true;
+        }
+        return false;
+    }
+
+    // Room-name/desc coercion for map_edit_room: an absent or null field
+    // leaves the node property unchanged; a present field must be a string
+    // within its length cap. Returns false (with the caller's reject already
+    // sent) on a wrong-typed or overlong value.
+    private static bool TakeRoomText(BaseConnection connection, Dictionary<string, object?> room, string field, int maxLength, out string? value)
+    {
+        value = null;
+        if (!room.TryGetValue(field, out var o) || o is null) return true;
+        if (o is not string s || s.Length > maxLength)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid room {field}." }, []);
+            return false;
+        }
+        value = s;
+        return true;
+    }
+
+    public void MapEditRoomHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
+    {
+        if (args.Count < 3)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room payload." }, []);
+            return;
+        }
+        var key = args[0] as string;
+        object? seqObj = args[1];
+        var roomObj = args[2];
+        if (key is null || roomObj is null)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room payload." }, []);
+            return;
+        }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room payload." }, []); return; }
+        var room = NormalizeDict(roomObj);
+        if (room is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room payload." }, []); return; }
+        if (!TryGetRoomCoord(room, "x", out var x) || !TryGetRoomCoord(room, "y", out var y))
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+            return;
+        }
+        if (!TakeRoomText(connection, room, "name", 200, out var name)) return;
+        if (!TakeRoomText(connection, room, "desc", 8000, out var desc)) return;
+        var result = ConsumeOrReply(connection, key, seq);
+        if (result is null) return;
+        // One verdict path for Processed and Retry alike: a duplicate
+        // delivery replays the verdict instead of blind-acking. Re-applying
+        // identical values is idempotent (and a room deleted since still
+        // denies), so a retry can never report a save that did not land —
+        // the moves handler replays its stored verdict the same way.
+        var node = NodeHandlerFactory().GetArea(result.Chain!.Area)?.GetGrid(result.Chain.Z)?.GetNode(x, y);
+        if (node is null)
+        {
+            // The key is already consumed: rotate it like moves_denied so the
+            // session survives (map_edit_reject would kill the client).
+            connection.SendCommand("room_denied", new List<object?>{ seq, result.NewKey, $"No room at ({x}, {y})." }, []);
+            return;
+        }
+        // Plain Node.Name stays coord-derived by pin; the editable room
+        // name is DisplayName. Desc always applies.
+        if (name is not null) node.DisplayName = name;
+        if (desc is not null) node.Desc = desc;
+        connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
+        connection.SendCommand("room_ok", new List<object?>{ seq, result.NewKey }, []);
+    }
+
+    // Single exit validation for map_edit_exits: name/aliases statics, coord
+    // triple. Returns the parsed link or null after sending the loud reject.
+    private bool TryParseExit(BaseConnection connection, object? exitObj, int index, out Objects.NodeLink? link)
+    {
+        link = null;
+        var dict = NormalizeDict(exitObj);
+        if (dict is null) { connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit at index {index}." }, []); return false; }
+        if (!dict.TryGetValue("name", out var nameObj) || nameObj is not string exitName || exitName.Length == 0 || exitName.Length > 64)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit name at index {index}." }, []);
+            return false;
+        }
+        List<string> aliases = [];
+        if (dict.TryGetValue("aliases", out var aliasesObj) && aliasesObj is not null)
+        {
+            var aliasList = ToList(aliasesObj);
+            if (aliasesObj is not List<object?> && !(aliasesObj is System.Text.Json.JsonElement jeArr && jeArr.ValueKind == System.Text.Json.JsonValueKind.Array))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit aliases at index {index}." }, []);
+                return false;
+            }
+            if (aliasList.Count > 16)
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ $"Too many exit aliases at index {index} (max 16)." }, []);
+                return false;
+            }
+            foreach (var a in aliasList)
+            {
+                if (a is not string alias || alias.Length == 0 || alias.Length > 32)
+                {
+                    connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit alias at index {index}." }, []);
+                    return false;
+                }
+                aliases.Add(alias);
+            }
+        }
+        if (!dict.TryGetValue("coord", out var coordObj) || coordObj is null)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit coord at index {index}." }, []);
+            return false;
+        }
+        var coordList = ToList(coordObj);
+        if (coordList.Count != 4)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit coord at index {index}." }, []);
+            return false;
+        }
+        var area = coordList[0] as string;
+        if (string.IsNullOrEmpty(area) || area.Length > 64)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit coord at index {index}." }, []);
+            return false;
+        }
+        if (!TryCoerceExitInt(coordList[1], out var cx) || !TryCoerceExitInt(coordList[2], out var cy) || !TryCoerceExitInt(coordList[3], out var cz))
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit coord at index {index}." }, []);
+            return false;
+        }
+        link = new Objects.NodeLink(exitName, new Coord(area, cx, cy, cz), aliases);
+        return true;
+    }
+
+    // Exit-coord int coercion: int/long/JSON-number only, range-checked
+    // (a long outside Int32 rejects, never wraps to a wrong room).
+    private static bool TryCoerceExitInt(object? o, out int value)
+    {
+        value = 0;
+        if (o is int i) { value = i; return true; }
+        if (o is long l)
+        {
+            if (l < int.MinValue || l > int.MaxValue) return false;
+            value = (int)l;
+            return true;
+        }
+        if (o is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var jv))
+        {
+            value = jv;
+            return true;
+        }
+        return false;
+    }
+
+    public void MapEditExitsHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
+    {
+        if (args.Count < 3)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []);
+            return;
+        }
+        var key = args[0] as string;
+        object? seqObj = args[1];
+        var roomObj = args[2];
+        if (key is null || roomObj is null)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []);
+            return;
+        }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []); return; }
+        var room = NormalizeDict(roomObj);
+        if (room is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []); return; }
+        if (!TryGetRoomCoord(room, "x", out var x) || !TryGetRoomCoord(room, "y", out var y))
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+            return;
+        }
+        if (!room.TryGetValue("exits", out var exitsObj) || exitsObj is null)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []);
+            return;
+        }
+        var exitList = ToList(exitsObj);
+        if (exitsObj is not List<object?> && !(exitsObj is System.Text.Json.JsonElement jeEx && jeEx.ValueKind == System.Text.Json.JsonValueKind.Array))
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []);
+            return;
+        }
+        if (exitList.Count > 64)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Too many exits (max 64)." }, []);
+            return;
+        }
+        List<Objects.NodeLink> parsed = new(exitList.Count);
+        HashSet<string> seenNames = new(StringComparer.OrdinalIgnoreCase);
+        for (int idx = 0; idx < exitList.Count; idx++)
+        {
+            if (!TryParseExit(connection, exitList[idx], idx, out var link)) return;
+            if (!seenNames.Add(link!.Name))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate exit name '{link.Name}'." }, []);
+                return;
+            }
+            parsed.Add(link);
+        }
+        var result = ConsumeOrReply(connection, key, seq);
+        if (result is null) return;
+        ApplyExitsVerdict(connection, seq, result.NewKey!, result.Chain!.Area, result.Chain.Z, x, y, parsed);
+    }
+
+    // Shared verdict for fresh and retried map_edit_exits: missing room or
+    // missing target denies with a rotated key (session survives); otherwise
+    // the full list replaces the room's links (remove-all then add, so
+    // renames and coord rewrites apply atomically) and acks map_ack +
+    // exits_ok. Re-applying the identical list is idempotent, so duplicate
+    // delivery replays the verdict instead of inventing a save.
+    private void ApplyExitsVerdict(BaseConnection connection, int seq, string newKey, string area, int z, int x, int y, List<Objects.NodeLink> parsed)
+    {
+        var nh = NodeHandlerFactory();
+        var node = nh.GetArea(area)?.GetGrid(z)?.GetNode(x, y);
+        if (node is null)
+        {
+            connection.SendCommand("exits_denied", new List<object?>{ seq, newKey, $"No room at ({x}, {y})." }, []);
+            return;
+        }
+        foreach (var link in parsed)
+        {
+            var target = nh.GetArea(link.Coord.Area)?.GetGrid(link.Coord.Z)?.GetNode(link.Coord.X, link.Coord.Y);
+            if (target is null)
+            {
+                connection.SendCommand("exits_denied", new List<object?>{ seq, newKey, $"No room at {link.Coord} for exit '{link.Name}'." }, []);
+                return;
+            }
+        }
+        foreach (var old in node.GetLinks()) node.RemoveLink(old.Name);
+        foreach (var link in parsed) node.AddLink(new Objects.NodeLink(link.Name, link.Coord, link.Aliases));
+        connection.SendCommand("map_ack", new List<object?>{ seq, newKey }, []);
+        connection.SendCommand("exits_ok", new List<object?>{ seq, newKey }, []);
+    }
+
+    // Room-creation batch for map_create_rooms: payload
+    // {rooms:[{x,y,name?,desc?}], exits:[{x,y,exits:[...]}]}. Shape errors
+    // fail loud (map_edit_reject, session dies — same as the sibling
+    // editors); semantic errors deny with a rotated key (session survives).
+    // Validation runs fully before any mutation, so a deny never leaves a
+    // half-created batch behind.
+    public void MapCreateRoomsHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
+    {
+        if (args.Count < 3)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            return;
+        }
+        var key = args[0] as string;
+        object? seqObj = args[1];
+        var payloadObj = args[2];
+        if (key is null || payloadObj is null)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            return;
+        }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []); return; }
+        var payload = NormalizeDict(payloadObj);
+        if (payload is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []); return; }
+        if (!payload.TryGetValue("rooms", out var roomsObj) || roomsObj is null
+            || (roomsObj is not List<object?> && !(roomsObj is System.Text.Json.JsonElement jeRooms && jeRooms.ValueKind == System.Text.Json.JsonValueKind.Array)))
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            return;
+        }
+        var roomList = ToList(roomsObj);
+        if (roomList.Count == 0)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            return;
+        }
+        if (roomList.Count > 256)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Too many rooms (max 256)." }, []);
+            return;
+        }
+        List<(int x, int y, string? name, string? desc)> rooms = new(roomList.Count);
+        HashSet<(int, int)> seenRooms = [];
+        for (int idx = 0; idx < roomList.Count; idx++)
+        {
+            var dict = NormalizeDict(roomList[idx]);
+            if (dict is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []); return; }
+            if (!TryGetRoomCoord(dict, "x", out var x) || !TryGetRoomCoord(dict, "y", out var y))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+                return;
+            }
+            if (!seenRooms.Add((x, y)))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate room at ({x}, {y})." }, []);
+                return;
+            }
+            if (!TakeRoomText(connection, dict, "name", 200, out var name)) return;
+            if (!TakeRoomText(connection, dict, "desc", 8000, out var desc)) return;
+            rooms.Add((x, y, name, desc));
+        }
+        if (!payload.TryGetValue("exits", out var exitsObj) || exitsObj is null
+            || (exitsObj is not List<object?> && !(exitsObj is System.Text.Json.JsonElement jeEx && jeEx.ValueKind == System.Text.Json.JsonValueKind.Array)))
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            return;
+        }
+        var exitsList = ToList(exitsObj);
+        List<(int x, int y, List<Objects.NodeLink> links)> exits = new(exitsList.Count);
+        HashSet<(int, int)> seenExits = [];
+        for (int idx = 0; idx < exitsList.Count; idx++)
+        {
+            var dict = NormalizeDict(exitsList[idx]);
+            if (dict is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []); return; }
+            if (!TryGetRoomCoord(dict, "x", out var x) || !TryGetRoomCoord(dict, "y", out var y))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+                return;
+            }
+            if (!seenExits.Add((x, y)))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate exits for room ({x}, {y})." }, []);
+                return;
+            }
+            if (!dict.TryGetValue("exits", out var roomExitsObj) || roomExitsObj is null
+                || (roomExitsObj is not List<object?> && !(roomExitsObj is System.Text.Json.JsonElement jeRe && jeRe.ValueKind == System.Text.Json.JsonValueKind.Array)))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+                return;
+            }
+            var roomExitList = ToList(roomExitsObj);
+            if (roomExitList.Count > 64)
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ "Too many exits (max 64)." }, []);
+                return;
+            }
+            List<Objects.NodeLink> parsed = new(roomExitList.Count);
+            HashSet<string> seenNames = new(StringComparer.OrdinalIgnoreCase);
+            for (int eidx = 0; eidx < roomExitList.Count; eidx++)
+            {
+                if (!TryParseExit(connection, roomExitList[eidx], eidx, out var link)) return;
+                if (!seenNames.Add(link!.Name))
+                {
+                    connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate exit name '{link.Name}'." }, []);
+                    return;
+                }
+                parsed.Add(link);
+            }
+            exits.Add((x, y, parsed));
+        }
+        var result = ConsumeOrReply(connection, key, seq);
+        if (result is null) return;
+        ApplyCreateVerdict(connection, seq, result.NewKey!, result.Chain!.Area, result.Chain.Z, rooms, exits);
+    }
+
+    // Shared verdict for fresh and retried map_create_rooms: every exit
+    // entry and target must resolve against the post-creation world
+    // (existing rooms plus this batch) before anything mutates, so a deny
+    // reports with a rotated key and no partial apply. Missing rooms are
+    // created (existing coords are skipped, making duplicate delivery an
+    // idempotent replay like the room/exits verdicts), exit replacements
+    // apply remove-all then add, and success acks map_ack + create_ok.
+    private void ApplyCreateVerdict(BaseConnection connection, int seq, string newKey, string area, int z,
+        List<(int x, int y, string? name, string? desc)> rooms, List<(int x, int y, List<Objects.NodeLink> links)> exits)
+    {
+        var nh = NodeHandlerFactory();
+        HashSet<(int, int)> creates = new(rooms.Select(r => (r.x, r.y)));
+        bool roomKnown(int x, int y) =>
+            creates.Contains((x, y)) || nh.GetArea(area)?.GetGrid(z)?.GetNode(x, y) is not null;
+        foreach (var (x, y, _) in exits)
+        {
+            if (!roomKnown(x, y))
+            {
+                connection.SendCommand("create_denied", new List<object?>{ seq, newKey, $"No room at ({x}, {y})." }, []);
+                return;
+            }
+        }
+        foreach (var (_, _, links) in exits)
+        {
+            foreach (var link in links)
+            {
+                var t = link.Coord;
+                var target = nh.GetArea(t.Area)?.GetGrid(t.Z)?.GetNode(t.X, t.Y);
+                if (target is null && !(t.Area == area && t.Z == z && creates.Contains((t.X, t.Y))))
+                {
+                    connection.SendCommand("create_denied", new List<object?>{ seq, newKey, $"No room at {link.Coord} for exit '{link.Name}'." }, []);
+                    return;
+                }
+            }
+        }
+        foreach (var (x, y, name, desc) in rooms)
+        {
+            var node = nh.GetArea(area)?.GetGrid(z)?.GetNode(x, y);
+            if (node is null)
+            {
+                node = new Objects.Node(new Coord(area, x, y, z), desc: desc ?? "New room.");
+                nh.AddNode(node);
+            }
+            else if (desc is not null)
+            {
+                node.Desc = desc;
+            }
+            if (name is not null) node.DisplayName = name;
+        }
+        foreach (var (x, y, links) in exits)
+        {
+            var node = nh.GetArea(area)?.GetGrid(z)?.GetNode(x, y);
+            if (node is null) continue;
+            foreach (var old in node.GetLinks()) node.RemoveLink(old.Name);
+            foreach (var link in links) node.AddLink(new Objects.NodeLink(link.Name, link.Coord, link.Aliases));
+        }
+        // New rooms join the in-game map the way dig draws them: without a
+        // grid cell a room falls outside the rendered bounds and the
+        // character symbol has nowhere to land. Empty cells only — drawn
+        // art is never overwritten. Auxiliary to the ack (rooms and exits
+        // already applied), so a map failure is logged, never fatal.
+        try
+        {
+            var mi = MapHandlerFactory().EnsureMapInfo(area, z);
+            using (mi.BatchUpdate())
+            {
+                var roomPH = AtherizSettings.Global.RoomPlaceholder;
+                foreach (var (x, y, _, _) in rooms)
+                    mi.SetPreCellIfAbsent((x, y), roomPH);
+            }
+        }
+        catch (Exception mapEx) { AtherizLogger.LogDebug("Suppressed MapCreateRoomsHandler map stamp: " + mapEx.Message, "InputFuncs"); }
+        connection.SendCommand("map_ack", new List<object?>{ seq, newKey }, []);
+        connection.SendCommand("create_ok", new List<object?>{ seq, newKey }, []);
+    }
+
+    // Room-deletion batch for map_delete_rooms: payload
+    // {rooms:[{x,y,fallback?:{x,y}}]}. Shape errors fail loud
+    // (map_edit_reject, session dies — same as the sibling editors);
+    // semantic errors deny with a rotated key (session survives).
+    // Missing rooms are skipped, making duplicate delivery an idempotent
+    // replay like the create verdict; everything else validates fully
+    // before any mutation, so a deny never leaves a half-deleted batch
+    // behind except rooms already evacuated and removed one by one (each
+    // a complete deletion on its own — retry converges via skip-missing).
+    public void MapDeleteRoomsHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
+    {
+        if (args.Count < 3)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []);
+            return;
+        }
+        var key = args[0] as string;
+        object? seqObj = args[1];
+        var payloadObj = args[2];
+        if (key is null || payloadObj is null)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []);
+            return;
+        }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []); return; }
+        var payload = NormalizeDict(payloadObj);
+        if (payload is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []); return; }
+        if (!payload.TryGetValue("rooms", out var roomsObj) || roomsObj is null
+            || (roomsObj is not List<object?> && !(roomsObj is System.Text.Json.JsonElement jeRooms && jeRooms.ValueKind == System.Text.Json.JsonValueKind.Array)))
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []);
+            return;
+        }
+        var roomList = ToList(roomsObj);
+        if (roomList.Count == 0)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []);
+            return;
+        }
+        if (roomList.Count > 256)
+        {
+            connection.SendCommand("map_edit_reject", new List<object?>{ "Too many rooms (max 256)." }, []);
+            return;
+        }
+        List<(int x, int y, int fx, int fy, bool hasFallback)> rooms = new(roomList.Count);
+        HashSet<(int, int)> seenRooms = [];
+        for (int idx = 0; idx < roomList.Count; idx++)
+        {
+            var dict = NormalizeDict(roomList[idx]);
+            if (dict is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []); return; }
+            if (!TryGetRoomCoord(dict, "x", out var x) || !TryGetRoomCoord(dict, "y", out var y))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+                return;
+            }
+            if (!seenRooms.Add((x, y)))
+            {
+                connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate room at ({x}, {y})." }, []);
+                return;
+            }
+            int fx = 0, fy = 0;
+            bool hasFallback = false;
+            if (dict.TryGetValue("fallback", out var fallbackObj) && fallbackObj is not null)
+            {
+                var fallback = NormalizeDict(fallbackObj);
+                if (fallback is null || !TryGetRoomCoord(fallback, "x", out fx) || !TryGetRoomCoord(fallback, "y", out fy))
+                {
+                    connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid fallback coordinates." }, []);
+                    return;
+                }
+                hasFallback = true;
+            }
+            rooms.Add((x, y, fx, fy, hasFallback));
+        }
+        var result = ConsumeOrReply(connection, key, seq);
+        if (result is null) return;
+        ApplyDeleteVerdict(connection, seq, result.NewKey!, result.Chain!.Area, result.Chain.Z, rooms);
+    }
+
+    // Shared verdict for fresh and retried map_delete_rooms: missing rooms
+    // are skipped (idempotent replay), but door endpoints and fallback
+    // shape deny with a rotated key before anything mutates. Occupied rooms
+    // evacuate to their fallback (bounded sweeps, fail closed like the door
+    // placement); rooms without a usable fallback deny instead of stranding
+    // anyone. Removal unlinks the grid entry, marks the node deleted, tears
+    // down tickables, and journals the row death so the checkpoint drops it
+    // (a bare registry eviction would resurrect the room on the next load).
+    // Inbound links from surviving rooms are stripped as part of the
+    // deletion — a deleted room takes its own links with it, and survivors
+    // must not point at rooms that no longer exist. Success acks
+    // map_ack + delete_ok.
+    private void ApplyDeleteVerdict(BaseConnection connection, int seq, string newKey, string area, int z,
+        List<(int x, int y, int fx, int fy, bool hasFallback)> rooms)
+    {
+        var nh = NodeHandlerFactory();
+        HashSet<Coord> targets = new(rooms.Select(r => new Coord(area, r.x, r.y, z)));
+        List<(Objects.Node node, Coord fallback, bool hasFallback)> plan = new(rooms.Count);
+        foreach (var (x, y, fx, fy, hasFallback) in rooms)
+        {
+            var node = nh.GetArea(area)?.GetGrid(z)?.GetNode(x, y);
+            if (node is null) continue;
+            var doors = nh.GetDoors(new Coord(area, x, y, z));
+            if (doors is not null && doors.Count > 0)
+            {
+                connection.SendCommand("delete_denied", new List<object?>{ seq, newKey, $"Room at ({x}, {y}) is a door endpoint; remove the door first." }, []);
+                return;
+            }
+            if (hasFallback && targets.Contains(new Coord(area, fx, fy, z)))
+            {
+                connection.SendCommand("delete_denied", new List<object?>{ seq, newKey, $"Fallback room at ({fx}, {fy}) is also being deleted." }, []);
+                return;
+            }
+            plan.Add((node, new Coord(area, fx, fy, z), hasFallback));
+        }
+        foreach (var (node, fallback, hasFallback) in plan)
+        {
+            var c = node.Coord;
+            if (node.GetContents().Count > 0)
+            {
+                Objects.Node? fallbackNode = null;
+                if (hasFallback) fallbackNode = nh.GetArea(fallback.Area)?.GetGrid(fallback.Z)?.GetNode(fallback.X, fallback.Y);
+                if (fallbackNode is null)
+                {
+                    connection.SendCommand("delete_denied", new List<object?>{ seq, newKey, $"Room at ({c.X}, {c.Y}) is occupied." }, []);
+                    return;
+                }
+                for (int sweep = 0; sweep < 3; sweep++)
+                {
+                    var occupants = node.GetContents();
+                    if (occupants.Count == 0) break;
+                    foreach (var obj in occupants)
+                    {
+                        obj.MoveTo(fallbackNode, force: true, announce: false);
+                        try { obj.Msg($"A room is being deleted where you stand; you are moved to {fallbackNode.Name}."); } catch (Exception) { }
+                    }
+                }
+                if (node.GetContents().Count != 0)
+                {
+                    connection.SendCommand("delete_denied", new List<object?>{ seq, newKey, $"Could not clear the room at ({c.X}, {c.Y}); occupants remain." }, []);
+                    return;
+                }
+            }
+            node.IsDeleted = true;
+            nh.RemoveNode(c);
+            if (!node.IsTemporary) Globals.ObjectRegistry.NoteDeleted(node.Id);
+            if (node.IsTickable)
+            {
+                try { Globals.GlobalServices.TryGetTicker()?.RemoveCoro(node.AtTick, node.TickSeconds); } catch (Exception) { }
+            }
+        }
+        // Survivors must not point at rooms that no longer exist: strip
+        // inbound links to the deleted coords (snapshot first — removal
+        // during enumeration would invalidate it).
+        var holders = Globals.ObjectRegistry.FilterBy(o => o is Objects.Node);
+        foreach (var holder in holders)
+        {
+            if (holder is not Objects.Node holderNode || targets.Contains(holderNode.Coord)) continue;
+            foreach (var link in holderNode.GetLinks().ToList())
+            {
+                if (targets.Contains(link.Coord))
+                    holderNode.RemoveLink(link.Name);
+            }
+        }
+        connection.SendCommand("map_ack", new List<object?>{ seq, newKey }, []);
+        connection.SendCommand("delete_ok", new List<object?>{ seq, newKey }, []);
     }
 }

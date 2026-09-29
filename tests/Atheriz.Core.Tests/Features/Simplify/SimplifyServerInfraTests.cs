@@ -340,10 +340,10 @@ public class NoNativeLibcTests
 [Collection("Ported")]
 public class VerifiedKillFunnelTests
 {
-    private static async Task<int> KillVerifiedPid(int pid, int port, string pidFilePath)
+    private static async Task<int> KillVerifiedPid(int pid, int port, string pidFilePath, bool force = false)
     {
         var m = typeof(StopHandler).GetMethod("KillVerifiedPidAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
-        return await (Task<int>)m.Invoke(null, [pid, port, pidFilePath])!;
+        return await (Task<int>)m.Invoke(null, [pid, port, pidFilePath, force])!;
     }
 
     private static async Task<(int Code, string Output)> CaptureOut(Func<Task<int>> fn)
@@ -353,6 +353,18 @@ public class VerifiedKillFunnelTests
         Console.SetOut(sw);
         try { return (await fn(), sw.ToString()); }
         finally { Console.SetOut(orig); }
+    }
+
+    // Long-running child from OS-guaranteed binaries only: ping loops
+    // forever on Windows with -t, sleep parks on POSIX. No python, no
+    // node, no listener — the caller decides what the pid stands in for.
+    private static Process? StartSleeper()
+    {
+        var psi = OperatingSystem.IsWindows()
+            ? new ProcessStartInfo("ping", "-t 127.0.0.1")
+            : new ProcessStartInfo("sleep", "120");
+        psi.RedirectStandardOutput = true;
+        return Process.Start(psi);
     }
 
     [Fact]
@@ -387,11 +399,104 @@ public class VerifiedKillFunnelTests
     public void StopPath_UsesTheFunnel()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "StopHandler.cs");
-        Assert.Equal(1, SourceScan.Count(src, "internal static async Task<int> KillVerifiedPidAsync("));
+        Assert.Equal(1, SourceScan.Count(src, "internal static async Task<int> KillVerifiedPidAsync(int pid, int port, string pidFilePath, bool force = false)"));
         Assert.Equal(2, SourceScan.Count(src, "KillVerifiedPidAsync(")); // def + pid-file call site
-        Assert.Contains("KillVerifiedPidAsync(pid.Value, port, pidFilePath)", src);
+        Assert.Contains("KillVerifiedPidAsync(pid.Value, port, pidFilePath, force)", src);
         Assert.Contains("IsProcessListeningOnPort(pid, port)", src);
         Assert.DoesNotContain("pidFilePath: null", src);
+    }
+
+    [Fact]
+    public async Task ForceTrue_KillsForeignLivePid()
+    {
+        // Force accepts the pid-reuse risk: a live non-server process named
+        // by the pid file is signalled. `sleep` is POSIX-only; skip elsewhere.
+        if (OperatingSystem.IsWindows()) return;
+        using var sleeper = Process.Start(new ProcessStartInfo("sleep", "120") { RedirectStandardOutput = true });
+        Assert.NotNull(sleeper);
+        var pidFile = Path.GetTempFileName();
+        File.WriteAllText(pidFile, sleeper.Id.ToString());
+        try
+        {
+            var (code, output) = await CaptureOut(() => KillVerifiedPid(sleeper.Id, 59993, pidFile, true));
+            Assert.Equal(0, code);
+            Assert.Contains("Force-stopping", output);
+            Assert.True(sleeper.WaitForExit(10000));
+            Assert.False(File.Exists(pidFile));
+        }
+        finally
+        {
+            try { if (!sleeper.HasExited) sleeper.Kill(); } catch { }
+            try { File.Delete(pidFile); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task ForceTrue_DeadPid_RemovesStaleClaim()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "atheriz_killforce_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var pidFile = Path.Combine(dir, "server.pid");
+        File.WriteAllText(pidFile, (int.MaxValue - 10).ToString());
+        try
+        {
+            var (code, output) = await CaptureOut(() => KillVerifiedPid(int.MaxValue - 10, 59994, pidFile, true));
+            Assert.Equal(0, code);
+            Assert.Contains("removing stale PID file", output);
+            Assert.False(File.Exists(pidFile));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void FindPidsListeningOnPort_FindsSelfListener()
+    {
+        // /proc-based discovery is Linux-only; elsewhere it reports empty.
+        if (!OperatingSystem.IsLinux()) return;
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            Assert.Contains(Process.GetCurrentProcess().Id, PidFile.FindPidsListeningOnPort(port));
+        }
+        finally { listener.Stop(); }
+    }
+
+    [Fact]
+    public async Task KillPortListeners_KillsDiscoveredPids()
+    {
+        // The reported scenario: something listens, no pid file names it.
+        // Discovery is injected and names a real child process; the kill
+        // path must terminate it. The scan itself is pinned separately by
+        // FindPidsListeningOnPort_FindsSelfListener, so no live listener,
+        // no listener scan, and no external tooling is needed here — just
+        // an OS-guaranteed sleeper (ping on Windows, sleep elsewhere).
+        using var stray = StartSleeper();
+        Assert.NotNull(stray);
+        try
+        {
+            var meth = typeof(StopHandler).GetMethod("KillPortListenersAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
+            Func<int, List<int>> find = _ => new List<int> { stray.Id };
+            var (code, output) = await CaptureOut(async () => await (Task<int>)meth.Invoke(null, [59997, find])!);
+            Assert.Equal(0, code);
+            Assert.Contains("Force-stopping listener", output);
+            Assert.True(stray.WaitForExit(10000));
+        }
+        finally
+        {
+            try { if (!stray.HasExited) stray.Kill(); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task KillPortListeners_EmptyDiscovery_KillsNothing()
+    {
+        var meth = typeof(StopHandler).GetMethod("KillPortListenersAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
+        Func<int, List<int>> find = _ => new List<int>();
+        var (code, output) = await CaptureOut(async () => await (Task<int>)meth.Invoke(null, [59996, find])!);
+        Assert.Equal(1, code);
+        Assert.Contains("nothing killed", output);
     }
 }
 

@@ -12,6 +12,7 @@ public sealed record GameObjectDto
     public int SchemaVersion { get; set; } = 1;
     public string Type { get; set; } = "object"; // object|account|channel|script|node
     public string Name { get; set; } = "";
+    public string DisplayName { get; set; } = "";
     public string Desc { get; set; } = "";
     public List<string> Aliases { get; set; } = [];
     public HashSet<string> Tags { get; set; } = [];

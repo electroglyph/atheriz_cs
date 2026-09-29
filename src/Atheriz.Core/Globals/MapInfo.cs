@@ -534,6 +534,22 @@ public class MapInfo
     {
         using (WriteScope()) { _preGrid[coord] = symbol; }
     }
+    // Room-creation stamp: check and set under one scope so a concurrent
+    // draw cannot slip between them (a lost race would overwrite drawn
+    // art with a placeholder). Render scheduling matches UpdateGrid.
+    public bool SetPreCellIfAbsent((int X, int Y) coord, string symbol)
+    {
+        bool stamped;
+        bool shouldRender;
+        using (WriteScope())
+        {
+            stamped = !_preGrid.ContainsKey(coord);
+            if (stamped) { _preGrid[coord] = symbol; MapChanged = true; IsModified = true; }
+            shouldRender = stamped && _batchUpdate == 0;
+        }
+        if (shouldRender) Render(true);
+        return stamped;
+    }
     public void RemovePreCell((int X, int Y) coord)
     {
         using (WriteScope()) { _preGrid.Remove(coord); }

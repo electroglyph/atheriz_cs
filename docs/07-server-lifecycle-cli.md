@@ -108,7 +108,8 @@ Phase (b) is the verified kill. It reads the pid claim, confirms the pid really 
 
 Two refusal cases protect you from shooting the wrong process:
 
-- No pid file but something is listening: stop refuses. Reconcile the stray listener by hand instead of letting the tool guess.
+- No pid file but something is listening: stop refuses. Reconcile the stray listener by hand instead of letting the tool guess — or accept the guess explicitly with `./atheriz.sh stop -f`, which kills every process holding the port listener.
+- A pid file naming a process that fails verification (not a server, not listening, recycled pid): stop refuses. `./atheriz.sh stop -f` kills the named pid without verification.
 - Never run a stray `kill` without these checks. `kill $(cat save/server.pid)` is the last-resort escape hatch in the triage checklist (§12), not the normal path.
 
 ## 4. `restart`: stop, wait for the ports, start again

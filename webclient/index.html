@@ -125,6 +125,8 @@
           </div>
           <div class="separator"></div>
           <button id="btn-edit-legend" title="Edit map legend">🏷️ Edit Legend</button>
+          <button id="btn-create-rooms" title="Create rooms from selection" style="display:none">🏠 Create Rooms</button>
+          <button id="btn-delete-rooms" title="Delete selected rooms" style="display:none">🗑️ Delete Rooms</button>
         </div>
       </header>
 
@@ -195,6 +197,8 @@
         <aside id="right-sidebar">
           <h3>Layers</h3>
           <div id="layer-manager-container"></div>
+          <h3>Room</h3>
+          <div id="room-editor-container"></div>
         </aside>
       </div>
     </div>
@@ -428,6 +432,17 @@
         <p id="move-denied-modal-message" style="color: #ffdede; font-size: 14px; line-height: 1.4; white-space: pre-wrap; background: #2a1212; border: 1px solid #662222; border-radius: 4px; padding: 10px 12px;"></p>
         <div class="modal-actions" style="margin-top: 16px;">
           <button id="move-denied-modal-ok" class="primary" style="background: #cc2222; border-color: #aa1111;">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="confirm-modal" class="modal hidden" style="z-index: 3000;">
+      <div class="modal-content" style="width: 420px; max-width: 90vw;">
+        <h3 style="display: flex; align-items: center; gap: 8px; font-size: 18px; margin-bottom: 12px;">Confirm</h3>
+        <p id="confirm-modal-message" style="font-size: 14px; line-height: 1.4; white-space: pre-wrap;"></p>
+        <div class="modal-actions" style="margin-top: 16px;">
+          <button id="confirm-modal-cancel">Cancel</button>
+          <button id="confirm-modal-ok" class="primary">OK</button>
         </div>
       </div>
     </div>

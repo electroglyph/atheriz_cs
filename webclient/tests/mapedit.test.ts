@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WebSocketLike } from '../src/webclient/connection';
 import { CanvasState } from '../src/state/CanvasState';
-import { loadMapPayload, logRoomData, MapEditSession, MapEditPayload } from '../src/mapedit';
+import { loadMapPayload, logRoomData, MapEditSession, MapEditPayload, formatExitCoord, parseExitCoord } from '../src/mapedit';
 
 class FakeSocket implements WebSocketLike {
     readyState = 0;
@@ -144,6 +144,20 @@ describe('logRoomData', () => {
         const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
         logRoomData({ area: 'TestArea', z: 0, grid: [] });
         expect(spy).toHaveBeenCalledWith('No rooms found.');
+        spy.mockRestore();
+    });
+
+    it('includes the room name when the payload carries one', () => {
+        const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        logRoomData({
+            area: 'TestArea',
+            z: 0,
+            grid: [],
+            rooms: [
+                { x: 0, y: 0, name: 'Hall', desc: 'A hall.', exits: [] },
+            ],
+        });
+        expect(spy).toHaveBeenCalledWith('(0, 0) Hall: A hall. | exits: none');
         spy.mockRestore();
     });
 });
@@ -343,6 +357,169 @@ describe('MapEditSession', () => {
     });
 });
 
+describe('MapEditSession room saves', () => {
+    function makeRoomSession() {
+        const holder = makeSocketHolder();
+        const events: string[] = [];
+        const session = new MapEditSession('K0', makeCanvas(), { originX: 0, originY: 0 }, holder.createSocket);
+        session.onEvent((event) => events.push(
+            event.type === 'room_denied' ? `room_denied:${event.reason}` : event.type === 'error' ? `error:${event.message}` : event.type
+        ));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+        return { holder, events, session };
+    }
+
+    it('sends a room save with the rotated key and emits room_saved on map_ack', () => {
+        const { holder, events, session } = makeRoomSession();
+        session.saveRoom(2, 3, 'Hall', 'A dusty hall.');
+        expect(holder.socket.sent[1]).toBe(
+            '["map_edit_room",["K1",1,{"x":2,"y":3,"name":"Hall","desc":"A dusty hall."}],{}]'
+        );
+        ack(holder.socket, 1, 'K2');
+        expect(events).toEqual(['synced', 'room_saved', 'synced']);
+        session.saveRoom(2, 3, 'Hall', 'Updated.');
+        expect(holder.socket.sent[2]).toBe(
+            '["map_edit_room",["K2",2,{"x":2,"y":3,"name":"Hall","desc":"Updated."}],{}]'
+        );
+        session.dispose();
+    });
+
+    it('emits room_saved on room_ok', () => {
+        const { holder, events, session } = makeRoomSession();
+        session.saveRoom(2, 3, 'Hall', 'A dusty hall.');
+        holder.socket.onmessage?.(new MessageEvent('message', { data: '["room_ok",[1,"K2"],{}]' }));
+        expect(events).toEqual(['synced', 'room_saved', 'synced']);
+        session.saveRoom(2, 3, 'Hall', 'Again.');
+        expect(holder.socket.sent[2]).toBe(
+            '["map_edit_room",["K2",2,{"x":2,"y":3,"name":"Hall","desc":"Again."}],{}]'
+        );
+        session.dispose();
+    });
+
+    it('emits room_denied, rotates the key, and keeps the session alive', () => {
+        const { holder, events, session } = makeRoomSession();
+        session.saveRoom(9, 9, 'Nowhere', 'No room.');
+        holder.socket.onmessage?.(
+            new MessageEvent('message', { data: '["room_denied",[1,"K2","No room at (9, 9)."],{}]' })
+        );
+        expect(events).toEqual(['synced', 'room_denied:No room at (9, 9).']);
+        session.saveRoom(2, 3, 'Hall', 'Recovered.');
+        expect(holder.socket.sent[2]).toBe(
+            '["map_edit_room",["K2",2,{"x":2,"y":3,"name":"Hall","desc":"Recovered."}],{}]'
+        );
+        session.dispose();
+    });
+
+    it('rejects non-integer coords without sending', () => {
+        const { holder, events, session } = makeRoomSession();
+        session.saveRoom(1.5, 3, 'Hall', 'A dusty hall.');
+        expect(events).toEqual(['synced', 'error:Invalid room coordinates.']);
+        expect(holder.socket.sent).toEqual(['["map_edit",["K0",0,[]],{}]']);
+        session.dispose();
+    });
+
+    it('queues a room save behind an in-flight edit and rotates keys in order', () => {
+        vi.useFakeTimers();
+        const holder = makeSocketHolder();
+        const events: string[] = [];
+        const canvas = makeCanvas();
+        const session = new MapEditSession('K0', canvas, { originX: 0, originY: 0 }, holder.createSocket);
+        session.onEvent((event) => events.push(event.type));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+        canvas.setCell(0, 0, { char: 'X', fg: [0, 0, 0], bg: [-1, -1, -1] });
+        session.scheduleSync();
+        vi.advanceTimersByTime(200);
+        session.saveRoom(2, 3, 'Hall', 'A dusty hall.');
+        expect(holder.socket.sent.length).toBe(2);
+        ack(holder.socket, 1, 'K2');
+        expect(holder.socket.sent[2]).toBe(
+            '["map_edit_room",["K2",2,{"x":2,"y":3,"name":"Hall","desc":"A dusty hall."}],{}]'
+        );
+        ack(holder.socket, 2, 'K3');
+        expect(events).toEqual(['synced', 'synced', 'room_saved', 'synced']);
+        session.dispose();
+        vi.useRealTimers();
+    });
+});
+
+describe('exit coord text', () => {
+    it('round-trips through format and parse', () => {
+        expect(formatExitCoord('TestArea', 5, -3, 0)).toBe('(TestArea,5,-3,0)');
+        expect(parseExitCoord('(TestArea,5,-3,0)')).toEqual({ area: 'TestArea', x: 5, y: -3, z: 0 });
+        expect(parseExitCoord('  (TestArea,5,-3,0)  ')).toEqual({ area: 'TestArea', x: 5, y: -3, z: 0 });
+    });
+
+    it('rejects malformed coord text', () => {
+        expect(parseExitCoord('TestArea 5,-3 (z=0)')).toBeNull();
+        expect(parseExitCoord('(TestArea,5,-3)')).toBeNull();
+        expect(parseExitCoord('(TestArea,5,-3,0,1)')).toBeNull();
+        expect(parseExitCoord('(TestArea,five,-3,0)')).toBeNull();
+        expect(parseExitCoord('')).toBeNull();
+        expect(parseExitCoord('(Te,st,5,-3,0)')).toBeNull();
+    });
+});
+
+describe('MapEditSession exit saves', () => {
+    function makeExitsSession() {
+        const holder = makeSocketHolder();
+        const events: string[] = [];
+        const session = new MapEditSession('K0', makeCanvas(), { originX: 0, originY: 0 }, holder.createSocket);
+        session.onEvent((event) => events.push(
+            event.type === 'exits_denied' ? `exits_denied:${event.x},${event.y}:${event.reason}`
+                : event.type === 'exits_saved' ? `exits_saved:${event.x},${event.y}`
+                : event.type === 'error' ? `error:${event.message}` : event.type
+        ));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+        return { holder, events, session };
+    }
+
+    const exits = [{ name: 'east', aliases: ['e'], coord: ['TestArea', 5, 5, 0] as [string, number, number, number] }];
+
+    it('sends a full exit replacement and emits exits_saved on map_ack', () => {
+        const { holder, events, session } = makeExitsSession();
+        session.setExits(2, 3, exits);
+        expect(holder.socket.sent[1]).toBe(
+            '["map_edit_exits",["K1",1,{"x":2,"y":3,"exits":[{"name":"east","aliases":["e"],"coord":["TestArea",5,5,0]}]}],{}]'
+        );
+        ack(holder.socket, 1, 'K2');
+        expect(events).toEqual(['synced', 'exits_saved:2,3', 'synced']);
+        session.dispose();
+    });
+
+    it('emits exits_saved on exits_ok', () => {
+        const { holder, events, session } = makeExitsSession();
+        session.setExits(2, 3, exits);
+        holder.socket.onmessage?.(new MessageEvent('message', { data: '["exits_ok",[1,"K2"],{}]' }));
+        expect(events).toEqual(['synced', 'exits_saved:2,3', 'synced']);
+        session.dispose();
+    });
+
+    it('emits exits_denied with coords, rotates the key, and keeps the session alive', () => {
+        const { holder, events, session } = makeExitsSession();
+        session.setExits(2, 3, [{ name: 'doom', aliases: [], coord: ['TestArea', 9, 9, 0] }]);
+        holder.socket.onmessage?.(
+            new MessageEvent('message', { data: '["exits_denied",[1,"K2","No room at TestArea(9,9,0) for exit \'doom\'."],{}]' })
+        );
+        expect(events).toEqual(['synced', "exits_denied:2,3:No room at TestArea(9,9,0) for exit 'doom'."]);
+        session.setExits(2, 3, exits);
+        expect(holder.socket.sent[2]).toBe(
+            '["map_edit_exits",["K2",2,{"x":2,"y":3,"exits":[{"name":"east","aliases":["e"],"coord":["TestArea",5,5,0]}]}],{}]'
+        );
+        session.dispose();
+    });
+
+    it('rejects non-integer coords without sending', () => {
+        const { holder, events, session } = makeExitsSession();
+        session.setExits(1.5, 3, exits);
+        expect(events).toEqual(['synced', 'error:Invalid exits payload.']);
+        expect(holder.socket.sent).toEqual(['["map_edit",["K0",0,[]],{}]']);
+        session.dispose();
+    });
+});
+
 describe('MapEditSession room moves', () => {
     interface MoveEvt { type: string; moves?: { fromX: number; fromY: number; toX: number; toY: number }[]; message?: string }
 
@@ -431,6 +608,18 @@ describe('MapEditSession room moves', () => {
         session.dispose();
     });
 
+    it('emits moves_accepted carrying the validated client moves', () => {
+        const { holder, session } = makeRoomSession();
+        const events: MoveEvt[] = [];
+        session.onEvent((e) => events.push(e as MoveEvt));
+        session.validateRoomMoves([{ fromX: 3, fromY: 3, toX: 4, toY: 3 }]);
+        feed(holder.socket, '["moves_ok",[1,"K2"],{}]');
+        expect(events.filter((e) => e.type === 'moves_accepted')).toEqual([
+            { type: 'moves_accepted', moves: [{ fromX: 3, fromY: 3, toX: 4, toY: 3 }] },
+        ]);
+        session.dispose();
+    });
+
     it('saves glyph diffs and validated room ops in one batch and clears them on ack', () => {
         const { holder, canvas, session } = makeRoomSession();
         const events: MoveEvt[] = [];
@@ -488,6 +677,216 @@ describe('MapEditSession room moves', () => {
         // only the allowed move survives in pending
         session.saveToServer();
         expect(holder.socket.sent[2]).toBe('["map_edit",["K2",2,[["room",3,3,4,3]]],{}]');
+        session.dispose();
+    });
+});
+
+describe('MapEditSession ack-then-ok pairs', () => {
+    it('room pair emits one saved event and keeps the pair key', () => {
+        const holder = makeSocketHolder();
+        const events: string[] = [];
+        const session = new MapEditSession('K0', makeCanvas(), { originX: 0, originY: 0 }, holder.createSocket);
+        session.onEvent((event) => events.push(event.type));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+        session.saveRoom(2, 3, 'Hall', 'A dusty hall.');
+        // Production order: map_ack then room_ok with the same key.
+        ack(holder.socket, 1, 'K2');
+        holder.socket.onmessage?.(new MessageEvent('message', { data: '["room_ok",[1,"K2"],{}]' }));
+        expect(events).toEqual(['synced', 'room_saved', 'synced']);
+        session.saveRoom(2, 3, 'Hall', 'Again.');
+        expect(holder.socket.sent[2]).toBe(
+            '["map_edit_room",["K2",2,{"x":2,"y":3,"name":"Hall","desc":"Again."}],{}]'
+        );
+        session.dispose();
+    });
+
+    it('exits pair emits one saved event and keeps the pair key', () => {
+        const holder = makeSocketHolder();
+        const events: string[] = [];
+        const session = new MapEditSession('K0', makeCanvas(), { originX: 0, originY: 0 }, holder.createSocket);
+        session.onEvent((event) => events.push(
+            event.type === 'exits_saved' ? `exits_saved:${event.x},${event.y}` : event.type
+        ));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+        const exits = [{ name: 'east', aliases: ['e'], coord: ['TestArea', 5, 5, 0] as [string, number, number, number] }];
+        session.setExits(2, 3, exits);
+        ack(holder.socket, 1, 'K2');
+        holder.socket.onmessage?.(new MessageEvent('message', { data: '["exits_ok",[1,"K2"],{}]' }));
+        expect(events).toEqual(['synced', 'exits_saved:2,3', 'synced']);
+        session.setExits(2, 3, exits);
+        expect(holder.socket.sent[2]).toBe(
+            '["map_edit_exits",["K2",2,{"x":2,"y":3,"exits":[{"name":"east","aliases":["e"],"coord":["TestArea",5,5,0]}]}],{}]'
+        );
+        session.dispose();
+    });
+});
+
+describe('MapEditSession room creation', () => {
+    function makeCreateSession() {
+        const holder = makeSocketHolder();
+        const events: string[] = [];
+        const session = new MapEditSession('K0', makeCanvas(), { originX: 0, originY: 0 }, holder.createSocket);
+        session.onEvent((event) => events.push(
+            event.type === 'create_denied' ? `create_denied:${event.rooms.map((r) => `${r.x},${r.y}`).join(';')}:${event.reason}`
+                : event.type === 'created' ? `created:${event.rooms.map((r) => `${r.x},${r.y}`).join(';')}`
+                : event.type === 'error' ? `error:${event.message}` : event.type
+        ));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+        return { holder, events, session };
+    }
+
+    const rooms = [
+        { x: 0, y: 0, name: null, desc: null },
+        { x: 1, y: 0, name: null, desc: null },
+    ];
+    const exits = [
+        { x: 0, y: 0, exits: [{ name: 'east', aliases: ['e'], coord: ['TestArea', 1, 0, 0] as [string, number, number, number] }] },
+        { x: 1, y: 0, exits: [{ name: 'west', aliases: ['w'], coord: ['TestArea', 0, 0, 0] as [string, number, number, number] }] },
+    ];
+
+    it('sends map_create_rooms and emits created plus tracking on map_ack', () => {
+        const { holder, events, session } = makeCreateSession();
+        session.createRooms(rooms, exits);
+        expect(holder.socket.sent[1]).toBe(
+            '["map_create_rooms",["K1",1,{"rooms":[{"x":0,"y":0,"name":null,"desc":null},{"x":1,"y":0,"name":null,"desc":null}],"exits":[{"x":0,"y":0,"exits":[{"name":"east","aliases":["e"],"coord":["TestArea",1,0,0]}]},{"x":1,"y":0,"exits":[{"name":"west","aliases":["w"],"coord":["TestArea",0,0,0]}]}]}],{}]'
+        );
+        ack(holder.socket, 1, 'K2');
+        expect(events).toEqual(['synced', 'created:0,0;1,0', 'synced']);
+        expect(session.currentRoomCoords()).toEqual([{ x: 0, y: 0 }, { x: 1, y: 0 }]);
+        session.dispose();
+    });
+
+    it('emits created on create_ok', () => {
+        const { holder, events, session } = makeCreateSession();
+        session.createRooms(rooms, exits);
+        holder.socket.onmessage?.(new MessageEvent('message', { data: '["create_ok",[1,"K2"],{}]' }));
+        expect(events).toEqual(['synced', 'created:0,0;1,0', 'synced']);
+        expect(session.currentRoomCoords()).toEqual([{ x: 0, y: 0 }, { x: 1, y: 0 }]);
+        session.dispose();
+    });
+
+    it('emits create_denied, rotates the key, and keeps the session alive', () => {
+        const { holder, events, session } = makeCreateSession();
+        session.createRooms(rooms, [{ x: 0, y: 0, exits: [{ name: 'doom', aliases: [], coord: ['TestArea', 9, 9, 0] }] }]);
+        holder.socket.onmessage?.(
+            new MessageEvent('message', { data: '["create_denied",[1,"K2","No room at TestArea(9,9,0) for exit \'doom\'."],{}]' })
+        );
+        expect(events).toEqual(['synced', "create_denied:0,0;1,0:No room at TestArea(9,9,0) for exit 'doom'."]);
+        expect(session.currentRoomCoords()).toEqual([]);
+        session.createRooms(rooms, exits);
+        expect(holder.socket.sent[2]).toContain('"K2",2,');
+        session.dispose();
+    });
+
+    it('forgetRooms drops tracked coords without touching loaded rooms', () => {
+        const holder = makeSocketHolder();
+        const canvas = makeCanvas();
+        const session = new MapEditSession('K0', canvas, {
+            originX: 0, originY: 0,
+            roomCells: new Set(),
+            rooms: [{ x: 5, y: 5, exits: [] }],
+        }, holder.createSocket);
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+        session.createRooms(rooms, exits);
+        ack(holder.socket, 1, 'K2');
+        expect(session.currentRoomCoords()).toEqual([{ x: 5, y: 5 }, { x: 0, y: 0 }, { x: 1, y: 0 }]);
+        session.forgetRooms([{ x: 0, y: 0 }, { x: 1, y: 0 }]);
+        expect(session.currentRoomCoords()).toEqual([{ x: 5, y: 5 }]);
+        session.dispose();
+    });
+
+    it('rejects an empty room list without sending', () => {
+        const { holder, events, session } = makeCreateSession();
+        session.createRooms([], exits);
+        expect(events).toEqual(['synced', 'error:Invalid create payload.']);
+        expect(holder.socket.sent).toEqual(['["map_edit",["K0",0,[]],{}]']);
+        session.dispose();
+    });
+
+    it('rejects non-integer coords without sending', () => {
+        const { holder, events, session } = makeCreateSession();
+        session.createRooms([{ x: 1.5, y: 0, name: null, desc: null }], []);
+        expect(events).toEqual(['synced', 'error:Invalid create payload.']);
+        expect(holder.socket.sent).toEqual(['["map_edit",["K0",0,[]],{}]']);
+        session.dispose();
+    });
+});
+
+describe('MapEditSession room deletion', () => {
+    function makeDeleteSession() {
+        const holder = makeSocketHolder();
+        const events: string[] = [];
+        const session = new MapEditSession('K0', makeCanvas(), {
+            originX: 0,
+            originY: 0,
+            roomCells: new Set(),
+            rooms: [{ x: 0, y: 0, exits: [] }, { x: 5, y: 5, exits: [] }],
+        }, holder.createSocket);
+        session.onEvent((event) => events.push(
+            event.type === 'delete_denied' ? `delete_denied:${event.rooms.map((r) => `${r.x},${r.y}`).join(';')}:${event.reason}`
+                : event.type === 'deleted' ? `deleted:${event.rooms.map((r) => `${r.x},${r.y}`).join(';')}`
+                : event.type === 'error' ? `error:${event.message}` : event.type
+        ));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+        return { holder, events, session };
+    }
+
+    it('sends map_delete_rooms with fallbacks and forgets tracking on map_ack', () => {
+        const { holder, events, session } = makeDeleteSession();
+        session.deleteRooms([
+            { x: 0, y: 0, fallback: { x: 5, y: 5 } },
+            { x: 1, y: 0, fallback: null },
+        ]);
+        expect(holder.socket.sent[1]).toBe(
+            '["map_delete_rooms",["K1",1,{"rooms":[{"x":0,"y":0,"fallback":{"x":5,"y":5}},{"x":1,"y":0}]}],{}]'
+        );
+        ack(holder.socket, 1, 'K2');
+        expect(events).toEqual(['synced', 'deleted:0,0;1,0', 'synced']);
+        expect(session.currentRoomCoords()).toEqual([{ x: 5, y: 5 }]);
+        session.dispose();
+    });
+
+    it('emits deleted on delete_ok', () => {
+        const { holder, events, session } = makeDeleteSession();
+        session.deleteRooms([{ x: 0, y: 0, fallback: null }]);
+        holder.socket.onmessage?.(new MessageEvent('message', { data: '["delete_ok",[1,"K2"],{}]' }));
+        expect(events).toEqual(['synced', 'deleted:0,0', 'synced']);
+        expect(session.currentRoomCoords()).toEqual([{ x: 5, y: 5 }]);
+        session.dispose();
+    });
+
+    it('emits delete_denied, rotates the key, and keeps tracking plus the session alive', () => {
+        const { holder, events, session } = makeDeleteSession();
+        session.deleteRooms([{ x: 0, y: 0, fallback: null }]);
+        holder.socket.onmessage?.(
+            new MessageEvent('message', { data: '["delete_denied",[1,"K2","Room (0, 0) is occupied with no usable fallback."],{}]' })
+        );
+        expect(events).toEqual(['synced', 'delete_denied:0,0:Room (0, 0) is occupied with no usable fallback.']);
+        expect(session.currentRoomCoords()).toEqual([{ x: 0, y: 0 }, { x: 5, y: 5 }]);
+        session.deleteRooms([{ x: 0, y: 0, fallback: { x: 5, y: 5 } }]);
+        expect(holder.socket.sent[2]).toContain('"K2",2,');
+        session.dispose();
+    });
+
+    it('rejects an empty room list without sending', () => {
+        const { holder, events, session } = makeDeleteSession();
+        session.deleteRooms([]);
+        expect(events).toEqual(['synced', 'error:Invalid delete payload.']);
+        expect(holder.socket.sent).toEqual(['["map_edit",["K0",0,[]],{}]']);
+        session.dispose();
+    });
+
+    it('rejects non-integer coords and fallbacks without sending', () => {
+        const { holder, events, session } = makeDeleteSession();
+        session.deleteRooms([{ x: 1.5, y: 0, fallback: null }]);
+        session.deleteRooms([{ x: 0, y: 0, fallback: { x: 5.5, y: 5 } }]);
+        expect(events).toEqual(['synced', 'error:Invalid delete payload.', 'error:Invalid delete payload.']);
+        expect(holder.socket.sent).toEqual(['["map_edit",["K0",0,[]],{}]']);
         session.dispose();
     });
 });

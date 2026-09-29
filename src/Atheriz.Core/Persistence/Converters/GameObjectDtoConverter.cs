@@ -118,6 +118,7 @@ internal static class GameObjectDtoConverter
             SchemaVersion = 1,
             Type = type,
             Name = obj.Name,
+            DisplayName = obj.DisplayName,
             Desc = obj.Desc,
             Aliases = new List<string>(obj.Aliases),
             Tags = new HashSet<string>(obj.TagsSnapshot),

@@ -135,7 +135,7 @@ public sealed class ThreadSafetyRegression13Tests
         try
         {
             var pidFile = Path.Combine(dir, "server.pid");
-            var task = (Task<int>)InvokeStatic(typeof(StopHandler), "KillVerifiedPidAsync", self, 9, pidFile)!;
+            var task = (Task<int>)InvokeStatic(typeof(StopHandler), "KillVerifiedPidAsync", self, 9, pidFile, false)!;
             int rc = await task.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.Equal(1, rc);
             Assert.True(Environment.ProcessId == self);

@@ -27,8 +27,8 @@ function makeAppState(): AppState {
   };
 }
 
-describe('SelectionTool keeps room cells in rectangle selections', () => {
-  it('retains glyph-less room cells that filterNonEmpty would drop', () => {
+describe('SelectionTool selects empty squares with rectangle', () => {
+  it('retains glyph-less room cells', () => {
     const state = new CanvasState(4, 4);
     // every cell is empty; only (1,1) is a room
     const roomCells = new Set(['1,1']);
@@ -54,10 +54,10 @@ describe('SelectionTool keeps room cells in rectangle selections', () => {
     tool.onMouseDown(ctx, { x: 0, y: 0 });
     tool.onMouseUp(ctx, { x: 2, y: 2 });
 
-    expect(selection).toEqual(new Set(['1,1']));
+    expect(selection).toEqual(new Set(['0,0', '1,0', '2,0', '0,1', '1,1', '2,1', '0,2', '1,2', '2,2']));
   });
 
-  it('still drops plain empty cells that are not rooms', () => {
+  it('selects plain empty cells that are not rooms', () => {
     const state = new CanvasState(4, 4);
     const roomCells = new Set<string>();
     let selection: Set<string> = new Set();
@@ -82,6 +82,6 @@ describe('SelectionTool keeps room cells in rectangle selections', () => {
     tool.onMouseDown(ctx, { x: 0, y: 0 });
     tool.onMouseUp(ctx, { x: 2, y: 2 });
 
-    expect(selection.size).toBe(0);
+    expect(selection).toEqual(new Set(['0,0', '1,0', '2,0', '0,1', '1,1', '2,1', '0,2', '1,2', '2,2']));
   });
 });

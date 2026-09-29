@@ -382,14 +382,21 @@ public class ServerRegressionTests
         Assert.DoesNotContain("var age = DateTimeOffset.UtcNow", src);
     }
 
-    // One shared /proc/net/tcp helper for the single-pid verifier (no
-    // lsof/ss subprocesses, no full-table scans).
+    // One shared /proc/net/tcp helper for the single-pid verifier.
+    // Per-OS listener discovery for the explicit force path lives in
+    // named FindPids* helpers — never inline in the verifier — and the
+    // verified kill references the scan exactly once (the force-only
+    // KillPortListenersAsync), never from its gates.
     [Fact]
     public void TcpParse_HasSharedHelper()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
         Assert.Contains("GetListeningInodes(", src);
-        Assert.DoesNotContain("\"lsof\"", src);
+        Assert.Contains("FindPidsLinux(", src);
+        Assert.Contains("FindPidsLsof(", src);
+        Assert.Contains("FindPidsNetstat(", src);
+        var stop = SourceScan.Read("src", "Atheriz.Server", "Cli", "StopHandler.cs");
+        Assert.Equal(1, SourceScan.Count(stop, "FindPidsListeningOnPort"));
     }
 
     // refusal messages name the failed check.

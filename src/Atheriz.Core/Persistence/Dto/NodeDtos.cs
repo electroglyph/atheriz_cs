@@ -6,6 +6,7 @@ internal sealed record NodeDto
 {
     public Coord Coord { get; set; }
     public string Name { get; set; } = "";
+    public string DisplayName { get; set; } = "";
     public string Desc { get; set; } = "";
     public string Theme { get; set; } = "";
     public string Symbol { get; set; } = "";
@@ -24,6 +25,7 @@ internal sealed record NodeDto
     internal void Migrate()
     {
         Name ??= "";
+        DisplayName ??= "";
         Desc ??= "";
         Theme ??= "";
         Symbol ??= "";

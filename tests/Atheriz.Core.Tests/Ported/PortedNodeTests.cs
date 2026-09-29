@@ -341,7 +341,9 @@ public class PortedNodeTests
         var area = $"test_area_{Guid.NewGuid():N}";
         var node = new Node(new Coord(area,0,0,0));
         var res = node.GetDisplayName(null);
-        Assert.Equal("", res);
+        // Null lookers see the effective room name (coord fallback here),
+        // not the old empty title.
+        Assert.Equal(node.Coord.ToString() + "\n", res);
     }
     // ----- tests/test_nodes.py -----
     [Fact] public void GetRandomNodeOnEmptyGridReturnsNone()
