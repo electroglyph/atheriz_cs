@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CanvasState } from '../src/state/CanvasState';
 import {
     planCreateRooms,
     splitCreateTargets,
@@ -9,6 +10,9 @@ import {
     buildDeleteUndoResend,
     buildRoomCellKeys,
     applyAcceptedMoves,
+    restoreDeniedSquares,
+    formatMovesDeniedMessage,
+    movesEqual,
     fillCreatedDefaults,
     worldToCellKey,
     findRoomIndex,
@@ -366,5 +370,111 @@ describe('applyAcceptedMoves', () => {
         ]);
         expect(relocated).toBe(1);
         expect(rooms.map((r) => [r.x, r.y])).toEqual([[2, 2], [8, 7]]);
+    });
+});
+
+describe('restoreDeniedSquares', () => {
+    function glyph(char: string) {
+        return { char, fg: [204, 204, 204] as [number, number, number], bg: [-1, -1, -1] as [number, number, number] };
+    }
+
+    // Origin (0,0), height 10: world (x,y) -> viewport (x, 9-y).
+    // Move (2,2)->(5,5): from-square (2,7), to-square (5,4).
+    function preMoveSnapshot(): CanvasState {
+        const s = new CanvasState(10, 10, false);
+        s.setCell(2, 7, glyph('R'));
+        s.setCell(5, 4, glyph('.'));
+        return s;
+    }
+
+    function postMoveLive(): CanvasState {
+        const live = new CanvasState(10, 10, false);
+        live.setCell(2, 7, glyph(''));
+        live.setCell(5, 4, glyph('R'));
+        // Later stroke elsewhere (must survive the restore).
+        live.setCell(0, 0, glyph('X'));
+        return live;
+    }
+
+    const move = { fromX: 2, fromY: 2, toX: 5, toY: 5 };
+
+    it('restores denied squares from the snapshot and keeps later strokes', () => {
+        const live = postMoveLive();
+        const batch = restoreDeniedSquares(live, preMoveSnapshot(), [move], 0, 0);
+        expect(batch).toHaveLength(2);
+        live.applyBatch(batch);
+        expect(live.getCell(2, 7)?.char).toBe('R');
+        expect(live.getCell(5, 4)?.char).toBe('.');
+        expect(live.getCell(0, 0)?.char).toBe('X');
+    });
+
+    it('restores each square once when moves share it', () => {
+        const live = postMoveLive();
+        const batch = restoreDeniedSquares(live, preMoveSnapshot(), [
+            move,
+            { fromX: 5, fromY: 5, toX: 8, toY: 8 },
+        ], 0, 0);
+        const keys = batch.map((u) => `${u.col},${u.row}`);
+        expect(new Set(keys).size).toBe(keys.length);
+        // (5,4) shared by both moves: single entry.
+        expect(keys.filter((k) => k === '5,4')).toHaveLength(1);
+    });
+
+    it('maps world squares with the current origin (growth rebase safe)', () => {
+        // Same squares as world (12,-3)->(15,1) under origin (10,-5).
+        const live = postMoveLive();
+        const batch = restoreDeniedSquares(live, preMoveSnapshot(), [
+            { fromX: 12, fromY: -3, toX: 15, toY: 1 },
+        ], 10, -5);
+        expect(batch.map((u) => [u.col, u.row])).toEqual([[2, 7], [5, 3]]);
+    });
+
+    it('restores a square the snapshot never stored as cleared', () => {
+        const live = new CanvasState(10, 10, false);
+        const snapshot = new CanvasState(4, 4, false);
+        // World (8,8) -> viewport (8,1): outside the 4x4 snapshot storage.
+        const batch = restoreDeniedSquares(live, snapshot, [
+            { fromX: 8, fromY: 8, toX: 8, toY: 8 },
+        ], 0, 0);
+        expect(batch).toHaveLength(1);
+        expect(batch[0]).toMatchObject({
+            col: 8, row: 1,
+            cell: { char: '', fg: [204, 204, 204], bg: [-1, -1, -1] },
+        });
+    });
+
+    it('returns no batch for no moves', () => {
+        const live = postMoveLive();
+        expect(restoreDeniedSquares(live, preMoveSnapshot(), [], 0, 0)).toEqual([]);
+    });
+});
+
+describe('formatMovesDeniedMessage', () => {
+    it('names a single room without asserting a cause', () => {
+        const text = formatMovesDeniedMessage([{ fromX: 0, fromY: 0, toX: 3, toY: 4 }]);
+        expect(text).toContain('a room');
+        expect(text).toContain('(3, 4)');
+        expect(text).not.toContain('occupied');
+        expect(text).not.toContain('reverted');
+    });
+
+    it('lists up to five destinations then counts the rest', () => {
+        const moves = Array.from({ length: 7 }, (_, i) => ({ fromX: i, fromY: 0, toX: i, toY: 1 }));
+        const text = formatMovesDeniedMessage(moves);
+        expect(text).toContain('7 rooms');
+        expect(text).toContain('(4, 1)');
+        expect(text).not.toContain('(5, 1)');
+        expect(text).toContain('and 2 more');
+    });
+});
+
+describe('movesEqual', () => {
+    it('matches identical batches by value, not identity', () => {
+        const a = [{ fromX: 1, fromY: 2, toX: 3, toY: 4 }];
+        const b = [{ fromX: 1, fromY: 2, toX: 3, toY: 4 }];
+        expect(movesEqual(a, b)).toBe(true);
+        expect(movesEqual(a, [])).toBe(false);
+        expect(movesEqual(a, [{ fromX: 1, fromY: 2, toX: 3, toY: 5 }])).toBe(false);
+        expect(movesEqual(a, [...b, ...b])).toBe(false);
     });
 });

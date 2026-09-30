@@ -1,6 +1,6 @@
 import { CanvasState } from '../state/CanvasState';
 import { UndoStack } from '../state/UndoStack';
-import { AppState } from '../types';
+import { AppState, ViewportGrowth } from '../types';
 import { renderTextToAnsiLayer, buildTextBatch, applyTextRender } from '../utils/TextToANSI';
 import { ChafaConfig, DEFAULT_CHAFA_OPTIONS } from '../utils/chafaDefaults';
 import { CellMetrics } from '../utils/fontMetrics';
@@ -24,8 +24,8 @@ export class TextToolDialog {
     private input: HTMLTextAreaElement;
     private fontSelect: HTMLSelectElement;
     private styleSelect: HTMLSelectElement;
-    private maxWidthInput: HTMLInputElement;
-    private maxWidthVal: HTMLElement;
+    private widthInput: HTMLInputElement;
+    private heightInput: HTMLInputElement;
     private stretchInput: HTMLInputElement;
     private stretchVal: HTMLElement;
     private previewCanvas: HTMLCanvasElement;
@@ -50,20 +50,22 @@ export class TextToolDialog {
     private getCanvasState: () => CanvasState;
     private getCellMetrics: () => CellMetrics;
     private undoStack: UndoStack | null = null;
+    private onViewportShifted: ((growth: ViewportGrowth) => void) | null = null;
 
-    constructor(appState: AppState, getCanvasState: () => CanvasState, onConfirm: (state: CanvasState) => void, getCellMetrics: () => CellMetrics, undoStack?: UndoStack) {
+    constructor(appState: AppState, getCanvasState: () => CanvasState, onConfirm: (state: CanvasState) => void, getCellMetrics: () => CellMetrics, undoStack?: UndoStack, onViewportShifted?: (growth: ViewportGrowth) => void) {
         this.appState = appState;
         this.getCanvasState = getCanvasState;
         this.onConfirm = onConfirm;
         this.getCellMetrics = getCellMetrics;
         this.undoStack = undoStack ?? null;
+        this.onViewportShifted = onViewportShifted ?? null;
 
         this.modal = document.getElementById('text-tool-modal') as HTMLElement;
         this.input = document.getElementById('text-tool-input') as HTMLTextAreaElement;
         this.fontSelect = document.getElementById('text-tool-font') as HTMLSelectElement;
         this.styleSelect = document.getElementById('text-tool-style') as HTMLSelectElement;
-        this.maxWidthInput = document.getElementById('text-tool-max-width') as HTMLInputElement;
-        this.maxWidthVal = document.getElementById('text-tool-max-width-val') as HTMLElement;
+        this.widthInput = document.getElementById('text-tool-width-chars') as HTMLInputElement;
+        this.heightInput = document.getElementById('text-tool-height-chars') as HTMLInputElement;
         this.stretchInput = document.getElementById('text-tool-stretch') as HTMLInputElement;
         this.stretchVal = document.getElementById('text-tool-stretch-val') as HTMLElement;
         this.previewCanvas = document.getElementById('text-tool-preview') as HTMLCanvasElement;
@@ -90,19 +92,21 @@ export class TextToolDialog {
                 this.close();
                 return;
             }
-            let maxWidth = parseInt(this.maxWidthInput.value, 10);
-            if (!Number.isFinite(maxWidth) || maxWidth < 1) maxWidth = 80;
+            let targetCols = parseInt(this.widthInput.value, 10);
+            if (!Number.isFinite(targetCols) || targetCols < 1) targetCols = 80;
+            targetCols = Math.min(targetCols, CanvasState.MAX_DIMENSION);
+            let targetRows = parseInt(this.heightInput.value, 10);
+            if (!Number.isFinite(targetRows) || targetRows < 1) targetRows = 24;
+            targetRows = Math.min(targetRows, CanvasState.MAX_DIMENSION);
             
             this.btnConfirm.disabled = true;
             this.btnConfirm.innerText = 'Converting...';
 
             
             try {
-                const target = this.getCanvasState();
                 const result = await renderTextToAnsiLayer(
                     text,
-                    maxWidth,
-                    { width: target.width, height: target.height },
+                    { cols: targetCols, rows: targetRows },
                     this.userConfig,
                     this.previewCanvas,
                     this.getCellMetrics(),
@@ -117,7 +121,8 @@ export class TextToolDialog {
                         live,
                         this.undoStack,
                         result.label,
-                        buildTextBatch(result.cells, result.cols, result.rows, live.width, live.height),
+                        buildTextBatch(result.cells, result.cols, result.rows, live.serverBounds),
+                        this.onViewportShifted ?? undefined,
                     );
                 }
                 this.onConfirm(live);
@@ -138,10 +143,6 @@ export class TextToolDialog {
         this.styleSelect.addEventListener('change', () => this.schedulePreview());
         this.stretchInput.addEventListener('input', () => {
             this.stretchVal.innerText = `${this.stretchInput.value}%`;
-            this.schedulePreview();
-        });
-        this.maxWidthInput.addEventListener('input', () => {
-            this.maxWidthVal.innerText = this.maxWidthInput.value;
             this.schedulePreview();
         });
 
@@ -380,10 +381,6 @@ export class TextToolDialog {
         const matchingOption = Array.from(this.fontSelect.options).find((option) => option.value === this.appState.fontFamily);
         if (matchingOption) this.fontSelect.value = this.appState.fontFamily;
         this.input.value = '';
-        const liveWidth = this.getCanvasState().width;
-        this.maxWidthInput.max = liveWidth.toString();
-        this.maxWidthInput.value = liveWidth.toString();
-        this.maxWidthVal.innerText = liveWidth.toString();
         this.stretchInput.value = '100';
         this.stretchVal.innerText = '100%';
         await this.ensureSelectedFontLoaded();

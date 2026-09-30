@@ -2,6 +2,7 @@ import { Tool, ToolContext } from './Tool';
 import { Point, Cell } from '../types';
 import { LIGHT_BOX, ROUNDED_BOX, DOUBLE_BOX, HEAVY_BOX } from '../utils/characters';
 import { getLinePoints } from '../utils/geometry';
+import { ensureToolCapacity } from '../canvas/ensureCapacity';
 
 function connectedLine(x0: number, y0: number, x1: number, y1: number, useDiagonal = false): Point[] {
     const raw = getLinePoints({ x: x0, y: y0 }, { x: x1, y: y1 });
@@ -179,9 +180,21 @@ export class LineTool implements Tool {
         const useDiagonal = ctx.appState.lineDiagonal;
         const newPoints = connectedLine(from.x, from.y, to.x, to.y, useDiagonal);
         const allPoints = [...this.committedPoints, ...newPoints];
-        // Clip here (not in buildCells, which stays pure for preview and
-        // junction computation): commits must never write overflowCells.
-        const cells = this.clipToCanvas(ctx, this.buildCells(ctx, allPoints));
+        // Grow here (not in buildCells, which stays pure for preview and
+        // junction computation): commits must land in storage, expanding
+        // the viewport past the violet line instead of clipping. Junction
+        // voting reads post-growth storage, so corners stay correct.
+        const cap = ensureToolCapacity(ctx, allPoints.map(p => ({ col: p.x, row: p.y })));
+        if (cap.pushed) this.pushedForStroke = true;
+        // Re-frame the whole gesture into post-growth storage: left/top
+        // inserts shift every stored coord, including earlier segments.
+        const sh = cap.shift;
+        const shifted = allPoints.map(p => ({ x: p.x + sh.col, y: p.y + sh.row }));
+        if (this.anchor) this.anchor = { x: this.anchor.x + sh.col, y: this.anchor.y + sh.row };
+        if (this.currentEnd) this.currentEnd = { x: this.currentEnd.x + sh.col, y: this.currentEnd.y + sh.row };
+        this.committedPoints = shifted;
+        const cells = this.buildCells(ctx, shifted)
+            .filter(u => !cap.dropped.has(`${u.col},${u.row}`));
         if (cells.length > 0) {
             if (!this.pushedForStroke) {
                 ctx.undoStack.push(ctx.state);
@@ -189,7 +202,6 @@ export class LineTool implements Tool {
             }
             ctx.state.applyBatch(cells);
         }
-        this.committedPoints = allPoints;
     }
 
     private renderPreview(ctx: ToolContext) {
@@ -231,13 +243,6 @@ export class LineTool implements Tool {
 
     private isInBounds(ctx: ToolContext, x: number, y: number): boolean {
         return x >= 0 && x < ctx.state.width && y >= 0 && y < ctx.state.height;
-    }
-
-    // Clip tool output to the canvas so commits never write overflowCells.
-    private clipToCanvas(ctx: ToolContext, cells: { col: number; row: number; cell: Cell }[]): { col: number; row: number; cell: Cell }[] {
-        const w = ctx.state.width;
-        const h = ctx.state.height;
-        return cells.filter(u => u.col >= 0 && u.col < w && u.row >= 0 && u.row < h);
     }
 
     private buildCells(ctx: ToolContext, points: Point[]): { col: number; row: number; cell: Cell }[] {

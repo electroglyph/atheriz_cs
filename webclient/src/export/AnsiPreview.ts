@@ -6,15 +6,19 @@ import { Color } from '../types';
  * (all visible layers merged), suitable for feeding into xterm.js.
  *
  * Conventions (pinned): a layer-less canvas yields a bare reset (never throws);
- * only the in-bounds grid is rendered (overflowCells are dropped, like the
- * exporter); output ends with a bare reset and NO trailing newline, matching
- * AnsiExporter.
+ * only the violet server grid is rendered (viewport margin cells and
+ * overflowCells are dropped, like the exporter); output ends with a bare
+ * reset and NO trailing newline, matching AnsiExporter.
  */
 export function buildCompositeAnsiPreview(state: CanvasState): string {
-    const { width, height } = state;
-    if (!state.layers || state.layers.length === 0) {
+    const layers = state.layers;
+    if (!layers || layers.length === 0) {
         return '\x1b[0m';
     }
+    // Same crop as the exporter: the violet server grid only.
+    const b = state.serverBounds ?? { col: 0, row: 0, w: state.width, h: state.height };
+    const width = b.w;
+    const height = b.h;
     let out = '';
 
     let currentFg: Color | null = null;
@@ -39,7 +43,7 @@ export function buildCompositeAnsiPreview(state: CanvasState): string {
         out += `\x1b[${r + 1};1H`;
 
         for (let c = 0; c < width; c++) {
-            const cell = state.getCompositeCell(c, r);
+            const cell = state.getCompositeCell(c + b.col, r + b.row);
             if (!cell) { out += ' '; continue; }
 
             const char = cell.char && cell.char.trim() !== '' ? cell.char : ' ';

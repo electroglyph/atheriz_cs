@@ -89,4 +89,27 @@ describe('beginNewCanvas', () => {
     expect(undone!.height).toBe(8);
     expect(layers.updateState).toHaveBeenCalledWith(created.state);
   });
+
+  it('supports a larger viewport with an inset server grid', () => {
+    const { deps } = makeDeps();
+
+    const created = beginNewCanvas(deps, 10, 6, {
+      viewportW: 16,
+      viewportH: 12,
+      bounds: { col: 3, row: 3, w: 10, h: 6 },
+    });
+
+    expect(created.state.width).toBe(16);
+    expect(created.state.height).toBe(12);
+    expect(created.state.serverBounds).toEqual({ col: 3, row: 3, w: 10, h: 6 });
+    expect(deps.tools.state).toBe(created.state);
+  });
+
+  it('rejects out-of-range viewport dimensions', () => {
+    const { deps } = makeDeps();
+    expect(() => beginNewCanvas(deps, 10, 6, { viewportW: 0, viewportH: 12 }))
+      .toThrow(RangeError);
+    expect(() => beginNewCanvas(deps, 10, 6, { viewportW: 16, viewportH: 5000 }))
+      .toThrow(RangeError);
+  });
 });

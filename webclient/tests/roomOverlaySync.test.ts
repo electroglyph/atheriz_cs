@@ -67,7 +67,7 @@ describe('room overlay sync wiring', () => {
         const start = mainSrc.indexOf("event.type === 'moves_denied'");
         const dialog = mainSrc.indexOf('moveDeniedDialog.show(', start);
         const branch = mainSrc.slice(start, dialog);
-        expect(branch).toContain('syncRoomCells()');
+        expect(branch).toContain('revertOptimisticMoves(event.moves)');
         // The old positional revert swapped keys across the async gap and
         // could plant teal on squares whose rooms were deleted meanwhile.
         expect(mainSrc).not.toContain('roomCellSet.add(`${fromCol},${fromRow}`)');
@@ -91,12 +91,12 @@ describe('room overlay sync wiring', () => {
     });
 
     it('moves_denied reverts the list then rebuilds the overlay', () => {
-        const start = mainSrc.indexOf("event.type === 'moves_denied'");
-        const dialog = mainSrc.indexOf('moveDeniedDialog.show(', start);
-        const branch = mainSrc.slice(start, dialog);
-        expect(branch).toContain('revertAcceptedMoves(rooms, event.moves)');
-        expect(branch.indexOf('revertAcceptedMoves'))
-            .toBeLessThan(branch.indexOf('syncRoomCells'));
+        const start = mainSrc.indexOf('const revertOptimisticMoves');
+        const end = mainSrc.indexOf('mapEditSession?.onEvent', start);
+        const helper = mainSrc.slice(start, end);
+        expect(helper).toContain('revertAcceptedMoves(rooms, moves)');
+        expect(helper.indexOf('revertAcceptedMoves'))
+            .toBeLessThan(helper.indexOf('syncRoomCells'));
     });
 
     it('no handler updates the overlay keys by hand', () => {

@@ -238,10 +238,14 @@ describe('webclient/main.ts regression wiring (source pins)', () => {
     expect(main).toContain('setPointerCapture');
   });
 
-  it('moves_denied in the draw editor reverts to the move checkpoint', () => {
+  it('moves_denied in the draw editor restores denied squares, not the whole canvas', () => {
     const drawMain = fs.readFileSync(path.resolve(import.meta.dirname, '../src/main.ts'), 'utf-8');
-    expect(drawMain).toContain('pendingMoveCheckpoints');
-    expect(drawMain).toContain('undoTo(checkpoint)');
+    // Surgical revert replaced the checkpoint nuke: the deny path keeps
+    // per-batch snapshots and repaints denied squares (behavior pinned by
+    // the boot-harness deny test and restoreDeniedSquares pins).
+    expect(drawMain).toContain('pendingMoveSnapshots');
+    expect(drawMain).toContain('restoreDeniedSquares');
+    expect(drawMain).not.toContain('pendingMoveCheckpoints');
   });
 
   it('blocked draw launches blame the popup blocker, never the throttle', () => {

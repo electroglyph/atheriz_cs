@@ -1,6 +1,7 @@
 import { Tool, ToolContext } from './Tool';
 import { Point } from '../types';
 import { TypeToolModal } from '../ui/TypeToolModal';
+import { ensureToolCapacity } from '../canvas/ensureCapacity';
 
 export class TypeTool implements Tool {
     private modal: TypeToolModal;
@@ -25,11 +26,17 @@ export class TypeTool implements Tool {
             const style = ctx.appState.typeStyle;
             const updates: { col: number; row: number; cell: { char: string; fg: [number, number, number]; bg: [number, number, number]; bold?: boolean; italic?: boolean; underline?: boolean } }[] = [];
 
+            // Grow the viewport past the violet line once for the whole
+            // string instead of clipping; only 2048-capped glyphs are
+            // still dropped. One undo entry covers the confirm. Paint in
+            // the post-growth frame (see BrushTool.onMouseDown).
+            const cap = ensureToolCapacity(ctx, glyphs.map((_, i) => ({ col: anchorX + i, row: anchorY })));
+            const sh = cap.shift;
+            const atRow = anchorY + sh.row;
+
             for (let i = 0; i < glyphs.length; i++) {
-                const col = anchorX + i;
-                // Clip both axes against the live canvas; fully off-canvas
-                // typing must not reach applyBatch (or the undo stack).
-                if (col < 0 || col >= state.width || anchorY < 0 || anchorY >= state.height) continue;
+                const col = anchorX + i + sh.col;
+                if (cap.dropped.has(`${col},${atRow}`)) continue;
                 const cellData: { char: string; fg: [number, number, number]; bg: [number, number, number]; bold?: boolean; italic?: boolean; underline?: boolean } = {
                     char: glyphs[i]!,
                     fg: [...ctx.appState.fgColor] as [number, number, number],
@@ -40,14 +47,15 @@ export class TypeTool implements Tool {
                 else if (style === 'italic') cellData.italic = true;
                 else if (style === 'underline') cellData.underline = true;
 
-                updates.push({ col, row: anchorY, cell: cellData });
+                updates.push({ col, row: atRow, cell: cellData });
             }
 
-            // Push undo only when something actually paints (contrast the old
-            // push-before-clip, which left a spurious entry for off-canvas
-            // typing like RectangleTool's guard avoids).
-            if (updates.length > 0) {
+            // One undo entry per confirm: the helper already pushed when the
+            // grid grew, otherwise push when something actually paints.
+            if (!cap.pushed && updates.length > 0) {
                 ctx.undoStack.push(state);
+            }
+            if (updates.length > 0) {
                 state.applyBatch(updates);
             }
         });

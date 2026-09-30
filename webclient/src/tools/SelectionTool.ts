@@ -5,6 +5,7 @@ import { LIGHT_CHARS, ROUNDED_CHARS, DOUBLE_CHARS, HEAVY_CHARS } from '../utils/
 import { GridRenderer } from '../canvas/GridRenderer';
 import { getLinePoints } from '../utils/geometry';
 import { parseCellKey } from '../utils/cellKeys';
+import { ensureToolCapacity } from '../canvas/ensureCapacity';
 
 function luminance(c: Color): number {
     return (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) / 255;
@@ -572,7 +573,11 @@ export class SelectionTool implements Tool, SelectionSync {
     private pasteClipboard(ctx: ToolContext): boolean {
         if (!this.clipboard) return false;
         this.lastRenderer = ctx.renderer;
-        ctx.undoStack.push(ctx.state);
+        // Grow the viewport past the violet line instead of clipping the
+        // paste; only 2048-capped cells are still dropped. The helper
+        // pushes undo when the grid grows, so skip the usual push then.
+        const cap = ensureToolCapacity(ctx, this.clipboard.cells.map((item) => ({ col: item.col, row: item.row })));
+        if (!cap.pushed) ctx.undoStack.push(ctx.state);
 
         // Reuse the top layer when it is already a paste target instead of
         // stacking a new 'Pasted' layer per paste.
@@ -586,10 +591,12 @@ export class SelectionTool implements Tool, SelectionSync {
         const layer = ctx.state.getActiveLayer();
 
         const pasted = new Set<string>();
+        // Paint in the post-growth frame (see BrushTool.onMouseDown).
+        const sh = cap.shift;
         for (const item of this.clipboard.cells) {
-            const col = item.col;
-            const row = item.row;
-            if (col >= 0 && col < ctx.state.width && row >= 0 && row < ctx.state.height) {
+            const col = item.col + sh.col;
+            const row = item.row + sh.row;
+            if (!cap.dropped.has(key(col, row))) {
                 layer.cells[row][col] = {
                     char: item.cell.char,
                     fg: [...item.cell.fg] as Color,

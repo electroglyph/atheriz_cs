@@ -29,8 +29,8 @@ function setupDom() {
       <select id="text-tool-font"></select>
       <select id="text-tool-style"></select>
       <select id="text-tool-align"></select>
-      <input id="text-tool-max-width" value="24" />
-      <span id="text-tool-max-width-val"></span>
+      <input id="text-tool-width-chars" value="80" />
+      <input id="text-tool-height-chars" value="24" />
       <input id="text-tool-stretch" value="100" />
       <span id="text-tool-stretch-val"></span>
       <canvas id="text-tool-preview"></canvas>

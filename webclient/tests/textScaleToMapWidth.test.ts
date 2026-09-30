@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// End-to-end scaling proof: real TTF rasterized through node-canvas,
+// End-to-end size proof: real TTF rasterized through node-canvas,
 // converted by the REAL chafa wasm and parsed by the REAL ansi parser.
-// No mocks below this line — if renderTextToAnsiLayer stops spanning the
-// map width, this file fails.
+// No mocks below this line — if renderTextToAnsiLayer stops honoring the
+// requested character size, this file fails.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { registerFont } from 'canvas';
 import { renderTextToAnsiLayer } from '../src/utils/TextToANSI';
@@ -35,18 +35,17 @@ function nonBlankFraction(cells: { char: string }[]): number {
   return marked / cells.length;
 }
 
-describe('rendered text spans the map width (real font + real chafa)', () => {
-  it('fills all 60 cols on a 60x20 map with real converted content', async () => {
+describe('rendered text honors the requested character size (real font + real chafa)', () => {
+  it('renders at exactly 60 cols with real converted content', async () => {
     const result = await renderTextToAnsiLayer(
       'hello',
-      60,
-      { width: 60, height: 20 },
+      { cols: 60, rows: 18 },
       DEFAULT_CHAFA_OPTIONS,
       helloCanvas(),
       CELL,
     );
     expect(result).not.toBeNull();
-    // Spans horizontally all the way across...
+    // Renders at the requested width...
     expect(result!.cols).toBe(60);
     // ...while fitting vertically...
     expect(result!.rows).toBeGreaterThanOrEqual(1);
@@ -56,11 +55,10 @@ describe('rendered text spans the map width (real font + real chafa)', () => {
     expect(nonBlankFraction(result!.cells)).toBeGreaterThan(0.1);
   }, 60000);
 
-  it('fills all 120 cols on a larger 120x40 map', async () => {
+  it('renders at exactly 120 cols when asked', async () => {
     const result = await renderTextToAnsiLayer(
       'hello',
-      120,
-      { width: 120, height: 40 },
+      { cols: 120, rows: 38 },
       DEFAULT_CHAFA_OPTIONS,
       helloCanvas(),
       CELL,

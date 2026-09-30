@@ -2,6 +2,7 @@ import { Tool, ToolContext } from './Tool';
 import { Point, Cell } from '../types';
 import { cellEquals } from '../utils/colors';
 import { parseCellKey } from '../utils/cellKeys';
+import { ensureToolCapacity } from '../canvas/ensureCapacity';
 
 export class MoveTool implements Tool {
     private anchor: Point | null = null;
@@ -122,22 +123,29 @@ export class MoveTool implements Tool {
             return;
         }
 
-        const inBounds = (c: number, r: number): boolean =>
+        // Destinations past the violet line grow the viewport instead of
+        // being clipped; only 2048-capped destinations are still dropped.
+        // Out-of-bounds origins (overflow cells) still cannot be cleared.
+        // Everything below runs in the post-growth frame: left/top inserts
+        // shift every stored coord (see BrushTool.onMouseDown).
+        const destinations = this.movingCells.map(mc => ({ col: mc.col + dx, row: mc.row + dy }));
+        const cap = ensureToolCapacity(ctx, destinations);
+        const sh = cap.shift;
+        const inStorage = (c: number, r: number): boolean =>
             c >= 0 && c < ctx.state.width && r >= 0 && r < ctx.state.height;
 
-        // Out-of-bounds destinations are clipped (dropped) instead of being
-        // written to overflowCells; out-of-bounds origins are left alone.
         const clearUpdates = this.movingCells
-            .filter(mc => inBounds(mc.col, mc.row))
-            .map(mc => ({
-                col: mc.col, row: mc.row, cell: { char: '', fg: [204, 204, 204] as [number, number, number], bg: [-1, -1, -1] as [number, number, number] }
+            .map(mc => ({ col: mc.col + sh.col, row: mc.row + sh.row }))
+            .filter(p => inStorage(p.col, p.row))
+            .map(p => ({
+                col: p.col, row: p.row, cell: { char: '', fg: [204, 204, 204] as [number, number, number], bg: [-1, -1, -1] as [number, number, number] }
             }));
 
         const placeUpdates = this.movingCells
             .map(mc => ({
-                col: mc.col + dx, row: mc.row + dy, cell: mc.originCell
+                col: mc.col + dx + sh.col, row: mc.row + dy + sh.row, cell: mc.originCell
             }))
-            .filter(u => inBounds(u.col, u.row));
+            .filter(u => !cap.dropped.has(`${u.col},${u.row}`));
 
         // Merge with placements winning over clears on overlap, then drop
         // writes that would not actually change the cell. A fully clipped
@@ -156,21 +164,25 @@ export class MoveTool implements Tool {
             return;
         }
 
-        // Push state for undo
-        ctx.undoStack.push(ctx.state);
+        // Push state for undo (skipped when growth already pushed one).
+        if (!cap.pushed) ctx.undoStack.push(ctx.state);
 
-        ctx.state.applyBatch(batch);
-
+        // Report before painting: the host snapshots the live canvas here
+        // for deny reverts, and nothing below reads painted cells (list,
+        // overlay, and queue updates are coord-only), so pre-paint order
+        // is safe and keeps the snapshot pre-move.
         if (ctx.onCellsMoved) {
             ctx.onCellsMoved(
                 this.movingCells.map(mc => ({
-                    fromCol: mc.col,
-                    fromRow: mc.row,
-                    toCol: mc.col + dx,
-                    toRow: mc.row + dy
+                    fromCol: mc.col + sh.col,
+                    fromRow: mc.row + sh.row,
+                    toCol: mc.col + dx + sh.col,
+                    toRow: mc.row + dy + sh.row
                 }))
             );
         }
+
+        ctx.state.applyBatch(batch);
 
         // 3. Move the selection outline if any
         let selected = ctx.renderer.getSelectedCells();

@@ -1,7 +1,8 @@
-import { measureCellMetrics } from './utils/fontMetrics';
+import { measureCellMetrics, CellMetrics } from './utils/fontMetrics';
+import { scrollerGridTile } from './utils/scrollerGrid';
 import { CanvasState } from './state/CanvasState';
 import { UndoStack } from './state/UndoStack';
-import { GridRenderer } from './canvas/GridRenderer';
+import { GridRenderer, STATE_ORIGIN_MARGIN, planContentScroll } from './canvas/GridRenderer';
 import { beginNewCanvas } from './canvas/newCanvas';
 import { CanvasController } from './canvas/CanvasController';
 import { ToolManager } from './tools/ToolManager';
@@ -42,7 +43,7 @@ import { RoomEditor } from './ui/RoomEditor';
 import { PreviewWindow } from './ui/PreviewWindow';
 import { GradientPicker } from './ui/GradientPicker';
 import { readDrawGrant, clearDrawGrant } from './webclient/launch';
-import { loadMapPayload, MapEditSession, MapEditPayload, MapEditOrigin, MapLegendEntry, MapRoom, MapExitEdit, logRoomData } from './mapedit';
+import { loadMapPayload, MapEditSession, MapEditPayload, MapEditOrigin, MapLegendEntry, MapRoom, MapExitEdit, RoomMove, logRoomData } from './mapedit';
 import { buildEditorSettings } from './editorSettings';
 import {
     planCreateRooms,
@@ -55,6 +56,9 @@ import {
     buildRoomCellKeys,
     applyAcceptedMoves,
     revertAcceptedMoves,
+    restoreDeniedSquares,
+    formatMovesDeniedMessage,
+    movesEqual,
     fillCreatedDefaults,
     findRoomIndex,
     cloneRoom,
@@ -66,6 +70,7 @@ import {
 import { applyEditorSettings } from './applyEditorSettings';
 import { toCssFontFamily } from './utils/cssFont';
 import { LegendEditorDialog } from './ui/LegendEditorDialog';
+import { originDeltaForGrowth } from './canvas/ensureCapacity';
 
 document.fonts.ready.then(() => {
     void initApp();
@@ -128,6 +133,59 @@ async function initApp() {
     let metrics = measureCellMetrics(appState.fontFamily, currentFontSize);
     const renderer = new GridRenderer(canvasEl, canvasState, metrics);
 
+    // Keep the scroller's fallback grid aligned with the canvas cells.
+    // The tile is hard-edged SVG baked at the live cell size (never a
+    // gradient: resampled gradient stops render soft and read lighter
+    // than the canvas strokes). See scrollerGridTile.
+    const canvasScroller = canvasEl.parentElement;
+    const syncScrollerGrid = (m: CellMetrics): void => {
+        canvasScroller?.style.setProperty('--cell-w', `${m.width}px`);
+        canvasScroller?.style.setProperty('--cell-h', `${m.height}px`);
+        canvasScroller?.style.setProperty('background-image', scrollerGridTile(m.width, m.height));
+        canvasScroller?.style.setProperty('background-size', `${m.width}px ${m.height}px`);
+    };
+    syncScrollerGrid(metrics);
+
+    // One drawable surface: the canvas element covers the whole scroller
+    // viewport with storage at a fixed inset, so every visible grid
+    // square takes paint (margin clicks land outside storage and the
+    // tools grow into them). The view only grows — never shrinks — so
+    // scroll position is never disturbed.
+    renderer.setViewOrigin(STATE_ORIGIN_MARGIN, STATE_ORIGIN_MARGIN);
+    const fitCanvasToViewport = (): void => {
+        if (!canvasScroller) return;
+        renderer.ensureViewForViewport(
+            canvasScroller.scrollLeft,
+            canvasScroller.scrollTop,
+            canvasScroller.clientWidth,
+            canvasScroller.clientHeight);
+    };
+    fitCanvasToViewport();
+    canvasScroller?.addEventListener('scroll', fitCanvasToViewport);
+    window.addEventListener('resize', fitCanvasToViewport);
+    // loadMapPayload sets bounds on the state before the renderer exists:
+    // mirror them or the violet outline keeps the stale boot-time copy
+    // until the first growth/text/undo refreshes it.
+    renderer.setServerBounds(canvasState.serverBounds);
+    // The map sits at the view inset, far from the scroller origin: put
+    // it on screen or the editor opens on empty margin grid.
+    const scrollContentIntoView = (): void => {
+        if (!canvasScroller) return;
+        const b = canvasState.serverBounds;
+        const origin = renderer.getViewOrigin();
+        const pos = planContentScroll({
+            offsetCol: origin.offsetCol,
+            offsetRow: origin.offsetRow,
+            rectCol: b.col,
+            rectRow: b.row,
+            cellW: metrics.width,
+            cellH: metrics.height,
+        });
+        canvasScroller.scrollLeft = pos.scrollLeft;
+        canvasScroller.scrollTop = pos.scrollTop;
+    };
+    scrollContentIntoView();
+
     if (mapEditOrigin) {
         renderer.setRoomCells(roomCellSet ?? mapEditOrigin.roomCells);
     }
@@ -143,11 +201,11 @@ async function initApp() {
         modifiers: { shiftKey: false, altKey: false, ctrlKey: false }
     };
 
-    // Undo checkpoints for in-flight move validations (FIFO: the server
-    // answers validations in order). Each entry is the undo depth before the
-    // move's own stroke, so a deny reverts that stroke plus anything painted
-    // after it instead of a single unrelated entry.
-    const pendingMoveCheckpoints: number[] = [];
+    // In-flight move validations (FIFO: the server answers validations in
+    // order). Each entry carries the sent client moves plus a pre-move
+    // canvas snapshot, so a deny restores just the denied squares instead
+    // of reverting the whole canvas and the strokes painted after it.
+    const pendingMoveSnapshots: { moves: RoomMove[]; snapshot: CanvasState }[] = [];
 
     // A canvas move relocates the room itself, so the list entry and the
     // overlay key have to move in this handler, not when the answer comes
@@ -159,18 +217,60 @@ async function initApp() {
     // accept is then a no-op.
     context.onCellsMoved = (moves) => {
         if (!mapEditSession || !mapEditOrigin) return;
-        pendingMoveCheckpoints.push(Math.max(0, undoStack.depth - 1));
+        // Snapshot first: the move tool reports pre-paint, so the live
+        // canvas is still the pre-move state a deny restores squares from.
+        // (Nothing below paints cells; bounds may expand, which is fine —
+        // the snapshot is only read for cell content.)
+        const snapshot = canvasState.clone();
         const worldMoves = moves.map((m) => ({
             fromX: m.fromCol + mapEditOrigin!.originX,
             fromY: canvasState.height - 1 - m.fromRow + mapEditOrigin!.originY,
             toX: m.toCol + mapEditOrigin!.originX,
             toY: canvasState.height - 1 - m.toRow + mapEditOrigin!.originY,
         }));
+        pendingMoveSnapshots.push({ moves: worldMoves, snapshot });
         applyAcceptedMoves(rooms, worldMoves);
         syncRoomCells();
         roomEditor.setRooms(rooms);
         refreshRoomPanel();
         mapEditSession.validateRoomMoves(worldMoves);
+    };
+
+    // Viewport growth keeps content anchored, so every viewport-frame
+    // record has to follow the shift: the world origin moves the opposite
+    // way (left/top inserts push content down-right), the diff rect is the
+    // grown state's bounds, the room overlay rebuilds against the rebased
+    // origin, and the selection outline translates with the content.
+    // Previews are dropped — they were computed in the old frame.
+    context.onViewportShifted = (growth) => {
+        const { dx, dy } = originDeltaForGrowth(growth);
+        if (mapEditOrigin) {
+            mapEditOrigin.originX += dx;
+            mapEditOrigin.originY += dy;
+            mapEditOrigin.serverBounds = { ...canvasState.serverBounds };
+        }
+        mapEditSession?.rebaseOrigin(dx, dy);
+        mapEditSession?.setServerBounds(canvasState.serverBounds);
+        renderer.setServerBounds(canvasState.serverBounds);
+        syncRoomCells();
+        // Storage grew toward the view edge: re-cover it and the viewport.
+        fitCanvasToViewport();
+        if (growth.addedLeft !== 0 || growth.addedTop !== 0) {
+            const shifted = new Set<string>();
+            for (const key of selectionTool.getSelectedCells()) {
+                const [c, r] = key.split(',').map(Number);
+                if (!Number.isInteger(c) || !Number.isInteger(r)) continue;
+                shifted.add(`${c + growth.addedLeft},${r + growth.addedTop}`);
+            }
+            selectionTool.setSelection(shifted);
+        }
+        renderer.clearPreview();
+        if (growth.capped) {
+            // No toast element exists; a sticky error dialog would be
+            // disproportionate for a routine cap, so this stays a warning.
+            console.warn(
+                `Viewport capped at ${CanvasState.MAX_DIMENSION}: cells past the limit were dropped.`);
+        }
     };
 
 
@@ -186,7 +286,7 @@ async function initApp() {
         // the live object or save would diff a discarded one.
         mapEditSession?.rebindCanvas(canvasState);
         clearRoomEditHistory();
-    }, () => metrics, undoStack);
+    }, () => metrics, undoStack, (g) => context.onViewportShifted?.(g));
 
     const toolManager = new ToolManager(context);
     toolManager.addTool('rect', new RectangleTool());
@@ -215,11 +315,14 @@ async function initApp() {
     toolManager.addTool('linkpick', linkPickTool);
 
     const controller = new CanvasController(canvasEl, metrics, toolManager);
+    controller.setStateOffset(STATE_ORIGIN_MARGIN, STATE_ORIGIN_MARGIN);
     if (document.fonts && !document.fonts.check(`${currentFontSize}px ${toCssFontFamily(appState.fontFamily)}`)) {
         void document.fonts.ready.then(() => {
             const refreshed = measureCellMetrics(appState.fontFamily, currentFontSize);
             controller.updateMetrics(refreshed);
             renderer.updateMetrics(refreshed);
+            syncScrollerGrid(refreshed);
+            fitCanvasToViewport();
         });
     }
 
@@ -406,6 +509,20 @@ async function initApp() {
         if (roomCellSet && mapEditOrigin) {
             roomCellSet = buildRoomCellKeys(rooms, mapEditOrigin.originX, mapEditOrigin.originY, canvasState.height);
             renderer.setRoomCells(roomCellSet);
+            // Rooms are server content: keep the violet grid covering them
+            // so room glyphs stay inside the diff/export rect (e.g. rooms
+            // created from a selection outside the current grid).
+            let expanded = false;
+            for (const room of rooms) {
+                const col = room.x - mapEditOrigin.originX;
+                const row = canvasState.height - 1 - (room.y - mapEditOrigin.originY);
+                expanded = canvasState.ensureBoundsFor(col, row) || expanded;
+            }
+            if (expanded) {
+                renderer.setServerBounds(canvasState.serverBounds);
+                mapEditSession?.setServerBounds(canvasState.serverBounds);
+                mapEditOrigin.serverBounds = { ...canvasState.serverBounds };
+            }
         }
     }
 
@@ -723,6 +840,32 @@ async function initApp() {
 
     // Safe to register here: websocket events are async and cannot fire
     // before the synchronous setup below this point has completed.
+    // Revert one optimistic move batch (denied by the server or dropped
+    // as stale): repaint its squares from its pre-move snapshot, walk the
+    // room list back, rebuild overlays. Later strokes elsewhere survive;
+    // undo depths never shift so the journals need no pruning. Entries
+    // match by batch content, since drops can resolve out of FIFO order.
+    const revertOptimisticMoves = (moves: RoomMove[]): void => {
+        const idx = pendingMoveSnapshots.findIndex((e) => movesEqual(e.moves, moves));
+        const entry = idx >= 0 ? pendingMoveSnapshots[idx] : undefined;
+        if (idx >= 0) pendingMoveSnapshots.splice(idx, 1);
+        if (entry && mapEditOrigin) {
+            const batch = restoreDeniedSquares(
+                canvasState, entry.snapshot, moves,
+                mapEditOrigin.originX, mapEditOrigin.originY);
+            if (batch.length > 0) canvasState.applyBatch(batch);
+        }
+        // Walk the list back from the optimistic relocation, then
+        // rebuild. No surgical key swap: a raw to→from key revert
+        // could hand a square to the wrong room when creates,
+        // deletes, or later moves landed between send and deny,
+        // planting a highlight on a square with no room while the
+        // panel stayed empty.
+        revertAcceptedMoves(rooms, moves);
+        roomEditor.setRooms(rooms);
+        syncRoomCells();
+        refreshRoomPanel();
+    };
     mapEditSession?.onEvent((event) => {
         if (event.type === 'reject') {
             console.warn(`Map edit rejected (${event.reason}). Re-run 'mapedit' in-game.`);
@@ -836,7 +979,11 @@ async function initApp() {
         } else if (event.type === 'saved') {
             if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) console.log('Saved to server.');
         } else if (event.type === 'moves_accepted') {
-            pendingMoveCheckpoints.shift();
+            // Match by batch content: drops can resolve out of FIFO order,
+            // so a blind shift could discard the wrong snapshot. No match
+            // means the entry already settled; nothing to drop then.
+            const at = pendingMoveSnapshots.findIndex((e) => movesEqual(e.moves, event.moves));
+            if (at >= 0) pendingMoveSnapshots.splice(at, 1);
             // The list already relocated when the move was sent, so the
             // accept is normally a no-op; it still runs (identity-based,
             // never positional) so a batch whose accept was preceded by a
@@ -848,49 +995,17 @@ async function initApp() {
             syncRoomCells();
             refreshRoomPanel();
         } else if (event.type === 'moves_denied') {
-            console.warn('Room move denied by server — snapping back.');
-            const checkpoint = pendingMoveCheckpoints.shift() ?? Math.max(0, undoStack.depth - 1);
-            const restored = undoStack.undoTo(checkpoint);
-            // The popped canvas states are gone: drop exit-undo entries
-            // pointing past the checkpoint and clear exit redo (the redo
-            // stack now holds foreign states). Exit data itself is
-            // untouched — only glyph strokes revert here.
-            while (exitUndo.length > 0 && exitUndo[exitUndo.length - 1].depth > checkpoint) exitUndo.pop();
-            exitRedo.length = 0;
-            while (createUndo.length > 0 && createUndo[createUndo.length - 1].depth > checkpoint) createUndo.pop();
-            createRedo.length = 0;
-            while (deleteUndo.length > 0 && deleteUndo[deleteUndo.length - 1].depth > checkpoint) deleteUndo.pop();
-            deleteRedo.length = 0;
-            if (restored) {
-                canvasState = restored;
-                context.state = restored;
-                renderer.updateState(restored);
-                layerManager.updateState(restored);
-                // Undo restored a different canvas object: rebind the
-                // session so save diffs the restored map, not the denied one.
-                mapEditSession?.rebindCanvas(restored);
-            }
-            // Walk the list back from the optimistic relocation, then
-            // rebuild. No surgical key swap: a raw to→from key revert
-            // could hand a square to the wrong room when creates,
-            // deletes, or later moves landed between send and deny,
-            // planting a highlight on a square with no room while the
-            // panel stayed empty.
-            revertAcceptedMoves(rooms, event.moves);
-            roomEditor.setRooms(rooms);
-            syncRoomCells();
-            refreshRoomPanel();
-            const maxListed = 5;
-            const listed = event.moves
-                .slice(0, maxListed)
-                .map((m) => `(${m.toX}, ${m.toY})`)
-                .join(', ');
-            const extra = event.moves.length > maxListed ? ` and ${event.moves.length - maxListed} more` : '';
-            moveDeniedDialog.show(
-                `The server rejected moving ${event.moves.length === 1 ? 'a room' : `${event.moves.length} rooms`} `
-                + `to ${listed}${extra} — destination occupied. The canvas was reverted to before the rejected move`
-                + ` (strokes painted after it were reverted as well).`
-            );
+            console.warn('Room move denied by server — restoring denied squares.');
+            revertOptimisticMoves(event.moves);
+            moveDeniedDialog.show(formatMovesDeniedMessage(event.moves));
+        } else if (event.type === 'moves_dropped') {
+            // Stale queued batch the session discarded after a deny: its
+            // optimistic canvas effects never reached the server, so they
+            // revert the same surgical way. No dialog (the deny already
+            // showed); the panel notes the dropped strokes.
+            console.warn('Stale queued room moves dropped after a deny.');
+            revertOptimisticMoves(event.moves);
+            roomEditor.setStatus(`Dropped ${event.moves.length === 1 ? '1 stale queued move' : `${event.moves.length} stale queued moves`}.`);
         }
     });
 
@@ -905,6 +1020,8 @@ async function initApp() {
         metrics = measureCellMetrics(fontFamily, currentFontSize);
         controller.updateMetrics(metrics);
         renderer.updateMetrics(metrics);
+        syncScrollerGrid(metrics);
+        fitCanvasToViewport();
 
         document.documentElement.style.setProperty('--main-font', toCssFontFamily(fontFamily));
         charPalette.reRender();
@@ -1047,31 +1164,59 @@ async function initApp() {
     }
 
     new NewCanvasDialog((w, h) => {
-        // New means a cleared map; the reset helper owns the full sequence
-        // (undo push, room/selection overlay clears, state rebind) so the
-        // wiring itself stays unit-tested. The mapedit session stays bound
-        // so Save still targets the same map.
+        // New means a cleared map, and the picked size is the server grid
+        // (what gets sent back), not the viewport: the viewport fits the
+        // container with a working margin around the centered grid so there
+        // is room to draw past the violet line. The reset helper owns the
+        // full sequence (undo push, room/selection overlay clears, state
+        // rebind) so the wiring itself stays unit-tested. The mapedit
+        // session stays bound so Save still targets the same map, and the
+        // world origin is untouched: a fresh grid at the same origin keeps
+        // world-coord math (and the wipe-as-deletions baseline) stable.
+        const MARGIN = 8;
+        const container = canvasEl.parentElement;
+        const fitW = container && metrics.width > 0
+            ? Math.ceil(container.clientWidth / metrics.width) : 0;
+        const fitH = container && metrics.height > 0
+            ? Math.ceil(container.clientHeight / metrics.height) : 0;
+        const vw = Math.min(2048, Math.max(fitW, w + MARGIN));
+        const vh = Math.min(2048, Math.max(fitH, h + MARGIN));
         const created = beginNewCanvas({
             undoStack,
             renderer,
             selection: selectionTool,
             layers: layerManager,
             tools: context,
-        }, w, h);
+        }, w, h, {
+            viewportW: vw,
+            viewportH: vh,
+            bounds: { col: Math.floor((vw - w) / 2), row: Math.floor((vh - h) / 2), w, h },
+        });
         canvasState = created.state;
         roomCellSet = created.roomCells;
+        if (mapEditOrigin) mapEditOrigin.serverBounds = { ...created.state.serverBounds };
         // New is a deliberate clear: keep the old baseline so the next
         // save expresses the wipe as deletions (a re-baseline here would
-        // make the cleared map unsendable).
+        // make the cleared map unsendable). The rebind adopts the new
+        // bounds for the diff rect.
         mapEditSession?.rebindCanvas(created.state, { keepBaseline: true });
         clearRoomEditHistory();
+        // Fresh storage and a fresh diff rect: re-cover the viewport and
+        // put the new grid on screen (the view never shrinks on its own).
+        fitCanvasToViewport();
+        scrollContentIntoView();
     });
 
     new ResizeCanvasDialog(() => canvasState, (w, h) => {
+        // The Resize dialog now sizes the server grid (violet rect), not
+        // the viewport: the origin stays put and storage is untouched, so
+        // no content moves or is cropped. Bounds clamp into storage.
         undoStack.push(canvasState);
-        canvasState.resize(w, h);
-        
-        renderer.updateState(canvasState);
+        canvasState.setServerBounds({ ...canvasState.serverBounds, w, h });
+
+        renderer.setServerBounds(canvasState.serverBounds);
+        mapEditSession?.setServerBounds(canvasState.serverBounds);
+        if (mapEditOrigin) mapEditOrigin.serverBounds = { ...canvasState.serverBounds };
         layerManager.updateState(canvasState);
     });
 
@@ -1236,6 +1381,8 @@ async function initApp() {
         metrics = measureCellMetrics(appState.fontFamily, currentFontSize);
         controller.updateMetrics(metrics);
         renderer.updateMetrics(metrics);
+        syncScrollerGrid(metrics);
+        fitCanvasToViewport();
         charPalette.reRender();
     };
 

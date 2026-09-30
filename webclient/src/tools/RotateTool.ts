@@ -5,6 +5,7 @@ import { cellEquals } from '../utils/colors';
 import { transformCharacter } from '../utils/transformMappings';
 import { measureCellMetrics } from '../utils/fontMetrics';
 import { parseCellKey } from '../utils/cellKeys';
+import { ensureToolCapacity } from '../canvas/ensureCapacity';
 
 function getCellAspect(fontFamily: string): number {
     try {
@@ -37,7 +38,8 @@ export class RotateTool implements Tool {
 
     // Merge clears + placements (placements win on overlap) and drop writes
     // that would not change the cell, so content-identical transforms push
-    // no undo entry. Out-of-bounds destinations are clipped (dropped).
+    // no undo entry. Callers grow the viewport first, so the in-bounds gate
+    // reads post-growth storage and only 2048-capped points are dropped.
     private static buildBatch(
         ctx: ToolContext,
         clearUpdates: { col: number; row: number; cell: Cell }[],
@@ -116,7 +118,6 @@ export class RotateTool implements Tool {
         }));
 
         const newTargetCells: { col: number, row: number, originCell: Cell }[] = [];
-        const mappedSelection = new Set<string>();
 
         // 2. Transform positions and characters (in-place, anchored to bbox top-left)
         for (const tc of targetCells) {
@@ -155,25 +156,38 @@ export class RotateTool implements Tool {
                 row: finalRow,
                 originCell: { ...tc.originCell, char: newChar }
             });
-            if (selected && selected.size > 0 && RotateTool.inBounds(ctx, finalCol, finalRow)) {
-                mappedSelection.add(`${finalCol},${finalRow}`);
-            }
         }
 
         const placeUpdates = newTargetCells.map(ntc => ({
             col: ntc.col, row: ntc.row, cell: ntc.originCell
         }));
 
+        // Destinations past the violet line grow the viewport instead of
+        // being clipped. Everything below runs in the post-growth frame:
+        // left/top inserts shift every stored coord (see BrushTool).
+        const cap = ensureToolCapacity(ctx, placeUpdates.map(p => ({ col: p.col, row: p.row })));
+        const sh = cap.shift;
+        const shiftedClears = clearUpdates.map(u => ({ ...u, col: u.col + sh.col, row: u.row + sh.row }));
+        const shiftedPlaces = placeUpdates.map(u => ({ ...u, col: u.col + sh.col, row: u.row + sh.row }));
+        // Remap the selection in the post-growth frame: destinations the
+        // growth pulled into storage stay selected, capped ones drop.
+        const shiftedSelection = new Set<string>();
+        if (selected && selected.size > 0) {
+            for (const ntc of newTargetCells) {
+                const k = `${ntc.col + sh.col},${ntc.row + sh.row}`;
+                if (!cap.dropped.has(k)) shiftedSelection.add(k);
+            }
+        }
         // Content-identical or fully-clipped transforms push no undo entry.
-        const batch = RotateTool.buildBatch(ctx, clearUpdates, placeUpdates);
+        const batch = RotateTool.buildBatch(ctx, shiftedClears, shiftedPlaces);
         if (batch.length === 0) return;
 
-        ctx.undoStack.push(ctx.state);
+        if (!cap.pushed) ctx.undoStack.push(ctx.state);
         ctx.state.applyBatch(batch);
 
-        if (mappedSelection.size > 0) {
-            ctx.renderer.setSelection(mappedSelection);
-            ctx.selectionSync?.setSelection(mappedSelection);
+        if (shiftedSelection.size > 0) {
+            ctx.renderer.setSelection(shiftedSelection);
+            ctx.selectionSync?.setSelection(shiftedSelection);
         } else if (selected && selected.size > 0) {
              // they all fell out of bounds
              ctx.renderer.clearSelection();
@@ -356,22 +370,37 @@ export class RotateTool implements Tool {
         const minR = Math.floor(this.cy - RmaxRow);
         const maxR = Math.ceil(this.cy + RmaxRow);
 
+        // Grow past the violet line for the rotated bbox before sampling.
+        // The rotation is translation-invariant, so re-frame center, loop,
+        // and source hash into post-growth storage: left/top inserts shift
+        // every stored coord (see BrushTool.onMouseDown). The loop's
+        // in-bounds gate then reads post-growth storage.
+        const cap = ensureToolCapacity(ctx, [
+            { col: minC - 1, row: minR - 1 },
+            { col: maxC + 1, row: minR - 1 },
+            { col: minC - 1, row: maxR + 1 },
+            { col: maxC + 1, row: maxR + 1 },
+        ]);
+        const sh = cap.shift;
+        const ccx = this.cx + sh.col;
+        const ccy = this.cy + sh.row;
+
         const originHash = new Map<string, Cell>();
-        for (const mc of this.movingCells) originHash.set(`${mc.col},${mc.row}`, mc.originCell);
+        for (const mc of this.movingCells) originHash.set(`${mc.col + sh.col},${mc.row + sh.row}`, mc.originCell);
 
         const newTargetCells: { col: number, row: number, originCell: Cell }[] = [];
         const mappedSelection = new Set<string>();
         const wasSelected = ctx.renderer.getSelectedCells().size > 0;
 
-        for (let r = minR - 1; r <= maxR + 1; r++) {
-            for (let c = minC - 1; c <= maxC + 1; c++) {
-                const px = (c - this.cx) * W;
-                const py = (r - this.cy) * H;
+        for (let r = minR - 1 + sh.row; r <= maxR + 1 + sh.row; r++) {
+            for (let c = minC - 1 + sh.col; c <= maxC + 1 + sh.col; c++) {
+                const px = (c - ccx) * W;
+                const py = (r - ccy) * H;
                 const ox = px * cosInv - py * sinInv;
                 const oy = px * sinInv + py * cosInv;
-                const sc = Math.round((ox / W) + this.cx);
-                const sr = Math.round((oy / H) + this.cy);
-                
+                const sc = Math.round((ox / W) + ccx);
+                const sr = Math.round((oy / H) + ccy);
+
                 const oCell = originHash.get(`${sc},${sr}`);
                 if (oCell && RotateTool.inBounds(ctx, c, r)) {
                     newTargetCells.push({ col: c, row: r, originCell: oCell });
@@ -381,7 +410,7 @@ export class RotateTool implements Tool {
         }
 
         const clearUpdates = this.movingCells.map(mc => ({
-            col: mc.col, row: mc.row, cell: { char: '', fg: [204, 204, 204] as [number, number, number], bg: [-1, -1, -1] as [number, number, number] }
+            col: mc.col + sh.col, row: mc.row + sh.row, cell: { char: '', fg: [204, 204, 204] as [number, number, number], bg: [-1, -1, -1] as [number, number, number] }
         }));
 
         const placeUpdates = newTargetCells.map(ntc => ({
@@ -396,7 +425,7 @@ export class RotateTool implements Tool {
             return;
         }
 
-        ctx.undoStack.push(ctx.state);
+        if (!cap.pushed) ctx.undoStack.push(ctx.state);
         ctx.state.applyBatch(batch);
 
         if (mappedSelection.size > 0) {

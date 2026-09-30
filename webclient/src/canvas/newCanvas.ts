@@ -2,6 +2,7 @@ import { CanvasState } from '../state/CanvasState';
 import { UndoStack } from '../state/UndoStack';
 import { GridRenderer } from './GridRenderer';
 import type { SelectionSync } from '../tools/Tool';
+import type { ServerBounds } from '../types';
 
 /**
  * Dependencies for the New command (fresh blank canvas at a given size).
@@ -14,6 +15,19 @@ export interface NewCanvasDeps {
     selection: SelectionSync;
     layers: { updateState(state: CanvasState): void };
     tools: { state: CanvasState };
+}
+
+/**
+ * Optional layout for the New command. `w`/`h` are always the server grid
+ * (what gets sent back); the viewport may be larger so the fresh grid sits
+ * inset with working margin around it, and `bounds` places the violet rect
+ * inside that viewport. Omitted fields keep the old behavior: viewport ==
+ * grid, bounds == full canvas.
+ */
+export interface NewCanvasLayout {
+    viewportW?: number;
+    viewportH?: number;
+    bounds?: ServerBounds;
 }
 
 /**
@@ -31,12 +45,19 @@ export function beginNewCanvas(
     deps: NewCanvasDeps,
     w: number,
     h: number,
+    layout?: NewCanvasLayout,
 ): { state: CanvasState; roomCells: Set<string> } {
     if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w > 2048 || h > 2048) {
         throw new RangeError(`Invalid canvas size ${w}x${h}: width and height must be integers in 1..2048.`);
     }
+    const vw = layout?.viewportW ?? w;
+    const vh = layout?.viewportH ?? h;
+    if (!Number.isInteger(vw) || !Number.isInteger(vh) || vw < 1 || vh < 1 || vw > 2048 || vh > 2048) {
+        throw new RangeError(`Invalid canvas viewport ${vw}x${vh}: width and height must be integers in 1..2048.`);
+    }
     deps.undoStack.push(deps.tools.state);
-    const state = new CanvasState(w, h);
+    const state = new CanvasState(vw, vh);
+    if (layout?.bounds) state.setServerBounds(layout.bounds);
 
     const roomCells = new Set<string>();
     deps.renderer.setRoomCells(roomCells);

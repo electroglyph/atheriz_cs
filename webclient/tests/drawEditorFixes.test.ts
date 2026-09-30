@@ -375,10 +375,10 @@ describe('SidebarResizer destroy removes window unload listeners', () => {
   });
 });
 
-describe('TextToANSI calculateGrid clamps rows on tiny canvases', () => {
-  it('returns at least one row and a sane column count for height 2', () => {
+describe('TextToANSI calculateGrid honors an explicit character size', () => {
+  it('returns at least one row and a sane column count for a 2x1 target', () => {
     expect(
-      calculateGrid(10, 10, 80, 80, 2, { width: 5, height: 10, font: '10px monospace', advance: 5 }),
+      calculateGrid(10, 10, 2, 1, { width: 5, height: 10, font: '10px monospace', advance: 5 }),
     ).toEqual({ cols: 2, rows: 1 });
   });
 });

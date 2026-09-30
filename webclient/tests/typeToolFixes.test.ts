@@ -78,7 +78,7 @@ afterEach(() => {
 });
 
 describe('W11 TypeTool confirm guards', () => {
-  it('fully off-canvas typing pushes no undo entry and paints nothing', async () => {
+  it('off-storage typing grows the grid and paints with one undo entry', async () => {
     buildModalDom();
     const state = new CanvasState(4, 4);
     const ctx = makeCtx(state);
@@ -88,8 +88,11 @@ describe('W11 TypeTool confirm guards', () => {
     tool.onMouseDown(ctx, { x: 10, y: 0 });
     await Promise.resolve();
     await Promise.resolve();
-    expect(ctx.undoStack.depth).toBe(depthBefore);
-    expect(state.getCompositeCell(0, 0)?.char ?? '').toBe('');
+    expect(ctx.undoStack.depth).toBe(depthBefore + 1);
+    expect(state.getCompositeCell(10, 0)?.char).toBe('h');
+    expect(state.getCompositeCell(11, 0)?.char).toBe('i');
+    expect(state.getActiveLayer().overflowCells?.size ?? 0).toBe(0);
+    expect(state.serverBounds.w).toBeGreaterThanOrEqual(12);
   });
 
   it('clips negative columns and out-of-range rows instead of overflowCells', async () => {

@@ -298,15 +298,27 @@ button.primary:hover {
   min-width: 0;
 }
 
-/* Canvas Container */
+/* Canvas Container: bare black with the same #222 cell grid as the
+ * canvas, so every viewable pixel reads as grid — even past the canvas
+ * edge after a window resize. main.ts syncScrollerGrid replaces the
+ * gradient below with a hard-edged SVG tile baked at the live cell
+ * size (gradients resample soft and read lighter than the canvas
+ * strokes); the gradient stays as the first-paint fallback only.
+ * --cell-w/--cell-h are set from the live font metrics (main.ts);
+ * `local` keeps the pattern glued to the scrolled content so it stays
+ * aligned with the canvas grid. */
 #canvas-container {
   flex: 1;
-  background-color: #111;
+  background-color: #000;
+  background-image:
+    linear-gradient(#222 1px, transparent 1px),
+    linear-gradient(90deg, #222 1px, transparent 1px);
+  background-size: var(--cell-w, 10px) var(--cell-h, 18px);
+  background-attachment: local;
   overflow: auto;
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
-  padding: 24px;
 }
 
 /* Bottom Toolbar */

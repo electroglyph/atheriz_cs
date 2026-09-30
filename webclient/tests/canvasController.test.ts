@@ -154,9 +154,90 @@ describe('strokes are clipped at the canvas edge', () => {
   });
 });
 
+describe('clicks outside the violet grid still paint', () => {
+  it('paints a margin click and expands the server bounds to cover it', () => {
+    const canvas = makeCanvasDom();
+    const state = new CanvasState(10, 10);
+    state.setServerBounds({ col: 2, row: 2, w: 4, h: 4 });
+    const tm = new ToolManager(makeContext(state));
+
+    new CanvasController(canvas, metrics, tm);
+
+    // client (5,5) -> cell (0,0): outside the violet grid but inside the
+    // viewport. The controller must pass viewport coords through untouched
+    // (no bounds filtering); the brush then grows the grid to the stroke.
+    canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 5, clientY: 5 }));
+    window.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: 5, clientY: 5 }));
+
+    expect(state.getActiveLayer().cells[0][0].char).toBe('x');
+    expect(state.serverBounds.col).toBe(0);
+    expect(state.serverBounds.row).toBe(0);
+  });
+});
+
 function makeContext(state: CanvasState): ToolContext {
   const undoStack = new UndoStack();
   const renderer = { setPreview: () => {}, clearPreview: () => {} } as unknown as GridRenderer;
   const appState = makeAppState();
   return { state, undoStack, renderer, appState, modifiers: { shiftKey: false, altKey: false, ctrlKey: false } };
 }
+
+describe('CanvasController state inset', () => {
+  it('subtracts the view inset so margin clicks land outside storage', () => {
+    const canvas = makeCanvasDom();
+    const state = new CanvasState(10, 10);
+    const tm = new ToolManager(makeContext(state));
+    const controller = new CanvasController(canvas, metrics, tm);
+    controller.setStateOffset(128, 128);
+
+    const seen: Array<{ x: number; y: number }> = [];
+    tm.onMouseDown = ((cell: { x: number; y: number }) => { seen.push(cell); }) as never;
+    // Element cell (5,5) minus the inset: deep in the drawable margin.
+    canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 55, clientY: 55 }));
+
+    expect(seen).toEqual([{ x: 5 - 128, y: 5 - 128 }]);
+  });
+
+  it('paints through the inset onto the state origin', () => {
+    const canvas = makeCanvasDom();
+    const state = new CanvasState(10, 10);
+    const tm = new ToolManager(makeContext(state));
+    const controller = new CanvasController(canvas, metrics, tm);
+    controller.setStateOffset(5, 5);
+
+    // Element cell (5,5) is state (0,0): the brush paints the origin.
+    canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 55, clientY: 55 }));
+    window.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: 55, clientY: 55 }));
+
+    expect(state.getActiveLayer().cells[0][0].char).toBe('x');
+  });
+
+  it('clamps to the element before shifting, never past it', () => {
+    const canvas = makeCanvasDom();
+    const state = new CanvasState(10, 10);
+    const tm = new ToolManager(makeContext(state));
+    const controller = new CanvasController(canvas, metrics, tm);
+    controller.setStateOffset(5, 5);
+
+    const seen: Array<{ x: number; y: number }> = [];
+    tm.onMouseDown = ((cell: { x: number; y: number }) => { seen.push(cell); }) as never;
+    // 100px element = 10 cells: clamped to element cell (9,9), then shifted.
+    canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 50000, clientY: 50000 }));
+
+    expect(seen).toEqual([{ x: 4, y: 4 }]);
+  });
+
+  it('sanitizes a garbage inset back to zero', () => {
+    const canvas = makeCanvasDom();
+    const state = new CanvasState(10, 10);
+    const tm = new ToolManager(makeContext(state));
+    const controller = new CanvasController(canvas, metrics, tm);
+    controller.setStateOffset(NaN, -3);
+
+    const seen: Array<{ x: number; y: number }> = [];
+    tm.onMouseDown = ((cell: { x: number; y: number }) => { seen.push(cell); }) as never;
+    canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 55, clientY: 55 }));
+
+    expect(seen).toEqual([{ x: 5, y: 5 }]);
+  });
+});

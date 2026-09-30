@@ -8,12 +8,19 @@ export const LAYER_BOUNDARY_MARKER = '\x1b[s\x1b[u\x1b[s\x1b[u\x1b[s\x1b[u';
 
 export class AnsiExporter {
     public static export(state: CanvasState): string {
-        const { width, height, layers } = state;
+        const { layers } = state;
+        // Export the server grid (violet rect), not the whole viewport:
+        // margin cells outside the bounds are editor-only working space.
+        // Cursor addresses are 1-based within the cropped output.
+        const b = state.serverBounds ?? { col: 0, row: 0, w: state.width, h: state.height };
+        const width = b.w;
+        const height = b.h;
 
         // Empty guard: a canvas with no layers (e.g. all layers deleted)
         // exports a bare reset instead of throwing on layers[0].
-        // Note: only the in-bounds grid is exported. overflowCells
-        // (out-of-bounds writes) are intentionally dropped, not serialized.
+        // Note: only the violet server grid is exported. Viewport margin
+        // cells and overflowCells (out-of-bounds writes) are intentionally
+        // dropped, not serialized.
         if (!layers || layers.length === 0) {
             return '\x1b[0m';
         }
@@ -47,7 +54,7 @@ export class AnsiExporter {
         for (let r = 0; r < height; r++) {
             out += `\x1b[${r + 1};1H`;
             for (let c = 0; c < width; c++) {
-                const cell = bgLayer.cells[r][c];
+                const cell = bgLayer.cells[r + b.row][c + b.col];
                 const char = bgHidden ? ' ' : (cell.char || ' ');
 
                 // A layer promoted to index 0 (after the original bg was deleted) may still
@@ -83,7 +90,7 @@ export class AnsiExporter {
             let hasContent = false;
             for (let r = 0; r < height && !hasContent; r++) {
                 for (let c = 0; c < width; c++) {
-                    const cell = layer.cells[r][c];
+                    const cell = layer.cells[r + b.row][c + b.col];
                     if ((cell.char && cell.char.trim() !== '') || cell.bg[0] !== -1) {
                         hasContent = true;
                         break;
@@ -99,7 +106,7 @@ export class AnsiExporter {
 
             for (let r = 0; r < height; r++) {
                 for (let c = 0; c < width; c++) {
-                    const cell = layer.cells[r][c];
+                    const cell = layer.cells[r + b.row][c + b.col];
 
                     const hasChar = cell.char && cell.char.trim() !== '';
                     const hasBg = cell.bg[0] !== -1;
@@ -111,7 +118,7 @@ export class AnsiExporter {
                         out += `\x1b[48;2;${cell.bg[0]};${cell.bg[1]};${cell.bg[2]}m`;
                         currentBg = cell.bg;
                     } else if (hasChar) {
-                        const composite = state.getCompositeCell(c, r);
+                        const composite = state.getCompositeCell(c + b.col, r + b.row);
                         const underlyingBg: Color = composite ? composite.bg : [0, 0, 0];
                         const bgChanged = !currentBg || currentBg[0] !== underlyingBg[0] || currentBg[1] !== underlyingBg[1] || currentBg[2] !== underlyingBg[2];
                         if (bgChanged) {

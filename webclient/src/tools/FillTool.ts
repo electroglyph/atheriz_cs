@@ -2,6 +2,7 @@ import { Tool, ToolContext } from './Tool';
 import { Point, Cell, Color } from '../types';
 import { sampleGradient, lerpColor } from '../utils/colors';
 import { parseCellKey } from '../utils/cellKeys';
+import { ensureToolCapacity } from '../canvas/ensureCapacity';
 
 function luminance(c: Color): number {
     return (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) / 255;
@@ -11,6 +12,8 @@ export class FillTool implements Tool {
     private anchor: Point | null = null;
     private currentTarget: Point | null = null;
     private fillCells: Set<string> = new Set();
+    /** True when the gradient gesture already pushed undo for growth. */
+    private gradientGrew = false;
 
     private isEmptyCell(cell: Cell): boolean {
         const hasChar = cell.char && cell.char.trim() !== '';
@@ -22,8 +25,15 @@ export class FillTool implements Tool {
 
     private floodFill(ctx: ToolContext, start: Point): Set<string> {
         const layer = ctx.state.getActiveLayer();
-        const w = ctx.state.width;
-        const h = ctx.state.height;
+        // Flood stays inside the violet server-grid rect, not the full
+        // viewport: with default full-canvas bounds this matches the old
+        // behavior exactly. The seed is expanded into the rect first (see
+        // onMouseDown), so clicking outside the line grows the grid.
+        const b = ctx.state.serverBounds;
+        const minX = b.col;
+        const minY = b.row;
+        const maxX = b.col + b.w;
+        const maxY = b.row + b.h;
         const visited = new Set<string>();
         const queue: Point[] = [start];
         let qIdx = 0;
@@ -34,7 +44,7 @@ export class FillTool implements Tool {
             const k = `${p.x},${p.y}`;
 
             if (visited.has(k)) continue;
-            if (p.x < 0 || p.x >= w || p.y < 0 || p.y >= h) {
+            if (p.x < minX || p.x >= maxX || p.y < minY || p.y >= maxY) {
                 reachedBorder = true;
                 continue;
             }
@@ -59,20 +69,23 @@ export class FillTool implements Tool {
 
     private getOutsideEmptyCells(ctx: ToolContext): Set<string> {
         const layer = ctx.state.getActiveLayer();
-        const w = ctx.state.width;
-        const h = ctx.state.height;
+        const b = ctx.state.serverBounds;
+        const minX = b.col;
+        const minY = b.row;
+        const maxX = b.col + b.w;
+        const maxY = b.row + b.h;
         const outside = new Set<string>();
         const visited = new Set<string>();
         const queue: Point[] = [];
         let qIdx = 0;
 
-        for (let x = 0; x < w; x++) {
-            queue.push({ x, y: 0 });
-            queue.push({ x, y: h - 1 });
+        for (let x = minX; x < maxX; x++) {
+            queue.push({ x, y: minY });
+            queue.push({ x, y: maxY - 1 });
         }
-        for (let y = 1; y < h - 1; y++) {
-            queue.push({ x: 0, y });
-            queue.push({ x: w - 1, y });
+        for (let y = minY + 1; y < maxY - 1; y++) {
+            queue.push({ x: minX, y });
+            queue.push({ x: maxX - 1, y });
         }
 
         while (qIdx < queue.length) {
@@ -80,7 +93,7 @@ export class FillTool implements Tool {
             const k = `${p.x},${p.y}`;
 
             if (visited.has(k)) continue;
-            if (p.x < 0 || p.x >= w || p.y < 0 || p.y >= h) continue;
+            if (p.x < minX || p.x >= maxX || p.y < minY || p.y >= maxY) continue;
 
             visited.add(k);
 
@@ -107,15 +120,30 @@ export class FillTool implements Tool {
     onMouseDown(ctx: ToolContext, cell: Point): void {
         this.anchor = cell;
         this.currentTarget = cell;
+        this.gradientGrew = false;
+
+        // A seed outside the violet line grows the grid to include it
+        // first, then the flood runs inside the (possibly expanded) rect.
+        // A selected region outside the line grows it the same way.
+        const selected = ctx.renderer.getSelectedCells();
+        const wanted = [{ col: cell.x, row: cell.y }];
+        for (const k of selected) {
+            const parsed = parseCellKey(k);
+            if (parsed) wanted.push({ col: parsed.col, row: parsed.row });
+        }
+        const cap = ensureToolCapacity(ctx, wanted);
+        // Flood in the post-growth frame (see BrushTool.onMouseDown).
+        const seed = { x: cell.x + cap.shift.col, y: cell.y + cap.shift.row };
 
         if (ctx.appState.fillMode === 'gradient') {
-            this.fillCells = this.computeFillCells(ctx, cell);
+            this.fillCells = this.computeFillCells(ctx, seed);
+            this.gradientGrew = cap.pushed;
             this.renderPreview(ctx);
         } else {
-            const targets = this.computeFillCells(ctx, cell);
+            const targets = this.computeFillCells(ctx, seed);
             const updates = this.applyFill(ctx, targets);
             if (updates.length > 0) {
-                ctx.undoStack.push(ctx.state);
+                if (!cap.pushed) ctx.undoStack.push(ctx.state);
                 ctx.state.applyBatch(updates);
             }
             this.anchor = null;
@@ -137,7 +165,7 @@ export class FillTool implements Tool {
 
         const updates = this.applyGradientFill(ctx, this.anchor, this.currentTarget);
         if (updates.length > 0) {
-            ctx.undoStack.push(ctx.state);
+            if (!this.gradientGrew) ctx.undoStack.push(ctx.state);
             ctx.state.applyBatch(updates);
         }
 

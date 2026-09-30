@@ -246,7 +246,9 @@ export class PreviewWindow {
         // Use the same font metrics as the editor grid so the preview renders
         // at an integral pixel scale; fractional advances anti-alias bitmap
         // fonts into mush and the preview colors no longer match the editor.
-        const fontSize = pickPreviewFontSize((fs) => measureCellMetrics(fontFamily, fs), state.width, state.height, availW, availH);
+        // The preview shows what the server gets: the violet grid only.
+        const grid = state.serverBounds ?? { col: 0, row: 0, w: state.width, h: state.height };
+        const fontSize = pickPreviewFontSize((fs) => measureCellMetrics(fontFamily, fs), grid.w, grid.h, availW, availH);
 
         if (this.terminal) {
             this.terminal.dispose();
@@ -256,8 +258,8 @@ export class PreviewWindow {
         }
 
         const term = new Terminal({
-            cols: state.width,
-            rows: state.height,
+            cols: grid.w,
+            rows: grid.h,
             fontSize,
             fontFamily: `${fontFamily}, monospace`,
             theme: {

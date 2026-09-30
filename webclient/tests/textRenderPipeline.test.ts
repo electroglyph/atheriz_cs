@@ -41,13 +41,12 @@ beforeEach(() => {
 });
 
 describe('renderTextToAnsiLayer returns cells without mutating state', () => {
-  it('fits the grid inside the map and leaves the passed state untouched', async () => {
+  it('fits the grid inside the requested size and leaves the passed state untouched', async () => {
     const state = new CanvasState(60, 20);
     const layersBefore = state.layers.length;
     const result = await renderTextToAnsiLayer(
       'hello',
-      60,
-      { width: state.width, height: state.height },
+      { cols: 60, rows: 18 },
       { height: 25 } as never,
       textSourceCanvas(),
       CELL,
@@ -70,7 +69,7 @@ describe('renderTextToAnsiLayer returns cells without mutating state', () => {
     const ctx = canvas.getContext('2d')!;
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, 100, 100);
-    const result = await renderTextToAnsiLayer('hello', 60, { width: 60, height: 20 }, { height: 25 } as never, canvas, CELL);
+    const result = await renderTextToAnsiLayer('hello', { cols: 60, rows: 18 }, { height: 25 } as never, canvas, CELL);
     expect(result).toBeNull();
   });
 });

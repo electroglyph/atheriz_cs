@@ -192,17 +192,22 @@ describe('MapEditSession chained room moves', () => {
         return { holder, session };
     }
 
-    it('folds A->B,B->C in one batch to A->C and consumes the hop', () => {
+    it('keeps same-batch hops unfolded so dense rooms keep their own origins', () => {
         const { holder, session } = makeRoomSession();
         session.validateRoomMoves([
             { fromX: 3, fromY: 3, toX: 4, toY: 3 },
             { fromX: 4, fromY: 3, toX: 5, toY: 3 },
         ]);
         expect(holder.socket.sent[1]).toBe(
-            '["map_validate_moves",["K1",1,[[3,3,4,3],[3,3,5,3]],[]],{}]'
+            '["map_validate_moves",["K1",1,[[3,3,4,3],[4,3,5,3]],[]],{}]'
         );
-        // The intermediate hop is consumed: save sends a single room op.
-        expect(session.pendingMoves).toEqual([{ fromX: 3, fromY: 3, toX: 5, toY: 3 }]);
+        // Same-batch hops stay unfolded (folding across rooms of one batch
+        // steals origins on dense maps); the server judges each hop
+        // against occupancy and the wire above is unchanged.
+        expect(session.pendingMoves).toEqual([
+            { fromX: 3, fromY: 3, toX: 4, toY: 3 },
+            { fromX: 4, fromY: 3, toX: 5, toY: 3 },
+        ]);
         session.dispose();
     });
 
@@ -213,7 +218,10 @@ describe('MapEditSession chained room moves', () => {
             { fromX: 2, fromY: 3, toX: 3, toY: 3 },
         ];
         session.validateRoomMoves([{ fromX: 3, fromY: 3, toX: 4, toY: 3 }]);
-        expect(holder.socket.sent[1]).toBe('["map_validate_moves",["K1",1,[[1,3,4,3]],[[1,3,2,3],[2,3,3,3]]],{}]');
+        // Both priors fold into the batch, so neither rides as context:
+        // sending them would delete the unfolded source from the server's
+        // occupancy and fail the move.
+        expect(holder.socket.sent[1]).toBe('["map_validate_moves",["K1",1,[[1,3,4,3]],[]],{}]');
         expect(session.pendingMoves).toEqual([{ fromX: 1, fromY: 3, toX: 4, toY: 3 }]);
         session.dispose();
     });

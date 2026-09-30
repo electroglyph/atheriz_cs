@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WebSocketLike } from '../src/webclient/connection';
 import { CanvasState } from '../src/state/CanvasState';
-import { loadMapPayload, logRoomData, MapEditSession, MapEditPayload, formatExitCoord, parseExitCoord } from '../src/mapedit';
+import { loadMapPayload, logRoomData, MapEditSession, MapEditPayload, formatExitCoord, parseExitCoord, chunkEditOps, MAP_EDIT_CHUNK_BUDGET_BYTES } from '../src/mapedit';
 
 class FakeSocket implements WebSocketLike {
     readyState = 0;
@@ -101,11 +101,24 @@ describe('loadMapPayload', () => {
         expect(origin.roomCells).toEqual(new Set(['0,1', '1,1']));
     });
 
+    it('sets the violet server-grid rect to the content bbox', () => {
+        const canvas = makeCanvas();
+        const payload: MapEditPayload = {
+            area: 'TestArea',
+            z: 0,
+            grid: [[-2, 3, 'X'], [5, 3, 'Y']],
+        };
+        const origin = loadMapPayload(canvas, payload);
+        // mapW=8, mapH=1 → viewport 16x2, content at cols 0..7, row 1.
+        expect(origin.serverBounds).toEqual({ col: 0, row: 1, w: 8, h: 1 });
+        expect(canvas.serverBounds).toEqual({ col: 0, row: 1, w: 8, h: 1 });
+    });
+
     it('handles an empty grid', () => {
         const canvas = makeCanvas();
         const payload: MapEditPayload = { area: 'TestArea', z: 0, grid: [] };
         const origin = loadMapPayload(canvas, payload);
-        expect(origin).toEqual({ originX: 0, originY: 0, roomCells: new Set(), rooms: [] });
+        expect(origin).toEqual({ originX: 0, originY: 0, roomCells: new Set(), rooms: [], serverBounds: { col: 0, row: 0, w: 1, h: 1 } });
         expect(canvas.width).toBe(1);
         expect(canvas.height).toBe(1);
     });
@@ -542,16 +555,19 @@ describe('MapEditSession room moves', () => {
         socket.onmessage?.(new MessageEvent('message', { data: wire }));
     }
 
-    it('validates room moves and folds follow-up drags through pending moves', () => {
+    it('excludes folded hops from context so chained drags validate', () => {
         const { holder, session } = makeRoomSession();
         session.validateRoomMoves([{ fromX: 3, fromY: 3, toX: 4, toY: 3 }]);
         expect(holder.socket.sent[1]).toBe('["map_validate_moves",["K1",1,[[3,3,4,3]],[]],{}]');
 
         feed(holder.socket, '["moves_ok",[1,"K2"],{}]');
-        // the server has not received a save yet, so a second drag of the
-        // same room must be expressed against its original coordinate
+        // The server has not received a save yet, so a second drag of the
+        // same room must be expressed against its original coordinate — and
+        // the folded hop must NOT ride along as context (it would delete
+        // that original coordinate from the server's occupancy and fail
+        // every re-touched room).
         session.validateRoomMoves([{ fromX: 4, fromY: 3, toX: 5, toY: 3 }]);
-        expect(holder.socket.sent[2]).toBe('["map_validate_moves",["K2",2,[[3,3,5,3]],[[3,3,4,3]]],{}]');
+        expect(holder.socket.sent[2]).toBe('["map_validate_moves",["K2",2,[[3,3,5,3]],[]],{}]');
         session.dispose();
     });
 
@@ -574,11 +590,74 @@ describe('MapEditSession room moves', () => {
         // A moves onto free space (pending, unsaved)
         session.validateRoomMoves([{ fromX: 3, fromY: 3, toX: 4, toY: 3 }]);
         feed(holder.socket, '["moves_ok",[1,"K2"],{}]');
-        // B then moves onto A's now-vacated origin: context tells the server
-        // A's pending move vacates it, so this must not be denied
+        // B then moves onto A's now-vacated origin: B's move consumes
+        // nothing, so A's pending relocation stays in context and the
+        // server sees the destination as vacated.
         session.validateRoomMoves([{ fromX: 10, fromY: 10, toX: 3, toY: 3 }]);
         expect(holder.socket.sent[2]).toBe(
             '["map_validate_moves",["K2",2,[[10,10,3,3]],[[3,3,4,3]]],{}]'
+        );
+        session.dispose();
+    });
+
+    it('retains non-consumed pendings in context', () => {        const holder = makeSocketHolder();
+        const canvas = makeCanvas();
+        const origin = {
+            originX: 0,
+            originY: 0,
+            roomCells: new Set(['3,3']),
+            rooms: [
+                { x: 3, y: 3, desc: 'A', exits: [] },
+                { x: 10, y: 10, desc: 'B', exits: [] },
+            ],
+        };
+        const session = new MapEditSession('K0', canvas, origin, holder.createSocket);
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+
+        session.validateRoomMoves([{ fromX: 3, fromY: 3, toX: 4, toY: 3 }]);
+        feed(holder.socket, '["moves_ok",[1,"K2"],{}]');
+        session.validateRoomMoves([{ fromX: 10, fromY: 10, toX: 11, toY: 10 }]);
+        feed(holder.socket, '["moves_ok",[2,"K3"],{}]');
+        // Re-drag A: folds to its original coord; B's pending relocation
+        // stays in context so the server respects it.
+        session.validateRoomMoves([{ fromX: 4, fromY: 3, toX: 5, toY: 3 }]);
+        expect(holder.socket.sent[3]).toBe(
+            '["map_validate_moves",["K3",3,[[3,3,5,3]],[[10,10,11,10]]],{}]'
+        );
+        session.dispose();
+    });
+
+    it('sends an empty context when a whole-map re-drag consumes everything', () => {
+        const holder = makeSocketHolder();
+        const canvas = makeCanvas();
+        const origin = {
+            originX: 0,
+            originY: 0,
+            roomCells: new Set(['0,0', '1,0']),
+            rooms: [
+                { x: 0, y: 0, desc: 'A', exits: [] },
+                { x: 1, y: 0, desc: 'B', exits: [] },
+            ],
+        };
+        const session = new MapEditSession('K0', canvas, origin, holder.createSocket);
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+
+        session.validateRoomMoves([
+            { fromX: 0, fromY: 0, toX: 10, toY: 10 },
+            { fromX: 1, fromY: 0, toX: 11, toY: 10 },
+        ]);
+        feed(holder.socket, '["moves_ok",[1,"K2"],{}]');
+        // Drag everything again: every prior hop folds, nothing stays in
+        // context, and the batch validates atomically against the server's
+        // own state — no collisions when moving everything.
+        session.validateRoomMoves([
+            { fromX: 10, fromY: 10, toX: 20, toY: 20 },
+            { fromX: 11, fromY: 10, toX: 21, toY: 20 },
+        ]);
+        expect(holder.socket.sent[2]).toBe(
+            '["map_validate_moves",["K2",2,[[0,0,20,20],[1,0,21,20]],[]],{}]'
         );
         session.dispose();
     });
@@ -643,6 +722,52 @@ describe('MapEditSession room moves', () => {
         session.saveToServer();
         expect(events.some((e) => e.type === 'error' && e.message === 'Nothing to save.')).toBe(true);
         expect(holder.socket.sent.length).toBe(3);
+        session.dispose();
+    });
+
+    it('drops queued validates overlapping denied squares and keeps disjoint ones', () => {
+        const holder = makeSocketHolder();
+        const canvas = makeCanvas();
+        const origin = {
+            originX: 0,
+            originY: 0,
+            roomCells: new Set(['3,3', '5,5']),
+            rooms: [
+                { x: 3, y: 3, desc: 'A', exits: [] },
+                { x: 5, y: 5, desc: 'B', exits: [] },
+            ],
+        };
+        const events: string[] = [];
+        const session = new MapEditSession('K0', canvas, origin, holder.createSocket);
+        session.onEvent((e) => events.push(e.type));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+
+        // Batch 1 sent; batch 2 (same room, overlapping) and batch 3
+        // (disjoint) queue up behind it.
+        session.validateRoomMoves([{ fromX: 3, fromY: 3, toX: 4, toY: 3 }]);
+        session.validateRoomMoves([{ fromX: 3, fromY: 3, toX: 9, toY: 9 }]);
+        session.validateRoomMoves([{ fromX: 5, fromY: 5, toX: 6, toY: 5 }]);
+        expect(holder.socket.sent.length).toBe(2);
+
+        // Deny batch 1: batch 2 touches a denied square (3,3) and drops;
+        // batch 3 is disjoint and sends (its pre-deny context is stale but
+        // benign: none of its squares intersect the denied set).
+        feed(holder.socket, '["moves_denied",[1,"K2",[0]],{}]');
+        expect(holder.socket.sent.length).toBe(3);
+        expect(holder.socket.sent[2]).toBe(
+            '["map_validate_moves",["K2",2,[[5,5,6,5]],[[3,3,4,3],[3,3,9,9]]],{}]'
+        );
+        expect(events).toContain('moves_denied');
+        expect(events).toContain('moves_dropped');
+
+        // Dropped batch's pending entry is gone; the survivor's remains.
+        // No glyph diff on the untouched canvas, so the save carries only
+        // the surviving room op.
+        feed(holder.socket, '["moves_ok",[2,"K3"],{}]');
+        session.saveToServer();
+        const saveMsg = JSON.parse(holder.socket.sent[holder.socket.sent.length - 1]);
+        expect(saveMsg[1][2]).toEqual([['room', 5, 5, 6, 5]]);
         session.dispose();
     });
 
@@ -887,6 +1012,116 @@ describe('MapEditSession room deletion', () => {
         session.deleteRooms([{ x: 0, y: 0, fallback: { x: 5.5, y: 5 } }]);
         expect(events).toEqual(['synced', 'error:Invalid delete payload.', 'error:Invalid delete payload.']);
         expect(holder.socket.sent).toEqual(['["map_edit",["K0",0,[]],{}]']);
+        session.dispose();
+    });
+});
+
+describe('map_edit chunking (server 64KB cap)', () => {
+    function feed(socket: FakeSocket, wire: string): void {
+        socket.onmessage?.(new MessageEvent('message', { data: wire }));
+    }
+
+    function deletionCell(i: number): [number, number, string, [number, number, number], [number, number, number], string[]] {
+        return [i % 300, Math.floor(i / 300), '', [204, 204, 204], [0, 0, 0], []];
+    }
+
+    it('packs ops under budget preserving order', () => {
+        const ops = Array.from({ length: 3000 }, (_, i) => deletionCell(i));
+        const chunks = chunkEditOps(ops as never[]);
+        expect(chunks.length).toBeGreaterThan(1);
+        for (const chunk of chunks) {
+            expect(JSON.stringify(chunk).length).toBeLessThanOrEqual(MAP_EDIT_CHUNK_BUDGET_BYTES);
+        }
+        expect(chunks.flat()).toEqual(ops);
+        expect(chunkEditOps([])).toEqual([]);
+    });
+
+    it('sends a single pathological op whole rather than dropping it', () => {
+        const giant: [number, number, string, [number, number, number], [number, number, number], string[]] =
+            [0, 0, 'X'.repeat(MAP_EDIT_CHUNK_BUDGET_BYTES), [0, 0, 0], [0, 0, 0], []];
+        expect(chunkEditOps([giant as never])).toEqual([[giant]]);
+    });
+
+    it('splits an oversized save into wire-safe messages and reports saved once', () => {
+        const holder = makeSocketHolder();
+        const canvas = new CanvasState(60, 60, false);
+        const session = new MapEditSession('K0', canvas, { originX: 0, originY: 0 }, holder.createSocket);
+        const events: string[] = [];
+        session.onEvent((e) => events.push(e.type));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+
+        const batch: { col: number; row: number; cell: { char: string; fg: [number, number, number]; bg: [number, number, number] } }[] = [];
+        for (let row = 0; row < 60; row++) {
+            for (let col = 0; col < 60; col++) {
+                batch.push({ col, row, cell: { char: 'X', fg: [204, 204, 204], bg: [0, 0, 0] } });
+            }
+        }
+        canvas.applyBatch(batch);
+        session.saveToServer();
+
+        // Drive the ack chain like the server would (rotating keys).
+        const seenCells: unknown[][] = [];
+        let seq = 1;
+        for (let i = 0; i < 25 && !events.includes('saved'); i++) {
+            const last = holder.socket.sent[holder.socket.sent.length - 1];
+            const parsed = JSON.parse(last) as [string, [string, number, unknown[][]], object];
+            expect(parsed[0]).toBe('map_edit');
+            expect(last.length).toBeLessThanOrEqual(52000);
+            expect(JSON.stringify(parsed[1][2]).length).toBeLessThanOrEqual(MAP_EDIT_CHUNK_BUDGET_BYTES);
+            seenCells.push(...(parsed[1][2] as unknown[][]));
+            ack(holder.socket, seq, `K${seq + 1}`);
+            seq++;
+        }
+        // All 3600 cells arrived, in diff order, across several messages.
+        expect(seenCells.length).toBe(3600);
+        expect(holder.socket.sent.length).toBeGreaterThan(3);
+        expect(seenCells[0].slice(0, 2)).toEqual([0, 59]);
+        expect(seenCells[3599].slice(0, 2)).toEqual([59, 0]);
+        expect(events.filter((e) => e === 'saved').length).toBe(1);
+        session.dispose();
+    });
+
+    it('rides room moves on the final chunk and clears them once', () => {
+        const holder = makeSocketHolder();
+        const canvas = new CanvasState(60, 60, false);
+        const origin = {
+            originX: 0,
+            originY: 0,
+            roomCells: new Set(['3,3']),
+            rooms: [{ x: 3, y: 3, desc: 'Hall', exits: [] }],
+        };
+        const session = new MapEditSession('K0', canvas, origin, holder.createSocket);
+        const events: string[] = [];
+        session.onEvent((e) => events.push(e.type));
+        holder.socket.open();
+        ack(holder.socket, 0, 'K1');
+
+        session.validateRoomMoves([{ fromX: 3, fromY: 3, toX: 4, toY: 3 }]);
+        feed(holder.socket, '["moves_ok",[1,"K2"],{}]');
+
+        const batch: { col: number; row: number; cell: { char: string; fg: [number, number, number]; bg: [number, number, number] } }[] = [];
+        for (let row = 0; row < 60; row++) {
+            for (let col = 0; col < 60; col++) {
+                batch.push({ col, row, cell: { char: 'X', fg: [204, 204, 204], bg: [0, 0, 0] } });
+            }
+        }
+        canvas.applyBatch(batch);
+        session.saveToServer();
+
+        let seq = 2;
+        for (let i = 0; i < 25 && !events.includes('saved'); i++) {
+            ack(holder.socket, seq, `K${seq + 1}`);
+            seq++;
+        }
+        // The room op rode the final chunk, after every glyph cell.
+        const messages = holder.socket.sent.filter((s) => s.includes('"map_edit"')).map((s) => JSON.parse(s));
+        const lastCells = messages[messages.length - 1][1][2] as unknown[][];
+        expect(lastCells[lastCells.length - 1]).toEqual(['room', 3, 3, 4, 3]);
+        expect(events.filter((e) => e === 'saved').length).toBe(1);
+        // Pending moves consumed: another save has nothing to send.
+        session.saveToServer();
+        expect(events.some((e) => e === 'error')).toBe(true);
         session.dispose();
     });
 });

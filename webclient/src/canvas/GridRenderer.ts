@@ -1,7 +1,99 @@
 import { CanvasState } from '../state/CanvasState';
 import { CellMetrics } from '../utils/fontMetrics';
 import { parseCellKey } from '../utils/cellKeys';
-import { Cell, Color } from '../types';
+import { Cell, Color, ServerBounds } from '../types';
+
+/** Violet server-grid outline: the rect actually sent back to the server. */
+export const SERVER_BOUNDS_COLOR = '#A855F7';
+
+/**
+ * State origin inside the drawable surface, in cells. The canvas element
+ * always covers the whole scroller viewport with the stored map sitting
+ * at this inset, so every visible grid square is drawable surface: there
+ * is no separate look-but-don't-touch margin. Clicks map through this
+ * inset (CanvasController subtracts it) and land as state coords that
+ * may sit outside storage — the tools already grow storage in all four
+ * directions, so drawing anywhere just works.
+ */
+export const STATE_ORIGIN_MARGIN = 128;
+
+/** Right/bottom keep past storage when the view auto-covers, in cells. */
+const VIEW_STATE_MARGIN = 32;
+
+/** Overscan past the visible scroll area when the view grows, in px. */
+const VIEW_OVERSCAN_PX = 256;
+
+export interface CanvasViewSize {
+    viewCols: number;
+    viewRows: number;
+}
+
+/** Cells of breathing room between the viewport edge and the content
+ * when the host auto-scrolls content into view. */
+const CONTENT_SCROLL_MARGIN_CELLS = 3;
+
+export interface ContentScroll {
+    scrollLeft: number;
+    scrollTop: number;
+}
+
+/**
+ * Pure scroll math: put the top-left of the given state rect in view
+ * with a small margin, clamped at zero. The host applies it after load
+ * and New — without this the editor opens staring at empty margin while
+ * the map sits at the view inset, off-screen.
+ */
+export function planContentScroll(args: {
+    offsetCol: number;
+    offsetRow: number;
+    rectCol: number;
+    rectRow: number;
+    cellW: number;
+    cellH: number;
+}): ContentScroll {
+    const cw = Number.isFinite(args.cellW) && args.cellW > 0 ? args.cellW : 1;
+    const ch = Number.isFinite(args.cellH) && args.cellH > 0 ? args.cellH : 1;
+    return {
+        scrollLeft: Math.max(0, (args.offsetCol + args.rectCol) * cw - CONTENT_SCROLL_MARGIN_CELLS * cw),
+        scrollTop: Math.max(0, (args.offsetRow + args.rectRow) * ch - CONTENT_SCROLL_MARGIN_CELLS * ch),
+    };
+}
+
+/**
+ * Pure planner for the drawable surface size. The view only ever grows:
+ * it must cover the state rect at its inset plus a margin, and the
+ * scrolled viewport plus overscan. Never shrinks (shrinking would jump
+ * the scroll position and strand storage outside the element).
+ */
+export function planCanvasView(args: {
+    stateW: number;
+    stateH: number;
+    offsetCol: number;
+    offsetRow: number;
+    viewCols: number;
+    viewRows: number;
+    scrollX: number;
+    scrollY: number;
+    clientW: number;
+    clientH: number;
+    cellW: number;
+    cellH: number;
+}): CanvasViewSize {
+    let needCols = Math.max(args.viewCols, args.offsetCol + args.stateW + VIEW_STATE_MARGIN);
+    let needRows = Math.max(args.viewRows, args.offsetRow + args.stateH + VIEW_STATE_MARGIN);
+    if (Number.isFinite(args.cellW) && args.cellW > 0) {
+        needCols = Math.max(needCols,
+            Math.ceil((args.scrollX + args.clientW + VIEW_OVERSCAN_PX) / args.cellW));
+    }
+    if (Number.isFinite(args.cellH) && args.cellH > 0) {
+        needRows = Math.max(needRows,
+            Math.ceil((args.scrollY + args.clientH + VIEW_OVERSCAN_PX) / args.cellH));
+    }
+    return {
+        viewCols: Math.max(1, Math.floor(needCols)),
+        viewRows: Math.max(1, Math.floor(needRows)),
+    };
+}
 
 /**
  * Exterior boundary edges of a room-cell set, in cell units. An edge
@@ -41,29 +133,79 @@ export class GridRenderer {
     private roomCells: Set<string> = new Set();
     private roomColor: string = '#00CCCC';
     private roomVisible: boolean = true;
+    // Violet outline of the server grid: the rect actually sent to the server.
+    private serverBounds: ServerBounds | null = null;
+    // Drawable surface in cells. Defaults to the storage size at origin
+    // (0,0): first paint and unit tests behave exactly like the old
+    // storage-sized canvas until the host sets a real view.
+    private viewCols: number;
+    private viewRows: number;
+    // State origin inside the surface, in cells. Fixed once set: left/top
+    // inserts shift content within storage, so the origin never moves.
+    private offsetCol = 0;
+    private offsetRow = 0;
 
     private renderBound = () => this.render();
+    /** Fixed ratio for tests; production follows window.devicePixelRatio. */
+    private fixedPixelRatio: number | null = null;
 
-    constructor(canvas: HTMLCanvasElement, state: CanvasState, metrics: CellMetrics) {
+    constructor(canvas: HTMLCanvasElement, state: CanvasState, metrics: CellMetrics, devicePixelRatio?: number) {
         this.canvas = canvas;
         const ctx = canvas.getContext('2d', { alpha: false }); // Optimize for no transparency
         if (!ctx) throw new Error("Could not get 2D context");
         this.ctx = ctx;
         this.state = state;
         this.metrics = metrics;
+        this.serverBounds = { ...state.serverBounds };
+        this.viewCols = state.width;
+        this.viewRows = state.height;
+        if (devicePixelRatio !== undefined) this.fixedPixelRatio = devicePixelRatio;
 
         // Resize the actual canvas element based on state * metrics
         this.resize();
         this.state.onChange(this.renderBound);
+        if (this.fixedPixelRatio === null) this.watchPixelRatio();
+    }
+
+    /** Backing-store scale: crisp on HiDPI and OS-scaled displays. */
+    private currentPixelRatio(): number {
+        if (this.fixedPixelRatio !== null) return this.fixedPixelRatio;
+        if (typeof window !== 'undefined' && typeof window.devicePixelRatio === 'number' &&
+            Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0) {
+            return window.devicePixelRatio;
+        }
+        return 1;
+    }
+
+    /** Re-render when the display scale changes (zoom, monitor move). */
+    private watchPixelRatio(): void {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+        const mq = window.matchMedia(`(resolution: ${this.currentPixelRatio()}dppx)`);
+        const onChange = (): void => {
+            mq.removeEventListener?.('change', onChange);
+            this.resize();
+            this.watchPixelRatio();
+        };
+        mq.addEventListener?.('change', onChange);
     }
 
     public resize() {
-        this.canvas.width = this.state.width * this.metrics.width;
-        this.canvas.height = this.state.height * this.metrics.height;
-        this.canvas.style.width = `${this.canvas.width}px`;
-        this.canvas.style.height = `${this.canvas.height}px`;
+        // The backing store scales with the device pixel ratio while the
+        // element stays CSS-px sized: without this the browser upscales a
+        // CSS-px bitmap on scaled displays and every canvas line reads
+        // softer than the scroller's CSS grid around it. Drawing stays in
+        // CSS px under setTransform. The element spans the whole drawable
+        // view (viewport coverage), not just storage.
+        const dpr = this.currentPixelRatio();
+        const cssW = this.viewCols * this.metrics.width;
+        const cssH = this.viewRows * this.metrics.height;
+        this.canvas.width = Math.max(1, Math.round(cssW * dpr));
+        this.canvas.height = Math.max(1, Math.round(cssH * dpr));
+        this.canvas.style.width = `${cssW}px`;
+        this.canvas.style.height = `${cssH}px`;
 
-        // Setting width/height resets context state, so re-apply font
+        // Setting width/height resets context state, so re-apply transform + font
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.ctx.font = this.metrics.font;
         this.ctx.textBaseline = "middle";
         this.ctx.textAlign = "center";
@@ -74,13 +216,80 @@ export class GridRenderer {
     public updateState(newState: CanvasState) {
         this.state.offChange(this.renderBound);
         this.state = newState;
+        this.serverBounds = { ...newState.serverBounds };
         this.state.onChange(this.renderBound);
+        // The view persists across swaps (no scroll jumps) but must still
+        // cover the new storage at the fixed inset.
+        this.coverState();
         this.resize();
     }
 
     public updateMetrics(metrics: CellMetrics) {
         this.metrics = metrics;
         this.resize();
+    }
+
+    /** Fix the state origin inside the surface (host sets this once from
+     * STATE_ORIGIN_MARGIN). Content shifts; the element size is untouched
+     * unless the state no longer fits, which coverState repairs. */
+    public setViewOrigin(col: number, row: number): void {
+        this.offsetCol = Number.isFinite(col) ? Math.max(0, Math.floor(col)) : 0;
+        this.offsetRow = Number.isFinite(row) ? Math.max(0, Math.floor(row)) : 0;
+        this.coverState();
+        this.resize();
+    }
+
+    /** Current state origin, for host scroll math (mirrors setViewOrigin). */
+    public getViewOrigin(): { offsetCol: number; offsetRow: number } {
+        return { offsetCol: this.offsetCol, offsetRow: this.offsetRow };
+    }
+
+    /** Grow the view to cover storage at the inset (expand-only). */
+    private coverState(): void {
+        // No viewport info here (NaN cell dims skip the coverage term):
+        // this only repairs the storage half of the invariant.
+        const need = planCanvasView({
+            stateW: this.state.width,
+            stateH: this.state.height,
+            offsetCol: this.offsetCol,
+            offsetRow: this.offsetRow,
+            viewCols: this.viewCols,
+            viewRows: this.viewRows,
+            scrollX: 0,
+            scrollY: 0,
+            clientW: 0,
+            clientH: 0,
+            cellW: NaN,
+            cellH: NaN,
+        });
+        this.viewCols = need.viewCols;
+        this.viewRows = need.viewRows;
+    }
+
+    /** Grow the view to cover storage plus the scrolled viewport
+     * (expand-only). Deliberately state-free: margin extension pushes no
+     * undo entry and marks nothing dirty. Returns true when the element
+     * was resized. */
+    public ensureViewForViewport(scrollX: number, scrollY: number, clientW: number, clientH: number): boolean {
+        const need = planCanvasView({
+            stateW: this.state.width,
+            stateH: this.state.height,
+            offsetCol: this.offsetCol,
+            offsetRow: this.offsetRow,
+            viewCols: this.viewCols,
+            viewRows: this.viewRows,
+            scrollX,
+            scrollY,
+            clientW,
+            clientH,
+            cellW: this.metrics.width,
+            cellH: this.metrics.height,
+        });
+        if (need.viewCols === this.viewCols && need.viewRows === this.viewRows) return false;
+        this.viewCols = need.viewCols;
+        this.viewRows = need.viewRows;
+        this.resize();
+        return true;
     }
 
     public setPreview(cells: {col: number, row: number, cell: Cell}[]) {
@@ -135,11 +344,19 @@ export class GridRenderer {
         this.render();
     }
 
+    /** Refresh the violet server-grid outline (null hides it). */
+    public setServerBounds(rect: ServerBounds | null) {
+        this.serverBounds = rect ? { ...rect } : null;
+        this.render();
+    }
+
     public render() {
         const { width, height } = this.metrics;
+        const ox = this.offsetCol * width;
+        const oy = this.offsetRow * height;
 
         this.ctx.fillStyle = '#000000';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.fillRect(0, 0, this.viewCols * width, this.viewRows * height);
 
         const bgColors = new Map<string, Path2D>();
         const chars = new Map<string, {text: string, x: number, y: number}[]>();
@@ -179,10 +396,15 @@ export class GridRenderer {
             }
         };
 
-        for (let row = 0; row < this.state.height; row++) {
-            for (let col = 0; col < this.state.width; col++) {
-                const previewCell = this.previewCells.get(`${col},${row}`);
-                const baseCell = this.state.getCompositeCell(col, row) || { char: '', fg: [204, 204, 204] as [number, number, number], bg: [0, 0, 0] as [number, number, number] };
+        // One surface for the whole view: the loop runs over element
+        // cells and reads storage at the inset. Outside storage the
+        // composite is null and the square stays empty grid.
+        for (let row = 0; row < this.viewRows; row++) {
+            for (let col = 0; col < this.viewCols; col++) {
+                const scol = col - this.offsetCol;
+                const srow = row - this.offsetRow;
+                const previewCell = this.previewCells.get(`${scol},${srow}`);
+                const baseCell = this.state.getCompositeCell(scol, srow) || { char: '', fg: [204, 204, 204] as [number, number, number], bg: [0, 0, 0] as [number, number, number] };
                 const cell = previewCell ?? baseCell;
                 const opacity = previewCell ? 0.7 : 1.0;
 
@@ -200,19 +422,29 @@ export class GridRenderer {
             this.ctx.fill(path);
         }
 
-        // Enhance grid lines over everything but text
+        // Enhance grid lines over everything but text.
+        // Half-pixel boundaries keep 1px strokes crisp: integer coords
+        // would straddle two pixels and smear into a dimmer 2px line.
         this.ctx.strokeStyle = '#222';
         this.ctx.lineWidth = 1;
         this.ctx.beginPath();
-        for (let col = 1; col < this.state.width; col++) {
-            this.ctx.moveTo(col * width, 0);
-            this.ctx.lineTo(col * width, this.canvas.height);
+        for (let col = 1; col < this.viewCols; col++) {
+            this.ctx.moveTo(col * width + 0.5, 0);
+            this.ctx.lineTo(col * width + 0.5, this.viewRows * height);
         }
-        for (let row = 1; row < this.state.height; row++) {
-            this.ctx.moveTo(0, row * height);
-            this.ctx.lineTo(this.canvas.width, row * height);
+        for (let row = 1; row < this.viewRows; row++) {
+            this.ctx.moveTo(0, row * height + 0.5);
+            this.ctx.lineTo(this.viewCols * width, row * height + 0.5);
         }
         this.ctx.stroke();
+
+        // Violet server-grid outline, under the room and selection overlays.
+        if (this.serverBounds) {
+            const b = this.serverBounds;
+            this.ctx.strokeStyle = SERVER_BOUNDS_COLOR;
+            this.ctx.lineWidth = 2;
+            this.ctx.strokeRect(ox + b.col * width, oy + b.row * height, b.w * width, b.h * height);
+        }
 
         const strokeCellOutlines = (cells: Set<string>) => {
             this.ctx.beginPath();
@@ -221,8 +453,8 @@ export class GridRenderer {
                 if (!parsed) continue;
                 const col = parsed.col;
                 const row = parsed.row;
-                const x = col * width;
-                const y = row * height;
+                const x = ox + col * width;
+                const y = oy + row * height;
                 this.ctx.moveTo(x, y);
                 this.ctx.lineTo(x + width, y);
                 this.ctx.moveTo(x + width, y);
@@ -244,7 +476,7 @@ export class GridRenderer {
             for (const key of this.roomCells) {
                 const parsed = parseCellKey(key);
                 if (!parsed) continue;
-                this.ctx.fillRect(parsed.col * width, parsed.row * height, width, height);
+                this.ctx.fillRect(ox + parsed.col * width, oy + parsed.row * height, width, height);
             }
             this.ctx.restore();
             // Union boundary, not per-cell boxes: shared edges belong to no
@@ -253,8 +485,8 @@ export class GridRenderer {
             this.ctx.lineWidth = 2;
             this.ctx.beginPath();
             for (const [x1, y1, x2, y2] of roomBoundaryEdges(this.roomCells)) {
-                this.ctx.moveTo(x1 * width, y1 * height);
-                this.ctx.lineTo(x2 * width, y2 * height);
+                this.ctx.moveTo(ox + x1 * width, oy + y1 * height);
+                this.ctx.lineTo(ox + x2 * width, oy + y2 * height);
             }
             this.ctx.stroke();
         }

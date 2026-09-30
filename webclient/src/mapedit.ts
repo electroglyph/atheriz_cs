@@ -1,7 +1,7 @@
 import { WebSocketConnection, WebSocketLike } from './webclient/connection';
 import { ConnectionState, WireMessage } from './webclient/types';
 import { CanvasState } from './state/CanvasState';
-import { Cell, Color } from './types';
+import { Cell, Color, ServerBounds } from './types';
 import { EditorSettings } from './editorSettings';
 import { parseAnsiSymbol, stripAnsi, wrapLegendSymbol, DEFAULT_FG, TRANSPARENT } from './utils/ansiParser';
 
@@ -80,6 +80,8 @@ export interface MapEditOrigin {
     originY: number;
     roomCells: Set<string>;
     rooms: MapRoom[];
+    /** Violet server-grid rect the diff loop sends back to the server. */
+    serverBounds?: ServerBounds;
 }
 
 export type MapEditEvent =
@@ -87,6 +89,7 @@ export type MapEditEvent =
     | { type: 'reject'; reason: string }
     | { type: 'error'; message: string }
     | { type: 'moves_denied'; moves: RoomMove[] }
+    | { type: 'moves_dropped'; moves: RoomMove[] }
     | { type: 'moves_accepted'; moves: RoomMove[] }
     | { type: 'saved' }
     | { type: 'legend_saved' }
@@ -103,10 +106,47 @@ export type MapEditListener = (event: MapEditEvent) => void;
 
 const SYNC_DELAY_MS = 200;
 
+/**
+ * Byte budget for one map_edit cells array. The server closes the socket
+ * on inbound messages over 64KB (verified: 2.2MB save -> close 1009
+ * "Message too large"), and the client then resends the same poison frame
+ * on every reconnect until the session dies — so an oversized save is not
+ * just dropped, it bricks the editor until reload. 48KB leaves headroom
+ * for the key/seq framing. Chunking lives here (not in flush) so every
+ * queued edit item is already wire-safe.
+ */
+export const MAP_EDIT_CHUNK_BUDGET_BYTES = 48_000;
+
+/**
+ * Pure packer: split edit ops into sequential chunks whose JSON stays
+ * within budget. Order is preserved (the queue is FIFO and acks rotate
+ * the key in order), and every chunk holds at least one op — a single
+ * pathological op can never be split, so it goes out whole.
+ */
+export function chunkEditOps(ops: MapEditOp[]): MapEditOp[][] {
+    const chunks: MapEditOp[][] = [];
+    let current: MapEditOp[] = [];
+    let currentBytes = 2; // JSON "[]"
+    for (const op of ops) {
+        const opBytes = JSON.stringify(op).length + 1; // + comma separator
+        if (current.length > 0 && currentBytes + opBytes > MAP_EDIT_CHUNK_BUDGET_BYTES) {
+            chunks.push(current);
+            current = [];
+            currentBytes = 2;
+        }
+        current.push(op);
+        currentBytes += opBytes;
+    }
+    if (current.length > 0) chunks.push(current);
+    return chunks;
+}
+
 export function loadMapPayload(canvas: CanvasState, payload: MapEditPayload): MapEditOrigin {
     if (payload.grid.length === 0) {
         canvas.resize(1, 1);
-        return { originX: 0, originY: 0, roomCells: new Set(), rooms: payload.rooms ?? [] };
+        const bounds = { col: 0, row: 0, w: 1, h: 1 };
+        canvas.setServerBounds(bounds);
+        return { originX: 0, originY: 0, roomCells: new Set(), rooms: payload.rooms ?? [], serverBounds: bounds };
     }
     let minX = payload.grid[0][0];
     let minY = payload.grid[0][1];
@@ -138,7 +178,11 @@ export function loadMapPayload(canvas: CanvasState, payload: MapEditPayload): Ma
     for (const room of payload.rooms ?? []) {
         roomCells.add(`${room.x - minX},${toRow(room.y)}`);
     }
-    return { originX: minX, originY: minY, roomCells, rooms: payload.rooms ?? [] };
+    // Violet server-grid rect: the content bbox in viewport coords
+    // (cols 0..mapW-1, rows mapH..2mapH-1).
+    const serverBounds = { col: 0, row: mapHeight, w: mapWidth, h: mapHeight };
+    canvas.setServerBounds(serverBounds);
+    return { originX: minX, originY: minY, roomCells, rooms: payload.rooms ?? [], serverBounds };
 }
 
 export function logRoomData(payload: MapEditPayload): void {
@@ -197,7 +241,15 @@ export class MapEditSession {
     private canvas: CanvasState;
     private originX: number;
     private originY: number;
+    /** Violet server-grid rect, in viewport coords; the diff loop only
+     * sends this rect. Kept in step with the canvas by setServerBounds
+     * and rebaseOrigin (world-keyed baseline needs no shift). */
+    private serverBounds: ServerBounds;
     private baseline = new Map<string, string>();
+    /** World keys whose baselined value holds a glyph. The outside-rect
+     * sweep consults this (not string parsing) so empties never emit
+     * and a '|' glyph still counts as content. */
+    private nonEmptyBaseline = new Set<string>();
     private queue: QueueItem[] = [];
     private inFlight: { seq: number; item: QueueItem } | null = null;
     private handshakeSent = false;
@@ -214,6 +266,9 @@ export class MapEditSession {
         this.canvas = canvas;
         this.originX = origin.originX;
         this.originY = origin.originY;
+        this.serverBounds = origin.serverBounds
+            ? { ...origin.serverBounds }
+            : { col: 0, row: 0, w: canvas.width, h: canvas.height };
         for (const room of origin.rooms ?? []) {
             this.roomPositions.set(coordKey(room.x, room.y), coordKey(room.x, room.y));
         }
@@ -237,9 +292,12 @@ export class MapEditSession {
      * one. Plain swaps re-baseline; pass `{ keepBaseline: true }` for a
      * deliberate clear (New) so the next diff expresses the wipe as
      * deletions against the old baseline — otherwise the cleared map
-     * would never reach the server. */
+     * would never reach the server. Either way the diff rect follows the
+     * new canvas: every swap adopts its server bounds, so an import at a
+     * different size cannot diff against a stale rect. */
     public rebindCanvas(canvas: CanvasState, opts?: { keepBaseline?: boolean }): void {
         this.canvas = canvas;
+        this.serverBounds = { ...canvas.serverBounds };
         if (opts?.keepBaseline) return;
         this.baseline.clear();
         this.snapshotBaseline();
@@ -251,13 +309,27 @@ export class MapEditSession {
         this.originY = origin.originY;
     }
 
+    /** Keep the diff rect in step with the canvas grid size. */
+    public setServerBounds(rect: ServerBounds): void {
+        this.serverBounds = { ...rect };
+    }
+
+    /** Shift the world origin after a left/bottom viewport insert, so
+     * world coords stay stable. The world-keyed baseline needs no shift. */
+    public rebaseOrigin(dx: number, dy: number): void {
+        this.originX += dx;
+        this.originY += dy;
+    }
+
     public scheduleSync(): void {
         if (this.stopped || this.syncTimer !== null) return;
         this.syncTimer = setTimeout(() => {
             this.syncTimer = null;
             const cells = this.computeDiff();
             if (cells.length > 0) {
-                this.queue.push({ kind: 'edit', cells, isSave: false });
+                for (const chunk of chunkEditOps(cells)) {
+                    this.queue.push({ kind: 'edit', cells: chunk, isSave: false });
+                }
                 this.flush();
             }
         }, SYNC_DELAY_MS);
@@ -271,51 +343,74 @@ export class MapEditSession {
         const known = new Set(this.roomPositions.values());
         const clientMoves: RoomMove[] = [];
         const serverMoves: RoomMove[] = [];
-        // context = pendings already validated (the moves being sent now are
-        // not their own context)
-        const context = this.pendingMoves.slice();
+        // Pre-batch pendings, stable for the whole loop. Unfolding matches
+        // ONLY these: matching moves pushed by this same batch steals
+        // origins across rooms — on a dense map every room sits on its
+        // neighbor's destination, so intra-batch folding corrupts the batch
+        // (duplicate sources the server rejects, plus eaten pendings).
+        const prior = this.pendingMoves.slice();
+        const consumed = new Set<RoomMove>();
         for (const move of moves) {
             if (!known.has(coordKey(move.fromX, move.fromY))) continue;
-            // Unfold the full chain back to the original server-side coord,
-            // consuming each prior hop so save sends one op per room.
+            // Unfold the full chain back to the original server-side coord.
             let fromX = move.fromX;
             let fromY = move.fromY;
             for (;;) {
-                const prior = this.pendingMoves.find((p) => p.toX === fromX && p.toY === fromY);
-                if (!prior) break;
-                fromX = prior.fromX;
-                fromY = prior.fromY;
-                this.pendingMoves = this.pendingMoves.filter((p) => p !== prior);
+                const prev = prior.find((p) => !consumed.has(p) && p.toX === fromX && p.toY === fromY);
+                if (!prev) break;
+                fromX = prev.fromX;
+                fromY = prev.fromY;
+                consumed.add(prev);
             }
             clientMoves.push(move);
             serverMoves.push({ fromX, fromY, toX: move.toX, toY: move.toY });
-            this.pendingMoves.push({ fromX, fromY, toX: move.toX, toY: move.toY });
-            // Track client-side occupancy within the batch so chained moves
-            // (A->B, B->C in one stroke) fold instead of dropping the second.
+            // Track client-side occupancy within the batch so a room
+            // arriving on an already-vacated square is not dropped.
             known.delete(coordKey(move.fromX, move.fromY));
             known.add(coordKey(move.toX, move.toY));
         }
         if (clientMoves.length === 0) return;
+        // New folded moves join the pending list; consumed hops leave it,
+        // so save sends one op per room. Context = surviving pre-batch
+        // pendings: a consumed hop's original coord is this batch's source,
+        // so sending it as context would delete that source from the
+        // server's occupancy and fail every re-touched room. The moves
+        // being sent now are not their own context either.
+        this.pendingMoves = [
+            ...prior.filter((p) => !consumed.has(p)),
+            ...serverMoves,
+        ];
+        const context = prior.filter((p) => !consumed.has(p));
         this.queue.push({ kind: 'validate', serverMoves, clientMoves, context });
         this.flush();
     }
 
     /** Send all unsnapshotted glyph changes plus every validated room move
-     * to the server in a single batch. The server is only updated here.
-     * Editor settings ride along as a fourth map_edit arg when provided,
-     * even when the map itself is unchanged (settings-only save). */
+     * to the server. Large op lists go out as sequential byte-budgeted
+     * chunks (see chunkEditOps): one oversized frame gets the socket
+     * closed, so a big save must never be a single message. Room moves
+     * and settings ride the last chunk with isSave, preserving the old
+     * single-batch order (cells, then moves) and firing 'saved' once
+     * everything landed. Editor settings ride along as a fourth map_edit
+     * arg when provided, even when the map itself is unchanged
+     * (settings-only save). The server is only updated here. */
     public saveToServer(settings?: EditorSettings): void {
         if (this.stopped) return;
         const cells = this.computeDiff();
-        const ops: MapEditOp[] = [
-            ...cells,
-            ...this.pendingMoves.map((m) => ['room', m.fromX, m.fromY, m.toX, m.toY] as MapEditOp),
-        ];
-        if (ops.length === 0 && settings === undefined) {
+        const moves = this.pendingMoves.map((m) => ['room', m.fromX, m.fromY, m.toX, m.toY] as MapEditOp);
+        if (cells.length === 0 && moves.length === 0 && settings === undefined) {
             this.listener?.({ type: 'error', message: 'Nothing to save.' });
             return;
         }
-        this.queue.push({ kind: 'edit', cells: ops, isSave: true, settings });
+        const chunks = chunkEditOps(cells);
+        if (chunks.length === 0) chunks.push([]);
+        chunks[chunks.length - 1] = [...chunks[chunks.length - 1], ...moves];
+        chunks.forEach((chunk, i) => {
+            const last = i === chunks.length - 1;
+            this.queue.push(last
+                ? { kind: 'edit', cells: chunk, isSave: true, settings }
+                : { kind: 'edit', cells: chunk, isSave: false });
+        });
         this.flush();
     }
 
@@ -445,34 +540,63 @@ export class MapEditSession {
         this.conn.close();
     }
 
+    /** Viewport (col,row) -> world (x,y) under the current origin. */
+    private toWorld(col: number, row: number): { x: number; y: number } {
+        return { x: col + this.originX, y: this.canvas.height - 1 - row + this.originY };
+    }
+
     private snapshotBaseline(): void {
+        this.nonEmptyBaseline.clear();
         for (let row = 0; row < this.canvas.height; row++) {
             for (let col = 0; col < this.canvas.width; col++) {
                 const composite = this.canvas.getCompositeCell(col, row);
-                this.baseline.set(`${col},${row}`, serializeCell(composite));
+                const { x, y } = this.toWorld(col, row);
+                const key = `${x},${y}`;
+                this.baseline.set(key, serializeCell(composite));
+                if (composite?.char) this.nonEmptyBaseline.add(key);
             }
         }
     }
 
     private computeDiff(): MapEditCell[] {
         const cells: MapEditCell[] = [];
-        for (let row = 0; row < this.canvas.height; row++) {
-            for (let col = 0; col < this.canvas.width; col++) {
+        const seen = new Set<string>();
+        const b = this.serverBounds;
+        // Violet rect only: the grid sent back to the server.
+        for (let row = b.row; row < b.row + b.h; row++) {
+            for (let col = b.col; col < b.col + b.w; col++) {
                 const composite = this.canvas.getCompositeCell(col, row);
-                const key = `${col},${row}`;
+                const { x, y } = this.toWorld(col, row);
+                const key = `${x},${y}`;
+                seen.add(key);
                 const serialized = serializeCell(composite);
                 if (this.baseline.get(key) !== serialized) {
                     cells.push([
-                        col + this.originX,
-                        this.canvas.height - 1 - row + this.originY,
+                        x,
+                        y,
                         composite?.char ?? '',
                         composite ? [...composite.fg] : [204, 204, 204],
                         composite ? [...composite.bg] : [0, 0, 0],
                         cellAttrs(composite),
                     ]);
                     this.baseline.set(key, serialized);
+                    if (composite?.char) this.nonEmptyBaseline.add(key);
+                    else this.nonEmptyBaseline.delete(key);
                 }
             }
+        }
+        // Outside-baseline sweep: a shrink of the violet rect orphans
+        // keys the rect loop can no longer reach. Keys that held a glyph
+        // go out as deletions so the server clears them; keys that were
+        // already empty are skipped (the server holds nothing for them,
+        // and re-emitting would spam every sync).
+        for (const key of Array.from(this.baseline.keys())) {
+            if (seen.has(key)) continue;
+            if (!this.nonEmptyBaseline.has(key)) continue;
+            const [x, y] = key.split(',').map(Number);
+            cells.push([x, y, '', [204, 204, 204], [0, 0, 0], []]);
+            this.baseline.set(key, '');
+            this.nonEmptyBaseline.delete(key);
         }
         return cells;
     }
@@ -742,21 +866,43 @@ export class MapEditSession {
                 const { clientMoves } = this.inFlight.item;
                 this.key = args[1];
                 this.inFlight = null;
+                // Sources of this same accepted batch are exempt from the
+                // sweep below: on a dense map every destination is another
+                // room's original square, and sweeping those entries would
+                // corrupt rooms the batch itself relocates on later moves.
+                const batchSources = new Set(clientMoves.map((m) => coordKey(m.fromX, m.fromY)));
                 for (const move of clientMoves) {
+                    // Prefer the entry that began at the move's source: by
+                    // now several entries can point at that square (an
+                    // earlier move of this batch already relocated there),
+                    // and first-match would hijack the wrong room's tracking
+                    // — corrupting every later drag of a whole-map shift.
+                    // Only a room that never left its source still has
+                    // orig == from; a chained room falls back to first
+                    // match, which is then unambiguous.
                     let original: string | null = null;
                     for (const [orig, current] of this.roomPositions.entries()) {
-                        if (current === coordKey(move.fromX, move.fromY)) {
+                        if (current === coordKey(move.fromX, move.fromY) && orig === coordKey(move.fromX, move.fromY)) {
                             original = orig;
                             break;
+                        }
+                    }
+                    if (original === null) {
+                        for (const [orig, current] of this.roomPositions.entries()) {
+                            if (current === coordKey(move.fromX, move.fromY)) {
+                                original = orig;
+                                break;
+                            }
                         }
                     }
                     if (original === null) original = coordKey(move.fromX, move.fromY);
                     const dest = coordKey(move.toX, move.toY);
                     // Keep values unique: drop any other entry already
                     // pointing at the destination so overlapping acks cannot
-                    // leave two rooms on one coord.
+                    // leave two rooms on one coord — except entries this
+                    // batch itself relocates (see batchSources above).
                     for (const [orig, current] of Array.from(this.roomPositions.entries())) {
-                        if (orig !== original && current === dest) this.roomPositions.delete(orig);
+                        if (orig !== original && current === dest && !batchSources.has(orig)) this.roomPositions.delete(orig);
                     }
                     this.roomPositions.set(original, dest);
                 }
@@ -782,6 +928,33 @@ export class MapEditSession {
                 if (deniedClientMoves.length > 0) {
                     this.listener?.({ type: 'moves_denied', moves: deniedClientMoves });
                 }
+                // Queued validates built on the optimistic canvas the deny
+                // just invalidated go stale: drop the ones touching denied
+                // squares (their coords assume positions the server never
+                // applied) plus their pending entries, and tell the host so
+                // it restores their optimistic canvas effects too. Disjoint
+                // batches proceed — their canvas is untouched.
+                const deniedSquares = new Set<string>();
+                for (const m of deniedClientMoves) {
+                    deniedSquares.add(coordKey(m.fromX, m.fromY));
+                    deniedSquares.add(coordKey(m.toX, m.toY));
+                }
+                const kept: typeof this.queue = [];
+                for (const item of this.queue) {
+                    const overlap = item.kind === 'validate' && item.clientMoves.some((m) =>
+                        deniedSquares.has(coordKey(m.fromX, m.fromY)) ||
+                        deniedSquares.has(coordKey(m.toX, m.toY)));
+                    if (!overlap) {
+                        kept.push(item);
+                        continue;
+                    }
+                    if (item.kind === 'validate') {
+                        const ids = new Set(item.serverMoves);
+                        this.pendingMoves = this.pendingMoves.filter((p) => !ids.has(p));
+                        this.listener?.({ type: 'moves_dropped', moves: item.clientMoves });
+                    }
+                }
+                this.queue = kept;
                 this.flush();
             }
         } else if (message.command === 'map_edit_reject') {

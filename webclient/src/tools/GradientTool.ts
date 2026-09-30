@@ -66,16 +66,20 @@ export class GradientTool implements Tool {
         const lenSq = vx * vx + vy * vy;
         
         const activeLayer = ctx.state.getActiveLayer();
-        const width = ctx.state.width;
-        const height = ctx.state.height;
+        // Recolor the violet server-grid rect, not the full viewport.
+        const bounds = ctx.state.serverBounds;
+        const minC = bounds.col;
+        const minR = bounds.row;
+        const maxC = bounds.col + bounds.w;
+        const maxR = bounds.row + bounds.h;
         const target = ctx.appState.gradientTarget;
         // `|| default` misses an explicitly empty array (truthy), so check length.
         const stops: Color[] = ctx.appState.gradientStops.length > 0
             ? ctx.appState.gradientStops
             : [[0, 0, 0], [255, 255, 255]];
-        
-        for (let r = 0; r < height; r++) {
-            for (let c = 0; c < width; c++) {
+
+        for (let r = minR; r < maxR; r++) {
+            for (let c = minC; c < maxC; c++) {
                 const existingCell = activeLayer.cells[r][c];
                 
                 const hasChar = existingCell.char && existingCell.char.trim() !== '';

@@ -1,4 +1,6 @@
 import { MapExitEdit, MapRoom, RoomMove } from './mapedit';
+import { CanvasState } from './state/CanvasState';
+import { Cell } from './types';
 
 /** One room to create: null name/desc keeps the server default in place. */
 export interface NewRoomSpec {
@@ -196,6 +198,91 @@ export function revertAcceptedMoves(rooms: MapRoom[], moves: RoomMove[]): number
         reverted++;
     }
     return reverted;
+}
+
+/** Order-sensitive value equality for move batches: matches a host
+ * snapshot entry to the batch a session event refers to (the arrays are
+ * different objects holding equal moves). */
+export function movesEqual(a: RoomMove[], b: RoomMove[]): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        const x = a[i];
+        const y = b[i];
+        if (x.fromX !== y.fromX || x.fromY !== y.fromY || x.toX !== y.toX || x.toY !== y.toY) return false;
+    }
+    return true;
+}
+
+/** One canvas cell to repaint when restoring denied squares. */
+export interface DeniedSquareRestore {
+    col: number;
+    row: number;
+    cell: Cell;
+}
+
+/** Transparent clear cell (matches the move tool's clears). */
+function clearedCell(): Cell {
+    return { char: '', fg: [204, 204, 204], bg: [-1, -1, -1] };
+}
+
+/**
+ * Surgical deny revert: copy the pre-move active-layer cells at each
+ * denied move's from/to squares out of the snapshot, as a batch for the
+ * live canvas. Squares are identified in world coords and mapped with the
+ * CURRENT origin/height, so viewport growth between send and deny stays
+ * correct. Only denied squares are touched — later strokes elsewhere
+ * survive, and undo depths never shift so the journals need no pruning.
+ * A square the snapshot never stored restores as cleared. Each square is
+ * restored once even when several denied moves share it. Reads the
+ * snapshot's active layer and targets the live canvas's active layer: if
+ * the user switched layers mid-flight the content crosses layers, still
+ * strictly closer to server truth than a whole-canvas revert.
+ */
+export function restoreDeniedSquares(
+    live: CanvasState,
+    snapshot: CanvasState,
+    moves: RoomMove[],
+    originX: number,
+    originY: number,
+): DeniedSquareRestore[] {
+    const out: DeniedSquareRestore[] = [];
+    const seen = new Set<string>();
+    for (const m of moves) {
+        const squares: Array<[number, number]> = [[m.fromX, m.fromY], [m.toX, m.toY]];
+        for (const [wx, wy] of squares) {
+            const col = wx - originX;
+            const row = live.height - 1 - (wy - originY);
+            const key = `${col},${row}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const cell = snapshot.getCell(col, row);
+            out.push({
+                col,
+                row,
+                cell: cell
+                    ? { char: cell.char, fg: [...cell.fg] as [number, number, number], bg: [...cell.bg] as [number, number, number], bold: cell.bold, italic: cell.italic, underline: cell.underline }
+                    : clearedCell(),
+            });
+        }
+    }
+    return out;
+}
+
+/** Deny dialog text: the server reports failed indices only, never a
+ * cause, so the message must not assert one (a missing source fails the
+ * same way an occupied destination does). Describes the actual revert
+ * scope instead of the old whole-canvas claim. */
+export function formatMovesDeniedMessage(moves: RoomMove[]): string {
+    const maxListed = 5;
+    const listed = moves
+        .slice(0, maxListed)
+        .map((m) => `(${m.toX}, ${m.toY})`)
+        .join(', ');
+    const extra = moves.length > maxListed ? ` and ${moves.length - maxListed} more` : '';
+    const rooms = moves.length === 1 ? 'a room' : `${moves.length} rooms`;
+    return `The server rejected moving ${rooms} `
+        + `to ${listed}${extra}. The affected squares were restored; `
+        + `later strokes elsewhere were kept.`;
 }
 
 /** Split a plan against the live list: full MapRoom copies for the fresh

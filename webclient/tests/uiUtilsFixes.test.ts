@@ -378,7 +378,7 @@ describe('U6 listener, timer and palette lifecycle', () => {
             <textarea id="text-tool-input"></textarea>
             <select id="text-tool-font"></select>
             <select id="text-tool-style"><option value="normal">Normal</option></select>
-            <input id="text-tool-max-width" /><span id="text-tool-max-width-val"></span>
+            <input id="text-tool-width-chars" value="80" /><input id="text-tool-height-chars" value="24" />
             <input id="text-tool-stretch" /><span id="text-tool-stretch-val"></span>
             <canvas id="text-tool-preview"></canvas>
             <button id="btn-text-cancel"></button><button id="btn-text-confirm"></button>

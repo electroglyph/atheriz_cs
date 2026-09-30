@@ -8,6 +8,11 @@ export class CanvasController {
     private toolManager: ToolManager;
     private isDragging: boolean = false;
     private lastCell: Point | null = null;
+    // State origin inside the canvas element, in cells (mirrors the
+    // renderer's view inset). Clicks land as state coords and may sit
+    // outside storage — the tools grow storage to meet them.
+    private offsetX = 0;
+    private offsetY = 0;
 
     private boundOnMouseDown = this.onMouseDown.bind(this);
     private boundOnMouseMove = this.onMouseMove.bind(this);
@@ -43,6 +48,12 @@ export class CanvasController {
         this.metrics = metrics;
     }
 
+    /** Match the renderer's view inset (host sets this once). */
+    public setStateOffset(col: number, row: number): void {
+        this.offsetX = Number.isFinite(col) ? Math.max(0, Math.floor(col)) : 0;
+        this.offsetY = Number.isFinite(row) ? Math.max(0, Math.floor(row)) : 0;
+    }
+
     private getCellCoord(e: MouseEvent): Point {
         const rect = this.canvas.getBoundingClientRect();
         // Calculate coordinate ignoring scroll (boundingClient is relative to viewport)
@@ -51,9 +62,11 @@ export class CanvasController {
         const maxCol = Math.max(0, Math.floor(rect.width / this.metrics.width) - 1);
         const maxRow = Math.max(0, Math.floor(rect.height / this.metrics.height) - 1);
 
+        // Clamp to the element (the whole drawable view), then shift into
+        // state coords: margin clicks legitimately land outside storage.
         return {
-            x: Math.min(Math.max(Math.floor(x / this.metrics.width), 0), maxCol),
-            y: Math.min(Math.max(Math.floor(y / this.metrics.height), 0), maxRow)
+            x: Math.min(Math.max(Math.floor(x / this.metrics.width), 0), maxCol) - this.offsetX,
+            y: Math.min(Math.max(Math.floor(y / this.metrics.height), 0), maxRow) - this.offsetY
         };
     }
 

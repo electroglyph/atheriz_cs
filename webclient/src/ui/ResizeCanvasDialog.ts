@@ -33,8 +33,10 @@ export class ResizeCanvasDialog {
             closeOtherModals('resize-canvas-modal');
             const state = this.getStateCallback();
             if (state) {
-                this.inputW.value = state.width.toString();
-                this.inputH.value = state.height.toString();
+                // The dialog sizes the server grid, so it pre-fills from
+                // the violet bounds, not the viewport dimensions.
+                this.inputW.value = state.serverBounds.w.toString();
+                this.inputH.value = state.serverBounds.h.toString();
             }
             this.modal.classList.remove('hidden');
         });

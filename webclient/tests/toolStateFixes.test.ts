@@ -96,13 +96,18 @@ describe('T1 ToolManager warns once per unknown tool id', () => {
   });
 });
 
-describe('T2 tools clip output to canvas bounds', () => {
-  it('brush mousedown out of bounds writes no overflow and no undo', () => {
+describe('T2 tools grow the viewport past the violet line instead of clipping', () => {
+  it('brush mousedown out of bounds grows the canvas and paints without overflow', () => {
     const state = new CanvasState(5, 5);
     const ctx = makeCtx(state);
     new BrushTool().onMouseDown(ctx, { x: -1, y: -1 });
-    expect(ctx.undoStack.canUndo()).toBe(false);
+    // Left/top insert: storage grew and the click landed at remapped (0,0).
+    expect(state.width).toBeGreaterThan(5);
+    expect(state.height).toBeGreaterThan(5);
+    expect(state.getCell(0, 0)!.char).toBe('x');
     expect(state.getActiveLayer().overflowCells?.size ?? 0).toBe(0);
+    // Growth is undoable: one entry covers paint and growth together.
+    expect(ctx.undoStack.canUndo()).toBe(true);
   });
 
   it('brush drag past the edge paints to the edge without overflow', () => {
@@ -124,7 +129,7 @@ describe('T2 tools clip output to canvas bounds', () => {
     expect(state.getActiveLayer().overflowCells?.size ?? 0).toBe(0);
   });
 
-  it('line commit clips out-of-bounds points instead of overflowCells', () => {
+  it('line commit grows past out-of-bounds points instead of overflowCells', () => {
     const state = new CanvasState(5, 5);
     const ctx = makeCtx(state, { lineDiagonal: false });
     const tool = new LineTool();
@@ -146,15 +151,15 @@ describe('T2 tools clip output to canvas bounds', () => {
     };
     // (2,5) is off-canvas: without the in-bounds-only neighbor rule (2,4)
     // would see a southern neighbor and draw 'v'; it must draw 'h'.
-    // (buildCells itself stays unclipped for preview/junction use; the
-    // commit path clips before applyBatch.)
+    // (buildCells itself stays pure for preview/junction use; the
+    // commit path grows storage before applyBatch.)
     const cells = tool.buildCells(ctx as never, [{ x: 2, y: 4 }, { x: 2, y: 5 }]);
     const inBounds = cells.find((c) => c.col === 2 && c.row === 4);
     expect(inBounds).toBeDefined();
     expect(inBounds!.cell.char).toBe(LIGHT_BOX.h);
   });
 
-  it('rectangle commit clips to bounds', () => {
+  it('rectangle commit grows past bounds', () => {
     const state = new CanvasState(5, 5);
     const ctx = makeCtx(state);
     const tool = new RectangleTool();
@@ -166,7 +171,7 @@ describe('T2 tools clip output to canvas bounds', () => {
     expect(state.getCell(4, 3)!.char).not.toBe('');
   });
 
-  it('oval commit clips to bounds', () => {
+  it('oval commit grows past bounds', () => {
     const state = new CanvasState(5, 5);
     const ctx = makeCtx(state);
     const tool = new OvalTool();

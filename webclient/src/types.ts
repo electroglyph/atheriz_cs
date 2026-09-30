@@ -51,3 +51,32 @@ export interface Point {
   x: number;
   y: number;
 }
+
+/**
+ * Violet server-grid rect in viewport (canvas) coordinates: top-left cell
+ * plus size in cells. The only region diffed, exported, previewed, and
+ * sent to the server. Always contained in viewport storage.
+ */
+export interface ServerBounds {
+  col: number;
+  row: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * What a viewport growth did, in per-side amounts. Insertions at index 0
+ * (left/top) shift every existing viewport coord right/down by the amount;
+ * appends (right/bottom) leave existing indices alone. `col`/`row` are the
+ * input point remapped into post-growth storage; `capped` means the point
+ * is still outside storage (2048 cap) and must be dropped.
+ */
+export interface ViewportGrowth {
+  col: number;
+  row: number;
+  addedLeft: number;
+  addedTop: number;
+  addedRight: number;
+  addedBottom: number;
+  capped: boolean;
+}

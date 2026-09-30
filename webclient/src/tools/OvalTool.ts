@@ -3,6 +3,7 @@ import { Point, Cell } from '../types';
 import { getEllipsePerimeter } from '../utils/geometry';
 import { LIGHT_BOX, ROUNDED_BOX, DOUBLE_BOX, HEAVY_BOX } from '../utils/characters';
 import { cellEquals } from '../utils/colors';
+import { ensureToolCapacity } from '../canvas/ensureCapacity';
 
 export class OvalTool implements Tool {
     private anchor: Point | null = null;
@@ -24,16 +25,30 @@ export class OvalTool implements Tool {
         if (!this.anchor) return;
         this.currentTarget = cell;
 
-        // Clip here (not in getOvalCells, which stays pure for preview):
-        // commits must never write overflowCells.
-        const cells = this.clipToCanvas(ctx, this.getOvalCells(ctx, this.anchor, this.currentTarget));
+        // Grow here (not in getOvalCells, which stays pure for preview):
+        // the bbox corners cover the whole oval, expanding the viewport
+        // past the violet line instead of clipping. Junction voting reads
+        // post-growth storage, so corners stay correct. Only 2048-capped
+        // points are still dropped.
+        const anchor = this.anchor;
+        const target = this.currentTarget;
+        const cap = ensureToolCapacity(ctx, [
+            { col: anchor.x, row: anchor.y },
+            { col: target.x, row: target.y },
+        ]);
+        // Re-frame into post-growth storage before building cells.
+        const sh = cap.shift;
+        const a = { x: anchor.x + sh.col, y: anchor.y + sh.row };
+        const t = { x: target.x + sh.col, y: target.y + sh.row };
+        const cells = this.getOvalCells(ctx, a, t)
+            .filter(u => !cap.dropped.has(`${u.col},${u.row}`));
 
         // Only record undo when at least one cell actually changes.
         if (cells.some(u => {
             const current = ctx.state.getCell(u.col, u.row);
             return !current || !cellEquals(current, u.cell);
         })) {
-            ctx.undoStack.push(ctx.state);
+            if (!cap.pushed) ctx.undoStack.push(ctx.state);
             ctx.state.applyBatch(cells);
         }
 
@@ -69,13 +84,6 @@ export class OvalTool implements Tool {
 
     private isInBounds(ctx: ToolContext, x: number, y: number): boolean {
         return x >= 0 && x < ctx.state.width && y >= 0 && y < ctx.state.height;
-    }
-
-    // Clip tool output to the canvas so commits never write overflowCells.
-    private clipToCanvas(ctx: ToolContext, cells: {col: number, row: number, cell: Cell}[]): {col: number, row: number, cell: Cell}[] {
-        const w = ctx.state.width;
-        const h = ctx.state.height;
-        return cells.filter(u => u.col >= 0 && u.col < w && u.row >= 0 && u.row < h);
     }
 
     private getOvalCells(ctx: ToolContext, from: Point, to: Point): {col: number, row: number, cell: Cell}[] {

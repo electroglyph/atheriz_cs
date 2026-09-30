@@ -77,4 +77,22 @@ public sealed class MapEditCellParsingTests
         Assert.Equal("map_edit_reject", conn.Sent[0].Cmd);
         Assert.Equal("text", conn.Sent[1].Cmd);
     }
+
+    [Fact]
+    public void NegativeCoords_PassValidation_ReachingConsume()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var conn = new TestConnection();
+        CallMapEdit(conn, [
+            new List<object?> { -5, -3, "x" },
+            new List<object?> { "room", -1, -2, -3, -4 },
+            new List<object?> { -10, 7, "y", new List<object?> { 1, 2, 3 }, new List<object?> { -1, -1, -1 }, new List<object?> { "bold" } },
+        ]);
+        // Negative coords are legal map positions, so validation passes and
+        // consume runs (rejecting the unknown key) just like positive coords.
+        Assert.Equal(2, conn.Sent.Count);
+        Assert.Equal("map_edit_reject", conn.Sent[0].Cmd);
+        Assert.Equal("unknown_key", conn.Sent[0].Args[0]);
+        Assert.Equal("text", conn.Sent[1].Cmd);
+    }
 }

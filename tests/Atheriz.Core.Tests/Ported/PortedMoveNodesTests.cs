@@ -48,6 +48,7 @@ public class PortedMoveNodesTests
 
     [Fact] public void TestCheckMovesDeniesOccupiedDestination(){ using var env=GlobalTestEnv.Enter(); var a=new Node(new Coord("TestArea",0,0,0)); var b=new Node(new Coord("TestArea",1,0,0)); var (g,_)=MakeGrid(a,b); Assert.Equal(new HashSet<int>{0}, g.CheckMoves(new List<((int,int),(int,int))>{((0,0),(1,0))})); }
     [Fact] public void TestCheckMovesAllowsFreeDestination(){ using var env=GlobalTestEnv.Enter(); var a=new Node(new Coord("TestArea",0,0,0)); var (g,_)=MakeGrid(a); Assert.Empty(g.CheckMoves(new List<((int,int),(int,int))>{((0,0),(5,5))})); }
+    [Fact] public void TestCheckMovesAllowsWholeMapShiftIntoVacatedCells(){ using var env=GlobalTestEnv.Enter(); var nodes=new List<Node>(); var moves=new List<((int,int),(int,int))>(); for(int x=0;x<5;x++) for(int y=-3;y<=0;y++){ nodes.Add(new Node(new Coord("TestArea",x,y,0))); moves.Add(((x,y),(x-1,y-6))); } var (g,_)=MakeGrid([.. nodes]); Assert.Empty(g.CheckMoves(moves)); }
 
     [Fact]
     public void TestApplyMovesRekeysNodeAndInboundLinks()

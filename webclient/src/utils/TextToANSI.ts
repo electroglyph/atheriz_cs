@@ -1,31 +1,33 @@
 import { CanvasState } from "../state/CanvasState";
 import { UndoStack } from "../state/UndoStack";
-import { Cell } from "../types";
+import { Cell, ServerBounds, ViewportGrowth } from "../types";
 import { convertImageToAnsi } from "./imageLoader";
 import { parseAnsiToCells } from "./ansiParser";
 import { ChafaConfig } from "./chafaDefaults";
 import { CellMetrics } from "./fontMetrics";
 
 /**
- * Grid size for a text crop that spans the allowed width inside the current
- * map. Scales the crop up or down to fill min(maxWidth, map width) —
- * preserving aspect — then shrinks to fit when that would exceed the map
- * height bound (map height - 2). The map itself is never resized.
+ * Grid size for a text crop rendered at an explicit character size. Starts
+ * at the requested target and scales DOWN only — preserving aspect — until
+ * it fits, so the dialog's width/height inputs are an exact size for small
+ * text and a cap for large text. Takes no map inputs: callers pass whatever
+ * target the text should render to.
  */
 export function calculateGrid(
   cropW: number,
   cropH: number,
-  maxWidthGlyphs: number,
-  canvasWidth: number,
-  canvasHeight: number,
+  targetCols: number,
+  targetRows: number,
   cellMetrics: CellMetrics,
 ): { cols: number; rows: number } {
   const cellW = Math.max(1, cellMetrics.width);
   const cellH = Math.max(1, cellMetrics.height);
   // fontRatio = cellWidth / cellHeight. rows = (cols * cropH * fontRatio) / cropW
   const fontRatio = cellW / cellH;
-  const maxCols = Math.max(1, Math.min(maxWidthGlyphs, canvasWidth));
-  const maxRows = Math.max(1, canvasHeight - 2);
+  const cleanCols = Number.isFinite(targetCols) ? Math.floor(targetCols) : 1;
+  const cleanRows = Number.isFinite(targetRows) ? Math.floor(targetRows) : 1;
+  const maxCols = Math.max(1, Math.min(cleanCols, CanvasState.MAX_DIMENSION));
+  const maxRows = Math.max(1, Math.min(cleanRows, CanvasState.MAX_DIMENSION));
 
   let cols = maxCols;
   let rows = Math.max(1, Math.round((cols * cropH * fontRatio) / cropW));
@@ -44,9 +46,10 @@ export function previewFontString(cellFont: string, px = 96): string {
 
 /**
  * Unapplied text-conversion result: converted cells in row-major order over
- * a cols x rows grid, plus the layer label. Placement onto map coordinates
- * happens in buildTextBatch against the LIVE map size, so a canvas replaced
- * mid-conversion (New/resize/load/undo) still gets centered output.
+ * a cols x rows grid, plus the layer label. Placement onto viewport
+ * coordinates happens in buildTextBatch against the LIVE server bounds, so
+ * a canvas replaced mid-conversion (New/resize/load/undo) still gets
+ * centered output.
  */
 export interface TextRenderResult {
   label: string;
@@ -59,9 +62,8 @@ export interface TextRenderResult {
  * Pipeline to convert drawn text on a temporary Canvas into quantized ANSI art:
  * 1. Derives an exact bounding box isolating the text content.
  * 2. Crops the source canvas to eliminate arbitrary whitespace.
- * 3. Dynamically calculates an ANSI grid spelling the crop across the full
- *    allowed map width at the font aspect ratio (shrinking to fit the map
- *    height when needed), never resizing the map itself.
+ * 3. Renders the crop at the requested character size (scaling down only,
+ *    preserving aspect, when it would exceed the target).
  * 4. Passes standard PNG data to Chafa for WASM-based color quantization.
  * 5. Returns the converted cells WITHOUT touching any CanvasState, so the
  *    caller can apply them to the live canvas even if it was replaced while
@@ -69,8 +71,7 @@ export interface TextRenderResult {
  */
 export async function renderTextToAnsiLayer(
   text: string,
-  maxWidthGlyphs: number,
-  mapSize: { width: number; height: number },
+  size: { cols: number; rows: number },
   chafaConfig: ChafaConfig,
   sourceCanvas: HTMLCanvasElement,
   cellMetrics: CellMetrics,
@@ -161,7 +162,7 @@ export async function renderTextToAnsiLayer(
 
   if (!buffer) return null;
 
-  const grid = calculateGrid(cropW, cropH, maxWidthGlyphs, mapSize.width, mapSize.height, cellMetrics);
+  const grid = calculateGrid(cropW, cropH, size.cols, size.rows, cellMetrics);
   const totalCols = grid.cols;
   const totalRows = grid.rows;
 
@@ -183,21 +184,20 @@ export async function renderTextToAnsiLayer(
 }
 
 /**
- * Centers converted cells on the map, skipping blank (transparent/black
- * background, empty char) cells so text never paints over the map with
- * empty fills. Coordinates outside the map are left for applyBatch to
- * clamp into overflow.
+ * Centers converted cells on the violet server grid, skipping blank
+ * (transparent/black background, empty char) cells so text never paints
+ * over the map with empty fills. Placements outside the grid are kept:
+ * applyTextRender grows the viewport and the grid to hold them.
  */
 export function buildTextBatch(
   rawCells: Cell[],
   totalCols: number,
   totalRows: number,
-  mapWidth: number,
-  mapHeight: number,
+  bounds: ServerBounds,
 ): { col: number; row: number; cell: Cell }[] {
   const batch: { col: number; row: number; cell: Cell }[] = [];
-  const startX = Math.floor(mapWidth / 2 - totalCols / 2);
-  const startY = Math.floor(mapHeight / 2 - totalRows / 2);
+  const startX = bounds.col + Math.floor(bounds.w / 2 - totalCols / 2);
+  const startY = bounds.row + Math.floor(bounds.h / 2 - totalRows / 2);
 
   for (let i = 0; i < rawCells.length; i++) {
     const localCol = i % totalCols;
@@ -224,17 +224,62 @@ export function buildTextBatch(
 }
 
 /**
- * Applies a converted result to the given (live) state: undo checkpoint,
- * then a new layer with the batch. No-op for null/empty results.
+ * Applies a converted result to the given (live) state: one undo
+ * checkpoint, then viewport growth for out-of-grid placements, grid
+ * expansion to cover them, a new layer, and the batch. No-op for empty
+ * results. Growth is reported through onViewportShifted so the host can
+ * rebase the world origin and overlays, exactly like a tool stroke.
  */
 export function applyTextRender(
   state: CanvasState,
   undoStack: UndoStack | null,
   label: string,
   batch: { col: number; row: number; cell: Cell }[],
+  onViewportShifted?: (growth: ViewportGrowth) => void,
 ): void {
   if (batch.length === 0) return;
   if (undoStack) undoStack.push(state);
+  let shiftCol = 0;
+  let shiftRow = 0;
+  const total: ViewportGrowth = { col: 0, row: 0, addedLeft: 0, addedTop: 0, addedRight: 0, addedBottom: 0, capped: false };
+  const placed: { col: number; row: number; cell: Cell }[] = [];
+  for (const item of batch) {
+    const grown = state.ensureViewportFor(item.col + shiftCol, item.row + shiftRow);
+    if (grown.capped) {
+      total.capped = true;
+      continue;
+    }
+    shiftCol += grown.addedLeft;
+    shiftRow += grown.addedTop;
+    total.addedLeft += grown.addedLeft;
+    total.addedTop += grown.addedTop;
+    total.addedRight += grown.addedRight;
+    total.addedBottom += grown.addedBottom;
+    total.col = grown.col;
+    total.row = grown.row;
+    placed.push({ col: grown.col, row: grown.row, cell: item.cell });
+  }
+  if (placed.length === 0) {
+    // Everything sat past the 2048 cap: nothing to paint, but the host
+    // still needs the cap warning.
+    onViewportShifted?.(total);
+    return;
+  }
+  let minCol = placed[0].col;
+  let minRow = placed[0].row;
+  let maxCol = placed[0].col;
+  let maxRow = placed[0].row;
+  for (const p of placed) {
+    minCol = Math.min(minCol, p.col);
+    minRow = Math.min(minRow, p.row);
+    maxCol = Math.max(maxCol, p.col);
+    maxRow = Math.max(maxRow, p.row);
+  }
+  state.ensureBoundsForRect({ col: minCol, row: minRow, w: maxCol - minCol + 1, h: maxRow - minRow + 1 });
   state.addLayer(label, false);
-  state.applyBatch(batch);
+  state.applyBatch(placed);
+  if (shiftCol !== 0 || shiftRow !== 0 || total.capped ||
+      total.addedRight !== 0 || total.addedBottom !== 0) {
+    onViewportShifted?.(total);
+  }
 }

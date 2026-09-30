@@ -35,8 +35,8 @@ function buildDialogDom(): Record<string, HTMLElement> {
     ['textarea', 'text-tool-input'],
     ['select', 'text-tool-font'],
     ['select', 'text-tool-style'],
-    ['input', 'text-tool-max-width'],
-    ['span', 'text-tool-max-width-val'],
+    ['input', 'text-tool-width-chars'],
+    ['input', 'text-tool-height-chars'],
     ['input', 'text-tool-stretch'],
     ['span', 'text-tool-stretch-val'],
     ['canvas', 'text-tool-preview'],
@@ -104,7 +104,8 @@ describe('text confirm applies to the live canvas, never a replaced one', () => 
     );
 
     (dom['text-tool-input'] as HTMLTextAreaElement).value = 'new text';
-    (dom['text-tool-max-width'] as HTMLInputElement).value = '60';
+    (dom['text-tool-width-chars'] as HTMLInputElement).value = '60';
+    (dom['text-tool-height-chars'] as HTMLInputElement).value = '20';
 
     let resolveRender!: (v: unknown) => void;
     renderMock.mockImplementation(() => new Promise((res) => { resolveRender = res as (v: unknown) => void; }));
@@ -128,6 +129,14 @@ describe('text confirm applies to the live canvas, never a replaced one', () => 
 
     // The live (fresh) map receives the text...
     expect(confirmed).toBe(fresh);
+    // ...rendered at the dialog's explicit character size, not the map size.
+    expect(renderMock).toHaveBeenCalledWith(
+        'new text',
+        { cols: 60, rows: 20 },
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+    );
     expect(fresh.layers).toHaveLength(2);
     expect(fresh.getActiveLayer().cells[9][29].char).toBe('N');
     // ...and the discarded map is NOT resurrected: no text layer, marker intact.
@@ -163,7 +172,8 @@ describe('text confirm applies to the live canvas, never a replaced one', () => 
     undo.setCurrentState(live);
 
     (dom['text-tool-input'] as HTMLTextAreaElement).value = 'hi';
-    (dom['text-tool-max-width'] as HTMLInputElement).value = '60';
+    (dom['text-tool-width-chars'] as HTMLInputElement).value = '60';
+    (dom['text-tool-height-chars'] as HTMLInputElement).value = '20';
     renderMock.mockResolvedValue({
       label: 'Text: hi',
       cells: [{ char: 'H', fg: [255, 255, 255], bg: [-1, -1, -1] }],
