@@ -46,6 +46,7 @@ import { loadMapPayload, MapEditSession, MapEditPayload, MapEditOrigin, MapLegen
 import { buildEditorSettings } from './editorSettings';
 import {
     planCreateRooms,
+    shouldShowCreateRooms,
     splitCreateTargets,
     removeRoomsByCoords,
     buildCreateResend,
@@ -473,10 +474,16 @@ async function initApp() {
     }
 
     const btnCreateRooms = document.getElementById('btn-create-rooms');
-    // The button only makes sense with a live edit session and a selection.
+    // The button only makes sense with a live edit session and an
+    // all-fresh selection: any selected pre-existing room hides it.
     function updateCreateRoomsButton(): void {
         if (!btnCreateRooms) return;
-        btnCreateRooms.style.display = (mapEditSession && selectionTool.getSelectedCells().size > 0) ? '' : 'none';
+        const show = shouldShowCreateRooms(
+            mapEditSession !== null,
+            selectionTool.getSelectedCells().size,
+            selectedRoomCoords().length,
+        );
+        btnCreateRooms.style.display = show ? '' : 'none';
     }
 
     const btnDeleteRooms = document.getElementById('btn-delete-rooms');

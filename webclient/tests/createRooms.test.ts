@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CanvasState } from '../src/state/CanvasState';
 import {
     planCreateRooms,
+    shouldShowCreateRooms,
     splitCreateTargets,
     removeRoomsByCoords,
     buildCreateResend,
@@ -476,5 +477,24 @@ describe('movesEqual', () => {
         expect(movesEqual(a, [])).toBe(false);
         expect(movesEqual(a, [{ fromX: 1, fromY: 2, toX: 3, toY: 5 }])).toBe(false);
         expect(movesEqual(a, [...b, ...b])).toBe(false);
+    });
+});
+
+describe('shouldShowCreateRooms', () => {
+    it('shows only with a session and an all-fresh selection', () => {
+        expect(shouldShowCreateRooms(true, 3, 0)).toBe(true);
+    });
+
+    it('hides without a session', () => {
+        expect(shouldShowCreateRooms(false, 3, 0)).toBe(false);
+    });
+
+    it('hides with an empty selection', () => {
+        expect(shouldShowCreateRooms(true, 0, 0)).toBe(false);
+    });
+
+    it('hides when any selected square is already a room', () => {
+        expect(shouldShowCreateRooms(true, 3, 1)).toBe(false);
+        expect(shouldShowCreateRooms(true, 3, 3)).toBe(false);
     });
 });

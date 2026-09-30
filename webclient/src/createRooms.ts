@@ -144,6 +144,13 @@ export function planCreateRooms(
     };
 }
 
+/** Create Rooms button visibility: offered only for all-fresh selections.
+ * Any selected pre-existing room hides it (those squares are already
+ * rooms — Delete Rooms covers that direction). */
+export function shouldShowCreateRooms(hasSession: boolean, selectedCells: number, selectedRooms: number): boolean {
+    return hasSession && selectedCells > 0 && selectedRooms === 0;
+}
+
 /** Undo/redo journal entry for one applied create plan. Rooms are matched
  * by coords at replay time because list indexes shift as rooms come and go. */
 export interface CreateJournalEntry {
