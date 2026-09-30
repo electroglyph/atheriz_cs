@@ -238,9 +238,9 @@ public partial class Node
             var nh = NodeHandler.GetCurrent();
             nh?.RemoveTransition(Coord, found.Coord);
         }
-        // also remove exits from occupants
+        // also refresh exits for occupants so surviving links stay usable
         if (found is not null)
-            foreach (var o in GetContents()) try { o.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveLink: " + logEx.Message, "Node"); }
+            foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveLink: " + logEx.Message, "Node"); }
     }
 
     public void AddExits(GameObject obj)

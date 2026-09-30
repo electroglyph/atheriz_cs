@@ -318,4 +318,73 @@ public sealed class MapDeleteRoomsTests
         Assert.True(handlers.ContainsKey("MapDeleteRoomsHandler"));
         Assert.Same(handlers["map_delete_rooms"], handlers["MapDeleteRoomsHandler"]);
     }
+
+    private static bool OccupantHasExit(GameObject o, string key) =>
+        o.InternalCmdSet?.GetAll().Any(c => c.Key == key) == true;
+
+    [Fact]
+    public void RemoveLink_RebuildsSurvivingExitsForOccupants()
+    {
+        using var env = GlobalTestEnv.Enter();
+        ResetChains();
+        var room = AddRoom("TestArea", 4, 4);
+        AddRoom("TestArea", 4, 5);
+        AddRoom("TestArea", 5, 4);
+        room.AddLink(new NodeLink("north", new Coord("TestArea", 4, 5, 0), ["n"]));
+        room.AddLink(new NodeLink("east", new Coord("TestArea", 5, 4, 0), ["e"]));
+        var obj = new GameObject();
+        ObjectRegistry.AddObject(obj);
+        Assert.True(obj.MoveTo(room, force: true, announce: false));
+        try
+        {
+            Assert.True(OccupantHasExit(obj, "north"));
+            room.RemoveLink("north");
+            Assert.False(OccupantHasExit(obj, "north"));
+            Assert.True(OccupantHasExit(obj, "east"));
+        }
+        finally
+        {
+            NodeHandler.SetCurrent(null);
+            ResetChains();
+        }
+    }
+
+    [Fact]
+    public void MapDeleteRooms_StripRebuildsSurvivorExitsForOccupants()
+    {
+        using var env = GlobalTestEnv.Enter();
+        ResetChains();
+        var here = AddRoom("TestArea", 4, 4);
+        AddRoom("TestArea", 4, 5);
+        AddRoom("TestArea", 5, 4);
+        AddRoom("TestArea", 3, 4);
+        AddRoom("TestArea", 4, 3);
+        here.AddLink(new NodeLink("north", new Coord("TestArea", 4, 5, 0), ["n"]));
+        here.AddLink(new NodeLink("east", new Coord("TestArea", 5, 4, 0), ["e"]));
+        here.AddLink(new NodeLink("west", new Coord("TestArea", 3, 4, 0), ["w"]));
+        here.AddLink(new NodeLink("south", new Coord("TestArea", 4, 3, 0), ["s"]));
+        var obj = new GameObject();
+        ObjectRegistry.AddObject(obj);
+        Assert.True(obj.MoveTo(here, force: true, announce: false));
+        Assert.True(OccupantHasExit(obj, "north"));
+        try
+        {
+            var conn = Conn();
+            var hk = Handshake(conn);
+            conn.ClearSent();
+            new InputFuncs().MapDeleteRoomsHandler(conn, [hk, 1, Payload([DeleteEntry(4, 5)])], []);
+            Assert.Equal("delete_ok", conn.Sent[^1].Cmd);
+            Assert.Null(LiveRoom(4, 5));
+            Assert.Equal(["east->5,4", "south->4,3", "west->3,4"], LinkNames(here));
+            Assert.False(OccupantHasExit(obj, "north"));
+            Assert.True(OccupantHasExit(obj, "east"));
+            Assert.True(OccupantHasExit(obj, "west"));
+            Assert.True(OccupantHasExit(obj, "south"));
+        }
+        finally
+        {
+            NodeHandler.SetCurrent(null);
+            ResetChains();
+        }
+    }
 }
