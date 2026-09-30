@@ -19,6 +19,7 @@ import { SequentialWriter, chunkEndsWithNewline, drainTrailer } from './buffer';
 import { playAudio as playAudioElement } from './audio';
 import { screenReaderFeedback, settingFeedback } from './feedback';
 import { shouldResetSession } from './session';
+import { TerminalScrollbar } from './scrollbar';
 import { asBoolean, asMapPayload, asLegend, asPosition, asString } from './payload';
 import './style.css';
 
@@ -94,6 +95,15 @@ left.loadAddon(new Unicode11Addon());
 right.loadAddon(new Unicode11Addon());
 left.open(elements.leftTerminal);
 right.open(elements.rightTerminal);
+// Custom scrollbar thumb for the left terminal (native thumbs stay
+// invisible under overlay scrollbars): visible while scrolled up, and a
+// resize can clamp the viewport back to the bottom without firing scroll.
+const leftScrollbar = new TerminalScrollbar(left, elements.leftTerminal, (() => {
+    const thumb = document.createElement('div');
+    thumb.className = 'terminal-scrollbar-thumb';
+    return thumb;
+})());
+const updateLeftScrollbar = () => leftScrollbar.update();
 installWebgl(left);
 installWebgl(right);
 write('\x1b[1;97mxtermia3\x1b[0m terminal emulator (made with xterm.js)\n');
@@ -362,6 +372,7 @@ function fitAndReportSize(): void {
     } catch {
         return;
     }
+    updateLeftScrollbar();
     if (mapEnabled) renderMap();
     recordLayout();
     if (!connected) return;

@@ -58,6 +58,31 @@ body {
     display: none;
 }
 
+/* On-demand scrollbar for the left terminal: overlay scrollbars give
+   the native xterm thumb zero layout space, so no CSS can force it
+   visible. TerminalScrollbar (wired in main.ts) renders its own thumb
+   instead: hidden at the bottom, shown while scrolled up. */
+#left-terminal {
+    position: relative;
+}
+.terminal-scrollbar-thumb {
+    position: absolute;
+    top: 0;
+    right: 2px;
+    width: 8px;
+    border-radius: 4px;
+    background: #666;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 10;
+}
+.terminal-scrollbar-thumb.visible {
+    opacity: 1;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
 #divider {
     width: 5px;
     flex: 0 0 5px;
