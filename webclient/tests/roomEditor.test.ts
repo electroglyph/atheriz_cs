@@ -128,6 +128,18 @@ describe('RoomEditor', () => {
         expect(document.querySelector('.room-editor-status')!.textContent).toBe('Saved to server.');
     });
 
+    it('keeps operation feedback visible when the panel falls back to a notice', () => {
+        mountContainer();
+        const editor = new RoomEditor('room-editor-container');
+        selectFirst(editor);
+        editor.setStatus('Deleted 1 room.');
+        editor.showNotice();
+        expect(document.querySelector('.room-editor-empty')!.textContent).toBe(
+            'Select a single room to edit it.'
+        );
+        expect(document.querySelector('.room-editor-status')!.textContent).toBe('Deleted 1 room.');
+    });
+
     it('commits an exit rename through onExitsChange', () => {
         mountContainer();
         const changes: ExitsChange[] = [];

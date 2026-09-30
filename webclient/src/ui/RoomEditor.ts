@@ -122,8 +122,13 @@ export class RoomEditor {
         return `${room.x},${room.y}`;
     }
 
+    /** Last operation feedback; re-rendered every render so a panel
+     * refresh (e.g. notice after delete) never swallows it. */
+    private statusText = '';
+
     /** Save feedback shown under the Save button (_saved to server_, denial reason). */
     public setStatus(text: string): void {
+        this.statusText = text;
         const status = this.container.querySelector('.room-editor-status');
         if (status) status.textContent = text;
     }
@@ -141,6 +146,7 @@ export class RoomEditor {
             empty.className = 'room-editor-empty';
             empty.textContent = 'No rooms — re-run mapedit in-game.';
             this.container.appendChild(empty);
+            this.container.appendChild(this.renderStatus());
             return;
         }
         const room = this.selected;
@@ -149,6 +155,7 @@ export class RoomEditor {
             empty.className = 'room-editor-empty';
             empty.textContent = this.notice;
             this.container.appendChild(empty);
+            this.container.appendChild(this.renderStatus());
             return;
         }
 
@@ -219,9 +226,15 @@ export class RoomEditor {
         });
         this.container.appendChild(saveButton);
 
+        const status = this.renderStatus();
+        this.container.appendChild(status);
+    }
+
+    private renderStatus(): HTMLElement {
         const status = document.createElement('div');
         status.className = 'room-editor-status';
-        this.container.appendChild(status);
+        status.textContent = this.statusText;
+        return status;
     }
 
     /** Full validation of one exit row against the server's caps. */

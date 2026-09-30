@@ -3,6 +3,32 @@ import { CellMetrics } from '../utils/fontMetrics';
 import { parseCellKey } from '../utils/cellKeys';
 import { Cell, Color } from '../types';
 
+/**
+ * Exterior boundary edges of a room-cell set, in cell units. An edge
+ * between two room cells is interior (drawn by neither side once the
+ * union is stroked); only edges facing a non-room cell are returned, so
+ * a deleted interior square can never keep an outline: its border
+ * pixels belong to no room anymore. Each edge is [x1, y1, x2, y2].
+ */
+export function roomBoundaryEdges(cells: Set<string>): Array<[number, number, number, number]> {
+    const present = new Set<string>();
+    const coords: Array<{ col: number; row: number }> = [];
+    for (const key of cells) {
+        const parsed = parseCellKey(key);
+        if (!parsed || present.has(key)) continue;
+        present.add(key);
+        coords.push(parsed);
+    }
+    const edges: Array<[number, number, number, number]> = [];
+    for (const { col, row } of coords) {
+        if (!present.has(`${col},${row - 1}`)) edges.push([col, row, col + 1, row]);
+        if (!present.has(`${col},${row + 1}`)) edges.push([col, row + 1, col + 1, row + 1]);
+        if (!present.has(`${col - 1},${row}`)) edges.push([col, row, col, row + 1]);
+        if (!present.has(`${col + 1},${row}`)) edges.push([col + 1, row, col + 1, row + 1]);
+    }
+    return edges;
+}
+
 export class GridRenderer {
     private canvas: HTMLCanvasElement;
     private ctx: CanvasRenderingContext2D;
@@ -210,9 +236,27 @@ export class GridRenderer {
         };
 
         if (this.roomVisible && this.roomCells.size > 0) {
+            // Subtle fill first, so every room cell — interior ones included —
+            // reads as a room and a deletion visibly empties the square.
+            this.ctx.save();
+            this.ctx.globalAlpha = 0.16;
+            this.ctx.fillStyle = this.roomColor;
+            for (const key of this.roomCells) {
+                const parsed = parseCellKey(key);
+                if (!parsed) continue;
+                this.ctx.fillRect(parsed.col * width, parsed.row * height, width, height);
+            }
+            this.ctx.restore();
+            // Union boundary, not per-cell boxes: shared edges belong to no
+            // room once drawn, so a deleted square keeps no outline.
             this.ctx.strokeStyle = this.roomColor;
             this.ctx.lineWidth = 2;
-            strokeCellOutlines(this.roomCells);
+            this.ctx.beginPath();
+            for (const [x1, y1, x2, y2] of roomBoundaryEdges(this.roomCells)) {
+                this.ctx.moveTo(x1 * width, y1 * height);
+                this.ctx.lineTo(x2 * width, y2 * height);
+            }
+            this.ctx.stroke();
         }
 
         if (this.selectedCells.size > 0) {

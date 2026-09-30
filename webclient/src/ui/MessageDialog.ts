@@ -4,14 +4,19 @@ export class MessageDialog {
     private container: HTMLElement;
     private messageEl: HTMLElement;
     private okButton: HTMLButtonElement;
+    // Denial notices must be acknowledged, not waved away: a sticky
+    // dialog ignores Escape and backdrop clicks, so a rejected edit or
+    // delete cannot vanish unseen (its rooms roll back underneath it).
+    private readonly dismissable: boolean;
     private boundKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape' && this.isVisible()) this.hide();
+        if (e.key === 'Escape' && this.dismissable && this.isVisible()) this.hide();
     };
     private boundBackdropClick = (e: MouseEvent) => {
-        if (e.target === this.container) this.hide();
+        if (e.target === this.container && this.dismissable) this.hide();
     };
 
-    constructor(containerId: string) {
+    constructor(containerId: string, options?: { dismissable?: boolean }) {
+        this.dismissable = options?.dismissable ?? true;
         const container = document.getElementById(containerId);
         if (!container) throw new Error(`Missing dialog container #${containerId}`);
         this.container = container;

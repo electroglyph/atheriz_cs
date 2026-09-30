@@ -54,6 +54,7 @@ import {
     buildDeleteUndoResend,
     buildRoomCellKeys,
     applyAcceptedMoves,
+    revertAcceptedMoves,
     fillCreatedDefaults,
     findRoomIndex,
     cloneRoom,
@@ -148,6 +149,14 @@ async function initApp() {
     // after it instead of a single unrelated entry.
     const pendingMoveCheckpoints: number[] = [];
 
+    // A canvas move relocates the room itself, so the list entry and the
+    // overlay key have to move in this handler, not when the answer comes
+    // back. Moving only the overlay left the two on different squares if a
+    // validation never landed (denied batch, dropped connection, session
+    // reset): the list still named the old square, so a later delete
+    // removed the wrong entry and the rebuild painted the highlight back
+    // on a square with no room. The deny below walks the list back; the
+    // accept is then a no-op.
     context.onCellsMoved = (moves) => {
         if (!mapEditSession || !mapEditOrigin) return;
         pendingMoveCheckpoints.push(Math.max(0, undoStack.depth - 1));
@@ -157,16 +166,10 @@ async function initApp() {
             toX: m.toCol + mapEditOrigin!.originX,
             toY: canvasState.height - 1 - m.toRow + mapEditOrigin!.originY,
         }));
-        if (roomCellSet) {
-            for (const m of moves) {
-                const key = `${m.fromCol},${m.fromRow}`;
-                if (roomCellSet.has(key)) {
-                    roomCellSet.delete(key);
-                    roomCellSet.add(`${m.toCol},${m.toRow}`);
-                }
-            }
-            renderer.setRoomCells(roomCellSet);
-        }
+        applyAcceptedMoves(rooms, worldMoves);
+        syncRoomCells();
+        roomEditor.setRooms(rooms);
+        refreshRoomPanel();
         mapEditSession.validateRoomMoves(worldMoves);
     };
 
@@ -434,7 +437,6 @@ async function initApp() {
         roomEditor.setStatus('');
         refreshRoomPanel();
         updateCreateRoomsButton();
-    updateDeleteRoomsButton();
     }
 
     function undoCreateRooms(entry: CreateJournalEntry): void {
@@ -590,8 +592,8 @@ async function initApp() {
         applyExitsAtIndex(roomIndex, room.exits.filter((_, i) => i !== index));
     }
 
-    const moveDeniedDialog = new MessageDialog('move-denied-modal');
-    const mapErrorDialog = new MessageDialog('map-error-modal');
+    const moveDeniedDialog = new MessageDialog('move-denied-modal', { dismissable: false });
+    const mapErrorDialog = new MessageDialog('map-error-modal', { dismissable: false });
     const confirmDialog = new ConfirmDialog('confirm-modal');
     const legendEditor = new LegendEditorDialog((legend) => {
         legendEntries = legend.map((e) => ({ ...e }));
@@ -711,7 +713,10 @@ async function initApp() {
         deleteUndo.push({ depth: undoStack.depth, removed: removed.map(cloneRoom), stripped, deletes });
         deleteRedo.length = 0;
         roomEditor.setRooms(rooms);
-        roomEditor.setStatus('');
+        // Interior deletions are invisible on canvas (neighbors' shared
+        // outlines paint the same pixels), so confirm the count here; the
+        // ack replaces this with 'Saved to server.', a deny with its reason.
+        roomEditor.setStatus(`Deleted ${removed.length === 1 ? '1 room' : `${removed.length} rooms`}.`);
         refreshRoomPanel();
         updateDeleteRoomsButton();
     });
@@ -832,13 +837,12 @@ async function initApp() {
             if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) console.log('Saved to server.');
         } else if (event.type === 'moves_accepted') {
             pendingMoveCheckpoints.shift();
-            // Relocate by move identity, not list position: the old code
-            // assigned session coords[i] onto rooms[i] whenever the two
-            // lists merely matched in length, so an accept landing while
-            // unacked creates/deletes were in flight scrambled the list —
-            // stranding teal on cells the list no longer pointed at, with
-            // the panel unable to match them. Identity matching leaves
-            // untracked rooms alone and preserves list order.
+            // The list already relocated when the move was sent, so the
+            // accept is normally a no-op; it still runs (identity-based,
+            // never positional) so a batch whose accept was preceded by a
+            // re-sync from server data lands correctly. Positional
+            // assignment used to scramble the list whenever an accept
+            // arrived while unsaved creates/deletes were in flight.
             applyAcceptedMoves(rooms, event.moves);
             roomEditor.setRooms(rooms);
             syncRoomCells();
@@ -866,13 +870,16 @@ async function initApp() {
                 // session so save diffs the restored map, not the denied one.
                 mapEditSession?.rebindCanvas(restored);
             }
-            // The rooms list never moves optimistically — only the overlay
-            // does — so a denied move leaves the list as the truth. Rebuild
-            // the overlay from it instead of surgically reverting keys: the
-            // revert could swap keys belonging to other rooms when creates,
-            // deletes, or later moves landed between send and deny, planting
-            // teal on squares with no room while the panel stayed empty.
+            // Walk the list back from the optimistic relocation, then
+            // rebuild. No surgical key swap: a raw to→from key revert
+            // could hand a square to the wrong room when creates,
+            // deletes, or later moves landed between send and deny,
+            // planting a highlight on a square with no room while the
+            // panel stayed empty.
+            revertAcceptedMoves(rooms, event.moves);
+            roomEditor.setRooms(rooms);
             syncRoomCells();
+            refreshRoomPanel();
             const maxListed = 5;
             const listed = event.moves
                 .slice(0, maxListed)

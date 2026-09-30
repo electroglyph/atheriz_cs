@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { MessageDialog } from '../src/ui/MessageDialog';
+import mainSrc from '../src/main.ts?raw';
 
 function mountModal(): void {
     document.body.innerHTML = `
@@ -59,6 +60,52 @@ describe('MessageDialog', () => {
         // message stays available until the next show
         expect(document.getElementById('move-denied-modal-message')!.textContent).toBe(
             'Room move rejected.'
+        );
+    });
+
+    it('hides a default dialog on Escape', () => {
+        mountModal();
+        const dialog = new MessageDialog('move-denied-modal');
+        dialog.show('Room move rejected.');
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        expect(dialog.isVisible()).toBe(false);
+        dialog.destroy();
+    });
+
+    it('hides a default dialog on backdrop click', () => {
+        mountModal();
+        const dialog = new MessageDialog('move-denied-modal');
+        dialog.show('Room move rejected.');
+        document.getElementById('move-denied-modal')!.dispatchEvent(
+            new MouseEvent('click', { bubbles: true })
+        );
+        expect(dialog.isVisible()).toBe(false);
+        dialog.destroy();
+    });
+
+    it('a sticky denial dialog ignores Escape and backdrop, keeps OK', () => {
+        mountModal();
+        const dialog = new MessageDialog('move-denied-modal', { dismissable: false });
+        dialog.show('Room deletion denied: room is occupied.');
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        expect(dialog.isVisible()).toBe(true);
+        document.getElementById('move-denied-modal')!.dispatchEvent(
+            new MouseEvent('click', { bubbles: true })
+        );
+        expect(dialog.isVisible()).toBe(true);
+        document.getElementById('move-denied-modal-ok')!.click();
+        expect(dialog.isVisible()).toBe(false);
+        dialog.destroy();
+    });
+
+    it('both denial dialogs are constructed sticky', () => {
+        // A refused edit/delete must survive Escape and backdrop clicks or
+        // the rollback looks exactly like a successful op that kept teal.
+        expect(mainSrc).toContain(
+            "new MessageDialog('move-denied-modal', { dismissable: false })"
+        );
+        expect(mainSrc).toContain(
+            "new MessageDialog('map-error-modal', { dismissable: false })"
         );
     });
 });

@@ -182,6 +182,22 @@ export function applyAcceptedMoves(rooms: MapRoom[], moves: RoomMove[]): number 
     return relocated;
 }
 
+/** Undo an optimistic relocation: every room sitting on a move's to-coord
+ *  goes back to its from-coord. Used when the server denies the move; the
+ *  list had already followed the canvas at send time, so the denial has to
+ *  move it back. Rooms that no longer sit on a to-coord are untouched. */
+export function revertAcceptedMoves(rooms: MapRoom[], moves: RoomMove[]): number {
+    let reverted = 0;
+    for (const m of moves) {
+        const index = findRoomIndex(rooms, m.toX, m.toY);
+        if (index < 0) continue;
+        rooms[index].x = m.fromX;
+        rooms[index].y = m.fromY;
+        reverted++;
+    }
+    return reverted;
+}
+
 /** Split a plan against the live list: full MapRoom copies for the fresh
  * rooms (adopting the plan's exit lists) plus before/after pairs for the
  * pre-existing rooms the plan touches. Nothing here mutates the live list. */
