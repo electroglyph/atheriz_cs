@@ -123,6 +123,152 @@ export function wrapLegendSymbol(char: string, fg: Color, bg: Color): string {
     return out + char + '\x1b[0m';
 }
 
+/** One colored run of room-description text: null fg/bg means the
+ * terminal default (no SGR emitted on encode). */
+export interface DescRun {
+    text: string;
+    fg: Color | null;
+    bg: Color | null;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+}
+
+/** Basic/bright SGR colors (30-37/90-97 fg, 40-47/100-107 bg). Stored
+ * descs may carry these from older builders; decode maps them to RGB
+ * and encode always emits 24-bit, so saving normalizes them. */
+const BASIC_SGR_COLORS: Color[] = [
+    [0, 0, 0], [128, 0, 0], [0, 128, 0], [128, 128, 0],
+    [0, 0, 128], [128, 0, 128], [0, 128, 128], [192, 192, 192],
+    [128, 128, 128], [255, 0, 0], [0, 255, 0], [255, 255, 0],
+    [0, 0, 255], [255, 0, 255], [0, 255, 255], [255, 255, 255],
+];
+
+/**
+ * Decodes a room description's inline SGR colors into runs, like the
+ * legend editor decodes a symbol's wrapping escapes into fg/bg state.
+ * Handles 24-bit (`38;2`/`48;2`), 256-color (`38;5`/`48;5`), and basic
+ * SGR colors plus bold/italic/underline; a reset (`0`, `39`, `49`,
+ * `22`, `23`, `24`) returns to the default. Inverse/strikethrough are
+ * dropped, matching parseAnsiSymbol — the run model has no fields for
+ * them. Unlike map cells, an explicit black background stays a real
+ * black (descs have no engine "unset means black" convention).
+ */
+export function parseDescRuns(text: string): DescRun[] {
+    const runs: DescRun[] = [];
+    let fg: Color | null = null;
+    let bg: Color | null = null;
+    let bold: boolean | undefined;
+    let italic: boolean | undefined;
+    let underline: boolean | undefined;
+    let pending = '';
+    const flush = (): void => {
+        if (!pending) return;
+        const last = runs[runs.length - 1];
+        if (last && colorsEqual(last.fg, fg) && colorsEqual(last.bg, bg)
+            && (last.bold ?? false) === (bold ?? false)
+            && (last.italic ?? false) === (italic ?? false)
+            && (last.underline ?? false) === (underline ?? false)) {
+            last.text += pending;
+        } else {
+            runs.push({ text: pending, fg, bg, bold, italic, underline });
+        }
+        pending = '';
+    };
+    const tokenRe = /\x1b\[[0-9;]*m|[^\x1b]+|\x1b/g;
+    let m: RegExpExecArray | null;
+    while ((m = tokenRe.exec(text)) !== null) {
+        const token = m[0];
+        if (!token.startsWith('\x1b[')) {
+            // A lone ESC carries no SGR and never renders: drop it the
+            // same way stripAnsi does instead of leaking it into a run.
+            if (token !== '\x1b') pending += token;
+            continue;
+        }
+        const raw = token.slice(2, -1);
+        const parts = raw ? raw.split(';') : ['0'];
+        // Flush first: the pending text belongs to the pre-sequence
+        // state. flush() coalesces adjacent same-state runs, so no-op
+        // sequences (a reset after plain text, a repeated color) never
+        // split anything visibly.
+        flush();
+        let i = 0;
+        while (i < parts.length) {
+            const code = Number(parts[i]);
+            if (code === 0) {
+                fg = null; bg = null;
+                bold = undefined; italic = undefined; underline = undefined;
+                i += 1;
+            } else if (code === 1) { bold = true; i += 1; }
+            else if (code === 22) { bold = false; i += 1; }
+            else if (code === 3) { italic = true; i += 1; }
+            else if (code === 23) { italic = false; i += 1; }
+            else if (code === 4) { underline = true; i += 1; }
+            else if (code === 24) { underline = false; i += 1; }
+            else if (code === 39) { fg = null; i += 1; }
+            else if (code === 49) { bg = null; i += 1; }
+            else if (code === 38 || code === 48) {
+                const isFg = code === 38;
+                const mode = Number(parts[i + 1]);
+                if (mode === 2 && i + 4 < parts.length) {
+                    const rgb: Color = [clampByte(Number(parts[i + 2])), clampByte(Number(parts[i + 3])), clampByte(Number(parts[i + 4]))];
+                    if (isFg) fg = rgb; else bg = rgb;
+                    i += 5;
+                } else if (mode === 5 && i + 2 < parts.length) {
+                    const idx = Number(parts[i + 2]);
+                    const rgb = ansi256ToRgb(Number.isFinite(idx) ? Math.floor(idx) : 0);
+                    if (isFg) fg = rgb; else bg = rgb;
+                    i += 3;
+                } else {
+                    i += 2;
+                }
+            } else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+                fg = [...(BASIC_SGR_COLORS[code >= 90 ? code - 90 + 8 : code - 30] ?? DEFAULT_FG)] as Color;
+                i += 1;
+            } else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
+                bg = [...(BASIC_SGR_COLORS[code >= 100 ? code - 100 + 8 : code - 40] ?? [0, 0, 0])] as Color;
+                i += 1;
+            } else {
+                // 7 (inverse) and 9 (strikethrough): no run fields, dropped.
+                i += 1;
+            }
+        }
+    }
+    flush();
+    return runs;
+}
+
+function colorsEqual(a: Color | null, b: Color | null): boolean {
+    if (a === null || b === null) return a === b;
+    return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+/**
+ * Encodes description runs back to a stored string, emitting 24-bit
+ * (`38;2`/`48;2`) control codes for every color — the save-time twin
+ * of the legend editor's wrapLegendSymbol. Default runs stay plain
+ * text; anything decodable (256-color, basic SGR) comes back as
+ * truecolor, so saving normalizes legacy codes.
+ */
+export function encodeDescRuns(runs: DescRun[]): string {
+    let out = '';
+    for (const run of runs) {
+        if (!run.text) continue;
+        const params: string[] = [];
+        if (run.bg) params.push(`48;2;${run.bg[0]};${run.bg[1]};${run.bg[2]}`);
+        if (run.fg) params.push(`38;2;${run.fg[0]};${run.fg[1]};${run.fg[2]}`);
+        if (run.bold) params.push('1');
+        if (run.italic) params.push('3');
+        if (run.underline) params.push('4');
+        if (params.length === 0) {
+            out += run.text;
+        } else {
+            out += `\x1b[${params.join(';')}m${run.text}\x1b[0m`;
+        }
+    }
+    return out;
+}
+
 /**
  * Parses a single ANSI-wrapped symbol (one map-editor cell) into a Cell.
  * Handles the engine's wrap_truecolor() output: always a background

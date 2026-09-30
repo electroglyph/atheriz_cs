@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BUFFER_FINAL_SEQUENCE } from '../src/webclient/buffer';
 import { settingFeedback, screenReaderFeedback } from '../src/webclient/feedback';
 import { mapLayout, recordingDividerPct, resizeWidth } from '../src/webclient/layout';
-import { DEFAULT_TEXT_COLOR, normalizeServerText, wrapText } from '../src/webclient/text';
+import { DEFAULT_TEXT_COLOR, normalizeServerText, stripAnsiBroad, wrapText } from '../src/webclient/text';
 
 describe('text wrapping with newlines and ANSI', () => {
     it('preserves hard newlines and resets line length after each', () => {
@@ -75,6 +75,33 @@ describe('text wrapping with newlines and ANSI', () => {
         expect(out).toContain('\n');
         expect(out).toContain('a');
         expect(out).toContain('b');
+    });
+
+    it('keeps default gray on the continuation line when a color span ends at the wrap', () => {
+        // Room-desc shape: gray base text with a highlighted word ending in
+        // RESET right where the line wraps — the next line must stay gray,
+        // not fall back to terminal white.
+        const red = '\x1b[31m';
+        const reset = '\x1b[0m';
+        const input = `${DEFAULT_TEXT_COLOR}crossroads of Beadle Alley and Hedge ${red}Mews${reset} heads north and south.`;
+        let wrappedAtBoundary = false;
+        for (let width = 30; width <= 50; width++) {
+            const lines = normalizeServerText(input, width, false).split('\n');
+            const heads = lines.find((l) => stripAnsiBroad(l).startsWith('heads'));
+            if (heads !== undefined) {
+                wrappedAtBoundary = true;
+                expect(heads.startsWith(DEFAULT_TEXT_COLOR)).toBe(true);
+            }
+        }
+        expect(wrappedAtBoundary).toBe(true);
+    });
+
+    it('re-emits stacked fg+bg+bold after a wrap instead of only the last code', () => {
+        const bold = '\x1b[1m';
+        const fg = '\x1b[38;2;204;204;204m';
+        const bg = '\x1b[48;2;0;0;0m';
+        const reset = '\x1b[0m';
+        expect(wrapText(`${bold}${fg}${bg}one two`, 5)).toContain(`${reset}\n${bold}${fg}${bg}two`);
     });
 });
 

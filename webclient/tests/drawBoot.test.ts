@@ -33,8 +33,7 @@ const MAIN_IDS = [
 
 const EXTRA_IDS = [
     'btn-export', 'btn-import-cancel', 'btn-import-confirm', 'btn-new',
-    'btn-new-cancel', 'btn-new-confirm', 'btn-redo', 'btn-resize',
-    'btn-resize-cancel', 'btn-resize-confirm', 'btn-text-cancel',
+    'btn-new-cancel', 'btn-new-confirm', 'btn-redo', 'btn-text-cancel',
     'btn-text-confirm', 'btn-undo', 'chafa-options-container',
     'char-scan-status', 'color-adjust-all-layers', 'color-adjust-brightness',
     'color-adjust-brightness-val', 'color-adjust-cancel', 'color-adjust-contrast',
@@ -49,8 +48,7 @@ const EXTRA_IDS = [
     'legend-add-btn', 'legend-cancel-btn', 'legend-editor-list',
     'legend-editor-modal', 'legend-save-btn', 'line-diagonal-checkbox',
     'line-mode-select', 'new-canvas-modal', 'new-height', 'new-width',
-    'oval-mode-select', 'preview-window', 'rect-mode-select',
-    'resize-canvas-modal', 'resize-height', 'resize-width', 'rotate-mode-select',
+    'oval-mode-select', 'preview-window', 'rect-mode-select', 'rotate-mode-select',
     'select-mode-select', 'text-chafa-options-container', 'text-tool-align',
     'text-tool-font', 'text-tool-google-fonts-btn', 'text-tool-height-chars',
     'text-tool-input', 'text-tool-modal', 'text-tool-preview',
@@ -73,7 +71,7 @@ function tagFor(id: string): string {
     if (id.includes('upload')) return 'input';
     if (id === 'gfp-search' || id === 'cp-hex' || id === 'type-tool-input') return 'input';
     if (id === 'line-diagonal-checkbox' || id === 'color-adjust-all-layers') return 'input';
-    if (/^(cp-[rgb]|new-(width|height)|resize-(width|height)|import-(width|height)|text-tool-(width|height)-chars|color-adjust-(brightness|contrast|hue|saturation))$/.test(id)) return 'input';
+    if (/^(cp-[rgb]|new-(width|height)|import-(width|height)|text-tool-(width|height)-chars|color-adjust-(brightness|contrast|hue|saturation))$/.test(id)) return 'input';
     if (id.endsWith('-select') || id === 'text-tool-font' || id === 'text-tool-style' || id === 'text-tool-align' || id === 'font-select') return 'select';
     if (/^(btn-|.*-(cancel|confirm|ok|save-btn|add-btn))/.test(id) || id === 'gfp-ok') return 'button';
     return 'div';

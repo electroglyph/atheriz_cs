@@ -29,7 +29,6 @@ import { cssColor } from './utils/colors';
 import { Toolbar } from './ui/Toolbar';
 import { SidebarResizer } from './ui/SidebarResizer';
 import { NewCanvasDialog } from './ui/NewCanvasDialog';
-import { ResizeCanvasDialog } from './ui/ResizeCanvasDialog';
 import { ImageImportDialog } from './ui/ImageImportDialog';
 import { TextToolDialog } from './ui/TextToolDialog';
 import { ColorAdjustDialog } from './ui/ColorAdjustDialog';
@@ -1205,19 +1204,6 @@ async function initApp() {
         // put the new grid on screen (the view never shrinks on its own).
         fitCanvasToViewport();
         scrollContentIntoView();
-    });
-
-    new ResizeCanvasDialog(() => canvasState, (w, h) => {
-        // The Resize dialog now sizes the server grid (violet rect), not
-        // the viewport: the origin stays put and storage is untouched, so
-        // no content moves or is cropped. Bounds clamp into storage.
-        undoStack.push(canvasState);
-        canvasState.setServerBounds({ ...canvasState.serverBounds, w, h });
-
-        renderer.setServerBounds(canvasState.serverBounds);
-        mapEditSession?.setServerBounds(canvasState.serverBounds);
-        if (mapEditOrigin) mapEditOrigin.serverBounds = { ...canvasState.serverBounds };
-        layerManager.updateState(canvasState);
     });
 
     new ImageImportDialog(async (buffer, w, h, config) => {

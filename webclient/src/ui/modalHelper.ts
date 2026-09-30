@@ -16,7 +16,6 @@ export function visibleModalIds(): string[] {
  */
 const FALLBACK_MODAL_IDS = [
     'new-canvas-modal',
-    'resize-canvas-modal',
     'image-import-modal',
     'char-map-modal',
     'text-tool-modal',

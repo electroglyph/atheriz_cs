@@ -384,3 +384,126 @@ describe('RoomEditor exit drafts and aliases', () => {
         expect(rowInputs(rows()[0]).name.value).toBe('North');
     });
 });
+
+describe('RoomEditor field colors', () => {
+    function coloredRooms(): MapRoom[] {
+        return [{
+            x: 0, y: 0,
+            name: '\x1b[38;2;0;0;255mBlue Hall\x1b[0m',
+            desc: 'A \x1b[38;2;255;0;0mred\x1b[0m hall.',
+            exits: [],
+        }];
+    }
+
+    function selectColored(editor: RoomEditor): void {
+        editor.setRooms(coloredRooms());
+        editor.selectRoom(0, 0);
+    }
+
+    it('renders one Name input above the Description textarea', () => {
+        mountContainer();
+        const editor = new RoomEditor('room-editor-container');
+        selectColored(editor);
+        const names = document.querySelectorAll('.room-editor-name');
+        expect(names).toHaveLength(1);
+        const namePos = names[0].compareDocumentPosition(document.querySelector('.room-editor-desc')!);
+        expect(namePos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('shows plain white text in the inputs for stored colored fields', () => {
+        mountContainer();
+        const editor = new RoomEditor('room-editor-container');
+        selectColored(editor);
+        expect((document.querySelector('.room-editor-name') as HTMLInputElement).value).toBe('Blue Hall');
+        expect((document.querySelector('.room-editor-desc') as HTMLTextAreaElement).value).toBe('A red hall.');
+    });
+
+    it('decodes the stored colors into the swatches on select', () => {
+        mountContainer();
+        const editor = new RoomEditor('room-editor-container');
+        selectColored(editor);
+        expect((document.querySelector('.room-editor-name-fg') as HTMLElement).style.background)
+            .toBe('rgb(0, 0, 255)');
+        expect((document.querySelector('.room-editor-desc-fg') as HTMLElement).style.background)
+            .toBe('rgb(255, 0, 0)');
+    });
+
+    it('previews each field in its decoded color', () => {
+        mountContainer();
+        const editor = new RoomEditor('room-editor-container');
+        selectColored(editor);
+        const nameSpan = document.querySelector('.room-editor-name-preview span') as HTMLElement;
+        expect(nameSpan.textContent).toBe('Blue Hall');
+        expect(nameSpan.style.color).toBe('rgb(0, 0, 255)');
+        const descSpan = document.querySelector('.room-editor-desc-preview span') as HTMLElement;
+        expect(descSpan.textContent).toBe('A red hall.');
+        expect(descSpan.style.color).toBe('rgb(255, 0, 0)');
+    });
+
+    it('picks a field color and wraps the whole field on save', async () => {
+        mountContainer();
+        const saved: { x: number; y: number; name: string; desc: string }[] = [];
+        const editor = new RoomEditor('room-editor-container', (room) => saved.push(room),
+            undefined, async () => [0, 255, 0]);
+        editor.setRooms([{ x: 0, y: 0, name: 'Hall', desc: 'A hall.', exits: [] }]);
+        editor.selectRoom(0, 0);
+        (document.querySelector('.room-editor-name-fg') as HTMLButtonElement).click();
+        await new Promise((r) => setTimeout(r, 0));
+        (document.querySelector('.room-editor-desc-fg') as HTMLButtonElement).click();
+        await new Promise((r) => setTimeout(r, 0));
+        // Picking never writes escapes into the white inputs.
+        expect((document.querySelector('.room-editor-name') as HTMLInputElement).value).toBe('Hall');
+        expect((document.querySelector('.room-editor-desc') as HTMLTextAreaElement).value).toBe('A hall.');
+        (document.querySelector('.room-editor-save') as HTMLButtonElement).click();
+        expect(saved[0].name).toBe('\x1b[38;2;0;255;0mHall\x1b[0m');
+        expect(saved[0].desc).toBe('\x1b[38;2;0;255;0mA hall.\x1b[0m');
+    });
+
+    it('keeps a picked color across panel re-renders until save', async () => {
+        mountContainer();
+        const saved: { x: number; y: number; name: string; desc: string }[] = [];
+        const editor = new RoomEditor('room-editor-container', (room) => saved.push(room),
+            undefined, async () => [0, 255, 0]);
+        editor.setRooms([{ x: 0, y: 0, name: 'Hall', desc: 'A hall.', exits: [] }]);
+        editor.selectRoom(0, 0);
+        (document.querySelector('.room-editor-desc-fg') as HTMLButtonElement).click();
+        await new Promise((r) => setTimeout(r, 0));
+        // Any re-render (e.g. Add exit) must not wipe the picked color.
+        (document.querySelector('.room-editor-exit-add') as HTMLButtonElement).click();
+        expect((document.querySelector('.room-editor-desc-fg') as HTMLElement).style.background)
+            .toBe('rgb(0, 255, 0)');
+        (document.querySelector('.room-editor-save') as HTMLButtonElement).click();
+        expect(saved[0].desc).toBe('\x1b[38;2;0;255;0mA hall.\x1b[0m');
+    });
+
+    it('does nothing when the picker is cancelled', async () => {
+        mountContainer();
+        const editor = new RoomEditor('room-editor-container', undefined, undefined,
+            async () => null);
+        selectColored(editor);
+        (document.querySelector('.room-editor-desc-fg') as HTMLButtonElement).click();
+        await new Promise((r) => setTimeout(r, 0));
+        expect((document.querySelector('.room-editor-desc-fg') as HTMLElement).style.background)
+            .toBe('rgb(255, 0, 0)');
+    });
+
+    it('saves legacy palette codes normalized to 24-bit', () => {
+        mountContainer();
+        const saved: { x: number; y: number; name: string; desc: string }[] = [];
+        const editor = new RoomEditor('room-editor-container', (room) => saved.push(room));
+        editor.setRooms([{ x: 0, y: 0, name: 'Hall', desc: '\x1b[38;5;9mQ\x1b[0m', exits: [] }]);
+        editor.selectRoom(0, 0);
+        (document.querySelector('.room-editor-save') as HTMLButtonElement).click();
+        expect(saved[0].desc).toBe('\x1b[38;2;255;0;0mQ\x1b[0m');
+    });
+
+    it('saves plain fields unchanged', () => {
+        mountContainer();
+        const saved: { x: number; y: number; name: string; desc: string }[] = [];
+        const editor = new RoomEditor('room-editor-container', (room) => saved.push(room));
+        editor.setRooms([{ x: 0, y: 0, name: 'Hall', desc: 'Just text.', exits: [] }]);
+        editor.selectRoom(0, 0);
+        (document.querySelector('.room-editor-save') as HTMLButtonElement).click();
+        expect(saved[0]).toMatchObject({ name: 'Hall', desc: 'Just text.' });
+    });
+});

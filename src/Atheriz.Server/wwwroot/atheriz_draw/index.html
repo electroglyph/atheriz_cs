@@ -8,17 +8,16 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- We link the custom font CSS directly, vite will inline it -->
-    <script type="module" crossorigin src="/static/assets/draw-Dyp0OF-o.js"></script>
-    <link rel="modulepreload" crossorigin href="/static/assets/connection-DVK0zFpT.js">
-    <link rel="stylesheet" crossorigin href="/static/assets/connection-wsl0qt4t.css">
-    <link rel="stylesheet" crossorigin href="/static/assets/draw-LJXqRVom.css">
+    <script type="module" crossorigin src="/static/assets/draw-CxhTIBrj.js"></script>
+    <link rel="modulepreload" crossorigin href="/static/assets/launch-8c7TMuoZ.js">
+    <link rel="stylesheet" crossorigin href="/static/assets/launch-wsl0qt4t.css">
+    <link rel="stylesheet" crossorigin href="/static/assets/draw-simEW3y7.css">
   </head>
   <body>
     <div id="app">
       <!-- Toolbar -->
       <header id="toolbar">
         <button id="btn-new" title="New Canvas">📄 New</button>
-        <button id="btn-resize" title="Resize Canvas">📐 Resize</button>
         <button id="btn-load-image" title="Load Image as ANSI">🖼️ Load Image</button>
         <input type="file" id="image-upload" accept="image/*" style="display:none;" />
         <div class="separator"></div>
@@ -125,6 +124,8 @@
           </div>
           <div class="separator"></div>
           <button id="btn-edit-legend" title="Edit map legend">🏷️ Edit Legend</button>
+          <button id="btn-create-rooms" title="Create rooms from selection" style="display:none">🏠 Create Rooms</button>
+          <button id="btn-delete-rooms" title="Delete selected rooms" style="display:none">🗑️ Delete Rooms</button>
         </div>
       </header>
 
@@ -195,6 +196,8 @@
         <aside id="right-sidebar">
           <h3>Layers</h3>
           <div id="layer-manager-container"></div>
+          <h3>Room</h3>
+          <div id="room-editor-container"></div>
         </aside>
       </div>
     </div>
@@ -213,25 +216,10 @@
           <label>W: <input type="number" id="new-width" value="24" min="1"></label>
           <label>H: <input type="number" id="new-height" value="24" min="1"></label>
         </div>
+        <p style="font-size: 0.85em; color: #888; margin-top: 10px;">The size you pick is the grid sent back to the server (violet outline). The viewport fits your window with working margin around it.</p>
         <div class="modal-actions">
           <button id="btn-new-cancel">Cancel</button>
           <button id="btn-new-confirm" class="primary">Create</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Resize Canvas Modal -->
-    <div id="resize-canvas-modal" class="modal hidden">
-      <div class="modal-content" style="width: 300px;">
-        <h2>Resize Canvas</h2>
-        <div class="custom-size">
-          <label>W: <input type="number" id="resize-width" value="80" min="1"></label>
-          <label>H: <input type="number" id="resize-height" value="24" min="1"></label>
-        </div>
-        <p style="font-size: 0.85em; color: #888; margin-top: 10px;">Layers will be expanded or cropped from the bottom-right.</p>
-        <div class="modal-actions" style="margin-top: 16px;">
-          <button id="btn-resize-cancel">Cancel</button>
-          <button id="btn-resize-confirm" class="primary">Resize</button>
         </div>
       </div>
     </div>
@@ -329,10 +317,12 @@
               </select>
             </div>
             <div>
-              <label style="display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 2px;">
-                <span>Max Width (glyphs):</span> <span id="text-tool-max-width-val">80</span>
-              </label>
-              <input type="range" id="text-tool-max-width" value="80" min="1" max="200" style="width: 100%;">
+              <label style="display: block; font-size: 0.9em; margin-bottom: 2px;">Width (chars):</label>
+              <input type="number" id="text-tool-width-chars" value="80" min="1" max="2048" style="width: 100%; padding: 4px; box-sizing: border-box;">
+            </div>
+            <div>
+              <label style="display: block; font-size: 0.9em; margin-bottom: 2px;">Height (chars):</label>
+              <input type="number" id="text-tool-height-chars" value="24" min="1" max="2048" style="width: 100%; padding: 4px; box-sizing: border-box;">
             </div>
              <div>
               <label style="display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 2px;">
@@ -428,6 +418,17 @@
         <p id="move-denied-modal-message" style="color: #ffdede; font-size: 14px; line-height: 1.4; white-space: pre-wrap; background: #2a1212; border: 1px solid #662222; border-radius: 4px; padding: 10px 12px;"></p>
         <div class="modal-actions" style="margin-top: 16px;">
           <button id="move-denied-modal-ok" class="primary" style="background: #cc2222; border-color: #aa1111;">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="confirm-modal" class="modal hidden" style="z-index: 3000;">
+      <div class="modal-content" style="width: 420px; max-width: 90vw;">
+        <h3 style="display: flex; align-items: center; gap: 8px; font-size: 18px; margin-bottom: 12px;">Confirm</h3>
+        <p id="confirm-modal-message" style="font-size: 14px; line-height: 1.4; white-space: pre-wrap;"></p>
+        <div class="modal-actions" style="margin-top: 16px;">
+          <button id="confirm-modal-cancel">Cancel</button>
+          <button id="confirm-modal-ok" class="primary">OK</button>
         </div>
       </div>
     </div>

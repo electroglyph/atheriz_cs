@@ -1,4 +1,8 @@
 import { MapRoom, MapExitEdit, formatExitCoord, parseExitCoord } from '../mapedit';
+import { parseDescRuns, stripAnsi, wrapLegendSymbol, DEFAULT_FG, TRANSPARENT } from '../utils/ansiParser';
+import { cssColor } from '../utils/colors';
+import { Color } from '../types';
+import { ColorPickerModal } from './ColorPickerModal';
 
 export interface RoomSave {
     x: number;
@@ -34,7 +38,12 @@ export interface RoomEditorCallbacks {
 /** Room-property panel for the map editor sidebar. Shows the room the
  * canvas selection points at (no room list: the host calls showRoom as
  * the selection changes). Name/description Save and every exit edit go
- * to the host callbacks for a server roundtrip. */
+ * to the host callbacks for a server roundtrip.
+ *
+ * Name and Description work like a legend-editor row: the inputs hold
+ * plain white text, the swatches own the field color (decoded from the
+ * stored escapes on select), and Save wraps the whole field in 24-bit
+ * control codes. */
 export class RoomEditor {
     private container: HTMLElement;
     private rooms: MapRoom[] = [];
@@ -43,13 +52,30 @@ export class RoomEditor {
     private picking: boolean = false;
     private onSave: ((room: RoomSave) => void) | null;
     private callbacks: RoomEditorCallbacks;
+    private openPicker: (initial: Color) => Promise<Color | null>;
+    /** Swatch state per field (bg null = terminal default). Decoded
+     * from the stored text on selection; picking never writes escapes
+     * into the inputs, only Save wraps. */
+    private nameFg: Color = [...DEFAULT_FG] as Color;
+    private nameBg: Color = [...TRANSPARENT] as Color;
+    private descFg: Color = [...DEFAULT_FG] as Color;
+    private descBg: Color = [...TRANSPARENT] as Color;
+    /** Room key the swatch state was decoded for: re-renders (exit
+     * edits, status changes) must not wipe a picked-but-unsaved color. */
+    private colorKey: string | null = null;
 
-    constructor(containerId: string, onSave?: (room: RoomSave) => void, callbacks?: RoomEditorCallbacks) {
+    constructor(
+        containerId: string,
+        onSave?: (room: RoomSave) => void,
+        callbacks?: RoomEditorCallbacks,
+        openPicker?: (initial: Color) => Promise<Color | null>,
+    ) {
         const container = document.getElementById(containerId);
         if (!container) throw new Error(`Missing #${containerId}`);
         this.container = container;
         this.onSave = onSave ?? null;
         this.callbacks = callbacks ?? {};
+        this.openPicker = openPicker ?? ((initial) => ColorPickerModal.getInstance().open(initial));
     }
 
     public setRooms(rooms: MapRoom[]): void {
@@ -159,31 +185,67 @@ export class RoomEditor {
             return;
         }
 
+        // Decode the stored field colors into the swatches once per
+        // selection, like the legend editor decodes a symbol's wrapping
+        // escapes on open. Later re-renders keep a picked-but-unsaved
+        // color instead of wiping it.
+        const key = `${room.x},${room.y}`;
+        if (this.colorKey !== key) {
+            this.colorKey = key;
+            const nameColors = RoomEditor.decodeFieldColors(room.name);
+            this.nameFg = nameColors.fg;
+            this.nameBg = nameColors.bg;
+            const descColors = RoomEditor.decodeFieldColors(room.desc);
+            this.descFg = descColors.fg;
+            this.descBg = descColors.bg;
+        }
+
         const nameLabel = document.createElement('label');
         nameLabel.className = 'room-editor-label';
         nameLabel.textContent = 'Name';
+        nameLabel.appendChild(this.renderFieldTools('name'));
+        this.container.appendChild(nameLabel);
         const nameInput = document.createElement('input');
         nameInput.type = 'text';
         nameInput.className = 'room-editor-name';
-        nameInput.value = room.name ?? '';
+        nameInput.value = stripAnsi(room.name ?? '');
         nameInput.addEventListener('input', () => {
-            room.name = nameInput.value;
+            // Pasted escapes never stick: the box holds plain text, the
+            // swatches own the color. Only rewrite while escapes are
+            // present so normal typing never jumps the cursor.
+            const clean = stripAnsi(nameInput.value);
+            if (clean !== nameInput.value) nameInput.value = clean;
+            room.name = clean;
+            this.updateFieldPreview('name');
         });
-        nameLabel.appendChild(nameInput);
-        this.container.appendChild(nameLabel);
+        this.container.appendChild(nameInput);
+        const namePreview = document.createElement('div');
+        namePreview.className = 'room-editor-name-preview';
+        namePreview.title = 'How the name looks with its colors';
+        this.container.appendChild(namePreview);
 
         const descLabel = document.createElement('label');
         descLabel.className = 'room-editor-label';
         descLabel.textContent = 'Description';
+        descLabel.appendChild(this.renderFieldTools('desc'));
+        this.container.appendChild(descLabel);
         const descInput = document.createElement('textarea');
         descInput.className = 'room-editor-desc';
         descInput.rows = 4;
-        descInput.value = room.desc ?? '';
+        descInput.value = stripAnsi(room.desc ?? '');
         descInput.addEventListener('input', () => {
-            room.desc = descInput.value;
+            const clean = stripAnsi(descInput.value);
+            if (clean !== descInput.value) descInput.value = clean;
+            room.desc = clean;
+            this.updateFieldPreview('desc');
         });
-        descLabel.appendChild(descInput);
-        this.container.appendChild(descLabel);
+        this.container.appendChild(descInput);
+        const descPreview = document.createElement('div');
+        descPreview.className = 'room-editor-desc-preview';
+        descPreview.title = 'How the description looks with its colors';
+        this.container.appendChild(descPreview);
+        this.updateFieldPreview('name');
+        this.updateFieldPreview('desc');
 
         const exitsTitle = document.createElement('div');
         exitsTitle.className = 'room-editor-label';
@@ -219,10 +281,20 @@ export class RoomEditor {
         saveButton.className = 'room-editor-save';
         saveButton.textContent = 'Save';
         saveButton.addEventListener('click', () => {
-            room.name = nameInput.value;
-            room.desc = descInput.value;
+            // Whole-field 24-bit wrap, like the legend editor wraps its
+            // symbols on save. Default colors stay plain text; anything
+            // decodable (256-color, basic SGR) was already normalized
+            // into the swatch state on select.
+            const name = wrapLegendSymbol(stripAnsi(nameInput.value), this.nameFg, this.nameBg);
+            const desc = wrapLegendSymbol(stripAnsi(descInput.value), this.descFg, this.descBg);
+            room.name = name;
+            room.desc = desc;
+            nameInput.value = stripAnsi(name);
+            descInput.value = stripAnsi(desc);
+            this.updateFieldPreview('name');
+            this.updateFieldPreview('desc');
             this.setStatus('');
-            this.onSave?.({ x: room.x, y: room.y, name: nameInput.value, desc: descInput.value });
+            this.onSave?.({ x: room.x, y: room.y, name, desc });
         });
         this.container.appendChild(saveButton);
 
@@ -235,6 +307,122 @@ export class RoomEditor {
         status.className = 'room-editor-status';
         status.textContent = this.statusText;
         return status;
+    }
+
+    /** A stored field's swatch colors: its first colored run's fg/bg,
+     * default when the field carries no color — the field-level twin of
+     * the legend editor decoding a symbol's wrapping escapes. */
+    private static decodeFieldColors(raw: string | null | undefined): { fg: Color; bg: Color } {
+        const runs = parseDescRuns(raw ?? '');
+        const fg = runs.find((r) => r.fg)?.fg;
+        const bg = runs.find((r) => r.bg)?.bg;
+        return {
+            fg: fg ? ([...fg] as Color) : ([...DEFAULT_FG] as Color),
+            bg: bg ? ([...bg] as Color) : ([...TRANSPARENT] as Color),
+        };
+    }
+
+    private fieldColors(field: 'name' | 'desc'): { fg: Color; bg: Color } {
+        return field === 'name'
+            ? { fg: this.nameFg, bg: this.nameBg }
+            : { fg: this.descFg, bg: this.descBg };
+    }
+
+    private setFieldColors(field: 'name' | 'desc', fg: Color, bg: Color): void {
+        if (field === 'name') {
+            this.nameFg = fg;
+            this.nameBg = bg;
+        } else {
+            this.descFg = fg;
+            this.descBg = bg;
+        }
+    }
+
+    private renderFieldTools(field: 'name' | 'desc'): HTMLElement {
+        const tools = document.createElement('span');
+        tools.className = 'room-editor-field-tools';
+        tools.append(this.renderSwatch(field, true), this.renderSwatch(field, false));
+        return tools;
+    }
+
+    /** FG/BG swatch, mirroring the legend editor's color buttons:
+     * click picks the field color, right-click resets it. Picking never
+     * touches the input text — the preview shows the color and Save
+     * wraps the whole field. */
+    private renderSwatch(field: 'name' | 'desc', isFg: boolean): HTMLButtonElement {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = field === 'name'
+            ? (isFg ? 'room-editor-name-fg' : 'room-editor-name-bg')
+            : (isFg ? 'room-editor-desc-fg' : 'room-editor-desc-bg');
+        const paint = (): void => {
+            const color = isFg ? this.fieldColors(field).fg : this.fieldColors(field).bg;
+            if (!isFg && color[0] === -1) {
+                btn.style.background = 'repeating-conic-gradient(#666 0% 25%, #333 0% 50%) 50% / 8px 8px';
+                btn.style.border = '1px dashed #888';
+                btn.style.boxShadow = '';
+            } else {
+                btn.style.background = cssColor(color);
+                btn.style.border = '1px solid #fff';
+                btn.style.boxShadow = '0 0 0 1px #000 inset';
+            }
+        };
+        paint();
+        btn.title = isFg
+            ? 'Text color for this field (right-click to reset)'
+            : 'Background color for this field (right-click to clear)';
+        btn.setAttribute('aria-label', isFg ? 'Field text color' : 'Field background color');
+        btn.addEventListener('click', () => {
+            void this.pickFieldColor(field, isFg, paint);
+        });
+        btn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const colors = this.fieldColors(field);
+            if (isFg) this.setFieldColors(field, [...DEFAULT_FG] as Color, colors.bg);
+            else this.setFieldColors(field, colors.fg, [...TRANSPARENT] as Color);
+            paint();
+            this.updateFieldPreview(field);
+        });
+        return btn;
+    }
+
+    private async pickFieldColor(field: 'name' | 'desc', isFg: boolean, repaint: () => void): Promise<void> {
+        const colors = this.fieldColors(field);
+        const seed = isFg ? colors.fg : (colors.bg[0] === -1 ? [0, 0, 0] as Color : colors.bg);
+        const picked = await this.openPicker([...seed] as Color);
+        if (!picked) return;
+        if (isFg) this.setFieldColors(field, picked, colors.bg);
+        else this.setFieldColors(field, colors.fg, picked);
+        repaint();
+        this.updateFieldPreview(field);
+    }
+
+    /** Re-render one field's preview: its plain text in the swatch colors. */
+    private updateFieldPreview(field: 'name' | 'desc'): void {
+        const preview = this.container.querySelector(
+            field === 'name' ? '.room-editor-name-preview' : '.room-editor-desc-preview');
+        if (!preview) return;
+        const input = this.container.querySelector(
+            field === 'name' ? '.room-editor-name' : '.room-editor-desc') as HTMLInputElement | HTMLTextAreaElement | null;
+        preview.innerHTML = '';
+        const text = stripAnsi(input?.value ?? '');
+        if (!text) {
+            const empty = document.createElement('span');
+            empty.className = 'room-editor-preview-empty';
+            empty.textContent = field === 'name' ? '(no name)' : '(no description)';
+            preview.appendChild(empty);
+            return;
+        }
+        const { fg, bg } = this.fieldColors(field);
+        const span = document.createElement('span');
+        span.textContent = text;
+        if (!(fg[0] === DEFAULT_FG[0] && fg[1] === DEFAULT_FG[1] && fg[2] === DEFAULT_FG[2])) {
+            span.style.color = cssColor(fg);
+        }
+        if (!(bg[0] === -1 && bg[1] === -1 && bg[2] === -1)) {
+            span.style.backgroundColor = cssColor(bg);
+        }
+        preview.appendChild(span);
     }
 
     /** Full validation of one exit row against the server's caps. */

@@ -44,8 +44,14 @@ export function normalizeServerText(input: string, width: number, screenReader: 
     if (screenReader) return input;
     let output = input;
     if (output.charAt(0) !== ESC) output = DEFAULT_TEXT_COLOR + output;
-    output = wrapText(output, width);
-    return output.replaceAll(RESET, DEFAULT_TEXT_RESET).replaceAll(WHITE, DEFAULT_TEXT_COLOR).replaceAll(WHITE_BRIGHT, DEFAULT_TEXT_COLOR).replaceAll(WHITE_BRIGHT_BLACK, DEFAULT_TEXT_COLOR);
+    // Map resets/whites to the default gray BEFORE wrapping: wrapText
+    // re-emits the tracked color after each inserted line break, so the
+    // continuation line must see the gray explicitly. Mapping after the
+    // wrap lands the gray before the break (end of the old line), and a
+    // color span ending in RESET right at the break (e.g. a highlighted
+    // word at line end) leaves the next line bare — terminal white.
+    output = output.replaceAll(RESET, DEFAULT_TEXT_RESET).replaceAll(WHITE, DEFAULT_TEXT_COLOR).replaceAll(WHITE_BRIGHT, DEFAULT_TEXT_COLOR).replaceAll(WHITE_BRIGHT_BLACK, DEFAULT_TEXT_COLOR);
+    return wrapText(output, width);
 }
 
 // Text frames erase a live prompt but never reprint it. The stored prompt is
@@ -89,7 +95,13 @@ export function wrapText(text: string, width: number): string {
         let nextColor = currentColor;
         const codes = word.match(ANSI_COLOR);
         if (codes) {
-            for (const code of codes) nextColor = code === RESET ? '' : code;
+            // Accumulate the full active SGR state: sequences stack
+            // (bold + fg + bg), so keeping only the last code drops
+            // attributes from the continuation line after a wrap.
+            for (const code of codes) {
+                if (code === RESET) nextColor = '';
+                else nextColor += code;
+            }
         }
 
         if (word.includes('\n')) {

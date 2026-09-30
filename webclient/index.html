@@ -18,7 +18,6 @@
       <!-- Toolbar -->
       <header id="toolbar">
         <button id="btn-new" title="New Canvas">📄 New</button>
-        <button id="btn-resize" title="Grid Size">📐 Grid</button>
         <button id="btn-load-image" title="Load Image as ANSI">🖼️ Load Image</button>
         <input type="file" id="image-upload" accept="image/*" style="display:none;" />
         <div class="separator"></div>
@@ -221,22 +220,6 @@
         <div class="modal-actions">
           <button id="btn-new-cancel">Cancel</button>
           <button id="btn-new-confirm" class="primary">Create</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Grid Size Modal (sizes the violet server grid, not the viewport) -->
-    <div id="resize-canvas-modal" class="modal hidden">
-      <div class="modal-content" style="width: 300px;">
-        <h2>Grid Size</h2>
-        <div class="custom-size">
-          <label>W: <input type="number" id="resize-width" value="80" min="1"></label>
-          <label>H: <input type="number" id="resize-height" value="24" min="1"></label>
-        </div>
-        <p style="font-size: 0.85em; color: #888; margin-top: 10px;">Sets the violet grid sent back to the server. The viewport is untouched; drawing past the outline expands the grid.</p>
-        <div class="modal-actions" style="margin-top: 16px;">
-          <button id="btn-resize-cancel">Cancel</button>
-          <button id="btn-resize-confirm" class="primary">Resize</button>
         </div>
       </div>
     </div>
