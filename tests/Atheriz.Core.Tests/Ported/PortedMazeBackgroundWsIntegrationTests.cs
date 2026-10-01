@@ -60,6 +60,7 @@ public class PortedMazeBackgroundWsIntegrationTests
     }
 
     [Fact(Timeout=120000)]
+    [Trait("Category", "Slow")]
     public async Task Maze_Ws_BackgroundChangesMap()
     {
         if(!OperatingSystem.IsLinux()) return;

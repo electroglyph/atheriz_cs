@@ -88,6 +88,7 @@ public class ThreadPoolReliefLossTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Stop_JoinsFixedWorkersAgainstSharedDeadline()
     {
         // Three stuck fixed workers with a 2s timeout must stall ~2s total,

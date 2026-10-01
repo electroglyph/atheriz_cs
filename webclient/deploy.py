@@ -19,6 +19,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 DIST_ROOT = PROJECT_ROOT / "dist"
 PACKAGE_STATIC_ROOT = PROJECT_ROOT.parent / "atheriz" / "web" / "static"
+ENGINE_LANDING_TEMPLATE = (
+    PROJECT_ROOT.parent / "src" / "Atheriz.Server" / "web" / "templates" / "index.html"
+)
 
 
 def remove_path(path: Path) -> None:
@@ -84,6 +87,12 @@ def deploy(
         DIST_ROOT / "index.html",
         static_root / "atheriz_draw" / "index.html",
     )
+    # Stable server-log viewer name for the landing page (hashed names
+    # change per build, same as chafa.wasm above). It lives next to its
+    # hashed chunk neighbors so their relative imports keep resolving.
+    serverlog = sorted((DIST_ROOT / "assets").glob("serverlog-*.js"))
+    if serverlog:
+        copy_file(serverlog[0], static_root / "assets" / "serverlog.js")
     chafa_src = DIST_ROOT / "chafa.wasm"
     if chafa_src.is_file():
         copy_file(chafa_src, static_root / "chafa.wasm")
@@ -98,6 +107,25 @@ def deploy(
     print(f"Deployed frontend artifacts to {static_root}")
     print(f"  webclient: {static_root / 'webclient' / 'index.html'}")
     print(f"  draw:     {static_root / 'atheriz_draw' / 'index.html'}")
+    print(f"  serverlog:{static_root / 'assets' / 'serverlog.js'}")
+
+
+def sync_landing_template(web_root: Path) -> None:
+    """Copy the engine landing page into the game web root.
+
+    Games keep their own web/templates/index.html copy (seeded at `new`
+    time and winning over the shipped one at runtime), so without this
+    step a redeploy updates the JS bundles but never the landing page
+    itself. Deploy is an explicit operator action, so overwrite.
+    """
+    if not ENGINE_LANDING_TEMPLATE.is_file():
+        raise FileNotFoundError(
+            f"Engine landing template not found at {ENGINE_LANDING_TEMPLATE}"
+        )
+    copy_file(
+        ENGINE_LANDING_TEMPLATE, web_root.resolve() / "templates" / "index.html"
+    )
+    print(f"  landing:  {web_root.resolve() / 'templates' / 'index.html'}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -152,6 +180,8 @@ def main() -> int:
         clean=not args.no_clean,
         remove_legacy_webclient=args.target == "package",
     )
+    if args.target == "game" and args.web_root is not None:
+        sync_landing_template(args.web_root)
     return 0
 
 

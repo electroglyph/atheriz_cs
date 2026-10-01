@@ -17,7 +17,7 @@ public sealed class ReloadCommand : LoggedInCommand
             // the channel fetch itself can throw; keep it inside
             // try so a broken channel service still reaches the reload.
             channel = GlobalServices.GetServerChannel();
-            try { channel?.Msg("Server is reloading..."); } catch (Exception) { }
+            try { if (channel is Atheriz.Core.Objects.Channel ch) ch.Send("Server is reloading..."); } catch (Exception) { }
             try { Atheriz.Core.ServerEvents.AtServerReload(); } catch (Exception) { }
             try { AtherizLogger.LogInformation($"Reload triggered by {go.Name} ({go.Id})"); } catch (Exception) { }
         }
@@ -57,9 +57,9 @@ public sealed class ReloadCommand : LoggedInCommand
             try { Atheriz.Core.Globals.StartStop.DoReload(AtherizSettings.Global); result = "Reload completed."; }
             catch (Exception ex2) { result = $"Reload failed: {ex2.Message}"; }
         }
-        if (channel is not null)
+        if (channel is Atheriz.Core.Objects.Channel ch)
         {
-            try { channel.Msg(result); } catch (Exception) { }
+            try { ch.Send(result); } catch (Exception) { }
             try { go.Msg(result); } catch (Exception) { }
         }
         else

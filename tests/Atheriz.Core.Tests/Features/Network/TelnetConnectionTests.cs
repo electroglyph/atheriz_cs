@@ -50,6 +50,7 @@ public class TelnetConnectionTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public async Task Telnet_Write_ToNonReadingPeer_ReturnsPromptly()
     {
         // Behavior: writes run on the game thread with a deadline — a peer

@@ -355,7 +355,7 @@ internal static class GameObjectDtoConverter
     // Channel branch: Type=="channel" -> create Channel instance and restore history
     private static GameObject LoadChannel(GameObjectDto dto)
     {
-        var ch = Channel.CreateForLoad(dto.Id);
+        var ch = Channel.CreateForLoad(dto.Id, Atheriz.Core.Settings.AtherizSettings.Global.ChannelHistoryLimit);
         GameObject.ApplyDtoFields(ch, dto, null);
         ch.IsChannel = true;
         // Restore history if present; listeners intentionally not restored (excluded per __getstate__)
@@ -461,7 +461,9 @@ internal static class GameObjectDtoConverter
     }
 
     // History entries persist as [timestamp, sender, message] triples mirroring
-    // the Python (timestamp, sender, message) tuples.
+    // the Python (timestamp, sender, message) tuples, with an optional
+    // trailing sequence number ([timestamp, sender, message, seq]) for
+    // live-log replay. Triples load with seq 0.
     private static List<ChannelHistoryEntry> ParseChannelHistory(JsonElement he)
     {
         List<ChannelHistoryEntry> entries = [];
@@ -474,7 +476,8 @@ internal static class GameObjectDtoConverter
                 long ts = parts.Count > 0 && parts[0].ValueKind == JsonValueKind.Number && parts[0].TryGetInt64(out var t) ? t : 0;
                 string sender = parts.Count > 1 && parts[1].ValueKind == JsonValueKind.String ? parts[1].GetString() ?? "" : "";
                 string msg = parts.Count > 2 && parts[2].ValueKind == JsonValueKind.String ? parts[2].GetString() ?? "" : "";
-                entries.Add(new ChannelHistoryEntry(ts, sender, msg));
+                long seq = parts.Count > 3 && parts[3].ValueKind == JsonValueKind.Number && parts[3].TryGetInt64(out var s) ? s : 0;
+                entries.Add(new ChannelHistoryEntry(ts, sender, msg, seq));
             }
         }
         return entries;

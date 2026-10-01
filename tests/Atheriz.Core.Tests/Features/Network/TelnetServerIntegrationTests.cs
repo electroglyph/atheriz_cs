@@ -909,6 +909,7 @@ public sealed class TelnetServerIntegrationTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public async Task TlsHandshakeTimeout_DropsStalledPeerAndSurvives()
     {
         // A peer that starts TLS (0x16) then stalls past the 10 s handshake deadline
@@ -1000,6 +1001,7 @@ public sealed class TelnetServerIntegrationTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public async Task NegotiateThenHandle_PeerAbortsDuringPreset_LogsAndSurvives()
     {
         // The generic-failure arm (neither Timeout nor cancel): a peer that

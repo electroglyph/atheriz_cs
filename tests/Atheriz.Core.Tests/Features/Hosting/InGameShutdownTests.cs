@@ -27,6 +27,7 @@ public sealed class InGameShutdownTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public async Task InGameShutdown_FiresAtServerStopOnce()
     {
         using var env = GlobalTestEnv.Enter();

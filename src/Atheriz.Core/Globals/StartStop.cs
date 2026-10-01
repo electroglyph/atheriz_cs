@@ -157,14 +157,15 @@ public static class StartStop
 
     // Shared shutdown/reload announce: GetServerChannel → null-check → Msg → swallow.
     // Message stays byte-identical per caller; empty catches preserved.
+    // Channel-typed send: a GameObject-typed Msg would bind GameObject.Msg
+    // (log-to-self) instead of Channel.Msg (history + delivery).
     private static void AnnounceChannel(string message)
     {
         try
         {
-            var channel = GlobalServices.GetServerChannel();
-            if (channel is not null)
+            if (GlobalServices.GetServerChannel() is Atheriz.Core.Objects.Channel channel)
             {
-                try { channel.Msg(message); } catch (Exception) { }
+                try { channel.Send(message); } catch (Exception) { }
             }
         }
         catch (Exception) { }

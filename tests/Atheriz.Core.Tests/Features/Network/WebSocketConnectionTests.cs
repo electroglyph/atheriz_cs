@@ -94,6 +94,7 @@ public class WebSocketConnectionTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Ws_Close_ToBlackholePeer_CompletesPromptly()
     {
         // Behavior: closing toward a peer that stays open but never answers

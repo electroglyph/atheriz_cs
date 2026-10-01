@@ -30,6 +30,30 @@ public class PuppetChannelTests
         }
         finally { ObjectRegistry.ClearAll(); }
     }
+
+    [Fact]
+    public void AtPostPuppet_LoginAnnounce_ReachesServerChannelHistoryAndListeners()
+    {
+        // The login announce must take the Channel-typed send: a
+        // GameObject-typed Msg would bind GameObject.Msg (log-to-self) and
+        // neither history nor subscribers would ever see it.
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var server = Channel.Create("Server");
+            var watcher = GameObject.Create("watcher");
+            ObjectRegistry.AddObject(watcher);
+            server.AddListener(watcher);
+            GlobalServices.Reset();
+            Assert.Same(server, GlobalServices.GetServerChannel());
+            var puppet = GameObject.Create("hero", isPc: true);
+            ObjectRegistry.AddObject(puppet);
+            puppet.AtPostPuppet();
+            Assert.Contains(server.GetHistory(10).Split('\n', StringSplitOptions.RemoveEmptyEntries), h => h.Contains("has logged in"));
+            Assert.Contains(watcher.PeekMessages(), m => m.Contains("has logged in"));
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
 }
 
 // IsChannel but not a Channel: has an AddListener-shaped method the dynamic

@@ -102,6 +102,10 @@ if "%NEED_WEB_BUILD%"=="0" (
   copy /Y "%SRC_DIST%\webclient\index.html" "%DEST_WWWROOT%\webclient\index.html" >nul
   if not exist "%DEST_WWWROOT%\atheriz_draw" mkdir "%DEST_WWWROOT%\atheriz_draw"
   copy /Y "%SRC_DIST%\index.html" "%DEST_WWWROOT%\atheriz_draw\index.html" >nul
+  REM Stable server-log viewer name for the landing page (hashed names
+  REM change per build, same as chafa.wasm above). It lives next to its
+  REM hashed chunk neighbors so their relative imports keep resolving.
+  for %%f in ("%SRC_DIST%\assets\serverlog-*.js") do copy /Y "%%f" "%DEST_WWWROOT%\assets\serverlog.js" >nul 2>nul
   if exist "%SRC_DIST%\chafa.wasm" (
     copy /Y "%SRC_DIST%\chafa.wasm" "%DEST_WWWROOT%\chafa.wasm" >nul
   ) else (

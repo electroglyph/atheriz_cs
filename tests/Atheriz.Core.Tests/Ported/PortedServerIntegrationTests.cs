@@ -12,6 +12,7 @@ using Xunit;
 namespace Atheriz.Core.Tests.Ported;
 
 [Collection("Ported")]
+[Trait("Category", "Slow")]
 public class PortedServerIntegrationTests
 {
     private static int FindFreePortInt()

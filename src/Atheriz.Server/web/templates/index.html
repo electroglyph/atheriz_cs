@@ -13,10 +13,12 @@
         body {
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 2rem 0;
         }
         .container {
             text-align: center;
@@ -46,12 +48,41 @@
         .play-button:active {
             transform: translateY(0);
         }
+        #server-log-section {
+            width: min(900px, 92vw);
+            margin-top: 3rem;
+        }
+        #server-log-section h2 {
+            color: #fff;
+            font-size: 1.25rem;
+            margin-bottom: 0.75rem;
+            text-align: left;
+        }
+        #server-log-terminal {
+            height: 320px;
+            background: #000;
+            border: 1px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .server-log-note {
+            color: #888;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            text-align: left;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>AtheriZ</h1>
-        <button class="play-button" onclick="window.location.href='webclient/index.html'">Play</button>
+        <button class="play-button" onclick="window.open('webclient/index.html', '_blank', 'noopener')">Play</button>
     </div>
+    <section id="server-log-section">
+        <h2>Server log</h2>
+        <div id="server-log-terminal"></div>
+        <p class="server-log-note">Recent server-channel messages, live.</p>
+    </section>
+    <script type="module" src="/static/assets/serverlog.js"></script>
 </body>
 </html>

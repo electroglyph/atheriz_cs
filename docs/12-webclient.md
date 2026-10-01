@@ -1,6 +1,6 @@
 # Webclient: terminal client
 
-> Covers: `webclient/` terminal entry (`/webclient`), `webclient/deploy.py` (`package`/`game`, `--no-build`, `--web-root`), per-game `web/` overrides, per-game `build.sh [--web]` redeploy. You learn to play through the browser and ship the client with your game. Connection basics (banner, login, puppet) live in [Connecting: webclient and telnet](09-connecting.md); static serving and cache ages live in [Hosting and configuration](08-hosting-configuration.md). The drawing and map editor has its own guide ([Map editor](13-map-editor.md)). Current webclient version is 1.10.0 (`webclient/package.json:3`); its history split off into `webclient/CHANGELOG.md`, separate from the engine changelog.
+> Covers: `webclient/` terminal entry (`/webclient`), `webclient/deploy.py` (`package`/`game`, `--no-build`, `--web-root`), per-game `web/` overrides, per-game `build.sh [--web]` redeploy. You learn to play through the browser and ship the client with your game. Connection basics (banner, login, puppet) live in [Connecting: webclient and telnet](09-connecting.md); static serving and cache ages live in [Hosting and configuration](08-hosting-configuration.md). The drawing and map editor has its own guide ([Map editor](13-map-editor.md)). Current webclient version is 1.10.1 (`webclient/package.json:3`); its history split off into `webclient/CHANGELOG.md`, separate from the engine changelog.
 
 To reach the client you need a running server and its web address (host
 and port from the game operator, defaults in

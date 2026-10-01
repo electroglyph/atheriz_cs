@@ -55,7 +55,16 @@ public static partial class StaticFileConfig
                     // guard preserves header bytes for that overlap exactly.
                     bool immutable = path.StartsWith("/static/assets/", StringComparison.OrdinalIgnoreCase)
                         || (!path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase) && HashedBundlePattern().IsMatch(path));
-                    if (immutable)
+                    // Stable server-log viewer name never changes across builds
+                    // (unlike its hashed chunk neighbors), so it must not
+                    // cache — same always-fresh rule as the entry HTML.
+                    // Checked before the assets-immutable arm below.
+                    if (path.Equals("/static/assets/serverlog.js", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+                        ctx.Context.Response.Headers.Pragma = "no-cache";
+                    }
+                    else if (immutable)
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
                     else if (path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase))
                         ctx.Context.Response.Headers.CacheControl = "public, max-age=86400";
@@ -128,6 +137,23 @@ public static partial class StaticFileConfig
         app.MapGet("/ready", () => ServerLifecycle.StartupSucceeded
             ? Results.Json(new { status = "ok", server = settings.ServerName })
             : Results.Json(new { status = "starting", server = settings.ServerName }, statusCode: 503));
+        // Public server-channel log for the landing page (opt-in via
+        // ServerLogPublic — channel traffic stays in-game by default).
+        // Snapshot and stream carry identical FormatMessage bytes.
+        app.MapGet("/server-log", () =>
+        {
+            if (!settings.ServerLogPublic) return Results.NotFound();
+            if (Atheriz.Core.Globals.GlobalServices.GetServerChannel() is not Atheriz.Core.Objects.Channel channel)
+                return Results.NotFound("No server channel.");
+            return Results.Text(ServerLogEndpoints.SnapshotBody(channel), "text/plain");
+        });
+        app.MapGet("/server-log/stream", async (HttpContext ctx) =>
+        {
+            if (!settings.ServerLogPublic) { ctx.Response.StatusCode = 404; return; }
+            if (Atheriz.Core.Globals.GlobalServices.GetServerChannel() is not Atheriz.Core.Objects.Channel channel)
+            { ctx.Response.StatusCode = 404; return; }
+            await ServerLogEndpoints.StreamAsync(ctx, channel, ctx.RequestAborted);
+        });
         return staticCandidate;
     }
 }

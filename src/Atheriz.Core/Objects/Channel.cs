@@ -20,6 +20,16 @@ public class Channel : GameObject
     // when it moved, so a Msg landing between the history snapshot and the
     // save flag-clear cannot lose a checkpoint entry.
     private long _mutGen = 0;
+    // Monotonic per-message sequence for live log replay (SSE
+    // Last-Event-ID): assigned under _histLock, seeded from restored
+    // history on load so ids never repeat within a process lifetime.
+    private long _seqGen = 0;
+    /// <summary>
+    /// Raised (outside _histLock, exceptions swallowed) for every delivered
+    /// message with its sequence id and formatted line. Live-log streams
+    /// subscribe; game delivery never depends on subscribers.
+    /// </summary>
+    public event Action<long, long, string>? MessagePosted;
     private Atheriz.Core.Commands.Command? _command;
 
     private int _createdBy = -1;
@@ -78,7 +88,7 @@ public class Channel : GameObject
 
     public static Channel Create(string name, GameObject? caller = null)
     {
-        var ch = new Channel();
+        var ch = new Channel(Settings.AtherizSettings.Global.ChannelHistoryLimit);
         ch.Name = name;
         ch.CreatedBy = caller?.Id ?? -1;
         Globals.ObjectRegistry.AddObjectUnique(ch, o => o.IsChannel && string.Equals(o.Name, name, StringComparison.OrdinalIgnoreCase), $"Channel {name} already exists.");
@@ -277,16 +287,17 @@ public class Channel : GameObject
 // history keeps the
         // (timestamp, sender, message) entry; listeners receive the formatted
         // form, and GetHistory re-formats on replay so both match.
-        var entry = new ChannelHistoryEntry(timestamp, senderName, text);
         string formatted = FormatMessage(timestamp, senderName, text);
         List<GameObject> listeners;
+        long seq;
         lock (_histLock)
         {
             // A delete racing the send wins: the message is dropped instead
             // of appending to a dead channel's history (R5). User feedback
             // stays at the command layer, which already resolves liveness.
             if (_channelDeleted) return;
-            _history.AddLast(entry);
+            seq = ++_seqGen;
+            _history.AddLast(new ChannelHistoryEntry(timestamp, senderName, text, seq));
             while (_history.Count > _historyLimit) _history.RemoveFirst();
             listeners = _listeners.Values.ToList();
             _mutGen++;
@@ -305,6 +316,12 @@ public class Channel : GameObject
             // so per-receiver hooks (at_msg_receive) keep provenance.
             try { listener.Msg(formatted, from); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Msg: " + logEx.Message, "Channel"); }
         }
+        // Live-log subscribers get the web text plus its epoch, outside the
+        // lock and failure-isolated like listeners: a throwing stream must
+        // never break game delivery. In-game listeners above keep receiving
+        // the server-formatted bytes; only the web log renders viewer-local
+        // times from the epoch.
+        try { MessagePosted?.Invoke(seq, timestamp, FormatWebText(senderName, text)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.MessagePosted: " + logEx.Message, "Channel"); }
     }
 
     public virtual string FormatMessage(long timestamp, string sender, string message)
@@ -335,6 +352,74 @@ public class Channel : GameObject
     }
 
     public string GetHistory() => GetHistory(Settings.AtherizSettings.Global.ChannelHistoryLimit);
+
+    /// <summary>
+    /// Web-log text for one entry: channel and sender, no timestamp. The
+    /// landing page renders the time itself in the viewer's timezone from
+    /// the epoch travelling alongside (see <see cref="GetWebLines"/>);
+    /// in-game delivery keeps using <see cref="FormatMessage"/>.
+    /// </summary>
+    public string FormatWebText(string sender, string message)
+    {
+        var prefix = $"({Name}) ";
+        if (!string.IsNullOrEmpty(sender)) return $"{prefix}{sender}: {message}";
+        return $"{prefix}{message}";
+    }
+
+    /// <summary>
+    /// History as (sequence, epoch, web text) triples, same clamp as
+    /// <see cref="GetHistory(int)"/>. Backs the server-log snapshot.
+    /// </summary>
+    public List<(long Seq, long Timestamp, string Text)> GetWebLines(int count)
+    {
+        int limit = Settings.AtherizSettings.Global.ChannelHistoryLimit;
+        count = Math.Max(0, Math.Min(count, limit));
+        List<ChannelHistoryEntry> entries;
+        lock (_histLock)
+        {
+            if (count == 0) return [];
+            entries = count < _history.Count ? _history.TakeLast(count).ToList() : _history.ToList();
+        }
+        return entries.Select(e => (e.Seq, e.Timestamp, FormatWebText(e.Sender, e.Message))).ToList();
+    }
+
+    /// <summary>
+    /// Web triples posted after <paramref name="lastSeq"/>, oldest
+    /// first. Backs live-log reconnect replay (bounded by history size).
+    /// </summary>
+    public List<(long Seq, long Timestamp, string Text)> LinesWebAfter(long lastSeq)
+    {
+        List<ChannelHistoryEntry> entries;
+        lock (_histLock) { entries = _history.Where(e => e.Seq > lastSeq).ToList(); }
+        return entries.Select(e => (e.Seq, e.Timestamp, FormatWebText(e.Sender, e.Message))).ToList();
+    }
+    /// <summary>
+    /// History as (sequence, formatted line) pairs, same clamp as
+    /// <see cref="GetHistory(int)"/>. Backs the server-log snapshot.
+    /// </summary>
+    public List<(long Seq, string Line)> GetHistoryLines(int count)
+    {
+        int limit = Settings.AtherizSettings.Global.ChannelHistoryLimit;
+        count = Math.Max(0, Math.Min(count, limit));
+        List<ChannelHistoryEntry> entries;
+        lock (_histLock)
+        {
+            if (count == 0) return [];
+            entries = count < _history.Count ? _history.TakeLast(count).ToList() : _history.ToList();
+        }
+        return entries.Select(e => (e.Seq, FormatMessage(e.Timestamp, e.Sender, e.Message))).ToList();
+    }
+
+    /// <summary>
+    /// Formatted lines posted after <paramref name="lastSeq"/>, oldest
+    /// first. Backs live-log reconnect replay (bounded by history size).
+    /// </summary>
+    public List<(long Seq, string Line)> LinesAfter(long lastSeq)
+    {
+        List<ChannelHistoryEntry> entries;
+        lock (_histLock) { entries = _history.Where(e => e.Seq > lastSeq).ToList(); }
+        return entries.Select(e => (e.Seq, FormatMessage(e.Timestamp, e.Sender, e.Message))).ToList();
+    }
 
     public void ClearHistory()
     {
@@ -392,10 +477,11 @@ public class Channel : GameObject
     {
         var dto = base.ToDto();
         dto.Type = "channel";
-        // Persisted as [timestamp, sender, message] triples mirroring the
-        // Python (timestamp, sender, message) history tuples.
-        var triples = history.Select(e => new object[] { e.Timestamp, e.Sender, e.Message }).ToList();
-        dto.Extra["history"] = Persistence.JsonOptions.ToElement(triples);
+        // Persisted as [timestamp, sender, message, seq] quads mirroring the
+        // Python (timestamp, sender, message) history tuples plus the live-
+        // replay sequence (0 for pre-upgrade entries).
+        var rows = history.Select(e => new object[] { e.Timestamp, e.Sender, e.Message, e.Seq }).ToList();
+        dto.Extra["history"] = Persistence.JsonOptions.ToElement(rows);
         // listeners intentionally excluded per __getstate__ (pop listeners)
         // lock also excluded (not in DTO)
         dto.Extra.Remove("listeners");
@@ -413,6 +499,7 @@ public class Channel : GameObject
             _history.Clear();
             foreach (var h in hist) _history.AddLast(h);
             while (_history.Count > _historyLimit) _history.RemoveFirst();
+            if (hist.Count > 0) _seqGen = Math.Max(_seqGen, hist.Max(h => h.Seq));
             _mutGen++;
         }
     }

@@ -63,6 +63,7 @@ public sealed class WebSocketSendTimeoutTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public async Task LockTimeout_DropsQuietly_WithoutAbortOrSend()
     {
         var socket = new InstantWebSocket();
@@ -88,6 +89,7 @@ public sealed class WebSocketSendTimeoutTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void SendTimeout_AbortsSocket()
     {
         var socket = new HangingWebSocket();

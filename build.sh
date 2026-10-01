@@ -129,6 +129,13 @@ else
   cp -f "$SRC_DIST/webclient/index.html" "$DEST_WWWROOT/webclient/index.html"
   mkdir -p "$DEST_WWWROOT/atheriz_draw"
   cp -f "$SRC_DIST/index.html" "$DEST_WWWROOT/atheriz_draw/index.html"
+  # Stable server-log viewer name for the landing page (hashed names
+  # change per build, same as chafa.wasm above). It lives next to its
+  # hashed chunk neighbors so their relative imports keep resolving.
+  # (The glob needs the dash, so it never matches serverlog.js itself.)
+  for _sl in "$SRC_DIST"/assets/serverlog-*.js; do
+    [ -f "$_sl" ] && cp -f "$_sl" "$DEST_WWWROOT/assets/serverlog.js" && break
+  done
   if [ -f "$SRC_DIST/chafa.wasm" ]; then
     cp -f "$SRC_DIST/chafa.wasm" "$DEST_WWWROOT/chafa.wasm"
   elif ls "$SRC_DIST/assets/chafa-"*.wasm >/dev/null 2>&1; then

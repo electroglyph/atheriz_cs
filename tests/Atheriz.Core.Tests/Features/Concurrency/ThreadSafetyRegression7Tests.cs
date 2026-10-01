@@ -156,6 +156,7 @@ public sealed class ThreadSafetyRegression7Tests
 
     // Link churn beside Equals never throws.
     [Fact]
+    [Trait("Category", "Slow")]
     public async Task NodeArea_EqualsVsLinkChurn_NeverThrows()
     {
         using var env = GlobalTestEnv.Enter();

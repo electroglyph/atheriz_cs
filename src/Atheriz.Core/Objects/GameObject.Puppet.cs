@@ -287,11 +287,10 @@ public partial class GameObject
         });
         Suppress("AtPostPuppet", () =>
         {
-            var serverChannel = GlobalServices.GetServerChannel();
-            if (serverChannel is not null)
+            if (GlobalServices.GetServerChannel() is Channel serverChannel)
             {
                 var wrapped = GameUtils.WrapXterm256(Name ?? "", fg: 15, bold: true);
-                serverChannel.Msg($"{wrapped} (#{Id}) has logged in.");
+                serverChannel.Send($"{wrapped} (#{Id}) has logged in.");
             }
         });
         List<string> commands = new();

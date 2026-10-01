@@ -10,17 +10,11 @@ namespace Atheriz.Core.Tests.Features.Globals;
 [Collection("Ported")]
 public sealed class StartStopAnnounceTests
 {
-    private sealed class RecordingServerChannel : Channel
-    {
-        public readonly List<string> Seen = new();
-        public override void Msg(string text) => Seen.Add(text);
-    }
-
-    private static RecordingServerChannel InstallServerChannel()
+    private static Channel InstallServerChannel()
     {
         GlobalServices.Reset();
         ObjectRegistry.ClearAll();
-        var chan = new RecordingServerChannel
+        var chan = new Channel
         {
             Name = "server",
             Id = IdGenerator.GetUniqueId(),
@@ -40,6 +34,9 @@ public sealed class StartStopAnnounceTests
         try
         {
             var chan = InstallServerChannel();
+            var watcher = GameObject.Create("watcher");
+            ObjectRegistry.AddObject(watcher);
+            chan.AddListener(watcher);
             var settings = new AtherizSettings
             {
                 SavePath = env.TempPath,
@@ -48,7 +45,9 @@ public sealed class StartStopAnnounceTests
                 AutosaveOnShutdown = false,
             };
             StartStop.DoShutdown(settings);
-            Assert.Equal(new[] { "Server is shutting down!" }, chan.Seen);
+            var lines = chan.GetHistory(10).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            Assert.Contains(lines, h => h.Contains("Server is shutting down!"));
+            Assert.Contains(watcher.PeekMessages(), m => m.Contains("Server is shutting down!"));
         }
         finally { StartStop.Reset(); }
     }
@@ -71,7 +70,10 @@ public sealed class StartStopAnnounceTests
                 AutosaveOnReload = false,
             };
             StartStop.DoReload(settings, ticker);
-            Assert.Equal(new[] { "Server is reloading...", "Server reloaded" }, chan.Seen);
+            var lines = chan.GetHistory(10).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            Assert.Equal(2, lines.Length);
+            Assert.Contains("Server is reloading...", lines[0]);
+            Assert.Contains("Server reloaded", lines[1]);
         }
         finally
         {

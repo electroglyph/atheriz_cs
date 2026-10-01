@@ -84,12 +84,12 @@ public static class Autosave
         {
             var names = string.Join(", ", failures.Select(f => f.Name));
             AtherizLogger.LogErrorRobust($"Autosave failed for: {names}");
-            try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg($"Autosave failed for: {names}"); } catch (Exception) { }
+            try { if (GlobalServices.GetServerChannel() is Atheriz.Core.Objects.Channel ch) ch.Send($"Autosave failed for: {names}"); } catch (Exception) { }
         }
         else
         {
             AtherizLogger.LogInformationRobust("Autosave completed.");
-            try { var ch = GlobalServices.GetServerChannel(); if (ch is not null) ch.Msg("Autosave completed."); } catch (Exception) { }
+            try { if (GlobalServices.GetServerChannel() is Atheriz.Core.Objects.Channel ch) ch.Send("Autosave completed."); } catch (Exception) { }
         }
     }
 

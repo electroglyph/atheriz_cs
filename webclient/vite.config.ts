@@ -15,6 +15,9 @@ export default defineConfig({
   // Both pages are mounted below the AtheriZ static root. Shared absolute
   // assets keep /webclient/ and /atheriz_draw/ compatible with one build.
   // Assets are served via FastAPI's /static mount, so base must be /static/.
+  // serverlog is a sourceless entry (no HTML): it builds to a hashed
+  // assets/serverlog-*.js bundle that deploy scripts copy to a stable
+  // /static/serverlog.js name for the landing page.
   base: '/static/',
   define: {
     __WEBCLIENT_VERSION__: JSON.stringify(webclientVersion()),
@@ -34,6 +37,7 @@ export default defineConfig({
       input: {
         draw: path.resolve(import.meta.dirname, 'index.html'),
         webclient: path.resolve(import.meta.dirname, 'webclient/index.html'),
+        serverlog: path.resolve(import.meta.dirname, 'src/serverlog.ts'),
       },
     },
   },

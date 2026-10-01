@@ -226,6 +226,7 @@ public class GameFolderRejectTests
     }
 
     [Fact(Timeout = 120000)]
+    [Trait("Category", "Slow")]
     public async Task NewOverwrite_RefusesLiveServerFolder()
     {
         // `new --overwrite` wiped the save leaf with zero liveness probes,

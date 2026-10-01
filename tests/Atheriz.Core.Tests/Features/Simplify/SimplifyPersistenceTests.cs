@@ -14,13 +14,14 @@ using System.Text.Json;
 namespace Atheriz.Core.Tests.Features.Simplify;
 
 // Merged from ChannelAccountDtoRoundTripTests.cs
-// DTO persistence shape: channel history triples, account extras (loggedIn
+// DTO persistence shape: channel history rows (timestamp, sender, message
+// plus the live-replay sequence), account extras (loggedIn
 // persisted as false), and the shared single-id fetch outcome.
 [Collection("Ported")]
 public class ChannelAccountDtoRoundTripTests
 {
     [Fact]
-    public void Channel_ToDto_KeepsHistoryTriples()
+    public void Channel_ToDto_KeepsHistoryRowsWithSeq()
     {
         ObjectRegistry.ClearAll();
         try
@@ -37,10 +38,11 @@ public class ChannelAccountDtoRoundTripTests
             var history = dto.Extra["history"];
             Assert.Equal(JsonValueKind.Array, history.ValueKind);
             Assert.Equal(1, history.GetArrayLength());
-            var triple = history[0];
-            Assert.Equal(3, triple.GetArrayLength());
-            Assert.Equal("Bob", triple[1].GetString());
-            Assert.Equal("hello", triple[2].GetString());
+            var row = history[0];
+            Assert.Equal(4, row.GetArrayLength());
+            Assert.Equal("Bob", row[1].GetString());
+            Assert.Equal("hello", row[2].GetString());
+            Assert.Equal(1, row[3].GetInt64());
 
             var op = ch.GetSaveOperation();
             Assert.Equal(4242, op.Id);

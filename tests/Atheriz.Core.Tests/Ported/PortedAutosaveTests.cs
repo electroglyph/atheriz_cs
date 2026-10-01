@@ -329,28 +329,23 @@ public class PortedAutosaveTests
         public override void Save(Atheriz.Core.Persistence.AtherizDbContext db) { _onSave(); base.Save(db); }
     }
 
-    private class TestChannel : Atheriz.Core.Objects.GameObject
-    {
-        public List<string> Msgs = new();
-        public TestChannel(string name) { Name = name; IsChannel = true; }
-        public override void Msg(string text) { Msgs.Add(text); }
-        public override void Msg(string text, Atheriz.Core.Objects.GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null) { Msgs.Add(text); }
-    }
-
     [Fact]
     public void BroadcastsToServerChannel_AutosaveCompleted()
     {
         Reset();
         using var env = GlobalTestEnv.Enter();
         var s = new AtherizSettings{ SavePath=env.TempPath, TimeSystemEnabled=false };
-        var channel = new TestChannel("server");
-        Atheriz.Core.Globals.ObjectRegistry.AddObject(channel);
+        var channel = Channel.Create("Server");
+        var watcher = GameObject.Create("watcher");
+        ObjectRegistry.AddObject(watcher);
+        channel.AddListener(watcher);
         GlobalServices.Reset();
-        Atheriz.Core.Globals.ObjectRegistry.AddObject(channel);
         // Need to ensure GetServerChannel picks up new instance after reset
         var ch = GlobalServices.GetServerChannel();
+        Assert.Same(channel, ch);
         Autosave.AutosaveTick(s);
-        Assert.Contains(channel.Msgs, m => m.Contains("Autosave completed"));
+        Assert.Contains(channel.GetHistory(10).Split('\n', StringSplitOptions.RemoveEmptyEntries), h => h.Contains("Autosave completed"));
+        Assert.Contains(watcher.PeekMessages(), m => m.Contains("Autosave completed"));
     }
 
     [Fact]
@@ -359,15 +354,18 @@ public class PortedAutosaveTests
         Reset();
         using var env = GlobalTestEnv.Enter();
         var s = new AtherizSettings{ SavePath=env.TempPath, TimeSystemEnabled=false };
-        var channel = new TestChannel("server");
-        Atheriz.Core.Globals.ObjectRegistry.AddObject(channel);
+        var channel = Channel.Create("Server");
+        var watcher = GameObject.Create("watcher");
+        ObjectRegistry.AddObject(watcher);
+        channel.AddListener(watcher);
         GlobalServices.Reset();
-        Atheriz.Core.Globals.ObjectRegistry.AddObject(channel);
         var ch = GlobalServices.GetServerChannel();
+        Assert.Same(channel, ch);
         var failingMh = new FailingMapHandler();
         Autosave.AutosaveTick(s, failingMh, GlobalServices.GetNodeHandler(), null);
-        Assert.Contains(channel.Msgs, m => m.Contains("Autosave failed"));
-        Assert.DoesNotContain(channel.Msgs, m => m.Contains("Autosave completed") && !m.Contains("failed"));
+        Assert.Contains(channel.GetHistory(10).Split('\n', StringSplitOptions.RemoveEmptyEntries), h => h.Contains("Autosave failed"));
+        Assert.Contains(watcher.PeekMessages(), m => m.Contains("Autosave failed"));
+        Assert.DoesNotContain(watcher.PeekMessages(), m => m.Contains("Autosave completed") && !m.Contains("failed"));
     }
 
     private class FailingMapHandler : MapHandler
@@ -513,11 +511,18 @@ public class PortedAutosaveTests
         var s=new AtherizSettings{SavePath=env.TempPath, TimeSystemEnabled=false};
         // Force save_objects failure by closing DB; tick should not throw and should broadcast failure
         AtherizDbContextFactory.CloseDatabase();
-        var channel=new TestChannel("server"); ObjectRegistry.AddObject(channel); GlobalServices.Reset(); ObjectRegistry.AddObject(channel);
+        var channel=Channel.Create("Server");
+        var watcher=GameObject.Create("watcher");
+        ObjectRegistry.AddObject(watcher);
+        channel.AddListener(watcher);
+        GlobalServices.Reset();
+        var ch=GlobalServices.GetServerChannel();
+        Assert.Same(channel, ch);
         var ex=Record.Exception(()=> Autosave.AutosaveTick(s));
         Assert.Null(ex);
         // Failure message should contain Autosave failed (verbatim)
-        Assert.Contains(channel.Msgs, m=> m.Contains("Autosave failed"));
+        Assert.Contains(channel.GetHistory(10).Split('\n', StringSplitOptions.RemoveEmptyEntries), h => h.Contains("Autosave failed"));
+        Assert.Contains(watcher.PeekMessages(), m=> m.Contains("Autosave failed"));
         AtherizDbContextFactory.ReopenDatabase();
     }
 

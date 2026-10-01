@@ -299,6 +299,7 @@ public class PortedThreadPoolTickerGapTests
 
     // ---- StopTimeoutOnStuckWorker exact timing ----
     [Fact]
+    [Trait("Category", "Slow")]
     public async Task StopTimeoutOnStuckWorkerExact()
     {
         using var pool = new AsyncThreadPool(maxThreads: 2, queueLimit: 10);

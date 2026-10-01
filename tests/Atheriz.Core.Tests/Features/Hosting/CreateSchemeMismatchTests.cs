@@ -106,6 +106,7 @@ public class CreateSchemeMismatchTests
     }
 
     [Fact(Timeout = 120000)]
+    [Trait("Category", "Slow")]
     public async Task Create_SchemeMismatch_FlippedRetryFindsLiveServer()
     {        if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
@@ -163,6 +164,7 @@ public class CreateSchemeMismatchTests
     }
 
     [Fact(Timeout = 120000)]
+    [Trait("Category", "Slow")]
     public async Task Create_UnreachableLiveServer_RefusesOfflineWrites()
     {
         // A null admin response is "unreachable", not "not running".
