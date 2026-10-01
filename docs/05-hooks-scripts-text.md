@@ -347,7 +347,7 @@ Guests see the smallest verb set; players the standard set; helpers sit between;
 
 Registration recap (the rule, quoted): game commands register with explicit `Add(new XxxCommand())` — never an assembly scan, and no `System.Reflection` in game code. Dispatch uses `switch`/`is` pattern matching and typed lists instead.
 
-Threading recap (one line): hook and tick handlers run on pool/ticker threads — keep them short, never block or sleep, mutate the world only through the documented `GameObject` and command APIs. Locking rules live in [Engine internals](13-engine-internals.md).
+Threading recap (one line): hook and tick handlers run on pool/ticker threads — keep them short, never block or sleep, mutate the world only through the documented `GameObject` and command APIs. Locking rules live in [Engine internals](14-engine-internals.md).
 
 Where to go next: [Commands](06-commands.md) owns the verb catalog and the permission call sites behind the one-gate rule; [World and maps](04-world-maps.md) owns tick re-registration and alarms; [Custom code and hot reload](11-custom-code-plugins.md) owns the never-touch list (no assembly scan, no production reflection, explicit `Add`).
 

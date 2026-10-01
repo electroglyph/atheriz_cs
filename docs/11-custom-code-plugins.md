@@ -237,7 +237,7 @@ Scaffolded files:
 | `README.md` | Run and rebuild notes for this game folder. |
 | `atheriz.sh` / `atheriz.cmd` | Launcher forwarders with `ATHERIZ_ROOT` override support. |
 | `build.sh` / `build.cmd` | Per-game build (`--no-web` / `--web` / `--reload` / `--no-engine`, §5). |
-| `web/` | Your overridable client files (→ [Webclient and map editor](12-webclient-editor.md)). |
+| `web/` | Your overridable client files (→ [Webclient: terminal client](12-webclient.md)). |
 
 Code-generation note: `BuildParamList` (`GameTemplateGenerator.cs:381`),
 `BuildArgList` (`:434`), `FriendlyType` (`:329`), and `EscapeCsString`
@@ -267,7 +267,7 @@ Run from the game folder:
   §2, so the never-compiles rule applies: `--reload` without a build step
   hot-loads whatever dll is already there.
 - Web redeploy ships the client through `webclient/deploy.py` — full
-  detail in [Webclient and map editor](12-webclient-editor.md).
+  detail in [Webclient: terminal client](12-webclient.md).
 - Folders made by `new` get the same script with the same flags from day
   one, so the tutorial loop (edit, `./build.sh --reload`, playtest) works
   identically in every game folder.
@@ -338,7 +338,7 @@ Section 1 named the loader; this section adds only what it omitted:
   `InitialSetup.RunSetup` (`src/Atheriz.Core/InitialSetup.cs:71`) — the
   engine keeps no static slot for game types and never names them.
 - Save mechanics after a scaffold or wipe live in [Saves and backups](10-persistence-saves.md);
-  threading rules for game code live in [Engine internals](13-engine-internals.md).
+  threading rules for game code live in [Engine internals](14-engine-internals.md).
 
 ## 8. Rules for game code (never-touch list)
 
@@ -348,11 +348,11 @@ Section 1 named the loader; this section adds only what it omitted:
   are engine tooling, not a pattern to copy.
 - Keep hook and tick handlers brief. Never `Thread.Sleep` or block — game
   logic runs on shared pool and ticker threads
-  (→ [Engine internals](13-engine-internals.md)).
+  (→ [Engine internals](14-engine-internals.md)).
 - Mutate the world only through `GameObject` and command APIs, so locks,
   dirty flags, and saves stay coherent.
 - Never add a project reference to, or a `using` of, another game project
   or private game code. Your game references the engine only.
 
 ---
-Next: [Webclient and map editor](12-webclient-editor.md)
+Next: [Webclient: terminal client](12-webclient.md)

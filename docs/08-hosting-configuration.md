@@ -69,7 +69,7 @@ ATHERIZ_SSL_CERTFILE=secret/cert.pem ATHERIZ_SSL_KEYFILE=secret/key.pem ./atheri
 |---|---|---|
 | `/` | Game `web/templates/index.html` when present, else a fallback `<h1>ServerName</h1>` page with a Play link | Entry point for browsers. |
 | `/webclient` and `/webclient/index.html` | Compiled terminal client | See [Connecting: webclient and telnet](09-connecting.md). |
-| `/atheriz_draw` and `/atheriz_draw/index.html` | Compiled drawing / map editor | See [Webclient and map editor](12-webclient-editor.md). |
+| `/atheriz_draw` and `/atheriz_draw/index.html` | Compiled drawing / map editor | See [Map editor](13-map-editor.md). |
 | `/health` | Liveness, unconditional | Always `200` with `{status:"ok",server:...}` once the web host is up, even mid-startup. `server` carries the configured `ServerName`. |
 | `/ready` | Readiness | `200` with ok only after `StartupSucceeded`; before that, `503` with `starting`. Poll this one behind load balancers. |
 | `/_internal/*` | Admin only (`hot_reload`, `shutdown`, `create_account`) | `X-Admin-Token` required (§4). Used by the CLI verbs in [Running the server](07-server-lifecycle-cli.md). |
@@ -135,7 +135,7 @@ Settings type: `src/Atheriz.Core/Settings/AtherizSettings.cs`. Validation: `src/
 | `WebsocketMaxMessageSize` | 65536 | 64 KB inbound message cap (see [Connecting: webclient and telnet](09-connecting.md)). |
 | `TelnetMaxLine` | 65536 | 64 KB telnet line cap (same doc). |
 | `SslCertFile` / `SslKeyFile` | unset | TLS pair (§2). |
-| Threadpool keys | tuned defaults | `AsyncThreadPool` sizing (see [Engine internals](13-engine-internals.md)). |
+| Threadpool keys | tuned defaults | `AsyncThreadPool` sizing (see [Engine internals](14-engine-internals.md)). |
 
 Override precedence, highest first:
 
@@ -166,7 +166,7 @@ Static content resolves per game, not per install. `Infrastructure/AssetPathReso
 
 Game-before-install is the rule: a file in the game folder's `web/` tree shadows the shipped default. `ResolveWwwRoot` prefers a game `wwwroot/` and falls back to `web/` + `static`; `ResolveTemplates` prefers game `web/templates/` and falls back to the engine `templates/`.
 
-`WebclientSyncChecker.CheckSync` then compares the game folder's `web/` tree (SHA256) against the engine `wwwroot/.webclient-hash` recorded at build time. It honors `WebclientSyncCheck`: when true (default) a drift prints the sync warning at startup telling you to redeploy the client into the game folder. The warning is advisory — the server starts anyway. Redeploy with the per-game `./build.sh --web` (details in [Webclient and map editor](12-webclient-editor.md)).
+`WebclientSyncChecker.CheckSync` then compares the game folder's `web/` tree (SHA256) against the engine `wwwroot/.webclient-hash` recorded at build time. It honors `WebclientSyncCheck`: when true (default) a drift prints the sync warning at startup telling you to redeploy the client into the game folder. The warning is advisory — the server starts anyway. Redeploy with the per-game `./build.sh --web` (details in [Webclient: terminal client](12-webclient.md)).
 
 ## 1.1 Boot transcript
 
@@ -303,7 +303,7 @@ cd mygame
 ./atheriz.sh restart
 ```
 
-Expected: the rebuild refreshes the game `web/` tree from `webclient/src/` plus game overrides, the hash matches again, and the warning disappears on the next boot. `restart` (not `reload`) because static content resolves at boot through `AssetPathResolver`. Never hand-edit the compiled files under the engine `wwwroot/` to silence the warning — the source of truth is `webclient/src/` plus the game folder's `web/` overrides, and the next engine build overwrites hand edits (client deploy details in [Webclient and map editor](12-webclient-editor.md)).
+Expected: the rebuild refreshes the game `web/` tree from `webclient/src/` plus game overrides, the hash matches again, and the warning disappears on the next boot. `restart` (not `reload`) because static content resolves at boot through `AssetPathResolver`. Never hand-edit the compiled files under the engine `wwwroot/` to silence the warning — the source of truth is `webclient/src/` plus the game folder's `web/` overrides, and the next engine build overwrites hand edits (client deploy details in [Webclient: terminal client](12-webclient.md)).
 
 ## 7. Worked example: putting a game on the network
 

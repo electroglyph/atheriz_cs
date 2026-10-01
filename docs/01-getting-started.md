@@ -1,6 +1,6 @@
 # Getting started
 
-> Covers: [`build.sh`](../build.sh), [`build.cmd`](../build.cmd), [`atheriz.sh`](../atheriz.sh), `src/Atheriz.Server/appsettings.json`, `webclient/`. What the reader learns: install prerequisites, build the engine, create a game folder, connect a first client, and check the server is healthy. Configuration detail lives in [Hosting and configuration](08-hosting-configuration.md); client detail in [Webclient and map editor](12-webclient-editor.md).
+> Covers: [`build.sh`](../build.sh), [`build.cmd`](../build.cmd), [`atheriz.sh`](../atheriz.sh), `src/Atheriz.Server/appsettings.json`, `webclient/`. What the reader learns: install prerequisites, build the engine, create a game folder, connect a first client, and check the server is healthy. Configuration detail lives in [Hosting and configuration](08-hosting-configuration.md); client detail in [Webclient: terminal client](12-webclient.md).
 
 ## 1. Overview
 
@@ -145,7 +145,7 @@ CLI flags (`--port`, `--host`, `--telnet-port`) and `ATHERIZ_*` environment vari
 
 The `ATHERIZ_SUPERUSER_USERNAME` / `ATHERIZ_SUPERUSER_PASSWORD` variables are honored anywhere initial credentials are resolved — `new` and the seed paths such as `reset` — so the same non-interactive export works for scripted wipes.
 
-Full precedence (CLI overlay, then `ATHERIZ_*` variables, then environment-specific JSON, then `appsettings.json`) plus TLS certificates and the per-game `web/` overrides are in [Hosting and configuration](08-hosting-configuration.md). Port and host changes need a `restart`, not a `reload` — `reload` hot-loads game code only, and never compiles. The `MapEnabled` / `LegendEnabled` toggles control the map view and legend the client shows; maps themselves are built in [World and maps](04-world-maps.md) and drawn in [Webclient and map editor](12-webclient-editor.md).
+Full precedence (CLI overlay, then `ATHERIZ_*` variables, then environment-specific JSON, then `appsettings.json`) plus TLS certificates and the per-game `web/` overrides are in [Hosting and configuration](08-hosting-configuration.md). Port and host changes need a `restart`, not a `reload` — `reload` hot-loads game code only, and never compiles. The `MapEnabled` / `LegendEnabled` toggles control the map view and legend the client shows; maps themselves are built in [World and maps](04-world-maps.md) and drawn in [Map editor](13-map-editor.md).
 
 If a game-folder command fails with `Cannot determine save path ...` (or `... secret path ...`), the current directory is not a game folder — `cd` into the folder `new` created (the one holding the game `.csproj` and `GameSettings.cs`) and retry.
 

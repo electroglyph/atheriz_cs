@@ -1,6 +1,6 @@
 # Connecting: webclient and telnet
 
-> Covers: `src/Atheriz.Core/Network/`, `src/Atheriz.Server/Hosting/WebSocketHandler.cs`, `src/Atheriz.Server/Hosting/Protocols.cs`, `web/templates/index.html`, `web/templates/webclient/index.html`, `wwwroot/` (compiled `webclient/`, `atheriz_draw/`). You learn how to open the webclient, how to reach the server over telnet, what the login flow looks like, and which connection limits an operator should know. Server-side ports, TLS, and routes live in [Hosting and configuration](08-hosting-configuration.md); the client deep-dive lives in [Webclient and map editor](12-webclient-editor.md).
+> Covers: `src/Atheriz.Core/Network/`, `src/Atheriz.Server/Hosting/WebSocketHandler.cs`, `src/Atheriz.Server/Hosting/Protocols.cs`, `web/templates/index.html`, `web/templates/webclient/index.html`, `wwwroot/` (compiled `webclient/`, `atheriz_draw/`). You learn how to open the webclient, how to reach the server over telnet, what the login flow looks like, and which connection limits an operator should know. Server-side ports, TLS, and routes live in [Hosting and configuration](08-hosting-configuration.md); the client deep-dive lives in [Webclient: terminal client](12-webclient.md).
 
 The server listens on two ports by default: 9999 for HTTP/WebSocket (browser clients, health endpoints) and 4444 for telnet (terminal and MUD clients). Both default values can change per game folder — when a connection fails, confirm the actual ports in `appsettings.json` before assuming the defaults (see [Hosting and configuration](08-hosting-configuration.md)).
 
@@ -14,7 +14,7 @@ Terminal basics:
 - Up/Down recalls input history; the line keeps focus so you can keep typing during output bursts.
 - The map pane renders nearby rooms from the same map data the in-game `map` command uses. Map rendering can be toggled server-side with `MapEnabled` / `LegendEnabled` (see [Hosting and configuration](08-hosting-configuration.md)).
 - The audio toggle mutes or unmutes client-side sounds. The setting persists per browser.
-- If the drawing/map editor opens but the browser blocks it with a banner, allow popups for the game address and retry (1.5.0 note: the editor is a separate window and popup blockers catch it on first launch).
+- If the drawing/map editor opens but the browser blocks it with a banner, allow popups for the game address and retry (1.9.0 note: the editor is a separate window and popup blockers catch it on first launch).
 
 What you should see on a fresh game: after login and character select (section 3), `look` describes `limbo`, the seed room. If `look` instead answers `You are nowhere.`, the character has no location — tell the operator (or, if you are the operator, see the triage checklist in [Running the server](07-server-lifecycle-cli.md)).
 
@@ -42,7 +42,7 @@ The landing page (`/` or `/webclient`) is a static shell; the game begins when y
 
 - The terminal pane (left, largest): scrolling game output with input history on Up/Down, pager prompts on long output, and a focused input line that never loses keystrokes to output bursts.
 - The map pane (right): your room centered with linked neighbors at their exits, legend colors per terrain, re-rendered on every move and every `map`. Builders see committed edits appear without a client refresh.
-- The status strip: connection state (connected / reconnecting), the audio toggle, and the editor button that opens the drawing/map editor in a new window (allow popups — the 1.5.0 blocked-popup banner means the browser ate it, not that the editor is broken).
+- The status strip: connection state (connected / reconnecting), the audio toggle, and the editor button that opens the drawing/map editor in a new window (allow popups — the blocked-popup banner means the browser ate it, not that the editor is broken).
 
 First-visit checklist: page loads, Play opens the client, the connection banner names the game's `ServerName`, and after login `look` describes `limbo` on a fresh game. If the banner names the wrong game, the browser tab is pointed at the wrong port — compare against the game folder's `appsettings.json` before reporting anything.
 
@@ -295,7 +295,7 @@ Rate control splits three ways: `PendingLimiter` bounds queued-but-undispatched 
 | `tools` / `roomVisible` | wrong JSON shape | rejected with a message naming the field |
 | unknown keys | extra data | dropped — the canonical form (`ToJson`) keeps known keys only |
 
-The editor UI that speaks this protocol is documented in [Webclient and map editor](12-webclient-editor.md).
+The editor UI that speaks this protocol is documented in [Map editor](13-map-editor.md).
 
 ### Handshake gates in detail
 

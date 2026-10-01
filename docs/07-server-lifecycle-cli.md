@@ -2,7 +2,7 @@
 
 > Covers: `src/Atheriz.Server/Program.cs`, `src/Atheriz.Server/Cli/`, `src/Atheriz.Server/Infrastructure/`, `atheriz.sh`, `atheriz.cmd`, `build.sh`, `build.cmd`. You learn how to run, stop, restart, reload, wipe, and populate a game from the command line, which files track the live server, and how to triage a server that will not start. Game-code authoring details live in [Custom code and hot reload](11-custom-code-plugins.md); hosting and settings live in [Hosting and configuration](08-hosting-configuration.md).
 
-Game-folder commands need your current directory to be the game folder, so run them through the game folder's own launcher (`./atheriz.sh ...`). The engine is version 0.24.0.0 at the time of writing; see `../CHANGELOG.md` for history.
+Game-folder commands need your current directory to be the game folder, so run them through the game folder's own launcher (`./atheriz.sh ...`). The engine is version 0.27.0.0 at the time of writing; see `../CHANGELOG.md` for history.
 
 ## 1. CLI overview
 
