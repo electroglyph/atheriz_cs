@@ -2,7 +2,7 @@
 
 > Covers: [`../README.md`](../README.md), [`../CHANGELOG.md`](../CHANGELOG.md), this `docs/` folder. Start here: what this project is, which document to read for your goal, and how the files fit together. This page summarizes only — the guides it links to carry the detail.
 
-Atheriz-CS is a C# port of the `atheriz` Python MUD server on .NET 10 (C# 14, `net10.0`): the engine lives in `src/Atheriz.Core`, the server host in `src/Atheriz.Server`, game scaffolding in `src/Atheriz.GameTemplate`, and the webclient (terminal + drawing editor) in `webclient/`. Engine 0.27.0.0, webclient 1.9.0.
+Atheriz-CS is a C# port of the `atheriz` Python MUD server on .NET 10 (C# 14, `net10.0`): the engine lives in `src/Atheriz.Core`, the server host in `src/Atheriz.Server`, game scaffolding in `src/Atheriz.GameTemplate`, and the webclient (terminal + drawing editor) in `webclient/`. Engine 0.27.0.0, webclient 1.10.0.
 
 "(everything here is 100% clanker generated, but i've tried to do it as sanely as possible)"
 
@@ -12,7 +12,7 @@ A multi-user dungeon (MUD) engine and server: builders describe rooms, objects, 
 
 These docs teach the user path (install, create a game, run a server, connect, build a world, write game code, operate and back up a live game) and document each subsystem thoroughly, with runnable C# examples and "Under the hood" sections naming the engine classes behind the behavior. Every library guide answers "how do I use this" first and names the mechanism second. Behavior history per release is in the [changelog](../CHANGELOG.md).
 
-Current pins: engine 0.27.0.0, webclient 1.9.0, `System.CommandLine` 2.0.0, `telnet_cs` 0.19.0, .NET SDK 10.0.100 (`latestPatch`).
+Current pins: engine 0.27.0.0, webclient 1.10.0, `System.CommandLine` 2.0.0, `telnet_cs` 0.19.0, .NET SDK 10.0.100 (`latestPatch`).
 
 How the guides are written: each one answers "how do I use this" with copy-paste shell transcripts and runnable C# snippets, then names the engine classes and files behind the behavior in "Under the hood" sections. Player-visible messages are quoted verbatim — keep them byte-identical in custom code rather than paraphrasing. Every guide ends with a link to the next one, so the whole set reads as one chain from first build to engine internals.
 

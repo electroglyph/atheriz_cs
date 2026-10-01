@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { inputHeight, shouldClearSubmittedInput, shouldNavigateHistory, submissionFeedback } from '../src/webclient/input';
+import { inputHeight, shouldClearSubmittedInput, shouldFocusInputOnKeydown, shouldNavigateHistory, submissionFeedback } from '../src/webclient/input';
 
 describe('webclient input behavior', () => {
     it('keeps arrow navigation inside multiline input', () => {
@@ -28,5 +29,32 @@ describe('webclient input behavior', () => {
     it('reports when a command cannot be sent', () => {
         expect(submissionFeedback(false)).toBe('\r\nNot connected to server.\r\n');
         expect(submissionFeedback(true)).toBeNull();
+    });
+
+    it('focuses the input on typing outside editables, including terminals', () => {
+        const input = document.createElement('textarea');
+        document.body.append(input);
+        const term = document.createElement('div');
+        term.className = 'xterm';
+        const helper = document.createElement('textarea');
+        helper.className = 'xterm-helper-textarea';
+        term.append(helper);
+        document.body.append(term);
+        const other = document.createElement('input');
+        document.body.append(other);
+        try {
+            expect(shouldFocusInputOnKeydown('a', document.body, input, false, false, false)).toBe(true);
+            expect(shouldFocusInputOnKeydown('a', null, input, false, false, false)).toBe(true);
+            expect(shouldFocusInputOnKeydown('a', helper, input, false, false, false)).toBe(true);
+            expect(shouldFocusInputOnKeydown('a', input, input, false, false, false)).toBe(false);
+            expect(shouldFocusInputOnKeydown('a', other, input, false, false, false)).toBe(false);
+            expect(shouldFocusInputOnKeydown('Enter', document.body, input, false, false, false)).toBe(false);
+            expect(shouldFocusInputOnKeydown('a', document.body, input, true, false, false)).toBe(false);
+            expect(shouldFocusInputOnKeydown('a', helper, input, true, false, false)).toBe(false);
+        } finally {
+            input.remove();
+            term.remove();
+            other.remove();
+        }
     });
 });

@@ -13,7 +13,7 @@ import { MapPayload, WebClientElements, WireMessage } from './types';
 import { SessionRecorder } from './recorder';
 import { MAP_CLEAR_SEQUENCE, mergeBackgrounds, parseBackground, renderMap as renderMapText } from './map';
 import { mapLayout, recordingDividerPct, resizeWidth } from './layout';
-import { inputHeight, shouldClearSubmittedInput, shouldNavigateHistory, submissionFeedback } from './input';
+import { inputHeight, shouldClearSubmittedInput, shouldFocusInputOnKeydown, shouldNavigateHistory, submissionFeedback } from './input';
 import { formatPrompt, formatTextOutput, stripAnsiBroad } from './text';
 import { SequentialWriter, chunkEndsWithNewline, drainTrailer } from './buffer';
 import { playAudio as playAudioElement } from './audio';
@@ -310,6 +310,16 @@ function installInputHandlers(): void {
         hint.scrollTop = elements.input.scrollTop;
         hint.scrollLeft = elements.input.scrollLeft;
     });
+    // Typing anywhere outside an editable lands in the command input.
+    // Capture phase: xterm.js stops keydown propagation inside the
+    // terminal panes, so a bubble listener never sees those keys.
+    // Stopping propagation keeps xterm from swallowing the keystroke;
+    // the browser default then types it into the newly focused input.
+    document.addEventListener('keydown', (event) => {
+        if (!shouldFocusInputOnKeydown(event.key, event.target, elements.input, event.ctrlKey, event.altKey, event.metaKey)) return;
+        event.stopPropagation();
+        elements.input.focus();
+    }, true);
     resizeInput();
     document.fonts?.ready.then(() => resizeInput());
 }
