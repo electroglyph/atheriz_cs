@@ -159,7 +159,7 @@ public static class WebclientSyncChecker
         // Shipped/project copies first: in the DLL-run layout engineWeb
         // resolves to the game's own web dir (self-compare, always clean),
         // so the layout-derived candidate goes last. The up-three-levels
-        // probe mirrors the deploy.py heuristic in FormatWarning (bin /
+        // probe mirrors the server-DLL lookup behind the `deploy game` hint in FormatWarning (bin /
         // Debug|Release / net10.0 -> project dir).
         var candidates = new[]
         {
@@ -228,22 +228,12 @@ public static class WebclientSyncChecker
             || FindEngineDrawIndex(engineWeb, contentRoot) is not null;
         if (compiledWebclient)
         {
-            // Try locate deploy.py for message — mirrors Python's deploy_py = Path(__file__).resolve().parent.parent / "webclient" / "deploy.py"
-            var possibleDeploy = Path.GetFullPath(Path.Combine(engineWeb, "..", "..", "webclient", "deploy.py"));
-            // In C# repo, webclient is at /home/anon/atheriz/webclient, not under Server
-            // We hint generic command
+            // The engine stages its own build: hint the in-process server's
+            // `deploy game` verb (matches `deploy game --help`), resolved
+            // from the running assembly so the command is directly runnable.
+            string serverDll = Path.Combine(AppContext.BaseDirectory, "Atheriz.Server.dll");
             lines.Add("  Deploy the compiled webclient into the game:");
-            // Try find deploy.py relative to engineWeb
-            var deployPy = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "webclient", "deploy.py"));
-            if (File.Exists(deployPy))
-                lines.Add($"    python \"{deployPy}\" game --web-root \"{Path.Combine(gameCwd, "web")}\"");
-            else if (File.Exists(possibleDeploy))
-                lines.Add($"    python \"{possibleDeploy}\" game --web-root \"{Path.Combine(gameCwd, "web")}\"");
-            else
-            {
-                lines.Add("    From the atheriz source checkout:");
-                lines.Add($"    python webclient/deploy.py game --web-root \"{Path.Combine(gameCwd, "web")}\"");
-            }
+            lines.Add($"    dotnet \"{serverDll}\" deploy game --web-root \"{Path.Combine(gameCwd, "web")}\"");
             return string.Join("\n", lines);
         }
         lines.Add("  Copy the server's webclient over the game's:");

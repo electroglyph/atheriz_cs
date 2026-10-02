@@ -369,7 +369,7 @@ Expected: live-server probe first (a running game on the target's ports aborts t
 ./build.sh --no-engine  # skip the engine rebuild (plugin + web only)
 ```
 
-Staleness warnings from `atheriz.sh` name the direction: webclient sources newer than the staged copy mean rebuild the client; a game plugin newer than the engine sources can trigger an engine rebuild first (per-game `--no-engine` skips that freshness check). Either warning clears with a successful build.
+Staleness warnings from `atheriz.sh` name the direction: webclient sources newer than the staged copy mean rebuild the client; a game plugin newer than the engine sources can trigger an engine rebuild first (per-game `--no-engine` skips that freshness check). Either warning clears with a successful build. (`new`/`create` don't warn — they rebuild first, since scaffolding would otherwise bake the stale stage into the new game.)
 
 ## 12.1 Triage session transcript
 

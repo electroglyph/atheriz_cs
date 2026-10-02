@@ -42,7 +42,7 @@ goto :no_dll
 :dispatch
 REM --- webclient staleness check (warnings only, never blocks startup) ---
 REM L1: webclient/src newer than staged server copy means run build.cmd
-REM L2: this game's staged copy (CWD) differs from server copy means run deploy.py
+REM L2: this game's staged copy (CWD) differs from server copy means run the server's deploy game verb
 REM Entry HTML files embed hashed asset names, so any rebuild changes them.
 REM (new/create never warn — they rebuild when stale instead, since
 REM scaffolding would otherwise bake stale assets into the new game.)
@@ -83,7 +83,10 @@ if "%DO_WEB_CHECK%"=="src" goto :run_dll
 set "GAME_ASSETS_STALE=0"
 call :check_staged_entry "web\static\atheriz_draw\index.html" "%WWWROOT%\atheriz_draw\index.html" draw
 call :check_staged_entry "web\static\webclient\index.html" "%WWWROOT%\webclient\index.html" webclient
-if "%GAME_ASSETS_STALE%"=="1" echo   Refresh this game's copy with: python "%WEBCLIENT_DIR%\deploy.py" game --web-root "%CD%\web" 1>&2
+if "%GAME_ASSETS_STALE%"=="1" (
+  REM First built DLL wins, same Release - Debug - publish order :dispatch runs.
+  if exist "%SERVER_DLL_RELEASE%" (echo   Refresh this game's copy with: dotnet "%SERVER_DLL_RELEASE%" deploy game --web-root "%CD%\web" 1>&2) else if exist "%SERVER_DLL_DEBUG%" (echo   Refresh this game's copy with: dotnet "%SERVER_DLL_DEBUG%" deploy game --web-root "%CD%\web" 1>&2) else if exist "%PUBLISH_DLL%" (echo   Refresh this game's copy with: dotnet "%PUBLISH_DLL%" deploy game --web-root "%CD%\web" 1>&2)
+)
 goto :run_dll
 
 :check_staged_entry

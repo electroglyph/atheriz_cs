@@ -97,8 +97,8 @@ public static partial class StaticFileConfig
             // original serves web/templates/index.html via Jinja here, with
             // the game folder's web/templates overriding the shipped one.
             // (A stale Draw build once sat at wwwroot/index.html and this
-            // branch served it at / — deploy.py never writes a root
-            // index.html, and the Python static dir has none either.)
+            // branch served it at / — `deploy game` never writes a root
+            // index.html, and the staged static dir has none either.)
             var templateCandidate = AssetPathResolver.ResolveTemplates(app.Environment.ContentRootPath, AppContext.BaseDirectory);
             var idx = templateCandidate is not null ? Path.Combine(templateCandidate, "index.html") : null;
             if (idx is not null && File.Exists(idx)) return Results.File(idx, contentType: "text/html");

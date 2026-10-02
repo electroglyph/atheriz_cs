@@ -127,9 +127,17 @@ public static class AtherizCli
         test.Arguments.Add(testArgs);
         test.SetAction((ParseResult pr) => Task.FromResult(TestHandler.HandleTest(pr.GetValue(testArgs) ?? [])));
 
+        var deploy = new Command("deploy", "Stage built webclient bundles into a game web folder");
+        var deployGame = new Command("game", "Deploy the webclient into a game web directory");
+        var webRootOpt = new Option<string>("--web-root") { Description = "Game web directory (the one holding templates/ and static/)" };
+        var noCleanOpt = new Option<bool>("--no-clean") { Description = "Preserve generated output from an earlier deployment" };
+        deployGame.Options.Add(webRootOpt); deployGame.Options.Add(noCleanOpt);
+        deployGame.SetAction((ParseResult pr) => DeployHandler.DeployGameAsync(pr.GetValue(webRootOpt)!, pr.GetValue(noCleanOpt)));
+        deploy.Subcommands.Add(deployGame);
+
         root.Subcommands.Add(start); root.Subcommands.Add(stop); root.Subcommands.Add(restart);
         root.Subcommands.Add(reload); root.Subcommands.Add(reset); root.Subcommands.Add(create);
-        root.Subcommands.Add(@new); root.Subcommands.Add(test);
+        root.Subcommands.Add(@new); root.Subcommands.Add(test); root.Subcommands.Add(deploy);
         return root;
     }
 

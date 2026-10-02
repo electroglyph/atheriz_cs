@@ -15,7 +15,6 @@ C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core
   node --version
   npm --version
   ```
-- **Python 3** — only needed to redeploy the webclient into a game folder (`deploy.py` uses the standard library only).
 - **rsync** — used by `build.sh` to stage the webclient (`sudo pacman -S rsync` / `apt install rsync`).
   On Arch: `sudo pacman -S dotnet-sdk aspnet-targeting-pack nodejs npm`
   (`aspnet-targeting-pack` is required: without it the `Atheriz.Server` web
@@ -89,7 +88,7 @@ Game folders also get their own `build.sh` / `build.cmd`. From inside the game f
 The plugin build is what `reload` picks up (reload never compiles — it skips stale sources with "run `dotnet build` first"). The web step is equivalent to running this from the repo root:
 
 ```bash
-python webclient/deploy.py game --web-root "/tmp/MyGame/web"
+dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll deploy game --web-root "/tmp/MyGame/web"
 ```
 
 If you prefer `dotnet` directly:

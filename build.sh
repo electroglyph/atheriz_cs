@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build webclient (only if webclient/src changed) + .NET engine
-# Mirrors webclient/README.md: npm run build / python deploy.py package + dotnet build
+# Mirrors webclient/README.md: npm run build / dotnet <server.dll> deploy game + dotnet build
 # Engine requires webclient — hash of webclient/src decides if vite rebuild needed
 set -euo pipefail
 
@@ -117,7 +117,7 @@ else
   if [ -d "$SRC_DIST/gfonts" ]; then rm -rf "$DEST_WWWROOT/gfonts"; fi
   if [ -f "$SRC_DIST/chafa.wasm" ] || ls "$SRC_DIST/assets/chafa-"*.wasm >/dev/null 2>&1; then rm -f "$DEST_WWWROOT/chafa.wasm"; fi
 
-  # Stage dist → wwwroot (mirrors webclient/deploy.py:87-127)
+  # Stage dist → wwwroot (mirrors WebDeployer.StageDist)
   rsync -a "$SRC_DIST/assets/" "$DEST_WWWROOT/assets/"
   # Defensive: remove accidental nested copy if it appeared
   rm -rf "$DEST_WWWROOT/assets/assets"

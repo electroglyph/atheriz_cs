@@ -402,7 +402,7 @@ public class PortedWebclientSyncTests
             Assert.NotNull(summary);
             var msg = Atheriz.Server.Infrastructure.WebclientSyncChecker.FormatWarning(summary!, game, null, engine);
             Assert.Contains("web/static/atheriz_draw", msg);
-            Assert.Contains("deploy.py", msg);
+            Assert.Contains("deploy game", msg);
             Assert.Contains($"game --web-root \"{Path.Combine(game, "web")}\"", msg);
         }
         finally { try{Directory.Delete(tmp,true);}catch{} }

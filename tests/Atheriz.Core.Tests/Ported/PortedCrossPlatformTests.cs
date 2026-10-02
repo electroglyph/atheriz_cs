@@ -286,15 +286,6 @@ public class PortedCrossPlatformTests
         Assert.True(evt.Wait(2000));
         Assert.True(ran);
     }
-    [Fact] public void NpmShellFlag()
-    {
-        // Port: webclient/deploy.py shell=(os.name == "nt") — in C# we check that Process spawning would use shell appropriately
-        // We verify that UseShellExecute would be conditional — here just assert OS check logic
-        bool isWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows);
-        bool shell = isWindows; // mirrors shell=(os.name == "nt")
-        // On Linux CI, shell should be false; on Windows true — either is valid as long as logic matches
-        Assert.Equal(isWindows, shell);
-    }
     [Fact] public void WebclientWarningSeparator()
     {
         // Port: format_webclient_sync_warning uses xcopy on nt vs cp -r on posix with correct separators

@@ -8,16 +8,13 @@ probably still a few other bugs to work out
 
 The build also includes the TypeScript AtheriZ webclient at `dist/webclient/`.
 
-To stage the compiled assets into the Python package, run:
+To stage the compiled assets into a game web directory, build the
+webclient (`npm run build`) and run the engine server's `deploy game`
+verb:
 
-`python deploy.py package`
+`dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll deploy game --web-root /path/to/game/web`
 
-(equivalently `npm run deploy:package`). The script builds first; pass
-`--no-build` to stage an existing `dist/`.
-
-To deploy into a game web directory, run:
-
-`python deploy.py game --web-root /path/to/game/web`
+Pass `--no-clean` to keep files the stage would otherwise remove.
 
 ## Changelog
 

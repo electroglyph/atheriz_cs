@@ -50,7 +50,7 @@ run_via_project() {
 #       ./build.sh, since scaffolding would otherwise bake the stale
 #       stage into the new game folder.
 #   L2: this game's staged copy (CWD/web/static) differs from wwwroot
-#       → python webclient/deploy.py game --web-root "<game>/web"
+#       → dotnet <server.dll> deploy game --web-root "<game>/web"
 # L2 compares the entry HTML files: they embed the hashed asset names, so any
 # rebuild changes them. Only runs for serve/scaffold commands.
 WEBCLIENT_DIR="$PROJECT_ROOT/webclient"
@@ -58,16 +58,20 @@ WWWROOT="$PROJECT_ROOT/src/Atheriz.Server/wwwroot"
 SRC_HASH_FILE="$WWWROOT/.webclient-hash"
 
 web_src_stale() {
-  # 0 (stale) when sources are newer than the last staged build.
+  # 0 (stale) when sources differ from the last staged build. Compares
+  # the same content hash build.sh records (not mtimes, which copies and
+  # checkouts can fake), so the two can never disagree about staleness.
   [ -d "$WEBCLIENT_DIR/src" ] || return 1
   [ -f "$SRC_HASH_FILE" ] || return 0
   [ -f "$WWWROOT/atheriz_draw/index.html" ] || return 0
-  if find "$WEBCLIENT_DIR/src" "$WEBCLIENT_DIR/vite.config.ts" "$WEBCLIENT_DIR/package.json" \
-      "$WEBCLIENT_DIR/package-lock.json" "$WEBCLIENT_DIR/tsconfig.json" \
-      -type f -newer "$SRC_HASH_FILE" -print -quit 2>/dev/null | grep -q .; then
-    return 0
-  fi
-  return 1
+  local current stored
+  current=$(find "$WEBCLIENT_DIR/src" "$WEBCLIENT_DIR/vite.config.ts" "$WEBCLIENT_DIR/package.json" \
+    "$WEBCLIENT_DIR/package-lock.json" "$WEBCLIENT_DIR/tsconfig.json" \
+    -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
+  stored=$(tr -d '[:space:]' <"$SRC_HASH_FILE")
+  # An unreadable hash is stale (rebuild, the safe direction); the legacy
+  # trailing-space hash files compare clean after whitespace stripping.
+  [ -z "$current" ] || [ "$current" != "$stored" ]
 }
 
 check_staged_entry() {
@@ -105,8 +109,14 @@ check_webclient_sync() {
       game_assets_stale=1
     fi
     if [ "$game_assets_stale" -eq 1 ]; then
-      # deploy.py rebuilds the bundle first by default, so this alone refreshes the game copy.
-      echo "  Refresh this game's copy with: python \"$WEBCLIENT_DIR/deploy.py\" game --web-root \"$(pwd)/web\"" >&2
+      # Print a concrete runnable command: first built DLL wins, same
+      # Release → Debug → publish order run_via_dll executes.
+      for _dll in "$SERVER_DLL_RELEASE" "$SERVER_DLL_DEBUG" "$PUBLISH_DLL"; do
+        if [ -f "$_dll" ]; then
+          echo "  Refresh this game's copy with: dotnet \"$_dll\" deploy game --web-root \"$(pwd)/web\"" >&2
+          break
+        fi
+      done
     fi
   fi
   return 0

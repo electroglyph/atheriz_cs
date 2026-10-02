@@ -7,9 +7,6 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "vite build && gh-pages -d dist",
-    "deploy:package": "python deploy.py package",
-    "deploy:game": "python deploy.py game",
-    "deploy:atheriz": "python deploy.py package",
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.tests.json",
     "test": "vitest run"
   },

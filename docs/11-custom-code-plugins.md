@@ -266,8 +266,8 @@ Run from the game folder:
   Release dll (Debug as fallback) and hot-loads it — the same reload as
   §2, so the never-compiles rule applies: `--reload` without a build step
   hot-loads whatever dll is already there.
-- Web redeploy ships the client through `webclient/deploy.py` — full
-  detail in [Webclient: terminal client](12-webclient.md).
+- Web redeploy ships the client through the engine server's
+  `deploy game` verb — full detail in [Webclient: terminal client](12-webclient.md).
 - Folders made by `new` get the same script with the same flags from day
   one, so the tutorial loop (edit, `./build.sh --reload`, playtest) works
   identically in every game folder.

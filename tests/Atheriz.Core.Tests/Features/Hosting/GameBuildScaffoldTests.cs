@@ -55,7 +55,7 @@ public class GameBuildScaffoldTests
                 Assert.Contains("dotnet build", shText);
                 Assert.Contains("-c Release", shText);
                 Assert.Contains("buildgame.csproj", shText);
-                Assert.Contains("deploy.py", shText);
+                Assert.Contains("deploy game", shText);
                 Assert.Contains("--web-root", shText);
                 Assert.Contains("--no-web", shText);
                 Assert.Contains("--reload", shText);
@@ -96,7 +96,7 @@ public class GameBuildScaffoldTests
                 Assert.Contains("dotnet build", cmdText);
                 Assert.Contains("-c Release", cmdText);
                 Assert.Contains("buildgame.csproj", cmdText);
-                Assert.Contains("deploy.py", cmdText);
+                Assert.Contains("deploy game", cmdText);
                 Assert.Contains("--web-root", cmdText);
                 Assert.Contains("--no-web", cmdText);
                 Assert.Contains("--reload", cmdText);

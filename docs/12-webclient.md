@@ -1,6 +1,6 @@
 # Webclient: terminal client
 
-> Covers: `webclient/` terminal entry (`/webclient`), `webclient/deploy.py` (`package`/`game`, `--no-build`, `--web-root`), per-game `web/` overrides, per-game `build.sh [--web]` redeploy. You learn to play through the browser and ship the client with your game. Connection basics (banner, login, puppet) live in [Connecting: webclient and telnet](09-connecting.md); static serving and cache ages live in [Hosting and configuration](08-hosting-configuration.md). The drawing and map editor has its own guide ([Map editor](13-map-editor.md)). Current webclient version is 1.10.1 (`webclient/package.json:3`); its history split off into `webclient/CHANGELOG.md`, separate from the engine changelog.
+> Covers: `webclient/` terminal entry (`/webclient`), the engine server's `deploy game` verb (`--web-root`, `--no-clean`), per-game `web/` overrides, per-game `build.sh [--web]` redeploy. You learn to play through the browser and ship the client with your game. Connection basics (banner, login, puppet) live in [Connecting: webclient and telnet](09-connecting.md); static serving and cache ages live in [Hosting and configuration](08-hosting-configuration.md). The drawing and map editor has its own guide ([Map editor](13-map-editor.md)). Current webclient version is 1.10.1 (`webclient/package.json:3`); its history split off into `webclient/CHANGELOG.md`, separate from the engine changelog.
 
 To reach the client you need a running server and its web address (host
 and port from the game operator, defaults in
@@ -82,23 +82,14 @@ banner or stylesheet belongs in the game `web/` folder, and a client bug
 fix belongs upstream in `webclient/src/` — location decides who survives
 the next deploy.
 
-`webclient/deploy.py` (`deploy.py:105-123`) stages bundles. The two
-targets and their jobs:
-
-| Target | Job |
-|---|---|
-| `package` | Stage into the installed package source (engine-side client). |
-| `game` | Stage into a game web root — requires `--web-root`. |
+The engine server's `deploy game` verb stages bundles into a game web
+root (`--web-root` required; `--no-clean` keeps files the stage would
+otherwise remove):
 
 ```bash
-python3 webclient/deploy.py game --web-root mygame/web
-python3 webclient/deploy.py game --web-root mygame/web --no-build
+dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll deploy game --web-root mygame/web
 ```
 
-- Target `package` stages into the installed package source;
-  target `game` stages into a game web root (`--web-root` required).
-- `--no-build` reuses an already-built `dist/` instead of running the npm
-  build. Without it, Node must be on `PATH`.
 - Day to day you rarely call it directly: per-game `./build.sh [--web]`
   redeploys for you (`--web` for web only, default for plugin plus web;
   flag table in [Running the server](07-server-lifecycle-cli.md)).

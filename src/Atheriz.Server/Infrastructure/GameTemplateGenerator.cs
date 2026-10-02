@@ -490,8 +490,9 @@ public static class GameTemplateGenerator
     // runs an older Atheriz.Core than the fresh plugin, and exact-version
     // unification drops the game to 0 replacements), then the game plugin
     // (reload discovers the Release dll, falling back to Debug) plus a
-    // webclient redeploy into this game via the engine's deploy.py (which
-    // rebuilds the bundle itself). Default runs all three steps; --no-engine
+    // webclient redeploy into this game via the engine server's own
+    // `deploy game` verb (the server dll is rebuilt just above, so the
+    // verb is always present). Default runs all three steps; --no-engine
     // trusts the current server dll, --no-web is plugin-only, --web is
     // web-only, --reload forwards to the sibling atheriz wrapper so a
     // running server hot-loads the fresh dll (loud failure when no server
@@ -595,18 +596,11 @@ public static class GameTemplateGenerator
           dotnet build "$CSPROJ" -c Release
         fi
         if [ "$DO_WEB" -eq 1 ]; then
-          PY=python
-          if ! command -v python >/dev/null 2>&1; then
-            if command -v python3 >/dev/null 2>&1; then PY=python3; else
-              echo "error: python required for the webclient deploy" >&2
-              exit 1
-            fi
-          fi
-          if [ ! -f "$ENGINE_ROOT/webclient/deploy.py" ]; then
-            echo "error: deploy.py not found under '$ENGINE_ROOT' (set ATHERIZ_ROOT to the engine checkout)" >&2
+          if [ ! -f "$SERVER_DLL" ]; then
+            echo "error: engine server dll not found: $SERVER_DLL (build the engine first)" >&2
             exit 1
           fi
-          "$PY" "$ENGINE_ROOT/webclient/deploy.py" game --web-root "$GAME_DIR/web"
+          dotnet "$SERVER_DLL" deploy game --web-root "$GAME_DIR/web"
         fi
         if [ "$DO_RELOAD" -eq 1 ]; then
           if [ ! -f "$GAME_DIR/atheriz.sh" ]; then
@@ -676,11 +670,8 @@ public static class GameTemplateGenerator
           if errorlevel 1 exit /b 1
         )
         if "%DO_WEB%"=="1" (
-          set "PY=python"
-          where python >nul 2>nul
-          if errorlevel 1 set "PY=python3"
-          if not exist "%ENGINE_ROOT%\webclient\deploy.py" ( echo error: deploy.py not found under '%ENGINE_ROOT%' (set ATHERIZ_ROOT to the engine checkout) 1>&2 & exit /b 1 )
-          "!PY!" "%ENGINE_ROOT%\webclient\deploy.py" game --web-root "%GAME_DIR%\web"
+          if not exist "%SERVER_DLL%" ( echo error: engine server dll not found: %SERVER_DLL% (build the engine first) 1>&2 & exit /b 1 )
+          dotnet "%SERVER_DLL%" deploy game --web-root "%GAME_DIR%\web"
           if errorlevel 1 exit /b 1
         )
         if "%DO_RELOAD%"=="1" (

@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.30.0.0] - 2026-10-02
+
+- Staging the webclient into a game folder is now a server command
+  (`deploy game --web-root <game>/web`) instead of the
+  `webclient/deploy.py` script, which is deleted. The generated
+  per-game build scripts and the out-of-sync warning already point at
+  it, so redeploys keep working with no Python needed.
+
 ## [0.29.0.12] - 2026-10-02
 
 - Bare `help` now groups each command category inside its own
