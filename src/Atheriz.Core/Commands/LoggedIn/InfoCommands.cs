@@ -214,7 +214,7 @@ public sealed class HelpCommand : Command
                 }
             }
             sb.AppendLine();
-            sb.AppendLine("Help <command> for more information.");
+            sb.AppendLine("help <command> for more information");
             caller.Msg(sb.ToString());
             return;
         }

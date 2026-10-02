@@ -60,7 +60,7 @@ public class HelpExamMenuTests
             var job = CommandDispatcher.DispatchLoggedIn(admin, "help", immediate: true);
             RunJob(job);
             var msgs = string.Join("\n", admin.PeekMessages());
-            Assert.Contains("\n\nHelp <command> for more information.", msgs);
+            Assert.Contains("\n\nhelp <command> for more information", msgs);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

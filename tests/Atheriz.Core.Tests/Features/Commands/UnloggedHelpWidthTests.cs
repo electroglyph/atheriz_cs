@@ -66,6 +66,6 @@ public sealed class UnloggedHelpWidthTests
         // Bare help closes with a blank line plus the per-command pointer.
         var puppet = new GameObject { Name = "Hero" };
         puppet.Session = new Session { TermWidth = 80, ScreenReader = false };
-        Assert.EndsWith("\nHelp <command> for more information.", RunHelp(puppet));
+        Assert.EndsWith("\nhelp <command> for more information", RunHelp(puppet));
     }
 }

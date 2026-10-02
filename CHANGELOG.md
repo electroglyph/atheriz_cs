@@ -11,7 +11,7 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
   comma-separated across as many lines as needed. Per-command
   descriptions moved to `help <command>`; screenreader sessions keep
   the plain borderless list. The listing closes with a blank line and
-  a `Help <command> for more information.` pointer.
+  a `help <command> for more information` pointer.
 - When two boxes share a row and one is shorter, the padding under it
   is blank space instead of a bordered empty line, which used to draw
   stray vertical lines beside the taller box.
