@@ -7,8 +7,8 @@ using Atheriz.Core.Objects;
 namespace Atheriz.Core.Tests.Features.Commands;
 
 // The help overview renders each category inside a box-drawing border
-// (two boxes per row); the screenreader list stays a plain borderless
-// table byte-for-byte.
+// (two independent columns; one empty line between boxes on the same
+// side); the screenreader list stays a plain borderless table byte-for-byte.
 [Collection("Ported")]
 public sealed class HelpFormatterLayoutTests
 {
@@ -44,11 +44,11 @@ public sealed class HelpFormatterLayoutTests
         public override void Run(IMessageTarget caller, object? args) { }
     }
 
-    private sealed class TallCommand(string key) : Command
+    private sealed class SoloCommand(string key, string category) : Command
     {
         public override string Key => key;
-        public override string Desc => "Tall.";
-        public override string Category => "Zzz";
+        public override string Desc => "Solo.";
+        public override string Category => category;
         public override void Run(IMessageTarget caller, object? args) { }
     }
 
@@ -94,32 +94,52 @@ public sealed class HelpFormatterLayoutTests
     }
 
     [Fact]
-    public void HelpFormatter_ShortBox_PadsWithBlankSpace_NoStrayBorders()
+    public void HelpFormatter_SameSideBoxes_SeparatedBySingleEmptyLine()
     {
-        // Unequal-height row: the short box's padding must be blank space,
-        // not a bordered empty line (stray │ next to the taller box).
+        // Five groups deal Aaa/Ccc/Eee down the left column: between one
+        // box's bottom border and the next box's top on that side sits
+        // exactly one empty line — never padding rows, never stray │.
         Command[] cmds = [
-            new LoneCommand(),
-            new TallCommand("tallalpha"), new TallCommand("tallbeta"),
-            new TallCommand("tallgamma"), new TallCommand("talldelta"),
-            new TallCommand("tallepsilon"), new TallCommand("tallzeta"),
+            new SoloCommand("akey", "Aaa"), new SoloCommand("bkey", "Bbb"),
+            new SoloCommand("ckey", "Ccc"), new SoloCommand("dkey", "Ddd"),
+            new SoloCommand("ekey", "Eee"),
         ];
         string boxes = HelpFormatter.Format(cmds, screenreader: false, termWidth: 80);
-        var lines = boxes.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        // "Aaa" sorts first and holds one key: 3 lines (top, content,
-        // bottom). The "Zzz" names wrap past that, so every later line
-        // must start with a blank 39-wide cell, never a border.
-        Assert.True(lines.Length > 3);
-        Assert.All(lines.Skip(3), l => Assert.Equal(new string(' ', 39), l[..39]));
+        var lines = boxes.Split('\n');
+        Assert.Equal("", lines[^1]);
+        var inner = lines[..^1];
+        Assert.All(inner, l => Assert.Equal(80, l.Length));
+        // Left cell (39 wide): exactly two blank separators, each between
+        // a ╯ above and a ╭ below.
+        var blanks = inner.Where((l, i) => string.IsNullOrWhiteSpace(l[..39])).ToList();
+        Assert.Equal(2, blanks.Count);
+        foreach (var blank in blanks)
+        {
+            int i = Array.IndexOf(inner, blank);
+            Assert.Contains("╯", inner[i - 1][..39]);
+            Assert.Contains("╭", inner[i + 1][..39]);
+        }
+        // Every left-cell bordered line carries content — no filler │.
+        Assert.All(inner.Where(l => l.StartsWith("│")), l => Assert.True(l[1..38].Trim().Length > 0));
     }
 
     [Fact]
-    public void HelpCategories_ReloadIsAdmin_MapeditIsBuilding()
+    public void HelpFormatter_GroupsReloadUnderAdminBox_MapeditUnderBuildingBox()
     {
-        // reload is superuser-only; mapedit opens the builder map editor —
-        // neither belongs in General.
-        Assert.Equal("Admin", new ReloadCommand().Category);
-        Assert.Equal("Building", new DrawCommand().Category);
+        // Behavioral pin for the category assignments: the rendered
+        // overview must show reload inside the Admin box and mapedit
+        // inside the Building box (row 1 pairs Admin left, Building
+        // right at width 80 — box 39, gap 2).
+        Command[] cmds = [new ReloadCommand(), new DrawCommand(), new OpenCommand()];
+        string boxes = HelpFormatter.Format(cmds, screenreader: false, termWidth: 80);
+        var lines = boxes.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        int adminTop = Array.FindIndex(lines, l => l.Contains("─ Admin "));
+        int adminBottom = Array.FindIndex(lines, adminTop, l => l.StartsWith("╰"));
+        Assert.True(adminTop >= 0 && adminBottom > adminTop);
+        Assert.Contains(lines[adminTop..adminBottom], l => l[..39].Contains("reload"));
+        int buildTop = Array.FindIndex(lines, l => l.Contains("─ Building "));
+        Assert.Equal(adminTop, buildTop);
+        Assert.Contains(lines[buildTop..adminBottom], l => l[41..].Contains("mapedit"));
     }
 
     [Fact]

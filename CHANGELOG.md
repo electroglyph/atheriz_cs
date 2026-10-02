@@ -7,14 +7,14 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
 ## [0.29.0.12] - 2026-10-02
 
 - Bare `help` now groups each command category inside its own
-  box-drawing border, two boxes per row, with command names
-  comma-separated across as many lines as needed. Per-command
+  box-drawing border, laid out in two independent columns with command
+  names comma-separated across as many lines as needed. Per-command
   descriptions moved to `help <command>`; screenreader sessions keep
   the plain borderless list. The listing closes with a blank line and
   a `help <command> for more information` pointer.
-- When two boxes share a row and one is shorter, the padding under it
-  is blank space instead of a bordered empty line, which used to draw
-  stray vertical lines beside the taller box.
+- Boxes on the same side are separated by a single empty line, and
+  the columns flow independently — no padding rows, so no stray
+  vertical lines appear beside a taller box.
 - `reload` lists under Admin and `mapedit` under Building in the help
   overview instead of General.
 - Logging in now re-asserts the default `>` prompt after the puppet
@@ -23,6 +23,9 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
   newer than the staged copy, instead of printing a warning and
   scaffolding the game with stale assets. Other commands keep the
   warning-only behavior.
+- `reload` now rebuilds the game plugin projects in the current folder
+  first, so new commands are picked up without a separate build step.
+  A failed build aborts the reload instead of reloading stale code.
 
 ## [0.29.0.11] - 2026-10-02
 

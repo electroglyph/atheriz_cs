@@ -9,8 +9,10 @@ public static class HelpFormatter
     // byte-for-byte; wider data widens the column instead of overflowing.
     private const int MinColumnWidth = 12;
 
-    // Box overview layout: two boxes share a row (one for narrow
-    // terminals), each fixed at an equal share of the width.
+    // Box overview layout: two independent columns (one below width
+    // 50). Each side stacks its boxes with a single empty line between
+    // them; the sides never pad each other, so no blank-looking filler
+    // rows appear beside a taller box.
     private const int PairGap = 2;
     private const int NarrowSingleColumnBelow = 50;
 
@@ -33,17 +35,23 @@ public static class HelpFormatter
         }
         int width = termWidth > 0 ? termWidth : 80;
         if (width < 20) width = 20;
-        int perRow = width >= NarrowSingleColumnBelow ? 2 : 1;
-        int boxWidth = (width - PairGap * (perRow - 1)) / perRow;
+        int cols = width >= NarrowSingleColumnBelow ? 2 : 1;
+        int boxWidth = (width - PairGap * (cols - 1)) / cols;
         var groups = ordered.GroupBy(c => c.Category).ToList();
-        for (int i = 0; i < groups.Count; i += perRow)
+        // Deal groups into columns round-robin (keeps the established
+        // pairing: 1st/3rd/5th down the left, 2nd/4th down the right).
+        // Each column concatenates its boxes with one empty line between.
+        var columns = Enumerable.Range(0, cols).Select(_ => new List<string>()).ToList();
+        for (int i = 0; i < groups.Count; i++)
         {
-            var row = groups.Skip(i).Take(perRow).Select(g => BuildBox(g.Key, g.Select(c => c.Key), boxWidth)).ToList();
-            int height = row.Max(b => b.Count);
-            for (int line = 0; line < height; line++)
-                sb.AppendLine(string.Join(new string(' ', PairGap),
-                    row.Select(b => line < b.Count ? b[line] : BlankLine(boxWidth))));
+            var column = columns[i % cols];
+            if (column.Count > 0) column.Add(string.Empty);
+            column.AddRange(BuildBox(groups[i].Key, groups[i].Select(c => c.Key), boxWidth));
         }
+        int height = columns.Max(c => c.Count);
+        for (int line = 0; line < height; line++)
+            sb.AppendLine(string.Join(new string(' ', PairGap),
+                columns.Select(c => line < c.Count && c[line].Length > 0 ? c[line] : BlankLine(boxWidth))));
         return sb.ToString();
     }
 
@@ -69,9 +77,6 @@ public static class HelpFormatter
         return $"╭{head}{new string('─', boxWidth - 2 - head.Length)}╮";
     }
 
-    // Padding for the shorter box in a row: blank space, never a
-    // border — bordered padding draws stray vertical lines next to the
-    // taller box (Admin/Communication/Socials rows).
     private static string BlankLine(int boxWidth)
         => new string(' ', boxWidth);
 
