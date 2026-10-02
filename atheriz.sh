@@ -42,9 +42,13 @@ run_via_project() {
   exec dotnet run --project "$SERVER_PROJ" -- "$@"
 }
 
-# --- webclient staleness check (warnings only, never blocks startup) ---
+# --- webclient staleness handling ---
 # Two levels, mirroring the build/deploy pipeline:
-#   L1: webclient/src newer than the staged server copy (wwwroot) → ./build.sh
+#   L1: webclient/src newer than the staged server copy (wwwroot).
+#       Serve commands (start/restart/reload) warn only and never block
+#       startup; scaffold commands (new/create) rebuild first via
+#       ./build.sh, since scaffolding would otherwise bake the stale
+#       stage into the new game folder.
 #   L2: this game's staged copy (CWD/web/static) differs from wwwroot
 #       → python webclient/deploy.py game --web-root "<game>/web"
 # L2 compares the entry HTML files: they embed the hashed asset names, so any
@@ -85,8 +89,9 @@ check_staged_entry() {
 
 check_webclient_sync() {
   # $1 = "game" to also compare this game's staged copy (CWD); omit for
-  # new/create where the game does not exist yet (CWD may incidentally be
-  # another game folder — never judge it).
+  # other serve commands. (new/create never call this — they rebuild when
+  # stale instead of warning, and the game does not exist yet, so CWD may
+  # incidentally be another game folder that must never be judged.)
   if web_src_stale; then
     echo "WARNING: webclient sources are newer than the staged server copy." >&2
     echo "  Rebuild with: $PROJECT_ROOT/build.sh  (build.cmd on Windows)" >&2
@@ -125,7 +130,14 @@ case "${1:-}" in
     check_webclient_sync game
     ;;
   new|create)
-    check_webclient_sync
+    # Scaffolding copies wwwroot into the new game folder: a stale stage
+    # would bake old assets into the game, so rebuild first instead of
+    # warning. A failed rebuild aborts (set -e) rather than scaffolding
+    # from a stale copy.
+    if web_src_stale; then
+      echo "webclient sources are newer than the staged server copy — rebuilding first..." >&2
+      "$PROJECT_ROOT/build.sh"
+    fi
     ;;
 esac
 if have_dll; then

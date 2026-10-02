@@ -553,6 +553,10 @@ function setPrompt(value: string): void {
     const oldPrompt = prompt;
     prompt = value;
     write(formatPrompt(prompt, oldPrompt, promptPrinted));
+    // The prompt stays on the live line: a lone prompt-only drain must not
+    // take the committing-newline trailer (that seals ">" into scrollback
+    // and drops the cursor a line — the CR after the first prompt).
+    lastChunkEndedNewline = true;
     promptPrinted = true;
 }
 

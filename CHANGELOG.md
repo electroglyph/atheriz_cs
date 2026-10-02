@@ -19,6 +19,10 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
   overview instead of General.
 - Logging in now re-asserts the default `>` prompt after the puppet
   attaches, so menu prompts no longer linger into the game session.
+- `new`/`create` now rebuild the webclient first when its sources are
+  newer than the staged copy, instead of printing a warning and
+  scaffolding the game with stale assets. Other commands keep the
+  warning-only behavior.
 
 ## [0.29.0.11] - 2026-10-02
 

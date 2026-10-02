@@ -44,6 +44,8 @@ REM --- webclient staleness check (warnings only, never blocks startup) ---
 REM L1: webclient/src newer than staged server copy means run build.cmd
 REM L2: this game's staged copy (CWD) differs from server copy means run deploy.py
 REM Entry HTML files embed hashed asset names, so any rebuild changes them.
+REM (new/create never warn — they rebuild when stale instead, since
+REM scaffolding would otherwise bake stale assets into the new game.)
 set "WEBCLIENT_DIR=%PROJECT_ROOT%\webclient"
 set "WWWROOT=%PROJECT_ROOT%\src\Atheriz.Server\wwwroot"
 set "SRC_HASH_FILE=%WWWROOT%\.webclient-hash"
@@ -65,8 +67,17 @@ if "%STORED_HASH%"=="%SRC_HASH%" goto :web_l1_done
 REM tolerate legacy hash files with trailing space (build.cmd used to echo one)
 if "%STORED_HASH%"=="%SRC_HASH% " goto :web_l1_done
 :web_l1_stale
+if "%DO_WEB_CHECK%"=="src" goto :web_rebuild
 echo WARNING: webclient sources are newer than the staged server copy. 1>&2
 echo   Rebuild with: %PROJECT_ROOT%\build.cmd 1>&2
+goto :web_l1_done
+:web_rebuild
+REM Scaffolding copies wwwroot into the new game folder: a stale stage
+REM would bake old assets into the game, so rebuild first instead of
+REM warning. A failed rebuild aborts rather than scaffolding stale.
+echo webclient sources are newer than the staged server copy -- rebuilding first... 1>&2
+call "%PROJECT_ROOT%\build.cmd"
+if errorlevel 1 exit /b 1
 :web_l1_done
 if "%DO_WEB_CHECK%"=="src" goto :run_dll
 set "GAME_ASSETS_STALE=0"
