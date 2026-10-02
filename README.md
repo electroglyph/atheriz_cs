@@ -15,9 +15,58 @@ C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core
   node --version
   npm --version
   ```
-  On Arch: `sudo pacman -S dotnet-sdk aspnet-targeting-pack nodejs npm`
-  (`aspnet-targeting-pack` is required: without it the `Atheriz.Server` web
-  project fails at restore with `NETSDK1226: Prune Package data not found`.)
+
+### Windows
+
+**.NET 10 SDK** — either option (both install system-wide, run as admin):
+
+- Installer: download the Windows x64 SDK from
+  [dotnet.microsoft.com/en-us/download/dotnet/10.0](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
+  and run it. Pick **x64** unless you know you need x86/Arm64.
+- Or via winget:
+  ```powershell
+  winget install Microsoft.DotNet.SDK.10
+  ```
+  ([Microsoft Learn: Install .NET on Windows](https://learn.microsoft.com/en-us/dotnet/core/install/windows))
+
+**Node.js 18+** (npm is bundled with it): download the Windows LTS
+installer from [nodejs.org/en/download](https://nodejs.org/en/download)
+and run it, then verify with `node --version` / `npm --version`.
+
+### Ubuntu
+
+**.NET 10 SDK** ([Microsoft Learn: Install .NET on Ubuntu](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu)):
+
+```bash
+sudo apt-get update && \
+  sudo apt-get install -y dotnet-sdk-10.0
+```
+
+On Ubuntu 22.04 the SDK is not in the built-in feed — add the
+backports PPA first:
+
+```bash
+sudo add-apt-repository ppa:dotnet/backports
+```
+
+(Ubuntu 24.04 and newer need no extra feed.)
+
+**Node.js 18+** — Ubuntu's stock `nodejs` package lags behind, so use
+the NodeSource repo (npm ships with the `nodejs` package):
+
+```bash
+sudo apt install -y curl
+curl -fsSL https://deb.nodesource.com/setup_lts.x -o nodesource_setup.sh
+sudo -E bash nodesource_setup.sh
+sudo apt install -y nodejs
+node --version   # expect 18+
+```
+
+### Arch
+
+On Arch: `sudo pacman -S dotnet-sdk aspnet-targeting-pack nodejs npm`
+(`aspnet-targeting-pack` is required: without it the `Atheriz.Server` web
+project fails at restore with `NETSDK1226: Prune Package data not found`.)
 
 ## Build
 
