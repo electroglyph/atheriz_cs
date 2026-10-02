@@ -202,7 +202,7 @@
                 <option value="npc">npc</option>
                 <option value="account">account</option>
                 <option value="channel">channel</option>
-                <option value="object">object</option>
+                <option value="other">other</option>
                 <option value="script">script</option>
             </select>
             <input id="admin-search" type="text" placeholder="Name, #id, or tag:foo">
@@ -316,6 +316,7 @@
         let currentId = null;
         let openId = null;
         let lastItems = [];
+        let lastType = document.getElementById('admin-type').value;
 
         function renderResults() {
             const rows = lastItems.map((it) =>
@@ -340,15 +341,26 @@
             if (out === null) return;
             if (!out.res.ok) { adminStatus((out.body && out.body.message) || 'Search failed.'); return; }
             adminStatus(`${out.body.total} match(es).`);
+            if (type !== lastType) {
+                // A new item type invalidates the open editor: collapse it
+                // instead of leaving the old item's properties showing
+                // under the new list.
+                lastType = type;
+                clearDetailSelection();
+            }
             lastItems = out.body.items;
             renderResults();
         }
 
-        function closeDetail() {
+        function clearDetailSelection() {
             openId = null;
             currentId = null;
             document.getElementById('admin-detail').innerHTML = '';
             document.getElementById('admin-extra-row').style.display = 'none';
+        }
+
+        function closeDetail() {
+            clearDetailSelection();
             adminStatus('');
             renderResults();
         }

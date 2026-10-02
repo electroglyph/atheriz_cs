@@ -350,7 +350,7 @@ public static class AdminAccess
         _ when o.IsNpc => "npc",
         _ when o.IsItem => "item",
         _ when o.IsScript => "script",
-        _ => "object",
+        _ => "other",
     };
 
     // Type is the editor kind the client should render: "bool" for a real

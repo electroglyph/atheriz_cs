@@ -511,4 +511,41 @@ public class GameAdminApiTests
         var allText = string.Join(" ", conn.Sent.Select(s => s.Args.FirstOrDefault()?.ToString() ?? ""));
         Assert.Contains("ATHERIZ VERSION", allText);
     }
+
+    [Fact]
+    public void ItemEditor_FallbackType_IsOther()
+    {
+        // The admin type filter's catch-all is labeled "other" (plain
+        // objects: no pc/npc/item/script flag, not account/channel/room),
+        // and the filter, classifier, and template option agree on it.
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var plain = GameObject.Create("plainrock");
+            ObjectRegistry.AddObject(plain);
+            Assert.Equal("other", AdminAccess.ObjectType(plain));
+            var html = SourceScan.Read("src", "Atheriz.Server", "web", "templates", "index.html");
+            Assert.Contains("<option value=\"other\">other</option>", html);
+            var routes = SourceScan.Read("src", "Atheriz.Server", "Hosting", "GameAdminRoutes.cs");
+            Assert.Contains("\"other\"", routes);
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
+    public void ItemEditor_TypeSwitch_CollapsesOpenDetail()
+    {
+        // Switching the admin search type must collapse the open item
+        // editor: the old item's properties must not linger under the new
+        // list. doSearch tracks the last listed type and clears the detail
+        // pane when it changes (scoped to doSearch so a stray clear
+        // elsewhere cannot satisfy this pin).
+        var html = SourceScan.Read("src", "Atheriz.Server", "web", "templates", "index.html");
+        int start = html.IndexOf("async function doSearch()", StringComparison.Ordinal);
+        int end = html.IndexOf("function clearDetailSelection()", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var body = html.Substring(start, end - start);
+        Assert.Contains("type !== lastType", body);
+        Assert.Contains("clearDetailSelection()", body);
+    }
 }

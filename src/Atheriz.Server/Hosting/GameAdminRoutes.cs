@@ -117,7 +117,7 @@ public static class GameAdminRoutes
     }
 
     private static readonly HashSet<string> ListTypes = new(StringComparer.OrdinalIgnoreCase)
-        { "all", "player", "room", "item", "npc", "account", "channel", "object", "script" };
+        { "all", "player", "room", "item", "npc", "account", "channel", "other", "script" };
 
     private static bool MatchesQuery(GameObject o, string? query)
     {
