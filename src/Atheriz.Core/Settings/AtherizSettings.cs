@@ -69,11 +69,10 @@ public sealed class AtherizSettings
     public bool WebclientSyncCheck { get; set; } = true;
     /// <summary>
     /// When true, the landing page shows the server channel's recent
-    /// history (/server-log snapshot plus live stream). Default false:
-    /// channel traffic stays in-game unless the operator opts into
-    /// publishing it on the open web.
+    /// history (/server-log snapshot plus live stream). Default true:
+    /// the log is public unless the operator opts out.
     /// </summary>
-    public bool ServerLogPublic { get; set; } = false;
+    public bool ServerLogPublic { get; set; } = true;
 
     public int? ThreadpoolLimit { get; set; } = Environment.ProcessorCount;
     public int? ThreadpoolReliefLimit { get; set; } = Environment.ProcessorCount;

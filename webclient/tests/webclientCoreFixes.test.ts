@@ -194,12 +194,14 @@ describe('webclient/main.ts regression wiring (source pins)', () => {
   const resetStart = main.indexOf('function resetSessionState');
   const resetFn = main.slice(resetStart, main.indexOf('\n}', resetStart));
 
-  it('resetSessionState clears writer, audio, recorder, and map flags', () => {
+  it('resetSessionState keeps the map up across reconnects', () => {
     expect(resetStart).toBeGreaterThan(-1);
     expect(resetFn).toContain('writer.clear();');
     expect(resetFn).toContain('audio?.pause();');
     expect(resetFn).toContain('recorder');
-    expect(resetFn).toContain('mapWanted = false;');
+    expect(resetFn).not.toContain('mapWanted = false;');
+    expect(resetFn).not.toContain('mapPayload = null;');
+    expect(resetFn).not.toContain('setMapVisibility(false);');
   });
 
   it('screenreader handler ignores non-boolean args', () => {

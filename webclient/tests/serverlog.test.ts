@@ -52,6 +52,9 @@ describe('server log viewer', () => {
         await import('../src/serverlog');
         await vi.waitFor(() => expect(terminalWrites.length).toBeGreaterThan(0));
         expect(terminalWrites.join('')).toContain('(server) hi');
+        // The section hides before the fetch and reveals on success, so a
+        // disabled endpoint never flashes an empty terminal.
+        expect(document.getElementById('server-log-section')?.hidden).toBe(false);
         const source = FakeEventSource.instances[0];
         expect(source.url).toBe('/server-log/stream');
         source.onmessage?.({ data: '1720000060 live line' });

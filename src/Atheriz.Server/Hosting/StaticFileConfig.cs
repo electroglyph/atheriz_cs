@@ -137,8 +137,8 @@ public static partial class StaticFileConfig
         app.MapGet("/ready", () => ServerLifecycle.StartupSucceeded
             ? Results.Json(new { status = "ok", server = settings.ServerName })
             : Results.Json(new { status = "starting", server = settings.ServerName }, statusCode: 503));
-        // Public server-channel log for the landing page (opt-in via
-        // ServerLogPublic — channel traffic stays in-game by default).
+        // Public server-channel log for the landing page (opt-out via
+        // ServerLogPublic — on by default).
         // Snapshot and stream carry identical FormatMessage bytes.
         app.MapGet("/server-log", (HttpContext ctx) =>
         {

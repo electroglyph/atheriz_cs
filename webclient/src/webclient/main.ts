@@ -186,10 +186,11 @@ function resetSessionState(): void {
     censorInput = true;
     prompt = '';
     promptPrinted = false;
-    mapPayload = null;
-    pendingBackground = undefined;
-    mapWanted = false;
-    readerHidMap = false;
+    // The map stays up across reconnects with its last known payload:
+    // hiding it on every blip strands the player without their map, and
+    // the server re-pushes map_enable plus fresh map frames on login.
+    // mapPayload, pendingBackground, mapWanted, and map visibility are
+    // deliberately left untouched here.
     commandSubmitted = false;
     writer.clear();
     audio?.pause();
@@ -200,7 +201,6 @@ function resetSessionState(): void {
     history.reset();
     elements.input.value = '';
     elements.input.style.height = '';
-    setMapVisibility(false);
 }
 
 function installInputHandlers(): void {

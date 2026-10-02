@@ -47,6 +47,10 @@ function hideSection(doc: Document): void {
 export function startServerLog(doc: Document = document): void {
     const el = doc.getElementById('server-log-terminal');
     if (!(el instanceof HTMLElement)) return;
+    // Hidden until the snapshot lands: hiding after a failed fetch lets
+    // the empty terminal flash on screen for a network roundtrip.
+    // (The template also ships the section hidden for pre-script paint.)
+    hideSection(doc);
     const style = doc.createElement('style');
     style.textContent = xtermCss;
     doc.head.append(style);
@@ -66,6 +70,8 @@ export function startServerLog(doc: Document = document): void {
                 hideSection(doc);
                 return;
             }
+            const section = doc.getElementById('server-log-section');
+            if (section instanceof HTMLElement) section.hidden = false;
             term.write(toRows((await res.text()).split('\n').map(renderLogLine).join('\n')));
             // Snapshot and stream overlap: without the snapshot's last id
             // the stream replays the same history the snapshot just
