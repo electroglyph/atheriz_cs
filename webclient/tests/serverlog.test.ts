@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const terminalWrites = vi.hoisted(() => [] as string[]);
+const fitCalls = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock('@xterm/xterm', () => ({
     Terminal: class {
@@ -18,7 +19,9 @@ vi.mock('@xterm/xterm', () => ({
 
 vi.mock('@xterm/addon-fit', () => ({
     FitAddon: class {
-        fit() {}
+        fit() {
+            fitCalls.count++;
+        }
     },
 }));
 
@@ -38,6 +41,7 @@ function markup(): void {
     document.body.innerHTML =
         '<section id="server-log-section"><div id="server-log-terminal"></div></section>';
     terminalWrites.length = 0;
+    fitCalls.count = 0;
     FakeEventSource.instances.length = 0;
 }
 
@@ -89,6 +93,26 @@ describe('server log viewer', () => {
         // replaying the same history (which duplicated every line on reload).
         expect(FakeEventSource.instances[0].url).toBe('/server-log/stream?lastId=42');
         expect(terminalWrites.join('')).toContain('(server) hi');
+    });
+
+    it('re-fits the terminal after revealing the section', async () => {
+        vi.resetModules();
+        markup();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async () => ({
+                ok: true,
+                headers: { get: () => null },
+                text: async () => '1720000000 (server) hi\n',
+            })),
+        );
+        vi.stubGlobal('EventSource', FakeEventSource);
+        await import('../src/serverlog');
+        await vi.waitFor(() => expect(terminalWrites.length).toBeGreaterThan(0));
+        // Once at open (while hidden, zero size) and once more after the
+        // reveal — without the second fit lines wrap at the hidden width.
+        expect(fitCalls.count).toBeGreaterThanOrEqual(2);
+        expect(document.getElementById('server-log-section')?.hidden).toBe(false);
     });
 
     it('hides the section when the endpoint is disabled', async () => {

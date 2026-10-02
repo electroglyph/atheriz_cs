@@ -13,6 +13,9 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
   it, so redeploys keep working with no Python needed.
 - `build.sh` no longer requires rsync: the three local staging copies
   are plain `cp -r`.
+- The landing-page server log no longer wraps lines early: the viewer
+  re-fits the terminal once the section reveals, so lines use the full
+  width instead of the hidden-state narrow default.
 
 ## [0.29.0.12] - 2026-10-02
 

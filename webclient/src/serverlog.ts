@@ -72,6 +72,11 @@ export function startServerLog(doc: Document = document): void {
             }
             const section = doc.getElementById('server-log-section');
             if (section instanceof HTMLElement) section.hidden = false;
+            // The terminal was opened and fitted while the section was
+            // hidden (zero size), so fit again now that it has real
+            // dimensions — otherwise lines wrap at the hidden-time width
+            // instead of the full pane.
+            fit.fit();
             term.write(toRows((await res.text()).split('\n').map(renderLogLine).join('\n')));
             // Snapshot and stream overlap: without the snapshot's last id
             // the stream replays the same history the snapshot just
