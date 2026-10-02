@@ -3,3 +3,4 @@ dist/
 *.md
 !README.md
 !readme.md
+!CHANGELOG.md
