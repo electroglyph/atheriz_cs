@@ -64,6 +64,33 @@ public partial class GameObject
         _ => false,
     };
 
+    /// <summary>
+    /// Whether <paramref name="name"/> names a settable property (one of the
+    /// <see cref="TrySetProperty"/> arms that assigns instead of reporting
+    /// read-only). Pure predicate, no side effects: the HTTP admin API uses
+    /// it to mark properties editable without probing the assigning switch.
+    /// Extras are not covered here (use <c>SetHelper.HasAttr</c> for those).
+    /// </summary>
+    public virtual bool IsSettableProperty(string name) => name switch
+    {
+        "Desc" or "desc" or "_desc" => true,
+        "Symbol" or "symbol" or "_symbol" => true,
+        "MoveVerb" or "move_verb" or "_move_verb" => true,
+        "Gender" or "gender" or "_gender" => true,
+        "Name" or "name" or "_name" => true,
+        "Quelled" or "quelled" or "_quelled" => true,
+        "MapEnabled" or "map_enabled" or "_map_enabled" => true,
+        "NoFollow" or "no_follow" or "_no_follow" => true,
+        "TickSeconds" or "tick_seconds" or "_tick_seconds" => true,
+        "LastMapTime" or "last_map_time" or "_last_map_time" => true,
+        "Following" or "following" or "_following" => true,
+        "PrivilegeLevel" or "privilege_level" or "_privilege_level" => true,
+        "Session" or "session" or "_session" => true,
+        "ExternalCmdSet" or "external_cmdset" or "_external_cmdset" => true,
+        "InternalCmdSet" or "internal_cmdset" or "_internal_cmdset" => true,
+        _ => false,
+    };
+
     /// <inheritdoc/>
     public virtual bool TrySetProperty(string name, object? value, out string? error)
     {

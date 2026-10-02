@@ -215,6 +215,13 @@ public class InputFuncs
 // prompt welcome screen
     public void ClientReady(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
+        // Token auto-login binds the account before the client's ready
+        // signal arrives (it is sent on every socket open). Rendering the
+        // welcome + "connect to login" screen there would land on top of
+        // the character-selection prompt and look like the login never
+        // happened; an authenticated session keeps the screen the
+        // character wizard already owns.
+        if (connection.Session.Account is not null) return;
         var welcome = ConnectionScreen.Render(connection.Session);
         connection.Msg(welcome);
         connection.SendCommand("prompt", new List<object?> { ">" }, []);

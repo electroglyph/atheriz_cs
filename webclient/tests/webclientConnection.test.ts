@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WebSocketConnection, WebSocketLike, websocketUrl } from '../src/webclient/connection';
+import { WebSocketConnection, WebSocketLike, gameTokenFromFragment, websocketUrl } from '../src/webclient/connection';
 
 class FakeSocket implements WebSocketLike {
     readyState = 0;
@@ -37,6 +37,20 @@ describe('webclient connection', () => {
     it('derives ws and wss endpoints from the current host', () => {
         expect(websocketUrl({ protocol: 'http:', host: 'example.test:9999' })).toBe('ws://example.test:9999/ws');
         expect(websocketUrl({ protocol: 'https:', host: 'example.test' })).toBe('wss://example.test/ws');
+    });
+
+    it('forwards the landing-page token as a ws query', () => {
+        expect(websocketUrl({ protocol: 'http:', host: 'example.test' }, 'abc123')).toBe('ws://example.test/ws?token=abc123');
+        expect(websocketUrl({ protocol: 'http:', host: 'example.test' }, null)).toBe('ws://example.test/ws');
+        expect(websocketUrl({ protocol: 'http:', host: 'example.test' }, '')).toBe('ws://example.test/ws');
+    });
+
+    it('reads the token from the url fragment', () => {
+        expect(gameTokenFromFragment('#token=abc123')).toBe('abc123');
+        expect(gameTokenFromFragment('#token=' + encodeURIComponent('a/b+c='))).toBe('a/b+c=');
+        expect(gameTokenFromFragment('')).toBeNull();
+        expect(gameTokenFromFragment('#other=1')).toBeNull();
+        expect(gameTokenFromFragment('#token=')).toBeNull();
     });
 
     it('parses messages and sends only while open', () => {

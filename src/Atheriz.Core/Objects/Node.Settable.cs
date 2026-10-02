@@ -20,6 +20,20 @@ public partial class Node
     };
 
     /// <inheritdoc/>
+    public override bool IsSettableProperty(string name) => name switch
+    {
+        "Theme" or "theme" or "_theme" => true,
+        "LegendDesc" or "legend_desc" or "_legend_desc" => true,
+        "OpenAttenuation" or "open_attenuation" or "_open_attenuation" => true,
+        "EnclosedAttenuation" or "enclosed_attenuation" or "_enclosed_attenuation" => true,
+        "AmbientSoundLevel" or "ambient_sound_level" or "_ambient_sound_level" => true,
+        "Coord" or "coord" or "_coord" => true,
+        "Links" or "links" or "_links" => true,
+        "Nouns" or "nouns" or "_nouns" => true,
+        _ => base.IsSettableProperty(name),
+    };
+
+    /// <inheritdoc/>
     public override bool TrySetProperty(string name, object? value, out string? error)
     {
         error = null;

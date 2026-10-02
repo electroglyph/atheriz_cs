@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { roomBoundaryEdges } from '../src/canvas/GridRenderer.ts';
+import { roomBoundaryEdges } from '../src/canvas/GridRenderer';
 
 function edgeSet(cells: Set<string>): Set<string> {
     return new Set(

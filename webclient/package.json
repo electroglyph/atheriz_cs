@@ -1,6 +1,6 @@
 {
   "name": "atheriz_draw",
-  "version": "1.10.2",
+  "version": "1.11.1",
   "description": "ANSI art drawing program",
   "scripts": {
     "dev": "vite",

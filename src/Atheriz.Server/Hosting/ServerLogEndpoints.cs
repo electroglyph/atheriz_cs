@@ -27,8 +27,36 @@ public static class ServerLogEndpoints
         return sb.ToString();
     }
 
+    // Newest sequence id held in history, 0 when empty. The snapshot body
+    // carries no ids (epoch + text only), so /server-log exposes this as
+    // X-Last-Seq and the viewer passes it back as ?lastId= to open the
+    // stream without replaying the lines it just rendered.
+    public static long SnapshotLastSeq(Atheriz.Core.Objects.Channel channel)
+    {
+        ArgumentNullException.ThrowIfNull(channel);
+        var last = channel.GetWebLines(1);
+        return last.Count > 0 ? last[0].Seq : 0;
+    }
+
     public static long ParseLastEventId(string? header)
         => long.TryParse(header, out var id) && id > 0 ? id : 0;
+
+    // Initial EventSource requests carry no Last-Event-ID header (the
+    // browser only sends it on reconnect), so the viewer hands back the
+    // snapshot's X-Last-Seq as ?lastId=. Query wins; header covers
+    // reconnects and direct stream clients.
+    public static long ResolveLastId(HttpRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string[] queryKeys = ["lastId", "after", "lastEventId"];
+        foreach (var key in queryKeys)
+        {
+            long parsed = ParseLastEventId(request.Query[key].ToString());
+            if (parsed > 0)
+                return parsed;
+        }
+        return ParseLastEventId(request.Headers["Last-Event-ID"].ToString());
+    }
 
     public static async Task WriteFrameAsync(HttpResponse response, long seq, long timestamp, string text, CancellationToken ct)
     {
@@ -45,16 +73,17 @@ public static class ServerLogEndpoints
         await response.Body.FlushAsync(ct);
     }
 
-    // Replay-then-live: entries after the client's Last-Event-ID first
-    // (so reconnects miss nothing inside history bounds), then new posts
-    // until the client disconnects. Subscribe-before-replay with sequence
-    // dedupe closes the gap a post could otherwise slip through.
+    // Replay-then-live: entries after the client's resume point first
+    // (?lastId= from the snapshot's X-Last-Seq, or Last-Event-ID on
+    // reconnect — so reconnects miss nothing inside history bounds), then
+    // new posts until the client disconnects. Subscribe-before-replay with
+    // sequence dedupe closes the gap a post could otherwise slip through.
     // Keepalive comments every 20s keep idle connections open through proxies.
     public static async Task StreamAsync(HttpContext ctx, Atheriz.Core.Objects.Channel channel, CancellationToken ct)
     {
         ctx.Response.ContentType = "text/event-stream";
         ctx.Response.Headers.CacheControl = "no-cache";
-        long lastId = ParseLastEventId(ctx.Request.Headers["Last-Event-ID"].ToString());
+        long lastId = ResolveLastId(ctx.Request);
         var queue = Channel.CreateUnbounded<(long Seq, long Timestamp, string Text)>();
         void Handler(long seq, long timestamp, string text) => queue.Writer.TryWrite((seq, timestamp, text));
         channel.MessagePosted += Handler;

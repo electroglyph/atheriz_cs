@@ -12,7 +12,7 @@ import {
     buildRoomCellKeys,
     removeRoomsByCoords,
     revertAcceptedMoves,
-} from '../src/createRooms.ts';
+} from '../src/createRooms';
 
 function syncCalls(): string[] {
     return mainSrc.match(/^[ \t]*syncRoomCells\(\);/gm) ?? [];

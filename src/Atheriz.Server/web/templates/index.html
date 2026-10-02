@@ -48,6 +48,107 @@
         .play-button:active {
             transform: translateY(0);
         }
+        #login-bar {
+            margin-top: 1.5rem;
+            color: #ccc;
+            font-size: 0.95rem;
+        }
+        #login-bar input {
+            padding: 0.4rem 0.6rem;
+            border-radius: 6px;
+            border: 1px solid #444;
+            background: #0f0f1e;
+            color: #eee;
+            margin: 0 0.25rem;
+        }
+        #login-bar button, .admin-btn {
+            padding: 0.4rem 0.9rem;
+            border-radius: 6px;
+            border: 1px solid #e94560;
+            background: transparent;
+            color: #e94560;
+            cursor: pointer;
+            margin: 0 0.25rem;
+        }
+        #login-bar button:hover, .admin-btn:hover {
+            background: rgba(233, 69, 96, 0.15);
+        }
+        #login-status {
+            margin-top: 0.6rem;
+            min-height: 1.2em;
+            color: #aaa;
+        }
+        #admin-panel {
+            width: min(900px, 92vw);
+            margin-top: 2rem;
+            text-align: left;
+            color: #ddd;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+        }
+        #admin-panel h2 {
+            color: #fff;
+            font-size: 1.25rem;
+            margin-bottom: 0.75rem;
+        }
+        #admin-panel .row {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.75rem;
+            align-items: center;
+        }
+        #admin-panel input, #admin-panel select {
+            padding: 0.4rem 0.6rem;
+            border-radius: 6px;
+            border: 1px solid #444;
+            background: #0f0f1e;
+            color: #eee;
+        }
+        #admin-search {
+            flex: 1;
+            min-width: 12rem;
+        }
+        table.admin-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        table.admin-table th, table.admin-table td {
+            border-bottom: 1px solid #2a2a3e;
+            padding: 0.35rem 0.5rem;
+            text-align: left;
+            vertical-align: top;
+        }
+        table.admin-table th {
+            color: #888;
+            font-weight: normal;
+        }
+        .prop-val {
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-width: 28rem;
+        }
+        .prop-input {
+            width: 100%;
+            min-width: 10rem;
+        }
+        .extra-tag {
+            color: #7ec8ff;
+            font-size: 0.8rem;
+            margin-left: 0.4rem;
+        }
+        .readonly-note {
+            color: #666;
+            font-size: 0.8rem;
+        }
+        #admin-status {
+            margin-top: 0.6rem;
+            min-height: 1.2em;
+            color: #aaa;
+        }
         #server-log-section {
             width: min(900px, 92vw);
             margin-top: 3rem;
@@ -76,13 +177,275 @@
 <body>
     <div class="container">
         <h1>AtheriZ</h1>
-        <button class="play-button" onclick="window.open('webclient/index.html', '_blank', 'noopener')">Play</button>
+        <button class="play-button" id="play-button">Play</button>
+        <div id="login-bar">
+            <span id="login-form">
+                <input id="login-account" type="text" placeholder="Account" autocomplete="username">
+                <input id="login-password" type="password" placeholder="Password" autocomplete="current-password">
+                <button id="login-button">Log in</button>
+            </span>
+            <span id="logout-form" style="display:none">
+                <span id="whoami"></span>
+                <button id="logout-button">Log out</button>
+            </span>
+            <div id="login-status"></div>
+        </div>
     </div>
+    <section id="admin-panel" style="display:none">
+        <h2>Server admin</h2>
+        <div class="row">
+            <select id="admin-type">
+                <option value="all">all</option>
+                <option value="player">player</option>
+                <option value="room">room</option>
+                <option value="item">item</option>
+                <option value="npc">npc</option>
+                <option value="account">account</option>
+                <option value="channel">channel</option>
+                <option value="object">object</option>
+                <option value="script">script</option>
+            </select>
+            <input id="admin-search" type="text" placeholder="Name, #id, or tag:foo">
+            <button class="admin-btn" id="admin-search-button">Search</button>
+        </div>
+        <p class="server-log-note">Pick a type and press Search to list objects of that type — leave the box empty to list them all (first 50).</p>
+        <div id="admin-results"></div>
+        <div id="admin-detail"></div>
+        <div class="row" id="admin-extra-row" style="display:none; margin-top: 0.75rem;">
+            <input id="admin-extra-key" type="text" placeholder="new extra key">
+            <input id="admin-extra-value" type="text" placeholder="value (JSON or text)">
+            <button class="admin-btn" id="admin-extra-add">Add extra</button>
+        </div>
+        <div id="admin-status"></div>
+    </section>
     <section id="server-log-section">
         <h2>Server log</h2>
         <div id="server-log-terminal"></div>
         <p class="server-log-note">Recent server-channel messages, live.</p>
     </section>
     <script type="module" src="/static/assets/serverlog.js"></script>
+    <script>
+        const tokenKey = 'atheriz.gameToken';
+        const getToken = () => sessionStorage.getItem(tokenKey) || '';
+        const setToken = (t) => { if (t) sessionStorage.setItem(tokenKey, t); else sessionStorage.removeItem(tokenKey); };
+        const esc = (s) => (s ?? '').toString().replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const loginStatus = (msg) => { document.getElementById('login-status').textContent = msg || ''; };
+        const adminStatus = (msg) => { document.getElementById('admin-status').textContent = msg || ''; };
+
+        async function api(path, opts = {}) {
+            const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+            const token = getToken();
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const res = await fetch(path, Object.assign({}, opts, { headers }));
+            if (res.status === 401) { setToken(''); await refreshMe('Session expired. Logged out.'); return null; }
+            let body = null;
+            try { body = await res.json(); } catch { body = null; }
+            return { res, body };
+        }
+
+        async function refreshMe(note) {
+            const loginForm = document.getElementById('login-form');
+            const logoutForm = document.getElementById('logout-form');
+            const panel = document.getElementById('admin-panel');
+            if (!getToken()) {
+                loginForm.style.display = '';
+                logoutForm.style.display = 'none';
+                panel.style.display = 'none';
+                if (note) loginStatus(note);
+                return null;
+            }
+            const out = await api('/api/me');
+            // api() already handled 401 (token cleared, recursion shows logged-out state).
+            if (out === null) { loginForm.style.display = ''; logoutForm.style.display = 'none'; panel.style.display = 'none'; return null; }
+            if (!out.res.ok) { loginStatus('Could not load account.'); return null; }
+            const me = out.body;
+            loginForm.style.display = 'none';
+            logoutForm.style.display = '';
+            document.getElementById('whoami').textContent = `Logged in as ${me.name} (${privName(me.privilege)}) `;
+            loginStatus(note || '');
+            if (me.builder) { panel.style.display = ''; }
+            else { panel.style.display = 'none'; }
+            return me;
+        }
+
+        function privName(p) {
+            return { 1: 'guest', 2: 'player', 3: 'helper', 4: 'builder', 5: 'admin' }[p] || ('level ' + p);
+        }
+
+        async function doLogin() {
+            const account = document.getElementById('login-account').value.trim();
+            const password = document.getElementById('login-password').value;
+            if (!account || !password) { loginStatus('Account and password are required.'); return; }
+            loginStatus('Logging in...');
+            let res, body;
+            try {
+                const r = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ account, password }),
+                });
+                res = r;
+                try { body = await r.json(); } catch { body = null; }
+            } catch { loginStatus('Login failed: network error.'); return; }
+            if (res.status === 401) { loginStatus('Invalid password.'); return; }
+            if (res.status === 403) { loginStatus((body && body.message) || 'Banned.'); return; }
+            if (!res.ok) { loginStatus((body && body.message) || 'Login failed.'); return; }
+            setToken(body.token);
+            document.getElementById('login-password').value = '';
+            await refreshMe();
+        }
+
+        async function doLogout() {
+            try { await api('/api/logout', { method: 'POST' }); } catch { }
+            setToken('');
+            lastItems = [];
+            openId = null;
+            currentId = null;
+            document.getElementById('admin-results').innerHTML = '';
+            document.getElementById('admin-detail').innerHTML = '';
+            document.getElementById('admin-extra-row').style.display = 'none';
+            await refreshMe('Logged out.');
+        }
+
+        function doPlay() {
+            const token = getToken();
+            const url = 'webclient/index.html' + (token ? '#token=' + encodeURIComponent(token) : '');
+            window.open(url, '_blank', 'noopener');
+        }
+
+        let currentId = null;
+        let openId = null;
+        let lastItems = [];
+
+        function renderResults() {
+            const rows = lastItems.map((it) =>
+                `<tr><td>#${it.id}</td><td>${esc(it.name)}</td><td>${esc(it.type)}</td>` +
+                `<td>${esc(privName(it.privilege))}</td><td class="prop-val">${esc(it.where)}</td>` +
+                `<td><button class="admin-btn" data-open="${it.id}">${openId === it.id ? 'Close' : 'Open'}</button></td></tr>`).join('');
+            document.getElementById('admin-results').innerHTML =
+                `<table class="admin-table"><tr><th>ID</th><th>Name</th><th>Type</th><th>Priv</th><th>Where</th><th></th></tr>${rows}</table>`;
+            document.querySelectorAll('[data-open]').forEach((b) => {
+                const id = Number(b.getAttribute('data-open'));
+                b.addEventListener('click', () => { if (openId === id) closeDetail(); else openDetail(id); });
+            });
+        }
+
+        async function doSearch() {
+            adminStatus('Searching...');
+            const type = document.getElementById('admin-type').value;
+            const q = document.getElementById('admin-search').value.trim();
+            const params = new URLSearchParams({ type, limit: '50' });
+            if (q) params.set('q', q);
+            const out = await api('/api/objects?' + params.toString());
+            if (out === null) return;
+            if (!out.res.ok) { adminStatus((out.body && out.body.message) || 'Search failed.'); return; }
+            adminStatus(`${out.body.total} match(es).`);
+            lastItems = out.body.items;
+            renderResults();
+        }
+
+        function closeDetail() {
+            openId = null;
+            currentId = null;
+            document.getElementById('admin-detail').innerHTML = '';
+            document.getElementById('admin-extra-row').style.display = 'none';
+            adminStatus('');
+            renderResults();
+        }
+
+        async function openDetail(id) {
+            adminStatus('Loading...');
+            const out = await api('/api/objects/' + id);
+            if (out === null) return;
+            if (!out.res.ok) { adminStatus((out.body && out.body.message) || 'Load failed.'); return; }
+            currentId = id;
+            openId = id;
+            const d = out.body;
+            adminStatus(`#${d.id} ${d.name} (${d.type}, ${privName(d.privilege)})`);
+            const rows = d.props.map((p) => {
+                const tag = p.isExtra ? '<span class="extra-tag">extra</span>' : '';
+                const del = p.isExtra ? ` <button class="admin-btn" data-del="${esc(p.name)}">Delete</button>` : '';
+                let cell;
+                if (p.editable && p.type === 'bool') {
+                    const on = (p.value || '').toLowerCase() === 'true';
+                    cell = `<select class="prop-input" data-prop="${esc(p.name)}">` +
+                        `<option value="true"${on ? ' selected' : ''}>true</option>` +
+                        `<option value="false"${on ? '' : ' selected'}>false</option>` +
+                        `</select> <button class="admin-btn" data-save="${esc(p.name)}">Save</button>${del}`;
+                } else if (p.editable) {
+                    cell = `<input class="prop-input" data-prop="${esc(p.name)}" value="${esc(p.value)}"> <button class="admin-btn" data-save="${esc(p.name)}">Save</button>${del}`;
+                } else {
+                    cell = `<span class="prop-val">${esc(p.value)}</span> <span class="readonly-note">read-only</span>`;
+                }
+                return `<tr><td>${esc(p.name)}${tag}</td><td>${cell}</td></tr>`;
+            }).join('');
+            document.getElementById('admin-detail').innerHTML =
+                `<table class="admin-table"><tr><th>Property</th><th>Value</th></tr>${rows}</table>` +
+                `<div class="row" style="margin-top: 0.75rem;"><button class="admin-btn" id="admin-detail-close">Close</button></div>`;
+            document.getElementById('admin-extra-row').style.display = '';
+            document.querySelectorAll('[data-save]').forEach((b) =>
+                b.addEventListener('click', () => saveProp(b.getAttribute('data-save'))));
+            document.querySelectorAll('[data-del]').forEach((b) =>
+                b.addEventListener('click', () => deleteExtra(b.getAttribute('data-del'))));
+            document.getElementById('admin-detail-close').addEventListener('click', closeDetail);
+            renderResults();
+        }
+
+        function parseValue(text) {
+            const t = text.trim();
+            if (t === '') return '';
+            try { return JSON.parse(t); } catch { return text; }
+        }
+
+        async function saveProp(attr) {
+            const input = document.querySelector(`[data-prop="${CSS.escape(attr)}"]`);
+            const value = parseValue(input ? input.value : '');
+            adminStatus('Saving...');
+            const out = await api('/api/objects/' + currentId, {
+                method: 'PATCH',
+                body: JSON.stringify({ attr, value }),
+            });
+            if (out === null) return;
+            if (!out.res.ok) { adminStatus((out.body && out.body.message) || 'Save failed.'); return; }
+            adminStatus((out.body && out.body.warning) || 'Saved.');
+            await openDetail(currentId);
+        }
+
+        async function addExtra() {
+            const key = document.getElementById('admin-extra-key').value.trim();
+            const raw = document.getElementById('admin-extra-value').value;
+            if (!key) { adminStatus('Extra key is required.'); return; }
+            adminStatus('Saving...');
+            const out = await api('/api/objects/' + currentId, {
+                method: 'PATCH',
+                body: JSON.stringify({ attr: key, value: parseValue(raw) }),
+            });
+            if (out === null) return;
+            if (!out.res.ok) { adminStatus((out.body && out.body.message) || 'Save failed.'); return; }
+            document.getElementById('admin-extra-key').value = '';
+            document.getElementById('admin-extra-value').value = '';
+            adminStatus((out.body && out.body.warning) || 'Saved.');
+            await openDetail(currentId);
+        }
+
+        async function deleteExtra(key) {
+            adminStatus('Deleting...');
+            const out = await api('/api/objects/' + currentId + '/extras/' + encodeURIComponent(key), { method: 'DELETE' });
+            if (out === null) return;
+            if (!out.res.ok) { adminStatus((out.body && out.body.message) || 'Delete failed.'); return; }
+            adminStatus('Deleted.');
+            await openDetail(currentId);
+        }
+
+        document.getElementById('login-button').addEventListener('click', doLogin);
+        document.getElementById('logout-button').addEventListener('click', doLogout);
+        document.getElementById('login-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+        document.getElementById('play-button').addEventListener('click', doPlay);
+        document.getElementById('admin-search-button').addEventListener('click', doSearch);
+        document.getElementById('admin-type').addEventListener('change', doSearch);
+        document.getElementById('admin-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+        document.getElementById('admin-extra-add').addEventListener('click', addExtra);
+        refreshMe();
+    </script>
 </body>
 </html>

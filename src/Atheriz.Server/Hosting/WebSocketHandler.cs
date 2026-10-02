@@ -1,4 +1,6 @@
+using Atheriz.Core.Commands.UnloggedIn;
 using Atheriz.Core.Network;
+using Atheriz.Core.Objects;
 
 namespace Atheriz.Server.Hosting;
 
@@ -56,6 +58,22 @@ public static class WebSocketHandler
 
         try
         {
+            // Token auto-login for the landing page Play button: a valid
+            // ?token= binds the account and runs the same character wizard
+            // as the in-band login. Absent/invalid tokens fall through to
+            // the normal unauthenticated prompt flow.
+            try
+            {
+                var token = context.Request.Query["token"].ToString();
+                if (!string.IsNullOrEmpty(token))
+                {
+                    var tokenService = context.RequestServices?.GetService(typeof(GameTokenService)) as GameTokenService;
+                    var gameAccount = tokenService?.Resolve(token);
+                    if (gameAccount is not null && !gameAccount.IsBanned)
+                        ConnectCommand.AttachAuthenticatedSession(connection, gameAccount);
+                }
+            }
+            catch { }
             var buffer = new byte[8192];
             // socket ops observe host shutdown — graceful stop
             // cancels open sockets (whose OperationCanceledException flows

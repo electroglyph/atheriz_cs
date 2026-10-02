@@ -130,6 +130,34 @@ public sealed class ConnectCommand : Command
         finally { conn.Session.EndWizard(); }
     }
 
+    /// <summary>
+    /// Post-authentication tail shared by the password login and the HTTP
+    /// token auto-login: binds the account to the connection session and runs
+    /// the character-selection wizard. Lives here (instead of the web host)
+    /// so the wizard-guard and lifetime linkage stay next to the code they
+    /// mirror in <see cref="Run"/>.
+    /// </summary>
+    public static void AttachAuthenticatedSession(BaseConnection conn, Account account)
+    {
+        ArgumentNullException.ThrowIfNull(conn);
+        ArgumentNullException.ThrowIfNull(account);
+        // One wizard per session: same guard as the in-band login path.
+        if (!conn.Session.TryStartWizard()) { conn.Msg("A character selection is already in progress."); return; }
+        conn.Session.Account = account;
+        conn.SendCommand("logged_in");
+        // Fire-and-forget async, bound to the connection lifetime, mirroring Run above.
+        var wizardCts = CancellationTokenSource.CreateLinkedTokenSource(conn.RetryLifetimeToken);
+        _ = Task.Run(async () =>
+        {
+            using (wizardCts)
+            {
+                try { await CharSelectionAsync(conn, account, wizardCts.Token).ConfigureAwait(false); }
+                catch (Exception ex) { AtherizLogger.LogError($"[Connect] char_selection failed: {ex}"); }
+                finally { conn.Session.EndWizard(); }
+            }
+        });
+    }
+
     internal static async Task CharSelectionAsync(BaseConnection caller, Account account, CancellationToken ct = default)
     {
         var settings = AtherizSettings.Global;

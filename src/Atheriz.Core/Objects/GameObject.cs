@@ -895,7 +895,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     // (never-hashed) instances — production delete/create paths use this;
     // the public setter deliberately leaves the snapshot alone.
     internal void SetIdRaw(int id) => Write(() => { _id = id; _hashCache = id.GetHashCode(); _flags.IsModified = true; });
-    internal Dictionary<string, System.Text.Json.JsonElement> GetExtraSnapshot() => Read(() => new Dictionary<string, System.Text.Json.JsonElement>(_extra));
+    // Snapshot of persisted extras for the HTTP admin API (read-only copy;
+    // mutate through SetExtraJson/TryRemoveExtraJson). Public so the server
+    // host can enumerate extra keys without going through the examine text.
+    public Dictionary<string, System.Text.Json.JsonElement> GetExtraSnapshot() => Read(() => new Dictionary<string, System.Text.Json.JsonElement>(_extra));
     internal Dictionary<string, List<LockEntry>> GetLockEntriesSnapshot()
         => Read(() => _lockTable.SnapshotEntries());
     internal Dictionary<string, List<Func<GameObject, bool>>> GetLocksSnapshot()

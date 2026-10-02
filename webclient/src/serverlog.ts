@@ -67,7 +67,20 @@ export function startServerLog(doc: Document = document): void {
                 return;
             }
             term.write(toRows((await res.text()).split('\n').map(renderLogLine).join('\n')));
-            const source = new EventSource(STREAM_URL);
+            // Snapshot and stream overlap: without the snapshot's last id
+            // the stream replays the same history the snapshot just
+            // rendered, so every line appears twice on reload. The server
+            // exposes the newest id as X-Last-Seq; hand it back as ?lastId=
+            // so the stream replays only newer lines (reconnects still use
+            // Last-Event-ID).
+            let streamUrl = STREAM_URL;
+            try {
+                const lastSeq = Number.parseInt(res.headers.get('X-Last-Seq') ?? '', 10);
+                if (Number.isFinite(lastSeq) && lastSeq > 0) streamUrl += `?lastId=${lastSeq}`;
+            } catch {
+                // Old server without the header: fall back to the bare stream.
+            }
+            const source = new EventSource(streamUrl);
             source.onmessage = (event) => {
                 live = true;
                 const data = typeof event.data === 'string' ? event.data : String(event.data);

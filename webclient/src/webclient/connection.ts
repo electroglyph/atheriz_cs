@@ -29,7 +29,7 @@ export const OPEN_STATE = 1;
 // Inbound frames larger than this are treated as invalid instead of parsed.
 export const MAX_INBOUND_FRAME_BYTES = 4 * 1024 * 1024;
 
-export function websocketUrl(locationLike?: Pick<Location, 'protocol' | 'host'>): string {
+export function websocketUrl(locationLike?: Pick<Location, 'protocol' | 'host'>, token?: string | null): string {
     const currentLocation = locationLike ?? (
         typeof window === 'undefined'
             ? { protocol: 'http:', host: 'localhost' }
@@ -37,7 +37,26 @@ export function websocketUrl(locationLike?: Pick<Location, 'protocol' | 'host'>)
     );
     const protocol = currentLocation.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = currentLocation.host || 'localhost';
-    return `${protocol}//${host}/ws`;
+    const base = `${protocol}//${host}/ws`;
+    const t = token ?? gameTokenFromFragment();
+    return t ? `${base}?token=${encodeURIComponent(t)}` : base;
+}
+
+// Landing-page auto-login: the Play button opens the webclient with the game
+// token in the URL fragment (#token=...), which never reaches the server on
+// page load. The token is forwarded as the ?token= WebSocket query the
+// server auto-login accepts. Explicit arg beats fragment; absent fragment
+// yields null so plain logins keep the bare /ws URL.
+export function gameTokenFromFragment(hash?: string): string | null {
+    const raw = hash ?? (typeof window === 'undefined' ? '' : window.location.hash);
+    const match = /^#token=(.+)$/.exec(raw);
+    if (!match) return null;
+    try {
+        const token = decodeURIComponent(match[1]);
+        return token || null;
+    } catch {
+        return null;
+    }
 }
 
 export function decodeWireData(data: unknown): string | null {

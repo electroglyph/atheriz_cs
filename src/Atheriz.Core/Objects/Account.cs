@@ -86,6 +86,13 @@ public class Account : GameObject
     };
 
     /// <inheritdoc/>
+    public override bool IsSettableProperty(string name) => name switch
+    {
+        "BanReason" or "ban_reason" or "_ban_reason" => true,
+        _ => base.IsSettableProperty(name),
+    };
+
+    /// <inheritdoc/>
     public override bool TrySetProperty(string name, object? value, out string? error)
     {
         error = null;

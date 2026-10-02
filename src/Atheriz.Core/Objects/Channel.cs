@@ -53,6 +53,13 @@ public class Channel : GameObject
     };
 
     /// <inheritdoc/>
+    public override bool IsSettableProperty(string name) => name switch
+    {
+        "CreatedBy" or "created_by" or "_created_by" => true,
+        _ => base.IsSettableProperty(name),
+    };
+
+    /// <inheritdoc/>
     public override bool TrySetProperty(string name, object? value, out string? error)
     {
         error = null;

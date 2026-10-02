@@ -1,5 +1,6 @@
 using Atheriz.Core.Network;
 using Atheriz.Server.Cli;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -23,7 +24,10 @@ public static class ServerHost
         // IOptionsMonitor.CurrentValue reflects them; delegates read after Build.
         services.AddSingleton(sp => sp.GetRequiredService<IOptionsMonitor<AtherizSettings>>().CurrentValue);
         services.AddSingleton<ConnectionManager>(sp => new ConnectionManager(settings: sp.GetRequiredService<IOptionsMonitor<AtherizSettings>>().CurrentValue));
+        services.AddSingleton<GameTokenService>();
         AdminAuthServices.AddAdminAuth(services);
+        services.AddAuthentication()
+            .AddScheme<AuthenticationSchemeOptions, GameAuthHandler>(GameAuthHandler.SchemeName, null);
     }
 
     internal static void ApplyCliOverrides(ConfigurationManager config, int? port, string? host, int? telnetPort)
@@ -137,6 +141,7 @@ public static class ServerHost
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapAdminRoutes(settings);
+        app.MapGameAdminRoutes();
         if (!daemon) PrintBanners(settings);
         var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
         RegisterShutdown(lifetime, settings, pidFile, withToken: true);

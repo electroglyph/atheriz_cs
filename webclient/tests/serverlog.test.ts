@@ -68,6 +68,26 @@ describe('server log viewer', () => {
         expect(renderLogLine('(server) legacy')).toBe('(server) legacy');
     });
 
+    it('opens the stream after the snapshot id so lines do not repeat', async () => {
+        vi.resetModules();
+        markup();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async () => ({
+                ok: true,
+                headers: { get: (name: string) => (name === 'X-Last-Seq' ? '42' : null) },
+                text: async () => '1720000000 (server) hi\n',
+            })),
+        );
+        vi.stubGlobal('EventSource', FakeEventSource);
+        await import('../src/serverlog');
+        await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+        // Snapshot renders first; the stream resumes after it instead of
+        // replaying the same history (which duplicated every line on reload).
+        expect(FakeEventSource.instances[0].url).toBe('/server-log/stream?lastId=42');
+        expect(terminalWrites.join('')).toContain('(server) hi');
+    });
+
     it('hides the section when the endpoint is disabled', async () => {
         vi.resetModules();
         markup();

@@ -140,11 +140,12 @@ public static partial class StaticFileConfig
         // Public server-channel log for the landing page (opt-in via
         // ServerLogPublic — channel traffic stays in-game by default).
         // Snapshot and stream carry identical FormatMessage bytes.
-        app.MapGet("/server-log", () =>
+        app.MapGet("/server-log", (HttpContext ctx) =>
         {
             if (!settings.ServerLogPublic) return Results.NotFound();
             if (Atheriz.Core.Globals.GlobalServices.GetServerChannel() is not Atheriz.Core.Objects.Channel channel)
                 return Results.NotFound("No server channel.");
+            ctx.Response.Headers["X-Last-Seq"] = ServerLogEndpoints.SnapshotLastSeq(channel).ToString();
             return Results.Text(ServerLogEndpoints.SnapshotBody(channel), "text/plain");
         });
         app.MapGet("/server-log/stream", async (HttpContext ctx) =>
