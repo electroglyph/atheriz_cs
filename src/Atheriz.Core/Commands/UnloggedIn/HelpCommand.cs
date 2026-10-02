@@ -39,7 +39,7 @@ public sealed class HelpCommand : Command
             }
             catch (Exception) { }
             var cmds = cs.GetAll().Where(c => !c.Hide && c.Access(caller)).OrderBy(c => c.Category).ThenBy(c => c.Key).ToList();
-            caller.Msg("\n" + HelpFormatter.Format(cmds, sr, tw + 2));
+            caller.Msg("\n" + HelpFormatter.Format(cmds, sr, tw + 2) + "\nHelp <command> for more information.");
             return;
         }
         if (HelpHelper.TryShowGlobal(cs, caller, query!)) return;

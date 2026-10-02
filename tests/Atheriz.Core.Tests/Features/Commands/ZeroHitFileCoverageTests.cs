@@ -56,15 +56,16 @@ public sealed class ZeroHitFileCoverageTests
     }
 
     [Fact]
-    public void HelpFormatter_TableHeaderAndTruncation()
+    public void HelpFormatter_BoxOverview_ReplacesTable()
     {
         Command[] cmds = [new OpenCommand()];
         var wide = HelpFormatter.Format(cmds, screenreader: false, termWidth: 80);
-        Assert.Contains("Category", wide);
-        Assert.Contains("Command", wide);
-        Assert.Contains("Description", wide);
+        Assert.Contains("╭─ General", wide);
+        Assert.Contains("open", wide);
+        Assert.DoesNotContain("Description", wide);
         var narrow = HelpFormatter.Format(cmds, screenreader: false, termWidth: 30);
-        Assert.Contains("...", narrow);
+        Assert.All(narrow.Split('\n', StringSplitOptions.RemoveEmptyEntries),
+            l => Assert.Equal(30, l.Length));
     }
 
     private static object? InvokeBanHelper(string method, params object?[] args)

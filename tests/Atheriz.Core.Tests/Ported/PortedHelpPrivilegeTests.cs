@@ -31,7 +31,8 @@ public class PortedHelpPrivilegeTests
         c.Session = new Session { ScreenReader = false, TermWidth = 80 };
         new HelpCommand().Run(c, null);
         var txt = string.Join(" ", c.PeekMessages());
-        Assert.Contains("Category", txt);
+        Assert.Contains("╭", txt);
+        Assert.Contains("look", txt);
     }
 
     [Fact]

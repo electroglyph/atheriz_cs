@@ -4,9 +4,9 @@ using Atheriz.Core.Objects;
 
 namespace Atheriz.Core.Tests.Features.Commands;
 
-// The collapsed session lookup renders identical tables for every caller
+// The collapsed session lookup renders identical listings for every caller
 // shape: a session-less puppet reads (null ?? 80) - 2 = 78, exactly like a
-// default-width session, and the table width stays TermWidth (tw + 2) with
+// default-width session, and the box width stays TermWidth (tw + 2) with
 // the below-20 clamp.
 [Collection("Ported")]
 public sealed class UnloggedHelpWidthTests
@@ -30,25 +30,42 @@ public sealed class UnloggedHelpWidthTests
     [Fact]
     public void TableWidth_EqualsTermWidth()
     {
-        // TermWidth 40 -> tw = 38 -> Format width 40 -> 38-dash separator.
-        // Pins the -2/+2 arithmetic exactly (dropping either changes the run).
+        // TermWidth 40 -> tw = 38 -> Format width 40 -> every box line is
+        // exactly 40 wide. Pins the -2/+2 arithmetic exactly (dropping
+        // either changes the run).
         var puppet = new GameObject { Name = "Hero" };
         puppet.Session = new Session { TermWidth = 40, ScreenReader = false };
         var output = RunHelp(puppet);
-        Assert.Contains(new string('-', 38), output);
-        Assert.DoesNotContain(new string('-', 40), output);
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        // Only box lines carry the width; the trailing hint line
+        // ("Help <command> ...") is exempt.
+        var box = lines.Where(l => l.Length > 0 && "╭╰│".Contains(l[0])).ToList();
+        Assert.NotEmpty(box);
+        Assert.All(box, l => Assert.Equal(40, l.Length));
     }
 
     [Fact]
     public void NarrowSession_ClampsWidth()
     {
-        // TermWidth 10 -> tw collapses to 20 -> width-22 table (20-dash
-        // separator), which must differ from the width-80 render (60 dashes).
+        // TermWidth 10 -> tw collapses to 20 -> width-22 boxes, which must
+        // differ from the width-80 render.
         var narrow = new GameObject { Name = "Hero" };
         narrow.Session = new Session { TermWidth = 10, ScreenReader = false };
         var wide = new GameObject { Name = "Hero" };
         wide.Session = new Session { TermWidth = 80, ScreenReader = false };
         Assert.NotEqual(RunHelp(wide), RunHelp(narrow));
-        Assert.Contains("\n" + new string('-', 20) + "\n", "\n" + RunHelp(narrow) + "\n");
+        var lines = RunHelp(narrow).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var box = lines.Where(l => l.Length > 0 && "╭╰│".Contains(l[0])).ToList();
+        Assert.NotEmpty(box);
+        Assert.All(box, l => Assert.Equal(22, l.Length));
+    }
+
+    [Fact]
+    public void FullListing_EndsWithHint()
+    {
+        // Bare help closes with a blank line plus the per-command pointer.
+        var puppet = new GameObject { Name = "Hero" };
+        puppet.Session = new Session { TermWidth = 80, ScreenReader = false };
+        Assert.EndsWith("\nHelp <command> for more information.", RunHelp(puppet));
     }
 }

@@ -7,6 +7,7 @@ public sealed class ReloadCommand : LoggedInCommand
 {
     public override string Key => "reload";
     public override string Desc => "Reload game logic and modules.";
+    public override string Category => "Admin";
     public override bool UseParser => false;
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
     protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)

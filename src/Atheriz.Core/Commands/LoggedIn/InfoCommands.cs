@@ -8,6 +8,7 @@ public sealed class DrawCommand : Command
 {
     public override string Key => "mapedit";
     public override string Desc => "Open the AtheriZ map editor in a new browser tab.";
+    public override string Category => "Building";
     public override bool UseParser => false;
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsBuilder(caller);
 
@@ -212,6 +213,8 @@ public sealed class HelpCommand : Command
                     sb.Append(HelpFormatter.Format(locals, sr, tw + 2));
                 }
             }
+            sb.AppendLine();
+            sb.AppendLine("Help <command> for more information.");
             caller.Msg(sb.ToString());
             return;
         }

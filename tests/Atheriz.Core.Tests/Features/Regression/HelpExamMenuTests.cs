@@ -48,6 +48,23 @@ public class HelpExamMenuTests
         finally { ObjectRegistry.ClearAll(); }
     }
 
+    [Fact]
+    public void LoggedInHelp_FullListing_EndsWithHint()
+    {
+        // Bare help closes with a blank line plus the per-command pointer.
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var admin = GameObject.Create("helped", privilege: Privilege.Admin);
+            ObjectRegistry.AddObject(admin);
+            var job = CommandDispatcher.DispatchLoggedIn(admin, "help", immediate: true);
+            RunJob(job);
+            var msgs = string.Join("\n", admin.PeekMessages());
+            Assert.Contains("\n\nHelp <command> for more information.", msgs);
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
+
     // Exam branches on the node type directly; the key list keeps insertion
     // order under an honest name.
     [Fact]

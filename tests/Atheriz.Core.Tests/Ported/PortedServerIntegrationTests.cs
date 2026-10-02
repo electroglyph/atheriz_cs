@@ -501,7 +501,7 @@ public class PortedServerIntegrationTests
         {
             ["look"] = "limbo",
             ["inventory"] = "carrying",
-            ["help"] = "Command",
+            ["help"] = "look",
             ["say hello"] = "You say",
         };
         foreach (var kv in commands)
