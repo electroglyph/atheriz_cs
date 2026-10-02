@@ -28,7 +28,7 @@ done
 
 if [ ! -f "$WEBCLIENT_DIR/package.json" ]; then
   echo "error: webclient/package.json not found at $WEBCLIENT_DIR" >&2
-  echo "hint: ensure webclient/ is vendored (rsync -a ../atheriz/webclient/ ./webclient/ --exclude node_modules --exclude dist)" >&2
+  echo "hint: ensure webclient/ is vendored (copy ../atheriz/webclient/ to ./webclient/, excluding node_modules and dist)" >&2
   exit 1
 fi
 
@@ -42,10 +42,6 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 if ! command -v dotnet >/dev/null 2>&1; then
   echo "error: dotnet SDK 10.0.100+ required (see global.json)" >&2
-  exit 1
-fi
-if ! command -v rsync >/dev/null 2>&1; then
-  echo "error: rsync required (used to stage webclient dist into wwwroot)" >&2
   exit 1
 fi
 
@@ -110,7 +106,7 @@ else
   # Clean old built assets — must remove entire assets dir so stale hashed webclient-*.js do not accumulate
   # (previous buggy glob test left multiple hashes; rm -rf ensures single current hash)
   rm -rf "$DEST_WWWROOT/assets" "$DEST_WWWROOT/atheriz_draw" "$DEST_WWWROOT/webclient"
-  # Remove nested artifacts from prior bad rsync (wwwroot/assets/assets, wwwroot/webclient/webclient)
+  # Remove nested artifacts from prior bad staging runs (wwwroot/assets/assets, wwwroot/webclient/webclient)
   rm -rf "$DEST_WWWROOT/assets/assets" "$DEST_WWWROOT/webclient/webclient"
   # Do NOT rm gfonts/chafa on every build — they are large and vite may not emit gfonts every time (dist/gfonts only if public/gfonts present)
   # Clean gfonts/chafa only if dist contains them
@@ -118,12 +114,14 @@ else
   if [ -f "$SRC_DIST/chafa.wasm" ] || ls "$SRC_DIST/assets/chafa-"*.wasm >/dev/null 2>&1; then rm -f "$DEST_WWWROOT/chafa.wasm"; fi
 
   # Stage dist → wwwroot (mirrors WebDeployer.StageDist)
-  rsync -a "$SRC_DIST/assets/" "$DEST_WWWROOT/assets/"
+  mkdir -p "$DEST_WWWROOT/assets"
+  cp -r "$SRC_DIST/assets/." "$DEST_WWWROOT/assets/"
   # Defensive: remove accidental nested copy if it appeared
   rm -rf "$DEST_WWWROOT/assets/assets"
   # fonts from webclient/fonts (Fira_Custom etc.)
   if [ -d "$WEBCLIENT_DIR/fonts" ]; then
-    rsync -a "$WEBCLIENT_DIR/fonts/" "$DEST_WWWROOT/fonts/"
+    mkdir -p "$DEST_WWWROOT/fonts"
+    cp -r "$WEBCLIENT_DIR/fonts/." "$DEST_WWWROOT/fonts/"
   fi
   mkdir -p "$DEST_WWWROOT/webclient"
   cp -f "$SRC_DIST/webclient/index.html" "$DEST_WWWROOT/webclient/index.html"
@@ -143,7 +141,8 @@ else
     # keep hashed copy in assets as well (vite already did)
   fi
   if [ -d "$SRC_DIST/gfonts" ]; then
-    rsync -a "$SRC_DIST/gfonts/" "$DEST_WWWROOT/gfonts/"
+    mkdir -p "$DEST_WWWROOT/gfonts"
+    cp -r "$SRC_DIST/gfonts/." "$DEST_WWWROOT/gfonts/"
   fi
 
   # Record hash so next run can skip

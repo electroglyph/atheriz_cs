@@ -11,6 +11,8 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
   `webclient/deploy.py` script, which is deleted. The generated
   per-game build scripts and the out-of-sync warning already point at
   it, so redeploys keep working with no Python needed.
+- `build.sh` no longer requires rsync: the three local staging copies
+  are plain `cp -r`.
 
 ## [0.29.0.12] - 2026-10-02
 

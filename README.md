@@ -15,7 +15,6 @@ C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core
   node --version
   npm --version
   ```
-- **rsync** — used by `build.sh` to stage the webclient (`sudo pacman -S rsync` / `apt install rsync`).
   On Arch: `sudo pacman -S dotnet-sdk aspnet-targeting-pack nodejs npm`
   (`aspnet-targeting-pack` is required: without it the `Atheriz.Server` web
   project fails at restore with `NETSDK1226: Prune Package data not found`.)
