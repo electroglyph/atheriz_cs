@@ -2,7 +2,7 @@
 
 (everything here is 100% clanker generated, but i've tried to do it as sanely as possible)
 
-C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included — see the [webclient changelog](webclient/CHANGELOG.md). User guides (install, game creation, commands, hosting, saves, plugins) live in [docs/](docs/README.md).
+C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included — see the [changelog](CHANGELOG.md) and the [webclient changelog](webclient/CHANGELOG.md). User guides (install, game creation, commands, hosting, saves, plugins) live in [docs/](docs/README.md).
 
 ## Prereqs
 

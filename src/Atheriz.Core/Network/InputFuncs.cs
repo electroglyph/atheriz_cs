@@ -212,6 +212,18 @@ public class InputFuncs
         }
     }
 
+// Default command prompt: (re)asserted whenever a session enters
+    // command mode (puppet attached). The welcome screen sets ">" for
+    // fresh sockets, but token auto-logins skip it and menu prompts
+    // (character select, passwords) replace it — without this the client
+    // keeps showing the last menu prompt instead of ">".
+    public static void SendDefaultPrompt(BaseConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        try { connection.SendCommand("prompt", new List<object?> { ">" }, []); }
+        catch (Exception) { }
+    }
+
 // prompt welcome screen
     public void ClientReady(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {

@@ -244,6 +244,7 @@ public sealed class ConnectCommand : Command
             if (!SessionPuppetHelper.TryAttach(caller, chosen)) continue;
             try { caller.Session.ConnectedAt = DateTime.UtcNow; } catch (Exception) { }
             try { chosen.AtPostPuppet(); } catch (Exception ex) { AtherizLogger.LogError($"[Connect] AtPostPuppet failed: {ex}"); }
+            try { Atheriz.Core.Network.InputFuncs.SendDefaultPrompt(caller); } catch (Exception) { }
             // In Python, char_selection loop exits after successful puppet (while puppet is None)
             break;
         }

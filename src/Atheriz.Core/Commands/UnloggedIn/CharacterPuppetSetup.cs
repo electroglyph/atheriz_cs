@@ -21,6 +21,7 @@ public static class CharacterPuppetSetup
             character.MoveTo(home);
         }
         try { character.AtPostPuppet(); } catch (Exception) { }
+        try { Atheriz.Core.Network.InputFuncs.SendDefaultPrompt(conn); } catch (Exception) { }
         return true;
     }
 }

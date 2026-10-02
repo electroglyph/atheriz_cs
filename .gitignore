@@ -232,6 +232,8 @@ save/
 *.md
 !README.md
 !readme.md
+!CHANGELOG.md
+!webclient/CHANGELOG.md
 !docs/**
 docs/upgrade-10-done.md
 .vscode/

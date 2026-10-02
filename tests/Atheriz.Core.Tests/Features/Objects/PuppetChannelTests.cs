@@ -1,4 +1,5 @@
 using System.Reflection;
+using Atheriz.Core.Commands.UnloggedIn;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 
@@ -51,6 +52,25 @@ public class PuppetChannelTests
             puppet.AtPostPuppet();
             Assert.Contains(server.GetHistory(10).Split('\n', StringSplitOptions.RemoveEmptyEntries), h => h.Contains("has logged in"));
             Assert.Contains(watcher.PeekMessages(), m => m.Contains("has logged in"));
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
+    public void PuppetLogin_ReassertsDefaultPrompt()
+    {
+        // ">" was only sent on the unauthenticated welcome screen, so token
+        // logins (and any menu prompt) left the client with no default
+        // prompt. Attaching a puppet must re-assert it.
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var conn = new TestConnection();
+            var puppet = GameObject.Create("hero", isPc: true);
+            ObjectRegistry.AddObject(puppet);
+            Assert.True(CharacterPuppetSetup.AttachAndHome(conn, puppet));
+            Assert.Contains(conn.Sent,
+                s => s.Cmd == "prompt" && s.Args.Count > 0 && s.Args[0]?.ToString() == ">");
         }
         finally { ObjectRegistry.ClearAll(); }
     }
