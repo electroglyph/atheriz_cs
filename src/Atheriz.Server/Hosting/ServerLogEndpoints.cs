@@ -58,6 +58,22 @@ public static class ServerLogEndpoints
         return ParseLastEventId(request.Headers["Last-Event-ID"].ToString());
     }
 
+    // Headers must reach the client the instant the stream opens: with no
+    // replay pending (a caught-up ?lastId=) the first body byte used to be
+    // the 20s keepalive, and the headers sat unsent until then — leaving
+    // EventSource stuck in CONNECTING with zero bytes, which some browsers
+    // fail instead of riding out. StartAsync alone did not move bytes on
+    // the wire here, so an initial SSE comment (protocol-legal, ignored by
+    // clients, changes no lastEventId) forces the first flush as well.
+    public static async Task SendHeadersAsync(HttpResponse response, CancellationToken ct)
+    {
+        response.ContentType = "text/event-stream";
+        response.Headers.CacheControl = "no-cache";
+        await response.StartAsync(ct);
+        await response.WriteAsync(": connected\n\n", ct);
+        await response.Body.FlushAsync(ct);
+    }
+
     public static async Task WriteFrameAsync(HttpResponse response, long seq, long timestamp, string text, CancellationToken ct)
     {
         await response.WriteAsync($"id: {seq}\n", ct);
@@ -79,11 +95,16 @@ public static class ServerLogEndpoints
     // new posts until the client disconnects. Subscribe-before-replay with
     // sequence dedupe closes the gap a post could otherwise slip through.
     // Keepalive comments every 20s keep idle connections open through proxies.
+    // Headers flush before the first body byte (see SendHeadersAsync), and
+    // the connection lifecycle is logged so a stuck viewer is diagnosable
+    // from server.log instead of a silent client-side timeout.
     public static async Task StreamAsync(HttpContext ctx, Atheriz.Core.Objects.Channel channel, CancellationToken ct)
     {
-        ctx.Response.ContentType = "text/event-stream";
-        ctx.Response.Headers.CacheControl = "no-cache";
+        await SendHeadersAsync(ctx.Response, ct);
         long lastId = ResolveLastId(ctx.Request);
+        string client = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        try { Atheriz.Core.AtherizLogger.LogInformation($"Server log stream opened for {client} (resume {lastId})."); }
+        catch { }
         var queue = Channel.CreateUnbounded<(long Seq, long Timestamp, string Text)>();
         void Handler(long seq, long timestamp, string text) => queue.Writer.TryWrite((seq, timestamp, text));
         channel.MessagePosted += Handler;
@@ -114,7 +135,18 @@ public static class ServerLogEndpoints
                 }
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            try { Atheriz.Core.AtherizLogger.LogDebug($"Server log stream closed for {client}."); }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            // A dead client mid-write must end the stream, not escape: the
+            // headers already went out, so there is no error page to render.
+            try { Atheriz.Core.AtherizLogger.LogWarning($"Server log stream for {client} failed: {ex.Message}"); }
+            catch { }
+        }
         finally { channel.MessagePosted -= Handler; }
     }
 }

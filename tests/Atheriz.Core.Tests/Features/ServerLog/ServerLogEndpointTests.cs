@@ -1,9 +1,12 @@
+using System.Buffers;
+using System.IO.Pipelines;
 using System.Text;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
 using Atheriz.Core.Tests.Features.Regression;
 using Atheriz.Server.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Atheriz.Core.Tests.Features.ServerLog;
 
@@ -128,6 +131,42 @@ public class ServerLogEndpointTests
     }
 
     [Fact]
+    public async Task StreamAsync_OpensWithComment_BeforeFirstFrame()
+    {
+        // The stall fix: a caught-up ?lastId= must still produce bytes
+        // immediately. StartAsync alone moved nothing on the wire, so the
+        // open sends an SSE comment (ignored by clients, changes no
+        // lastEventId) to force headers out — no waiting on the first
+        // replay frame or the 20s keepalive.
+        var ch = NewChannel();
+        try
+        {
+            ch.Msg("first", null);
+            long resume = ServerLogEndpoints.SnapshotLastSeq(ch);
+            var ctx = new DefaultHttpContext();
+            ctx.Request.QueryString = new QueryString($"?lastId={resume}");
+            var body = new RecordingBodyFeature();
+            ctx.Features.Set<IHttpResponseBodyFeature>(body);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var stream = ServerLogEndpoints.StreamAsync(ctx, ch, cts.Token);
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (!body.Started && DateTime.UtcNow < deadline)
+                await Task.Delay(10);
+            Assert.True(body.Started, "Stream must flush headers even with nothing to replay.");
+            Assert.Equal("text/event-stream", ctx.Response.ContentType);
+            deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (body.Written == 0 && DateTime.UtcNow < deadline)
+                await Task.Delay(10);
+            var opening = body.ReadText();
+            Assert.StartsWith(":", opening);
+            Assert.DoesNotContain("id:", opening);
+            cts.Cancel();
+            await stream;
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
     public void SnapshotRoute_ExposesLastSeqHeader()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Hosting", "StaticFileConfig.cs");
@@ -224,5 +263,59 @@ public class ServerLogEndpointTests
             Assert.Contains("live", Output());
         }
         finally { ObjectRegistry.ClearAll(); }
+    }
+
+    // Records when headers flush, separately from body bytes: the stall fix
+    // pins header-flush-before-first-body-byte, which a plain MemoryStream
+    // body cannot observe. (HttpResponse.StartAsync routes through
+    // IHttpResponseBodyFeature.StartAsync — there is no separate
+    // start-feature type.)
+    private sealed class RecordingBodyFeature : IHttpResponseBodyFeature
+    {
+        private readonly Pipe _pipe = new();
+        private long _written;
+        public bool Started;
+        public long Written => Volatile.Read(ref _written);
+        public Stream Stream => Stream.Null;
+        public PipeWriter Writer => new CountingWriter(_pipe.Writer, this);
+        public Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            Started = true;
+            return Task.CompletedTask;
+        }
+        public Task CompleteAsync() => Task.CompletedTask;
+        public void DisableBuffering() { }
+        public Task SendFileAsync(string path, long offset, long? count, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public string ReadText()
+        {
+            var sb = new StringBuilder();
+            while (_pipe.Reader.TryRead(out var result))
+            {
+                sb.Append(Encoding.UTF8.GetString(result.Buffer.ToArray()));
+                _pipe.Reader.AdvanceTo(result.Buffer.End);
+            }
+            return sb.ToString();
+        }
+
+        // Counts in Advance: every PipeWriter write path (GetSpan/Write/
+        // WriteAsync) funnels through it exactly once.
+        private sealed class CountingWriter(PipeWriter inner, RecordingBodyFeature owner) : PipeWriter
+        {
+            public override void Advance(int bytes)
+            {
+                if (bytes > 0) Interlocked.Add(ref owner._written, bytes);
+                inner.Advance(bytes);
+            }
+
+            public override Memory<byte> GetMemory(int sizeHint = 0) => inner.GetMemory(sizeHint);
+            public override Span<byte> GetSpan(int sizeHint = 0) => inner.GetSpan(sizeHint);
+            public override void CancelPendingFlush() => inner.CancelPendingFlush();
+            public override void Complete(Exception? exception = null) => inner.Complete(exception);
+
+            public override ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
+                => inner.FlushAsync(cancellationToken);
+        }
     }
 }
