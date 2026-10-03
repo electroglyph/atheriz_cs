@@ -129,4 +129,55 @@ describe('server log viewer', () => {
         });
         expect(FakeEventSource.instances).toHaveLength(0);
     });
+
+    it('re-opens the stream after an error, resuming from the last frame', async () => {
+        vi.resetModules();
+        markup();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async () => ({
+                ok: true,
+                headers: { get: (name: string) => (name === 'X-Last-Seq' ? '42' : null) },
+                text: async () => '1720000000 (server) hi\n',
+            })),
+        );
+        vi.stubGlobal('EventSource', FakeEventSource);
+        await import('../src/serverlog');
+        await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+        expect(FakeEventSource.instances[0].url).toBe('/server-log/stream?lastId=42');
+        // A live frame arrives, then the connection drops: the viewer must
+        // re-open from the delivered frame, not the stale snapshot id —
+        // otherwise a wedged tab silently replays or misses lines.
+        const first = FakeEventSource.instances[0];
+        first.onmessage?.({ data: '1720000060 live line', lastEventId: '43' } as { data: string });
+        first.onerror?.();
+        await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(2), { timeout: 5000 });
+        expect(FakeEventSource.instances[1].url).toBe('/server-log/stream?lastId=43');
+        // The stream was live, so no unavailable note may appear.
+        expect(terminalWrites.join('')).not.toContain('live stream unavailable');
+    }, 10000);
+
+    it('writes the unavailable note only once across retries', async () => {
+        vi.resetModules();
+        markup();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async () => ({
+                ok: true,
+                headers: { get: (name: string) => (name === 'X-Last-Seq' ? '42' : null) },
+                text: async () => '1720000000 (server) hi\n',
+            })),
+        );
+        vi.stubGlobal('EventSource', FakeEventSource);
+        await import('../src/serverlog');
+        await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+        // Two drops before anything goes live: each schedules a re-open,
+        // but the note must appear exactly once.
+        FakeEventSource.instances[0].onerror?.();
+        await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(2), { timeout: 5000 });
+        FakeEventSource.instances[1].onerror?.();
+        await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(3), { timeout: 8000 });
+        const notes = terminalWrites.join('').match(/live stream unavailable/g) ?? [];
+        expect(notes).toHaveLength(1);
+    }, 15000);
 });

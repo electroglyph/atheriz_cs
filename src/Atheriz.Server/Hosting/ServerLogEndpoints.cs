@@ -43,19 +43,18 @@ public static class ServerLogEndpoints
 
     // Initial EventSource requests carry no Last-Event-ID header (the
     // browser only sends it on reconnect), so the viewer hands back the
-    // snapshot's X-Last-Seq as ?lastId=. Query wins; header covers
-    // reconnects and direct stream clients.
+    // snapshot's X-Last-Seq as ?lastId=. Take the newest of the two: on a
+    // reconnect the query id is frozen at snapshot time while the header
+    // tracks the newest delivered frame — resuming from the stale query
+    // id would replay lines the viewer already rendered.
     public static long ResolveLastId(HttpRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        long id = ParseLastEventId(request.Headers["Last-Event-ID"].ToString());
         string[] queryKeys = ["lastId", "after", "lastEventId"];
         foreach (var key in queryKeys)
-        {
-            long parsed = ParseLastEventId(request.Query[key].ToString());
-            if (parsed > 0)
-                return parsed;
-        }
-        return ParseLastEventId(request.Headers["Last-Event-ID"].ToString());
+            id = Math.Max(id, ParseLastEventId(request.Query[key].ToString()));
+        return id;
     }
 
     // Headers must reach the client the instant the stream opens: with no
@@ -90,9 +89,9 @@ public static class ServerLogEndpoints
     }
 
     // Replay-then-live: entries after the client's resume point first
-    // (?lastId= from the snapshot's X-Last-Seq, or Last-Event-ID on
-    // reconnect — so reconnects miss nothing inside history bounds), then
-    // new posts until the client disconnects. Subscribe-before-replay with
+    // (newest of ?lastId= and Last-Event-ID — so reconnects miss nothing
+    // inside history bounds and never replay rendered lines), then new
+    // posts until the client disconnects. Subscribe-before-replay with
     // sequence dedupe closes the gap a post could otherwise slip through.
     // Keepalive comments every 20s keep idle connections open through proxies.
     // Headers flush before the first body byte (see SendHeadersAsync), and

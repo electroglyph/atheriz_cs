@@ -16,6 +16,11 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
 - The landing-page server log no longer wraps lines early: the viewer
   re-fits the terminal once the section reveals, so lines use the full
   width instead of the hidden-state narrow default.
+- The landing-page log viewer now recovers from a wedged stream on its
+  own: on error it re-opens from the last rendered frame with
+  backoff instead of sitting silent. The stream resume point is also
+  the newest of the snapshot id and the reconnect id, so a retry
+  never replays lines it already showed.
 
 ## [0.29.0.12] - 2026-10-02
 

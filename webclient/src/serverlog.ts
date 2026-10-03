@@ -91,15 +91,40 @@ export function startServerLog(doc: Document = document): void {
             } catch {
                 // Old server without the header: fall back to the bare stream.
             }
-            const source = new EventSource(streamUrl);
-            source.onmessage = (event) => {
-                live = true;
-                const data = typeof event.data === 'string' ? event.data : String(event.data);
-                term.write(`${toRows(renderLogLine(data))}\r\n`);
+            // Resume point for re-opens: snapshot id first, then the newest
+            // frame actually rendered (EventSource exposes it per message).
+            // Resuming from the last seen frame — never the stale snapshot
+            // id — is what keeps a re-open from replaying rendered lines.
+            let resumeQuery = streamUrl.startsWith(`${STREAM_URL}?`)
+                ? streamUrl.slice(STREAM_URL.length)
+                : '';
+            let failures = 0;
+            let noteShown = false;
+            const openStream = (): void => {
+                const source = new EventSource(`${STREAM_URL}${resumeQuery}`);
+                source.onmessage = (event) => {
+                    live = true;
+                    failures = 0;
+                    if (typeof event.lastEventId === 'string' && event.lastEventId !== '') {
+                        resumeQuery = `?lastId=${event.lastEventId}`;
+                    }
+                    const data = typeof event.data === 'string' ? event.data : String(event.data);
+                    term.write(`${toRows(renderLogLine(data))}\r\n`);
+                };
+                source.onerror = () => {
+                    // A failed stream may be wedged (no more frames and no
+                    // browser reconnect), so close it and re-open from the
+                    // last rendered frame instead of trusting the retry.
+                    source.close();
+                    if (!live && !noteShown) {
+                        noteShown = true;
+                        term.writeln('Server log live stream unavailable — showing snapshot.');
+                    }
+                    failures++;
+                    setTimeout(openStream, Math.min(1000 * 2 ** (failures - 1), 30000));
+                };
             };
-            source.onerror = () => {
-                if (!live) term.writeln('Server log live stream unavailable — showing snapshot.');
-            };
+            openStream();
         })
         .catch(() => hideSection(doc));
 }
