@@ -85,7 +85,15 @@ public static class DaemonSpawner
                     catch { died = true; break; }
                     int? claim = PidFile.TryReadPid(pidPath);
                     bool claimOk = false;
-                    try { claimOk = claim is int c && c == childPid && childPid != -1 && PidFile.IsServerProcess(c); } catch { }
+                    // Identity comes from the live child handle, not
+                    // IsServerProcess: pid reuse is impossible while this
+                    // handle is open, and IsServerProcess reads /proc
+                    // cmdlines so it always fails for dotnet-hosted
+                    // servers on Windows (dotnet.exe, no /proc) — that
+                    // flapped every background start into a false "did
+                    // not become ready" on healthy servers. The c ==
+                    // childPid match still refuses a rival starter's claim.
+                    try { claimOk = claim is int c && c == childPid && childPid != -1 && !child.HasExited; } catch { }
                     bool portOk = !webEnabled || PidFile.IsPortListening(expectedPort);
                     if (claimOk && portOk) { ready = true; break; }
                     try { await Task.Delay(PollCadence, timeoutCts.Token).ConfigureAwait(false); }
