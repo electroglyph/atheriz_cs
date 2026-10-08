@@ -16,7 +16,7 @@ set "PUBLISH_DLL=%PROJECT_ROOT%\publish\Atheriz.Server.dll"
 
 where dotnet >nul 2>nul
 if %errorlevel% neq 0 (
-  echo error: dotnet 10.0.100+ required (see global.json) 1>&2
+  echo error: dotnet 10.0.100+ required ^(see global.json^) 1>&2
   exit /b 1
 )
 
@@ -93,7 +93,7 @@ goto :run_dll
 if not exist "%~2" exit /b 0
 if not exist "%~1" (
   if not exist "web" exit /b 0
-  echo WARNING: this game has no staged %~3 entry (%~1 missing). 1>&2
+  echo WARNING: this game has no staged %~3 entry ^(%~1 missing^). 1>&2
   set "GAME_ASSETS_STALE=1"
   exit /b 0
 )

@@ -232,8 +232,8 @@ public static class GameTemplateGenerator
         Console.WriteLine($"    - {gName}.csproj (refs Atheriz.Core)");
         Console.WriteLine("    - README.md, save/, secret/");
         Console.WriteLine("    - web/ (templates and static files)");
-        Console.WriteLine("    - atheriz.sh, atheriz.cmd (per-game launchers: ./atheriz.sh start)");
-        Console.WriteLine("    - build.sh, build.cmd (per-game build: ./build.sh [--no-web] [--web] [--reload])");
+        Console.WriteLine("    - atheriz.sh, atheriz.cmd, atheriz.ps1 (per-game launchers: ./atheriz.sh start)");
+        Console.WriteLine("    - build.sh, build.cmd, build.ps1 (per-game build: ./build.sh [--no-web] [--web] [--reload])");
         if (shouldSetup)
         {
             Console.WriteLine("  Initial world:");
@@ -311,14 +311,23 @@ public static class GameTemplateGenerator
         // generated ones.
         files["atheriz.sh"] = ShWrapper(engineRoot);
         files["atheriz.cmd"] = CmdWrapper(engineRoot);
+        files["atheriz.ps1"] = PsWrapper(engineRoot);
         // Per-game builds: Release plugin build + webclient redeploy into
         // this game. Same plain-write refresh semantics as the launchers.
         files["build.sh"] = BuildSh(gameName, engineRel);
         files["build.cmd"] = BuildCmd(gameName, engineRel);
+        files["build.ps1"] = BuildPs1(gameName, engineRel);
         foreach (var kv in files)
         {
             Console.WriteLine($"  Creating {kv.Key}...");
-            File.WriteAllText(Path.Combine(folderPath, kv.Key), kv.Value);
+            var text = kv.Value;
+            if (kv.Key.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
+            {
+                // cmd.exe cannot parse LF-only batch files: the C# template
+                // strings above are LF, so normalize to CRLF on write.
+                text = text.Replace("\r\n", "\n").Replace("\n", "\r\n");
+            }
+            File.WriteAllText(Path.Combine(folderPath, kv.Key), text);
         }
         // Best-effort executable bit for the shell wrappers (no-op on Windows).
         Atheriz.Core.Utils.FsUtil.TryChmod0755(Path.Combine(folderPath, "atheriz.sh"));
@@ -437,7 +446,7 @@ public static class GameTemplateGenerator
         // Call-site mirrors of the modifiers (ref/out/in/params pass-through).
         return string.Join(", ", ps.Select(p => ModifierPrefix(p) + (p.Name ?? "arg")));
     }
-    private static string RM(string ns) => $"# {ns} — Atheriz Game Folder\nGenerated via `atheriz-cs new {ns}` (ports `atheriz/new.py:784`).\n## Run\n```\n# From this folder (the wrappers forward to the engine launcher):\n./atheriz.sh start\n# (atheriz.cmd start on Windows; set ATHERIZ_ROOT if the engine moved)\n# Rebuild this game (engine server when stale + plugin Release + webclient redeploy):\n./build.sh\n# (build.cmd on Windows; --no-web for code only, --web for web only,\n# --reload to hot-load a running server, --no-engine to trust the server dll)\n# Game code is a class library loaded by the server (no Program.cs needed).\n# Direct alternative:\ndotnet run --project ../src/Atheriz.Server -- start\n```\n";
+    private static string RM(string ns) => $"# {ns} — Atheriz Game Folder\nGenerated via `atheriz-cs new {ns}` (ports `atheriz/new.py:784`).\n## Run\n```\n# From this folder (the wrappers forward to the engine launcher):\n./atheriz.sh start\n# (atheriz.cmd / atheriz.ps1 start on Windows; set ATHERIZ_ROOT if the engine moved)\n# Rebuild this game (engine server when stale + plugin Release + webclient redeploy):\n./build.sh\n# (build.cmd / build.ps1 on Windows; --no-web for code only, --web for web only,\n# --reload to hot-load a running server, --no-engine to trust the server dll)\n# Game code is a class library loaded by the server (no Program.cs needed).\n# Direct alternative:\ndotnet run --project ../src/Atheriz.Server -- start\n```\n";
     // Assembly attributes for scaffolded games (checked-in template carries AssemblyInfo.cs with the same shape).
     private static string AI(string ns) => $"using System.Reflection;\n[assembly: AssemblyDescription(\"{ns} — Atheriz game plugin, loaded by Atheriz.Server via PluginLoader.\")]\n";
     // Per-game launchers: thin forwarders to the engine's atheriz.sh/cmd.
@@ -479,11 +488,41 @@ public static class GameTemplateGenerator
         set "ENGINE_ROOT=__ATHERIZ_ENGINE_ROOT__"
         if defined ATHERIZ_ROOT set "ENGINE_ROOT=%ATHERIZ_ROOT%"
         if not exist "%ENGINE_ROOT%\atheriz.cmd" (
-          echo error: engine launcher not found under '%ENGINE_ROOT%' (set ATHERIZ_ROOT to the engine checkout) 1>&2
+          echo error: engine launcher not found under '%ENGINE_ROOT%' ^(set ATHERIZ_ROOT to the engine checkout^) 1>&2
           exit /b 1
         )
         call "%ENGINE_ROOT%\atheriz.cmd" %*
         exit /b %errorlevel%
+        """.Replace("__ATHERIZ_ENGINE_ROOT__", engineRoot ?? "") + "\n";
+    // Per-game PowerShell launcher: same forwarder contract as ShWrapper /
+    // CmdWrapper (ATHERIZ_ROOT override, upward search, baked absolute
+    // fallback, game folder stays CWD). Written with LF endings like
+    // every template here — PowerShell parses LF and CRLF alike.
+    private static string PsWrapper(string engineRoot) => """
+        # Auto-generated by `atheriz.ps1 new` — per-game launcher. Forwards every
+        # command to the engine launcher; the game folder (current directory) is
+        # never changed. Override the engine location with $env:ATHERIZ_ROOT.
+        $engineRoot = $env:ATHERIZ_ROOT
+        if ([string]::IsNullOrEmpty($engineRoot)) {
+          $dir = $PSScriptRoot
+          if ([string]::IsNullOrEmpty($dir)) { $dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+          $depth = 0
+          while ($depth -lt 12) {
+            if (Test-Path (Join-Path $dir 'src/Atheriz.Server/Atheriz.Server.csproj')) { $engineRoot = $dir; break }
+            $parent = Split-Path -Parent $dir
+            if ([string]::IsNullOrEmpty($parent) -or ($parent -ceq $dir)) { break }
+            $dir = $parent
+            $depth++
+          }
+        }
+        if ([string]::IsNullOrEmpty($engineRoot)) { $engineRoot = '__ATHERIZ_ENGINE_ROOT__' }
+        $launcher = Join-Path $engineRoot 'atheriz.ps1'
+        if (-not (Test-Path $launcher -PathType Leaf)) {
+          [Console]::Error.WriteLine("error: engine launcher not found under '$engineRoot' (set ATHERIZ_ROOT to the engine checkout)")
+          exit 1
+        }
+        & $launcher @args
+        exit $LASTEXITCODE
         """.Replace("__ATHERIZ_ENGINE_ROOT__", engineRoot ?? "") + "\n";
     // Per-game builds: `dotnet build -c Release` the engine server first when
     // its dll is missing or older than the engine sources (a stale server
@@ -639,7 +678,7 @@ public static class GameTemplateGenerator
           )
         )
         if not defined ENGINE_ROOT (
-          echo error: engine checkout not found (set ATHERIZ_ROOT to the engine checkout) 1>&2
+          echo error: engine checkout not found ^(set ATHERIZ_ROOT to the engine checkout^) 1>&2
           exit /b 1
         )
         set "DO_BUILD=1"
@@ -670,7 +709,7 @@ public static class GameTemplateGenerator
           if errorlevel 1 exit /b 1
         )
         if "%DO_WEB%"=="1" (
-          if not exist "%SERVER_DLL%" ( echo error: engine server dll not found: %SERVER_DLL% (build the engine first) 1>&2 & exit /b 1 )
+          if not exist "%SERVER_DLL%" ( echo error: engine server dll not found: %SERVER_DLL% ^(build the engine first^) 1>&2 & exit /b 1 )
           dotnet "%SERVER_DLL%" deploy game --web-root "%GAME_DIR%\web"
           if errorlevel 1 exit /b 1
         )
@@ -713,6 +752,125 @@ public static class GameTemplateGenerator
         if errorlevel 1 exit /b 1
         exit /b 0
         """.Replace("__GAME_NAME__", gameName).Replace("__ATHERIZ_ENGINE_REL__", engineRel ?? "") + "\n";
+    // Per-game PowerShell build: same contract as BuildSh (engine Release
+    // freshness check, game plugin Release build, webclient redeploy via
+    // the engine server's `deploy game` verb, optional reload through the
+    // sibling per-game atheriz.ps1). Engine resolution mirrors PsWrapper,
+    // except the baked fallback is the relative path from `new` time.
+    private static string BuildPs1(string gameName, string engineRel) => """
+        # Auto-generated by `atheriz.ps1 new` — per-game build. Rebuilds the
+        # engine server (Release) when it is older than the engine sources,
+        # then the game plugin (Release), and redeploys the webclient into
+        # this game's web/ folder.
+        # Usage: ./build.ps1 [--no-web] [--web] [--reload] [--no-engine]
+        #   (no flags)  build the server (when stale) AND the plugin AND redeploy the webclient
+        #   --no-web    plugin only (skip web redeploy)
+        #   --web       web redeploy only (skip plugin build)
+        #   --reload    after a successful build, reload the running server so it
+        #               hot-loads the fresh dll (fails loudly if no server runs)
+        #   --no-engine skip the engine freshness check (trust the current server dll)
+        # Engine resolution: $env:ATHERIZ_ROOT wins, then an upward search for
+        # the engine checkout, then the relative path baked in at `new` time.
+        $ErrorActionPreference = 'Stop'
+        function Show-Usage {
+          Write-Output 'Usage: ./build.ps1 [--no-web] [--web] [--reload] [--no-engine]'
+          Write-Output '  (no flags)  build the server (when stale) AND the plugin AND redeploy the webclient'
+          Write-Output '  --no-web    plugin only'
+          Write-Output '  --web       web redeploy only'
+          Write-Output '  --reload    reload the running server after a successful build'
+          Write-Output '  --no-engine skip the engine freshness check'
+        }
+        $gameDir = $PSScriptRoot
+        if ([string]::IsNullOrEmpty($gameDir)) { $gameDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+        $engineRoot = $env:ATHERIZ_ROOT
+        if ([string]::IsNullOrEmpty($engineRoot)) {
+          $dir = $gameDir
+          $depth = 0
+          while ($depth -lt 12) {
+            if (Test-Path (Join-Path $dir 'src/Atheriz.Server/Atheriz.Server.csproj')) { $engineRoot = $dir; break }
+            $parent = Split-Path -Parent $dir
+            if ([string]::IsNullOrEmpty($parent) -or ($parent -ceq $dir)) { break }
+            $dir = $parent
+            $depth++
+          }
+        }
+        if ([string]::IsNullOrEmpty($engineRoot)) { $engineRoot = Join-Path $gameDir '__ATHERIZ_ENGINE_REL__' }
+        $serverCsproj = Join-Path $engineRoot 'src/Atheriz.Server/Atheriz.Server.csproj'
+        $serverDll = Join-Path $engineRoot 'src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll'
+        # True when the server Release dll is missing or any engine source
+        # is newer than it (same rule as build.sh; bin/obj never count).
+        function Test-EngineStale {
+          if (-not (Test-Path $serverDll -PathType Leaf)) { return $true }
+          if (-not (Test-Path $serverCsproj -PathType Leaf)) { return $false }
+          $dllTime = (Get-Item $serverDll).LastWriteTimeUtc
+          if ((Get-Item $serverCsproj).LastWriteTimeUtc -gt $dllTime) { return $true }
+          foreach ($p in @((Join-Path $engineRoot 'Directory.Build.props'), (Join-Path $engineRoot 'Directory.Packages.props'))) {
+            if ((Test-Path $p -PathType Leaf) -and ((Get-Item $p).LastWriteTimeUtc -gt $dllTime)) { return $true }
+          }
+          $newer = @(Get-ChildItem -Path (Join-Path $engineRoot 'src/*') -Include *.cs,*.csproj -Recurse -File -ErrorAction SilentlyContinue | Where-Object { ($_.FullName -notlike '*\bin\*') -and ($_.FullName -notlike '*\obj\*') -and ($_.LastWriteTimeUtc -gt $dllTime) })
+          return ($newer.Count -gt 0)
+        }
+        $doBuild = $true
+        $doWeb = $true
+        $doReload = $false
+        $doEngine = $true
+        foreach ($a in $args) {
+          $k = $a.ToLowerInvariant()
+          if ($k -eq '--no-web') { $doWeb = $false }
+          elseif ($k -eq '--web') { $doBuild = $false }
+          elseif ($k -eq '--reload') { $doReload = $true }
+          elseif ($k -eq '--no-engine') { $doEngine = $false }
+          elseif ($k -in @('--help', '-h', '-?', '/?')) { Show-Usage; exit 0 }
+          else { [Console]::Error.WriteLine("error: unknown arg: $a"); Show-Usage; exit 1 }
+        }
+        if ((-not $doBuild) -and (-not $doWeb)) {
+          [Console]::Error.WriteLine('error: --no-web and --web together leave nothing to do')
+          exit 1
+        }
+        $csproj = Join-Path $gameDir '__GAME_NAME__.csproj'
+        if ($doBuild) {
+          if ($null -eq (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+            [Console]::Error.WriteLine('error: dotnet SDK required (see engine global.json)')
+            exit 1
+          }
+          if (-not (Test-Path $csproj -PathType Leaf)) {
+            [Console]::Error.WriteLine("error: game project not found: $csproj")
+            exit 1
+          }
+          if ($doEngine) {
+            if (-not (Test-Path $serverCsproj -PathType Leaf)) {
+              [Console]::Error.WriteLine("WARNING: engine sources not found ($serverCsproj) - skipping server build.")
+            }
+            elseif (Test-EngineStale) {
+              Write-Output 'Engine server is stale - rebuilding...'
+              & dotnet build $serverCsproj -c Release
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+            else {
+              Write-Output 'Engine server is up to date - skipping.'
+            }
+          }
+          & dotnet build $csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
+        if ($doWeb) {
+          if (-not (Test-Path $serverDll -PathType Leaf)) {
+            [Console]::Error.WriteLine("error: engine server dll not found: $serverDll (build the engine first)")
+            exit 1
+          }
+          & dotnet $serverDll deploy game --web-root (Join-Path $gameDir 'web')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
+        if ($doReload) {
+          $launcher = Join-Path $gameDir 'atheriz.ps1'
+          if (-not (Test-Path $launcher -PathType Leaf)) {
+            [Console]::Error.WriteLine("error: per-game launcher missing: $launcher")
+            exit 1
+          }
+          & $launcher reload
+        }
+        Write-Output 'Build complete.'
+        """.Replace("__GAME_NAME__", gameName).Replace("__ATHERIZ_ENGINE_REL__", (engineRel ?? "").Replace('\\', '/')) + "\n";
     public static void CopyWebFolder(string destination, string? webSrc = null)
     {
         if (webSrc is not null)

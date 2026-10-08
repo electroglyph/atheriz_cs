@@ -9,7 +9,7 @@ set "WEBCLIENT_DIR=%SCRIPT_DIR%\webclient"
 set "DEST_WWWROOT=%SCRIPT_DIR%\src\Atheriz.Server\wwwroot"
 set "SRC_HASH_FILE=%DEST_WWWROOT%\.webclient-hash"
 set "FORCE=0"
-
+set "SRC_DIST=%WEBCLIENT_DIR%\dist"
 for %%a in (%*) do (
   if "%%a"=="--force" set "FORCE=1"
   if "%%a"=="-f" set "FORCE=1"
@@ -70,9 +70,9 @@ dir /b "%DEST_WWWROOT%\assets\webclient-*.js" >nul 2>nul
 if %errorlevel% neq 0 set "NEED_WEB_BUILD=1"
 
 if "%NEED_WEB_BUILD%"=="0" (
-  echo Webclient unchanged (%SRC_HASH%) — skipping vite build
+  echo Webclient unchanged ^(%SRC_HASH%^) — skipping vite build
 ) else (
-  echo Webclient changed (%SRC_HASH%) — rebuilding...
+  echo Webclient changed ^(%SRC_HASH%^) — rebuilding...
   pushd "%WEBCLIENT_DIR%"
   call npm ci --silent
   if !errorlevel! neq 0 call npm install
@@ -84,7 +84,6 @@ if "%NEED_WEB_BUILD%"=="0" (
   )
   popd
 
-  set "SRC_DIST=%WEBCLIENT_DIR%\dist"
   if not exist "%SRC_DIST%" (
     echo error: vite build did not produce %SRC_DIST% 1>&2
     exit /b 1

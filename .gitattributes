@@ -1,0 +1,6 @@
+# cmd.exe cannot parse batch files with LF-only line endings, so force
+# CRLF for batch scripts on every checkout (blob stays LF-normalized).
+*.cmd text eol=crlf
+*.bat text eol=crlf
+# Shell scripts must keep LF endings.
+*.sh text eol=lf
