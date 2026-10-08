@@ -15,14 +15,13 @@ usage() {
   echo "Usage: $0 [--force] [--help]"
   echo "  --force  force rebuild of webclient even if unchanged"
   echo "  --help   show this help"
-  exit 0
 }
 
 for arg in "$@"; do
   case "$arg" in
     --force|-f) FORCE=1 ;;
-    --help|-h) usage ;;
-    *) echo "unknown arg: $arg" >&2; usage ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "unknown arg: $arg" >&2; usage >&2; exit 1 ;;
   esac
 done
 
