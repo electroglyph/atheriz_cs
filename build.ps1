@@ -49,8 +49,8 @@
         ignored them. Hash-file comparison trims whitespace so legacy
         hash files with a trailing space still match.
     The content hash covers exactly the same inputs as build.cmd
-    (webclient/src + vite.config.ts + package.json) so the two agree
-    whenever collation agrees (see ordinal-sort note below).
+    (webclient/src + vite.config.ts + package.json), computed by the
+    same snippet, so the two agree byte-for-byte on Windows.
     build.sh additionally folds in package-lock.json + tsconfig.json
     and will disagree once those change without src/config changes.
 
@@ -62,13 +62,11 @@
         it would desync the skip decision.
       * Sort-Object is culture-sensitive AND differs between runtimes
         (.NET Framework/NLS on Windows PowerShell 5.1 vs ICU on
-        PowerShell 7+), so this script sorts the path list with an
-        explicit ordinal comparer instead. That makes the hash
-        byte-identical on 5.1, 7+, and Linux pwsh. It can differ from
-        build.cmd/atheriz.cmd (which inherit 5.1 NLS order) on trees
-        whose NLS and ordinal orders disagree — worst case is one
-        extra rebuild when alternating scripts, then each is stable
-        with itself.
+        PowerShell 7+). Get-WebclientHash therefore delegates to the
+        exact build.cmd snippet in a `powershell -NoProfile` child
+        whenever powershell.exe exists, so all Windows scripts agree
+        byte-for-byte; the internal ordinal sort is only the fallback
+        for hosts without it (e.g. Linux pwsh).
 #>
 [CmdletBinding(PositionalBinding = $false)]
 param(
@@ -108,22 +106,64 @@ function Fail-Build {
 function Get-WebclientHash {
     <#
     .SYNOPSIS
-        Hash of webclient sources, same algorithm as build.cmd.
+        Hash of webclient sources, byte-identical to build.cmd.
     .DESCRIPTION
         Concatenates the raw bytes of every file under webclient/src
         plus vite.config.ts and package.json (sorted by FullName) into
-        one SHA256. Returns '' when no input files are found.
+        one SHA256. Same inputs as build.cmd (including its
+        wildcard-child quirk: the package.json *file* path with
+        -Recurse matches every file NAMED package.json under
+        webclient/, root + node_modules).
+
+        Whenever Windows PowerShell 5.1 is available, the hash is
+        computed by the exact build.cmd/atheriz.cmd snippet in a
+        `powershell -NoProfile` child (input dir passed via the
+        ATHERIZ_HASH_DIR env var to avoid quoting layers), so every
+        Windows script agrees byte-for-byte. Sort-Object is
+        culture-sensitive and NLS (.NET Framework) vs ICU
+        (PowerShell 7+) order some trees differently, which would
+        otherwise flap the skip decision across hosts/scripts.
+
+        Without powershell.exe (e.g. Linux pwsh) the same inputs are
+        hashed internally with an explicit ordinal sort: deterministic
+        on every host. Returns '' when webclient/src is missing or the
+        child produces no hash (callers treat that as a hard error;
+        build.cmd would hash the empty set instead — failing fast here
+        with a clear message is deliberate).
     #>
     param([Parameter(Mandatory = $true)][string] $WebclientDir)
 
+    if (-not (Test-Path (Join-Path $WebclientDir 'src') -PathType Container)) {
+        return ''
+    }
+    $ps51 = Get-Command powershell -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $ps51) {
+        $env:ATHERIZ_HASH_DIR = $WebclientDir
+        try {
+            $out = @( & powershell -NoProfile -Command "`$files=@(Get-ChildItem -Recurse -File (`$env:ATHERIZ_HASH_DIR + '\src'), (`$env:ATHERIZ_HASH_DIR + '\vite.config.ts'), (`$env:ATHERIZ_HASH_DIR + '\package.json') -ErrorAction SilentlyContinue | Sort-Object FullName); `$sha=[System.Security.Cryptography.SHA256]::Create(); foreach(`$f in `$files){ `$bytes=[System.IO.File]::ReadAllBytes(`$f.FullName); `$null=`$sha.TransformBlock(`$bytes,0,`$bytes.Length,`$null,`$null)}; `$sha.TransformFinalBlock([byte[]]::new(0),0,0) | Out-Null; [System.BitConverter]::ToString(`$sha.Hash).Replace('-','').ToLower()" 2>$null )
+            $childOk = ($LASTEXITCODE -eq 0)
+        }
+        finally {
+            Remove-Item Env:\ATHERIZ_HASH_DIR -ErrorAction SilentlyContinue
+        }
+        if ($childOk) {
+            $h = @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ -ne '' }) | Select-Object -Last 1
+            if ($h -match '^[0-9a-f]{64}$') {
+                return $h
+            }
+        }
+        Write-Stderr 'error: failed to compute webclient/src hash (powershell subprocess produced no hash)'
+        return ''
+    }
     $inputs = @(
         (Join-Path $WebclientDir 'src'),
         (Join-Path $WebclientDir 'vite.config.ts'),
         (Join-Path $WebclientDir 'package.json')
     )
-    # Ordinal sort (see .NOTES): Sort-Object is culture-sensitive and
-    # NLS (.NET Framework) vs ICU (PowerShell 7+) disagree on some
-    # trees, which would flap the skip decision across hosts.
+    # Ordinal fallback (see .DESCRIPTION): Sort-Object is
+    # culture-sensitive and NLS (.NET Framework) vs ICU (PowerShell
+    # 7+) disagree on some trees, which would flap the skip decision
+    # across hosts.
     $paths = @()
     foreach ($p in $inputs) {
         if (Test-Path $p) {

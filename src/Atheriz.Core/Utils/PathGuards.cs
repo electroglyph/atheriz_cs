@@ -108,18 +108,22 @@ public static class PathGuards
     /// baked per-engine filename list — keeps the guard true if the storage
     /// layer gains new sidecar suffixes.
     /// </summary>
+    public static bool HasWorldMarkers(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (!Directory.Exists(full)) return false;
+        if (File.Exists(Path.Combine(full, "server.pid"))) return true;
+        return Directory.EnumerateFiles(full, "database.sqlite3*").Any();
+    }
+
     public static void GuardWipePath(string path)
     {
         DenyRoot(path);
-        var full = Path.GetFullPath(path);
-        if (Directory.Exists(full))
-        {
-            if (File.Exists(Path.Combine(full, "server.pid"))) return;
-            if (Directory.EnumerateFiles(full, "database.sqlite3*").Any()) return;
-        }
-        // No override: a markerless target refuses even inside a game
-        // folder. The operator already confirmed at the reset prompt; a
-        // missing world is a misconfiguration, never a force-through.
+        if (HasWorldMarkers(path)) return;
+        // No override at this layer. Callers that knowingly handle the
+        // markerless case (reset: nothing to protect, proceed to fresh
+        // setup — same as `new --overwrite`'s save-leaf wipe) branch on
+        // HasWorldMarkers first and only call here for initialized worlds.
         throw new InvalidOperationException(
             $"Refusing to wipe '{path}': not an initialized world (expected world markers).");
     }

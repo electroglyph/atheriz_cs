@@ -34,10 +34,10 @@
     hash-of-hashes. On Windows the staged hash file is written by
     build.cmd/build.ps1 (3 inputs: src + vite.config.ts +
     package.json, raw SHA256 concat), so this script uses the same
-    3-input raw hash as build.ps1 — otherwise the L1 comparison could
-    never agree with the Windows build scripts. Lockfile/tsconfig-only
-    changes therefore do not trigger the warning; everything else
-    behaves exactly like atheriz.sh.
+    3-input raw hash — computed by the same snippet, so all Windows
+    scripts agree byte-for-byte. Lockfile/tsconfig-only changes
+    therefore do not trigger the warning; everything else behaves
+    exactly like atheriz.sh.
 #>
 [CmdletBinding(PositionalBinding = $false)]
 param(
@@ -63,13 +63,39 @@ function Fail-Run {
 function Get-WebclientSrcHash {
     <#
     .SYNOPSIS
-        Current-sources hash, same inputs/algorithm as build.ps1.
+        Current-sources hash, byte-identical to build.ps1/build.cmd.
     .DESCRIPTION
-        Returns '' when webclient/src is missing or unreadable.
+        Same inputs and snippet as build.ps1's Get-WebclientHash, so
+        the L1 staleness comparison agrees with the hash file the
+        Windows build scripts record. Whenever Windows PowerShell 5.1
+        is available the hash is computed by that exact snippet in a
+        `powershell -NoProfile` child (input dir via the
+        ATHERIZ_HASH_DIR env var); otherwise the same inputs are
+        hashed internally with an explicit ordinal sort. Returns ''
+        when webclient/src is missing or no hash is produced.
     #>
     param([Parameter(Mandatory = $true)][string] $WebclientDir)
 
     if (-not (Test-Path (Join-Path $WebclientDir 'src') -PathType Container)) {
+        return ''
+    }
+    $ps51 = Get-Command powershell -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $ps51) {
+        $env:ATHERIZ_HASH_DIR = $WebclientDir
+        try {
+            $out = @( & powershell -NoProfile -Command "`$files=@(Get-ChildItem -Recurse -File (`$env:ATHERIZ_HASH_DIR + '\src'), (`$env:ATHERIZ_HASH_DIR + '\vite.config.ts'), (`$env:ATHERIZ_HASH_DIR + '\package.json') -ErrorAction SilentlyContinue | Sort-Object FullName); `$sha=[System.Security.Cryptography.SHA256]::Create(); foreach(`$f in `$files){ `$bytes=[System.IO.File]::ReadAllBytes(`$f.FullName); `$null=`$sha.TransformBlock(`$bytes,0,`$bytes.Length,`$null,`$null)}; `$sha.TransformFinalBlock([byte[]]::new(0),0,0) | Out-Null; [System.BitConverter]::ToString(`$sha.Hash).Replace('-','').ToLower()" 2>$null )
+            $childOk = ($LASTEXITCODE -eq 0)
+        }
+        finally {
+            Remove-Item Env:\ATHERIZ_HASH_DIR -ErrorAction SilentlyContinue
+        }
+        if ($childOk) {
+            $h = @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ -ne '' }) | Select-Object -Last 1
+            if ($h -match '^[0-9a-f]{64}$') {
+                return $h
+            }
+        }
+        Write-Stderr 'error: failed to compute webclient/src hash (powershell subprocess produced no hash)'
         return ''
     }
     $inputs = @(

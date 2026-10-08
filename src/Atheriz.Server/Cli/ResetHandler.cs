@@ -95,9 +95,29 @@ public static class ResetHandler
         // Nothing to wipe (fresh folder): skip the world-membership gate —
         // GuardWipePath demands markers precisely so a live/foreign dir is
         // never deleted, but an absent dir needs no protection.
+        //
+        // Same for a markerless save dir that is the conventional save
+        // leaf of the current game folder: there is no world worth
+        // protecting and no foreign dir at stake, so reset proceeds to a
+        // fresh setup instead of taking the operator's confirmation and
+        // then refusing. (Mirrors `new --overwrite`'s save-leaf wipe.)
+        // Any other markerless target — notably a foreign dir outside a
+        // game folder — still goes through the full gate and refuses.
         if (Directory.Exists(savePath))
         {
-            try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
+            try { Atheriz.Core.Utils.PathGuards.DenyRoot(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
+            var cwdSave = Path.Combine(Path.GetFullPath(Directory.GetCurrentDirectory()), "save");
+            var pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            bool ownSaveLeaf = Atheriz.Core.Utils.GameUtils.IsInGameFolder()
+                && string.Equals(Path.GetFullPath(savePath), cwdSave, pathComparison);
+            if (!ownSaveLeaf || Atheriz.Core.Utils.PathGuards.HasWorldMarkers(savePath))
+            {
+                try { Atheriz.Core.Utils.PathGuards.GuardWipePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
+            }
+            else
+            {
+                Console.WriteLine("No initialized world found — creating a fresh one...");
+            }
             try
             {
                 if (OperatingSystem.IsWindows())
