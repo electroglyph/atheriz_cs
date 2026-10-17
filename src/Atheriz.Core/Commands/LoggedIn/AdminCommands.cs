@@ -1,5 +1,7 @@
 using System.IO;
 using System.Net.Http;
+using Atheriz.Core.Commands.UnloggedIn;
+using Atheriz.Core.Network;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -325,5 +327,254 @@ public sealed class SpamCommand : LoggedInCommand
         catch (Exception) { }
         sw.Stop();
         go.Msg($"Created {created.Count} accounts/chars in {sw.Elapsed.TotalMilliseconds} milliseconds. Names saved to {credsFile}");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/admin.py:CmdBoot</c>.
+/// </summary>
+public sealed class BootCommand : LoggedInCommand
+{
+    public override string Key => "boot";
+    public override string Desc => "Disconnect someone's session.";
+    public override string Category => "Admin";
+    public override string ExtraDesc => "Use 'boot <account, character, or session id>[ = <reason>]'.";
+    public override bool UseParser => false;
+    public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        int eq = text.IndexOf('=');
+        string targetPart = (eq < 0 ? text : text[..eq]).Trim();
+        string reason = eq < 0 ? "You have been disconnected." : text[(eq + 1)..].Trim();
+        if (targetPart.Length == 0) { go.Msg(PrintHelp()); return; }
+        if (reason.Length == 0) reason = "You have been disconnected.";
+        var mgr = GlobalServices.GetConnectionManager();
+        var kicked = new List<BaseConnection>();
+        foreach (var conn in mgr.GetAllConnections())
+        {
+            string? sid, accName, puppetName;
+            try
+            {
+                sid = conn.SessionId;
+                accName = conn.Session.Account?.Name;
+                puppetName = conn.Session.Puppet?.Name;
+            }
+            catch { continue; }
+            if (targetPart.Equals(sid, StringComparison.OrdinalIgnoreCase)
+                || targetPart.Equals(accName, StringComparison.OrdinalIgnoreCase)
+                || targetPart.Equals(puppetName, StringComparison.OrdinalIgnoreCase))
+                kicked.Add(conn);
+        }
+        if (kicked.Count == 0) { CommandHelpers.MsgCouldNotFind(go, targetPart); return; }
+        foreach (var conn in kicked)
+        {
+            try { conn.Msg(reason); } catch (Exception) { }
+            try { mgr.Disconnect(conn); } catch (Exception) { }
+        }
+        go.Msg($"Booted {kicked.Count} session(s) ({targetPart}).");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/admin.py:CmdNewPassword</c>.
+/// </summary>
+public sealed class UserpasswordCommand : LoggedInCommand
+{
+    public override string Key => "userpassword";
+    public override string Desc => "Set a new password on another account.";
+    public override string Category => "Admin";
+    public override string ExtraDesc => "Use 'userpassword <account> = <new password>'.";
+    public override bool UseParser => false;
+    public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        int eq = text.IndexOf('=');
+        string accPart = (eq < 0 ? "" : text[..eq]).Trim();
+        string password = eq < 0 ? "" : text[(eq + 1)..].Trim();
+        if (accPart.Length == 0 || password.Length == 0) { go.Msg(PrintHelp()); return; }
+        var acc = ObjectRegistry.FilterBy(o => o is Account a && a.Name.Equals(accPart, StringComparison.OrdinalIgnoreCase))
+            .OfType<Account>()
+            .FirstOrDefault();
+        if (acc is null) { CommandHelpers.MsgCouldNotFind(go, accPart); return; }
+        var pwErr = Validation.ValidatePassword(password, AtherizSettings.Global);
+        if (pwErr is not null) { go.Msg(pwErr); return; }
+        acc.SetPassword(password);
+        go.Msg($"Password changed for {acc.Name}.");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/admin.py:CmdPerm</c>, over the
+/// privilege ranks this engine has instead of permission strings: viewing
+/// or granting a rank. SUPERUSER ONLY.
+/// </summary>
+public sealed class PermCommand : LoggedInCommand
+{
+    public override string Key => "perm";
+    public override IReadOnlyList<string> Aliases => ["setperm"];
+    public override string Desc => "View or grant a privilege rank.";
+    public override string Category => "Admin";
+    public override string ExtraDesc => "Use 'perm <object>' to view, 'perm <object> = <player|helper|builder|admin>' to grant. Prefix the target with * to target an account by name.";
+    public override bool UseParser => false;
+    public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        int eq = text.IndexOf('=');
+        string targetPart = (eq < 0 ? text : text[..eq]).Trim();
+        string rankPart = eq < 0 ? "" : text[(eq + 1)..].Trim();
+        if (targetPart.Length == 0) { go.Msg(PrintHelp()); return; }
+        GameObject? target;
+        if (targetPart.StartsWith("*", StringComparison.Ordinal))
+        {
+            string q = targetPart[1..].Trim();
+            var accs = ObjectRegistry.FilterBy(o => o is Account a && a.Name.Equals(q, StringComparison.OrdinalIgnoreCase))
+                .OfType<Account>()
+                .ToList();
+            if (accs.Count == 0) { CommandHelpers.MsgCouldNotFind(go, targetPart); return; }
+            if (accs.Count > 1) { go.Msg($"Multiple accounts match '{q}'."); return; }
+            target = accs[0];
+        }
+        else
+        {
+            var (resolved, error) = TargetResolution.ResolveObject(go, targetPart, _ => true, CommandHelpers.FormatNoMatchFound(targetPart));
+            if (error is not null) { go.Msg(error); return; }
+            if (resolved is null) return;
+            target = resolved;
+        }
+        if (eq < 0) { go.Msg($"{target.Name}: {target.PrivilegeLevel}"); return; }
+        if (!TryParseRank(rankPart, out var rank)) { go.Msg(PrintHelp()); return; }
+        if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }
+        target.PrivilegeLevel = rank;
+        go.Msg($"{target.Name} is now {rank}.");
+    }
+
+    private static bool TryParseRank(string text, out Privilege rank)
+    {
+        rank = text.ToLowerInvariant() switch
+        {
+            "player" => Privilege.Player,
+            "helper" => Privilege.Helper,
+            "builder" => Privilege.Builder,
+            "admin" => Privilege.Admin,
+            _ => (Privilege)(-1),
+        };
+        return (int)rank >= 0;
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/admin.py:CmdWall</c>.
+/// </summary>
+public sealed class WallCommand : LoggedInCommand
+{
+    public override string Key => "wall";
+    public override string Desc => "Announce to every connected session.";
+    public override string Category => "Admin";
+    public override string ExtraDesc => "Use 'wall <message>'. Reaches all sessions, including unlogged-in ones.";
+    public override bool UseParser => false;
+    public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        go.Msg("Announcing to all connected sessions...");
+        GlobalServices.GetConnectionManager().Broadcast($"{go.Name} shouts: {text}");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/system.py:CmdAccounts</c>.
+/// </summary>
+public sealed class AccountsCommand : LoggedInCommand
+{
+    public override string Key => "accounts";
+    public override IReadOnlyList<string> Aliases => ["account"];
+    public override string Desc => "Show account stats, or delete an account.";
+    public override string Category => "Admin";
+    public override string ExtraDesc => "Use 'accounts' for stats, 'accounts --delete <account>' to delete with its characters.";
+    public override bool UseParser => false;
+    public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.StartsWith("--delete ", StringComparison.OrdinalIgnoreCase))
+        {
+            DeleteAccount(go, text[9..].Trim(), PrintHelp());
+            return;
+        }
+        int accounts = ObjectRegistry.FilterBy(o => o.IsAccount).Count;
+        int characters = ObjectRegistry.FilterBy(o => o.IsPc).Count;
+        int online = 0;
+        try
+        {
+            foreach (var conn in GlobalServices.GetConnectionManager().GetAllConnections())
+                try { if (conn.Session.Account is not null) online++; } catch (Exception) { }
+        }
+        catch (Exception) { }
+        go.Msg($"Accounts: {accounts}, characters: {characters}, online sessions: {online}.");
+    }
+
+    private static void DeleteAccount(GameObject go, string name, string help)
+    {
+        if (name.Length == 0) { go.Msg(help); return; }
+        var acc = ObjectRegistry.FilterBy(o => o is Account a && a.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            .OfType<Account>()
+            .FirstOrDefault();
+        if (acc is null) { CommandHelpers.MsgCouldNotFind(go, name); return; }
+        // Kick live sessions first so no puppet outlives its account.
+        var mgr = GlobalServices.GetConnectionManager();
+        foreach (var conn in mgr.GetAllConnections())
+        {
+            bool theirs = false;
+            try { theirs = ReferenceEquals(conn.Session.Account, acc); } catch (Exception) { }
+            if (!theirs) continue;
+            try { conn.Msg($"Account {acc.Name} has been deleted."); } catch (Exception) { }
+            try { mgr.Disconnect(conn); } catch (Exception) { }
+        }
+        int chars = 0;
+        foreach (int id in acc.Characters.ToList())
+        {
+            var c = ObjectRegistry.GetSingle(id);
+            if (c is null || c.IsDeleted) continue;
+            c.Delete(go);
+            chars++;
+        }
+        acc.Delete(go);
+        go.Msg($"Deleted account {acc.Name} and {chars} character(s).");
+    }
+}
+
+/// <summary>
+/// Cold reboot beside <c>reload</c>: full checkpoint save plus the reload
+/// hooks, so non-persistent state is purged instead of hot-loaded.
+/// </summary>
+public sealed class ResetCommand : LoggedInCommand
+{
+    public override string Key => "reset";
+    public override string Desc => "Save and cold-reboot the server state.";
+    public override string Category => "Admin";
+    public override bool UseParser => false;
+    public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        go.Msg("Resetting...");
+        var settings = AtherizSettings.Global;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var failures = Persistence.CheckpointWriter.WriteCheckpoint(
+            settings, "save",
+            forceNodes: true,
+            includeTime: settings.TimeSystemEnabled);
+        foreach (var f in failures) go.Msg($"Save {f.Name} failed: {f.Message}");
+        sw.Stop();
+        if (failures.Count != 0) { go.Msg($"Reset aborted with {failures.Count} save error(s)."); return; }
+        try { Atheriz.Core.ServerEvents.AtServerReload(); }
+        catch (Exception ex) { go.Msg($"Reset failed: {ex.Message}"); return; }
+        try { AtherizLogger.LogInformation($"Reset triggered by {go.Name} ({go.Id}) in {sw.Elapsed.TotalMilliseconds} milliseconds."); } catch (Exception) { }
+        go.Msg($"Reset complete in {sw.Elapsed.TotalMilliseconds} milliseconds.");
     }
 }

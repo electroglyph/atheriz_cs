@@ -1,6 +1,6 @@
 # Commands: using and writing them
 
-> Covers: `src/Atheriz.Core/Commands/Command.cs`, `CommandContext.cs`, `CommandDispatcher.cs`, `CommandRegistry.cs`, `CmdSet.cs`, `GameArgumentParser.cs` (+`ParsedArgs`), `ParsedArgKeys.cs`, `CommandError.cs`, `CommandHelpException.cs`, `CommandHelpers.cs`, `Formatting.cs`, `HelpFormatter.cs`, `LoggedInCommand.cs`, `BuilderCommand.cs`, `LagGateCommand.cs`, `BaseChannelCommand.cs`, `ChannelAction.cs`, `CommandPermissions.cs`, `TargetResolution.cs`, `SessionLifecycle.cs` (`ConnectionHelper`+`CreationCooldownHelper`), `IMessageTarget.cs`, `ISessionProvider.cs`, `ILagInfo.cs`, `UnloggedIn/` (12), `LoggedIn/` (12). First half: what you can type. Second half: how to add a verb. Room/link mechanics are in [World and maps](04-world-maps.md); the tutorial teaser is in [Creating a game](02-creating-a-game.md).
+> Covers: `src/Atheriz.Core/Commands/Command.cs`, `CommandContext.cs`, `CommandDispatcher.cs`, `CommandRegistry.cs`, `CmdSet.cs`, `GameArgumentParser.cs` (+`ParsedArgs`), `ParsedArgKeys.cs`, `CommandError.cs`, `CommandHelpException.cs`, `CommandHelpers.cs`, `Formatting.cs`, `HelpFormatter.cs`, `LoggedInCommand.cs`, `BuilderCommand.cs`, `LagGateCommand.cs`, `BaseChannelCommand.cs`, `ChannelAction.cs`, `CommandPermissions.cs`, `TargetResolution.cs`, `SessionLifecycle.cs` (`ConnectionHelper`+`CreationCooldownHelper`), `IMessageTarget.cs`, `ISessionProvider.cs`, `ILagInfo.cs`, `UnloggedIn/` (13), `LoggedIn/` (12). First half: what you can type. Second half: how to add a verb. Room/link mechanics are in [World and maps](04-world-maps.md); the tutorial teaser is in [Creating a game](02-creating-a-game.md).
 
 ## 1. Connection-screen verbs
 
@@ -14,6 +14,7 @@ Before login you get the unlogged-in set. Name rules: at least 3 characters, at 
 | `new` | logged-in account | `<name>` | adds a character (up to `MaxCharacters`) |
 | `quit` | anyone | — | `Goodbye!`, closes the connection |
 | `help` | anyone | `[topic]` | shows help text |
+| `info` | anyone | — | server info block (`## BEGIN INFO` … `## END INFO`) |
 | `screenreader` | anyone | `on\|off` | toggles screen-reader-friendly output |
 
 ## 2. In-game groups
@@ -26,6 +27,18 @@ Info (look/help/map/mapedit):
 | `help` | player | `[topic]` | shows help text |
 | `map` | player | — | toggles your personal map display (`Map enabled.` / `Map disabled.`) |
 | `mapedit` | builder | — | opens the AtheriZ Draw editor in a new browser tab |
+| `home` | player | — | teleports to your `Home` (`You are already home.` when there) |
+| `about` | player | — | server name, version, OS, runtime |
+| `info` | player | — | server info block (same as the pre-login one) |
+| `time` | player | — | game time, then uptime and start time |
+| `nick` | player | `[<type>] <key> [= <replacement>]` | manages your input nicks (`nick`, `nick delete`, `nick clear`) |
+| `access` | player | `[<object> [= <lock>:<policy>[; …]]]` | bare: your permission groups; with a target (builder): view/set locks |
+| `who` / `doing` | player | — | who is online (`doing` hides session details) |
+| `sessions` | player | — | your own sessions only |
+| `color` | player | — | ANSI test charts (16, 256, truecolor) |
+| `page` / `tell` | player | `<who> [=] <text>` | private cross-room page (bare: last received; `page sent`: last sent) |
+| `password` | player | `<old> = <new>` | changes your own password |
+| `chardelete` | player | `<name> [--confirm]` | deletes one of your characters (two-step) |
 
 There is no `exits` verb — the exit list comes from `look`. There is no `draw` verb — the editor opens via `mapedit`.
 
@@ -55,11 +68,10 @@ Socials:
 | Command | Who | Args | What happens |
 |---|---|---|---|
 | `say` | player | `<text>` | `You say, "{text}"` to you, `{name} says, "{text}"` to the room |
-| `emote` | player | `<text>` | `{name} {text}` to you and the room |
+| `emote` / `pose` | player | `<text>` | `{name} {text}` to you and the room |
+| `whisper` | player | `<who> [=] <text>` | only the target hears it; the room sees nothing |
 | `socials` | player | — | lists the social commands |
 | `wave` | player | — | waves (the tutorial custom verb from [Creating a game](02-creating-a-game.md)) |
-
-There is no `whisper` verb — one-target speech exists only as the `AtSayFull(…, whisper: true)` hook path for game code.
 
 Communication (channels — there are no `join` / `leave` / `history` verbs):
 
@@ -82,6 +94,17 @@ Building (entry points — the how is in [World and maps](04-world-maps.md)):
 | `examine` | builder | `<target>` | `Examining {name} (#{id}):` plus attribute rows |
 | `delete` | builder | `<target>` | `Deleted {name}.` (a hook may refuse → `Deletion aborted.`) |
 | `create` | builder | `<name>` | `Created object '{name}' (ID: {id}).` |
+| `alias` | builder | `<object> [= <a>[;<b>…]]` | lists, replaces, or clears aliases |
+| `copy` | builder | `<object> [= <new name>]` | duplicates desc/aliases/tags/extras/flags (characters need a fresh name) |
+| `name` | builder | `<object> = <new name>` | renames (same guards as `set … name`) |
+| `wipe` | builder | `<object> [= <pattern>]` | bulk-deletes attributes (`*`/`?`; protected keys stay superuser-only) |
+| `find` | builder | `[--type …] <name\|#id\|*account>` | world search, first 50 hits |
+| `objects` | builder | — | kind counts plus the 10 most recent |
+| `teleport` | builder | `[<object> =] [dest]` | moves self (default) or another object; `--quiet`, `--tonone`, `--intoexit` |
+| `tag` | builder | `<object> = <tag>[;…]` | adds tags (`--remove` deletes, `--search <tag>` lists) |
+| `scripts` | builder | — | lists running tickable script objects |
+| `emit` | builder | `[<target> =] <text>` | god-voice to your room (default) or a room/object/account/channel |
+| `force` | builder | `<object> = <command>` | runs a command as another object (recursion-guarded) |
 | `desc` / `noun` / `move` / `maze` | builder | … | describe, name, teleport, generate (see [World and maps](04-world-maps.md)) |
 | `puppet` / `unpuppet` | builder | `<target>` | attach/detach a puppet |
 | `quell` / `unquell` | builder | — | `You are now quelled.` / `You are now unquelled.` |
@@ -93,10 +116,16 @@ Admin (builder+ only — one-gate rule noted: each of these carries ONE privileg
 |---|---|---|---|
 | `ban` | builder | `<name> [--reason …] [--account] [--ip]` | `Banned {name} ({character\|account}…).` |
 | `unban` | builder | `<name>` | `Unbanned {name} ({scope}).` |
+| `boot` | superuser | `<account\|character\|session> [= <reason>]` | disconnects matching sessions |
+| `userpassword` | superuser | `<account> = <password>` | sets another account's password |
+| `perm` | superuser | `<object> [= <rank>]` | views or grants player/helper/builder/admin |
+| `wall` | superuser | `<message>` | announces to every session, logged in or not |
+| `accounts` | superuser | `[--delete <account>]` | stats, or deletes an account with its characters |
+| `reset` | superuser | — | checkpoint save plus the reload hooks (cold reboot) |
 | `shutdown` | superuser | — | stops the server (saves first) |
 | `reload` | superuser | — | announces `Server is reloading...`, hot-loads |
 | `save` | superuser | — | checkpoints the world |
-| `spam` | superuser | `<text>` | broadcasts to all sessions |
+| `spam` | superuser | `<count>` | creates test accounts/characters |
 
 ## 3. Targeting from the player's side
 
@@ -271,6 +300,7 @@ Name/password rules in one paragraph: account and character names need at least 
 | `i` | `inventory` | alias |
 | `'` | `say` | alias |
 | `:` | `emote` | alias |
+| `pose` | `emote` | alias |
 | `?` | `help` | alias |
 | `exam` / `ex` / `exa` | `examine` | aliases |
 | `exit` / `logout` / `disconnect` | `quit` | aliases |

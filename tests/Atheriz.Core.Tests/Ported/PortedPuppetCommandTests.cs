@@ -66,7 +66,7 @@ public class PortedPuppetCommandTests
     // -----------------------------------------------------------------------
     // A. Command surface
     // -----------------------------------------------------------------------
-    [Fact] public void PuppetAttrs(){ var cmd=new PuppetCommand(); Assert.Equal("puppet",cmd.Key); Assert.Equal("Building",cmd.Category); Assert.Empty(cmd.Aliases); Assert.True(cmd.UseParser); }
+    [Fact] public void PuppetAttrs(){ var cmd=new PuppetCommand(); Assert.Equal("puppet",cmd.Key); Assert.Equal("Building",cmd.Category); Assert.Equal(["ic"],cmd.Aliases); Assert.True(cmd.UseParser); }
     [Fact] public void UnpuppetAttrs(){ var cmd=new UnpuppetCommand(); Assert.Equal("unpuppet",cmd.Key); Assert.Equal("Building",cmd.Category); Assert.False(cmd.UseParser); }
     [Fact] public void PuppetParserHasTarget(){ var parsed=new PuppetCommand().Parser!.ParseArgs(new string[]{"goblin"}); Assert.True(parsed.Has("target")); Assert.Equal("goblin", parsed["target"]?.ToString()); }
 

@@ -36,9 +36,9 @@ public sealed class CommandRegistryInitTests
         try
         {
             var keys = CommandRegistry.UnloggedIn.GetKeys();
-            foreach (var k in new[] { "connect", "create", "new", "guest", "none", "screenreader", "help", "quit" })
+            foreach (var k in new[] { "connect", "create", "new", "guest", "none", "screenreader", "help", "quit", "info" })
                 Assert.Contains(k, keys);
-            Assert.Equal(8, CommandRegistry.UnloggedIn.GetAll().Count);
+            Assert.Equal(9, CommandRegistry.UnloggedIn.GetAll().Count);
         }
         finally { CommandRegistry.Reset(); }
     }

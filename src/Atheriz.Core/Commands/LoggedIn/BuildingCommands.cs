@@ -1,5 +1,6 @@
 using Atheriz.Core.Commands.UnloggedIn;
 using Atheriz.Core.Concurrency;
+using System.Text.RegularExpressions;
 
 namespace Atheriz.Core.Commands.LoggedIn;
 
@@ -1053,6 +1054,7 @@ public sealed class NounCommand : BuilderCommand
 public sealed class PuppetCommand : BuilderCommand
 {
     public override string Key => "puppet";
+    public override IReadOnlyList<string> Aliases => ["ic"];
     public override string Desc => "Take control of an object, temporarily making it a player character.";
     public override string Category => "Building";
     protected override bool AllowMissingArgs => true;
@@ -1137,8 +1139,9 @@ public sealed class SetCommand : BuilderCommand
     public override string Desc => "Set an attribute on an object.";
     public override string Category => "Building";
     // Serializes PC renames: check-then-SetAttr must not straddle a
-    // rival rename to the same fresh name.
-    private static readonly Lock RenameLock = new();
+    // rival rename to the same fresh name. Shared with the dedicated
+    // rename verb (same reserve, one lock).
+    internal static readonly Lock RenameLock = new();
     protected override void SetupParser(GameArgumentParser p)
     {
         p.AddArgument(ParsedArgKeys.Target, help: "Object to modify (name, #id, 'me', or 'here').");
@@ -1405,6 +1408,7 @@ public sealed class UnbanCommand : BuilderCommand
 public sealed class UnpuppetCommand : BuilderCommand
 {
     public override string Key => "unpuppet";
+    public override IReadOnlyList<string> Aliases => ["ooc"];
     public override string Desc => "Release the puppeted object and return to your previous one.";
     public override string Category => "Building";
     public override bool UseParser => false;
@@ -1575,5 +1579,526 @@ public sealed class WanderCommand : BuilderCommand
                 try { AtherizLogger.LogWarning($"NPC {Name} (#{Id}) failed to move {loc.Coord} -> {node.Coord} via link '{link.Name}'"); } catch (Exception) { }
             }
         }
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/building.py:CmdSetObjAlias</c>.
+/// </summary>
+public sealed class AliasCommand : BuilderCommand
+{
+    public override string Key => "alias";
+    public override IReadOnlyList<string> Aliases => ["setobjalias"];
+    public override string Category => "Building";
+    public override string Desc => "View, set, or clear aliases on an object.";
+    public override string ExtraDesc => "Use 'alias <object>' to list, 'alias <object> = <a>[,<b>...]' to replace (separate with commas or semicolons), 'alias <object> =' to clear.";
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        int eq = text.IndexOf('=');
+        string targetPart = (eq < 0 ? text : text[..eq]).Trim();
+        var (target, error) = TargetResolution.ResolveObject(go, targetPart, _ => true, CommandHelpers.FormatNoMatchFound(targetPart));
+        if (error is not null) { go.Msg(error); return; }
+        if (target is null) return;
+        if (eq < 0)
+        {
+            var current = target.Aliases;
+            go.Msg(current.Count == 0 ? $"{target.Name} has no aliases." : $"{target.Name} aliases: {string.Join(", ", current)}");
+            return;
+        }
+        var fresh = text[(eq + 1)..].Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        target.Aliases = fresh;
+        target.IsModified = true;
+        go.Msg(fresh.Count == 0 ? $"Cleared aliases on {target.Name}." : $"Aliases on {target.Name}: {string.Join(", ", fresh)}.");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/building.py:CmdCopy</c>.
+/// </summary>
+public sealed class CopyCommand : BuilderCommand
+{
+    public override string Key => "copy";
+    public override string Category => "Building";
+    public override string Desc => "Copy an object.";
+    public override string ExtraDesc => "Use 'copy <object>[ = <new name>[;alias...]]'. Copies description, aliases, tags, extras, and kind flags (locks reset to fresh defaults).";
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        int eq = text.IndexOf('=');
+        string targetPart = (eq < 0 ? text : text[..eq]).Trim();
+        string rhs = eq < 0 ? "" : text[(eq + 1)..].Trim();
+        string? newName = null;
+        List<string> newAliases = [];
+        if (rhs.Length > 0)
+        {
+            var parts = rhs.Split(';', StringSplitOptions.TrimEntries);
+            if (parts[0].Length > 0) newName = parts[0];
+            newAliases = parts.Skip(1).Where(p => p.Length > 0).ToList();
+        }
+        var (target, error) = TargetResolution.ResolveObject(go, targetPart, _ => true, CommandHelpers.FormatNoMatchFound(targetPart));
+        if (error is not null) { go.Msg(error); return; }
+        if (target is null) return;
+        string name = newName is { Length: > 0 } ? newName : target.Name;
+        // Duplicate PC names cause permanent search ambiguity (see the spam
+        // command), so a PC copy needs a fresh name that passes the same
+        // checks as any rename.
+        if (target.IsPc)
+        {
+            var nameErr = Validation.ValidateCharacterName(name);
+            if (nameErr is not null) { go.Msg(nameErr); return; }
+            bool sameAsSource = name.Equals(target.Name, StringComparison.OrdinalIgnoreCase);
+            if (!sameAsSource && CreationValidation.PcNameExists(name)) { go.Msg($"Character with this name ({name}) already exists."); return; }
+            if (sameAsSource) { go.Msg("Copying a character needs a new name: 'copy <character> = <new name>'."); return; }
+        }
+        var copy = GameObject.Create(name, target.Desc,
+            isPc: target.IsPc, isItem: target.IsItem, isNpc: target.IsNpc,
+            isMapable: target.IsMapable, isContainer: target.IsContainer, isTickable: target.IsTickable);
+        copy.Aliases = newAliases.Count > 0 ? newAliases : target.Aliases;
+        copy.AddTags(target.TagsSnapshot);
+        foreach (var kv in target.GetExtraSnapshot()) copy.SetExtraJson(kv.Key, kv.Value);
+        copy.PrivilegeLevel = target.PrivilegeLevel;
+        ObjectRegistry.AddObject(copy);
+        go.Msg($"Copied {target.Name} to {copy.Name} (#{copy.Id}).");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/building.py:CmdName</c>.
+/// Dedicated rename verb over the same guards <c>set ... name</c> uses.
+/// </summary>
+public sealed class NameCommand : BuilderCommand
+{
+    public override string Key => "name";
+    public override IReadOnlyList<string> Aliases => ["rename"];
+    public override string Category => "Building";
+    public override string Desc => "Rename an object.";
+    public override string ExtraDesc => "Use 'name <object> = <new name>'.";
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        int eq = text.IndexOf('=');
+        string targetPart = (eq < 0 ? text : text[..eq]).Trim();
+        string newName = eq < 0 ? "" : text[(eq + 1)..].Trim();
+        if (targetPart.Length == 0 || newName.Length == 0) { go.Msg(PrintHelp()); return; }
+        var (target, error) = TargetResolution.ResolveObject(go, targetPart, _ => true, CommandHelpers.FormatNoMatchFound(targetPart));
+        if (error is not null) { go.Msg(error); return; }
+        if (target is null) return;
+        if (target != go && target.PrivilegeLevel >= go.PrivilegeLevel) { go.Msg("You cannot modify an object of equal or higher privilege."); return; }
+        var nameErr = Validation.ValidateCharacterName(newName);
+        if (nameErr is not null) { go.Msg(nameErr); return; }
+        bool sameAsSelf = target.IsPc && target.Name.Equals(newName, StringComparison.OrdinalIgnoreCase);
+        if (!sameAsSelf && CreationValidation.PcNameExists(newName)) { go.Msg($"Character with this name ({newName}) already exists."); return; }
+        lock (SetCommand.RenameLock)
+        {
+            bool stillSelf = target.IsPc && target.Name.Equals(newName, StringComparison.OrdinalIgnoreCase);
+            if (!stillSelf && CreationValidation.PcNameExists(newName)) { go.Msg($"Character with this name ({newName}) already exists."); return; }
+            target.Name = newName;
+            target.IsModified = true;
+        }
+        go.Msg($"Renamed to {newName}.");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/building.py:CmdWipe</c>.
+/// Bulk-delete attributes (the extras store); protected keys stay
+/// superuser-only exactly like <c>set</c>/<c>unset</c>.
+/// </summary>
+public sealed class WipeCommand : BuilderCommand
+{
+    public override string Key => "wipe";
+    public override string Category => "Building";
+    public override string Desc => "Delete attributes from an object.";
+    public override string ExtraDesc => "Use 'wipe <object>' for all attributes, 'wipe <object> = <pattern> [<pattern>...]' for wildcard (*, ?) matches.";
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        int eq = text.IndexOf('=');
+        string targetPart = (eq < 0 ? text : text[..eq]).Trim();
+        string? pattern = eq < 0 ? null : text[(eq + 1)..].Trim();
+        if (targetPart.Length == 0) { go.Msg(PrintHelp()); return; }
+        var (target, error) = TargetResolution.ResolveObject(go, targetPart, _ => true, CommandHelpers.FormatNoMatchFound(targetPart));
+        if (error is not null) { go.Msg(error); return; }
+        if (target is null) return;
+        var keys = target.GetExtraSnapshot().Keys.ToList();
+        if (pattern is { Length: > 0 })
+        {
+            var rxs = pattern.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => "^" + Regex.Escape(p).Replace(@"\*", ".*").Replace(@"\?", ".") + "$")
+                .ToList();
+            keys = keys.Where(k => rxs.Any(rx => Regex.IsMatch(k, rx, RegexOptions.IgnoreCase))).ToList();
+        }
+        if (keys.Count == 0) { go.Msg($"No attributes matched on {target.Name}."); return; }
+        string? blocked = keys.FirstOrDefault(SetHelper.IsProtected);
+        if (blocked is not null && !go.IsSuperUser) { go.Msg($"'{blocked}' is protected and cannot be removed."); return; }
+        int removed = 0;
+        foreach (var key in keys)
+            if (SetHelper.TryRemoveExtra(target, key)) removed++;
+        target.IsModified = true;
+        go.Msg($"Wiped {removed} attribute(s) from {target.Name}.");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/building.py:CmdFind</c>.
+/// </summary>
+public sealed class FindCommand : BuilderCommand
+{
+    public override string Key => "find";
+    public override IReadOnlyList<string> Aliases => ["search", "locate"];
+    public override string Category => "Building";
+    public override string Desc => "Search the world by name, id, or account.";
+    public override string ExtraDesc => "Use 'find <name>', 'find #<id>', 'find #<first>-#<last>', 'find *<account>', 'find --type <room|char|account|channel|item|npc> <query>'. Shows the first 50 hits.";
+    public override bool UseParser => false;
+    private const int Cap = 50;
+
+    internal static bool MatchesType(GameObject o, string? type) => type switch
+    {
+        null => true,
+        "room" => o.IsNode,
+        "char" => o.IsPc,
+        "account" => o.IsAccount,
+        "channel" => o.IsChannel,
+        "item" => o.IsItem,
+        "npc" => o.IsNpc,
+        _ => true,
+    };
+
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        string? type = null;
+        if (text.StartsWith("--type ", StringComparison.OrdinalIgnoreCase) || text.StartsWith("--type\t", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = text[6..].Trim();
+            int sp = rest.IndexOfAny([' ', '\t']);
+            if (sp < 0) { go.Msg(PrintHelp()); return; }
+            type = rest[..sp].Trim().ToLowerInvariant();
+            text = rest[(sp + 1)..].Trim();
+            if (type is not ("room" or "char" or "account" or "channel" or "item" or "npc")) { go.Msg(PrintHelp()); return; }
+            if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        }
+        List<GameObject> hits;
+        if (text.StartsWith("#", StringComparison.Ordinal))
+        {
+            string idref = text[1..].Trim();
+            int dash = idref.IndexOf('-');
+            if (dash >= 0)
+            {
+                // Dbref range: #<first>-#<last> (either # optional).
+                if (!int.TryParse(idref[..dash].Trim().TrimStart('#'), out int first)
+                    || !int.TryParse(idref[(dash + 1)..].Trim().TrimStart('#'), out int last))
+                { go.Msg("Invalid ID format. Use #<number> or #<first>-#<last>."); return; }
+                (int lo, int hi) = first <= last ? (first, last) : (last, first);
+                hits = ObjectRegistry.FilterBy(o => o.Id >= lo && o.Id <= hi && MatchesType(o, type));
+            }
+            else
+            {
+                if (!CommandHelpers.TryParseIdRef(text, out int id)) { go.Msg("Invalid ID format. Use #<number>."); return; }
+                var obj = ObjectRegistry.GetSingle(id);
+                hits = obj is not null && MatchesType(obj, type) ? [obj] : [];
+            }
+        }
+        else if (text.StartsWith("*", StringComparison.Ordinal))
+        {
+            string q = text[1..].Trim();
+            hits = ObjectRegistry.FilterBy(o => o.IsAccount && o.Name.Contains(q, StringComparison.OrdinalIgnoreCase) && MatchesType(o, type));
+        }
+        else
+        {
+            string q = text;
+            hits = ObjectRegistry.FilterBy(o => o.Name.Contains(q, StringComparison.OrdinalIgnoreCase) && MatchesType(o, type));
+        }
+        if (hits.Count == 0) { CommandHelpers.MsgNoMatchFound(go, text); return; }
+        var shown = hits.Take(Cap).Select(o => $"  #{o.Id} {o.Name}");
+        string tail = hits.Count > Cap ? $"\n... and {hits.Count - Cap} more." : "";
+        go.Msg($"Found {hits.Count}:\n{string.Join("\n", shown)}{tail}");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/building.py:CmdObjects</c>.
+/// </summary>
+public sealed class ObjectsCommand : BuilderCommand
+{
+    public override string Key => "objects";
+    public override string Category => "Building";
+    public override string Desc => "Show object counts and recent objects.";
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        var all = ObjectRegistry.FilterBy(_ => true);
+        int chars = all.Count(o => o.IsPc);
+        int rooms = all.Count(o => o.IsNode);
+        int exits = 0;
+        foreach (var node in all.OfType<Node>()) exits += node.GetLinks().Count;
+        int other = all.Count - chars - rooms;
+        var recent = all.OrderByDescending(o => o.Id).Take(10).Select(o => $"  #{o.Id} {o.Name}");
+        go.Msg($"Objects: {chars} characters, {rooms} rooms, {exits} exits, {other} other.\nRecently created:\n{string.Join("\n", recent)}");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/building.py:CmdTeleport</c>.
+/// </summary>
+public sealed class TeleportCommand : BuilderCommand
+{
+    public override string Key => "teleport";
+    public override IReadOnlyList<string> Aliases => ["tel"];
+    public override string Category => "Building";
+    public override string Desc => "Teleport an object somewhere.";
+    public override string ExtraDesc => "Use 'teleport <object> = <destination>' (defaults: self, your location). Flags --quiet, --tonone, --intoexit (destination is an exit name from your room). Both spellings --flag and /flag work.";
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        bool quiet = TakeFlag(ref text, "quiet");
+        bool toNone = TakeFlag(ref text, "tonone");
+        bool intoExit = TakeFlag(ref text, "intoexit");
+        if (text.Length == 0 && !toNone) { go.Msg(PrintHelp()); return; }
+        int eq = text.IndexOf('=');
+        string objPart = (eq < 0 ? text : text[..eq]).Trim();
+        string destPart = eq < 0 ? "" : text[(eq + 1)..].Trim();
+        GameObject target = go;
+        if (objPart.Length > 0)
+        {
+            var (found, error) = TargetResolution.ResolveObject(go, objPart, _ => true, CommandHelpers.FormatNoMatchFound(objPart));
+            if (error is not null) { go.Msg(error); return; }
+            if (found is null) return;
+            target = found;
+        }
+        bool announce = !quiet;
+        if (toNone)
+        {
+            if (!target.MoveToNowhere(force: true)) go.Msg($"Could not teleport {target.Name} nowhere.");
+            else if (!quiet) go.Msg($"Teleported {target.Name} nowhere.");
+            return;
+        }
+        if (destPart.Length == 0)
+        {
+            // No destination: the caller's own location (self-teleport home
+            // to the room you stand in; someone else joins you).
+            var here = go.ResolveLocationObject();
+            if (here is null) { go.Msg("You are nowhere."); return; }
+            if (!target.MoveTo(here, go, force: true, announce: announce)) go.Msg($"Could not teleport {target.Name}.");
+            else if (!quiet) go.Msg($"Teleported {target.Name} to {here.Name}.");
+            return;
+        }
+        if (intoExit)
+        {
+            if (go.ResolveLocationObject() is not Node node) { go.Msg("You are not in a mapped room."); return; }
+            var link = node.GetLinkByName(destPart);
+            if (link is null) { CommandHelpers.MsgCouldNotFind(go, destPart); return; }
+            var destNode = ObjectRegistry.FindNodeByCoord(link.Coord);
+            if (destNode is null) { go.Msg($"Exit {link.Name} leads nowhere."); return; }
+            if (!target.MoveTo(destNode, go, force: true, announce: announce)) go.Msg($"Could not teleport {target.Name}.");
+            else if (!quiet) go.Msg($"Teleported {target.Name} to {destNode.Name}.");
+            return;
+        }
+        var (dest, destError) = TargetResolution.ResolveObject(go, destPart, _ => true, CommandHelpers.FormatNoMatchFound(destPart));
+        if (destError is not null) { go.Msg(destError); return; }
+        if (dest is null) return;
+        if (!target.MoveTo(dest, go, force: true, announce: announce)) go.Msg($"Could not teleport {target.Name}.");
+        else if (!quiet) go.Msg($"Teleported {target.Name} to {dest.Name}.");
+    }
+
+    // Leading --flag or /flag tokens (both spellings accepted); returns
+    // whether the flag was present and strips every occurrence.
+    private static bool TakeFlag(ref string text, string flag)
+    {
+        bool found = false;
+        while (true)
+        {
+            string t = text.TrimStart();
+            bool dash = t.StartsWith("--" + flag, StringComparison.OrdinalIgnoreCase);
+            bool slash = t.StartsWith("/" + flag, StringComparison.OrdinalIgnoreCase);
+            if (!dash && !slash) break;
+            string token = dash ? "--" + flag : "/" + flag;
+            if (t.Length > token.Length && !char.IsWhiteSpace(t[token.Length])) break;
+            found = true;
+            text = t[token.Length..].TrimStart();
+        }
+        return found;
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/building.py:CmdTag</c>.
+/// </summary>
+public sealed class TagCommand : BuilderCommand
+{
+    public override string Key => "tag";
+    public override IReadOnlyList<string> Aliases => ["tags"];
+    public override string Category => "Building";
+    public override string Desc => "Add, remove, or search tags on objects.";
+    public override string ExtraDesc => "Use 'tag <object>' to list, 'tag <object> = <tag>[,<tag>...]' to add (separate with commas or semicolons), 'tag --remove <object> = <tag>[,...]' to remove, 'tag --search <tag>' to list tagged objects.";
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.StartsWith("--search ", StringComparison.OrdinalIgnoreCase))
+        {
+            string tag = text[9..].Trim();
+            if (tag.Length == 0) { go.Msg(PrintHelp()); return; }
+            var hits = ObjectRegistry.GetByTag(tag);
+            if (hits.Count == 0) { go.Msg($"Nothing is tagged '{tag}'."); return; }
+            go.Msg($"Tagged '{tag}':\n{string.Join("\n", hits.Select(o => $"  #{o.Id} {o.Name}"))}");
+            return;
+        }
+        bool remove = false;
+        if (text.StartsWith("--remove ", StringComparison.OrdinalIgnoreCase))
+        {
+            remove = true;
+            text = text[9..].Trim();
+        }
+        int eq = text.IndexOf('=');
+        string targetPart = (eq < 0 ? text : text[..eq]).Trim();
+        string tagPart = eq < 0 ? "" : text[(eq + 1)..].Trim();
+        if (targetPart.Length == 0) { go.Msg(PrintHelp()); return; }
+        var (target, error) = TargetResolution.ResolveObject(go, targetPart, _ => true, CommandHelpers.FormatNoMatchFound(targetPart));
+        if (error is not null) { go.Msg(error); return; }
+        if (target is null) return;
+        if (eq < 0)
+        {
+            if (remove) { go.Msg(PrintHelp()); return; }
+            var current = target.TagsSnapshot;
+            go.Msg(current.Count == 0 ? $"{target.Name} has no tags." : $"{target.Name} tags: {string.Join(", ", current)}.");
+            return;
+        }
+        if (tagPart.Length == 0) { go.Msg(PrintHelp()); return; }
+        var tags = tagPart.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        if (tags.Count == 0) { go.Msg(PrintHelp()); return; }
+        if (remove)
+        {
+            target.RemoveTags(tags);
+            target.IsModified = true;
+            go.Msg($"Removed tags from {target.Name}: {string.Join(", ", tags)}.");
+        }
+        else
+        {
+            target.AddTags(tags);
+            target.IsModified = true;
+            go.Msg($"Tagged {target.Name}: {string.Join(", ", tags)}.");
+        }
+    }
+}
+
+/// <summary>
+/// Mirrors the listing half of
+/// <c>evennia/commands/default/building.py:CmdScripts</c>: every tickable
+/// script object. Starting/stopping needs a per-script lifecycle decision
+/// first, so this verb lists only.
+/// </summary>
+public sealed class ScriptsCommand : BuilderCommand
+{
+    public override string Key => "scripts";
+    public override IReadOnlyList<string> Aliases => ["script"];
+    public override string Category => "Building";
+    public override string Desc => "List running script objects.";
+    public override bool UseParser => false;
+    private const int Cap = 50;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        var tickables = ObjectRegistry.FilterBy(o => o.IsTickable && !o.IsDeleted);
+        if (tickables.Count == 0) { go.Msg("No scripts are running."); return; }
+        var shown = tickables.Take(Cap).Select(o => $"  #{o.Id} {o.Name} every {o.TickSeconds}s");
+        string tail = tickables.Count > Cap ? $"\n... and {tickables.Count - Cap} more." : "";
+        go.Msg($"Running scripts ({tickables.Count}):\n{string.Join("\n", shown)}{tail}");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/admin.py:CmdEmit</c>.
+/// </summary>
+public sealed class EmitCommand : BuilderCommand
+{
+    public override string Key => "emit";
+    public override IReadOnlyList<string> Aliases => ["pemit", "remit"];
+    public override string Category => "Building";
+    public override string Desc => "Broadcast a message as god-voice.";
+    public override string ExtraDesc => "Use 'emit <text>' for your room, 'emit <target> = <text>' for a room, object, account, or channel.";
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        int eq = text.IndexOf('=');
+        if (eq < 0)
+        {
+            var here = go.ResolveLocationObject();
+            if (here is null) { go.Msg("You are nowhere."); return; }
+            here.MsgContents(text);
+            return;
+        }
+        string targetPart = text[..eq].Trim();
+        string message = text[(eq + 1)..].Trim();
+        if (targetPart.Length == 0 || message.Length == 0) { go.Msg(PrintHelp()); return; }
+        var (target, error) = TargetResolution.ResolveObject(go, targetPart, _ => true, CommandHelpers.FormatNoMatchFound(targetPart));
+        if (error is not null) { go.Msg(error); return; }
+        if (target is null) return;
+        switch (target)
+        {
+            case Node node:
+                node.MsgContents(message);
+                break;
+            case Channel channel:
+                channel.Send(message, go);
+                break;
+            case Account account:
+                var live = CommandHelpers.LivePuppets(account);
+                if (live.Count == 0) { go.Msg($"{account.Name} is not online."); return; }
+                foreach (var puppet in live) puppet.Msg(message);
+                break;
+            default:
+                target.Msg(message);
+                break;
+        }
+        go.Msg($"Emitted to {target.Name}.");
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/admin.py:CmdForce</c>: one gate
+/// (builders are trusted), plus an anti-recursion guard so forced loops
+/// cannot spin dispatch forever.
+/// </summary>
+public sealed class ForceCommand : BuilderCommand
+{
+    public override string Key => "force";
+    public override string Category => "Building";
+    public override string Desc => "Make another object execute a command.";
+    public override string ExtraDesc => "Use 'force <object> = <command>'.";
+    public override bool UseParser => false;
+    private static readonly AsyncLocal<int> Depth = new();
+    private const int MaxDepth = 8;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        int eq = text.IndexOf('=');
+        string targetPart = (eq < 0 ? "" : text[..eq]).Trim();
+        string cmdText = eq < 0 ? "" : text[(eq + 1)..].Trim();
+        if (targetPart.Length == 0 || cmdText.Length == 0) { go.Msg(PrintHelp()); return; }
+        var (target, error) = TargetResolution.ResolveObject(go, targetPart, _ => true, CommandHelpers.FormatNoMatchFound(targetPart));
+        if (error is not null) { go.Msg(error); return; }
+        if (target is null) return;
+        if (Depth.Value >= MaxDepth) { go.Msg("Force recursion too deep; refusing."); return; }
+        Depth.Value++;
+        try
+        {
+            var job = CommandDispatcher.DispatchLoggedIn(target, cmdText, immediate: true);
+            if (job is null) { go.Msg($"Nothing happened on {target.Name}."); return; }
+            job.Func(job.Caller, job.Args);
+        }
+        finally { Depth.Value--; }
+        go.Msg($"Forced {target.Name}: {cmdText}");
     }
 }

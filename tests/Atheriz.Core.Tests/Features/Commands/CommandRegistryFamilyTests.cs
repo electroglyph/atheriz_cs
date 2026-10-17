@@ -18,17 +18,22 @@ public sealed class CommandRegistryFamilyTests
         try
         {
             var all = CommandRegistry.LoggedIn.GetAll();
-            Assert.Equal(47, all.Count);
+            Assert.Equal(76, all.Count);
             var keys = all.Select(c => c.Key).OrderBy(k => k, StringComparer.Ordinal).ToList();
             Assert.Equal(
             [
-                "ban", "build", "channel", "close", "create", "delete", "desc",
-                "door", "drop", "emote", "examine", "follow", "get", "give",
-                "group", "help", "inventory", "lock", "look", "map", "mapedit",
-                "maze", "move", "nofollow", "none", "noun", "open", "puppet",
-                "put", "quell", "quit", "reload", "save", "say", "screenreader",
-                "set", "shutdown", "socials", "spam", "time", "unban", "unfollow",
-                "unlock", "unpuppet", "unquell", "unset", "wander",
+                "about", "access", "accounts", "alias", "ban", "boot", "build",
+                "channel", "chardelete", "close", "color", "copy", "create",
+                "delete", "desc", "door", "drop", "emit", "emote", "examine",
+                "find", "follow", "force", "get", "give", "group", "help",
+                "home", "info", "inventory", "lock", "look", "map", "mapedit",
+                "maze", "move", "name", "nick", "nofollow", "none", "noun",
+                "objects", "open", "page", "password", "perm", "puppet", "put",
+                "quell", "quit", "reload", "reset", "save", "say",
+                "screenreader", "scripts", "sessions", "set", "shutdown",
+                "socials", "spam", "tag", "teleport", "time", "unban",
+                "unfollow", "unlock", "unpuppet", "unquell", "unset",
+                "userpassword", "wall", "wander", "whisper", "who", "wipe",
             ], keys);
         }
         finally { CommandRegistry.Reset(); }
@@ -41,10 +46,10 @@ public sealed class CommandRegistryFamilyTests
         try
         {
             var all = CommandRegistry.UnloggedIn.GetAll();
-            Assert.Equal(8, all.Count);
+            Assert.Equal(9, all.Count);
             var keys = all.Select(c => c.Key).OrderBy(k => k, StringComparer.Ordinal).ToList();
             Assert.Equal(
-                ["connect", "create", "guest", "help", "new", "none", "quit", "screenreader"],
+                ["connect", "create", "guest", "help", "info", "new", "none", "quit", "screenreader"],
                 keys);
         }
         finally { CommandRegistry.Reset(); }

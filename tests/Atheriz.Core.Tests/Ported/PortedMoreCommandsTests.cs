@@ -213,7 +213,8 @@ public class PortedMoreCommandsTests
         using var env = GlobalTestEnv.Enter();
         var c = MakeCaller();
         new TimeCommand().Run(c, null);
-        Assert.Single(c.PeekMessages());
+        // Game time first, then the uptime/start-time lines.
+        Assert.Equal(3, c.PeekMessages().Count);
         Assert.False(string.IsNullOrWhiteSpace(c.PeekMessages()[0]));
     }
 

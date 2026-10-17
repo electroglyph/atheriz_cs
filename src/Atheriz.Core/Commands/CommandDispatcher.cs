@@ -164,7 +164,9 @@ public static class CommandDispatcher
     /// </summary>
     public static Job? DispatchLoggedIn(GameObject puppet, string text, bool immediate = false)
     {
-        var parsed = ParseRaw(text);
+        // Personal input nicks rewrite the line before parsing (single pass;
+        // existing commands and movement keys win inside ExpandNicks).
+        var parsed = ParseRaw(LoggedIn.NickCommand.ExpandNicks(puppet, text));
         if (parsed is null) return null;
         var stripped = parsed.Stripped;
         var rawCmdKey = parsed.RawCmdKey;

@@ -1,3 +1,4 @@
+using Atheriz.Core.Network;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Atheriz.Core.Commands.LoggedIn;
@@ -133,7 +134,7 @@ public sealed class ChannelCommand : LoggedInCommand
 public sealed class EmoteCommand : LoggedInCommand
 {
     public override string Key => "emote";
-    public override IReadOnlyList<string> Aliases => [":"];
+    public override IReadOnlyList<string> Aliases => [":", "pose"];
     public override string Category => "Communication";
     public override string Desc => "Emote something.";
     protected override void SetupParser(GameArgumentParser p)
@@ -394,6 +395,88 @@ public sealed class GroupCommand : LoggedInCommand
 }
 
 /// <summary>
+/// Mirrors <c>evennia/commands/default/general.py:CmdWhisper</c>.
+/// </summary>
+public sealed class WhisperCommand : LoggedInCommand
+{
+    public override string Key => "whisper";
+    public override string Category => "Communication";
+    public override string Desc => "Whisper privately to someone in the same room.";
+    public override string ExtraDesc => "Use 'whisper <target>[, <target>...] [=] <text>'. Only the targets hear it; the rest of the room sees nothing. Without '=' the first word is the target, so multi-word names need the '=' form.";
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { go.Msg(PrintHelp()); return; }
+        string targetPart, message;
+        int eq = text.IndexOf('=');
+        if (eq >= 0)
+        {
+            targetPart = text[..eq].Trim();
+            message = text[(eq + 1)..].Trim();
+        }
+        else
+        {
+            int sp = text.IndexOfAny([' ', '\t']);
+            if (sp < 0) { go.Msg(PrintHelp()); return; }
+            targetPart = text[..sp].Trim();
+            message = text[(sp + 1)..].Trim();
+        }
+        if (targetPart.Length == 0 || message.Length == 0) { go.Msg(PrintHelp()); return; }
+        var targets = new List<GameObject>();
+        foreach (var name in targetPart.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var tgt = ResolveTarget(go, name);
+            if (tgt is null) return;
+            if (!targets.Contains(tgt)) targets.Add(tgt);
+        }
+        if (targets.Count == 0) { go.Msg(PrintHelp()); return; }
+        go.AtSayFull(message, msgSelf: true, receivers: targets, whisper: true);
+    }
+
+    // Room-scoped resolution: inventory, then the viewable location, with the
+    // same hidden-multiple probe as the group member lookup — a whisper to
+    // the wrong same-named target leaks private text. Msgs and returns null
+    // on any failure.
+    private static GameObject? ResolveTarget(GameObject go, string name)
+    {
+        // Self never surfaces from a contents search, so catch it (and "me")
+        // up front instead of reporting not-found for your own name.
+        if (name.Equals("me", StringComparison.OrdinalIgnoreCase)
+            || name.Equals(go.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            go.Msg("You cannot whisper to yourself.");
+            return null;
+        }
+        var matches = ContentUtils.Search(go, name, ObjectRegistry.GetSingle, true, go);
+        GameObject? loc = null;
+        if (matches.Count == 0) { var locTmp = go.ResolveLocationObject() as GameObject; if (locTmp is not null && locTmp.Access(go, "view")) loc = locTmp; }
+        else loc = go.ResolveLocationObject() as GameObject;
+        if (matches.Count == 0 && loc is not null)
+            matches = loc is Node n ? n.Search(name, true, go) : ContentUtils.Search(loc, name, ObjectRegistry.GetSingle, true, go);
+        if (matches.Count == 1)
+        {
+            var seen = matches[0];
+            bool multiple = false;
+            foreach (var pool in new GameObject?[] { go, loc })
+            {
+                if (pool is null || multiple) break;
+                foreach (var o in ContentUtils.GatherContents(pool, ObjectRegistry.GetSingle, looker: go))
+                {
+                    if (o != seen && string.Equals(o.Name, seen.Name, StringComparison.OrdinalIgnoreCase)) { multiple = true; break; }
+                }
+            }
+            if (multiple) { CommandHelpers.MsgMultipleMatchesFound(go, name); return null; }
+        }
+        if (matches.Count == 0) { CommandHelpers.MsgCouldNotFind(go, name); return null; }
+        if (matches.Count > 1) { CommandHelpers.MsgMultipleMatchesFound(go, name); return null; }
+        var tgt = matches[0];
+        if (tgt == go) { go.Msg("You cannot whisper to yourself."); return null; }
+        return tgt;
+    }
+}
+
+/// <summary>
 /// Mirrors <c>atheriz/commands/loggedin/say.py</c> (27 LOC).
 /// </summary>
 public sealed class SayCommand : LoggedInCommand
@@ -414,5 +497,100 @@ public sealed class SayCommand : LoggedInCommand
             puppet.AtSay(string.Join(" ", lst), msgSelf: true);
         }
         else puppet.Msg(PrintHelp());
+    }
+}
+
+/// <summary>
+/// Mirrors <c>evennia/commands/default/comms.py:CmdPage</c>.
+/// Private cross-room messages to an account or character, with a small
+/// last-page store for the sent/received switches.
+/// </summary>
+public sealed class PageCommand : LoggedInCommand
+{
+    public override string Key => "page";
+    public override IReadOnlyList<string> Aliases => ["tell"];
+    public override string Category => "Communication";
+    public override string Desc => "Send a private page to someone anywhere.";
+    public override string ExtraDesc => "Use 'page <account or character> [=] <text>'. Bare 'page' shows the last page you received, 'page sent' the last one you sent. Multi-word names need the '=' form.";
+    public override bool UseParser => false;
+
+    // Last-page store: no persistence pollution (in-memory only, dies with
+    // the account). Sent is keyed on the sender account, received on the
+    // receiver account when one owns the target.
+    private sealed record PageNote(string Other, string Text);
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Account, PageNote> LastSent = new();
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Account, PageNote> LastReceived = new();
+
+    // A page target is either an account (deliver to its live puppets) or a
+    // lone character (deliver to it directly when online).
+    private sealed record PageTarget(Account? Account, GameObject Recipient);
+
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        var acc = go.Session?.Account;
+        if (acc is null) { go.Msg("No account is attached to your session."); return; }
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { ShowLast(go, acc, sent: false); return; }
+        if (text.Equals("sent", StringComparison.OrdinalIgnoreCase)) { ShowLast(go, acc, sent: true); return; }
+        if (text.Equals("received", StringComparison.OrdinalIgnoreCase)) { ShowLast(go, acc, sent: false); return; }
+        string targetPart, message;
+        int eq = text.IndexOf('=');
+        if (eq >= 0)
+        {
+            targetPart = text[..eq].Trim();
+            message = text[(eq + 1)..].Trim();
+        }
+        else
+        {
+            int sp = text.IndexOfAny([' ', '\t']);
+            if (sp < 0) { go.Msg(PrintHelp()); return; }
+            targetPart = text[..sp].Trim();
+            message = text[(sp + 1)..].Trim();
+        }
+        if (targetPart.Length == 0 || message.Length == 0) { go.Msg(PrintHelp()); return; }
+        var target = ResolvePageTarget(go, targetPart);
+        if (target is null) return;
+        if (target.Account == acc || target.Recipient == go) { go.Msg("You cannot page yourself."); return; }
+        var live = LiveRecipients(target).ToList();
+        if (live.Count == 0) { go.Msg($"{target.Recipient.Name} is not online."); return; }
+        foreach (var puppet in live) puppet.Msg($"{go.Name} pages: {message}");
+        go.Msg($"You paged {target.Recipient.Name}.");
+        LastSent.AddOrUpdate(acc, new PageNote(target.Recipient.Name, message));
+        if (target.Account is not null)
+            LastReceived.AddOrUpdate(target.Account, new PageNote(go.Name, message));
+    }
+
+    private static void ShowLast(GameObject go, Account acc, bool sent)
+    {
+        var table = sent ? LastSent : LastReceived;
+        if (!table.TryGetValue(acc, out var note)) { go.Msg(sent ? "You have not paged anyone yet." : "Nobody has paged you yet."); return; }
+        go.Msg(sent ? $"Last page you sent (to {note.Other}): {note.Text}" : $"Last page you received (from {note.Other}): {note.Text}");
+    }
+
+    // Account by exact name first, then character by exact name — both
+    // world-wide (pages are cross-room). Msgs and returns null on failure.
+    private static PageTarget? ResolvePageTarget(GameObject go, string name)
+    {
+        var acc = ObjectRegistry.FilterBy(o => o is Account a && a.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            .OfType<Account>()
+            .FirstOrDefault();
+        if (acc is not null) return new PageTarget(acc, acc);
+        var chars = ObjectRegistry.FilterBy(o => o.IsPc && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (chars.Count == 0) { CommandHelpers.MsgCouldNotFind(go, name); return null; }
+        if (chars.Count > 1) { CommandHelpers.MsgMultipleMatchesFound(go, name); return null; }
+        var owner = ObjectRegistry.FilterBy(o => o is Account a && a.Characters.Contains(chars[0].Id)).OfType<Account>().FirstOrDefault();
+        return new PageTarget(owner, chars[0]);
+    }
+
+    private static IEnumerable<GameObject> LiveRecipients(PageTarget target)
+    {
+        // Lone online character: deliver straight to it.
+        if (target.Account is null)
+        {
+            if (target.Recipient.Session is { Closed: false }) yield return target.Recipient;
+            yield break;
+        }
+        // Account target: every live puppet on its sessions.
+        foreach (var puppet in CommandHelpers.LivePuppets(target.Account)) yield return puppet;
     }
 }

@@ -1,9 +1,29 @@
 using System.Diagnostics.CodeAnalysis;
+using Atheriz.Core.Network;
 
 namespace Atheriz.Core.Commands;
 
 public static partial class CommandHelpers
 {
+    /// <summary>
+    /// Live puppets on an account's sessions: every session puppet whose
+    /// session is still open. Shared by page delivery and emit-to-account.
+    /// </summary>
+    public static List<GameObject> LivePuppets(Account acc)
+    {
+        var live = new List<GameObject>();
+        List<BaseConnection> conns;
+        try { conns = Globals.GlobalServices.GetConnectionManager().GetAllConnections(); }
+        catch { return live; }
+        foreach (var conn in conns)
+        {
+            GameObject? puppet = null;
+            try { puppet = ReferenceEquals(conn.Session.Account, acc) ? conn.Session.Puppet : null; }
+            catch (Exception) { }
+            if (puppet is not null && puppet.Session is { Closed: false }) live.Add(puppet);
+        }
+        return live;
+    }
     /// <summary>
     /// Single shared implementation of the puppet guard repeated across every logged-in
     /// command. Returns true with <paramref name="puppet"/> set when <paramref name="caller"/>

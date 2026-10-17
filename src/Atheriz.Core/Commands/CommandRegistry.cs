@@ -67,33 +67,50 @@ public static class CommandRegistry
     // Server administration: the Admin category plus superuser-gated reload.
     private static IEnumerable<Command> BuildAdminSet() =>
     [
+        new LoggedIn.AccountsCommand(),
+        new LoggedIn.BootCommand(),
+        new LoggedIn.PermCommand(),
         new LoggedIn.ReloadCommand(),
+        new LoggedIn.ResetCommand(),
         new LoggedIn.SaveCommand(),
         new LoggedIn.ShutdownCommand(),
         new LoggedIn.SpamCommand(),
+        new LoggedIn.UserpasswordCommand(),
+        new LoggedIn.WallCommand(),
     ];
 
     // World building and moderation (Category "Building").
     private static IEnumerable<Command> BuildBuildingSet() =>
     [
+        new LoggedIn.AliasCommand(),
         new LoggedIn.BanCommand(),
         new LoggedIn.BuildCommand(),
+        new LoggedIn.CopyCommand(),
         new LoggedIn.CreateCommand(),
         new LoggedIn.DeleteCommand(),
         new LoggedIn.DescCommand(),
         new LoggedIn.DoorCommand(),
+        new LoggedIn.EmitCommand(),
         new LoggedIn.ExamCommand(),
+        new LoggedIn.FindCommand(),
+        new LoggedIn.ForceCommand(),
         new LoggedIn.MazeCommand(),
         new LoggedIn.MoveCommand(),
+        new LoggedIn.NameCommand(),
         new LoggedIn.NounCommand(),
+        new LoggedIn.ObjectsCommand(),
         new LoggedIn.PuppetCommand(),
         new LoggedIn.QuellCommand(),
+        new LoggedIn.ScriptsCommand(),
         new LoggedIn.SetCommand(),
+        new LoggedIn.TagCommand(),
+        new LoggedIn.TeleportCommand(),
         new LoggedIn.UnbanCommand(),
         new LoggedIn.UnpuppetCommand(),
         new LoggedIn.UnquellCommand(),
         new LoggedIn.UnsetCommand(),
         new LoggedIn.WanderCommand(),
+        new LoggedIn.WipeCommand(),
     ];
 
     // Chat and channels (Category "Communication", shared screenreader).
@@ -102,8 +119,10 @@ public static class CommandRegistry
         new LoggedIn.ChannelCommand(),
         new LoggedIn.EmoteCommand(),
         new LoggedIn.GroupCommand(),
+        new LoggedIn.PageCommand(),
         new LoggedIn.SayCommand(),
         new Common.ScreenReaderCommand(),
+        new LoggedIn.WhisperCommand(),
     ];
 
     // Social verbs (Category "Socials").
@@ -137,13 +156,23 @@ public static class CommandRegistry
     // Information, session, and fallback verbs.
     private static IEnumerable<Command> BuildInfoSet() =>
     [
+        new LoggedIn.AboutCommand(),
+        new LoggedIn.AccessCommand(),
+        new LoggedIn.ChardeleteCommand(),
+        new LoggedIn.ColorCommand(),
         new LoggedIn.DrawCommand(),
         new LoggedIn.HelpCommand(),
+        new LoggedIn.HomeCommand(),
+        new LoggedIn.InfoCommand(),
         new LoggedIn.LookCommand(),
         new LoggedIn.MapCommand(),
+        new LoggedIn.NickCommand(),
         new LoggedIn.NoneCommand(),
+        new LoggedIn.PasswordCommand(),
         new LoggedIn.QuitCommand(),
+        new LoggedIn.SessionsCommand(),
         new LoggedIn.TimeCommand(),
+        new LoggedIn.WhoCommand(),
     ];
 
     private static void RegisterUnloggedIn(CmdSet cs)
@@ -165,12 +194,13 @@ public static class CommandRegistry
         new UnloggedIn.GuestCommand(),
     ];
 
-    // Session verbs: fallback, screenreader, help, quit.
+    // Session verbs: fallback, screenreader, help, quit, info.
     private static IEnumerable<Command> BuildSessionSet() =>
     [
         new UnloggedIn.NoneCommand(),
         new UnloggedIn.ScreenReaderCommand(),
         new UnloggedIn.HelpCommand(),
+        new UnloggedIn.InfoCommand(),
         new UnloggedIn.QuitCommand(),
     ];
 }

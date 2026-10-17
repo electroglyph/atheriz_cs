@@ -66,10 +66,13 @@ public sealed class LoggedInCommandBaseTests
         // (quell/unquell) verbs stay on LoggedInCommand with their own gate.
         var expected = new HashSet<string>(StringComparer.Ordinal)
         {
-            "BanCommand", "BuildCommand", "CreateCommand", "DeleteCommand",
-            "DescCommand", "DoorCommand", "ExamCommand", "MazeCommand",
-            "MoveCommand", "NounCommand", "PuppetCommand", "SetCommand",
-            "UnbanCommand", "UnpuppetCommand", "UnsetCommand", "WanderCommand",
+            "AliasCommand", "BanCommand", "BuildCommand", "CopyCommand",
+            "CreateCommand", "DeleteCommand", "DescCommand", "DoorCommand",
+            "EmitCommand", "ExamCommand", "FindCommand", "ForceCommand",
+            "MazeCommand", "MoveCommand", "NameCommand", "NounCommand",
+            "ObjectsCommand", "PuppetCommand", "ScriptsCommand", "SetCommand",
+            "TagCommand", "TeleportCommand", "UnbanCommand", "UnpuppetCommand",
+            "UnsetCommand", "WanderCommand", "WipeCommand",
         };
         var actual = LoggedInCommandTypes()
             .Where(t => t.IsSubclassOf(typeof(BuilderCommand)))

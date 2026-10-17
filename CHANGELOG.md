@@ -4,6 +4,43 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.31.0.0] - 2026-10-16
+
+Player verbs: `home` teleports to your home, `nick` manages personal
+input aliases (expanded at dispatch, real commands always win),
+`whisper` sends room-private speech, `page`/`tell` sends cross-room
+private messages with last-sent/received recall, `pose` is now an
+`emote` alias, `about`/`info` report version and server status
+(`info` also works before login), `time` adds uptime and start time,
+`who`/`doing` lists online sessions, `sessions` lists your own,
+`color` prints ANSI test charts, `password` changes your own
+password, and `chardelete` deletes one of your characters in two
+steps.
+Builder verbs: `access` shows your permission groups bare and manages
+object locks with a target, `alias` manages object aliases, `copy`
+duplicates objects, `name` renames, `wipe` bulk-deletes attributes
+(protected keys stay superuser-only), `find` searches the world by
+name, id, account, or kind, `objects` reports kind counts and recent
+objects, `teleport` moves self or others (quiet, to-nowhere, and
+into-exit forms), `tag` manages and searches tags, `scripts` lists
+running script objects, `emit` broadcasts to a room, object,
+account, or channel, and `force` runs a command as another object
+with a recursion guard.
+Superuser verbs: `boot` disconnects sessions by account, character,
+or session id, `userpassword` resets another account's password,
+`perm` views or grants privilege ranks, `wall` announces to every
+session including unlogged-in ones, `accounts` reports totals and
+deletes an account with its characters, and `reset` cold-reboots
+through a checkpoint save plus the reload hooks.
+Corrections: `whisper` and `page` list under Communication beside
+`say` and `emote`, `time` also answers to `uptime`, `chardelete`
+accepts `--confirm` before or after the name, and `puppet`/`unpuppet`
+also answer to their short forms `ic`/`ooc`. Also: `alias` and `tag`
+accept comma-separated lists, bare `tag <obj>` lists tags, `copy`
+assigns `;`-separated aliases to the copy, `wipe` takes several
+patterns, `find` takes `#first-#last` ranges, and `perm` targets an
+account as `*<account>`.
+
 ## [0.30.0.0] - 2026-10-02
 
 - Staging the webclient into a game folder is now a server command

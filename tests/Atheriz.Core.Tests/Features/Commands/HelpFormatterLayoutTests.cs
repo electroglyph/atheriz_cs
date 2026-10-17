@@ -143,6 +143,24 @@ public sealed class HelpFormatterLayoutTests
     }
 
     [Fact]
+    public void HelpFormatter_GroupsWhisperAndPageUnderCommunicationBox()
+    {
+        // Behavioral pin for the category assignments: the rendered
+        // overview must show whisper and page inside the Communication
+        // box beside say (row 1 pairs Communication left, General
+        // right at width 80 — box 39, gap 2).
+        Command[] cmds = [new SayCommand(), new WhisperCommand(), new PageCommand(), new OpenCommand()];
+        string boxes = HelpFormatter.Format(cmds, screenreader: false, termWidth: 80);
+        var lines = boxes.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        int commTop = Array.FindIndex(lines, l => l.Contains("─ Communication "));
+        int commBottom = Array.FindIndex(lines, commTop, l => l.StartsWith("╰"));
+        Assert.True(commTop >= 0 && commBottom > commTop);
+        Assert.Contains(lines[commTop..commBottom], l => l[..39].Contains("say"));
+        Assert.Contains(lines[commTop..commBottom], l => l[..39].Contains("whisper"));
+        Assert.Contains(lines[commTop..commBottom], l => l[..39].Contains("page"));
+    }
+
+    [Fact]
     public void HelpFormatter_OddBoxOut_StandsAlone_NoEmptyBoxes()
     {
         Command[] cmds = [new OpenCommand()];
