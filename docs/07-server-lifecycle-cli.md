@@ -246,7 +246,7 @@ Per-game forwarders (scaffolded into each game folder by `new`) resolve the engi
 | `--reload` | Build, then hot-load into the live server. |
 | `--no-engine` | Skip rebuilding the engine itself. |
 
-Root `build.sh` builds the engine `Release` and `Debug`; `build.cmd` builds `Release` only. Either may also rebuild the engine first when the game plugin DLL is stale relative to the engine sources.
+Root `build.sh` and `build.cmd` both build the engine `Release` only. Either may also rebuild the engine first when the game plugin DLL is stale relative to the engine sources.
 
 ## 12. Failure triage: the ordered checklist
 

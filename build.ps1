@@ -42,9 +42,8 @@
       * Cleans the staged webclient/ dir and nested staging artifacts
         (wwwroot/assets/assets, wwwroot/webclient/webclient) like
         build.sh; build.cmd left webclient/ contents stale.
-      * Builds .NET in both Release and Debug like build.sh
-        (build.cmd built Release only, leaving the Debug DLL used by
-        integration tests and boot checks stale).
+      * Builds .NET Release only, like build.sh and build.cmd (no Debug
+        configuration is produced any more).
       * Unknown args are an error (like build.sh); build.cmd silently
         ignored them. Hash-file comparison trims whitespace so legacy
         hash files with a trailing space still match.
@@ -490,15 +489,10 @@ function Invoke-AtherizBuild {
         }
     }
 
-    # Always build .NET in both configs like build.sh: Release (preferred
-    # at runtime) and Debug (integration tests + boot checks run it).
-    Write-Output 'Building .NET (Release + Debug)...'
+    # Always build .NET Release, like build.sh and build.cmd: it is the
+    # configuration the launchers and the integration tests run.
+    Write-Output 'Building .NET (Release)...'
     & dotnet build $solutionFile -c Release
-    if ($LASTEXITCODE -ne 0) {
-        Fail-Build $LASTEXITCODE
-        return
-    }
-    & dotnet build $solutionFile -c Debug
     if ($LASTEXITCODE -ne 0) {
         Fail-Build $LASTEXITCODE
         return

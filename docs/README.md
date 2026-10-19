@@ -70,7 +70,7 @@ docs/                    # these docs
 - `src/Atheriz.GameTemplate/` — The scaffold copied by `new` into each game folder.
 - `webclient/` — Browser client source: terminal client plus the drawing and map editor.
 - `atheriz.sh` / `atheriz.cmd` — Launch wrappers; per-game copies forward to the engine.
-- `build.sh` / `build.cmd` — Build the webclient and the server (`build.sh` builds Release and Debug; `build.cmd` builds Release only).
+- `build.sh` / `build.cmd` — Build the webclient and the server (both build the engine `Release` configuration only).
 - `docs/` — These guides.
 
 What `new` creates next to that tree — a game folder is separate from the repo:

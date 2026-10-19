@@ -18,6 +18,10 @@ checkout or game folder whose path contains `!` no longer breaks the build.
 Path values reach PowerShell through the environment instead of the command
 text.
 
+Builds: the root `build.sh` and `build.ps1` now build the engine `Release`
+configuration only, matching `build.cmd`; no build script produces the
+`Debug` configuration any more.
+
 ## [0.31.0.0] - 2026-10-16
 
 Player verbs: `home` teleports to your home, `nick` manages personal

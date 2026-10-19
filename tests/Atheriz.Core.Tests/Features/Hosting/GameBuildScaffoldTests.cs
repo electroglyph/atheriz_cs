@@ -158,6 +158,20 @@ public class GameBuildScaffoldTests
     }
 
     [Fact]
+    public void RootBuildScriptsBuildReleaseOnly()
+    {
+        // Every root build script produces the engine Release configuration
+        // and nothing else: no second configuration to build or keep fresh.
+        foreach (var script in new[] { "build.sh", "build.ps1", "build.cmd" })
+        {
+            var src = Tests.Features.Regression.SourceScan.Read(script);
+            Assert.Contains("-c Release", src);
+            Assert.DoesNotContain("-c Debug", src);
+            Assert.DoesNotContain("Release + Debug", src);
+        }
+    }
+
+    [Fact]
     public void Scaffold_MarksBuildShExecutable()
     {
         // The shell wrapper must be directly runnable on POSIX.

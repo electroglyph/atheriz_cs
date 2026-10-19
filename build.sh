@@ -153,11 +153,10 @@ else
   fi
 fi
 
-# Always build .NET (cheap, ~3s) — both configs: Release (atheriz.sh prefers it)
-# and Debug (integration tests + boot checks run the Debug DLL)
-echo "Building .NET (Release + Debug)..."
+# Always build .NET (cheap, ~3s) — Release only: the launchers and the
+# integration tests all run the Release DLL.
+echo "Building .NET (Release)..."
 dotnet build "$SCRIPT_DIR/Atheriz.sln" -c Release
-dotnet build "$SCRIPT_DIR/Atheriz.sln" -c Debug
 
 echo "Build complete — webclient $([ "$NEED_WEB_BUILD" -eq 0 ] && echo "unchanged" || echo "rebuilt") + engine built"
 echo "Run ./atheriz.sh --help  (or atheriz.cmd on Windows)"

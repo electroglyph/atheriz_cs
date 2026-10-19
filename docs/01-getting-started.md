@@ -22,7 +22,7 @@ dotnet --version   # expect 10.0.100 or newer
 node --version     # expect 18+
 ```
 
-Windows notes: use `build.cmd` instead of `build.sh` and `atheriz.cmd` instead of `atheriz.sh`. `build.cmd` builds Release only; `build.sh` builds Release and Debug. The commands below show the `.sh` form; the `.cmd` form takes the same arguments.
+Windows notes: use `build.cmd` instead of `build.sh` and `atheriz.cmd` instead of `atheriz.sh`. Both `build.cmd` and `build.sh` build the engine `Release` configuration only. The commands below show the `.sh` form; the `.cmd` form takes the same arguments.
 
 ## 3. Build
 
@@ -34,9 +34,9 @@ From the repo root (where `Atheriz.sln` is):
 # Windows: build.cmd / build.cmd --force
 ```
 
-The first run takes a bit (downloads webclient dependencies and copies fonts). The next run is fast if `webclient/src` has not changed. Root `build.sh` takes only `--force` and `--help`. `build.sh` builds both Release and Debug configurations; `build.cmd` builds Release only.
+The first run takes a bit (downloads webclient dependencies and copies fonts). The next run is fast if `webclient/src` has not changed. Root `build.sh` takes only `--force` and `--help`. Every root build script (`build.sh`, `build.cmd`, `build.ps1`) builds the engine `Release` configuration only.
 
-What gets built: the webclient bundle (staged into the host `wwwroot/`), then the solution — engine library plus server host. The launch scripts prefer the Release server DLL and fall back to Debug.
+What gets built: the webclient bundle (staged into the host `wwwroot/`), then the solution — engine library plus server host. The launch scripts run the `Release` server DLL, falling back to a `Debug` or `publish` output only when one happens to exist.
 
 You can also build with plain `dotnet`:
 
