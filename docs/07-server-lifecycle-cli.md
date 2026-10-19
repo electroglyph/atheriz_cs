@@ -213,7 +213,7 @@ All paths are inside the game folder:
 
 | Path | Permissions | Purpose |
 |---|---|---|
-| `save/server.pid` | `0600` | Pid claim for the live server. Read by `stop`/`restart`/liveness probes; stale claims are rejected by process verification. |
+| `save/server.pid` | `0600` | Pid claim for the live server: the pid on line 1, the UTC claim time on line 2. Read by `stop`/`restart`/liveness probes; a claim is rejected when its process is gone or its pid now belongs to a process that started later (a recycled pid). A one-line file from an older engine is still read on the pid alone. |
 | `secret/admin.token` | `0600` | Shared secret for `/_internal/*` admin routes, sent as `X-Admin-Token`. A zero-byte file is treated as poisoned and regenerated on next boot. |
 | `save/server.log` | — | The server log. Read FIRST on any issue, before curl or `ss`. |
 | `save/.wipe-lock` (`.wipe-lock`) | — | Taken during `reset` wipes so savers and starters serialize against the delete. |
@@ -256,7 +256,7 @@ Work this list top to bottom; stop at the first step that explains the failure.
 2. `curl --max-time 5 http://localhost:9999/health` must return `{"status":"ok",...}`. Connection refused means nothing is listening; a `200` with an error body means the host is up but the app layer failed.
 3. `ss -lptn 'sport = :9999'` must show `LISTEN`. No listener, no server — compare against the pid claim in `save/server.pid`.
 4. Connect the webclient and run `look`: a fresh game answers with `limbo`. `You are nowhere.` means the character has no location (reseed or repuppet; see [Connecting: webclient and telnet](09-connecting.md)).
-5. Check the pid claim: does the pid in `save/server.pid` exist and is it this server? Stale claims after a crash are normal — clear them by starting fresh, not by hand-editing the database.
+5. Check the pid claim: does the pid on line 1 of `save/server.pid` exist, is it this server, and did its process start no later than the claim time on line 2 (a later start means the OS recycled the pid)? Stale claims after a crash are normal — clear them by starting fresh, not by hand-editing the database.
 6. Kill leftovers only as a last resort: `kill $(cat save/server.pid)`, then re-verify with steps 1–3. Never leave scratch servers running once triage is done.
 
 ## 2.1 Background daemon details

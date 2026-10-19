@@ -254,12 +254,9 @@ public static class GameTemplateGenerator
         {
             var pidFile = Path.Combine(folderPath, "save", "server.pid");
             if (!File.Exists(pidFile)) return false;
-            // Same pid-file read as the CLI liveness probes (create/reset/
-            // restart/stop): TryParse failure is a dead claim, exactly like
-            // the hand-rolled parse this replaced.
-            var pid = PidFile.TryReadPid(pidFile);
-            if (pid is null) return false;
-            return PidFile.IsServerProcess(pid.Value);
+            // Same claim read as the CLI liveness probes (create/reset/
+            // restart/stop): a dead or recycled pid is not a live server.
+            return PidFile.IsLiveClaim(pidFile, out _);
         }
         catch { return false; }
     }
@@ -683,7 +680,9 @@ public static class GameTemplateGenerator
         REM   --no-engine skip the engine freshness check (trust the current server dll)
         REM Engine resolution: ATHERIZ_ROOT wins, else the relative path baked in
         REM at `new` time, resolved against this script's directory.
-        setlocal EnableDelayedExpansion
+        REM Plain setlocal: delayed expansion is not needed (and would corrupt
+        REM a game path containing `!`).
+        setlocal
         set "GAME_DIR=%~dp0"
         if "%GAME_DIR:~-1%"=="\" set "GAME_DIR=%GAME_DIR:~0,-1%"
         set "ENGINE_ROOT="
@@ -691,7 +690,7 @@ public static class GameTemplateGenerator
         if not defined ENGINE_ROOT (
           pushd "%GAME_DIR%\__ATHERIZ_ENGINE_REL__" 2>nul
           if not errorlevel 1 (
-            set "ENGINE_ROOT=!CD!"
+            for %%p in (.) do set "ENGINE_ROOT=%%~fp"
             popd
           )
         )
@@ -760,7 +759,10 @@ public static class GameTemplateGenerator
         if not exist "%SERVER_DLL%" goto :do_engine_build
         where powershell >nul 2>nul
         if errorlevel 1 goto :do_engine_build
-        powershell -NoProfile -Command "$d=(Get-Item -LiteralPath '%SERVER_DLL%').LastWriteTimeUtc; $f=Get-ChildItem -Path '%ENGINE_ROOT%\src\*' -Include *.cs,*.csproj -Recurse -File | Where-Object { $_.FullName -notlike '*\bin\*' -and $_.FullName -notlike '*\obj\*' }; $f+=Get-ChildItem -Path '%ENGINE_ROOT%\*' -Include *.props,global.json -File -ErrorAction SilentlyContinue; $n=$f | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1; if ($n -ne $null -and $n.LastWriteTimeUtc -gt $d) { exit 1 } else { exit 0 }"
+        REM Paths reach PowerShell through the environment ($env:SERVER_DLL /
+        REM $env:ENGINE_ROOT), never pasted into the command text: quotes,
+        REM %, !, & and spaces in the checkout path stay harmless.
+        powershell -NoProfile -Command "$d=(Get-Item -LiteralPath $env:SERVER_DLL).LastWriteTimeUtc; $f=Get-ChildItem -LiteralPath $env:ENGINE_ROOT -Recurse -File -Include *.cs,*.csproj -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notlike '*\bin\*' -and $_.FullName -notlike '*\obj\*' }; $f+=Get-ChildItem -LiteralPath $env:ENGINE_ROOT -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.props' -or $_.Name -eq 'global.json' }; $n=$f | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1; if ($n -ne $null -and $n.LastWriteTimeUtc -gt $d) { exit 1 } else { exit 0 }"
         if errorlevel 1 goto :do_engine_build
         echo Engine server is up to date - skipping.
         exit /b 0

@@ -31,7 +31,9 @@ public class RestartSafetyTests
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Cli/RestartHandler.cs");
         Assert.Contains("aborting restart", src);
         Assert.Contains("Kill(entireProcessTree", src);
-        Assert.Contains("IsServerProcess(oldPid)", src);
+        // The escalation re-verifies the claim (pid + recorded time) before
+        // SIGKILL, so a pid recycled mid-wait is never killed.
+        Assert.Contains("ours = Infrastructure.PidFile.TryReadClaim(pidPath2) == claim && Infrastructure.PidFile.ClaimNamesLiveServer(claim)", src);
         Assert.DoesNotContain("may fail to bind", src);
     }
 }

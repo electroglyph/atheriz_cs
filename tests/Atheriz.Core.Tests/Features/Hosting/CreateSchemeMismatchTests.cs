@@ -154,7 +154,8 @@ public class CreateSchemeMismatchTests
             try
             {
                 var pf = Path.Combine(gameFolder, "save", "server.pid");
-                if (File.Exists(pf) && int.TryParse(File.ReadAllText(pf).Trim(), out var pid))
+                // First line is the pid; a claim may carry a claim-time line below it.
+                if (File.Exists(pf) && int.TryParse(File.ReadLines(pf).FirstOrDefault()?.Trim(), out var pid))
                     try { Process.GetProcessById(pid).Kill(); } catch { }
             }
             catch { }
@@ -217,7 +218,8 @@ public class CreateSchemeMismatchTests
             try
             {
                 var pf = Path.Combine(gameFolder, "save", "server.pid");
-                if (File.Exists(pf) && int.TryParse(File.ReadAllText(pf).Trim(), out var pid))
+                // First line is the pid; a claim may carry a claim-time line below it.
+                if (File.Exists(pf) && int.TryParse(File.ReadLines(pf).FirstOrDefault()?.Trim(), out var pid))
                     try { Process.GetProcessById(pid).Kill(); } catch { }
             }
             catch { }

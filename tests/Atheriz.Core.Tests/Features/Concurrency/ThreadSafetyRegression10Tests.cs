@@ -134,7 +134,7 @@ public sealed class ThreadSafetyRegression10Tests
     {
         var src = Tests.Features.Regression.SourceScan.Read("src", "Atheriz.Server", "Cli", "StopHandler.cs");
         Assert.Contains("Terminal re-verify", src);
-        Assert.Contains("PidFile.TryReadPid(pidFilePath) == pid && PidFile.IsServerProcess(pid)", src);
+        Assert.Contains("claim is PidClaim c && c.Pid == pid && PidFile.ClaimNamesLiveServer(c)", src);
     }
 
     [Fact]

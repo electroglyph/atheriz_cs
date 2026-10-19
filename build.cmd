@@ -1,7 +1,7 @@
 @echo off
 REM Build webclient (only if webclient/src changed) + .NET engine
 REM Mirrors build.sh incremental logic — standalone, webclient required
-setlocal EnableDelayedExpansion
+setlocal
 
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
@@ -46,8 +46,14 @@ if %errorlevel% neq 0 (
 )
 
 REM --- compute hash of webclient/src + config ---
+REM Paths reach PowerShell through the environment ($env:HASH_*), never
+REM pasted into the command text: quotes, %, !, & and spaces in the repo
+REM path stay harmless.
+set "HASH_SRC_DIR=%WEBCLIENT_DIR%\src"
+set "HASH_VITE_CONFIG=%WEBCLIENT_DIR%\vite.config.ts"
+set "HASH_PACKAGE_JSON=%WEBCLIENT_DIR%\package.json"
 set "SRC_HASH="
-for /f "delims=" %%h in ('powershell -NoProfile -Command "$hash=''; $files=@(Get-ChildItem -Recurse -File '%WEBCLIENT_DIR%\src', '%WEBCLIENT_DIR%\vite.config.ts', '%WEBCLIENT_DIR%\package.json' -ErrorAction SilentlyContinue | Sort-Object FullName); $sha=[System.Security.Cryptography.SHA256]::Create(); foreach($f in $files){ $bytes=[System.IO.File]::ReadAllBytes($f.FullName); $null=$sha.TransformBlock($bytes,0,$bytes.Length,$null,$null)}; $sha.TransformFinalBlock([byte[]]::new(0),0,0) | Out-Null; [System.BitConverter]::ToString($sha.Hash).Replace('-','').ToLower()"') do set "SRC_HASH=%%h"
+for /f "delims=" %%h in ('powershell -NoProfile -Command "$hash=''; $files=@(Get-Item -LiteralPath $env:HASH_VITE_CONFIG, $env:HASH_PACKAGE_JSON -ErrorAction SilentlyContinue; Get-ChildItem -LiteralPath $env:HASH_SRC_DIR -Recurse -File -ErrorAction SilentlyContinue) | Sort-Object FullName; $sha=[System.Security.Cryptography.SHA256]::Create(); foreach($f in $files){ $bytes=[System.IO.File]::ReadAllBytes($f.FullName); $null=$sha.TransformBlock($bytes,0,$bytes.Length,$null,$null)}; $sha.TransformFinalBlock([byte[]]::new(0),0,0) | Out-Null; [System.BitConverter]::ToString($sha.Hash).Replace('-','').ToLower()"') do set "SRC_HASH=%%h"
 
 if "%SRC_HASH%"=="" (
   echo error: failed to compute webclient/src hash 1>&2
@@ -55,14 +61,7 @@ if "%SRC_HASH%"=="" (
 )
 
 set "NEED_WEB_BUILD=1"
-if "%FORCE%"=="0" if exist "%SRC_HASH_FILE%" (
-  set /p STORED_HASH=<"%SRC_HASH_FILE%"
-  if "!STORED_HASH!"=="%SRC_HASH%" if exist "%DEST_WWWROOT%\webclient\index.html" if exist "%DEST_WWWROOT%\atheriz_draw\index.html" (
-    REM check hashed asset exists
-    dir /b "%DEST_WWWROOT%\assets\webclient-*.js" >nul 2>nul
-    if !errorlevel! equ 0 set "NEED_WEB_BUILD=0"
-  )
-)
+if "%FORCE%"=="0" if exist "%SRC_HASH_FILE%" call :webclient_hash_matches
 if "%FORCE%"=="1" set "NEED_WEB_BUILD=1"
 if not exist "%SRC_HASH_FILE%" set "NEED_WEB_BUILD=1"
 if not exist "%DEST_WWWROOT%\webclient\index.html" set "NEED_WEB_BUILD=1"
@@ -75,9 +74,9 @@ if "%NEED_WEB_BUILD%"=="0" (
   echo Webclient changed ^(%SRC_HASH%^) — rebuilding...
   pushd "%WEBCLIENT_DIR%"
   call npm ci --silent
-  if !errorlevel! neq 0 call npm install
+  if errorlevel 1 call npm install
   call npm run build
-  if !errorlevel! neq 0 (
+  if errorlevel 1 (
     echo error: vite build failed 1>&2
     popd
     exit /b 1
@@ -128,4 +127,19 @@ if "%NEED_WEB_BUILD%"=="0" (
   echo Build complete — webclient rebuilt + engine built
 )
 echo Run atheriz.cmd --help
+exit /b 0
+
+:webclient_hash_matches
+REM Unchanged when the stored hash matches AND both deployed index pages
+REM and a hashed webclient bundle are present. A subroutine rather than a
+REM parenthesised block: each line expands %STORED_HASH% at execution time,
+REM so no delayed expansion (and no `!` corruption) is needed.
+set "STORED_HASH="
+set /p STORED_HASH=<"%SRC_HASH_FILE%"
+if not "%STORED_HASH%"=="%SRC_HASH%" exit /b 0
+if not exist "%DEST_WWWROOT%\webclient\index.html" exit /b 0
+if not exist "%DEST_WWWROOT%\atheriz_draw\index.html" exit /b 0
+dir /b "%DEST_WWWROOT%\assets\webclient-*.js" >nul 2>nul
+if errorlevel 1 exit /b 0
+set "NEED_WEB_BUILD=0"
 exit /b 0

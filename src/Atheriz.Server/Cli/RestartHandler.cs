@@ -16,16 +16,21 @@ public static class RestartHandler
         int portVal = port ?? StopHandler.EffectiveSettingsValue.WebserverPort;
         var savePath2 = StopHandler.EffectiveSettingsValue.SavePath;
         var pidPath2 = Path.Combine(savePath2, "server.pid");
-        if (Infrastructure.PidFile.TryReadPid(pidPath2) is int oldPid)
+        // Only a claim that still names one of our live servers is worth
+        // waiting on: a dead pid, or a number the OS recycled onto an
+        // unrelated process, must not park the restart on that process.
+        var oldClaim = Infrastructure.PidFile.TryReadClaim(pidPath2);
+        if (oldClaim is Infrastructure.PidClaim claim && Infrastructure.PidFile.ClaimNamesLiveServer(claim))
         {
+            int oldPid = claim.Pid;
             bool exited = await ProcessHelper.WaitForPidExitAsync(oldPid).ConfigureAwait(false);
             if (!exited)
             {
                 // Grace expired and the old server is stuck: escalate, but
-                // only after re-verifying the pid still names our server —
-                // it may have been recycled mid-wait.
+                // only after re-verifying the file still holds this claim —
+                // it may have been replaced mid-wait.
                 bool ours = false;
-                try { ours = Infrastructure.PidFile.TryReadPid(pidPath2) == oldPid && Infrastructure.PidFile.IsServerProcess(oldPid); } catch { }
+                try { ours = Infrastructure.PidFile.TryReadClaim(pidPath2) == claim && Infrastructure.PidFile.ClaimNamesLiveServer(claim); } catch { }
                 if (ours)
                 {
                     try { using var stuck = Process.GetProcessById(oldPid); try { stuck.Kill(entireProcessTree: false); } catch { } } catch { }

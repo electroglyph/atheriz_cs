@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.32.0.0] - 2026-10-19
+
+Server lifecycle: `save/server.pid` now records the UTC claim time beside the
+pid, so a pid the OS handed to an unrelated process after a crash is no longer
+reported as a running server. Liveness probes, `stop`, `restart`, `reset`,
+`create`, and the launcher's status probe treat such a claim as stale. Files
+written by older engines keep working.
+
+Windows build: the generated per-game `build.cmd` and the repository's
+webclient `build.cmd` no longer enable command-line delayed expansion, so a
+checkout or game folder whose path contains `!` no longer breaks the build.
+Path values reach PowerShell through the environment instead of the command
+text.
+
 ## [0.31.0.0] - 2026-10-16
 
 Player verbs: `home` teleports to your home, `nick` manages personal

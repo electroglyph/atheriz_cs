@@ -176,7 +176,7 @@ public class PidFileCompatOverloadTests
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
         var region = SourceScan.Region(src, "public void Release()");
-        Assert.Contains("ReleaseIfOwner(PidPath, _ownPid)", region);
+        Assert.Contains("ReleaseIfOwner(PidPath, _ownClaim)", region);
         Assert.Equal(1, SourceScan.Count(src, "public static string LocateServerPidFile(string savePath)"));
         Assert.Equal(1, SourceScan.Count(src, "public static string LocateServerPidFile(int port, string savePath)"));
     }
@@ -221,16 +221,18 @@ public class PidFileReadFunnelTests
         foreach (var file in new[] { "Cli/ResetHandler.cs", "Cli/RestartHandler.cs", "Cli/StopHandler.cs" })
         {
             var src = SourceScan.Read("src", "Atheriz.Server", file);
-            Assert.Contains("TryReadPid(", src);
+            Assert.True(src.Contains("TryReadPid(") || src.Contains("TryReadClaim("),
+                $"{file} must read the pid file through the shared claim reader");
             Assert.DoesNotContain("File.ReadAllText(pid", src);
         }
         var create = SourceScan.Read("src", "Atheriz.Server", "Cli", "CreateHandler.cs");
         Assert.Contains("IsLiveClaim(", create);
         var gen = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "GameTemplateGenerator.cs");
         var region = SourceScan.Region(gen, "private static bool IsLiveServerFolder(");
-        Assert.Contains("TryReadPid(", region);
+        Assert.Contains("IsLiveClaim(", region);
         Assert.DoesNotContain("File.ReadAllText", region);
         var pid = SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "PidFile.cs");
+        Assert.Equal(1, SourceScan.Count(pid, "internal static PidClaim? TryReadClaim("));
         Assert.Equal(1, SourceScan.Count(pid, "internal static int? TryReadPid("));
         Assert.Equal(1, SourceScan.Count(pid, "internal static bool IsLiveClaim("));
     }

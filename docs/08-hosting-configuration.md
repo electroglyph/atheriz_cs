@@ -14,7 +14,7 @@ Common boot runs the same way in both modes:
 1. `AddAtherizCore` registers settings (with `ValidateOnStart`), the `ConnectionManager` singleton, and admin authentication.
 2. `ApplyCliOverrides` layers `--port` / `--telnet-port` / `--host` over everything else (§5).
 3. `EnsureDirs` plus `PathGuards` create and verify `save/` and `secret/`.
-4. `PidFile.TryAcquire` claims `save/server.pid` (success logs `PID … acquired`).
+4. `PidFile.TryAcquire` claims `save/server.pid` — the pid plus the UTC claim time, so a later process holding a recycled pid is not mistaken for this server (success logs `PID … acquired`).
 5. `AdminToken.EnsureToken` guarantees `secret/admin.token` exists (web mode; headless skips token creation since there are no admin routes to guard).
 6. `ServerLifecycle.DoStartup` loads the world, starts schedulers, and logs `DoStartup completed`.
 7. `UseWebSockets` with a 20-second keep-alive interval, then `Map("/ws")` for the websocket endpoint (§3).

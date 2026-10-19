@@ -69,7 +69,7 @@ All paths below are inside the game folder:
 |---|---|---|
 | `save/database.sqlite3` | The world — objects, maps, doors, time, channels, bans. Back THIS up. | Yes — this is the backup. |
 | `save/server.log` | The server log. Diagnose here first on any issue. | Optional (useful context, not world state). |
-| `save/server.pid` | Pid claim for the live server (`0600`). Stale after a crash; never restore this onto another host. | No — exclude from backups, or delete after restore. |
+| `save/server.pid` | Pid claim for the live server (pid + UTC claim time, `0600`). Stale after a crash; never restore this onto another host. | No — exclude from backups, or delete after restore. |
 | `save/.wipe-lock` | Taken during `reset` wipes. Transient; never present on a clean stopped server. | No. |
 | `secret/admin.token` | Admin-route shared secret (`0600` inside a `0700` `secret/`). Per-boot in web mode: a clean shutdown deletes it and the next boot mints fresh hex — no continuity to preserve. | No — back up `secret/` only for TLS certs/keys kept there (see §3.2). |
 | `secret/salt.txt` | The password-hash salt (`0600`). Every stored password hash depends on it — lose it and nobody can log in. | Yes — always with the database. |
@@ -201,7 +201,7 @@ Expected on a running game:
 save/
   database.sqlite3   # the world — back THIS up
   server.log         # diagnose here first
-  server.pid         # live pid claim (0600) — never restore elsewhere
+  server.pid         # live pid + claim-time claim (0600) — never restore elsewhere
 secret/
   admin.token        # X-Admin-Token secret (0600) — copy for continuity
 ```

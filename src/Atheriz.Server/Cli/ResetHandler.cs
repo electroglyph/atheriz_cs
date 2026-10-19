@@ -16,10 +16,14 @@ public static class ResetHandler
         var pidPath = Path.Combine(savePath, "server.pid");
         bool isRunning = false;
         int? pid = null;
-        if (Infrastructure.PidFile.TryReadPid(pidPath) is int readPid)
+        // Only a claim that still names one of our live servers counts as
+        // running: a number the OS recycled onto an unrelated process must
+        // not be stopped, nor must it block the wipe as "our listener".
+        var runningClaim = Infrastructure.PidFile.TryReadClaim(pidPath);
+        if (runningClaim is Infrastructure.PidClaim claim && Infrastructure.PidFile.ClaimNamesLiveServer(claim))
         {
-            pid = readPid;
-            isRunning = Infrastructure.PidFile.IsServerProcess(readPid);
+            pid = claim.Pid;
+            isRunning = true;
         }
         Console.WriteLine("WARNING: This will delete ALL game data. This action cannot be undone.");
         if (isRunning) Console.WriteLine("The server is currently running and will be stopped.");

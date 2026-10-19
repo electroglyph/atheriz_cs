@@ -222,7 +222,8 @@ public class PortedServerIntegrationTests
                 {
                     // try pkill via pid file
                     var pf = Path.Combine(gameFolder, "save", "server.pid");
-                    if (File.Exists(pf) && int.TryParse(File.ReadAllText(pf).Trim(), out var pid))
+                    // First line is the pid; a claim may carry a claim-time line below it.
+                    if (File.Exists(pf) && int.TryParse(File.ReadLines(pf).FirstOrDefault()?.Trim(), out var pid))
                         try { Process.GetProcessById(pid).Kill(); } catch { }
                     await Task.Delay(1000);
                 }
@@ -277,7 +278,7 @@ public class PortedServerIntegrationTests
             Assert.True(await WaitForHealthAsync(port, 15000), $"Daemon not healthy on {port}. Output: {newOut}\nLog: {TryReadLog(gameFolder)}");
             var pidFile = Path.Combine(gameFolder, "save", "server.pid");
             Assert.True(File.Exists(pidFile), "server.pid not created");
-            Assert.True(int.TryParse(File.ReadAllText(pidFile).Trim(), out var daemonPid), "server.pid unparseable");
+            Assert.True(int.TryParse(File.ReadLines(pidFile).FirstOrDefault()?.Trim(), out var daemonPid), "server.pid unparseable");
             Assert.NotEqual(Environment.ProcessId, daemonPid);
             await RunProcessAsync("kill", $"-HUP {daemonPid}", gameFolder, null, 5000);
             await Task.Delay(1500);
@@ -299,7 +300,8 @@ public class PortedServerIntegrationTests
                 if (await IsPortListeningAsync(port))
                 {
                     var pf = Path.Combine(gameFolder, "save", "server.pid");
-                    if (File.Exists(pf) && int.TryParse(File.ReadAllText(pf).Trim(), out var pid))
+                    // First line is the pid; a claim may carry a claim-time line below it.
+                    if (File.Exists(pf) && int.TryParse(File.ReadLines(pf).FirstOrDefault()?.Trim(), out var pid))
                         try { Process.GetProcessById(pid).Kill(); } catch { }
                     await Task.Delay(1000);
                 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.NetworkInformation;
 
 namespace Atheriz.Server.Infrastructure;
@@ -9,15 +10,21 @@ namespace Atheriz.Server.Infrastructure;
 public sealed class PidFile : IDisposable
 {
     public string PidPath { get; }
-    private readonly int _ownPid;
+    private readonly PidClaim _ownClaim;
     private bool _acquired;
     private bool _disposed;
 
-    private PidFile(string pidPath, bool acquired, int ownPid)
+    // Tolerance when comparing a claim's recorded time with the process's
+    // own start time: the writer may have used wall clock where the reader
+    // reads the start time (or vice versa), so a small skew must not turn a
+    // live server into a stale claim.
+    private static readonly TimeSpan ClaimTimeTolerance = TimeSpan.FromSeconds(2);
+
+    private PidFile(string pidPath, bool acquired, PidClaim ownClaim)
     {
         PidPath = pidPath;
         _acquired = acquired;
-        _ownPid = ownPid;
+        _ownClaim = ownClaim;
     }
 
     /// <summary>
@@ -322,14 +329,82 @@ public sealed class PidFile : IDisposable
     }
 
     /// <summary>
+    /// The claim to write for <paramref name="pid"/>: the process's own start
+    /// time when it can be read, else the current wall clock. Either way a
+    /// pid reused later starts after the recorded time, so a reader can tell
+    /// the file no longer names the process that wrote it. The start time is
+    /// preferred because the same process reads it back exactly.
+    /// </summary>
+    internal static PidClaim NewClaim(int pid)
+    {
+        return new PidClaim(pid, ProcessStartUtc(pid) ?? DateTime.UtcNow);
+    }
+
+    /// <summary>
+    /// Serialized claim: the pid on the first line (keeps <c>head -n1</c> and
+    /// bare-pid readers working) and the claim time on the second.
+    /// </summary>
+    internal static string FormatClaim(PidClaim claim)
+    {
+        if (claim.WrittenUtc is not DateTime written)
+            return claim.Pid.ToString(CultureInfo.InvariantCulture);
+        return claim.Pid.ToString(CultureInfo.InvariantCulture)
+            + "\n"
+            + written.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    }
+
+    // The process's own start time in UTC, or null when it cannot be read
+    // (permissions on some platforms, short-lived process).
+    private static DateTime? ProcessStartUtc(int pid)
+    {
+        try
+        {
+            var start = Process.GetProcessById(pid).StartTime;
+            return start.Kind == DateTimeKind.Utc ? start : start.ToUniversalTime();
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="claim"/> still names a live server: the pid is
+    /// one of this engine's processes AND its own start time is not after the
+    /// recorded claim time (a recycled pid starts later). A legacy claim
+    /// carries no time and is checked on process shape alone; an unreadable
+    /// start time fails closed the same way, so a live server is never
+    /// reported stale merely because its start time could not be read.
+    /// </summary>
+    internal static bool ClaimNamesLiveServer(PidClaim claim)
+    {
+        if (!IsServerProcess(claim.Pid)) return false;
+        return ClaimTimeCouldBelongToProcess(claim);
+    }
+
+    /// <summary>
+    /// Whether the recorded claim time is consistent with
+    /// <paramref name="claim"/>'s pid: a process whose own start time is
+    /// before the claim (plus a small tolerance for clock read differences)
+    /// could be the one that wrote it, so a pid recycled later — its start
+    /// time after the claim — is ruled out. A claim with no time, or a pid
+    /// whose start time cannot be read, cannot be ruled out and passes: an
+    /// unreadable start time must never make a live server look stale.
+    /// </summary>
+    internal static bool ClaimTimeCouldBelongToProcess(PidClaim claim)
+    {
+        if (claim.WrittenUtc is not DateTime written) return true;
+        if (ProcessStartUtc(claim.Pid) is not DateTime start) return true;
+        return start <= written + ClaimTimeTolerance;
+    }
+
+    /// <summary>
     /// Live pid + fresh file = a concurrent starter still booting (the daemon
     /// parent holds the parent pid until it exits; the child re-claims right
-    /// after). Wait bounded for the claim to go stale (file replaced/gone or
-    /// pid dead); true means the caller should re-read and proceed, false
-    /// means a genuinely running server that must be refused. An old file
-    /// naming a live pid never waits — that server is already running.
+    /// after). Wait bounded for the claim to go stale (file replaced with a
+    /// different claim, or the pid no longer names a live server); true means
+    /// the caller should re-read and proceed, false means a genuinely running
+    /// server that must be refused. An old file naming a live pid never waits
+    /// — that server is already running.
     /// </summary>
-    private static bool FreshLiveClaimWentStale(string pidPath, int oldPid)
+    private static bool FreshLiveClaimWentStale(string pidPath, PidClaim oldClaim)
     {
         try
         {
@@ -344,8 +419,8 @@ public sealed class PidFile : IDisposable
         while (DateTime.UtcNow < deadline)
         {
             beat.Wait(100);
-            if (TryReadPid(pidPath) != oldPid) return true;
-            if (!IsServerProcess(oldPid)) return true;
+            if (TryReadClaim(pidPath) != oldClaim) return true;
+            if (!ClaimNamesLiveServer(oldClaim)) return true;
         }
         return false;
     }
@@ -433,6 +508,7 @@ public sealed class PidFile : IDisposable
         var pidPath = Path.Combine(savePath, "server.pid");
 
         int currentPid = Environment.ProcessId; // atheriz.py:507 pid = os.getpid()
+        var ownClaim = NewClaim(currentPid);
 
         // Atomic create attempts — atheriz.py:517-554 (3 retries). The stale
         // check runs inside the loop so a fresh live claim that goes stale
@@ -448,11 +524,11 @@ public sealed class PidFile : IDisposable
         // (announced + terminal failure vs silent swallow + retry).
         (string? refusal, bool staleRetry) StaleVerdict()
         {
-            int? oldPid = TryReadPid(pidPath);
-            if (oldPid.HasValue && IsServerProcess(oldPid.Value))
+            PidClaim? oldClaim = TryReadClaim(pidPath);
+            if (oldClaim is PidClaim claim && ClaimNamesLiveServer(claim))
             {
-                if (FreshLiveClaimWentStale(pidPath, oldPid.Value)) return (null, true);
-                return ($"{AlreadyRunningMessagePrefix} {oldPid.Value}", false);
+                if (FreshLiveClaimWentStale(pidPath, claim)) return (null, true);
+                return ($"{AlreadyRunningMessagePrefix} {claim.Pid}", false);
             }
             if (IsPortListening(webserverPort))
                 return ($"Port {webserverPort} still listening; refusing to overwrite PID file for an unverified process.", false);
@@ -480,7 +556,7 @@ public sealed class PidFile : IDisposable
             {
                 // Mirrors open(pid_file, "x") + os.open O_EXCL 0o600
                 using var fs = new FileStream(pidPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                var pidBytes = System.Text.Encoding.UTF8.GetBytes(currentPid.ToString());
+                var pidBytes = System.Text.Encoding.UTF8.GetBytes(FormatClaim(ownClaim));
                 fs.Write(pidBytes, 0, pidBytes.Length);
                 // Durable before anyone reads it: a crash between write and
                 // flush can leave an empty pid file that later parses as invalid.
@@ -488,7 +564,7 @@ public sealed class PidFile : IDisposable
                 // UnixFileMode 0o600 — atheriz.py relies on os.open 0o600; we set via FsUtil per AGENTS POSIX best-effort
 
                 FsUtil.TryChmod0600(pidPath);
-                pidFile = new PidFile(pidPath, true, currentPid);
+                pidFile = new PidFile(pidPath, true, ownClaim);
                 return true;
             }
             catch (IOException ex) when ((ex.HResult & 0xFFFF) == 80 || File.Exists(pidPath))
@@ -525,33 +601,48 @@ public sealed class PidFile : IDisposable
     }
 
     // Shared pid-file read for the CLI liveness probes (create/reset/
-    // restart/stop + the game-folder guard): ReadAllText + Trim + TryParse in
-    // one place. A TryParse failure is a dead claim (the old Parse sites
-    // threw into a swallow-catch with the same outcome).
-    internal static int? TryReadPid(string pidPath)
+    // restart/stop + the game-folder guard): line 1 is the pid, and when a
+    // second line is present it must parse as the claim time — anything else
+    // is an invalid claim. A corrupt file must not fall back to the legacy
+    // one-line reading, which would silently drop the identity check. A
+    // legacy one-line file yields a claim with no time.
+    internal static PidClaim? TryReadClaim(string pidPath)
     {
         try
         {
-            var text = File.ReadAllText(pidPath, System.Text.Encoding.UTF8).Trim();
-            if (int.TryParse(text, out var pid)) return pid;
-            return null;
+            var lines = File.ReadAllLines(pidPath, System.Text.Encoding.UTF8);
+            if (lines.Length == 0) return null;
+            if (!int.TryParse(lines[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid))
+                return null;
+            if (lines.Length < 2) return new PidClaim(pid, null);
+            if (!DateTime.TryParse(lines[1].Trim(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var written))
+                return null;
+            return new PidClaim(pid, written.ToUniversalTime());
         }
         catch { return null; }
     }
 
-    // Live-claim probe: the file parses AND names a verified server process.
-    // Stale/dead/unparseable/foreign pids report false (never throw).
+    // Compatibility wrapper over the single claim read (callers that only
+    // need the number keep working; a TryParse failure is a dead claim).
+    internal static int? TryReadPid(string pidPath)
+    {
+        return TryReadClaim(pidPath)?.Pid;
+    }
+
+    // Live-claim probe: the file parses AND the claim still names a verified
+    // server process. Stale/dead/unparsed/foreign/recycled pids report false
+    // (never throw).
     internal static bool IsLiveClaim(string pidPath, out int pid)
     {
-        var read = TryReadPid(pidPath);
-        if (read is int p && IsServerProcess(p)) { pid = p; return true; }
-        pid = read ?? -1;
+        var claim = TryReadClaim(pidPath);
+        if (claim is PidClaim c && ClaimNamesLiveServer(c)) { pid = c.Pid; return true; }
+        pid = claim?.Pid ?? -1;
         return false;
     }
 
     /// <summary>
     /// Release the PID file — mirrors <c>atheriz/atheriz.py:679 pid_file.unlink()</c> on shutdown.
-    /// Owner-verified: only deletes when the file still contains our own pid, so a stale
+    /// Owner-verified: only deletes when the file still contains our own claim, so a stale
     /// <c>PidFile</c> can never delete a live successor's pid file on pid reuse.
     /// No finalizer: finalization during a long <c>RunAsync</c> could delete the live pid.
     /// </summary>
@@ -560,7 +651,7 @@ public sealed class PidFile : IDisposable
         if (_disposed) return;
         if (!_acquired) return;
         // Same exists-and-equals-owner delete check as ReleaseIfOwner below.
-        ReleaseIfOwner(PidPath, _ownPid);
+        ReleaseIfOwner(PidPath, _ownClaim);
         _acquired = false;
     }
 
@@ -572,6 +663,18 @@ public sealed class PidFile : IDisposable
     /// read/kill/delete window (pid reuse).
     /// </summary>
     public static bool ReleaseIfOwner(string pidPath, int expectedPid)
+        => ReleaseIfOwner(pidPath, expectedPid, expectedWrittenUtc: null);
+
+    /// <summary>
+    /// Owner-verified delete by full claim identity: deletes only when the
+    /// file still holds exactly <paramref name="expected"/> — pid and claim
+    /// time — so a successor that reused the pid and rewrote the file keeps
+    /// its claim.
+    /// </summary>
+    internal static bool ReleaseIfOwner(string pidPath, PidClaim expected)
+        => ReleaseIfOwner(pidPath, expected.Pid, expected.WrittenUtc);
+
+    private static bool ReleaseIfOwner(string pidPath, int expectedPid, DateTime? expectedWrittenUtc)
     {
         // Atomic-claim delete: Exists + read + Delete are three separate
         // syscalls — a successor claiming between the read and the delete
@@ -590,7 +693,11 @@ public sealed class PidFile : IDisposable
         catch { return false; }
         try
         {
-            if (TryReadPid(sidecar) == expectedPid)
+            var current = TryReadClaim(sidecar);
+            bool isOurs = current is PidClaim claim
+                && claim.Pid == expectedPid
+                && (expectedWrittenUtc is null || claim.WrittenUtc == expectedWrittenUtc);
+            if (isOurs)
             {
                 try { File.Delete(sidecar); } catch { }
                 return true;

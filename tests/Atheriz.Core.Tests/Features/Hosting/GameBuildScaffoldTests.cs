@@ -118,6 +118,46 @@ public class GameBuildScaffoldTests
     }
 
     [Fact]
+    public void Scaffold_BuildCmdAvoidsDelayedExpansion()
+    {
+        // Delayed expansion off: cmd otherwise consumes `!` inside values it
+        // expands, corrupting a game path like C:\Games\Grotto! (a legal
+        // Windows filename character). PowerShell inputs go through the
+        // environment, so quotes, %, !, & and spaces stay harmless.
+        var folder = FreshFolder("atheriz_buildcmd_bang_", "bang1");
+        using (SuperuserEnv("bang1admin", "bang1Pass123"))
+        {
+            try
+            {
+                Assert.True(GameTemplateGenerator.CreateGameFolder(folder, "banggame", overwrite: true));
+                var cmdText = File.ReadAllText(Path.Combine(folder, "build.cmd"));
+                Assert.DoesNotContain("EnableDelayedExpansion", cmdText);
+                Assert.DoesNotContain("!CD!", cmdText);
+                Assert.DoesNotContain("!errorlevel!", cmdText);
+                Assert.Contains("for %%p in (.) do set \"ENGINE_ROOT=%%~fp\"", cmdText);
+                Assert.Contains("$env:SERVER_DLL", cmdText);
+                Assert.Contains("$env:ENGINE_ROOT", cmdText);
+            }
+            finally { try { Directory.Delete(Path.GetDirectoryName(folder)!, recursive: true); } catch { } }
+        }
+    }
+
+    [Fact]
+    public void RootBuildScriptAvoidsDelayedExpansion()
+    {
+        // The repository's own webclient build script must not corrupt a
+        // checkout path containing `!` either: the stored-hash check moved
+        // into a subroutine so plain %VAR% expansion suffices, and the hash
+        // PowerShell command receives its paths from the environment.
+        var src = Tests.Features.Regression.SourceScan.Read("build.cmd");
+        Assert.DoesNotContain("EnableDelayedExpansion", src);
+        Assert.DoesNotContain("!errorlevel!", src);
+        Assert.DoesNotContain("!STORED_HASH!", src);
+        Assert.Contains("$env:HASH_SRC_DIR", src);
+        Assert.Contains("call :webclient_hash_matches", src);
+    }
+
+    [Fact]
     public void Scaffold_MarksBuildShExecutable()
     {
         // The shell wrapper must be directly runnable on POSIX.

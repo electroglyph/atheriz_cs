@@ -279,7 +279,9 @@ public class GameFolderRejectTests
             try
             {
                 var pf = Path.Combine(gameFolder, "save", "server.pid");
-                if (File.Exists(pf) && int.TryParse(File.ReadAllText(pf).Trim(), out var pid))
+                // The pid file's first line is the pid; a claim written by this
+                // engine also carries a claim-time line below it.
+                if (File.Exists(pf) && int.TryParse(File.ReadLines(pf).FirstOrDefault()?.Trim(), out var pid))
                     try { System.Diagnostics.Process.GetProcessById(pid).Kill(); } catch { }
             }
             catch { }
