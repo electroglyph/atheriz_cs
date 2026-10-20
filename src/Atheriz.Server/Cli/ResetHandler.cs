@@ -14,6 +14,18 @@ public static class ResetHandler
         var port = portOverride ?? settings.WebserverPort;
         var savePath = settings.SavePath;
         var pidPath = Path.Combine(savePath, "server.pid");
+
+        // A reset replaces the world with whatever setup runs next. When the
+        // folder holds a game project but no up-to-date build of it, that setup
+        // is the engine template — so refuse before anything is deleted
+        // instead of handing back a world the game's own setup never saw.
+        if (!Atheriz.Core.Plugins.PluginReloader.WorldCanBeRebuilt(settings, out var gameProject))
+        {
+            Console.Error.WriteLine(
+                $"No up-to-date build of {gameProject} was found, so reset would recreate the world from the engine template. " +
+                $"Run build.sh (or dotnet build {gameProject}) and reset again. Nothing was deleted.");
+            return 1;
+        }
         bool isRunning = false;
         int? pid = null;
         // Only a claim that still names one of our live servers counts as
@@ -191,6 +203,17 @@ public static class ResetHandler
             Atheriz.Core.IGameSetup? game = null;
             try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings, out game); }
             catch (Exception ex) { Console.Error.WriteLine($"[reset] Game load failed ({ex.Message}); using template setup."); }
+            // Discovery passed before the wipe, so this is only reached when the
+            // assembly exists but cannot be loaded. Stop instead of building a
+            // template world in a game folder the operator will keep using.
+            if (game is null && gameProject is not null)
+            {
+                Console.Error.WriteLine(
+                    $"The world was wiped but {gameProject} could not be loaded; refusing to create the engine template world. " +
+                    "Keep the server stopped, fix the build, and reset again.");
+                Infrastructure.PidFile.ReleaseWipeLock(wipeB, savePath);
+                return 1;
+            }
 
             Console.WriteLine("Setting up new world...");
             try

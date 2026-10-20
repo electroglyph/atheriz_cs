@@ -122,19 +122,56 @@ public static class PluginReloader
     // Grotto.Tests/). Pure path-string check, no IO. Convention cost: game
     // code must not live under such names (a change there would load a stale
     // dll instead of skipping loudly).
-    private static bool IsNonGameSource(string gameDir, string file)
+    // Path segments that never feed the game assembly: build output and test
+    // projects. A change there must not make the built dll look stale.
+    private static bool IsIgnoredPathSegment(string segment) =>
+        segment.Equals("obj", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("bin", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("test", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("tests", StringComparison.OrdinalIgnoreCase) ||
+        segment.EndsWith("Tests", StringComparison.OrdinalIgnoreCase);
+
+    // Project names that are the engine and its template, never a game.
+    private static bool IsEngineProjectName(string name) =>
+        string.Equals(name, "Atheriz.Server", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "Atheriz.Core", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "Atheriz.GameTemplate", StringComparison.OrdinalIgnoreCase);
+
+    // Directories under a scan root that hold their own project file. Their
+    // sources belong to that project, not to the game assembly, so editing one
+    // cannot make the game dll stale. Without this, a tool project living
+    // inside the game folder (a launcher, a generator) disables the game
+    // plugin on the next reset.
+    private static HashSet<string> NestedProjectDirectories(string scanRoot)
+    {
+        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var project in Directory.EnumerateFiles(scanRoot, "*.csproj", SearchOption.AllDirectories))
+            {
+                var directory = Path.GetDirectoryName(project);
+                if (directory is null || string.Equals(directory, scanRoot, StringComparison.OrdinalIgnoreCase)) continue;
+                var relative = Path.GetRelativePath(scanRoot, directory);
+                if (relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]).Any(IsIgnoredPathSegment)) continue;
+                directories.Add(directory);
+            }
+        }
+        catch (Exception ex) { Suppress("DiscoverGameAssembly", ex); }
+        return directories;
+    }
+
+    private static bool IsNonGameSource(string gameDir, string file, IReadOnlySet<string> projectDirectories)
     {
         try
         {
             var rel = Path.GetRelativePath(gameDir, file);
-            foreach (var seg in rel.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]))
+            if (rel.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]).Any(IsIgnoredPathSegment))
+                return true;
+
+            for (var directory = Path.GetDirectoryName(file); !string.IsNullOrEmpty(directory); directory = Path.GetDirectoryName(directory))
             {
-                if (seg.Equals("obj", StringComparison.OrdinalIgnoreCase) ||
-                    seg.Equals("bin", StringComparison.OrdinalIgnoreCase) ||
-                    seg.Equals("test", StringComparison.OrdinalIgnoreCase) ||
-                    seg.Equals("tests", StringComparison.OrdinalIgnoreCase) ||
-                    seg.EndsWith("Tests", StringComparison.OrdinalIgnoreCase))
-                    return true;
+                if (projectDirectories.Contains(directory)) return true;
+                if (string.Equals(directory, gameDir, StringComparison.OrdinalIgnoreCase)) break;
             }
         }
         catch (Exception ex) { Suppress("DiscoverGameAssembly", ex); }
@@ -561,9 +598,12 @@ public static class PluginReloader
 // scan plugins + game project
     // Game project discovery: look for already-built dlls near CWD / SavePath parent (mirrors Python game folder import).
     // Never builds: Python imports source (no build step); a dropped-in .csproj must not trigger compilation on reload.
-    public static int DiscoverGameAssembly(AtherizSettings settings, List<string> outList)
+    /// <summary>
+    /// Directories a game project may live in: the current directory, the
+    /// directory holding the save folder, and that directory's parent.
+    /// </summary>
+    private static List<string> GameSearchDirectories(AtherizSettings settings)
     {
-        int added = 0;
         var searchDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try { searchDirs.Add(Directory.GetCurrentDirectory()); } catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
         try
@@ -579,6 +619,13 @@ public static class PluginReloader
             }
         }
         catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
+        return [.. searchDirs];
+    }
+
+    public static int DiscoverGameAssembly(AtherizSettings settings, List<string> outList)
+    {
+        int added = 0;
+        var searchDirs = GameSearchDirectories(settings);
         foreach (var dir in searchDirs)
         {
             string[] csprojs;
@@ -587,9 +634,7 @@ public static class PluginReloader
             {
                 // skip server/core templates themselves
                 var name = Path.GetFileNameWithoutExtension(csproj);
-                if (string.Equals(name, "Atheriz.Server", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "Atheriz.Core", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "Atheriz.GameTemplate", StringComparison.OrdinalIgnoreCase)) continue;
+                if (IsEngineProjectName(name)) continue;
                 // Try already-built dll first
                 var dllRelease = Path.Combine(dir, "bin", "Release", "net10.0", $"{name}.dll");
                 var dllDebug = Path.Combine(dir, "bin", "Debug", "net10.0", $"{name}.dll");
@@ -598,24 +643,35 @@ public static class PluginReloader
                 else if (File.Exists(dllDebug)) dll = dllDebug;
                 // Build if missing or csproj newer than dll
                 bool needBuild = dll is null;
+                string reason = dll is null ? "no built dll" : "";
                 if (!needBuild)
                 {
                     try
                     {
-                        var csprojTime = File.GetLastWriteTimeUtc(csproj);
                         var dllTime = File.GetLastWriteTimeUtc(dll!);
-                        if (csprojTime > dllTime) needBuild = true;
-                        // also if any game *.cs newer (recursive: subdirectory
-                        // edits must not look "up to date") — but only sources
-                        // that can feed the game dll. Generated outputs
-                        // (obj/bin) and test projects never do: counting them
-                        // bricks every boot into engine-only after any test
-                        // build/edit, which build.sh (game project only,
-                        // incremental) can never heal.
-                        foreach (var cs in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
+                        if (File.GetLastWriteTimeUtc(csproj) > dllTime)
                         {
-                            if (IsNonGameSource(dir, cs)) continue;
-                            if (File.GetLastWriteTimeUtc(cs) > dllTime) { needBuild = true; break; }
+                            needBuild = true;
+                            reason = $"{Path.GetFileName(csproj)} is newer than {Path.GetFileName(dll)}";
+                        }
+                        else
+                        {
+                            // Also build if any game *.cs is newer (recursive:
+                            // subdirectory edits must not look "up to date") —
+                            // but only sources that feed the game dll. Generated
+                            // outputs (obj/bin), test projects, and sources
+                            // owned by a nested project never do.
+                            var projectDirectories = NestedProjectDirectories(dir);
+                            foreach (var cs in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
+                            {
+                                if (IsNonGameSource(dir, cs, projectDirectories)) continue;
+                                if (File.GetLastWriteTimeUtc(cs) > dllTime)
+                                {
+                                    needBuild = true;
+                                    reason = $"{Path.GetRelativePath(dir, cs)} is newer than {Path.GetFileName(dll)}";
+                                    break;
+                                }
+                            }
                         }
                     }
                     catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
@@ -624,7 +680,9 @@ public static class PluginReloader
                 // .csproj must not trigger compilation). Only use already-built dlls.
                 if (needBuild)
                 {
-                    Console.Error.WriteLine($"[HotReload] Skipping {name}: no up-to-date built dll (run 'dotnet build' first; reload never builds).");
+                    var message = $"[HotReload] Skipping {name}: {reason} (run 'dotnet build' first; reload never builds).";
+                    Console.Error.WriteLine(message);
+                    AtherizLogger.LogWarning(message, "PluginReloader");
                     continue;
                 }
                 if (dll is not null && File.Exists(dll) && !outList.Contains(dll, StringComparer.OrdinalIgnoreCase) && !IsExcluded(dll))
@@ -632,10 +690,50 @@ public static class PluginReloader
                     outList.Add(dll);
                     added++;
                     Console.Error.WriteLine($"[HotReload] Discovered game assembly {Path.GetFileName(dll)}");
+                    AtherizLogger.LogInformation($"Discovered game assembly {Path.GetFileName(dll)}", "PluginReloader");
                 }
             }
         }
         return added;
+    }
+
+    /// <summary>
+    /// True when one of the game search directories holds a game project: any
+    /// top-level <c>*.csproj</c> that is not the server, the engine, or the
+    /// template. Such a folder expects its own world, not the template world.
+    /// </summary>
+    public static bool HasGameProject(AtherizSettings settings, out string? projectName)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        foreach (var dir in GameSearchDirectories(settings))
+        {
+            string[] csprojs;
+            try { csprojs = Directory.GetFiles(dir, "*.csproj", SearchOption.TopDirectoryOnly); }
+            catch { continue; }
+            foreach (var csproj in csprojs)
+            {
+                var name = Path.GetFileNameWithoutExtension(csproj);
+                if (IsEngineProjectName(name)) continue;
+                projectName = name;
+                return true;
+            }
+        }
+        projectName = null;
+        return false;
+    }
+
+    /// <summary>
+    /// True when a reset of this folder can rebuild the game's own world: either
+    /// it holds no game project (the template world is the intended one), or a
+    /// built game assembly is discoverable. False means a reset would delete the
+    /// world and silently recreate it from the engine template.
+    /// </summary>
+    public static bool WorldCanBeRebuilt(AtherizSettings settings, out string? gameProject)
+    {
+        if (!HasGameProject(settings, out gameProject)) return true;
+        var assemblies = new List<string>();
+        DiscoverGameAssembly(settings, assemblies);
+        return assemblies.Count > 0;
     }
 
     private static int DiscoverNewPluginModules(AtherizSettings settings, List<string> outList)

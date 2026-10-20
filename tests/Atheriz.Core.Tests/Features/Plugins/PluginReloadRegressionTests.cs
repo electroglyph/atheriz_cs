@@ -36,6 +36,120 @@ public class PluginReloadRegressionTests
 
     private static int CountCoros(AsyncTicker ticker) => ticker.Slots.Values.Sum(s => s.Coros.Count);
 
+    private static string NewGameRoot(out string gameDir)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "atheriz_game_" + Guid.NewGuid().ToString("N"));
+        gameDir = Path.Combine(root, "game");
+        Directory.CreateDirectory(gameDir);
+        return root;
+    }
+
+    private static AtherizSettings SettingsFor(string gameDir) => new() { SavePath = Path.Combine(gameDir, "save") };
+
+    private static void WriteGameProject(string gameDir, string name)
+    {
+        var project = Path.Combine(gameDir, name + ".csproj");
+        File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>");
+        File.SetLastWriteTimeUtc(project, DateTime.UtcNow.AddHours(-3));
+        var dllDir = Path.Combine(gameDir, "bin", "Release", "net10.0");
+        Directory.CreateDirectory(dllDir);
+        var dll = Path.Combine(dllDir, name + ".dll");
+        File.WriteAllBytes(dll, [0x4D, 0x5A]);
+        File.SetLastWriteTimeUtc(dll, DateTime.UtcNow.AddHours(-2));
+    }
+
+    [Fact]
+    public void DiscoverGameAssembly_NestedProjectSourceNewerThanDll_StillFindsGameAssembly()
+    {
+        var root = NewGameRoot(out var game);
+        try
+        {
+            WriteGameProject(game, "game");
+            var tool = Path.Combine(game, "tools");
+            Directory.CreateDirectory(tool);
+            File.WriteAllText(Path.Combine(tool, "Tool.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>");
+            var newer = Path.Combine(tool, "Newer.cs");
+            File.WriteAllText(newer, "// belongs to Tool.csproj, not to the game assembly");
+            File.SetLastWriteTimeUtc(newer, DateTime.UtcNow.AddHours(1));
+
+            var found = new List<string>();
+            var added = PluginReloader.DiscoverGameAssembly(SettingsFor(game), found);
+
+            Assert.Equal(1, added);
+            Assert.Contains(found, path => path.EndsWith("game.dll", StringComparison.OrdinalIgnoreCase));
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    [Fact]
+    public void DiscoverGameAssembly_GameSourceNewerThanDll_SkipsGameAssembly()
+    {
+        var root = NewGameRoot(out var game);
+        try
+        {
+            WriteGameProject(game, "game");
+            var source = Path.Combine(game, "Game.cs");
+            File.WriteAllText(source, "// game source");
+            File.SetLastWriteTimeUtc(source, DateTime.UtcNow.AddHours(1));
+
+            var found = new List<string>();
+            var added = PluginReloader.DiscoverGameAssembly(SettingsFor(game), found);
+
+            Assert.Equal(0, added);
+            Assert.Empty(found);
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    [Fact]
+    public void WorldCanBeRebuilt_NestedProjectSourceNewerThanDll_IsTrue()
+    {
+        var root = NewGameRoot(out var game);
+        try
+        {
+            WriteGameProject(game, "game");
+            var tool = Path.Combine(game, "tools");
+            Directory.CreateDirectory(tool);
+            File.WriteAllText(Path.Combine(tool, "Tool.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>");
+            var newer = Path.Combine(tool, "Newer.cs");
+            File.WriteAllText(newer, "// belongs to Tool.csproj, not to the game assembly");
+            File.SetLastWriteTimeUtc(newer, DateTime.UtcNow.AddHours(1));
+
+            Assert.True(PluginReloader.WorldCanBeRebuilt(SettingsFor(game), out var project));
+            Assert.Equal("game", project);
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    [Fact]
+    public void WorldCanBeRebuilt_GameSourceNewerThanDll_IsFalse()
+    {
+        var root = NewGameRoot(out var game);
+        try
+        {
+            WriteGameProject(game, "game");
+            var source = Path.Combine(game, "Game.cs");
+            File.WriteAllText(source, "// game source");
+            File.SetLastWriteTimeUtc(source, DateTime.UtcNow.AddHours(1));
+
+            Assert.False(PluginReloader.WorldCanBeRebuilt(SettingsFor(game), out var project));
+            Assert.Equal("game", project);
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    [Fact]
+    public void WorldCanBeRebuilt_FolderWithoutGameProject_IsTrue()
+    {
+        var root = NewGameRoot(out var game);
+        try
+        {
+            Assert.True(PluginReloader.WorldCanBeRebuilt(SettingsFor(game), out var project));
+            Assert.Null(project);
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
     [Fact]
     public void Load_MissingFile_ThrowsFileNotFound_AndNotLoaded()
     {

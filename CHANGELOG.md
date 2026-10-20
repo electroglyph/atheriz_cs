@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.33.0.0] - 2026-10-19
+
+Plugin discovery: sources inside a directory that holds its own project file
+are no longer counted as game sources when deciding whether a game assembly is
+up to date. A tool project built beside the game can no longer make the game
+plugin look stale, which previously replaced the game world with the engine
+template after a reset. The skip reason, naming the offending source file, is
+also written to the server log instead of stderr only.
+
+Reset: resetting a folder that holds a game project now refuses before deleting
+anything when no up-to-date game assembly is discoverable, and refuses again if
+the assembly cannot be loaded, instead of silently rebuilding the world from the
+engine template.
+
 ## [0.32.0.0] - 2026-10-19
 
 Server lifecycle: `save/server.pid` now records the UTC claim time beside the
