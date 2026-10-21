@@ -596,7 +596,7 @@ public class Door
         }
         if (status == "not_closed")
         {
-            loc?.MsgContents($"$You(target) $conj(try) to lock the door, but You can't lock an open door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
+            loc?.MsgContents($"$You(target) $conj(try) to lock the door, but you can't lock an open door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             return false;
         }
         if (status == "already_locked")

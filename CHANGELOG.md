@@ -25,6 +25,9 @@ of only a one-line question.
 Nicks: keys shorter than two characters are rejected when set, since they could
 never expand, and the command help states the minimum.
 
+Doors: trying to lock an open door now reads "but you can't lock an open door."
+with ordinary sentence casing.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file
