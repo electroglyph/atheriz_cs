@@ -26,7 +26,9 @@ Nicks: keys shorter than two characters are rejected when set, since they could
 never expand, and the command help states the minimum.
 
 Doors: trying to lock an open door now reads "but you can't lock an open door."
-with ordinary sentence casing.
+with ordinary sentence casing. Locking and unlocking also report the door's state
+before a missing key, so an already-open or already-unlocked door says so
+instead of asking for a key that would not change anything.
 
 ## [0.33.0.0] - 2026-10-19
 

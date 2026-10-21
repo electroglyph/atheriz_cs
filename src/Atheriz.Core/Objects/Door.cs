@@ -573,8 +573,8 @@ public class Door
             using (SuppressMarks())
             {
                 if (!canAccess) status = "no_access";
-                else if (!hasKey) status = "no_key";
                 else if (!Closed) status = "not_closed";
+                else if (!hasKey) status = "no_key";
                 else if (Locked) status = "already_locked";
                 else { Locked = true; status = "locked"; }
             }
@@ -625,9 +625,9 @@ public class Door
             using (SuppressMarks())
             {
                 if (!canAccess) status = "no_access";
+                else if (!Locked) status = "already_unlocked";
                 else if (!hasKey) status = "no_key";
-                else if (Locked) { Locked = false; status = "unlocked"; }
-                else status = "already_unlocked";
+                else { Locked = false; status = "unlocked"; }
             }
         }
         finally { _lock.ExitWriteLock(); }

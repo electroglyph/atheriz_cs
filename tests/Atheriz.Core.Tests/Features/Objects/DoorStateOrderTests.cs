@@ -38,4 +38,61 @@ public class DoorStateOrderTests
         Assert.Contains("but you can't lock an open door.", text);
         Assert.DoesNotContain("but You", text);
     }
+
+    [Fact]
+    public void TryLock_OpenKeyedDoorWithoutKey_ReportsOpenDoorBeforeMissingKey()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (room, caller) = MakeRoom("openkeyed");
+        var key = GameObject.Create("brass key");
+        ObjectRegistry.AddObject(key);
+        var door = new Door(room.Coord, new Coord("openkeyed", 0, 1, 0), "north", "south", closed: false)
+        {
+            KeyId = key.Id,
+        };
+
+        Assert.False(door.TryLock(caller));
+
+        var text = ReceivedText(caller);
+        Assert.Contains("you can't lock an open door.", text);
+        Assert.DoesNotContain("lack the key", text);
+        Assert.False(door.Locked);
+    }
+
+    [Fact]
+    public void TryUnlock_UnlockedKeyedDoorWithoutKey_ReportsAlreadyUnlocked()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (room, caller) = MakeRoom("unlockedkeyed");
+        var key = GameObject.Create("brass key");
+        ObjectRegistry.AddObject(key);
+        var door = new Door(room.Coord, new Coord("unlockedkeyed", 0, 1, 0), "north", "south", closed: true, locked: false)
+        {
+            KeyId = key.Id,
+        };
+
+        Assert.False(door.TryUnlock(caller));
+
+        var text = ReceivedText(caller);
+        Assert.Contains("it is already unlocked.", text);
+        Assert.DoesNotContain("lack the key", text);
+    }
+
+    [Fact]
+    public void TryUnlock_LockedKeyedDoorWithoutKey_StillReportsMissingKey()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (room, caller) = MakeRoom("lockedkeyed");
+        var key = GameObject.Create("brass key");
+        ObjectRegistry.AddObject(key);
+        var door = new Door(room.Coord, new Coord("lockedkeyed", 0, 1, 0), "north", "south", closed: true, locked: true)
+        {
+            KeyId = key.Id,
+        };
+
+        Assert.False(door.TryUnlock(caller));
+
+        Assert.Contains("lack the key", ReceivedText(caller));
+        Assert.True(door.Locked);
+    }
 }
