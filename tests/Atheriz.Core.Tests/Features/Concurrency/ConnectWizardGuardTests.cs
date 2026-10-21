@@ -7,7 +7,7 @@ using Atheriz.Core.Tests.Ported;
 
 namespace Atheriz.Core.Tests.Features.Concurrency;
 
-// Audit 10 finding 16: two `connect` lines on one socket must not start two
+// Two `connect` lines on one socket must not start two
 // character-selection wizards. The second is refused while one is in flight;
 // without the guard the two loops force-complete each other's prompt slot
 // with "" and flood "Invalid choice." with no player input. Neuter (drop the
@@ -47,7 +47,7 @@ public sealed class ConnectWizardGuardTests
             Assert.True(conn.Sent.Count < 100);
 
             // Answer the first wizard so its task ends and the token clears.
-            conn.Session.InputFuture?.TrySetResult("0");
+            conn.Session.InputFuture?.TrySetResult("1");
             Assert.True(PortedHelpers.WaitFor(() => conn.Session.TryStartWizard(), 5000));
             conn.Session.EndWizard();
         }

@@ -612,7 +612,8 @@ public class PortedServerIntegrationTests
         if (!afterConnect.Contains("Please select", StringComparison.OrdinalIgnoreCase))
             Console.WriteLine($"[Telnet] afterConnect missing Please select: '{afterConnect.Substring(0, Math.Min(1000, afterConnect.Length)).Replace("\n","\\n")}' welcome was '{welcome.Substring(0, Math.Min(500, welcome.Length)).Replace("\n","\\n")}'");
         Assert.Contains("Please select", afterConnect);
-        await writer.WriteLineAsync("0");
+        // The menu numbers characters from one.
+        await writer.WriteLineAsync("1");
         await writer.FlushAsync();
         // Wait for choice prompt to be consumed and puppet set
         await Task.Delay(500);

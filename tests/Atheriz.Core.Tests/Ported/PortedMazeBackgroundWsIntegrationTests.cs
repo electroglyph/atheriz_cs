@@ -130,7 +130,8 @@ public class PortedMazeBackgroundWsIntegrationTests
             await Send("text", new object[]{$"connect mazeadmin mazepass123"});
             var ac=await Drain(3000);
             Assert.Contains(ac,m=>m.Contains("Please select"));
-            await Send("text", new object[]{"0"});
+            // The menu numbers characters from one.
+            await Send("text", new object[]{"1"});
             await Task.Delay(700);
             await Drain(1500);
             // ensure look works (retry logic from AGENTS.md)
