@@ -23,19 +23,41 @@ public class SessionRestoreTests
     [Fact]
     public void MapEnabled_False_SurvivesSaveLoadRoundtrip()
     {
-        // MapEnabled and IsMapable setters stay in sync, and ApplyDtoFields
-        // restores both, so MapEnabled=false survives a save/load roundtrip.
+        // The two map settings are independent and each survives a roundtrip on
+        // its own: turning the display off must not drop map tracking.
         using var env = GlobalTestEnv.Enter();
         var o = GameObject.Create("mapper");
         ObjectRegistry.AddObject(o);
+        o.IsMapable = true;
         o.MapEnabled = false;
-        Assert.False(o.IsMapable);
+        Assert.True(o.IsMapable);
         using (var db = new AtherizDbContext(env.TempPath)) { db.Database.EnsureCreated(); ObjectRegistry.SaveObjects(db, force: true); }
         ObjectRegistry.ClearAll();
         ObjectRegistry.LoadObjects(env.TempPath);
         var back = ObjectRegistry.Get(o.Id).FirstOrDefault();
         Assert.NotNull(back);
-        Assert.False(back!.IsMapable);
+        Assert.True(back!.IsMapable);
         Assert.False(back.MapEnabled);
+    }
+
+    [Fact]
+    public void LegacyDto_WithoutMapEnabled_FollowsIsMapable()
+    {
+        // Saves written before MapEnabled was persisted stored only IsMapable;
+        // restore keeps the old single-setting meaning for those saves.
+        using var env = GlobalTestEnv.Enter();
+        var o = GameObject.Create("legacy");
+        var dto = new Atheriz.Core.Persistence.Dto.GameObjectDto
+        {
+            Id = o.Id,
+            Name = "legacy",
+            IsMapable = true,
+        };
+        GameObject.ApplyDtoFields(o, dto, null);
+        Assert.True(o.MapEnabled);
+
+        dto.IsMapable = false;
+        GameObject.ApplyDtoFields(o, dto, null);
+        Assert.False(o.MapEnabled);
     }
 }

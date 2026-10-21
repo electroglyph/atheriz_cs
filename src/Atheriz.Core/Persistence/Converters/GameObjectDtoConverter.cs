@@ -127,6 +127,7 @@ internal static class GameObjectDtoConverter
             IsItem = obj.IsItem,
             IsContainer = obj.IsContainer,
             IsMapable = obj.IsMapable,
+            MapEnabled = obj.MapEnabled,
             IsNode = isNode,
             IsTemporary = obj.IsTemporary,
             IsDeleted = obj.IsDeleted,

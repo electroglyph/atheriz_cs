@@ -23,6 +23,7 @@ public sealed record GameObjectDto
     public bool IsItem { get; set; }
     public bool IsContainer { get; set; }
     public bool IsMapable { get; set; }
+    public bool? MapEnabled { get; set; }
     public bool IsNode { get; set; }
     public bool IsTemporary { get; set; }
     public bool IsDeleted { get; set; }

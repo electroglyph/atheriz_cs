@@ -157,7 +157,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public bool IsPc { get => Read(() => _flags.IsPc); set => SetFlag(() => _flags.IsPc, v => _flags.IsPc = v, value); }
     public bool IsNpc { get => Read(() => _flags.IsNpc); set => SetFlag(() => _flags.IsNpc, v => _flags.IsNpc = v, value); }
     public bool IsItem { get => Read(() => _flags.IsItem); set => SetFlag(() => _flags.IsItem, v => _flags.IsItem = v, value); }
-    public bool IsMapable { get => Read(() => _flags.IsMapable); set => Write(() => { _flags.IsMapable = value; _mapEnabled = value; _flags.IsModified = true; }); }
+    public bool IsMapable { get => Read(() => _flags.IsMapable); set => Write(() => { _flags.IsMapable = value; _flags.IsModified = true; }); }
     public bool IsContainer { get => Read(() => _flags.IsContainer); set => SetFlag(() => _flags.IsContainer, v => _flags.IsContainer = v, value); }
     public bool IsScript { get => Read(() => _flags.IsScript); set => SetFlag(() => _flags.IsScript, v => _flags.IsScript = v, value); }
     public virtual bool IsTickable { get => Read(() => _flags.IsTickable); set => SetFlag(() => _flags.IsTickable, v => _flags.IsTickable = v, value); }
@@ -172,11 +172,11 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     public bool IsBanned { get => Read(() => _flags.IsBanned); set => SetFlag(() => _flags.IsBanned, v => _flags.IsBanned = v, value); }
     public bool CanHear { get => Read(() => _flags.CanHear); set => SetFlag(() => _flags.CanHear, v => _flags.CanHear = v, value); }
     public bool Quelled { get => Read(() => _quelled); set => Write(() => { _quelled = value; _flags.IsModified = true; }); }
-    public bool MapEnabled { get => Read(() => _mapEnabled); set => Write(() => { _mapEnabled = value; _flags.IsMapable = value; _flags.IsModified = true; }); }
+    public bool MapEnabled { get => Read(() => _mapEnabled); set => Write(() => { _mapEnabled = value; _flags.IsModified = true; }); }
     // Atomic read-modify-write for the map toggle: two concurrent toggles
     // must not both read the same value and write it back.
     // Returns the new value.
-    public bool ToggleMapEnabled() => Write(() => { _mapEnabled = !_mapEnabled; _flags.IsMapable = _mapEnabled; _flags.IsModified = true; return _mapEnabled; });
+    public bool ToggleMapEnabled() => Write(() => { _mapEnabled = !_mapEnabled; _flags.IsModified = true; return _mapEnabled; });
     public double? LastMapTime { get => Read(() => _lastMapTime); set => Write(() => _lastMapTime = value); }
     public string Gender { get => Read(() => _gender); set => SetIfChanged(ref _gender, value); }
     public virtual double TickSeconds { get => Read(() => _tickSeconds); set => Write(() => { _tickSeconds = value; _flags.IsModified = true; }); }
@@ -738,8 +738,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         o._flags.IsItem = dto.IsItem;
         o._flags.IsContainer = dto.IsContainer;
         o._flags.IsMapable = dto.IsMapable;
-        // Keep the twin field in sync (setters assign both; restore both).
-        o._mapEnabled = dto.IsMapable;
+        // Older saves stored only IsMapable; the display toggle follows it
+        // once at restore, then the two settings are independent.
+        o._mapEnabled = dto.MapEnabled ?? dto.IsMapable;
         o._flags.IsNode = isNodeOverride ?? dto.IsNode;
         o._flags.IsTemporary = dto.IsTemporary;
         o._flags.IsDeleted = dto.IsDeleted;

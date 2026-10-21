@@ -199,28 +199,35 @@ public class PortedOpenExitMapNounSpamWanderTests
     [Fact] public void Map_Enables()
     {
         using var env=GlobalTestEnv.Enter();
-        var c=MakeCaller(); c.IsMapable=false;
+        var c=MakeCaller(); c.IsMapable=true; c.MapEnabled=false;
         new MapCommand().Run(c, null);
         Assert.Contains(c.PeekMessages(), m=>m=="Map enabled.");
-        Assert.True(c.IsMapable);
+        Assert.True(c.MapEnabled);
     }
     [Fact] public void Map_Disables()
     {
         using var env=GlobalTestEnv.Enter();
-        var c=MakeCaller(); c.IsMapable=true;
+        var c=MakeCaller(); c.IsMapable=true; c.MapEnabled=true;
         new MapCommand().Run(c, null);
         Assert.Contains(c.PeekMessages(), m=>m=="Map disabled.");
-        Assert.False(c.IsMapable);
+        Assert.False(c.MapEnabled);
+    }
+    [Fact] public void Map_Disables_LeavesIsMapable()
+    {
+        using var env=GlobalTestEnv.Enter();
+        var c=MakeCaller(); c.IsMapable=true; c.MapEnabled=true;
+        new MapCommand().Run(c, null);
+        Assert.True(c.IsMapable);
     }
     [Fact] public void Map_ToggleTwice()
     {
         using var env=GlobalTestEnv.Enter();
-        var c=MakeCaller(); c.IsMapable=false;
+        var c=MakeCaller(); c.MapEnabled=false;
         new MapCommand().Run(c, null);
-        Assert.True(c.IsMapable);
+        Assert.True(c.MapEnabled);
         c.ClearMessages();
         new MapCommand().Run(c, null);
-        Assert.False(c.IsMapable);
+        Assert.False(c.MapEnabled);
     }
 
     // -----------------------------------------------------------------------

@@ -356,8 +356,7 @@ public class PortedHelpPrivilegeTests
     {
         using var env = GlobalTestEnv.Enter();
         var c = MakeCaller();
-        // Ensure MapEnabled via dynamic; we store via IsMapable fallback
-        c.IsMapable = false;
+        c.MapEnabled = false;
         new MapCommand().Run(c, null);
         Assert.Contains(c.PeekMessages(), m => m == "Map enabled.");
     }
