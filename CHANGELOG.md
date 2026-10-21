@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.34.0.0] - 2026-10-20
+
+Search: a leading negative count is now treated as part of the search text, so
+commands such as `get -1 sword` report that no object was found instead of
+raising an error.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file

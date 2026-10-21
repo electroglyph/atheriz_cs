@@ -161,7 +161,7 @@ public static class ContentUtils
             start = 1;
             if (start >= end) return new List<GameObject>(objs);
         }
-        else if (int.TryParse(split[0], out var n0))
+        else if (int.TryParse(split[0], out var n0) && n0 > 0)
         {
             count = n0;
             start = 1;
