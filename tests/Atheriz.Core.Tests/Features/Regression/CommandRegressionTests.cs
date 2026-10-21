@@ -539,12 +539,10 @@ public class CommandRegressionTests
         finally { Reset(); }
     }
 
-    // Python put.py resolves the destination with dest[0] — a silent first
-    // pick among same-name matches. Reporting ambiguity would invent new
-    // message strings. Pin the faithful pick: the coin moves out of
-    // inventory into one of the two boxes.
+    // A repeated container name is ambiguous, so the item stays put and both
+    // candidates are listed for the player to pick by id.
     [Fact]
-    public void PutMultiDest_ReportsInsteadOfSilentPick()
+    public void PutMultiDest_RefusesAmbiguousContainer()
     {
         Reset();
         NodeHandler? nh = null;
@@ -568,8 +566,10 @@ public class CommandRegressionTests
             Assert.True(coin.MoveTo(go));
             var cmd = new PutCommand();
             cmd.Run(go, cmd.Parser!.ParseArgs(new[] { "coin", "in", "box" }));
-            Assert.DoesNotContain(coin.Id, go.ContentsSnapshot);
-            Assert.True(box1.ContentsSnapshot.Contains(coin.Id) || box2.ContentsSnapshot.Contains(coin.Id));
+            Assert.Contains(coin.Id, go.ContentsSnapshot);
+            Assert.DoesNotContain(coin.Id, box1.ContentsSnapshot);
+            Assert.DoesNotContain(coin.Id, box2.ContentsSnapshot);
+            Assert.Contains("Multiple matches found for 'box'.", string.Join("\n", go.PeekMessages()));
         }
         finally { NodeHandler.SetCurrent(null); Reset(); }
     }
