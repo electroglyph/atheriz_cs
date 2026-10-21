@@ -179,7 +179,7 @@ public sealed class GiveCommand : LoggedInCommand
         // before the first MoveTo, so one read covers all three sites.
         var inv = go.ContentsSnapshot;
         var tokens = pa.GetList(ParsedArgKeys.Args);
-        if (tokens.Count == 0) { go.Msg("Give it to whom?"); return; }
+        if (tokens.Count == 0) { go.Msg(PrintHelp()); return; }
         string? objName = null, targetName = null;
         // Per-candidate search caches for the split loop below: every candidate
         // split is validated by real inventory + location searches, and the
@@ -201,13 +201,13 @@ public sealed class GiveCommand : LoggedInCommand
         }
         if (TargetResolution.SplitOnFirstKeyword(tokens, out var objParts, out var tgtParts, "to"))
         {
-            if (objParts.Count == 0 || tgtParts.Count == 0) { go.Msg("Give it to whom?"); return; }
+            if (objParts.Count == 0 || tgtParts.Count == 0) { go.Msg(PrintHelp()); return; }
             objName = string.Join(" ", objParts);
             targetName = string.Join(" ", tgtParts);
         }
         else
         {
-            if (tokens.Count < 2) { go.Msg("Give it to whom?"); return; }
+            if (tokens.Count < 2) { go.Msg(PrintHelp()); return; }
             string? foundObj = null, foundTgt = null;
             for (int split = 1; split < tokens.Count; split++)
             {
@@ -245,7 +245,7 @@ public sealed class GiveCommand : LoggedInCommand
                 }
             }
         }
-        if (objName is null || targetName is null) { go.Msg("Give it to whom?"); return; }
+        if (objName is null || targetName is null) { go.Msg(PrintHelp()); return; }
         List<GameObject> tgtMatches = LocSearch(targetName);
         if (tgtMatches.Count == 0) { go.Msg($"Could not find '{targetName}' here."); return; }
         if (tgtMatches.Count > 1) { CommandHelpers.MsgMultipleMatchesFound(go, targetName); return; }

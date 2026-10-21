@@ -117,4 +117,52 @@ public class GiveCommandTests
         }
         finally { NodeHandler.SetCurrent(null); }
     }
+
+    private static GameObject EnterGiverInRoom(string area)
+    {
+        var room = new Node(new Coord(area, 0, 0, 0));
+        ObjectRegistry.AddObject(room);
+        var giver = GameObject.Create("giver", isPc: true);
+        ObjectRegistry.AddObject(giver);
+        Assert.True(giver.MoveTo(room));
+        giver.ClearMessages();
+        return giver;
+    }
+
+    [Fact]
+    public void Give_NoArguments_RendersHelp()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var giver = EnterGiverInRoom("givehelp1");
+
+        RunJob(CommandDispatcher.DispatchLoggedIn(giver, "give", immediate: true));
+
+        var text = string.Join("\n", giver.PeekMessages());
+        Assert.Contains("usage: give", text);
+        Assert.Contains("object to give, optionally 'to <target>'", text);
+    }
+
+    [Fact]
+    public void Give_OnlyObject_RendersHelp()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var giver = EnterGiverInRoom("givehelp2");
+
+        RunJob(CommandDispatcher.DispatchLoggedIn(giver, "give sword", immediate: true));
+
+        Assert.Contains("usage: give", string.Join("\n", giver.PeekMessages()));
+    }
+
+    [Fact]
+    public void Give_TrailingToWithoutTarget_RendersHelp()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var giver = EnterGiverInRoom("givehelp3");
+
+        RunJob(CommandDispatcher.DispatchLoggedIn(giver, "give sword to", immediate: true));
+
+        var text = string.Join("\n", giver.PeekMessages());
+        Assert.Contains("usage: give", text);
+        Assert.DoesNotContain("Give it to whom?", text);
+    }
 }

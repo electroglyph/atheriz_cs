@@ -361,9 +361,11 @@ public class PortedMoreCommandsTests
         ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c=MakeCaller(); c.Location=new Persistence.Dto.LocationRef.CoordLocation(coord);
         var pa=new GameArgumentParser.ParsedArgs(); pa["args"]=new List<string>{"apple"};
-        // Our Give expects at least 1 token then checks <2 => Give it to whom?
+        // Incomplete input renders the command help.
         new GiveCommand().Run(c, pa);
-        Assert.Contains(c.PeekMessages(), m=>m=="Give it to whom?");
+        var help = string.Join("\n", c.PeekMessages());
+        Assert.Contains("usage: give", help);
+        Assert.Contains("object to give, optionally 'to <target>'", help);
     }
     [Fact]
     public void Give_TargetNotFound()

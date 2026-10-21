@@ -364,7 +364,7 @@ public class PortedIntentTests
         var pa=new GameArgumentParser.ParsedArgs();
         pa["args"]=new List<string>{"apple","to"};
         cmd.Run(c, pa);
-        Assert.Contains(c.PeekMessages(), m=>m=="Give it to whom?");
+        Assert.Contains("usage: give", string.Join("\n", c.PeekMessages()));
     }
     [Fact] public void Give_AllWithEmptyInventory()
     {

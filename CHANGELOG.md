@@ -19,6 +19,9 @@ Put: putting an item into a container name shared by several containers now
 lists the matching containers and asks for an id, instead of silently using the
 first one.
 
+Give: incomplete input now shows the command help with its usage line instead
+of only a one-line question.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file

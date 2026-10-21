@@ -79,8 +79,8 @@ internal static class TargetResolution
 
     // Splits tokens at the first keyword match (case-insensitive, like each
     // verb's old FindIndex/loop did): `give a to b` -> ([a], [b]). False when
-    // no token matches; emptiness checks stay with the callers because each
-    // verb reports them differently ("Give it to whom?" vs PrintHelp).
+    // no token matches; emptiness checks stay with the callers so each verb
+    // can decide between help text and its own refusal.
     internal static bool SplitOnFirstKeyword(IReadOnlyList<string> tokens, out List<string> before, out List<string> after, params string[] keywords)
     {
         ArgumentNullException.ThrowIfNull(tokens);
