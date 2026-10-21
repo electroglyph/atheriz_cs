@@ -181,7 +181,7 @@ public sealed class ConnectCommand : Command
             {
                 var c = chars[x];
                 string tag = c.IsBanned ? " [banned]" : "";
-                text += $"{x}. {c.Name}{tag}\r\n";
+                text += $"{x + 1}. {c.Name}{tag}\r\n";
             }
             if (settings.CharCreationEnabled)
                 text += "\r\nor type 'new' to create a new character\r\n";
@@ -215,12 +215,12 @@ public sealed class ConnectCommand : Command
                 caller.Msg("Invalid choice.");
                 continue;
             }
-            if (idx < 0 || idx >= chars.Count)
+            if (idx < 1 || idx > chars.Count)
             {
                 caller.Msg("Invalid choice.");
                 continue;
             }
-            var chosen = chars[idx];
+            var chosen = chars[idx - 1];
             if (chosen.IsBanned)
             {
                 string msg = "That character is banned.";

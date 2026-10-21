@@ -33,6 +33,9 @@ instead of asking for a key that would not change anything.
 Doors: opening a door now announces it in both rooms, matching the existing
 close announcement.
 
+Login: the character selection list is numbered from one, and the number shown
+next to a character is the number to type.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file

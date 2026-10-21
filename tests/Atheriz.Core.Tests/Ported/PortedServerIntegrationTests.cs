@@ -486,7 +486,7 @@ public class PortedServerIntegrationTests
         var afterConnect = await RecvAllAsync(3000);
         // logged_in may be coalesced or delayed; main check is character selection prompt
         Assert.Contains(afterConnect, m => m.Contains("Please select a character"));
-        // Find Enter your choice prompt and send 0
+        // Find Enter your choice prompt and send 1 (the menu numbers from one)
         // There may be an extra prompt for Enter your choice
         var hasChoicePrompt = afterConnect.Any(m => m.Contains("Enter your choice"));
         if (!hasChoicePrompt)
@@ -494,7 +494,7 @@ public class PortedServerIntegrationTests
             var extra = await RecvAllAsync(2000);
             afterConnect.AddRange(extra);
         }
-        await SendAsync("text", new object[] { "0" });
+        await SendAsync("text", new object[] { "1" });
         // Drain post-select (may include no message, just puppet set) — wait a bit for AtPostPuppet to finish MoveTo
         await Task.Delay(700);
         await RecvAllAsync(1500);
