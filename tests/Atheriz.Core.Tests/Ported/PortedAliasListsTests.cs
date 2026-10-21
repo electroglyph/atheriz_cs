@@ -131,10 +131,11 @@ public class PortedAliasListsTests
             caller.ClearMessages();
             var none = new Atheriz.Core.Commands.LoggedIn.NoneCommand();
             var pa = new GameArgumentParser.ParsedArgs();
-            pa["none"] = new List<string>{"qu"};
+            pa["none"] = new List<string>{"helq"};
             none.Run(caller, pa);
             var msg = string.Join(" ", caller.PeekMessages());
             Assert.Contains("did you mean", msg.ToLowerInvariant());
+            Assert.Contains("help", msg.ToLowerInvariant());
             Assert.DoesNotContain("quit", msg.ToLowerInvariant());
             Assert.DoesNotContain("save", msg.ToLowerInvariant());
             Assert.DoesNotContain("none", msg.ToLowerInvariant());
@@ -174,10 +175,11 @@ public class PortedAliasListsTests
             goCaller.ClearMessages();
             var none2 = new Atheriz.Core.Commands.UnloggedIn.NoneCommand();
             var pa = new GameArgumentParser.ParsedArgs();
-            pa["none"] = new List<string>{"quut"};
+            pa["none"] = new List<string>{"connekt"};
             none2.Run(goCaller, pa);
             var m2 = string.Join(" ", goCaller.PeekMessages());
             Assert.Contains("did you mean", m2.ToLowerInvariant());
+            Assert.Contains("connect", m2.ToLowerInvariant());
             Assert.DoesNotContain("quit", m2.ToLowerInvariant());
             Assert.DoesNotContain("exit", m2.ToLowerInvariant());
             Assert.DoesNotContain("logout", m2.ToLowerInvariant());

@@ -87,6 +87,17 @@ public static partial class CommandHelpers
         ordered.Add(key);
         return true;
     }
+
+    /// <summary>
+    /// First whitespace-separated word of the input, which is the only part the
+    /// unknown-command suggestion compares. Returns the input unchanged when it
+    /// holds no words.
+    /// </summary>
+    internal static string FirstWord(string text)
+    {
+        var words = text.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+        return words.Length > 0 ? words[0] : text;
+    }
     /// <summary>
     /// Narrow comma-form coord parse: the exact shape SearchWithFallback has
     /// always accepted — optional outer parens, then four comma-separated

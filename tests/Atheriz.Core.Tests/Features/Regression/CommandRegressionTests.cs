@@ -199,9 +199,10 @@ public class CommandRegressionTests
         finally { AtherizSettings.Global.SavePath = origSave; Reset(); }
     }
 
-    // disabled-verb demotion must reset args to the full stripped input.
+    // disabled-verb demotion still resets args to the stripped input; the
+    // fallback reports its first word.
     [Fact]
-    public void DisabledVerb_SuggestsFullInput()
+    public void DisabledVerb_ReportsFirstWordOfInput()
     {
         Reset();
         CommandDispatcher.SetSettings(new AtherizSettings { AccountCreationEnabled = false });
@@ -211,7 +212,7 @@ public class CommandRegressionTests
             var job = CommandDispatcher.ResolveUnloggedIn(conn, "create foo");
             Assert.NotNull(job);
             job!.Func(job.Caller, job.Args);
-            Assert.Contains(conn.Sent, s => s.Cmd.Contains("create foo", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("create foo", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("create foo", StringComparison.Ordinal) == true));
+            Assert.Contains(conn.Sent, s => s.Cmd.Contains("\"create\"", StringComparison.Ordinal) || s.Args.Any(a => a?.ToString()?.Contains("\"create\"", StringComparison.Ordinal) == true) || s.Kwargs.Any(kv => kv.Value?.ToString()?.Contains("\"create\"", StringComparison.Ordinal) == true));
         }
         finally { Reset(); }
     }

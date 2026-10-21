@@ -501,7 +501,7 @@ public class PortedOpenExitMapNounSpamWanderTests
         using var env=GlobalTestEnv.Enter();
         var c=MakeCaller(); c.InternalCmdSet=CommandRegistry.UnloggedIn;
         var cmd=new Atheriz.Core.Commands.UnloggedIn.NoneCommand();
-        var pa=new GameArgumentParser.ParsedArgs(); pa["none"]=new List<string>{"quut"};
+        var pa=new GameArgumentParser.ParsedArgs(); pa["none"]=new List<string>{"hlep"};
         cmd.Run(c, pa);
         Assert.True(c.PeekMessages().Count>0);
         Assert.Contains(c.PeekMessages(), m=>m.ToLowerInvariant().Contains("did you mean"));

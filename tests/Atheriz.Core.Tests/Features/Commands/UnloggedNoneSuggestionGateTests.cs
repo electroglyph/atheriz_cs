@@ -24,7 +24,7 @@ public sealed class UnloggedNoneSuggestionGateTests
     public void UnloggedNone_DoesNotSuggestAliasKeys()
     {
         using var env = GlobalTestEnv.Enter();
-        var text = RunNone(new TestConnection(), "h");
+        var text = RunNone(new TestConnection(), "hlep");
         Assert.Contains("did you mean", text);
         Assert.DoesNotContain("\"?\"", text);
     }
@@ -40,7 +40,7 @@ public sealed class UnloggedNoneSuggestionGateTests
         try
         {
             var text = RunNone(new TestConnection(), "cretae");
-            Assert.Contains("did you mean", text);
+            Assert.DoesNotContain("did you mean", text);
             Assert.DoesNotContain("\"create\"", text);
         }
         finally
@@ -48,5 +48,23 @@ public sealed class UnloggedNoneSuggestionGateTests
             g.AccountCreationEnabled = ogAccount;
             CommandDispatcher.SetSettings(new AtherizSettings());
         }
+    }
+
+    [Fact]
+    public void UnloggedNone_UnknownWithArguments_QuotesOnlyFirstWord()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var text = RunNone(new TestConnection(), "push button");
+        Assert.Contains("\"push\"", text);
+        Assert.DoesNotContain("push button", text);
+    }
+
+    [Fact]
+    public void UnloggedNone_SingleLetterWithoutCloseCommand_DoesNotSuggest()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var text = RunNone(new TestConnection(), "x");
+        Assert.DoesNotContain("did you mean", text);
+        Assert.Contains("\"x\"", text);
     }
 }

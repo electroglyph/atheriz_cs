@@ -39,6 +39,10 @@ next to a character is the number to type.
 Version display: the connection screen and `about` read a version constant
 compiled into the engine instead of inspecting assembly metadata at runtime.
 
+Unknown commands: the "did you mean" suggestion now compares only the first
+word of the input and stays quiet when nothing is close, so a stray word no
+longer produces an unrelated suggestion or echoes the whole line.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file

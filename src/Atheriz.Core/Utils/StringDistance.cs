@@ -67,4 +67,19 @@ public static class StringDistance
         ArgumentNullException.ThrowIfNull(candidates);
         return candidates.MinBy(k => Levenshtein(query, k));
     }
+
+    /// <summary>
+    /// Whether <paramref name="candidate"/> is close enough to
+    /// <paramref name="query"/> to be worth suggesting. A short word may match
+    /// on its first letter, but a distance beyond half the word's length (at
+    /// least one) is treated as unrelated.
+    /// </summary>
+    public static bool IsCloseMatch(string query, string candidate)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (query.Length == 0 || candidate.Length == 0) return false;
+        return Levenshtein(query, candidate) <= Math.Max(1, query.Length / 2)
+            || candidate.StartsWith(query[..1], StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -365,6 +365,7 @@ public sealed class NoneCommand : Command
         if (pa is not null) text = string.Join(" ", pa.GetList(ParsedArgKeys.None));
         else text = ctx.RawText.Trim();
         if (string.IsNullOrEmpty(text)) { caller.Msg("Command not found."); return; } // none.py:25
+        var word = CommandHelpers.FirstWord(text);
         var ignored = Atheriz.Core.Settings.AtherizSettings.Global.AutoAliasIgnoredKeys;
         // hidden or inaccessible commands are never suggested (otherwise a
         // typo oracle leaks their names to callers who cannot use them).
@@ -389,10 +390,12 @@ public sealed class NoneCommand : Command
         }
         if (choices.Count > 0)
         {
-            var best = StringDistance.BestMatch(text, choices);
-            caller.Msg($"Command \"{text}\" not found, did you mean: \"{best}\"?");
+            var best = StringDistance.BestMatch(word, choices);
+            if (best is not null && StringDistance.IsCloseMatch(word, best))
+                caller.Msg($"Command \"{word}\" not found, did you mean: \"{best}\"?");
+            else caller.Msg($"Command \"{word}\" not found.");
         }
-        else caller.Msg($"Command \"{text}\" not found.");
+        else caller.Msg($"Command \"{word}\" not found.");
     }
 }
 

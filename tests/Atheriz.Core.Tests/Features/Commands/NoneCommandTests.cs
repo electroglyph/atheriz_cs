@@ -62,4 +62,26 @@ public sealed class NoneCommandTests
         var text = string.Join("\n", low.PeekMessages());
         Assert.Contains("\"look\"", text);
     }
+
+    [Fact]
+    public void NoneCommand_UnknownWithArguments_QuotesOnlyFirstWord()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var low = MakePlayer("low3");
+        new NoneCommand().Run(low, "push button");
+        var text = string.Join("\n", low.PeekMessages());
+        Assert.Contains("\"push\"", text);
+        Assert.DoesNotContain("push button", text);
+    }
+
+    [Fact]
+    public void NoneCommand_SingleLetterWithoutCloseCommand_DoesNotSuggest()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var low = MakePlayer("low4");
+        new NoneCommand().Run(low, "x");
+        var text = string.Join("\n", low.PeekMessages());
+        Assert.DoesNotContain("did you mean", text);
+        Assert.Contains("\"x\"", text);
+    }
 }
