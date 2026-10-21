@@ -226,6 +226,34 @@ public class BatchACommandsTests
     }
 
     [Fact]
+    public void Nick_Set_SingleCharKey_IsRejected()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = MakeNickCaller("batcha-nick-min-1");
+        Run(caller, "nick x = look");
+        Assert.False(NickCommand.ReadNicks(caller.Session!.Account!).ContainsKey("inputline:x"));
+        Assert.Contains("Nick keys must be at least two characters.", caller.PeekMessages());
+    }
+
+    [Fact]
+    public void Nick_Set_ScopedSingleCharKey_IsRejected()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = MakeNickCaller("batcha-nick-min-2");
+        Run(caller, "nick inputline x = look");
+        Assert.False(NickCommand.ReadNicks(caller.Session!.Account!).ContainsKey("inputline:x"));
+    }
+
+    [Fact]
+    public void Nick_Set_TwoCharKey_Expands()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = MakeNickCaller("batcha-nick-min-3");
+        Run(caller, "nick xx = look");
+        Assert.Equal("look", NickCommand.ExpandNicks(caller, "xx"));
+    }
+
+    [Fact]
     public void Nick_Dispatch_ExpandsThroughSay()
     {
         using var env = GlobalTestEnv.Enter();

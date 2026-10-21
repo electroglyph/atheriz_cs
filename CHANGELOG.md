@@ -22,6 +22,9 @@ first one.
 Give: incomplete input now shows the command help with its usage line instead
 of only a one-line question.
 
+Nicks: keys shorter than two characters are rejected when set, since they could
+never expand, and the command help states the minimum.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file

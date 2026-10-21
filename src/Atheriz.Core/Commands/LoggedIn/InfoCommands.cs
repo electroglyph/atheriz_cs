@@ -589,7 +589,7 @@ public sealed class NickCommand : LoggedInCommand
     public override string Key => "nick";
     public override IReadOnlyList<string> Aliases => ["nickname", "nicks"];
     public override string Desc => "Manage your personal input nicks (aliases).";
-    public override string ExtraDesc => "Use 'nick' to list, 'nick <key> = <replacement>' to set, 'nick <type> <key> = <replacement>' for a scoped nick (inputline, object, account), 'nick <key>' to show one, 'nick delete [<type>] <key>' to delete, 'nick clear' to delete all.";
+    public override string ExtraDesc => "Use 'nick' to list, 'nick <key> = <replacement>' to set, 'nick <type> <key> = <replacement>' for a scoped nick (inputline, object, account), 'nick <key>' to show one, 'nick delete [<type>] <key>' to delete, 'nick clear' to delete all. Keys must be at least two characters.";
     public override bool UseParser => false;
 
     // Extras key holding the caller's nick table: a JSON object of
@@ -627,6 +627,9 @@ public sealed class NickCommand : LoggedInCommand
         if (words.Length == 1) key = words[0];
         else if (words.Length == 2 && IsScope(words[0])) { scope = words[0].ToLowerInvariant(); key = words[1]; }
         else { go.Msg(help); return; }
+        // Expansion only rewrites words longer than one character; rejecting
+        // shorter keys here keeps a stored nick from existing but doing nothing.
+        if (key.Length < 2) { go.Msg("Nick keys must be at least two characters."); return; }
         var nicks = ReadNicks(acc);
         nicks[$"{scope}:{key.ToLowerInvariant()}"] = replacement;
         WriteNicks(acc, nicks);
