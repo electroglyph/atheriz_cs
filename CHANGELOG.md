@@ -8,7 +8,8 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
 
 Search: a leading negative count is now treated as part of the search text, so
 commands such as `get -1 sword` report that no object was found instead of
-raising an error.
+raising an error. A literal `0` no longer behaves like `all`; it is ordinary
+search text, while `all` still selects every match.
 
 ## [0.33.0.0] - 2026-10-19
 

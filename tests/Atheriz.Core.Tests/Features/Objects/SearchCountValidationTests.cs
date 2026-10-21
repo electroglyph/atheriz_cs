@@ -46,6 +46,27 @@ public class SearchCountValidationTests
     }
 
     [Fact]
+    public void ZeroCount_ReturnsNoMatches()
+    {
+        var (room, R) = SetupSwords();
+        Assert.Empty(ContentUtils.Search(room, "0 sword", R));
+    }
+
+    [Fact]
+    public void BareZero_ReturnsNoMatches()
+    {
+        var (room, R) = SetupSwords();
+        Assert.Empty(ContentUtils.Search(room, "0", R));
+    }
+
+    [Fact]
+    public void AllKeyword_StillReturnsEveryMatch()
+    {
+        var (room, R) = SetupSwords();
+        Assert.Equal(2, ContentUtils.Search(room, "all sword", R).Count);
+    }
+
+    [Fact]
     public void GetCommand_NegativeCount_ReportsObjectNotFound()
     {
         using var env = GlobalTestEnv.Enter();
@@ -78,6 +99,46 @@ public class SearchCountValidationTests
 
         var cmd = new DropCommand();
         var (fn, target, pargs) = cmd.Execute(caller, "-1 sword", "drop");
+        if (fn is not null) fn(target!, pargs);
+        else cmd.Run(caller, pargs);
+
+        Assert.Contains("Object not found.", caller.PeekMessages());
+        Assert.Contains(sword.Id, caller.ContentsSnapshot);
+    }
+
+    [Fact]
+    public void GetCommand_ZeroCount_ReportsObjectNotFound()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var room = new Node(new Coord("zeroGet", 0, 0, 0));
+        ObjectRegistry.AddObject(room);
+        var caller = PortedHelpers.MakeCaller("Alice", Privilege.Player, room);
+        var sword = GameObject.Create("sword");
+        ObjectRegistry.AddObject(sword);
+        sword.MoveTo(room);
+
+        var cmd = new GetCommand();
+        var (fn, target, pargs) = cmd.Execute(caller, "0 sword", "get");
+        if (fn is not null) fn(target!, pargs);
+        else cmd.Run(caller, pargs);
+
+        Assert.Contains("Object not found.", caller.PeekMessages());
+        Assert.Contains(sword.Id, room.ContentsSnapshot);
+    }
+
+    [Fact]
+    public void DropCommand_ZeroCount_ReportsObjectNotFound()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var room = new Node(new Coord("zeroDrop", 0, 0, 0));
+        ObjectRegistry.AddObject(room);
+        var caller = PortedHelpers.MakeCaller("Alice", Privilege.Player, room);
+        var sword = GameObject.Create("sword");
+        ObjectRegistry.AddObject(sword);
+        sword.MoveTo(caller);
+
+        var cmd = new DropCommand();
+        var (fn, target, pargs) = cmd.Execute(caller, "0 sword", "drop");
         if (fn is not null) fn(target!, pargs);
         else cmd.Run(caller, pargs);
 
