@@ -96,20 +96,9 @@ public static class ConnectionScreen
         return (online, known);
     }
 
-    // Assembly version lookup runs once: the version cannot change under a
-    // running process, so every render reuses this instead of reflecting.
-    private static readonly string VersionString = ResolveVersion();
-
-    private static string ResolveVersion()
-    {
-        try
-        {
-            return System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "?";
-        }
-        catch { return "?"; }
-    }
-
-    private static string GetVersion() => VersionString;
+    // The display version is compiled in, so rendering never reflects over
+    // assembly metadata.
+    private static string GetVersion() => BuildInfo.Version;
 
     public static string Render(Session? session = null) => Render(AtherizSettings.Global, session);
     public static string Render(AtherizSettings? settings, Session? session = null)

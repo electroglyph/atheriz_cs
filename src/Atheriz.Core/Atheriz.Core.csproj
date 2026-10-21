@@ -31,6 +31,26 @@
     <ProjectReference Include="..\Atheriz.HookGen\Atheriz.HookGen.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
-
+  <!-- The display version is baked into the assembly at compile time instead of
+       being read from assembly metadata at runtime. -->
+  <Target Name="GenerateBuildInfo" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <BuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</BuildInfoFile>
+    </PropertyGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <ItemGroup>
+      <BuildInfoLines Include="// &lt;auto-generated/&gt;" />
+      <BuildInfoLines Include="namespace Atheriz.Core%3B" />
+      <BuildInfoLines Include="internal static class BuildInfo" />
+      <BuildInfoLines Include="{" />
+      <BuildInfoLines Include="    public const string Version = &quot;$(Version)&quot;%3B" />
+      <BuildInfoLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(BuildInfoFile)" Lines="@(BuildInfoLines)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Remove="$(BuildInfoFile)" />
+      <Compile Include="$(BuildInfoFile)" />
+    </ItemGroup>
+  </Target>
 
 </Project>

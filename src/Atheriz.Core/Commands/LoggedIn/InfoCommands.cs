@@ -488,8 +488,8 @@ public sealed class AboutCommand : LoggedInCommand
 
     // Shared with the info verb so the two agree.
     internal static string VersionText()
-        // Same assembly-version source as the connection screen.
-        => System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+        // The version is compiled into the assembly.
+        => BuildInfo.Version;
 }
 
 /// <summary>

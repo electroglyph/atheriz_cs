@@ -471,11 +471,27 @@ public class SmallCoreTypesTests
     }
 
     [Fact]
-    public void ConnectionScreen_LooksUpVersionOnce()
+    public void ConnectionScreen_UsesCompiledVersionConstant()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "ConnectionScreen.cs");
-        Assert.Equal(1, SourceScan.Count(src, "GetName().Version"));
-        Assert.Contains("VersionString", src);
+        Assert.DoesNotContain("System.Reflection", src);
+        Assert.Contains("BuildInfo.Version", src);
+    }
+
+    [Fact]
+    public void AboutCommand_UsesCompiledVersionConstant()
+    {
+        var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "InfoCommands.cs");
+        Assert.DoesNotContain("System.Reflection", src);
+        Assert.Contains("BuildInfo.Version", src);
+    }
+
+    [Fact]
+    public void BuildInfo_VersionMatchesAssembly()
+    {
+        var assemblyVersion = typeof(Atheriz.Core.ConnectionScreen).Assembly.GetName().Version?.ToString();
+        Assert.NotNull(assemblyVersion);
+        Assert.Equal(global::Atheriz.Core.BuildInfo.Version, assemblyVersion);
     }
 
     [Fact]

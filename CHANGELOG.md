@@ -36,6 +36,9 @@ close announcement.
 Login: the character selection list is numbered from one, and the number shown
 next to a character is the number to type.
 
+Version display: the connection screen and `about` read a version constant
+compiled into the engine instead of inspecting assembly metadata at runtime.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file
