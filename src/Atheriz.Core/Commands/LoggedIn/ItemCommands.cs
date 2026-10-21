@@ -334,13 +334,26 @@ public sealed class PutCommand : LoggedInCommand
         if (string.IsNullOrWhiteSpace(objName) || string.IsNullOrWhiteSpace(destName)) { goCaller.Msg(PrintHelp()); return; }
         GameObject? loc = null;
         try { loc = goCaller.ResolveLocationObject(); } catch (Exception) { }
-        List<GameObject> destList = new();
-        try { destList = goCaller.Search(destName!, true, goCaller); } catch (Exception) { }
+        // Ask for every match so a repeated container name is reported instead
+        // of silently taking the first one. "#id", an explicit count, and an
+        // "all" prefix already select without ambiguity.
+        var destQuery = destName!;
+        var leading = destQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+        if (!leading.StartsWith('#') && !leading.Equals("all", StringComparison.OrdinalIgnoreCase) && !int.TryParse(leading, out _))
+            destQuery = $"all {destQuery}";
+        List<GameObject> destList = [];
+        try { destList = goCaller.Search(destQuery, true, goCaller); } catch (Exception) { }
         if (destList.Count==0 && loc is not null)
         {
-            try { if (loc.Access(goCaller, "put")) destList = loc.Search(destName!, true, goCaller); } catch (Exception) { }
+            try { if (loc.Access(goCaller, "put")) destList = loc.Search(destQuery, true, goCaller); } catch (Exception) { }
         }
         if (destList.Count==0) { goCaller.Msg($"'{destName}' not found."); return; }
+        if (destList.Count > 1)
+        {
+            CommandHelpers.MsgMultipleMatchesFound(goCaller, destName);
+            foreach (var match in destList) goCaller.Msg($"  #{match.Id} {match.Name}");
+            return;
+        }
         var destObj = destList[0];
         if (!destObj.IsContainer || !destObj.Access(goCaller, "put")) { goCaller.Msg($"You can't put anything in {destObj.Name}!"); return; }
         bool IsLoop(GameObject obj, GameObject destC)

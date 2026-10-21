@@ -84,4 +84,117 @@ public sealed class PutCommandTests
         }
         finally { NodeHandler.SetCurrent(null); }
     }
+
+    [Fact]
+    public void PutCommand_TwoContainersInInventory_RefusesAmbiguousDestination()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (_, _, holder) = EnterBuilderInNode("putambig1");
+        try
+        {
+            var first = GameObject.Create("chest", isContainer: true);
+            var second = GameObject.Create("chest", isContainer: true);
+            ObjectRegistry.AddObject(first);
+            ObjectRegistry.AddObject(second);
+            Assert.True(first.MoveTo(holder));
+            Assert.True(second.MoveTo(holder));
+            var coin = GameObject.Create("coin", isItem: true);
+            ObjectRegistry.AddObject(coin);
+            Assert.True(coin.MoveTo(holder));
+            holder.ClearMessages();
+
+            RunJob(CommandDispatcher.DispatchLoggedIn(holder, "put coin in chest", immediate: true));
+
+            Assert.Contains(coin.Id, holder.ContentsSnapshot);
+            Assert.Empty(first.ContentsSnapshot);
+            Assert.Empty(second.ContentsSnapshot);
+            var text = string.Join("\n", holder.PeekMessages());
+            Assert.Contains("Multiple matches found for 'chest'.", text);
+            Assert.Contains($"#{first.Id} chest", text);
+            Assert.Contains($"#{second.Id} chest", text);
+        }
+        finally { NodeHandler.SetCurrent(null); }
+    }
+
+    [Fact]
+    public void PutCommand_TwoContainersInRoom_RefusesAmbiguousDestination()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (_, node, holder) = EnterBuilderInNode("putambig2");
+        try
+        {
+            var first = GameObject.Create("chest", isContainer: true);
+            var second = GameObject.Create("chest", isContainer: true);
+            ObjectRegistry.AddObject(first);
+            ObjectRegistry.AddObject(second);
+            Assert.True(first.MoveTo(node));
+            Assert.True(second.MoveTo(node));
+            var coin = GameObject.Create("coin", isItem: true);
+            ObjectRegistry.AddObject(coin);
+            Assert.True(coin.MoveTo(holder));
+            holder.ClearMessages();
+
+            RunJob(CommandDispatcher.DispatchLoggedIn(holder, "put coin in chest", immediate: true));
+
+            Assert.Contains(coin.Id, holder.ContentsSnapshot);
+            Assert.Empty(first.ContentsSnapshot);
+            Assert.Empty(second.ContentsSnapshot);
+            Assert.Contains("Multiple matches found for 'chest'.", string.Join("\n", holder.PeekMessages()));
+        }
+        finally { NodeHandler.SetCurrent(null); }
+    }
+
+    [Fact]
+    public void PutCommand_ExplicitIdPicksOneOfTwoContainers()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (_, _, holder) = EnterBuilderInNode("putambig3");
+        try
+        {
+            var first = GameObject.Create("chest", isContainer: true);
+            var second = GameObject.Create("chest", isContainer: true);
+            ObjectRegistry.AddObject(first);
+            ObjectRegistry.AddObject(second);
+            Assert.True(first.MoveTo(holder));
+            Assert.True(second.MoveTo(holder));
+            var coin = GameObject.Create("coin", isItem: true);
+            ObjectRegistry.AddObject(coin);
+            Assert.True(coin.MoveTo(holder));
+            holder.ClearMessages();
+
+            RunJob(CommandDispatcher.DispatchLoggedIn(holder, $"put coin in #{second.Id}", immediate: true));
+
+            Assert.Contains(coin.Id, second.ContentsSnapshot);
+            Assert.Empty(first.ContentsSnapshot);
+        }
+        finally { NodeHandler.SetCurrent(null); }
+    }
+
+    [Fact]
+    public void PutCommand_AllPrefix_RefusesAmbiguousDestination()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (_, _, holder) = EnterBuilderInNode("putambig4");
+        try
+        {
+            var first = GameObject.Create("chest", isContainer: true);
+            var second = GameObject.Create("chest", isContainer: true);
+            ObjectRegistry.AddObject(first);
+            ObjectRegistry.AddObject(second);
+            Assert.True(first.MoveTo(holder));
+            Assert.True(second.MoveTo(holder));
+            var coin = GameObject.Create("coin", isItem: true);
+            ObjectRegistry.AddObject(coin);
+            Assert.True(coin.MoveTo(holder));
+            holder.ClearMessages();
+
+            RunJob(CommandDispatcher.DispatchLoggedIn(holder, "put coin in all chest", immediate: true));
+
+            Assert.Contains(coin.Id, holder.ContentsSnapshot);
+            Assert.Empty(first.ContentsSnapshot);
+            Assert.Empty(second.ContentsSnapshot);
+            Assert.Contains("Multiple matches found for 'all chest'.", string.Join("\n", holder.PeekMessages()));
+        }
+        finally { NodeHandler.SetCurrent(null); }
+    }
 }

@@ -15,6 +15,10 @@ Map: toggling the map display no longer clears an object's map tracking, and
 the two settings are saved separately. Saves written before the split keep
 their previous combined meaning.
 
+Put: putting an item into a container name shared by several containers now
+lists the matching containers and asks for an id, instead of silently using the
+first one.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file
