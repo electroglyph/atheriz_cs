@@ -197,4 +197,12 @@ public sealed class PutCommandTests
         }
         finally { NodeHandler.SetCurrent(null); }
     }
+
+    [Fact]
+    public void PutCommand_Help_DescribesTheRemainderArgument()
+    {
+        var help = new PutCommand().PrintHelp();
+        Assert.Contains("usage: put", help);
+        Assert.Contains("object to put, optionally 'in <container>'", help);
+    }
 }

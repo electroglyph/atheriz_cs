@@ -43,6 +43,9 @@ Unknown commands: the "did you mean" suggestion now compares only the first
 word of the input and stays quiet when nothing is close, so a stray word no
 longer produces an unrelated suggestion or echoes the whole line.
 
+Put help: the command help now describes the object and container argument
+instead of leaving that line blank.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file

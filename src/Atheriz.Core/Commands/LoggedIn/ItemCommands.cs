@@ -316,7 +316,7 @@ public sealed class PutCommand : LoggedInCommand
     public override string Desc => "Put an object somewhere.";
     protected override bool AllowMissingArgs => true;
     protected override string? DenyMessage => PrintHelp();
-    protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument(ParsedArgKeys.Args, nargs: "REMAINDER"); }
+    protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument(ParsedArgKeys.Args, nargs: "REMAINDER", help: "object to put, optionally 'in <container>'"); }
     protected override void RunPuppet(GameObject goCaller, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
         List<GameObject> excludeSelf = [goCaller];
