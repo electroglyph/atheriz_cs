@@ -95,4 +95,30 @@ public class DoorStateOrderTests
         Assert.Contains("lack the key", ReceivedText(caller));
         Assert.True(door.Locked);
     }
+
+    [Fact]
+    public void TryOpen_AnnouncesToBothRooms()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var handler = new NodeHandler();
+        NodeHandler.SetCurrent(handler);
+        var fromRoom = new Node(new Coord("bothrooms", 0, 0, 0));
+        var toRoom = new Node(new Coord("bothrooms", 0, 1, 0));
+        handler.AddNode(fromRoom);
+        handler.AddNode(toRoom);
+        var caller = GameObject.Create("caller");
+        ObjectRegistry.AddObject(caller);
+        caller.Location = new LocationRef.CoordLocation(fromRoom.Coord);
+        fromRoom.AddObject(caller);
+        var far = GameObject.Create("far");
+        ObjectRegistry.AddObject(far);
+        far.Location = new LocationRef.CoordLocation(toRoom.Coord);
+        toRoom.AddObject(far);
+        var door = new Door(fromRoom.Coord, toRoom.Coord, "north", "south", closed: true);
+
+        Assert.True(door.TryOpen(caller));
+
+        Assert.Contains("You open the door.", ReceivedText(caller));
+        Assert.Contains("opens the door", ReceivedText(far));
+    }
 }

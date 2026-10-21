@@ -464,7 +464,8 @@ public class Door
         try
         {
             MapOpen();
-            loc?.MsgContents($"$You(target) $conj(open) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
+            fromNode?.MsgContents($"$You(target) $conj(open) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
+            toNode?.MsgContents($"$You(target) $conj(open) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             AtOpen(caller);
         }
         catch (Exception ex) { AtherizLogger.LogDebug("Suppressed Door.TryOpen post-open: " + ex.Message, "Door"); }

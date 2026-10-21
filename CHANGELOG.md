@@ -30,6 +30,9 @@ with ordinary sentence casing. Locking and unlocking also report the door's stat
 before a missing key, so an already-open or already-unlocked door says so
 instead of asking for a key that would not change anything.
 
+Doors: opening a door now announces it in both rooms, matching the existing
+close announcement.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file
