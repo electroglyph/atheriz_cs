@@ -46,6 +46,10 @@ longer produces an unrelated suggestion or echoes the whole line.
 Put help: the command help now describes the object and container argument
 instead of leaving that line blank.
 
+Exits: the exit list now shows north, south, east, west, up, and down in that
+order, with any other exit names following alphabetically, instead of using the
+order the links were created in.
+
 ## [0.33.0.0] - 2026-10-19
 
 Plugin discovery: sources inside a directory that holds its own project file

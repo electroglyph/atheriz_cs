@@ -344,11 +344,29 @@ public partial class Node
         var names = ContentUtils.GroupByName(chars, looker);
         return !string.IsNullOrEmpty(names) ? $"{GameUtils.WrapXterm256("Characters:", fg: 15, bold: true)} {names}\n" : "";
     }
+    // Compass exits read in the familiar order; anything else follows
+    // alphabetically so the display does not depend on link creation order.
+    private static readonly Dictionary<string, int> CompassOrder = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["north"] = 0,
+        ["south"] = 1,
+        ["east"] = 2,
+        ["west"] = 3,
+        ["up"] = 4,
+        ["down"] = 5,
+    };
+
     public string GetDisplayExits(GameObject? looker = null)
     {
         string names;
         SyncRoot.EnterReadLock();
-        try { names = string.Join(", ", _links.Select(l => l.Name)); }
+        try
+        {
+            names = string.Join(", ", _links
+                .Select(l => l.Name)
+                .OrderBy(n => CompassOrder.TryGetValue(n, out var rank) ? rank : int.MaxValue)
+                .ThenBy(n => n, StringComparer.OrdinalIgnoreCase));
+        }
         finally { SyncRoot.ExitReadLock(); }
         return !string.IsNullOrEmpty(names) ? $"{GameUtils.WrapXterm256("Exits:", fg: 15, bold: true)} {names}\n" : "";
     }
