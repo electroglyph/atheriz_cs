@@ -33,7 +33,7 @@ public sealed class NodeLogContextTests
             Name = "throwing-msger";
         }
 
-        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null) =>
+        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null, string? rawMsg = null) =>
             throw new InvalidOperationException("msg-boom");
     }
 

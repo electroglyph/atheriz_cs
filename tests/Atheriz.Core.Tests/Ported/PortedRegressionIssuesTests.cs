@@ -8,7 +8,7 @@ namespace Atheriz.Core.Tests.Ported;
 [Collection("Ported")]
 public class PortedRegressionIssuesTests
 {
-    [Fact] public void CreationCooldown_UnifiedPerHost_ClearsCorrectly()
+    [Fact] public void CreationCooldown_PerOp_ClearsCorrectly()
     {
         using var env = GlobalTestEnv.Enter();
         var host = "1.2.3.4";
@@ -16,14 +16,18 @@ public class PortedRegressionIssuesTests
         CreationCooldownStore.Clear();
         var t1 = ObjectRegistry.TryReserveCreationCooldown("guest", host, now, 60);
         Assert.NotNull(t1);
-        Assert.True(ObjectRegistry.CreationCooldownActive(host, now + 1));
-        Assert.Null(ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60));
-        ObjectRegistry.ClearCreationCooldown(host, t1.Value);
-        Assert.False(ObjectRegistry.CreationCooldownActive(host, now + 1));
-        Assert.False(ObjectRegistry.CreationCooldownActive(host, now + 1));
-        var t2 = ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60);
+        Assert.True(ObjectRegistry.CreationCooldownActive("guest", host, now + 1));
+        // Independent budgets: the guest hold leaves the account budget open.
+        Assert.False(ObjectRegistry.CreationCooldownActive("account", host, now + 1));
+        var t1b = ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60);
+        Assert.NotNull(t1b);
+        ObjectRegistry.ClearCreationCooldown("guest", host, t1.Value);
+        Assert.False(ObjectRegistry.CreationCooldownActive("guest", host, now + 1));
+        Assert.True(ObjectRegistry.CreationCooldownActive("account", host, now + 1));
+        var t2 = ObjectRegistry.TryReserveCreationCooldown("guest", host, now + 1, 60);
         Assert.NotNull(t2);
-        ObjectRegistry.ClearCreationCooldown(host, t2.Value);
+        ObjectRegistry.ClearCreationCooldown("guest", host, t2.Value);
+        ObjectRegistry.ClearCreationCooldown("account", host, t1b.Value);
     }
     [Fact] public void CreationCooldown_ValidationFailure_DoesNotLeak()
     {
@@ -33,11 +37,11 @@ public class PortedRegressionIssuesTests
         CreationCooldownStore.Clear();
         var t1 = ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60);
         Assert.NotNull(t1);
-        ObjectRegistry.ClearCreationCooldown(host, t1.Value);
-        Assert.False(ObjectRegistry.CreationCooldownActive(host, now + 1));
+        ObjectRegistry.ClearCreationCooldown("account", host, t1.Value);
+        Assert.False(ObjectRegistry.CreationCooldownActive("account", host, now + 1));
         var t2 = ObjectRegistry.TryReserveCreationCooldown("account", host, now + 1, 60);
         Assert.NotNull(t2);
-        ObjectRegistry.ClearCreationCooldown(host, t2.Value);
+        ObjectRegistry.ClearCreationCooldown("account", host, t2.Value);
     }
     [Fact] public void Set_Protects_AccessTags_Name_ButNotAliasesDesc()
     {

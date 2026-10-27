@@ -107,9 +107,9 @@ public sealed class ThreadSafetyRegression6Tests
         {
             var t1 = CreationCooldownStore.TryReserveCreationCooldown("character", host, 1000.0, 60.0);
             Assert.NotNull(t1);
-            CreationCooldownStore.ClearCreationCooldown(host, Guid.NewGuid());
+            CreationCooldownStore.ClearCreationCooldown("character", host, Guid.NewGuid());
             Assert.Null(CreationCooldownStore.TryReserveCreationCooldown("character", host, 1001.0, 60.0));
-            CreationCooldownStore.ClearCreationCooldown(host, t1.Value);
+            CreationCooldownStore.ClearCreationCooldown("character", host, t1.Value);
             Assert.NotNull(CreationCooldownStore.TryReserveCreationCooldown("character", host, 1001.0, 60.0));
         }
         finally { CreationCooldownStore.Clear(); }

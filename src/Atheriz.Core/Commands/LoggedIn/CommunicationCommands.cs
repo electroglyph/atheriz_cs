@@ -501,6 +501,116 @@ public sealed class SayCommand : LoggedInCommand
 }
 
 /// <summary>
+/// Area yell: the emitter's area hears the bare line. Self gets
+/// <c>You yell '...'</c>, each area receiver gets the display-name version;
+/// every delivery carries <c>msgType "yell"</c> and <c>rawMsg</c> line.
+/// All game rules are virtual on <see cref="GameObject"/> defaulting to
+/// permissive; game code overrides them.
+/// </summary>
+public sealed class YellCommand : LoggedInCommand
+{
+    public override string Key => "yell";
+    public override string Desc => "Yell a message to the surrounding area.";
+    public override string Category => "Communication";
+    public override bool UseParser => false;
+
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        string line = (raw ?? "").Trim();
+        if (string.IsNullOrEmpty(line))
+        {
+            go.ToggleYellPreference();
+            return;
+        }
+        YellToArea(go, line);
+    }
+
+    /// <summary>
+    /// Force an area yell from <paramref name="emitter"/>. <paramref name="line"/>
+    /// may contain message-content tokens rendered per receiver. Unregistered
+    /// areas (e.g. test rooms) fall back to the room's own contents.
+    /// Same-room receivers hear the bare line; distant same-area receivers
+    /// hear the same directional suffix as ambient sound
+    /// (<c> from above you</c>/<c> from below you</c>, <c> to the {direction}</c>)
+    /// with no loudness wording and no word replacement.
+    /// </summary>
+    public static void YellToArea(GameObject emitter, string line, IDictionary<string, object?>? mapping = null)
+    {
+        if (string.IsNullOrEmpty(line)) return;
+        var loc = emitter.ResolveLocationObject();
+        if (loc is null) return;
+        if (!emitter.IsAwakeForYell())
+        {
+            var standin = emitter.FindYellStandin();
+            if (standin is null) return;
+            YellToArea(standin, line, mapping);
+            return;
+        }
+        var blocked = emitter.YellBlockedReason();
+        if (blocked is not null) { emitter.Msg(blocked); return; }
+        emitter.Msg($"You yell '{line}'", fromObj: emitter, mapping: mapping, msgType: "yell", rawMsg: line);
+        foreach (var receiver in AreaReceivers(loc))
+        {
+            if (ReferenceEquals(receiver, emitter)) continue;
+            if (!receiver.CanHearYell(emitter)) continue;
+            var display = emitter.GetDisplayName(receiver);
+            var receiverLoc = receiver.ResolveLocationObject();
+            string text;
+            if (ReferenceEquals(receiverLoc, loc))
+            {
+                text = $"{display} yells '{line}'";
+            }
+            else
+            {
+                var (zStr, dirStr) = GameObject.HearDirection(receiverLoc, loc);
+                text = zStr.Length == 0 && dirStr.Length == 0
+                    ? $"{display} yells '{line}'"
+                    : $"{display} yells{zStr}{dirStr}: '{line}'";
+            }
+            receiver.Msg(text, fromObj: emitter, mapping: mapping, msgType: "yell", rawMsg: line);
+        }
+    }
+
+    private static List<GameObject> AreaReceivers(GameObject loc)
+    {
+        List<GameObject> receivers = [];
+        void Collect(GameObject room)
+        {
+            foreach (var cid in room.ContentsSnapshot)
+                foreach (var o in Globals.ObjectRegistry.Get(cid))
+                    if (o is not null && (o.IsPc || o.IsNpc))
+                        receivers.Add(o);
+        }
+        if (!loc.IsNode)
+        {
+            Collect(loc);
+            return receivers;
+        }
+        try
+        {
+            var nh = Globals.NodeHandler.GetCurrent() ?? Globals.GlobalServices.GetNodeHandler();
+            string areaName = loc is Node node ? node.Coord.Area : "";
+            var area = nh.GetArea(areaName);
+            if (area is null) { Collect(loc); return receivers; }
+            List<NodeGrid> grids;
+            area.Lock.EnterReadLock();
+            try { grids = area.Grids.Values.ToList(); }
+            finally { area.Lock.ExitReadLock(); }
+            foreach (var grid in grids)
+            {
+                List<Node> nodes;
+                grid.Lock.EnterReadLock();
+                try { nodes = grid.Nodes.Values.ToList(); }
+                finally { grid.Lock.ExitReadLock(); }
+                foreach (var n in nodes) Collect(n);
+            }
+            return receivers;
+        }
+        catch { Collect(loc); return receivers; }
+    }
+}
+
+/// <summary>
 /// Mirrors <c>evennia/commands/default/comms.py:CmdPage</c>.
 /// Private cross-room messages to an account or character, with a small
 /// last-page store for the sent/received switches.
@@ -553,8 +663,8 @@ public sealed class PageCommand : LoggedInCommand
         if (target.Account == acc || target.Recipient == go) { go.Msg("You cannot page yourself."); return; }
         var live = LiveRecipients(target).ToList();
         if (live.Count == 0) { go.Msg($"{target.Recipient.Name} is not online."); return; }
-        foreach (var puppet in live) puppet.Msg($"{go.Name} pages: {message}");
-        go.Msg($"You paged {target.Recipient.Name}.");
+        foreach (var puppet in live) puppet.Msg($"{go.Name} pages: {message}", fromObj: go, mapping: null, raiseErrors: false, msgType: null, rawMsg: message);
+        go.Msg($"You paged {target.Recipient.Name}.", fromObj: null, mapping: null, raiseErrors: false, msgType: null, rawMsg: message);
         LastSent.AddOrUpdate(acc, new PageNote(target.Recipient.Name, message));
         if (target.Account is not null)
             LastReceived.AddOrUpdate(target.Account, new PageNote(go.Name, message));

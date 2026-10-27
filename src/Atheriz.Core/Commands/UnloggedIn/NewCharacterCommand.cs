@@ -27,14 +27,14 @@ public sealed class NewCharacterCommand : Command
         var text = ctx.RawText;
         // One walk for head + verbatim tail (see CreateAccountCommand).
         var (head, descTail) = Command.SplitHeadTail(text, 2);
-        if (head.Count == 0) { CreationCooldownHelper.Clear(caller); caller.Msg("Usage: new <name> (interactive in real server)."); return; }
+        if (head.Count == 0) { CreationCooldownHelper.Clear(caller, "character"); caller.Msg("Usage: new <name> (interactive in real server)."); return; }
         string name = head[0];
         var err = Validation.ValidateCharacterName(name);
-        if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
+        if (err is not null) { CreationCooldownHelper.Clear(caller, "character"); caller.Msg(err); return; }
         if (caller is BaseConnection conn && conn.Session?.Account is Account acc)
         {
-            if (acc.Characters.Count >= settings.MaxCharacters) { CreationCooldownHelper.Clear(caller); caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
-            if (CreationValidation.PcNameExists(name)) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
+            if (acc.Characters.Count >= settings.MaxCharacters) { CreationCooldownHelper.Clear(caller, "character"); caller.Msg($"You already have {settings.MaxCharacters} characters."); return; }
+            if (CreationValidation.PcNameExists(name)) { CreationCooldownHelper.Clear(caller, "character"); caller.Msg($"Character with this name ({name}) already exists."); return; }
             // Desc is the raw remainder after name+gender (re-joined
             // tokens would collapse interior spacing the async prompt
             // line keeps verbatim). The tail is empty exactly when there
@@ -49,7 +49,7 @@ public sealed class NewCharacterCommand : Command
             }
             catch (InvalidOperationException ex)
             {
-                CreationCooldownHelper.Clear(caller);
+                CreationCooldownHelper.Clear(caller, "character");
                 caller.Msg(ex.Message);
                 try { character.IsDeleted = true; } catch (Exception) { }
                 return;
@@ -59,7 +59,7 @@ public sealed class NewCharacterCommand : Command
             // decides under the account write lock.
             if (!acc.TryAddCharacter(character, settings.MaxCharacters))
             {
-                CreationCooldownHelper.Clear(caller);
+                CreationCooldownHelper.Clear(caller, "character");
                 caller.Msg($"You already have {settings.MaxCharacters} characters.");
                 try { character.IsDeleted = true; } catch (Exception) { }
                 try { ObjectRegistry.RemoveObject(character); } catch (Exception) { }
@@ -73,7 +73,7 @@ public sealed class NewCharacterCommand : Command
             // For GameObject test caller, just validate.
             // Nothing is created on this path, so release the entry reservation:
             // otherwise the next `new` from the same caller is rate-limited.
-            CreationCooldownHelper.Clear(caller);
+            CreationCooldownHelper.Clear(caller, "character");
             if (CreationValidation.PcNameExists(name)) caller.Msg($"Character with this name ({name}) already exists.");
             else caller.Msg($"Would create character {name} (no account session).");
         }
@@ -101,13 +101,13 @@ public sealed class NewCharacterCommand : Command
             string name = await caller.Session.Prompt("Enter a name for your character:", false, ct).ConfigureAwait(false);
             name = name.Trim();
             var err = Validation.ValidateCharacterName(name);
-            if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
+            if (err is not null) { CreationCooldownHelper.Clear(caller, "character"); caller.Msg(err); return; }
             string gender = await caller.Session.Prompt("Enter your character's gender:", false, ct).ConfigureAwait(false);
             gender = gender.Trim();
-            if (string.IsNullOrEmpty(gender)) { CreationCooldownHelper.Clear(caller); caller.Msg("Gender cannot be empty."); return; }
+            if (string.IsNullOrEmpty(gender)) { CreationCooldownHelper.Clear(caller, "character"); caller.Msg("Gender cannot be empty."); return; }
             string desc = await caller.Session.Prompt("Enter a short description of your character:", false, ct).ConfigureAwait(false);
             if (CreationValidation.PcNameExists(name))
-            { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
+            { CreationCooldownHelper.Clear(caller, "character"); caller.Msg($"Character with this name ({name}) already exists."); return; }
             var character = GameObject.Create(name, desc, isPc: true);
             character.Gender = gender;
             try
@@ -116,7 +116,7 @@ public sealed class NewCharacterCommand : Command
             }
             catch (InvalidOperationException ex)
             {
-                CreationCooldownHelper.Clear(caller);
+                CreationCooldownHelper.Clear(caller, "character");
                 caller.Msg(ex.Message);
                 try { character.IsDeleted = true; } catch (Exception) { }
                 return;
@@ -126,7 +126,7 @@ public sealed class NewCharacterCommand : Command
             // decides under the account write lock.
             if (!account.TryAddCharacter(character, settings.MaxCharacters))
             {
-                CreationCooldownHelper.Clear(caller);
+                CreationCooldownHelper.Clear(caller, "character");
                 caller.Msg($"You already have {settings.MaxCharacters} characters.");
                 try { character.IsDeleted = true; } catch (Exception) { }
                 try { ObjectRegistry.RemoveObject(character); } catch (Exception) { }

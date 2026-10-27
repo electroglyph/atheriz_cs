@@ -194,10 +194,10 @@ public class ObjectMessagingTests
     private sealed class FromCapturingObject : GameObject
     {
         public GameObject? SeenFrom;
-        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null)
+        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null, string? rawMsg = null)
         {
             SeenFrom = fromObj;
-            base.Msg(text, fromObj, mapping, raiseErrors, msgType);
+            base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg);
         }
     }
 

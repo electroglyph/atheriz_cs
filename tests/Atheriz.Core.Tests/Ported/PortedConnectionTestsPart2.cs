@@ -524,7 +524,7 @@ public class PortedConnectionTestsPart2
         Assert.True(dupCount<=2);
         mgr.Atp.Stop(wait:false);
     }
-    [Fact] public void CreationCooldownAlternateOpIsRateLimited()
+    [Fact] public void CreationCooldownAlternateOpIsAllowed()
     {
         using var env = GlobalTestEnv.Enter();
         ObjectRegistry.ClearAll();
@@ -532,7 +532,9 @@ public class PortedConnectionTestsPart2
         var host="203.0.113.10";
         var t1 = ObjectRegistry.TryReserveCreationCooldown("guest", host, now, 60);
         Assert.NotNull(t1);
-        Assert.True(ObjectRegistry.CreationCooldownActive(host, now) || ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60) is null);
+        // Budgets are per-op: the guest hold leaves the account budget open.
+        Assert.False(ObjectRegistry.CreationCooldownActive("account", host, now));
+        Assert.NotNull(ObjectRegistry.TryReserveCreationCooldown("account", host, now, 60));
         ObjectRegistry.ClearAll();
     }
 

@@ -29,11 +29,14 @@ namespace Atheriz.Core.Commands.UnloggedIn
     // plus the atomic session-puppet attach (also used a 4th time by ConnectCommand).
     public static class CreationCooldownHelper
     {
-        // Owner tokens per caller-identity: a validation failure clears
+        // Owner tokens per (caller-identity, kind): a validation failure clears
         // only its own reservation — never another drain's live hold on the
-        // same host key. Keyed by connection session (unique per drain), with
+        // same host key, and never a sibling kind's budget (account vs
+        // character vs guest are throttled independently). Keyed by
+        // connection session (unique per drain), with
         // an identity-hash fallback for non-connection callers.
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Guid> _owners = new();
+        private static string OwnerKey(IMessageTarget caller, string kind) => OwnerKey(caller) + "\0" + kind;
         private static string OwnerKey(IMessageTarget caller)
         {
             if (caller is BaseConnection bc && bc.SessionId is not null) return "conn:" + bc.SessionId;
@@ -64,23 +67,27 @@ namespace Atheriz.Core.Commands.UnloggedIn
             var token = ObjectRegistry.TryReserveCreationCooldown(kind, RateKey(caller), now, settings.CreationCooldown);
             if (token is null)
             { caller.Msg("Creation is temporarily rate-limited. Please try again later."); return false; }
-            _owners[OwnerKey(caller)] = token.Value;
+            _owners[OwnerKey(caller, kind)] = token.Value;
             return true;
         }
 
         // Mirrors clear_creation_cooldown on every validation-failure return.
-        public static void Clear(IMessageTarget caller)
+        public static void Clear(IMessageTarget caller, string kind)
         {
-            if (_owners.TryRemove(OwnerKey(caller), out var token))
-                ObjectRegistry.ClearCreationCooldown(RateKey(caller), token);
+            if (_owners.TryRemove(OwnerKey(caller, kind), out var token))
+                ObjectRegistry.ClearCreationCooldown(kind, RateKey(caller), token);
         }
 
-        // Mirrors apply_creation_cooldown on success.
+        // Mirrors apply_creation_cooldown on success. Reuses the reserving
+        // token (instead of minting a fresh owner) so a failure after Apply
+        // — the cap race or a failed attach — can still release the entry
+        // through Clear with the same token.
         public static void Apply(IMessageTarget caller, string kind)
         {
             var settings = Settings.AtherizSettings.Global;
-            ObjectRegistry.ApplyCreationCooldown(kind, RateKey(caller), Utils.GameClock.MonotonicSeconds(), settings.CreationCooldown);
-            _owners.TryRemove(OwnerKey(caller), out _);
+            if (!_owners.TryRemove(OwnerKey(caller, kind), out var token))
+                token = Guid.NewGuid();
+            ObjectRegistry.ApplyCreationCooldown(kind, RateKey(caller), Utils.GameClock.MonotonicSeconds(), settings.CreationCooldown, token);
         }
     }
 }

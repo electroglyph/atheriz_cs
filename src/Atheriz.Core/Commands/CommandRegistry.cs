@@ -121,6 +121,7 @@ public static class CommandRegistry
         new LoggedIn.GroupCommand(),
         new LoggedIn.PageCommand(),
         new LoggedIn.SayCommand(),
+        new LoggedIn.YellCommand(),
         new Common.ScreenReaderCommand(),
         new LoggedIn.WhisperCommand(),
     ];

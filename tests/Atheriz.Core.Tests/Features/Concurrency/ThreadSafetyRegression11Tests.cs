@@ -80,10 +80,10 @@ public sealed class ThreadSafetyRegression11Tests
     {
         public readonly List<long> DeliveryTicks = new();
         public readonly object Gate = new();
-        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null)
+        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null, string? rawMsg = null)
         {
             lock (Gate) DeliveryTicks.Add(System.Diagnostics.Stopwatch.GetTimestamp());
-            base.Msg(text, fromObj, mapping, raiseErrors, msgType);
+            base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg);
         }
     }
 

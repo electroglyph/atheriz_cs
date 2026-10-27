@@ -81,15 +81,15 @@ public static class ObjectRegistry
     public static void BanIp(string host, double? expires = null) => IpBanStore.BanIp(host, expires);
     public static void UnbanIp(string host) => IpBanStore.UnbanIp(host);
 
-    // --- creation cooldowns (canonical home: CreationCooldownStore; unified per host, ? bypass) ---
-    public static bool CreationCooldownActive(string host, double now) =>
-        CreationCooldownStore.CreationCooldownActive(host, now);
-    public static void ApplyCreationCooldown(string op, string host, double now, double cooldown) =>
-        CreationCooldownStore.ApplyCreationCooldown(op, host, now, cooldown);
+    // --- creation cooldowns (canonical home: CreationCooldownStore; per (op, host), ? bypass) ---
+    public static bool CreationCooldownActive(string op, string host, double now) =>
+        CreationCooldownStore.CreationCooldownActive(op, host, now);
+    public static void ApplyCreationCooldown(string op, string host, double now, double cooldown, Guid owner) =>
+        CreationCooldownStore.ApplyCreationCooldown(op, host, now, cooldown, owner);
     public static Guid? TryReserveCreationCooldown(string op, string host, double now, double cooldown) =>
         CreationCooldownStore.TryReserveCreationCooldown(op, host, now, cooldown);
-    public static void ClearCreationCooldown(string host, Guid owner) =>
-        CreationCooldownStore.ClearCreationCooldown(host, owner);
+    public static void ClearCreationCooldown(string op, string host, Guid owner) =>
+        CreationCooldownStore.ClearCreationCooldown(op, host, owner);
 
     // --- failed login map exposed for parity ---
     public static BoundedDictionary<string, int> FailedLogins => IpBanStore.FailedLogins;

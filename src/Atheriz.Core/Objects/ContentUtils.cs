@@ -291,6 +291,11 @@ public static class ContentUtils
             : new Dictionary<string, object?>(StringComparer.Ordinal);
         var you = fromObj ?? host;
         map.TryAdd("you", you);
+        // The pre-format utterance rides along as rawMsg for NPC memory: say /
+        // whisper / emote templates all carry it under "speech" (built in
+        // AtSayFull). Other broadcasts have no speech key, so rawMsg stays
+        // null and memory/classify paths skip them. Mapping stays nulled.
+        string? rawSpeech = map.TryGetValue("speech", out var speechObj) ? speechObj as string : null;
         HashSet<GameObject>? excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
         string logContext = nodeSemantics ? "Node" : "GameObject";
         foreach (var receiver in receivers)
@@ -307,10 +312,10 @@ public static class ContentUtils
                 outMessage = text;
             }
             if (string.IsNullOrEmpty(outMessage) && nodeSemantics)
-                receiver.Msg("", fromObj, null, false, msgType);
+                receiver.Msg("", fromObj, null, false, msgType, rawSpeech);
             else
             {
-                try { receiver.Msg(outMessage, fromObj, null, false, msgType); }
+                try { receiver.Msg(outMessage, fromObj, null, false, msgType, rawSpeech); }
                 catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {logContext}.MsgContents: " + logEx.Message, logContext); }
             }
         }

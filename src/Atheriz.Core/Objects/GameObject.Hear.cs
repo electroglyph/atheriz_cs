@@ -42,6 +42,29 @@ public partial class GameObject
         return RunPreHook(HookName.AtPreEmitSound, emitter, soundDesc, soundMsg, loudness, isSay);
     }
 
+    // Directional suffix shared with area yell (same exact wording/order:
+    // " from above you" / " from below you" then " to the {direction}").
+    // Empty parts mean same room or no coordinates.
+    public static (string ZStr, string DirStr) HearDirection(GameObject? listenerLoc, GameObject? emitterLoc)
+    {
+        string zStr = "";
+        string dirStr = "";
+        try
+        {
+            Coord? ec = emitterLoc is Node en ? en.Coord : (Coord?)null;
+            Coord? lc = listenerLoc is Node ln ? ln.Coord : (Coord?)null;
+            if (ec is not null && lc is not null && ec.Value.Area == lc.Value.Area)
+            {
+                var direction = GameUtils.GetDir(lc.Value, ec.Value);
+                int zDiff = ec.Value.Z - lc.Value.Z;
+                zStr = zDiff == 0 ? "" : (zDiff > 0 ? " from above you" : " from below you");
+                if (!string.IsNullOrEmpty(direction)) dirStr = $" to the {direction}";
+            }
+        }
+        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.HearDirection: " + logEx.Message, "GameObject"); }
+        return (zStr, dirStr);
+    }
+
 // base returns void in Python, but for uniformity return double like Node
     public virtual double AtHear(GameObject emitter, string soundDesc, string soundMsg, double loudness, bool isSay)
     {
@@ -69,21 +92,7 @@ public partial class GameObject
         }
         else
         {
-                string zStr = "";
-                string dirStr = "";
-                try
-                {
-                    Coord? ec = emitterLoc is Node en ? en.Coord : (Coord?)null;
-                    Coord? lc = loc is Node ln ? ln.Coord : (Coord?)null;
-                    if (ec is not null && lc is not null && ec.Value.Area == lc.Value.Area)
-                    {
-                        var direction = GameUtils.GetDir(lc.Value, ec.Value);
-                        int zDiff = ec.Value.Z - lc.Value.Z;
-                        zStr = zDiff == 0 ? "" : (zDiff > 0 ? " from above you" : " from below you");
-                        if (!string.IsNullOrEmpty(direction)) dirStr = $" to the {direction}";
-                    }
-            }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtHear: " + logEx.Message, "GameObject"); }
+            var (zStr, dirStr) = HearDirection(loc, emitterLoc);
             Msg($"You hear something{adj}{zStr}{dirStr}: {soundDesc}{soundMsg}");
         }
             return 0.0;

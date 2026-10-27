@@ -4,6 +4,28 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.35.0.0] - 2026-10-27
+
+Create: the one-line `create <account> <password>` form now starts character
+selection immediately, like `connect` does, instead of leaving fresh accounts
+at the unlogged-in prompt with no next step. Answering `new` in that wizard
+creates and puppets the first character.
+
+Yell: distant same-area yells now name the direction, using the same wording
+and order as ambient sound ("from above you" / "from below you", then
+"to the direction"), without loudness wording or word replacement;
+same-room yells are unchanged.
+
+Creation throttle: account, character, and guest creation are now throttled
+independently per host instead of sharing one budget, so creating an account
+no longer rate-limits making its first character right after. Repeating the
+same creation still waits out the cooldown.
+
+Speech: the speaker's own line and each direct receiver's line now carry the
+bare spoken text along with the formatted delivery (room bystanders already
+had it), matching the reference engine. Characters whispered to now remember
+and react to the whisper instead of only logging its wording.
+
 ## [0.34.0.0] - 2026-10-20
 
 Search: a leading negative count is now treated as part of the search text, so

@@ -30,17 +30,17 @@ public sealed class CreateAccountCommand : Command
         string name = head.FirstOrDefault() ?? "";
         if (head.Count == 0 || password.Length == 0)
         {
-            CreationCooldownHelper.Clear(caller);
+            CreationCooldownHelper.Clear(caller, "account");
             caller.Msg("Usage: create <account_name> <password> (interactive prompts in real server).");
             return;
         }
         var err = ValidateInputs(name, password);
-        if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
+        if (err is not null) { CreationCooldownHelper.Clear(caller, "account"); caller.Msg(err); return; }
         try
         {
             // check uniqueness via ObjectRegistry
             var exists = ObjectRegistry.FilterBy(o => o.IsAccount && o.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Count > 0;
-            if (exists) { CreationCooldownHelper.Clear(caller); caller.Msg($"Account with this name ({name}) already exists."); return; }
+            if (exists) { CreationCooldownHelper.Clear(caller, "account"); caller.Msg($"Account with this name ({name}) already exists."); return; }
             var account = Account.Create(name, password);
             CreationCooldownHelper.Apply(caller, "account");
             // Account.Create already does AddObjectUnique
@@ -48,11 +48,32 @@ public sealed class CreateAccountCommand : Command
             {
                 conn.Session.Account = account;
                 conn.SendCommand("logged_in");
+                caller.Msg($"Account {name} created.");
+                // Fresh accounts land in character selection without typing
+                // `connect` first: same fire-and-forget wizard tail as the
+                // sync `connect` path (account binding above is the login;
+                // the wizard puppets once a character is picked or made).
+                if (AtherizSettings.Global.CharCreationEnabled)
+                {
+                    if (!conn.Session.TryStartWizard()) { caller.Msg("A character selection is already in progress."); return; }
+                    var wizardCts = CancellationTokenSource.CreateLinkedTokenSource(conn.RetryLifetimeToken);
+                    _ = Task.Run(async () =>
+                    {
+                        using (wizardCts)
+                        {
+                            try { await ConnectCommand.CharSelectionAsync(conn, account, wizardCts.Token).ConfigureAwait(false); }
+                            catch (Exception ex) { AtherizLogger.LogError($"[Create] char_selection failed: {ex}"); }
+                            finally { conn.Session.EndWizard(); }
+                        }
+                    });
+                    return;
+                }
+                return;
             }
             caller.Msg($"Account {name} created.");
         }
-        catch (InvalidOperationException ex) { CreationCooldownHelper.Clear(caller); caller.Msg(ex.Message); }
-        catch (ArgumentException ex) { CreationCooldownHelper.Clear(caller); caller.Msg(ex.Message); }
+        catch (InvalidOperationException ex) { CreationCooldownHelper.Clear(caller, "account"); caller.Msg(ex.Message); }
+        catch (ArgumentException ex) { CreationCooldownHelper.Clear(caller, "account"); caller.Msg(ex.Message); }
     }
     /// <summary>
     /// Async entry: delegates to the existing connection wizard when the
@@ -79,10 +100,10 @@ public sealed class CreateAccountCommand : Command
             string name = await caller.Session.Prompt("Enter an account name:", false, ct).ConfigureAwait(false);
             name = name.Trim();
             var err = ValidateInputs(name);
-            if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
+            if (err is not null) { CreationCooldownHelper.Clear(caller, "account"); caller.Msg(err); return; }
             string password = await caller.Session.Prompt("Enter a password:", false, ct).ConfigureAwait(false);
             err = ValidateInputs(name, password);
-            if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
+            if (err is not null) { CreationCooldownHelper.Clear(caller, "account"); caller.Msg(err); return; }
             try
             {
                 var account = Account.Create(name, password);
@@ -104,7 +125,7 @@ public sealed class CreateAccountCommand : Command
                     caller.Msg("Account created. Character creation is not enabled.");
                 }
             }
-            catch (Exception ex) { CreationCooldownHelper.Clear(caller); caller.Msg(ex.Message); }
+            catch (Exception ex) { CreationCooldownHelper.Clear(caller, "account"); caller.Msg(ex.Message); }
         }
         catch (OperationCanceledException) { return; }
     }

@@ -25,10 +25,10 @@ public class PortedContainmentTests
         public override void InstallHook(string funcName, Delegate hook) => base.InstallHook(funcName, hook);
         public void RecordMsg(string? t) => _msgs.Add(t ?? "");
         // Override Msg to capture
-        public override void Msg(string text, GameObject? fromObj=null, IDictionary<string,object?>? mapping=null, bool raiseErrors=false, string? msgType=null)
+        public override void Msg(string text, GameObject? fromObj=null, IDictionary<string,object?>? mapping=null, bool raiseErrors=false, string? msgType=null, string? rawMsg = null)
         {
             _msgs.Add(text);
-            base.Msg(text, fromObj, mapping, raiseErrors, msgType);
+            base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg);
         }
         public List<GameObject> SearchOverride(string q) => SearchFunc?.Invoke(q) ?? new List<GameObject>();
     }
@@ -39,7 +39,7 @@ public class PortedContainmentTests
         public Func<string, List<GameObject>>? SearchHandler = null!;
         public CaptureGameObject(string name, bool isPc=false) { Name=name; IsPc=isPc; }
         public override void Msg(string text) { Captured.Add(text); base.Msg(text); }
-        public override void Msg(string text, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null) { Captured.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType); }
+        public override void Msg(string text, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null) { Captured.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg); }
     }
 
     [Fact]
@@ -243,7 +243,7 @@ public class PortedContainmentTests
         private readonly GameObject _pouch;
         public TestCallerForPut(string name, GameObject bag, GameObject pouch) { Name=name; IsPc=true; _bag=bag; _pouch=pouch; }
         public override bool Access(GameObject? o, string l) => true;
-        public override void Msg(string text, GameObject? fromObj=null, IDictionary<string,object?>? mapping=null, bool raiseErrors=false, string? msgType=null) { Messages.Add(text); }
+        public override void Msg(string text, GameObject? fromObj=null, IDictionary<string,object?>? mapping=null, bool raiseErrors=false, string? msgType=null, string? rawMsg = null) { Messages.Add(text); }
         public override void Msg(string text) { Messages.Add(text); }
         // Need to intercept Msg with different overloads used by PutCommand: caller.Msg(string)
         // PutCommand calls caller.Msg(string) via IMessageTarget, so we implement via IMessageTarget
@@ -291,7 +291,7 @@ public class PortedContainmentTests
         public GameObject? Bag;
         public TestCallerForPutSelf(string name) { Name=name; IsPc=true; }
         public override void Msg(string t) => Messages.Add(t);
-        public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null) => Messages.Add(t);
+        public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null) => Messages.Add(t);
         public override List<GameObject> Search(string query, bool rec=true, GameObject? looker=null)
         {
             if (Bag != null && query.ToLowerInvariant().Contains("bag")) return new List<GameObject>{Bag};
@@ -331,7 +331,7 @@ public class PortedContainmentTests
         public GameObject? Bag; public GameObject? Pouch;
         public TestCallerForPutValid(string name) { Name=name; IsPc=true; }
         public override void Msg(string t) => Messages.Add(t);
-        public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null) => Messages.Add(t);
+        public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null) => Messages.Add(t);
         public override List<GameObject> Search(string q, bool r=true, GameObject? looker=null)
         {
             var low = q.ToLowerInvariant();
@@ -371,7 +371,7 @@ public class PortedContainmentTests
         public GameObject? Bag; public GameObject? Pouch; public GameObject? Apple;
         public TestCallerForPutAll(string name) { Name=name; IsPc=true; }
         public override void Msg(string t) => Messages.Add(t);
-        public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null) => Messages.Add(t);
+        public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null) => Messages.Add(t);
         public override List<GameObject> Search(string q, bool r=true, GameObject? looker=null)
         {
             if (q.ToLowerInvariant().Contains("pouch") && Pouch != null) return new List<GameObject>{Pouch};
@@ -474,7 +474,7 @@ public class PortedContainmentTests
         public GameObject? Outer; public GameObject? Deepest;
         public TestCallerForPutDeep(string name) { Name=name; IsPc=true; }
         public override void Msg(string t) => Messages.Add(t);
-        public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null) => Messages.Add(t);
+        public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null) => Messages.Add(t);
         public override List<GameObject> Search(string q, bool r=true, GameObject? looker=null)
         {
             var low = q.ToLowerInvariant();

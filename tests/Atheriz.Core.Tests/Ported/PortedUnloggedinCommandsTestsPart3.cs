@@ -381,7 +381,9 @@ public class PortedUnloggedinCommandsTestsPart3
         SaltProvider.Clear();
     }
 
-    // Port of test_cli_create_alternate_op_same_host_rate_limited
+    // Port of test_cli_create_alternate_op_same_host_rate_limited: same-op
+    // repeats on one host are rate-limited (budgets are per-op, so only the
+    // matching op observes the hold).
     [Fact] public void CliCreate_AlternateOpSameHostRateLimited()
     {
         using var env = GlobalTestEnv.Enter();
@@ -389,7 +391,7 @@ public class PortedUnloggedinCommandsTestsPart3
         CreationCooldownStore.Clear();
         var t1 = ObjectRegistry.TryReserveCreationCooldown("account", host, 1000, 60);
         Assert.NotNull(t1);
-        Assert.True(ObjectRegistry.CreationCooldownActive(host, 1001));
-        ObjectRegistry.ClearCreationCooldown(host, t1.Value);
+        Assert.True(ObjectRegistry.CreationCooldownActive("account", host, 1001));
+        ObjectRegistry.ClearCreationCooldown("account", host, t1.Value);
     }
 }

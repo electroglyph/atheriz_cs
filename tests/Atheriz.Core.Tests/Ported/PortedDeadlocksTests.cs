@@ -45,11 +45,11 @@ public class PortedDeadlocksTests
     {
         private readonly ManualResetEventSlim _started, _release;
         public BlockingListener(ManualResetEventSlim s, ManualResetEventSlim r) { _started = s; _release = r; Name = "Listener"; }
-        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null)
+        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null, string? rawMsg = null)
         {
             _started.Set();
             _release.Wait(10000);
-            base.Msg(text, fromObj, mapping, raiseErrors, msgType);
+            base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg);
         }
     }
     [Fact] public void ConcurrentSubscribeUnsubscribeAndMsg()

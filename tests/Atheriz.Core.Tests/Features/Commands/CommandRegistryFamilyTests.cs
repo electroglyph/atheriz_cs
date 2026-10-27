@@ -18,7 +18,7 @@ public sealed class CommandRegistryFamilyTests
         try
         {
             var all = CommandRegistry.LoggedIn.GetAll();
-            Assert.Equal(76, all.Count);
+            Assert.Equal(77, all.Count);
             var keys = all.Select(c => c.Key).OrderBy(k => k, StringComparer.Ordinal).ToList();
             Assert.Equal(
             [
@@ -34,6 +34,7 @@ public sealed class CommandRegistryFamilyTests
                 "socials", "spam", "tag", "teleport", "time", "unban",
                 "unfollow", "unlock", "unpuppet", "unquell", "unset",
                 "userpassword", "wall", "wander", "whisper", "who", "wipe",
+                "yell",
             ], keys);
         }
         finally { CommandRegistry.Reset(); }

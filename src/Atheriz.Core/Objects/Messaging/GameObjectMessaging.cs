@@ -10,8 +10,11 @@ public partial class GameObject
     /// When <paramref name="text"/> contains <c>$</c> or <c>{key}</c>, it is parsed via
     /// <see cref="FuncParser"/> using director stance (mapping) and actor stance (caller vs receiver).
     /// Mirrors Python's <c>at_msg_send</c>/<c>at_msg_receive</c> hooks (advisory, no abort).
+    /// <paramref name="rawMsg"/> carries the pre-format utterance (the bare
+    /// <c>speech</c> text) for NPC memory/classify paths; it is never rendered,
+    /// only forwarded. Null (the default) preserves the old behavior.
     /// </summary>
-    public virtual void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null)
+    public virtual void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null, string? rawMsg = null)
     {
         // Deleted receivers take no delivery: a Delete landing
         // between the broadcast snapshot and this call must not grow a
@@ -69,6 +72,10 @@ public partial class GameObject
 
     /// <summary>
     /// Mirrors <c>Object.msg</c> variety with params-object style for callers using keyword-style.
+    /// Deliberately has no rawMsg: adding it here as a 5th positional param
+    /// would hijack existing 5-arg msgType callers (Msg(text,fromObj,mapping,
+    /// raiseErrors,msgType) would bind "emote"/"move" to rawMsg instead of
+    /// msgType). RawMsg callers use the virtual overload with named args.
     /// </summary>
     public void Msg(string? text, GameObject? fromObj = null, IDictionary<string, object?>? mapping = null, bool raiseErrors = false) => Msg(text ?? "", fromObj, mapping, raiseErrors, null);
 
@@ -121,7 +128,10 @@ public partial class GameObject
             if (selfText is string selfStr && !string.IsNullOrEmpty(selfStr))
             {
                 var selfMapping = BuildSayMapping(GetDisplayName(this), loc is not null ? loc.GetDisplayName(this) : null, null, allRecvSelf, message, custom);
-                Msg(selfStr, this, selfMapping, false, type);
+                // FL at_say passes raw_msg on the self delivery too
+                // (base_obj.py); the location path below already rides via
+                // the "speech" mapping key through EmitToContents.
+                Msg(selfStr, this, selfMapping, false, type, rawMsg: message);
             }
             if (recvList is not null && !string.IsNullOrEmpty(recvText))
             {
@@ -129,7 +139,9 @@ public partial class GameObject
                 foreach (var receiver in recvList)
                 {
                     var rMapping = BuildSayMapping(GetDisplayName(receiver), loc is not null ? loc.GetDisplayName(receiver) : null, receiver.GetDisplayName(receiver), allRecv, message, custom);
-                    receiver.Msg(recvText, this, rMapping, false, type);
+                    // FL at_say passes raw_msg=message on receiver deliveries
+                    // (base_obj.py) — whisper targets included.
+                    receiver.Msg(recvText, this, rMapping, false, type, rawMsg: message);
                 }
             }
             if (loc is not null && !string.IsNullOrEmpty(locText))
@@ -246,4 +258,35 @@ public partial class GameObject
         // keeps ParsingError-only fallback semantics (nodeSemantics: false).
         ContentUtils.EmitToContents(ResolveContents(resolver), this, text, fromObj, mapping, exclude, msgType, raiseErrors, nodeSemantics: false);
     }
+
+    /// <summary>
+    /// Yell gate: null allows the yell, a non-null string is the block message
+    /// sent to the emitter instead. Default permissive (no game rules in the
+    /// engine); game code overrides with noyell/level/position/effect gates.
+    /// </summary>
+    public virtual string? YellBlockedReason() => null;
+
+    /// <summary>
+    /// True when the emitter can yell unaided. Default true; game code
+    /// overrides with its awake check (the engine has no awake state).
+    /// </summary>
+    public virtual bool IsAwakeForYell() => true;
+
+    /// <summary>
+    /// Empty-line yell behavior (the yell preference toggle). Default no-op;
+    /// game code overrides with its own flag flip and messages.
+    /// </summary>
+    public virtual void ToggleYellPreference() { }
+
+    /// <summary>
+    /// True when this object hears a yell from <paramref name="emitter"/>.
+    /// Default true; game code overrides with its yells-off/silence/deaf gates.
+    /// </summary>
+    public virtual bool CanHearYell(GameObject emitter) => true;
+
+    /// <summary>
+    /// Stand-in that yells for an emitter that cannot (e.g. asleep). Default
+    /// null (yell lost); game code overrides with its room-NPC search.
+    /// </summary>
+    public virtual GameObject? FindYellStandin() => null;
 }

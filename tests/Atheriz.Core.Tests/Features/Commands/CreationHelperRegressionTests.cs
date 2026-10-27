@@ -55,6 +55,26 @@ public sealed class CreationHelperRegressionTests
     }
 
     [Fact]
+    public void CreateThenNew_SameHost_NotRateLimited()
+    {
+        // Fresh-server onboarding: create an account, then immediately make
+        // its first character on the same host. The account budget must not
+        // consume the character budget.
+        using var env = GlobalTestEnv.Enter();
+        SaltProvider.SetSalt("testsalt");
+        try
+        {
+            var conn = new TestConnection("c4") { ClientHost = "198.51.100.14" };
+            new CreateAccountCommand().Run(conn, "flowacc hunter22");
+            Assert.Contains(conn.Sent, s => s.Args.Any(a => a?.ToString()?.Contains("Account flowacc created.") == true));
+            new NewCharacterCommand().Run(conn, "FlowChar M");
+            Assert.DoesNotContain(conn.Sent, s => s.Args.Any(a => a?.ToString()?.Contains("rate-limited") == true));
+            Assert.Contains(conn.Sent, s => s.Args.Any(a => a?.ToString()?.Contains("Character FlowChar created.") == true));
+        }
+        finally { SaltProvider.Clear(); }
+    }
+
+    [Fact]
     public void Guest_ValidationFailure_ClearsCooldown()
     {
         using var env = GlobalTestEnv.Enter();

@@ -28,7 +28,7 @@ public class PortedPuppetCommandTests
             IsPc = isPc;
         }
         public override void Msg(string text) { Msgs.Add(text); base.Msg(text); }
-        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null) { Msgs.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType); }
+        public override void Msg(string text, GameObject? fromObj, IDictionary<string, object?>? mapping, bool raiseErrors = false, string? msgType = null, string? rawMsg = null) { Msgs.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg); }
         public override void AtPuppet(GameObject caller) { PuppetCalls.Add(caller); PuppetSessionAtCall.Add(Session); base.AtPuppet(caller); }
         public override void AtUnpuppet(GameObject caller) { UnpuppetCalls.Add(caller); UnpuppetIsPcAtCall.Add(IsPc); base.AtUnpuppet(caller); }
         public override void AtDisconnect() { DisconnectCalls++; base.AtDisconnect(); }

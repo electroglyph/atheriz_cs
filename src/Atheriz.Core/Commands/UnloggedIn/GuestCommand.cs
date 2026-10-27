@@ -28,10 +28,10 @@ public sealed class GuestCommand : Command
         // it, instead of re-joined tokens which would collapse it.
         var (head, descTail) = Command.SplitHeadTail(text, 2);
         string name = head.FirstOrDefault() ?? "";
-        if (string.IsNullOrWhiteSpace(name)) { CreationCooldownHelper.Clear(caller); caller.Msg("Usage: guest <name> (interactive in real server)."); return; }
+        if (string.IsNullOrWhiteSpace(name)) { CreationCooldownHelper.Clear(caller, "guest"); caller.Msg("Usage: guest <name> (interactive in real server)."); return; }
         var err = Validation.ValidateCharacterName(name);
-        if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
-        if (CreationValidation.PcNameExists(name)) { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
+        if (err is not null) { CreationCooldownHelper.Clear(caller, "guest"); caller.Msg(err); return; }
+        if (CreationValidation.PcNameExists(name)) { CreationCooldownHelper.Clear(caller, "guest"); caller.Msg($"Character with this name ({name}) already exists."); return; }
         // Desc is the raw remainder after name+gender (was dropped, while
         // the async prompt path keeps it and `new` keeps it via
         // SplitHeadTail): re-joined tokens would collapse interior
@@ -48,7 +48,7 @@ public sealed class GuestCommand : Command
         }
         catch (InvalidOperationException ex)
         {
-            CreationCooldownHelper.Clear(caller);
+            CreationCooldownHelper.Clear(caller, "guest");
             caller.Msg(ex.Message);
             try { character.IsDeleted = true; } catch (Exception) { }
             return;
@@ -81,14 +81,14 @@ public sealed class GuestCommand : Command
             string name = await caller.Session.Prompt("Enter a name for your guest character:", false, ct).ConfigureAwait(false);
             name = name.Trim();
             var err = Validation.ValidateCharacterName(name);
-            if (err is not null) { CreationCooldownHelper.Clear(caller); caller.Msg(err); return; }
+            if (err is not null) { CreationCooldownHelper.Clear(caller, "guest"); caller.Msg(err); return; }
             string gender = await caller.Session.Prompt("Enter your character's gender:", false, ct).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(gender)) { CreationCooldownHelper.Clear(caller); caller.Msg("Gender cannot be empty."); return; }
+            if (string.IsNullOrWhiteSpace(gender)) { CreationCooldownHelper.Clear(caller, "guest"); caller.Msg("Gender cannot be empty."); return; }
             gender = gender.Trim();
-            if (string.IsNullOrEmpty(gender)) { CreationCooldownHelper.Clear(caller); caller.Msg("Gender cannot be empty."); return; }
+            if (string.IsNullOrEmpty(gender)) { CreationCooldownHelper.Clear(caller, "guest"); caller.Msg("Gender cannot be empty."); return; }
             string desc = await caller.Session.Prompt("Enter a short description of your character:", false, ct).ConfigureAwait(false);
             if (CreationValidation.PcNameExists(name))
-            { CreationCooldownHelper.Clear(caller); caller.Msg($"Character with this name ({name}) already exists."); return; }
+            { CreationCooldownHelper.Clear(caller, "guest"); caller.Msg($"Character with this name ({name}) already exists."); return; }
             var character = GameObject.Create(name, desc, isPc: true);
             character.IsTemporary = true;
             character.Gender = gender;
@@ -98,7 +98,7 @@ public sealed class GuestCommand : Command
             }
             catch (InvalidOperationException ex)
             {
-                CreationCooldownHelper.Clear(caller);
+                CreationCooldownHelper.Clear(caller, "guest");
                 caller.Msg(ex.Message);
                 try { character.IsDeleted = true; } catch (Exception) { }
                 return;

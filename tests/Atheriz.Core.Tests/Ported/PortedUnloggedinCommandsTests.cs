@@ -90,8 +90,8 @@ public class PortedUnloggedinCommandsTests
         CreationCooldownStore.Clear();
         var t1 = ObjectRegistry.TryReserveCreationCooldown("guest",host, 1000, 60);
         Assert.NotNull(t1);
-        Assert.True(ObjectRegistry.CreationCooldownActive(host, 1001));
+        Assert.True(ObjectRegistry.CreationCooldownActive("guest", host, 1001));
         Assert.Null(ObjectRegistry.TryReserveCreationCooldown("guest",host,1001,60));
-        ObjectRegistry.ClearCreationCooldown(host, t1.Value);
+        ObjectRegistry.ClearCreationCooldown("guest", host, t1.Value);
     }
 }

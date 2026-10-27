@@ -26,7 +26,7 @@ public class PortedPutGetDropExamTests
         public Func<string, List<GameObject>>? SearchFunc;
         public MockCaller(string name, Privilege priv=Privilege.Player){ Id=IdGenerator.GetUniqueId(); Name=name; PrivilegeLevel=priv; Quelled=false; }
         public override void Msg(string text){ base.Msg(text); }
-        public override void Msg(string text, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null){ Msgs.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType); }
+        public override void Msg(string text, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null){ Msgs.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg); }
         public override List<GameObject> Search(string q, bool rec=true, GameObject? looker=null)
         {
             if (SearchFunc != null) return SearchFunc(q);
@@ -51,7 +51,7 @@ public class PortedPutGetDropExamTests
             if (SearchHandler != null) return SearchHandler(q);
             return base.Search(q, rec, looker);
         }
-        public override void Msg(string text, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null){ Msgs.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType); }
+        public override void Msg(string text, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null){ Msgs.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg); }
     }
 
     private sealed class HookObj : GameObject
