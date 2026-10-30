@@ -90,7 +90,7 @@ public static class PluginBuilder
 
     /// <summary>
     /// Game plugin projects in one folder: top-level *.csproj files, excluding
-    /// the server project itself and test projects (reload never builds those).
+    /// the engine/template projects and test projects (reload never builds those).
     /// </summary>
     public static IReadOnlyList<string> FindPluginProjects(string directory)
     {
@@ -99,12 +99,20 @@ public static class PluginBuilder
         var found = new List<string>();
         foreach (var csproj in Directory.GetFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly))
         {
-            var name = Path.GetFileName(csproj);
-            if (name.Equals("Atheriz.Server.csproj", StringComparison.OrdinalIgnoreCase)) continue;
-            if (name.EndsWith(".Tests.csproj", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!IsGameProjectFile(csproj)) continue;
             found.Add(csproj);
         }
         return found;
+    }
+
+    // A csproj reload may build and load: not the engine/template, and never
+    // a test project (a top-level *.Tests.csproj next to the game must not
+    // be built or loaded as game code).
+    internal static bool IsGameProjectFile(string csproj)
+    {
+        if (IsEngineProjectName(Path.GetFileNameWithoutExtension(csproj))) return false;
+        if (Path.GetFileName(csproj).EndsWith(".Tests.csproj", StringComparison.OrdinalIgnoreCase)) return false;
+        return true;
     }
 
     /// <summary>
@@ -119,12 +127,11 @@ public static class PluginBuilder
         var found = new List<string>();
         foreach (var dir in GameSearchDirectories(settings))
         {
-            string[] csprojs;
-            try { csprojs = Directory.GetFiles(dir, "*.csproj", SearchOption.TopDirectoryOnly); }
+            IReadOnlyList<string> csprojs;
+            try { csprojs = FindPluginProjects(dir); }
             catch { continue; }
             foreach (var csproj in csprojs)
             {
-                if (IsEngineProjectName(Path.GetFileNameWithoutExtension(csproj))) continue;
                 if (!found.Contains(csproj, StringComparer.OrdinalIgnoreCase)) found.Add(csproj);
             }
         }
@@ -144,7 +151,9 @@ public static class PluginBuilder
     /// <summary>
     /// Deletes orphaned per-generation load copies (<c>*.gen-*.dll</c>) left
     /// beside game outputs by earlier reloads or crashes. Runs at boot, when
-    /// no ALC maps them yet, so it is safe on all platforms.
+    /// no ALC maps them yet, so it is safe on all platforms. Sweeps both the
+    /// game <c>bin/</c> outputs and the plugin drop folders (a module loaded
+    /// from <c>save/plugins</c> stages its copy there, not in <c>bin/</c>).
     /// </summary>
     public static void DeleteStaleGenerationCopies(AtherizSettings settings)
     {
@@ -166,6 +175,34 @@ public static class PluginBuilder
                     try { File.Delete(Path.ChangeExtension(f, ".pdb")); } catch { }
                 }
             }
+        }
+        // Plugin drop folders: any orphaned generation copy, regardless of name.
+        foreach (var plugins in PluginDropDirectories(settings))
+        {
+            string[] files;
+            try { files = Directory.GetFiles(plugins, "*.gen-*.dll"); }
+            catch { continue; }
+            foreach (var f in files)
+            {
+                try { File.Delete(f); } catch { }
+                try { File.Delete(Path.ChangeExtension(f, ".pdb")); } catch { }
+            }
+        }
+    }
+
+    private static IEnumerable<string> PluginDropDirectories(AtherizSettings settings)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var dir in new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "plugins"),
+            Path.Combine(settings.SavePath, "plugins"),
+        })
+        {
+            string full;
+            try { full = Path.GetFullPath(dir); }
+            catch { continue; }
+            if (seen.Add(full)) yield return full;
         }
     }
     /// <summary>
@@ -224,12 +261,20 @@ public static class PluginBuilder
     /// <summary>
     /// Runs dotnet build on one plugin project (Release). Build output is
     /// printed only on failure. Returns false when the SDK is missing, the
-    /// build fails, or the timeout elapses.
+    /// build fails, or the timeout elapses. The timeout applies even when the
+    /// caller passes <see cref="CancellationToken.None"/> (in-game reload has
+    /// no ambient deadline), so a hung compiler can never wedge the reload.
     /// </summary>
-    public static async Task<bool> BuildAsync(string csprojPath, CancellationToken cancellationToken)
+    public static async Task<bool> BuildAsync(string csprojPath, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
         ArgumentNullException.ThrowIfNull(csprojPath);
+        var limit = timeout ?? BuildTimeout;
         Console.Error.WriteLine($"Building {Path.GetFileName(csprojPath)}...");
+        // Bound the compiler even for callers without a deadline: link the
+        // ambient token (if any) with the build timeout.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(limit);
+        var buildToken = timeoutCts.Token;
         var output = new StringBuilder();
         using var process = new Process
         {
@@ -259,7 +304,7 @@ public static class PluginBuilder
         process.BeginErrorReadLine();
         try
         {
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await process.WaitForExitAsync(buildToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -269,9 +314,17 @@ public static class PluginBuilder
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Build timed out; stopping the build left: {ex.Message}");
+                Console.Error.WriteLine($"Build canceled; stopping the build left: {ex.Message}");
             }
-            Console.Error.WriteLine($"Build of {csprojPath} timed out after {BuildTimeout.TotalMinutes:F0} minutes.");
+            // Linked token: an ambient cancel reports as canceled, the
+            // internal timeout as timed out.
+            if (cancellationToken.IsCancellationRequested)
+                Console.Error.WriteLine($"Build of {csprojPath} canceled.");
+            else
+            {
+                var budget = limit.TotalMinutes >= 1 ? $"{limit.TotalMinutes:F0} minutes" : $"{limit.TotalSeconds:F1} seconds";
+                Console.Error.WriteLine($"Build of {csprojPath} timed out after {budget}.");
+            }
             return false;
         }
         if (process.ExitCode != 0)

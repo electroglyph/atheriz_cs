@@ -21,6 +21,9 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
   only asks the server to reload, and the server rebuilds stale game
   projects before loading — the same build-first reload the verb already
   ran. A failed build comes back as an error from either verb.
+- Reload discovery never treats a top-level test project as game code, and
+  the up-to-date check stamps the bytes actually loaded, so a build racing
+  a reload cannot wedge later reloads into a false no-op.
 
 ## [0.36.0.0] - 2026-10-30
 

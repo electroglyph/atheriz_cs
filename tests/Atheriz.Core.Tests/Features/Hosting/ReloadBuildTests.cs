@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using Atheriz.Core.Globals;
 using Atheriz.Core.Objects;
@@ -116,7 +117,8 @@ public class ReloadBuildTests
     [Fact]
     public void FindPluginProjects_PicksGame_SkipsServerAndTests()
     {
-        var root = MakePluginDir("mygame.csproj", "Atheriz.Server.csproj", "Foo.Tests.csproj");
+        var root = MakePluginDir("mygame.csproj", "Atheriz.Server.csproj", "Atheriz.Core.csproj",
+            "Atheriz.GameTemplate.csproj", "Foo.Tests.csproj");
         try
         {
             var found = PluginBuilder.FindPluginProjects(root);
@@ -144,6 +146,28 @@ public class ReloadBuildTests
     }
 
     [Fact]
+    public void FindGameProjects_SkipsTestsProjects()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "atheriz_findgame_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            var save = Path.Combine(tmp, "save");
+            Directory.CreateDirectory(save);
+            File.WriteAllText(Path.Combine(tmp, "mygame.csproj"), "<Project />");
+            File.WriteAllText(Path.Combine(tmp, "mygame.Tests.csproj"), "<Project />");
+            var settings = new AtherizSettings { SavePath = save };
+            var found = PluginBuilder.FindGameProjects(settings);
+            Assert.Contains(found, p => Path.GetFileName(p) == "mygame.csproj");
+            Assert.DoesNotContain(found, p => p.EndsWith(".Tests.csproj", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task ReloadAsync_UnreachableServer_ReturnsOne()
     {
         // No server on the port (and no token): the trigger reports the
@@ -163,6 +187,82 @@ public class ReloadBuildTests
         finally
         {
             try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task BuildAsync_InternalTimeout_AbortsAndReturnsFalse()
+    {
+        // A 50ms budget against a real `dotnet build` (host startup alone
+        // takes far longer): the internal timeout must fire and abort.
+        // Exercises the timeout branch, which no caller can reach with a
+        // patient token.
+        var root = MakePluginDir("bogus.csproj");
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            Assert.False(await PluginBuilder.BuildAsync(
+                Path.Combine(root, "bogus.csproj"), CancellationToken.None, TimeSpan.FromMilliseconds(50)));
+            sw.Stop();
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(30), $"took {sw.Elapsed}");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task BuildAsync_CancelledToken_ReturnsFalse()
+    {
+        var root = MakePluginDir("bogus.csproj");
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+            Assert.False(await PluginBuilder.BuildAsync(
+                Path.Combine(root, "bogus.csproj"), cts.Token));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void DeleteStaleGenerationCopies_RemovesGenCopiesKeepsRealOutputs()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "atheriz_genclean_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            File.WriteAllText(Path.Combine(tmp, "mygame.csproj"), "<Project />");
+            var save = Path.Combine(tmp, "save");
+            var bin = Path.Combine(tmp, "bin", "Release", "net10.0");
+            var plugins = Path.Combine(save, "plugins");
+            Directory.CreateDirectory(bin);
+            Directory.CreateDirectory(plugins);
+            var realDll = Path.Combine(bin, "mygame.dll");
+            var realPdb = Path.Combine(bin, "mygame.pdb");
+            var genDll = Path.Combine(bin, "mygame.gen-abc123.dll");
+            var genPdb = Path.Combine(bin, "mygame.gen-abc123.pdb");
+            var pluginDll = Path.Combine(plugins, "foo.dll");
+            var pluginGen = Path.Combine(plugins, "foo.gen-xyz789.dll");
+            var pluginGenPdb = Path.Combine(plugins, "foo.gen-xyz789.pdb");
+            foreach (var f in new[] { realDll, realPdb, genDll, genPdb, pluginDll, pluginGen, pluginGenPdb })
+                File.WriteAllBytes(f, [0x4D, 0x5A]);
+            var settings = new AtherizSettings { SavePath = save };
+
+            PluginBuilder.DeleteStaleGenerationCopies(settings);
+
+            foreach (var f in new[] { genDll, genPdb, pluginGen, pluginGenPdb })
+                Assert.False(File.Exists(f), $"{Path.GetFileName(f)} should be deleted");
+            foreach (var f in new[] { realDll, realPdb, pluginDll })
+                Assert.True(File.Exists(f), $"{Path.GetFileName(f)} should survive");
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, true); } catch { }
         }
     }
 

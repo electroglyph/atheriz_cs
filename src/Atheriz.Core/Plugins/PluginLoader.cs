@@ -44,6 +44,15 @@ public sealed class PluginLoader : IDisposable
     public Assembly? LoadedAssembly => _loaded;
 
     /// <summary>
+    /// Build time of the bytes actually loaded: the pre-load mtime snapshot,
+    /// verified unchanged after the load (the discovery→load TOCTOU guard).
+    /// Reload stamps must record this — not a fresh read — or a concurrent
+    /// build landing between the load and the stamp would pin the new mtime
+    /// to old bytes and no-op every future reload.
+    /// </summary>
+    public DateTime LoadedStamp { get; private set; }
+
+    /// <summary>
     /// Creates collectible ALC, loads assembly, scans for <see cref="EntityReplacementAttribute"/>, registers.
     /// Returns the discovered game-setup entry (a public non-abstract
     /// <c>IGameSetup</c> class, instantiated once), or null when the
@@ -119,6 +128,9 @@ public sealed class PluginLoader : IDisposable
             DeleteGenerationCopy(genPath);
             throw new IOException($"Plugin assembly {full} changed during load; refusing to patch from a torn file.");
         }
+        // The bytes on disk still match tsBefore, so the staged copy (taken
+        // after the snapshot) holds exactly those bytes: stamp them.
+        LoadedStamp = tsBefore;
         // Superseded generation copy goes away (best-effort: on Windows the
         // previous ALC may still map it, so orphans wait for boot cleanup).
         var prevGen = _genPath;
@@ -257,6 +269,7 @@ public sealed class PluginLoader : IDisposable
     {
         Replacements.Clear();
         _loaded = null;
+        LoadedStamp = default;
         if (_alc is not null)
         {
             // keep a weak handle so the unload can be VERIFIED.

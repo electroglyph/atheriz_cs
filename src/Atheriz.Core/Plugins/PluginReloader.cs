@@ -64,11 +64,10 @@ public static class PluginReloader
     // candidates all match is a no-op instead of churning the ALC.
     private static readonly Dictionary<string, DateTime> _loadedStamps = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Lock _stampsLock = new();
-    private static void RecordStamp(string fullPath)
+    private static void RecordStamp(string fullPath, DateTime stamp)
     {
         try
         {
-            var stamp = File.GetLastWriteTimeUtc(fullPath);
             lock (_stampsLock) _loadedStamps[Path.GetFullPath(fullPath)] = stamp;
         }
         catch (Exception ex) { Suppress("RecordStamp", ex); }
@@ -237,7 +236,7 @@ public static class PluginReloader
         try { newLoader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
         if (_loader is not null) { try{_loader.Unload();}catch (Exception logEx) { Suppress("ReloadAsync", logEx); } _loader=null; GC.Collect(); }
         _loader = newLoader;
-        RecordStamp(full);
+        RecordStamp(full, newLoader.LoadedStamp);
         Console.Error.WriteLine($"[HotReload] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
         // A previous load already converted the world when live instances
         // carry plugin types (non-Core assembly deriving a pair base):
@@ -620,9 +619,9 @@ public static class PluginReloader
             try { csprojs = Directory.GetFiles(dir, "*.csproj", SearchOption.TopDirectoryOnly); } catch { continue; }
             foreach (var csproj in csprojs)
             {
-                // skip server/core templates themselves
+                // skip server/core templates themselves, and never test projects
+                if (!PluginBuilder.IsGameProjectFile(csproj)) continue;
                 var name = Path.GetFileNameWithoutExtension(csproj);
-                if (PluginBuilder.IsEngineProjectName(name)) continue;
                 // Already-built dll only: a stale or missing dll is skipped
                 // here (boot stays build-free); the build-first reload
                 // rebuilds before discovering, so it never sees one.
@@ -668,9 +667,8 @@ public static class PluginReloader
             catch { continue; }
             foreach (var csproj in csprojs)
             {
-                var name = Path.GetFileNameWithoutExtension(csproj);
-                if (PluginBuilder.IsEngineProjectName(name)) continue;
-                projectName = name;
+                if (!PluginBuilder.IsGameProjectFile(csproj)) continue;
+                projectName = Path.GetFileNameWithoutExtension(csproj);
                 return true;
             }
         }
@@ -765,9 +763,9 @@ public static class PluginReloader
     // staleness scan. When nothing changed anywhere, the load pass reports
     // the no-op itself.
     public static Task<string> ReloadGameLogicWithBuildAsync(AsyncTicker ticker, AsyncThreadPool pool, AtherizSettings settings)
-        => ReloadGameLogicWithBuildAsync(ticker, pool, settings, PluginBuilder.BuildAsync, CancellationToken.None);
+        => ReloadGameLogicWithBuildAsync(ticker, pool, settings, (csproj, ct) => PluginBuilder.BuildAsync(csproj, ct), CancellationToken.None);
     public static Task<string> ReloadGameLogicWithBuildAsync(AsyncTicker ticker, AtherizSettings settings)
-        => ReloadGameLogicWithBuildAsync(ticker, GlobalServices.GetAsyncThreadPool(), settings, PluginBuilder.BuildAsync, CancellationToken.None);
+        => ReloadGameLogicWithBuildAsync(ticker, GlobalServices.GetAsyncThreadPool(), settings, (csproj, ct) => PluginBuilder.BuildAsync(csproj, ct), CancellationToken.None);
     public static async Task<string> ReloadGameLogicWithBuildAsync(AsyncTicker ticker, AsyncThreadPool pool, AtherizSettings settings, Func<string, CancellationToken, Task<bool>> buildAsync, CancellationToken cancellationToken)
     {
         settings ??= AtherizSettings.Global;
@@ -776,6 +774,10 @@ public static class PluginReloader
         var failures = new List<string>();
         foreach (var csproj in PluginBuilder.FindGameProjects(settings))
         {
+            // The load phase skips excluded assemblies (System.*, xunit.*,
+            // ...): building one would claim work for code that can never
+            // load, so the sets stay identical by skipping here too.
+            if (IsExcludedAssembly(csproj)) continue;
             bool stale;
             try { stale = PluginBuilder.DllNeedsBuild(csproj, out _); }
             catch (Exception ex) { failures.Add($"{Path.GetFileName(csproj)}: staleness check failed: {ex.Message}"); continue; }
@@ -849,7 +851,7 @@ public static class PluginReloader
                     catch (Exception ex) { Console.Error.WriteLine($"[Boot] Load failed: {ex.Message}"); continue; }
                     if (_loader is not null) { try { _loader.Unload(); } catch (Exception logEx) { Suppress("LoadGameAssembliesAtBoot", logEx); } _loader = null; GC.Collect(); }
                     _loader = newLoader;
-                    RecordStamp(full);
+                    RecordStamp(full, newLoader.LoadedStamp);
                     if (discovered is not null) gameSetup = discovered;
                     Console.Error.WriteLine($"[Boot] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
                     lock (StartStop.WorldLock)

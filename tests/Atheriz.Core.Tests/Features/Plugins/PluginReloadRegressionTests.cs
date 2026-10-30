@@ -139,6 +139,24 @@ public class PluginReloadRegressionTests
     }
 
     [Fact]
+    public void DiscoverGameAssembly_TopLevelTestsProject_NeverLoadsAsGame()
+    {
+        var root = NewGameRoot(out var game);
+        try
+        {
+            WriteGameProject(game, "game");
+            WriteGameProject(game, "game.Tests");
+            var found = new List<string>();
+            var added = PluginReloader.DiscoverGameAssembly(SettingsFor(game), found);
+
+            Assert.Equal(1, added);
+            Assert.Single(found);
+            Assert.EndsWith("game.dll", found[0], StringComparison.OrdinalIgnoreCase);
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    [Fact]
     public void WorldCanBeRebuilt_FolderWithoutGameProject_IsTrue()
     {
         var root = NewGameRoot(out var game);
