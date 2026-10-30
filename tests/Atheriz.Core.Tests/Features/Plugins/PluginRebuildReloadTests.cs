@@ -17,6 +17,25 @@ public class PluginRebuildReloadTests
     private const string AlphaGeneration = "GENERATION_ALPHA_7F3A9C";
     private const string BetaGeneration = "GENERATION_BETA_4D2E81";
 
+    // Locate the engine project without hardcoding the checkout path: walk
+    // up from the test binaries (bin/Release/net10.0 → repo root), then
+    // from the current directory. Fails closed with a clear message instead
+    // of silently referencing a stale absolute path.
+    private static string CoreCsprojPath()
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            var d = new DirectoryInfo(start);
+            while (d is not null)
+            {
+                var cand = Path.Combine(d.FullName, "src", "Atheriz.Core", "Atheriz.Core.csproj");
+                if (File.Exists(cand)) return cand;
+                d = d.Parent;
+            }
+        }
+        throw new InvalidOperationException("Atheriz.Core.csproj not found above test binaries or CWD.");
+    }
+
     private static string StageGameDir(string prefix)
     {
         var dir = Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N"));
@@ -30,8 +49,9 @@ public class PluginRebuildReloadTests
 
     private static void WriteDotnetProject(string dir, string name, string generation)
     {
+        var coreCsproj = CoreCsprojPath();
         File.WriteAllText(Path.Combine(dir, $"{name}.csproj"),
-            """
+            $"""
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
                 <TargetFramework>net10.0</TargetFramework>
@@ -39,7 +59,7 @@ public class PluginRebuildReloadTests
                 <ImplicitUsings>enable</ImplicitUsings>
               </PropertyGroup>
               <ItemGroup>
-                <ProjectReference Include="/home/anon/atheriz-cs/src/Atheriz.Core/Atheriz.Core.csproj" />
+                <ProjectReference Include="{coreCsproj}" />
               </ItemGroup>
             </Project>
             """);
@@ -99,17 +119,22 @@ public class PluginRebuildReloadTests
         try
         {
             // Stale project (no dll yet) for the build phase; the fake build
-            // drops this test assembly into the save plugins dir, which the
-            // load phase discovers like a freshly built game dll.
+            // stages this test assembly as the project's OWN bin output
+            // (bin/Release/net10.0/fakegame.dll), which DiscoverGameAssembly
+            // then picks up exactly like a real `dotnet build` product.
             File.WriteAllText(Path.Combine(dir, "fakegame.csproj"), "<Project />");
             ObjectRegistry.AddObject(new GameObject());
             var settings = GameSettings(dir);
             Task<bool> build(string csproj, CancellationToken ct)
             {
-                var plugins = Path.Combine(dir, "save", "plugins");
-                Directory.CreateDirectory(plugins);
-                File.Copy(typeof(PluginRebuildReloadTests).Assembly.Location,
-                    Path.Combine(plugins, "fakegame.dll"), overwrite: true);
+                var bin = Path.Combine(dir, "bin", "Release", "net10.0");
+                Directory.CreateDirectory(bin);
+                // WriteAllBytes (not File.Copy): File.Copy preserves the
+                // source mtime, so the staged dll would predate the csproj
+                // and look stale forever. A real build writes fresh bytes
+                // with a now mtime; mimic that.
+                var dllBytes = File.ReadAllBytes(typeof(PluginRebuildReloadTests).Assembly.Location);
+                File.WriteAllBytes(Path.Combine(bin, "fakegame.dll"), dllBytes);
                 return Task.FromResult(true);
             }
             var result = await PluginReloader.ReloadGameLogicWithBuildAsync(
@@ -196,5 +221,31 @@ public class PluginRebuildReloadTests
             Assert.Equal("Reload not needed; already up to date.", third);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void ReloadCommand_UsesBuildFirstReload()
+    {
+        // The in-game `reload` verb must drive the build-first path, or code
+        // edits silently need a separate build step again. Source pin (same
+        // style as HotReloadBlocksLoop): the command is fire-and-forget, so
+        // there is no result string to assert on behaviorally.
+        var root = FindRepoRoot();
+        var src = File.ReadAllText(Path.Combine(root, "src", "Atheriz.Core", "Commands", "LoggedIn", "AdminCommands.cs"));
+        Assert.Contains("ReloadGameLogicWithBuildAsync", src);
+    }
+
+    private static string FindRepoRoot()
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            var d = new DirectoryInfo(start);
+            while (d is not null)
+            {
+                if (Directory.Exists(Path.Combine(d.FullName, "src"))) return d.FullName;
+                d = d.Parent;
+            }
+        }
+        throw new InvalidOperationException("repo root with src/ not found");
     }
 }

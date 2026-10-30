@@ -14,7 +14,7 @@ Terminal basics:
 - Up/Down recalls input history; the line keeps focus so you can keep typing during output bursts.
 - The map pane renders nearby rooms from the same map data the in-game `map` command uses. Map rendering can be toggled server-side with `MapEnabled` / `LegendEnabled` (see [Hosting and configuration](08-hosting-configuration.md)).
 - The audio toggle mutes or unmutes client-side sounds. The setting persists per browser.
-- If the drawing/map editor opens but the browser blocks it with a banner, allow popups for the game address and retry (1.9.0 note: the editor is a separate window and popup blockers catch it on first launch).
+- If the drawing/map editor opens but the browser blocks it with a banner, allow popups for the game address and retry — the editor is a separate window and popup blockers catch it on first launch.
 
 What you should see on a fresh game: after login and character select (section 3), `look` describes `limbo`, the seed room. If `look` instead answers `You are nowhere.`, the character has no location — tell the operator (or, if you are the operator, see the triage checklist in [Running the server](07-server-lifecycle-cli.md)).
 
@@ -28,11 +28,11 @@ telnet localhost 4444
 
 Any telnet client works; a dedicated MUD client gives you scrollback, triggers, and keypad movement on top of the same wire. Set the client to UTF-8 — the server speaks UTF-8 in both directions and assumes your side does too.
 
-On connect the server negotiates terminal capabilities automatically; no action is needed on your side. The wire order, as observed per `README.md`, is:
+On connect the server negotiates terminal capabilities through the `telnet_cs` library (`NegotiateAsync` — the engine only sets UTF-8, charset-off, window-size-on and delegates); no action is needed on your side. The wire order you will see in client logs is:
 
-> `DO TTYPE` on connect, then `WILL SGA` / `WILL BINARY` / `DO NAWS`; charset negotiation off; UTF-8 both ways — performed by the `telnet_cs` library's `NegotiateAsync` (engine sets UTF-8 + charset-off + window-size).
+> `DO TTYPE` on connect, then `WILL SGA` / `WILL BINARY` / `DO NAWS`; charset negotiation off; UTF-8 both ways.
 
-In practice that means: the server learns your terminal type, switches both directions to binary mode with single-character handling (`SGA`), learns your window size (`NAWS`), and skips charset negotiation because UTF-8 is already fixed. If your client logs negotiation bytes, the sequence above is what a healthy handshake looks like. `telnet_cs` is pinned exact at `0.19.0` (`Directory.Packages.props`).
+In practice that means: the server learns your terminal type, switches both directions to binary mode with single-character handling (`SGA`), learns your window size (`NAWS`), and skips charset negotiation because UTF-8 is already fixed. If your client logs negotiation bytes, the sequence above is what a healthy handshake looks like. `telnet_cs` is pinned exact at `0.19.0` (`Directory.Packages.props:16`).
 
 Players using a screen reader can switch to the screen-reader command once logged in — it trims map art and decorative spacing from room output while keeping exits, contents, and names intact. The full command catalog lives in [Commands: using and writing them](06-commands.md).
 
@@ -59,7 +59,7 @@ encoding: UTF-8
 negotiation: enabled (TTYPE + SGA + BINARY + NAWS)
 ```
 
-Keep negotiation enabled. The server opens with `DO TTYPE` and continues `WILL SGA` / `WILL BINARY` / `DO NAWS` with charset negotiation off and UTF-8 fixed both ways (performed by `telnet_cs` `NegotiateAsync`, exact pin `0.19.0`). A client that answers the probes gets window-size-aware map rendering; a client that ignores them still plays, but the server never learns the terminal width and map art falls back to a default width. If your client's log shows the §2 wire order, the handshake is healthy — there is nothing further to configure.
+Keep negotiation enabled. The server opens with `DO TTYPE` and continues `WILL SGA` / `WILL BINARY` / `DO NAWS` with charset negotiation off and UTF-8 fixed both ways (the `telnet_cs` `NegotiateAsync` opening preset, exact pin `0.19.0`; see §2). A client that answers the probes gets window-size-aware map rendering; a client that ignores them still plays, but the server never learns the terminal width and map art falls back to a default width. If your client's log shows the §2 wire order, the handshake is healthy — there is nothing further to configure.
 
 Screen-reader players: switch to the screen-reader command after login. It strips map art and decorative spacing while keeping exits, contents, and names — the same world, linearized. The command catalog (including the reader) lives in [Commands: using and writing them](06-commands.md).
 
@@ -132,7 +132,7 @@ Connection loss mid-puppet (closed laptop, dead socket) leaves the character unp
 
 Per-IP and total connection caps (`MaxConnectionsPerIp`, `MaxTotalConnections`) bound how many simultaneous connections the server accepts. Past the cap, the new socket is closed at registration — the client sees the connection drop with no message; the reason (`per-IP limit … reached` / `total limit … reached`) goes to the server log, not the client. Nothing is queued. The caps live in settings; the enforcement lives in `ConnectionManager` (see Under the hood). If legitimate players hit the cap during an event, raise it and `restart` (settings changes need a restart, not a `reload`).
 
-Bans: a banned IP is refused at connect time (`IpBanStore` outcomes — the ban list persists across restarts, so rebooting does not clear it). Ban and unban through the in-game admin verbs (catalog in [Commands: using and writing them](06-commands.md)); never hand-edit the ban rows in the database file.
+Bans: a banned IP is refused at connect time — the socket closes with no message and the reason goes to the server log (`IpBanStore` outcomes). Persistent bans (the `IsBanned` flag on a character or account) survive restarts by design; temporary IP bans clear on reboot (the ban verb reports them as `banned until server restart`). Ban and unban through the in-game admin verbs (catalog in [Commands: using and writing them](06-commands.md)); never hand-edit the ban rows in the database file.
 
 Creation throttles: account creation is rate-limited per source. Too-fast repeat `create` attempts are rejected with a wait-and-retry message — this is the creation throttle doing its job against bots, not a bug. Legitimate bursts (a classroom signing up at once) should pace themselves or ask the operator to create accounts from the server side (`create` CLI verb, [Running the server](07-server-lifecycle-cli.md)).
 
@@ -140,10 +140,10 @@ Message size caps — both directions, both protocols:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `WebsocketMaxMessageSize` | 65536 | 64 KB max per inbound WebSocket message. Oversize input is dropped silently; the connection stays up. |
-| `TelnetMaxLine` | 65536 | 64 KB max per telnet line. Same silent-drop policy. |
+| `WebsocketMaxMessageSize` | 65536 | 64 KB max per inbound WebSocket message. Oversize input closes the socket (`MessageTooBig`); the server log records the drop. |
+| `TelnetMaxLine` | 65536 | 64 KB max per telnet line. Oversize input is dropped silently; the connection stays up. |
 
-Both caps are 64 KB (65536), not 8 KB — older notes quoting 8 KB are stale. Reads run a 64 KB fragment/line loop: WebSocket frames accumulate up to the cap, telnet bytes accumulate to end-of-line up to the cap, and anything past the cap vanishes without a reply to the sender (the server log records the drop, throttled) rather than disconnecting them.
+Both caps are 64 KB (65536). Reads run a 64 KB fragment/line loop: WebSocket frames accumulate up to the cap and an oversize message closes the socket (`MessageTooBig`, logged server-side); telnet bytes accumulate to end-of-line up to the cap and anything past it vanishes without a reply to the sender (the server log records the drop, throttled) rather than disconnecting them.
 
 Log triage for connection complaints: `save/server.log` first, then the ordered checklist (`/health`, `ss`, `look` → `limbo`, pid claim) in [Running the server](07-server-lifecycle-cli.md).
 
@@ -155,22 +155,20 @@ Log triage for connection complaints: `save/server.log` first, then the ordered 
 # Banned IP at connect time:
 (the connection closes with no message; the log notes the banned host)
 # Too-fast repeat creation:
-Account creation throttled — wait a moment and retry.
-# Overlong WebSocket message or telnet line (64 KB caps):
+Creation is temporarily rate-limited. Please try again later.
+# Overlong telnet line (64 KB cap):
 (no reply at all — the drop is silent; only the server log records it)
+# Overlong WebSocket message (64 KB cap):
+(the socket closes with MessageTooBig; only the server log records it)
 # Bad login (account and password both hidden):
 Invalid password.
 ```
 
-The cap/ban/throttle/login wordings above are quoted verbatim from the code (`ConnectionManager`, `WebSocketHandler`, `ConnectCommand`, `CreationCooldownHelper`); the overlong case is silent by design, so there is no sender-side string to quote. What matters for this doc: every refusal names its cause (full, banned, throttled, wrong-credentials) so players know whether to wait, retry, split input, or ask the operator — except the size gate, which says nothing and keeps the session alive. Nothing in this table disconnects punitively except the ban — caps and throttles and size gates all refuse quietly while keeping the session alive.
-
-## 4.2 Tuning caps for events
-
-An event night (a dozen players arriving at once) stresses two knobs: the total connection cap (simultaneous sockets) and the creation throttle (simultaneous signups). Raise the connection cap ahead of the event, `restart` to apply (settings need a restart — `reload` only hot-loads game code), and pre-create accounts from the server side with the `create` CLI verb ([Running the server](07-server-lifecycle-cli.md)) so signup throttles never gate the door. After the event, restore the tighter values and `restart` again — generous caps left in place become abuse surface. Bans set during the event persist across both restarts by design; review them the next day rather than assuming a reboot cleared them.
+The cap/ban/throttle/login wordings above are quoted verbatim from the code (`ConnectionManager`, `WebSocketHandler`, `ConnectCommand`, `CreationCooldownHelper`); over-cap and banned sockets close with no client-facing text (the reasons land in `save/server.log`) — there is no "busy" message. Throttle, login, and creation outcomes answer as §4.1 quotes, except the size gate, which stays silent on telnet and closes the socket on WebSocket.
 
 ## 4.3 Ban lifecycle (operator view)
 
-Bans are set and cleared through the in-game admin verbs — never by editing the database. A ban records the address (or range), the reason, and the setter; the banned source is refused at connect time from the next connection onward (existing sessions from that source are dropped when the ban lands). Unban reverses it the same way: next connection from the address succeeds. Both directions persist across restarts — the ban list is world state in `save/database.sqlite3`, covered in [Saves and backups](10-persistence-saves.md) — so a reboot is never a pardon and never a sentence. Review standing bans after events (§4.2); stale event-night bans are the commonest cause of "it worked yesterday" complaints.
+Bans are set and cleared through the in-game admin verbs — never by editing the database. A ban records the address (or range), the reason, and the setter; the banned source is refused at connect time from the next connection onward (existing sessions from that source are dropped when the ban lands). Unban reverses it the same way: next connection from the address succeeds. Persistent bans survive restarts — the ban list is world state in `save/database.sqlite3`, covered in [Saves and backups](10-persistence-saves.md) — while temporary IP bans clear on reboot, so a reboot is never a pardon and never a sentence. Review standing bans the next day rather than assuming a reboot cleared them; stale event-night bans are the commonest cause of "it worked yesterday" complaints.
 
 Creation throttles need no administration at all: windows slide, counters decay, and a throttled source succeeds on retry after waiting. Operators should resist clearing throttle state by hand — the decay is the feature, and manual clears teach nothing about whether the burst was a classroom or a botnet. The log's `ThrottledLog` summaries show the rate shapes; classrooms spike once and decay, botnets sustain.
 
@@ -232,9 +230,9 @@ Browser with no install: open `http://localhost:9999/`, Play, log in — nothing
 
 1. Wrong port? Confirm the game's actual web (9999 default) and telnet (4444 default) ports — game folders override them.
 2. Server still starting? `/health` ok + `/ready` `starting` means wait for `DoStartup completed`, not retry credentials.
-3. Banned IP? A connect-time refusal naming the ban is final for that address — ask the operator (bans persist across restarts).
+3. Banned IP? A connect-time close with no message is final for that address — ask the operator (persistent bans survive restarts; temporary IP bans clear on reboot).
 4. Throttled creation? A `create` rejection naming the cooldown means wait and retry — rapid repeats extend the wait.
-5. Overlong input? Anything past 64 KB per message/line is dropped with a notice (§4) — split pastes into smaller chunks.
+5. Overlong input? Anything past 64 KB per message/line never arrives (silent drop on telnet, socket close on WebSocket — §4) — split pastes into smaller chunks.
 6. Stale client? After a server upgrade, hard-refresh the webclient before reporting missing UI — entry HTML is no-cache but the browser may still hold old bundles from before.
 
 ## 7.1 What to send the operator (bug-report recipe)
@@ -250,7 +248,7 @@ health:   /health answer and /ready answer at that moment
 worked:   last time it worked, and anything that changed since
 ```
 
-The `/health` + `/ready` pair (§1) halves the diagnosis before it starts: both ok means the fault is past the server (account, ban, throttle, proxy); `starting` on ready means the server is mid-boot and the only fix is waiting; refused health means the server is down and the operator's triage checklist in [Running the server](07-server-lifecycle-cli.md) takes over. Reports without the refusal text get one round-trip asking for it — quote the screen first and skip the round-trip.
+The `/health` + `/ready` pair (§1) halves the diagnosis before it starts: both ok means the fault is past the server; `starting` means wait; refused health means the server is down (triage checklist in [Running the server](07-server-lifecycle-cli.md)). Always quote the screen verbatim — reports without the refusal text cost one round-trip.
 
 ## 8. Proxies, TLS, and the WebSocket upgrade
 
@@ -275,13 +273,13 @@ This section is for operators diagnosing failures and game devs extending the pi
 
 WebSocket path: `src/Atheriz.Server/Hosting/WebSocketHandler.cs` (`HandleAsync`) plus `src/Atheriz.Core/Network/WebSocketProtocol.cs`. The handshake gates reject banned IPs (403, before anything else) and non-websocket upgrades (400 for malformed requests) before any game state is touched. Each accepted socket gets a `GenerateConnectionId`, is `RegisterConnection`-ed with the manager, then reads in a 64 KB fragment loop gated by `WebsocketMaxMessageSize` — an oversize message is dropped at the shared `HandleCommand` entry (log line server-side, no reply, connection stays up). Each complete message runs per-message `HandleCommand`; `Disconnect` runs in a `finally` so it cannot be skipped by an exception; `ApplicationStopping` shutdown closes all sockets during `DoShutdown`.
 
-Telnet path: `TelnetHostedService` (`src/Atheriz.Core/Network/TelnetHostedService.cs`, wired by `src/Atheriz.Server/Hosting/Protocols.cs`) accepts raw TCP clients in both hosting modes — headless servers still serve telnet, because the hosted service does not depend on Kestrel. Per-connection framing splits across `TelnetProtocol` (option parsing + negotiation state), `TelnetSessionReader` (bytes → lines: buffering, normalization, the 64 KB `TelnetMaxLine` gate), and `TelnetCsWriter` (buffered writes back to the socket). Password redaction happens at the reader layer: bytes typed at a password prompt are consumed by authentication and never enter logs or echo buffers.
+Telnet path: `TelnetHostedService` (`src/Atheriz.Core/Network/TelnetHostedService.cs`, wired by `src/Atheriz.Server/Hosting/Protocols.cs`) accepts raw TCP clients in both hosting modes — headless servers still serve telnet, because the hosted service does not depend on Kestrel. Per-connection framing splits across `TelnetProtocol` (option parsing + negotiation state), `TelnetSessionReader` (bytes → lines: buffering, normalization, the 64 KB `TelnetMaxLine` gate), and `TelnetCsWriter` (buffered writes back to the socket). Bytes typed at a password prompt are consumed by authentication at the prompt/input-func layer and never enter logs or echo buffers.
 
 Negotiation itself is delegated: the `telnet_cs` library's `NegotiateAsync` performs the `DO TTYPE → WILL SGA / WILL BINARY / DO NAWS` exchange quoted in §2; the engine configures UTF-8 both ways, charset negotiation off, and window-size tracking, then reads the results. Engine code never hand-assembles negotiation bytes.
 
 `InputFuncs` (`src/Atheriz.Core/Network/InputFuncs.cs`) holds the `[InputFunc]`-marked handlers: the small state machines behind multi-step connection-screen input (password prompts, character select, paged output). Each handler is a pure function of the session plus the new line — no sockets, no threads.
 
-Rate control splits three ways: `PendingLimiter` bounds queued-but-undispatched input per connection (a flooding client gets capped, not the server); `ThrottleWindow` measures per-source creation/login rates for the throttles in §4; `ThrottledLog` keeps the server log readable under abuse by collapsing repeated refusal lines into counted summaries.
+Rate control splits three ways: `PendingLimiter` bounds queued-but-undispatched input per connection (a flooding client gets capped, not the server); `CreationCooldownStore` (via `CreationCooldownHelper`) rates account/character/guest creation per source; `ThrottledLog` keeps the server log readable under abuse by collapsing repeated refusal lines into counted summaries.
 
 `MapEditorSettings` plus the mapedit wire validation (`src/Atheriz.Core/Network/MapEditorSettings.cs`) validate the drawing-editor settings object arriving over either transport. `TryParse` requires every key and bounds every value; failures return a message naming the field:
 
@@ -327,18 +325,18 @@ Both paths converge at `ConnectionManager` dispatch and diverge only at framing 
 
 ### Queues, floods, and logs under abuse
 
-A client pasting megabytes at the game hits three defenses in order: the 64 KB message/line gate drops the excess silently (connection survives); `PendingLimiter` caps the queued-but-undispatched backlog (the flooder waits, everyone else plays); `ThrottleWindow` records the burst for the creation/login throttles when the flood is credential-shaped. Operators watching `save/server.log` during such an event see `ThrottledLog` summaries (counts per window) instead of one line per dropped chunk — the collapse is what keeps the log readable while the attack runs. None of these disconnect the client: refusal-with-notice is the policy at every layer, so a misbehaving script degrades to slowness rather than a ban (bans stay an explicit operator action via `IpBanStore`).
+A client pasting megabytes at the game hits three defenses in order: the 64 KB message/line gate drops the excess (silently on telnet; WebSocket closes with `MessageTooBig`); `PendingLimiter` caps the queued-but-undispatched backlog (the flooder waits, everyone else plays); `CreationCooldownStore` rates the burst when the flood is credential-shaped. Operators watching `save/server.log` during such an event see `ThrottledLog` summaries (counts per window) instead of one line per dropped chunk — the collapse is what keeps the log readable while the attack runs. Bans stay an explicit operator action (`IpBanStore`); nothing here bans by itself.
 
 ### Connection limits at a glance
 
 | Layer | Where | Over it means |
 |---|---|---|
-| Per-IP cap | `ConnectionManager` host buckets | one address holds too many sockets — refused with busy |
-| Total cap | `ConnectionManager` registry | whole server full — refused with busy |
+| Per-IP cap | `ConnectionManager` host buckets | one address holds too many sockets — socket closed, no message |
+| Total cap | `ConnectionManager` registry | whole server full — socket closed, no message |
 | Pending queue | `PendingLimiter` per connection | unread input piles up — sender capped, others unaffected |
-| Message/line size | 64 KB gates (§4) | single input too large — dropped with notice |
-| Creation rate | `ThrottleWindow` per source | signing up too fast — wait and retry |
-| Ban list | `IpBanStore` | banned — refused at connect |
+| Message/line size | 64 KB gates (§4) | single input too large — silent drop on telnet, socket close on WebSocket |
+| Creation rate | `CreationCooldownStore` per source | signing up too fast — wait and retry |
+| Ban list | `IpBanStore` | banned — refused at connect, no message |
 
 Caps refuse, gates drop-without-a-word, throttles delay, bans exclude — four different verbs for four different intents. Cap and ban refusals carry no client-facing text (the reasons land in `save/server.log`); throttle, login, and size-gate outcomes answer — or stay silent — as §4.1 quotes.
 
@@ -348,7 +346,7 @@ Caps refuse, gates drop-without-a-word, throttles delay, bans exclude — four d
 - `src/Atheriz.Core/Network/BaseConnection.cs` — input queue, lifetime, dispose, drain-on-disconnect.
 - `src/Atheriz.Core/Network/WebSocketProtocol.cs` — handshake gates, fragment loop, `MessageTooBig`, per-message dispatch.
 - `src/Atheriz.Core/Network/TelnetProtocol.cs` — option parsing + negotiation state.
-- `src/Atheriz.Core/Network/TelnetSessionReader.cs` — bytes to lines, normalization, line gate, password redaction.
+- `src/Atheriz.Core/Network/TelnetSessionReader.cs` — bytes to lines, normalization, line gate.
 - `src/Atheriz.Core/Network/TelnetCsWriter.cs` — buffered writes.
 - `src/Atheriz.Core/Network/TelnetHostedService.cs` — TCP accept loop (both hosting modes; wired by `src/Atheriz.Server/Hosting/Protocols.cs`).
 - `src/Atheriz.Core/Network/InputFuncs.cs` — `[InputFunc]` multi-step input handlers.

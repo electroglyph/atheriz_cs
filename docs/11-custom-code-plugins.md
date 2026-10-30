@@ -15,7 +15,7 @@ compiled dll into a collectible assembly-load context at boot
   as old-type to new-type pairs (applied in §2 and §3).
 - Loading at boot is best-effort
   (`PluginReloader.LoadGameAssembliesAtBoot`,
-  `src/Atheriz.Core/Plugins/PluginReloader.cs:704`). When no game
+  `src/Atheriz.Core/Plugins/PluginReloader.cs:815`). When no game
   assembly is found the server keeps going engine-only and prints:
 
   `[Boot] No game assembly discovered — running engine-only. Build the game project first (dotnet build) so its dll is discoverable next to the game folder.`
@@ -38,31 +38,41 @@ boots the server on engine types.
 
 What reload does not do, explicitly:
 
-- It does not compile. Build first (§5); reload hot-loads dlls.
 - It does not reseed the world. New-game seeding runs at `new`/`reset`
   time, never on reload.
-- It does not touch `save/`. The database is written on checkpoints and
-  shutdown (→ [Saves and backups](10-persistence-saves.md)), not by the
-  reloader.
+- It does not touch `save/` except for the default shutdown-style checkpoint: `DoReload` checkpoints when `AutosaveOnReload` (default `true`). It never reseeds or wipes.
 - It does not drop connections. Sessions, sockets, and puppets stay up;
   only the code behind the objects changes.
+- It does not re-read settings, ports, TLS, or hosting mode. Those need
+  `restart` (→ [Running the server](07-server-lifecycle-cli.md)).
+- It does not rebuild the webclient. Client files ship via
+  `./build.sh --web` (→ [Webclient: terminal client](12-webclient.md)).
+- It does not reload engine code. `Atheriz.Core` loads once into the
+  default context and is excluded from discovery; edits under `src/`
+  need `restart` (new process), never `reload`.
 
-## 2. Reload: rebuild first, then hot-load
+## 2. Reload: build first, then hot-load
 
 Reload swaps the running plugin for a freshly built dll without dropping
-connections. It never compiles. When the dll on disk is older than your
-sources, reload skips it and prints
-(`src/Atheriz.Core/Plugins/PluginReloader.cs:627`):
+connections. Both entry points — the in-game `reload` verb and
+`./atheriz.sh reload` (which POSTs to `/_internal/hot_reload`) — run the
+same server-side build-first path: stale game projects are rebuilt
+(`dotnet build -c Release`, 10-minute timeout) before anything loads.
+A failed build aborts with
 
-`[HotReload] Skipping {name}: no up-to-date built dll (run 'dotnet build' first; reload never builds).`
+`Reload aborted: build failed (...). Live code untouched.`
 
-So the loop is always the same: edit, `./build.sh` (or
+and the live server keeps running the old logic. When nothing changed
+anywhere, the load pass reports `Reload not needed; already up to date.`
+instead of churning the loader.
+
+So the loop is always the same: edit, `reload` (or
 `./build.sh --reload`, §5), verify in-game. The mechanics behind one
 reload, step by step:
 
 1. `POST /_internal/hot_reload` arrives at
    `src/Atheriz.Server/Hosting/AdminRoutes.cs`. A 60-second watchdog
-   wraps the work (`AdminRoutes.cs:58`). When reload is still running
+   wraps the work (`AdminRoutes.cs:59-64`). When reload is still running
    after 60 seconds, the route answers success status with an error body
    (`Reload timed out after 60s; still running in background.`) and logs
    `[HotReload] Reload exceeded 60s watchdog; continuing in background.`
@@ -70,13 +80,14 @@ reload, step by step:
 2. The watchdog lives in `AdminRoutes`. It does not live in
    `PluginReloader`, and it does not live in `ServerEvents`. Account
    creation uses the same 60-second shape on the same file.
-3. `PluginReloader.ReloadGameLogicAsync`
-   (`src/Atheriz.Core/Plugins/PluginReloader.cs:673`, with shorter
+3. `PluginReloader.ReloadGameLogicWithBuildAsync` rebuilds stale game
+   projects first, then `ReloadGameLogicAsync`
+   (`src/Atheriz.Core/Plugins/PluginReloader.cs:729`, with shorter
    overloads that take just the ticker and settings, or just settings)
    loads the new plugin dll into a fresh collectible context and applies
    every recorded replacement. For each old-type to new-type pair it
    calls `PatchLiveObjects(oldType, newType)`
-   (`PluginReloader.cs:261`), which rebuilds each live instance as the
+   (`PluginReloader.cs:296`), which rebuilds each live instance as the
    new type, runs `IMigrateFrom` migration where the new type offers one
    (§3), calls `ResolveRelations()` on the result, and re-registers tick
    methods with the ticker. It returns the count of patched instances.
@@ -99,25 +110,12 @@ means the migration missed a field. Fix `MigrateFrom` and reload again.
 ## 3. Example: substitute a type without losing live state
 
 This is the centerpiece of the plugin system. Suppose the tutorial game
-shipped a plain `Torch` on North Road whose remaining burn time lives in
-a property:
-
-```csharp
-using Atheriz.Core;
-
-namespace MyGame;
-
-public class Torch : GameObject
-{
-    public int RemainingMinutes { get; set; } = 60;
-}
-```
-
-Players are mid-session; torches are lit all over North Road. Version 2
-renames and reshapes the type into `SmoulderingTorch` with its own tick
-behavior. Without migration, reload would rebuild every torch from
-scratch and every flame would reset to 60 minutes. Instead, mark the new
-type as the replacement for the old one and carry the state across:
+shipped a plain `Torch : GameObject` on North Road with a
+`RemainingMinutes` property (default 60). Version 2 renames and reshapes
+the type into `SmoulderingTorch` with its own tick behavior. Without
+migration, reload would rebuild every torch from scratch and every flame
+would reset to 60 minutes. Instead, mark the new type as the replacement
+for the old one and carry the state across:
 
 ```csharp
 using Atheriz.Core;
@@ -173,27 +171,9 @@ Class-level marks the common case (one replacement next to its type);
 assembly-level collects a game's whole substitution list in one file.
 Both feed the same old-type to new-type pairs at reload.
 
-Ship it and verify in-game:
-
-```bash
-./build.sh --reload
-```
-
-Expected: the plugin builds in Release, the running server hot-loads it,
-and back in the client nothing visibly changes — the North Road torch is
-still lit with the same minutes left, because the state migrated instead
-of resetting. Confirm with `look` at the torch, then `wave` to prove the
-session survived:
-
-```bash
-> look torch
-A smouldering torch. It has about 40 minutes left.
-> wave
-You wave.
-```
-
-(The exact burn-time line depends on your description text; the point is
-the number carried over from before the reload instead of resetting.)
+Ship it and verify in-game (`./build.sh --reload`, then `look` at the
+torch and `wave`): the torch is still lit with the same minutes left —
+the number carried over instead of resetting, and the session survived.
 
 ## 4. Template scaffold: what `new` builds for you
 
@@ -217,7 +197,7 @@ these stages in order:
 6. Live-server probe: refuses to scaffold over a running server, wipes
    the `save/` leaf, and deletes a stale `secret/admin.token`.
 7. `Scaffold()`: writes the project files (table below).
-8. `CopyWebFolder()` (`GameTemplateGenerator.cs:725`): stages the default
+8. `CopyWebFolder()` (`GameTemplateGenerator.cs:894`): stages the default
    web overrides into the game `web/` folder.
 9. Creates `save/` and `secret/` with private permissions (0700 on
    POSIX) and writes `.gitignore` covering `save/`, `secret/`, `bin/`,
@@ -239,9 +219,9 @@ Scaffolded files:
 | `build.sh` / `build.cmd` | Per-game build (`--no-web` / `--web` / `--reload` / `--no-engine`, §5). |
 | `web/` | Your overridable client files (→ [Webclient: terminal client](12-webclient.md)). |
 
-Code-generation note: `BuildParamList` (`GameTemplateGenerator.cs:381`),
-`BuildArgList` (`:434`), `FriendlyType` (`:329`), and `EscapeCsString`
-(`:368`) use reflection only to format generated declaration text —
+Code-generation note: `BuildParamList` (`GameTemplateGenerator.cs:387`),
+`BuildArgList` (`:440`), `FriendlyType` (`:335`), and `EscapeCsString`
+(`:374`) use reflection only to format generated declaration text —
 parameter lists and default values in scaffolded code. Reflection is never
 used to invoke game code; runtime dispatch stays explicit (`Add`,
 `switch`/`is`). That carve-out belongs to engine tooling, not to game
@@ -262,10 +242,11 @@ Run from the game folder:
 - Engine-staleness rebuild: the script detects a stale server dll and
   rebuilds the engine first, so a game folder created by an older install
   never hot-loads a plugin against a mismatched server.
-- The plugin itself always builds Release. `--reload` discovers the
-  Release dll (Debug as fallback) and hot-loads it — the same reload as
-  §2, so the never-compiles rule applies: `--reload` without a build step
-  hot-loads whatever dll is already there.
+- The plugin itself always builds Release. `--reload` builds the plugin,
+  then forwards to the sibling `atheriz` wrapper to hot-load it — the
+  server-side reload (§2) would rebuild stale projects anyway, so the
+  local build is belt-and-braces. `--web` alone only redeploys the
+  client; add `--reload` to hot-load too.
 - Web redeploy ships the client through the engine server's
   `deploy game` verb — full detail in [Webclient: terminal client](12-webclient.md).
 - Folders made by `new` get the same script with the same flags from day
@@ -314,7 +295,7 @@ ATHERIZ_SUPERUSER_USERNAME=admin ATHERIZ_SUPERUSER_PASSWORD='s3cret-pass' ./athe
 
 From here the authoring loop from [Creating a game](02-creating-a-game.md)
 takes over: add rooms and the torch (§3), register the `wave` command
-(→ [Commands](06-commands.md)), rebuild, reload, playtest.
+(→ [Commands](06-commands.md)), edit, reload, playtest.
 
 ## 7. Under the hood: what the sections above leave out
 

@@ -7,10 +7,13 @@
 Builders open the editor from inside the game with the `mapedit`
 command. The server answers `Opening AtheriZ Draw in a new tab.` and
 opens `/atheriz_draw` in a new tab carrying a one-time grant (a server
-key plus the map payload: area, z-level, rooms, legend, and origin). The
-grant is stored in the browser and expires after 60 seconds, so an idle
-tab opened a minute later starts a plain drawing canvas instead of your
-map session. Launching twice within a second is throttled
+key plus the map payload: area, z, grid, rooms, legend, and player
+symbol, plus saved editor settings). The browser copy of the grant
+expires after 60 seconds, so an idle tab opened a minute later starts a
+plain drawing canvas instead of your map session — the server grant
+itself is session-bound, not time-bound (it lives while the owning
+session is open and only the chain cap evicts it). Launching twice
+within a second is throttled
 (`Draw launch throttled; ...`) — the newest grant is kept, so wait a
 moment and run `mapedit` again. If the browser blocks the popup, the
 terminal client shows a fallback banner with an
@@ -108,19 +111,21 @@ selection:
 - **🏠 Create Rooms** shows when the selection is non-empty and every
   selected square is fresh (no pre-existing rooms). It turns each
   selected square into a room and links fresh rooms to every orthogonal
-  neighbor — fresh or pre-existing — with reciprocal cardinal exits. It
-  never overwrites a hand-built exit name and never double-links an
-  already-linked target. New rooms land optimistically and the selection
+  neighbor — fresh or pre-existing — with reciprocal cardinal exits
+  (the editor composes the exits, including keeping hand-built names
+  and skipping already-linked targets; the server applies the payload
+  as sent). New rooms land optimistically and the selection
   clears; the server ack confirms (`Saved to server.`, fresh rooms gain
   their default description), while a deny removes the planned rooms,
   restores touched neighbors, and reports the reason. Undo/redo cover
   the whole batch.
 - **🗑️ Delete Rooms** shows when at least one selected square is a
   known room; empty squares in the selection are ignored, not deleted.
-  Each deleted room's occupants evacuate to the nearest surviving room,
-  and surviving rooms' exits into deleted rooms are stripped
-  automatically (mirrored locally). A deny puts everything back: rooms,
-  exit lists, and undo state.
+  Each deleted room's occupants evacuate to the per-room fallback the
+  client sends (rooms without a usable fallback are denied instead of
+  stranding anyone), and surviving rooms' exits into deleted rooms are
+  stripped automatically (mirrored locally). A deny puts everything
+  back: rooms, exit lists, and undo state.
 
 Batch limits are server-enforced (up to 256 rooms per create/delete);
 oversized or invalid batches are refused whole — nothing partial is
@@ -177,16 +182,7 @@ You see: torch.
 Exits: north
 ```
 
-Editor or in-game commands? Both edit the same map, and the choice is
-about shape, not power. Draw in the editor when the work is visual:
-terrain masses, road curves, districts that read as pictures. Type the
-in-game build commands when the work is structural: creating rooms,
-linking exits, setting descriptions and legend entries one by one
-(→ [World and maps](04-world-maps.md)). A common rhythm is editor first
-for the landmass, then in-game commands for exits and text, then one
-final save to reconcile drift. When drawing and room disagree (a wall
-cell across an exit), fix the drawing and save again — export
-overwrites.
+Editor or in-game commands? Both edit the same map. Draw in the editor when the work is visual (terrain masses, road curves, districts that read as pictures); type the in-game build commands when the work is structural (rooms, exits, descriptions, legend entries one by one — → [World and maps](04-world-maps.md)). When drawing and room disagree (a wall cell across an exit), fix the drawing and save again — export overwrites.
 
 ---
 Next: [Engine internals](14-engine-internals.md)

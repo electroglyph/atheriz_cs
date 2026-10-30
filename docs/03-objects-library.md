@@ -66,7 +66,7 @@ if (sword is not null)
 A sturdy wooden chest with iron bands.
 Inside you see: rusty sword
 > get sword from chest
-You picked up: rusty sword.
+You picked up: rusty sword
 ```
 
 `#id` references are plain-only: `get #12` resolves object 12, but signed or spaced forms do not resolve. Containment nests arbitrarily (a pouch in a chest in a room), and `Contents` on each object lists what is directly inside it.
@@ -93,7 +93,7 @@ Expected in-game output on a miss:
 Could not find 'halberd'.
 ```
 
-The string comes from `CommandHelpers.FormatCouldNotFind`, which returns `Could not find '{name}'.`. A different helper, `CommandHelpers.FormatNoMatchFound`, returns `No match found for '{name}'.` — used where the match step (not the search step) fails. Keep the messages byte-identical; game code and tests pin them.
+The string comes from `CommandHelpers.FormatCouldNotFind`. The sibling helper `FormatNoMatchFound` (`No match found for ...`) is for match-stage failures, not search misses. Keep the messages byte-identical; game code and tests pin them.
 
 ## 5. Example: move a character
 
@@ -118,7 +118,7 @@ North Road
 A dusty road leading north out of town.
 ```
 
-Guards explained as outcomes: a blocked exit stops the move with a message; grafted-origin (object mid-move bookkeeping) aborts rather than duplicating; cross-area moves between map areas are refused. Direction lookup on doors and links is case-insensitive (`OrdinalIgnoreCase`), so `North`, `NORTH`, and `north` all match.
+Guards explained as outcomes: a blocked exit stops the move with a message; grafted-origin (object mid-move bookkeeping) aborts rather than duplicating. Direction lookup on doors and links is case-insensitive (`OrdinalIgnoreCase`), so `North`, `NORTH`, and `north` all match.
 
 ## 6. Example: talk — Msg and Say
 
@@ -194,7 +194,7 @@ town?.Send("The market is open!", speaker);
 
 Subscribe and unsubscribe are silent; sends render as `(name) [<timestamp>] <sender>: <text>`. `channel -l` lists visible channels; `town -r` replays history (`No history available.` when empty).
 
-Doors gate exits with open/locked/remove flows; direction names on doors are case-insensitive like links. `open north`, `unlock north with iron key`, `lock north`, and builder `remove door north` cover the lifecycle.
+Doors gate exits with open/locked/remove flows; direction names on doors are case-insensitive like links. `open north`, `unlock north with iron key`, `lock north`, and builder `door --remove north` (short: `door -r north`) cover the lifecycle.
 
 ## 10. Give, drop, and containers in play
 
@@ -209,9 +209,9 @@ if (bryn is not null)
 > give torch to Bryn
 You give torch to Bryn.
 > drop torch
-You dropped: torch.
+You dropped: torch
 > get torch
-You picked up: torch.
+You picked up: torch
 ```
 
 Containers nest: a pouch inside the chest still resolves (`get coin from pouch`), and `IsContainer = false` refuses placement with a message rather than losing the object.
@@ -295,7 +295,7 @@ character.Unsubscribe(townChannel);
 > channel -u -c town
 ```
 
-History keeps the last N entries per channel (`ChannelHistoryEntry`); leaving does not erase history, rejoining replays nothing automatically — ask with replay (see below). Lock order inside channel code: channel list lock first, then member object locks, never the reverse — game code sending to channels inherits this ordering for free by calling `Send`.
+History is bounded per channel (`ChannelHistoryLimit`); leaving keeps history, rejoining replays nothing — ask with replay. Lock order is channel-list-then-member; plain `Send` calls already follow it.
 
 ## 16. Tag lookup in play
 
@@ -343,7 +343,7 @@ Lock, unlock (needs the key object), open, close, and builder remove cover the l
 
 `Flags` dirty tracking plus `ISettable` give the persistence layer its signal: only objects marked modified are written. DTO round-trip shape is `GameObjectDto` plus the subtype factory plus save ops (mechanics in [Saves and backups](10-persistence-saves.md)).
 
-`ContentUtils.Search()` order/term-split: split the query on whitespace, try full-name match, then singular/plural folding, then alias match, local contents first, then recursive contents, then (for `#id`) `ResolveById`/`ResolveObject` from `TargetResolution`. `MoveTo` guards: grafted-origin abort, cross-area refusal, destination resolution through the same resolvers.
+`ContentUtils.Search()` order/term-split: split the query on whitespace, try full-name match, then singular/plural folding, then alias match, local contents first, then recursive contents, then (for `#id`) `ResolveById`/`ResolveObject` from `TargetResolution`. `MoveTo` guards: grafted-origin abort, destination resolution through the same resolvers.
 
 Link directedness: `Node.AddLink(NodeLink)` publishes one direction; the reverse must be added explicitly (or use `AddLinkIfAbsent(name, factory)` for idempotent seeding). The link table dedups case-insensitively — adding `North` when `north` exists is refused, not doubled.
 

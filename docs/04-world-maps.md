@@ -62,7 +62,7 @@ A cobbled square with a dry fountain at its center.
 Exits: north, east
 ```
 
-Occupied-graft rule as outcome: two rooms cannot stack on one coord — creating a node at an occupied coord is refused (or grafts per handler policy) rather than silently replacing the room that is already there. Coords are caller-validated: a bad coord errors at the call site, not deep in the engine.
+Occupied-coord rule as outcome: two rooms cannot stack on one coord — creating a node at an occupied coord overwrites (old room deleted, `Overwriting node at …` in the log); `build` reports this as `Updating node at …`. Coords are caller-validated: a bad coord errors at the call site, not deep in the engine.
 
 ## 3. Exits and doors
 
@@ -110,7 +110,7 @@ A stone arch straddling the road.
 
 Standing in North Road (`town 0,1,0`), `door -a north` hangs a two-step door node between you and the far room (`-a` auto-creates it; without `-a` a missing destination answers `There is no node at the destination coord …, use -a to auto-create it.`). `build --room -e` raises `town 1,1,0` (`Created new node at …`; on an occupied coord it answers `Updating node at …` instead), links it both ways, and moves you into it — so the following `--desc` words the new room. `build` takes `--room` / `--road` / `--path`, a direction (`-n -e -s -w -u -d`, or `-x` for here), and `--desc`; `move` teleports by coord (`move <area> <x> <y> <z>`, or the comma form `move (town,1,1,0)`) and answers `Moved to town 1,1,0.`; `examine` on a node answers `Examining Node at town 1,1,0 in area 'town', z=0 (#<id>):`.
 
-Mapedit validation outcomes: `mapedit` opens the drawing editor in a new tab (`Opening AtheriZ Draw in a new tab.`); the settings wire protocol rejects bad input with a message instead of corrupting the map (`'fgColor' must be an [r,g,b] triple of 0-255 integers`, `'fontSize' must be an integer 1-…`, `'tools' must be an object`). What you see is always an error line in the client, never a half-applied map.
+Bad editor settings are rejected with an error line (`'fgColor' must be an [r,g,b] triple …`, `'fontSize' must be an integer …`, `'tools' must be an object`); a rejection never half-applies a map.
 
 ## 5. Legend and map view
 
@@ -134,8 +134,10 @@ Two settings toggle this surface: `MapEnabled` gates rendering in the engine (wh
 ```csharp
 var gameTime = GlobalServices.GetGameTime();
 
-// A bell that rings every minute from Town Square.
+// A bell that rings every minute from Town Square (your tick handler
+// emits the line — AddAlarm only fires the handler).
 var bell = GameObject.Create("chapel bell", "A bronze bell on a wooden frame.");
+bell.IsTickable = true;
 bell.MoveTo(square);
 gameTime.AddAlarm("?", "?", bell, repeat: true);
 
@@ -145,11 +147,11 @@ square.MsgContents($"Last save was {span.Desc}.");
 ```
 
 ```text
-The chapel bell tolls.
+The chapel bell tolls.   (your tick handler's output)
 Last save was 3 minutes ago.
 ```
 
-Tick mechanics in full (binding scripts, follow scripts, alarm dispatch) are in [Hooks, scripts, and text](05-hooks-scripts-text.md). Autosave timing in one line: checkpoints run on a scheduler and write the DB; full save mechanics are in [Saves and backups](10-persistence-saves.md). First-run seeding (`InitialSetup`) in one paragraph: on a fresh game folder, `InitialSetup` creates the limbo area, starter rooms, and the superuser account before the first connection is accepted.
+Tick mechanics in full (binding scripts, follow scripts, alarm dispatch) are in [Hooks, scripts, and text](05-hooks-scripts-text.md). Autosave timing in one line: checkpoints run on their own scheduler when enabled (`AutosaveMinutes = 0` disables them by default) and write the DB; full save mechanics are in [Saves and backups](10-persistence-saves.md). First-run seeding (`InitialSetup`) in one paragraph: on a fresh game folder, `InitialSetup` creates the limbo area, starter rooms, and the superuser account before the first connection is accepted.
 
 ## 7. Multi-floor grids and Z levels
 
@@ -213,7 +215,7 @@ Alarm wildcards: `?` matches any value, so `("?", "?")` fires every minute, `("1
 - `You are nowhere.` after `look`: the character has no location — re-puppet or re-place; on a fresh game the oracle is `limbo`, not this message.
 - Bad coord errors: coords are caller-validated; fix the call site (area name spelling, integer fields).
 - Two rooms on one coord: refused by the occupied-graft rule — pick an empty coord.
-- Map pane empty: check `MapEnabled` (the engine gate). `LegendEnabled` gates nothing — it is a preference setting with no code behind it.
+- Map pane empty: check `MapEnabled` (the engine gate; `LegendEnabled` is preference-only, §5).
 - Hand-editing the database for a map change: never do this — build in game or in code, then save.
 
 ## 10. Build-command reference
@@ -244,7 +246,7 @@ The clang of hammers fills the air.
 
 Legend entries come from code, not chat: `new Node(coord, symbol: "S", legendDesc: "Town Square")`, or a `LegendEntry("S", "Town Square", (x, y))` list on `MapInfo`. There is no `build legend` verb.
 
-GameTime calendar: ticks advance the clock; the calendar derives day/hour/minute from the tick count; alarms match hour/minute with `?` wildcards and fire their bound object's tick handler; repeating alarms re-arm after firing. Autosave checkpoints run on their own scheduler and write the DB — see [Saves and backups](10-persistence-saves.md) for timing and guarantees.
+GameTime calendar: ticks advance the clock; the calendar derives day/hour/minute from the tick count; alarms match hour/minute with `?` wildcards and fire their bound object's tick handler; repeating alarms re-arm after firing. Autosave checkpoints run on their own scheduler when enabled (`AutosaveMinutes = 0` disables them by default) and write the DB — see [Saves and backups](10-persistence-saves.md) for timing and guarantees.
 
 ## 11. Area management and MapEnabled toggle
 
@@ -255,7 +257,7 @@ handler.RemoveNode(new Coord("town", 1, 1, 0));
 handler.RemoveArea("dungeon");
 ```
 
-`RemoveNode` drops the room from its grid and evicts it from the registry — it does not re-home the room's contents, so move out anything living there first. Removing an area unregisters its grids and nodes in one pass. Tick re-registration runs after any structural change so surviving ticking objects keep their subscriptions.
+`RemoveNode` drops the room from its grid and evicts it from the registry — it does not re-home the room's contents, so move out anything living there first. Removing an area unregisters its grids and nodes in one pass. Tick re-registration runs on reload and boot, so surviving ticking objects keep their subscriptions across those.
 
 Map toggle (operator view): `MapEnabled` is a host setting (`appsettings.json`, not an in-game verb), while `map` is the per-player client toggle:
 
@@ -266,7 +268,7 @@ Map enabled.
 Map disabled.
 ```
 
-When `MapEnabled` is off the engine produces no map data at all — clients get no render, not an empty grid. `LegendEnabled` changes nothing in this path: it is a stored preference with no engine gate, so toggling it never enables or suppresses rendering.
+When `MapEnabled` is off the engine produces no map data at all — clients get no render, not an empty grid. (`LegendEnabled` is preference-only, §5.)
 
 ## 12. Node properties via Settable
 
@@ -324,7 +326,7 @@ square.AddLink(new NodeLink("gate", new Coord("dungeon", 0, 0, 0)));
 
 `GameTime.cs`: tick counter, calendar fields, `GetTimespan`/`TimeSpanInfo.Desc`, `?`-wildcards in alarm specs, `GameTimeRow` persistence shape (full row mechanics in [Saves and backups](10-persistence-saves.md)).
 
-`MapEnabled` render gate vs `LegendEnabled` setting-with-no-gate (stated in §5 — do not invert them). `Coord` parse failures surface at the parsing call site. Caller-error coords note: passing a malformed coord is the caller's bug; the engine reports it and moves on rather than guessing.
+`MapEnabled` render gate vs `LegendEnabled` setting-with-no-gate (§5 — do not invert them). `Coord` parse failures surface at the parsing call site. Caller-error coords note: passing a malformed coord is the caller's bug; the engine reports it and moves on rather than guessing.
 
 ---
 Next: [Hooks, scripts, and text](05-hooks-scripts-text.md)

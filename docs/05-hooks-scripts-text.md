@@ -4,7 +4,7 @@
 
 ## 1. Example: react to entering a room
 
-Hook sites fire at fixed points (receiving/leaving on move, rendering on look, teardown on delete, speech on say). Entering and leaving run through the receive/leave pair: the destination fires `AtObjectReceive(source, fromExit)` and the mover fires `AtObjectLeave(destination, toExit)` — the handler takes what the site passes (the other side plus the exit name), and the object itself is implicit (the one you installed on). Register a handler on the object with `InstallHook`; query with `HasHook`. There is no per-delegate uninstall — hook removal is script-scoped (`Script.RemoveHooks`, which unwires that script's marker-attributed methods) or whole-registry (`Clear` at delete teardown). A script that no longer applies removes itself the same way `FollowScript` does when its leader is gone.
+Hook sites fire at fixed points (receiving/leaving on move, rendering on look, teardown on delete, speech on say). Entering and leaving run through the receive/leave pair: `AtObjectLeave(destination, toExit)` fires on the mover and `AtObjectReceive(source, fromExit)` on the destination — each handler receives the other side plus the exit name. Register a handler on the object with `InstallHook`; query with `HasHook`. There is no per-delegate uninstall — hook removal is script-scoped (`Script.RemoveHooks`, which unwires that script's marker-attributed methods) or whole-registry (`Clear` at delete teardown). A script that no longer applies removes itself the same way `FollowScript` does when its leader is gone.
 
 ```csharp
 // Greet anyone entering Town Square. Installed on the room: the site calls
@@ -39,7 +39,7 @@ Move/look hook site table: which hooks fire when —
 | `AtDelete` | object is being deleted | refuse, rescue contents |
 | `AtSay` / `AtPreSay` | object speaks | log speech, transform text |
 
-Remove-by-identity note: keep the delegate reference and uninstall that same instance; a freshly constructed equal-looking lambda will not match. Hook name sources come in two parallel forms — the `HookName` enum and the `HookNames` static class — and both resolve to the same sites.
+Game-defined custom hooks bypass install-time validation: name them with a plain string and define their own shapes.
 
 ## 2. Example: a ticking object (torch that burns down)
 
@@ -65,6 +65,7 @@ public sealed class BurningTorch : Script
     }
 }
 
+torch.IsTickable = true;   // without this the ticker never calls AtTick
 torch.AddScript(new BurningTorch());
 ```
 
@@ -72,7 +73,7 @@ torch.AddScript(new BurningTorch());
 > look torch
 A sputtering torch. The flame is low.
 ... (ticks pass) ...
-Your torch gutters out.
+torch gutters out.
 ```
 
 Follow-script pointer: `FollowScript` is the specialized script that moves an object after its target (pets, guards, trailing NPCs). See [Commands](06-commands.md) for the player-facing follow verbs.
@@ -115,7 +116,7 @@ You wave your torch high.
 Bryn waves a sputtering torch.
 ```
 
-`FuncParser` plus helpers resolve `actor`, width hints, and reserved-name precedence, with a safe arithmetic evaluator (`$eval(1+2*3)` renders `7`) under a depth cap. `Conjugate` handles tense/person normalization; `Pronouns` holds the case tables (`he/him/his`, `she/her`, `they/them`) behind the `$pron` stance, read from the speaker's gender provider (`IGenderProvider`).
+`FuncParser` plus helpers resolve `actor`, width hints, and reserved-name precedence, with a safe arithmetic evaluator (`$eval(1+2*3)` renders `7`) under a depth cap.
 
 ## 5. Example: a multi-step menu
 
@@ -166,7 +167,7 @@ Town Square
 
 A handler declaring the wrong number of arguments is refused at install (logged and skipped), not at fire time. Bool-returning sites honor replacement results where the site allows refusal (delete, pre-move); handlers are partitioned per object — one object's handlers never leak into another's. Game-defined custom hooks bypass install-time validation: name them with a plain string and define their own shapes.
 
-Overriding an `At*` virtual carries one rule: call `base` (or route through `Hookable`) or the override silently drops every installed script hook on that site. `AtMsgReceive`/`AtMsgSend` are not virtual at all — message receive/send is customized with hooks, never overrides.
+An `At*` override must call `base` (or `Hookable`) or installed script hooks on that site never fire. `AtMsgReceive`/`AtMsgSend` are not virtual at all — message receive/send is customized with hooks, never overrides.
 
 ## 7. Example: a follower (FollowScript)
 
@@ -213,12 +214,12 @@ chest.AddLock("get", accessing => accessing.IsBuilder, "custom");
 
 ```text
 > get sword from chest
-Could not find 'sword'.
+Could not find 'sword' here.
 ```
 
 (The `from` keyword splits target and container; a denied lock reads as absent from that angle.)
 
-Pronoun outcomes by gender provider (`they` default), rendered through the `$pron` actor stance (backed by the `Pronouns` case tables, read from the speaker's gender provider via `IGenderProvider`):
+Pronoun outcomes by gender provider (neutral default), rendered through the `$pron` actor stance (backed by the `Pronouns` case tables, read from the speaker's gender provider via `IGenderProvider`):
 
 ```csharp
 // "Bryn (they) drops their torch." vs "Crier (he) drops his torch."
@@ -237,10 +238,14 @@ Bryn drops their torch.
 ## 9. Connection banner transcript
 
 ```text
-Welcome to MyGame!
-connect <account> <password> | create <account> <char> <password> | guest
+_____   __  .__                 .____________
+... (ASCII art; ATHERIZ VERSION, KNOWN/ONLINE ADVENTURERS counts)
+enter 'sr' for screenreader mode
+enter 'connect <account> <password>' to login
+enter 'create' to make a new account
+enter 'guest' to create a temporary character
 > connect bryn s3cretPass
-Welcome Bryn.
+Welcome bryn.
 Town Square
 A cobbled square with a dry fountain at its center.
 ```
@@ -298,7 +303,7 @@ Delete the torch?
 
 ### FuncParser reserved names and arithmetic
 
-Reserved names (`actor`, `target`, widths) take precedence over user variables — a game variable named `actor` never shadows the real actor. Arithmetic is a safe evaluator (no method calls, no property access) under a depth cap, so `$calc(1+2*3)` renders `7` and a pathological nesting errors instead of hanging.
+Reserved names (`actor`, `target`, widths) take precedence over user variables — a game variable named `actor` never shadows the real actor. Arithmetic is a safe evaluator (no method calls, no property access) under a depth cap, so `$eval(1+2*3)` renders `7` and a pathological nesting errors instead of hanging.
 
 ### Script bind/lookup API
 
@@ -379,9 +384,9 @@ Small glossary: a hook *site* is where the engine fires; a *handler* is your fun
 
 `GameObjectMessaging.Msg()` + `Hear`: delivery to one target, location-announce fan-out on enter/leave, `MsgContents` unification (single code path for "tell everyone here"), broadcast mapping (channel/world sends reuse the same delivery with a mapping function).
 
-`FuncParser.cs` + helpers: actor/width/reserved-precedence resolution, safe arithmetic evaluation with a depth cap. `Conjugate.cs`/`Pronouns.cs`: tense/case tables, person normalization. `IMessageTarget` contract: anything that can receive a message (`Msg`) and be checked for privilege — connections, sessions, and game objects all implement it.
+`FuncParser.cs` + helpers: actor/width/reserved-precedence resolution, safe arithmetic evaluation with a depth cap. `Conjugate.cs`/`Pronouns.cs`: tense/case tables, person normalization. `IMessageTarget` contract: anything that can receive a message (`Msg`) — connections and game objects implement it.
 
-Threading note, one paragraph: game code runs on pool/ticker threads — keep handlers short, never block or sleep, and mutate the world only through the documented `GameObject`/command APIs. Locking rules and the never-touch list (no `Assembly`-scan, no `System.Reflection` in game code, explicit `Add` registration with `switch`/`is` dispatch) are detailed in [Custom code and hot reload](11-custom-code-plugins.md).
+Threading note: hook and tick handlers run on pool/ticker threads — keep them short, never block, and mutate the world only through `GameObject`/command APIs. Locking rules and the never-touch list (no `Assembly`-scan, no `System.Reflection` in game code, explicit `Add`) are detailed in [Custom code and hot reload](11-custom-code-plugins.md).
 
 ---
 Next: [Commands: using and writing them](06-commands.md)

@@ -1,6 +1,6 @@
 # Webclient: terminal client
 
-> Covers: `webclient/` terminal entry (`/webclient`), the engine server's `deploy game` verb (`--web-root`, `--no-clean`), per-game `web/` overrides, per-game `build.sh [--web]` redeploy. You learn to play through the browser and ship the client with your game. Connection basics (banner, login, puppet) live in [Connecting: webclient and telnet](09-connecting.md); static serving and cache ages live in [Hosting and configuration](08-hosting-configuration.md). The drawing and map editor has its own guide ([Map editor](13-map-editor.md)). Current webclient version is 1.10.1 (`webclient/package.json:3`); its history split off into `webclient/CHANGELOG.md`, separate from the engine changelog.
+> Covers: `webclient/` terminal entry (`/webclient`), the engine server's `deploy game` verb (`--web-root`, `--no-clean`), per-game `web/` overrides, per-game `build.sh [--web]` redeploy. You learn to play through the browser and ship the client with your game. Connection basics (banner, login, puppet) live in [Connecting: webclient and telnet](09-connecting.md); static serving and cache ages live in [Hosting and configuration](08-hosting-configuration.md). The drawing and map editor has its own guide ([Map editor](13-map-editor.md)). Current webclient version is 1.11.3 (`webclient/package.json:3`); its history split off into `webclient/CHANGELOG.md`, separate from the engine changelog.
 
 To reach the client you need a running server and its web address (host
 and port from the game operator, defaults in
@@ -13,11 +13,8 @@ the server forgets is a save issue
 ## 1. Terminal client
 
 Open `/` or `/webclient` in a browser and press Play. The terminal client
-gives you three panes and a prompt:
+gives you three panes and a prompt (details in the table below):
 
-- Input line with history: type a command, Enter to send, up/down to
-  recall earlier input. `look`, `north`, `get torch`, `wave` all work as
-  they do over telnet.
 - Output pane: room descriptions, messages, and command results stream here.
 - Map pane: renders your surroundings when the game enables maps
   (→ [World and maps](04-world-maps.md)).
@@ -34,10 +31,10 @@ Input basics in one table:
 The map pane follows the character: moving updates the surroundings
 without a page reload. When the game disables maps, the pane stays empty
 — that is configuration (→ [World and maps](04-world-maps.md)), not a
-client fault. Overlong input is dropped silently on the server side
-(the 64 KB cap, → [Connecting: webclient and telnet](09-connecting.md)):
-no error comes back, so a pasted wall of text that vanishes was
-rejected, not lost.
+client fault. Overlong input never arrives (silent drop on telnet, socket
+close on WebSocket — the 64 KB cap,
+→ [Connecting: webclient and telnet](09-connecting.md)): a pasted wall of
+text that vanishes was rejected, not lost.
 
 Popup-blocked banner: the map editor opens in a new window or tab. When
 the browser blocks it, the client shows a `Popup blocked. ...` fallback
@@ -49,11 +46,7 @@ is throttled (`Draw launch throttled; ...`) rather than opening a second
 tab; the latest grant is kept, so waiting a moment and retrying opens
 the current session.
 
-Prompt behavior, one paragraph to close the loop: typed input echoes
-locally, server output streams above it, and the prompt redraws after
-each burst so mid-typing output never eats the line being composed. A
-`wave` answered pages later is lag or a busy server, not a lost keystroke
-— resend only after the output settles.
+Prompt behavior, one line: typed input echoes locally and the prompt redraws after each burst, so a late `wave` is lag, not a lost keystroke — resend only after the output settles.
 
 ## 2. Fonts
 
@@ -92,7 +85,7 @@ dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll deploy game --w
 
 - Day to day you rarely call it directly: per-game `./build.sh [--web]`
   redeploys for you (`--web` for web only, default for plugin plus web;
-  flag table in [Running the server](07-server-lifecycle-cli.md)).
+  flag table in [Custom code and hot reload](11-custom-code-plugins.md)).
 
 `WebclientSyncCheck` (engine default true,
 `src/Atheriz.Core/Settings/AtherizSettings.cs:69`): at

@@ -133,7 +133,7 @@ Game folders also get their own `build.sh` / `build.cmd`. From inside the game f
 # Windows: build.cmd [--no-web] [--web] [--reload]
 ```
 
-The plugin build is what `reload` picks up (reload never compiles — it skips stale sources with "run `dotnet build` first"). The web step is equivalent to running this from the repo root:
+The plugin build is what `reload` picks up (the server rebuilds stale game projects itself before hot-loading; a failed build aborts the reload with the old logic untouched). The web step is equivalent to running this from the repo root:
 
 ```bash
 dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll deploy game --web-root "/tmp/MyGame/web"

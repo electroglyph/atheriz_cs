@@ -25,9 +25,9 @@ Players: nothing — play normally, and know a crash may rewind to the last save
 
 Builders: batch work between saves (§2.3 rhythm — build, confirm commit, continue), and never treat "it works in-game" as "it is stored." Live behavior proves memory; only the commit mark proves durability.
 
-Operators: tune the interval to the community's mourning threshold (§5.1), save around events, keep three backup generations (§4.3), and read `save/server.log` before player reports arrive.
+Operators: tune the interval to expected loss tolerance (§7.4), save around events, keep three backup generations (§4.3), and read `save/server.log` before player reports arrive.
 
-Game devs: push durable fields through settable properties (§6), request checkpoints after runtime-created state that matters, and decide per-field what survives reboot (§6.2 scenarios) — the engine persists what you flag, exactly what you flag, nothing more.
+Game devs: push durable fields through settable properties (game-dev guidance above), request checkpoints after runtime-created state that matters, and decide per-field what survives reboot (§7.6 scenarios) — the engine persists what you flag, exactly what you flag, nothing more.
 
 ## 2. What gets saved
 
@@ -46,7 +46,7 @@ Safe-immediately vs needs-a-save, from the player's point of view:
 
 | Action | Durable when? |
 |---|---|
-| `say`, movement, `look` | Never persisted per action — position and chat live in memory until the next save. |
+| `say`, movement, `look` | Never persisted per action — position and chat live in memory until the next save (or disconnect, which checkpoints the player by default). |
 | `get`/`put`/`give`, building, linking rooms, locking a door | In memory at once, durable at the next save. A crash before the save rolls them back. |
 | `create` (account/character) | Same rule — the character exists in memory immediately and survives only if a save lands after. Operators scripting bulk creation should save (or `stop`, which saves) before calling it done. |
 | Checkpoint / autosave / clean shutdown | Durability points — everything dirty up to that moment is flushed. |
@@ -55,11 +55,11 @@ There is no per-action durability knob. If it matters, save; if it does not, the
 
 ## 2.2 Why nothing is durable immediately (and why that is fine)
 
-Per-action durability (fsync on every `get`, every step, every word) would make each command pay disk latency — the game would feel the database on every keystroke. Batching durability into checkpoints flips the cost: gameplay runs at memory speed and the disk pays once per interval for the whole dirty set. The price is the crash window (§1: everything since the last save), and the currency that buys it back is the interval knob (§5.1) plus deliberate saves around what matters (§5: before events, after build sessions, on shutdown). Operators who understand the trade tune it; operators who fight it (demanding per-command durability) tax every player for insurance nobody feels. The discipline is one sentence long because the mechanism is one mechanism: memory leads, checkpoints commit, crashes rewind to the last commit.
+Per-action durability (fsync on every `get`, every step, every word) would make each command pay disk latency — the game would feel the database on every keystroke. Batching durability into checkpoints flips the cost: gameplay runs at memory speed and the disk pays once per interval for the whole dirty set. The price is the crash window (§1: everything since the last save), and the currency that buys it back is the interval knob (§7.4) plus deliberate saves around what matters (§5: before events, after build sessions, on shutdown). Operators who understand the trade tune it; operators who fight it (demanding per-command durability) tax every player for insurance nobody feels. The discipline is one sentence long because the mechanism is one mechanism: memory leads, checkpoints commit, crashes rewind to the last commit.
 
 ## 2.3 Reading the save state from in-game
 
-Players cannot see the checkpoint schedule and should not need to — but builders mid-session can ask the operator "are we saved?" and get a real answer: the superuser `save` command ("`Saving...`" then "`Saved in ... milliseconds.`") plus the `Checkpoints` row (§2.1 table) name the most recent commit. A practical rhythm for build sessions: build for a while, ask for a `save`, hear the confirmation, keep building. The confirmation that matters is the commit mark, not the request — "saving" is a claim, "`Saved in ...`" is a fact, and the journal row (§5 crash anatomy) is the arbiter when the two disagree. (`save export <file>` dumps the object rows to JSON for inspection — same command, data path instead of durability path.)
+Players cannot see the checkpoint schedule and should not need to — but builders mid-session can ask the operator "are we saved?" and get a real answer: the superuser `save` command ("`Saving...`" then "`Saved in ... milliseconds.`") plus the `Checkpoints` row (§7.1 table) name the most recent commit. A practical rhythm for build sessions: build for a while, ask for a `save`, hear the confirmation, keep building. The confirmation that matters is the commit mark, not the request — "saving" is a claim, "`Saved in ...`" is a fact, and the journal row (§5 crash anatomy) is the arbiter when the two disagree. (`save export <file>` dumps the object rows to JSON for inspection — same command, data path instead of durability path.)
 
 ## 3. `save/` layout: which files matter
 
@@ -125,7 +125,7 @@ Expected outcome: the world as of the backup — characters, builds, door states
 
 > Warning: `reset` wipes `save/` and reseeds a fresh world (always prompts `[y/N]`, no force flag). It is not a restore, not a repair, and not undoable — anything not backed up per this section is gone. Full `reset` mechanics live in [Running the server](07-server-lifecycle-cli.md).
 
-Copying a live `database.sqlite3` without stopping first is not a backup — SQLite may be mid-transaction and the copy can land torn. Stop-then-copy is the only supported procedure. For moves and inspection without downtime pressure, `WorldExport` (§5) dumps the world through the live server instead of the file.
+Copying a live `database.sqlite3` without stopping first is not a backup — SQLite may be mid-transaction and the copy can land torn. Stop-then-copy is the only supported procedure. For moves and inspection without downtime pressure, `WorldExport` (§7.7) dumps the world through the live server instead of the file.
 
 ## 4.2 Moving hosts (full migration recipe)
 
@@ -149,17 +149,17 @@ sha256sum -c /tmp/migrate-save/SHA256
 ./atheriz.sh start
 ```
 
-Expected: checksum passes before start (identical bytes — a mismatch means the transfer tore and must be redone, never started from); boot shows `DoStartup completed` with migration lines only if the engine is newer than the data; health ok; in-client `look`/`map`/door/alarm verification per §4.1. Then update DNS/proxy to the new host and keep the old copy until players confirm — the old `save/` is the rollback until the new host proves itself. Decommission (delete) the old copy only after the new host survives a full checkpoint interval with players aboard.
+Expected: checksum passes before start (identical bytes — a mismatch means the transfer tore and must be redone, never started from); boot shows `DoStartup completed` with migration lines only if the engine is newer than the data; health ok; in-client `look`/`map`/door/alarm verification per §7.3. Then update DNS/proxy to the new host and keep the old copy until players confirm — the old `save/` is the rollback until the new host proves itself. Decommission (delete) the old copy only after the new host survives a full checkpoint interval with players aboard.
 
 ## 4.3 Backup retention (how many copies to keep)
 
-Keep three generations: the last known-good (verified by a boot — §4.1), the pre-change copy before every `reset`/migration/upgrade, and the rolling periodic copy. Name each with date and reason (`game-backup-2026-09-28-pre-reset-save`), checksum each at copy time (§4.1), and store the checksums with the copies. Prune oldest-first, never newest-first, and never keep exactly one — a single backup is a single point of failure wearing a backup's name. Test restores on a staging copy quarterly: an untested backup is a rumor, and the staging boot (`DoStartup completed` + `look` in a known room showing backup-era descriptions) is the whole test. Retention lives outside the game folder (separate disk, separate host) — a backup beside the database it mirrors protects against operator error, not disk failure.
+Keep three generations: the last known-good (verified by a boot — §7.3), the pre-change copy before every `reset`/migration/upgrade, and the rolling periodic copy. Name each with date and reason (`game-backup-2026-09-28-pre-reset-save`), checksum each at copy time (§7.3), and store the checksums with the copies. Prune oldest-first, never newest-first, and never keep exactly one — a single backup is a single point of failure wearing a backup's name. Test restores on a staging copy quarterly: an untested backup is a rumor, and the staging boot (`DoStartup completed` + `look` in a known room showing backup-era descriptions) is the whole test. Retention lives outside the game folder (separate disk, separate host) — a backup beside the database it mirrors protects against operator error, not disk failure.
 
 ## 5. Autosave and shutdown saves
 
 Checkpoints run on a scheduler (`Autosave`) only when the operator opts in: `AutosaveMinutes` defaults to `0` (disabled), and setting it to N enables a checkpoint every N minutes, each flushing dirty objects to the database in one transaction. Manual `save` (superuser command) and clean shutdown checkpoint regardless of the setting. There is no partial checkpoint: a checkpoint either commits the whole dirty set or rolls back quietly and retries next interval (rollback-quiet — a failed checkpoint logs and continues serving rather than crashing the game).
 
-Clean shutdown always saves. `stop` (graceful `POST /_internal/shutdown`), Ctrl+C in `--foreground`, and service halt all funnel through `ServerLifecycle.DoShutdown`, which checkpoints before releasing the pid claim. An unclean kill (power loss, `kill -9`, OOM) skips the save — that is the crash-loses-since-last-save case from §1, not a defect.
+Clean shutdown saves, unless `AutosaveOnShutdown=false`. `stop` (graceful `POST /_internal/shutdown`), Ctrl+C in `--foreground`, and service halt all funnel through `ServerLifecycle.DoShutdown`, which checkpoints before releasing the pid claim. An unclean kill (power loss, `kill -9`, OOM) skips the save — that is the crash-loses-since-last-save case from §1, not a defect.
 
 `WorldExport` is the full-world dump path: it serializes the live world (same DTO shape as checkpoints) for moves between hosts and for inspection tooling. Use it when you need the world as data — migrating content into a fresh game folder, reviewing what a build session produced, diffing before/after a big event. It reads memory, not the database file, so it reflects the live world including not-yet-saved changes.
 
@@ -172,7 +172,7 @@ Seed timing in one paragraph: first boot (and `reset`) runs `InitialSetup`, whic
 - Set state through properties so saves pick changes up. Direct field writes that bypass `ISettable` dirty flags are invisible to the checkpoint writer — the object looks changed in memory and reverts on next load. If your change survives `reload` but not `restart`, a missed dirty flag is the first suspect.
 - Never cache a database handle, row, or DTO across a save and write through it later. Handles belong to one load; the checkpoint owns the write path. Your code talks to live objects; the engine talks to SQLite.
 
-## 2.1 Table-by-table: what each row holds
+## 7.1 Table-by-table: what each row holds
 
 `Objects` — one row per entity with `Id` + `Data` + `Type` + `Version`. `Data` is the serialized `GameObjectDto`: identity, names, descriptions, tags, containment links, bound scripts, dirty-flagged properties, and lock definitions. `Type` selects the runtime class in the subtype factory; `Version` selects the migration path when game code outruns the data.
 
@@ -186,9 +186,9 @@ Seed timing in one paragraph: first boot (and `reset`) runs `InitialSetup`, whic
 
 `GameTime` — the single calendar row: tick counters, calendar position, registered alarms. Alarms re-register against the loaded clock at boot, so schedules survive restarts intact.
 
-`Checkpoints` — one journal row (`CheckpointRow`: id 0, `State` dirty/clean, `SavedAtUnix`): the writer marks it dirty before the tables commit and clean after. A dirty row at boot means the previous checkpoint died mid-way — the tables may be torn, so the operator treats the save before it as the good one (§5 crash case).
+`Checkpoints` — one journal row (`CheckpointRow`: id 0, `State` dirty/clean, `Token`, `SavedAtUnix`): the writer marks it dirty before the tables commit and clean after. A dirty row at boot means the previous checkpoint died mid-way — the tables may be torn, so the operator treats the save before it as the good one (§1.1 crash case).
 
-## 3.1 The layout on disk (annotated listing)
+## 7.2 The layout on disk (annotated listing)
 
 ```bash
 cd mygame
@@ -203,12 +203,12 @@ save/
   server.log         # diagnose here first
   server.pid         # live pid + claim-time claim (0600) — never restore elsewhere
 secret/
-  admin.token        # X-Admin-Token secret (0600) — copy for continuity
+  admin.token        # X-Admin-Token secret (0600) — per-boot, never back up
 ```
 
 Modes matter: `save/` and `secret/` are `0700`, pid and token `0600`. A listing that shows group/world-readable secrets means the scaffold umask was overridden — fix with `chmod 700 save secret` and `chmod 600 secret/admin.token save/server.pid` (the token regenerates if deleted while stopped; the pid claim releases on shutdown). The only transient resident you may see is `.wipe-lock` during `reset` — it should never survive a clean stop, and a leftover after a crash is diagnostic (the wipe did not finish) rather than state to preserve. The checkpoint journal is a database row, not a file, so it never appears in this listing.
 
-## 4.1 Restore verification transcript
+## 7.3 Restore verification transcript
 
 After the §4 restore (stop → copy → perms → start), confirm each layer before inviting players back:
 
@@ -222,7 +222,7 @@ Expected: `DoStartup completed` in the log tail (the restored database loaded cl
 
 Checksum the backup at copy time and store the hash next to it. A restore that loads but behaves oddly with a mismatched hash is a torn copy (live-copy without stopping, §4 warning); a restore that refuses to load with a matching hash is a version story (database newer than the engine reading it — upgrade the engine, never downgrade the data).
 
-## 5.1 Tuning the checkpoint interval
+## 7.4 Tuning the checkpoint interval
 
 Set `AutosaveMinutes` to N for a checkpoint every N minutes (`0`, the default, disables the scheduler — then durability is manual `save` plus shutdown saves). The interval trades crash-loss against I/O load:
 
@@ -232,36 +232,37 @@ Set `AutosaveMinutes` to N for a checkpoint every N minutes (`0`, the default, d
 | Default | balanced | ordinary play |
 | Relaxed | larger loss window, light I/O | quiet dev servers, single-player testing |
 
-There is no universally right value — pick by how much play the community will mourn. Before a scheduled build session or event, save (or clean-stop and start) so the session begins from a fresh commit; after it, save again so the work is durable before anyone logs off. Operators announcing "saving now" before a `restart` are practicing exactly this: the shutdown save covers it, but a named checkpoint beforehand means the restart itself carries no durability risk.
+There is no universally right value — pick by how much loss the players will tolerate. Before a scheduled build session or event, save (or clean-stop and start) so the session begins from a fresh commit; after it, save again so the work is durable before anyone logs off. Operators announcing "saving now" before a `restart` are practicing exactly this: the shutdown save covers it, but a named checkpoint beforehand means the restart itself carries no durability risk.
 
-Crash anatomy, concrete: power dies halfway between checkpoints. On next boot the `Checkpoints` row still reads dirty (intent without commit); the loader takes the previous committed checkpoint; everything after it (minutes of play, at most one interval's worth) is gone. The log says so plainly — read `save/server.log` before player reports arrive, so the announcement ("we lost the last N minutes") precedes the discovery.
+Crash anatomy, concrete: power dies halfway between checkpoints — same story as §1.1. On next boot the `Checkpoints` row still reads dirty (intent without commit); the loader takes the previous committed checkpoint; everything after it (minutes of play, at most one interval's worth) is gone. The log says so plainly — read `save/server.log` before player reports arrive, so the announcement ("we lost the last N minutes") precedes the discovery.
 
-## 6.1 Reload, restart, reset: the decision table
+## 7.5 Reload, restart, reset: the decision table
 
 | Goal | Command | State | Connections | Settings |
 |---|---|---|---|---|
-| New game code live | rebuild + `reload` | kept | kept | not re-read |
+| New game code live | `reload` (builds stale projects, then hot-loads) | kept | kept | not re-read |
+| New engine code live | rebuild + `restart` | saved, reloaded | dropped | re-read |
 | New settings/ports live | `restart` | saved, reloaded | dropped | re-read |
 | Fresh world, same code | `reset` (`[y/N]`, no force) | wiped + reseeded | dropped | kept |
 | Durable now | `save` (superuser command) | kept | kept | kept |
 
-When two apply, pick the strongest: settings plus code means `restart` (reload would leave the settings unread); a ruined world plus new code means rebuild + `reset`. `reload` is never a substitute for `restart` (settings) or `reset` (world), and `restart` is never a substitute for `reset` (wipes nothing). The tutorial loop in [Custom code and hot reload](11-custom-code-plugins.md) practices exactly this ladder: edit → rebuild → `reload`, escalating only when the symptom demands it.
+When two apply, pick the strongest: settings plus code means `restart` (reload would leave the settings unread); a ruined world plus new code means rebuild + `reset`. `reload` is never a substitute for `restart` (settings, engine code) or `reset` (world), and `restart` is never a substitute for `reset` (wipes nothing). The tutorial loop in [Custom code and hot reload](11-custom-code-plugins.md) practices exactly this ladder: edit → `reload`, escalating only when the symptom demands it.
 
-## 6.2 Scenarios: which knob your feature needs
+## 7.6 Scenarios: which knob your feature needs
 
 Spawning a quest item at midnight via alarm: the alarm registration persists (`GameTime` row), the spawned item persists from the next save after it appears. If the server crashes between spawn and save, the alarm already fired (it will not refire) but the item never landed — schedule spawns shortly after a checkpoint, or checkpoint after big spawns, so "the bell rang but nothing is here" never happens.
 
 Granting a player a new exit from their room: the `Transitions` rows persist at next save, same as any link edit. Verify with `restart` on a staging copy before doing it live — a direction typo persists as faithfully as a correct one, and there is no undo besides another edit plus another save.
 
-Script-bound state (torch burn-down counters, follow-script cursors): persists only what the script pushes through settable properties. Counters kept in private fields tick in memory and reset on load — which is correct for "burns for this session" and wrong for "burns across reboots." Decide per field, push the durable ones through properties (§6 bullet three), and document the choice in a code comment so the next dev does not "fix" it.
+Script-bound state (torch burn-down counters, follow-script cursors): persists only what the script pushes through settable properties. Counters kept in private fields tick in memory and reset on load — which is correct for "burns for this session" and wrong for "burns across reboots." Decide per field, push the durable ones through properties (game-dev guidance, third bullet), and document the choice in a code comment so the next dev does not "fix" it.
 
 Channel history your event bot posts: bounded by the per-channel history limit — the last N entries persist, older scrollback does not. Announcements players must keep (event schedules, rule changes) belong in room descriptions or persistent bulletins, not channel backlog.
 
-## 5.2 WorldExport in practice
+## 7.7 WorldExport in practice
 
 ```bash
 cd mygame
-# via the live server: dump, inspect, move content without touching the DB file
+# poor-operator's export (stop-copy-start) — NOT WorldExport proper, which reads live memory below
 ./atheriz.sh stop
 cp -a save /tmp/pre-event-save
 ./atheriz.sh start
@@ -269,17 +270,15 @@ cp -a save /tmp/pre-event-save
 
 The copy above is the poor operator's export (stop-copy-start, §4). `WorldExport` proper runs through the live world instead: same DTO shape as checkpoints, read from memory (so it includes not-yet-saved changes), written wherever the operator points it. Reach for it when staging needs the current live state without stopping the game (inspect what the event built, diff against the last checkpoint, seed a staging folder with tonight's world). It never replaces stop-copy-start for backups — the file copy is the restore path, the export is the data path — and it never writes to the database, so exporting is always safe mid-game.
 
-## 6.3 Staging copies (practice without risk)
+## 7.8 Staging copies (practice without risk)
 
-Every risky operation in this doc — `reset`, migrations, engine upgrades, experimental game code — deserves a rehearsal on a staging copy first: duplicate the game folder (or `save/` + `secret/` into a scratch game folder), run the operation, verify per §4.1, then do it for real. Staging catches the typo'd direction, the forgotten cert pair, the migration that quarantines half the world to `limbo` — all fixable in scratch, all embarrassing live. The scratch copy's pid claim and ports must differ from the live game (overlapping ports is how staging kills production — the `--port` overlay and a separate folder keep them apart). Delete scratch copies when done playing; a forgotten staging server holding an old world beside the live one is how "which copy is real?" incidents start.
+Every risky operation in this doc — `reset`, migrations, engine upgrades, experimental game code — deserves a rehearsal on a staging copy first: duplicate the game folder (or `save/` + `secret/` into a scratch game folder), run the operation, verify per §7.3, then do it for real. Staging catches the typo'd direction, the forgotten cert pair, the migration that quarantines half the world to `limbo` — all fixable in scratch, all embarrassing live. The scratch copy's pid claim and ports must differ from the live game (overlapping ports is how staging kills production — the `--port` overlay and a separate folder keep them apart). Delete scratch copies when done playing; a forgotten staging server holding an old world beside the live one is how "which copy is real?" incidents start.
 
-## 6.4 Where to go next
+## 7.9 Where to go next
 
 Reload-side mechanics (assembly unload, live-object patching, the `build.sh --reload` loop) continue in [Custom code and hot reload](11-custom-code-plugins.md). The CLI verbs that bracket every procedure here — `stop` (saves on the way down), `reset` (wipes and reseeds), `start` (loads once at boot) — are specified in [Running the server](07-server-lifecycle-cli.md). Ports, binds, and the admin-token gate behind those verbs live in [Hosting and configuration](08-hosting-configuration.md); the login-to-puppet flow players see after every restart lives in [Connecting: webclient and telnet](09-connecting.md).
 
-## 6.4 One-paragraph recap for the hurried
-
-Memory leads, checkpoints commit, crashes rewind to the last commit. Back up `save/database.sqlite3` (plus `secret/` for continuity) with stop-then-copy, verify restores per §4.1, keep three checksumed generations, rehearse risk on staging, and push durable game state through settable properties. Everything else in this doc is that paragraph, expanded.
+The one-paragraph version: memory leads, checkpoints commit, crashes rewind to the last commit. Back up `save/database.sqlite3` (plus `secret/salt.txt` and any TLS pair in `secret/`) with stop-then-copy, verify restores per §7.3, keep three checksumed generations, rehearse risk on staging, and push durable game state through settable properties.
 
 ## Under the hood: the save machinery
 
@@ -287,13 +286,13 @@ This section names the classes and files behind every behavior above. Mechanics 
 
 The store is EF Core over SQLite. `AtherizDbContext` exposes one `DbSet` per concern — `Objects`, `MapData`, `Areas`, `Transitions`, `Doors`, `GameTime`, `Checkpoints` — and `AtherizDbContextFactory` resolves the save path (`ATHERIZ_SAVE_PATH` wins over configured `SavePath`; a relative path outside a game folder throws `Cannot determine save path ...`, fixed by running from the game folder). Loading runs once at boot: game assemblies first (so rows convert to game types), then objects with containment, a torn-checkpoint check, map/node handlers, and the game clock. Each load logs and continues past corrupt rows rather than aborting the boot.
 
-Rows are thin; payloads are JSON. `ObjectRow` carries `Id` + `Data` + `Type` + `Version`: `Id` is the stable identity, `Data` holds the serialized `GameObjectDto`, `Type` names the entity kind for the subtype factory, `Version` gates migration. The DTO set (`src/Atheriz.Core/Persistence/Dto/`, 9 types: `GameObjectDto`, node DTOs, `NodeAreaDto`, `NodeGridDto`, `LocationRef`, `LockDefDto`, `EntityKind`, `SaveOperation`, and friends) is the versioned contract — `GameObjectDtoConverter` runs the subtype factory that rebuilds the right runtime class per `Type`, applying migrations when `Version` lags. Serializer options (naming, null handling, converters) centralize in `JsonOptions` so checkpoint and export agree byte-for-byte.
+Rows are thin; payloads are JSON. `ObjectRow` carries `Id` + `Data` + `Type` + `Version`: `Id` is the stable identity, `Data` holds the serialized `GameObjectDto`, `Type` names the entity kind for the subtype factory, `Version` gates migration. The DTO set (`src/Atheriz.Core/Persistence/Dto/`, 9 files: `GameObjectDto`, `NodeDtos`, `NodeAreaDto`, `NodeGridDto`, `LocationRef`, `LockDefDto`, `EntityKind`, `SaveOperation`, plus the `GameObjectDtoSerializer` helper) is the versioned contract — `GameObjectDtoConverter` runs the subtype factory that rebuilds the right runtime class per `Type`, applying migrations when `Version` lags. Serializer options (naming, null handling, converters) centralize in `JsonOptions` so checkpoint and export agree byte-for-byte.
 
 Writes go through `CheckpointWriter` inside a single SQLite transaction — no file swap. The older swap-a-temp-file-into-place strategy is gone; the transaction is the atomicity. `DbWriteGate` serializes everything that touches the database file: checkpoints, shutdown saves, `reset`'s wipe-and-reopen, offline `create`. During `reset`, the gate parks savers on a 30-second hold while the wipe runs; any holder that cannot acquire in time fails loudly rather than writing into a half-deleted directory. `CheckpointJournal` records checkpoint intent and outcome so a crash mid-checkpoint is identifiable in `save/server.log` on next boot (stale journal = the last save may be partial = the previous checkpoint is the good one). `DbTransactionHelper` wraps the gated transaction body with rollback-quiet semantics: on failure it rolls back, logs, and lets the server keep running — persistence degrades to "try again next interval" instead of taking the game down.
 
 Supporting cast, one line each:
 
-- `WorldExport` — serializes the live world through the same DTOs for moves and inspection (§5).
+- `WorldExport` — serializes the live world through the same DTOs for moves and inspection (§7.7).
 - `IdGenerator` — the unified in-memory counter backing every new object, node, and channel id; load paths push it forward with `EnsureAtLeast` per row, so ids never collide after restart.
 - `SaltProvider` — the single static salt for password hashing, persisted in `secret/salt.txt` (`0600`). One salt, process-wide. Rotation is not supported, and losing or changing it invalidates every stored password hash — back it up with the database.
 - `IpBanStore` — runtime-only temp-IP bans and failed-login windows (in-memory `BoundedDictionary`s, cleared on reboot). Persistent bans are `IsBanned` flags on character/account rows (§2 table); operator notes in [Connecting: webclient and telnet](09-connecting.md).
@@ -320,7 +319,7 @@ Every arrow is a place a failure is contained: gate contention waits (or, past t
 ```text
 boot → save path resolved (ATHERIZ_SAVE_PATH wins over settings.SavePath;
          a relative path outside a game folder throws
-         "Cannot determine save path ..." — cd into the game folder,
+         `Cannot determine save path: ...` — cd into the game folder,
          the one holding the game .csproj and GameSettings.cs)
   → game assemblies load first (rows convert to game types, not base kinds)
   → Objects with containment (corrupt rows skipped with a log line each)
@@ -344,7 +343,7 @@ Order is load-bearing in one direction: game assemblies load before the world so
 
 `Version` on each `ObjectRow` plus the `GameObjectDtoConverter` subtype factory is the whole migration story. When game code adds, renames, or drops a persisted field, the converter maps the stored `Version` forward: known-old versions upgrade field-by-field, unknown versions quarantine the object to `limbo` with a log line rather than crashing the load. Game devs replacing engine types pair this with `[EntityReplacement]` + `IMigrateFrom` (worked example in [Custom code and hot reload](11-custom-code-plugins.md)) — the attribute names the substitute, the migration interface carries old state into the new shape, and the checkpoint afterwards writes the new `Version` so the migration runs once, not every boot.
 
-File map: `src/Atheriz.Core/Persistence/AtherizDbContext.cs` + `AtherizDbContextFactory.cs` (store + path), `JsonTableLoader.cs` + `JsonOptions.cs` (boot load), `CheckpointWriter.cs` + `CheckpointJournal.cs` (save path), `DbTransactionHelper.cs` + `DbWriteGate.cs` (serialized gated transactions), `PersistedTypes.cs` + `IJsonEntity.cs` (row contracts), `WorldExport.cs` (dump path), `Converters/GameObjectDtoConverter.cs` (subtype factory), `Dto/` (9 versioned contracts), `Entities/` (7 row types).
+File map: `src/Atheriz.Core/Persistence/AtherizDbContext.cs` + `AtherizDbContextFactory.cs` (store + path), `JsonTableLoader.cs` + `JsonOptions.cs` (boot load), `CheckpointWriter.cs` + `CheckpointJournal.cs` (save path), `DbTransactionHelper.cs` + `DbWriteGate.cs` (serialized gated transactions), `PersistedTypes.cs` + `IJsonEntity.cs` (row contracts), `WorldExport.cs` (dump path), `Converters/GameObjectDtoConverter.cs` (subtype factory), `Dto/` (9 files), `Entities/` (7 files).
 
 ---
 Next: [Custom code and hot reload](11-custom-code-plugins.md)

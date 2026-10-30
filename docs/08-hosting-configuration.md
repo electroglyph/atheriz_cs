@@ -1,6 +1,6 @@
 # Hosting and configuration
 
-> Covers: `src/Atheriz.Server/Hosting/`, `src/Atheriz.Server/Infrastructure/ServerLifecycle.cs`, `src/Atheriz.Core/Settings/`, `appsettings.json`, `appsettings.Development.json`, `Properties/launchSettings.json`, `wwwroot/.webclient-hash`. You learn the two hosting modes, which ports and routes the server exposes, how admin authentication works, and how every setting resolves from CLI flags down to defaults. CLI verbs themselves live in [Running the server](07-server-lifecycle-cli.md); connecting as a player lives in [Connecting: webclient and telnet](09-connecting.md).
+> Covers: `src/Atheriz.Server/Hosting/`, `src/Atheriz.Server/Infrastructure/ServerLifecycle.cs`, `src/Atheriz.Core/Settings/`, `appsettings.json`, `appsettings.Development.json`, `Properties/launchSettings.json`. You learn the two hosting modes, which ports and routes the server exposes, how admin authentication works, and how every setting resolves from CLI flags down to defaults. CLI verbs themselves live in [Running the server](07-server-lifecycle-cli.md); connecting as a player lives in [Connecting: webclient and telnet](09-connecting.md).
 
 ## 1. Two modes: web app vs headless host
 
@@ -39,7 +39,7 @@ Minimal public-host override (`appsettings.json` in the game folder):
 {
   "Atheriz": {
     "ServerName": "MyGame",
-    "ServerHostname": "0.0.0.0",
+    "WebserverInterface": "0.0.0.0",
     "WebserverPort": 9999,
     "TelnetPort": 4444
   }
@@ -105,7 +105,7 @@ Request-routing waterfall (first match wins):
 
 Three pieces cooperate: `AdminAuth` (the gate), `AdminToken` (the secret on disk), and `ShutdownClient` (the CLI-side caller).
 
-- Every `/_internal/*` request must carry `X-Admin-Token` matching the contents of `secret/admin.token`. Comparison is constant-time; the token file is re-read per request so rotation (delete + restart) takes effect without a code path for hot rotation.
+- Every `/_internal/*` request must carry `X-Admin-Token` matching the contents of `secret/admin.token`. Comparison is constant-time and the file is re-read per request, so rotation is delete + restart.
 - A loopback peer check rejects admin calls arriving on non-loopback interfaces, even with a valid token. Admin is local-only by design — remote administration means SSH to the host first.
 - Failures return `401` with `{status:"error",message:...}` naming the cause (missing header, bad token, non-loopback peer).
 - Token format is 32 random bytes rendered as hex (`token_hex(32)`-equivalent). The `secret/` directory is `0700`, the token file `0600`. A zero-byte token file is treated as poisoned and regenerated at next boot rather than accepted as an empty secret.
@@ -122,7 +122,12 @@ Settings type: `src/Atheriz.Core/Settings/AtherizSettings.cs`. Validation: `src/
 | `SavePath` | `save` | World database + pid + log directory. |
 | `SecretPath` | `secret` | Admin token + TLS-adjacent secrets. |
 | `ServerName` | `AtheriZ` | Shown on `/`, `/health`, banners. Set it in the game folder's `appsettings.json` to brand a game (the scaffold's `GameSettings.ServerName` const is a convention for game code — the server itself reads only `AtherizSettings`). |
-| `ServerHostname` | `localhost` | Bind address (must parse as IP when overridden via CLI). |
+| `WebserverInterface` | `0.0.0.0` | Web bind address (literal IP only; `--host` overrides both interface keys). |
+| `TelnetInterface` | `0.0.0.0` | Telnet bind address (literal IP only). |
+| `ServerHostname` | `localhost` | Unused legacy key — nothing binds from it. Leave it alone. |
+| `MaxTotalConnections` | 500 | Whole-server socket cap (0 = unlimited). |
+| `MaxConnectionsPerIp` | 2 | Simultaneous sockets per IP (0 = unlimited; shared-IP groups feel this first). |
+| `CreationCooldown` | 60 | Seconds between creation attempts per source. |
 | `WebserverPort` | 9999 | HTTP/WebSocket port. |
 | `TelnetPort` | 4444 | Telnet port. |
 | `WebserverEnabled` | true | WebApplication vs headless Host (§1). |
@@ -131,7 +136,7 @@ Settings type: `src/Atheriz.Core/Settings/AtherizSettings.cs`. Validation: `src/
 | `MaxCharacters` | 5 | Cap on characters per account. |
 | `MapEnabled` | true | Map rendering gate. |
 | `LegendEnabled` | true | Legend layer toggle (a setting with no engine render gate — display-side only). |
-| `WebclientSyncCheck` | true | Compare game `web/` against the engine hash at startup; warn on drift. |
+| `WebclientSyncCheck` | true | Compare game `web/` against the shipped baseline at startup; warn on drift. |
 | `WebsocketMaxMessageSize` | 65536 | 64 KB inbound message cap (see [Connecting: webclient and telnet](09-connecting.md)). |
 | `TelnetMaxLine` | 65536 | 64 KB telnet line cap (same doc). |
 | `SslCertFile` / `SslKeyFile` | unset | TLS pair (§2). |
@@ -166,7 +171,7 @@ Static content resolves per game, not per install. `Infrastructure/AssetPathReso
 
 Game-before-install is the rule: a file in the game folder's `web/` tree shadows the shipped default. `ResolveWwwRoot` prefers a game `wwwroot/` and falls back to `web/` + `static`; `ResolveTemplates` prefers game `web/templates/` and falls back to the engine `templates/`.
 
-`WebclientSyncChecker.CheckSync` then compares the game folder's `web/` tree (SHA256) against the engine `wwwroot/.webclient-hash` recorded at build time. It honors `WebclientSyncCheck`: when true (default) a drift prints the sync warning at startup telling you to redeploy the client into the game folder. The warning is advisory — the server starts anyway. Redeploy with the per-game `./build.sh --web` (details in [Webclient: terminal client](12-webclient.md)).
+`WebclientSyncChecker.CheckSync` then compares the game folder's `web/` tree file-by-file (per-file SHA256 → missing/different/extra) against the shipped baseline. It honors `WebclientSyncCheck`: when true (default) a drift prints the sync warning at startup telling you to redeploy the client into the game folder. The `.webclient-hash` file under the engine tree is only a shell-build artifact for the launcher's staleness hint — the server never reads it. The warning is advisory — the server starts anyway. Redeploy with the per-game `./build.sh --web` (details in [Webclient: terminal client](12-webclient.md)).
 
 ## 1.1 Boot transcript
 
@@ -192,12 +197,12 @@ Shutdown mirrors the order: `DoShutdown` checkpoints, releases the pid claim, an
 
 ## 2.1 Bind examples
 
-Localhost-only (default posture — develop and test here):
+Localhost-only (develop and test here — the out-of-box default is `0.0.0.0`, all interfaces):
 
 ```json
 {
   "Atheriz": {
-    "ServerHostname": "127.0.0.1",
+    "WebserverInterface": "127.0.0.1",
     "WebserverPort": 9999,
     "TelnetPort": 4444
   }
@@ -209,7 +214,7 @@ All-interfaces (public host — pair with TLS §2 and firewall rules):
 ```json
 {
   "Atheriz": {
-    "ServerHostname": "0.0.0.0",
+    "WebserverInterface": "0.0.0.0",
     "WebserverPort": 9999,
     "TelnetPort": 4444
   }
@@ -221,14 +226,14 @@ IPv6 any (dual-stack where the OS supports it):
 ```json
 {
   "Atheriz": {
-    "ServerHostname": "::",
+    "WebserverInterface": "::",
     "WebserverPort": 9999,
     "TelnetPort": 4444
   }
 }
 ```
 
-`0.0.0.0` and `::` take the `ListenAnyIP` path; anything else takes `Listen(ip, port)` on exactly that address. A hostname that is not an IP literal (for example `"localhost"` spelled as a name in a CLI `--host`) is refused at the CLI layer with exit 2 — resolve it to `127.0.0.1` or `::1` yourself. A typo in the config file (like `999.999.999.999` in `ServerHostname`) throws at Kestrel bind time — after the pid claim, so the stranded claim is released by the process-exit hook as the server dies; either way a bad bind never leaves a running server behind, and `save/server.log` names the value (`Unparseable WebserverInterface '…'`).
+`0.0.0.0` and `::` take the `ListenAnyIP` path; anything else binds exactly that address. A hostname that is not an IP literal is refused at the CLI layer with exit 2 — resolve it to `127.0.0.1` or `::1` yourself. A typo in the config file (like `999.999.999.999` in `WebserverInterface`) fails validation before the pid claim — fix the value and retry; `save/server.log` names the value (`Unparseable WebserverInterface '…'`). Kestrel re-checks at bind time as defense-in-depth.
 
 Headless (no web server — telnet only, MUD-port appliances):
 
@@ -258,26 +263,26 @@ Symptoms: every admin verb (`stop`, `reload`, live `create`) answers auth reject
 
 ```bash
 cd mygame
-./atheriz.sh stop        # falls to verified kill: admin unreachable, pid checks pass
+./atheriz.sh stop -f     # plain stop aborts on token mismatch without killing; -f is the verified-kill path
 rm secret/admin.token
 ./atheriz.sh start
 ```
 
-Expected: stop succeeds through the kill path (the log shows the graceful attempt failing closed, then the verified kill), the token file reappears at boot with fresh hex and `0600` mode, and admin verbs work again. There is no token to preserve across migrations — copy `secret/` in a backup only for TLS certs/keys kept there (procedure in [Saves and backups](10-persistence-saves.md)).
+Expected: the server is killed and the pid claim released, the token file reappears at boot with fresh hex and `0600` mode, and admin verbs work again. There is no token to preserve across migrations — copy `secret/` in a backup only for TLS certs/keys kept there (procedure in [Saves and backups](10-persistence-saves.md)).
 
-Never fix auth rejection by disabling the gate, binding admin to a public interface, or sharing the token over an insecure channel. The loopback check plus constant-time compare plus per-request re-read is the whole admin security story; weakening any leg exposes world-wiping verbs (`shutdown`, `hot_reload`) to the network.
+Never fix auth rejection by disabling the gate, binding admin to a public interface, or sharing the token: loopback + constant-time compare + per-request re-read is the whole admin security story.
 
 ## 5.1 Validation ranges and environment table
 
-`AtherizSettingsValidator` runs at startup (`ValidateOnStart`) — a value outside its range fails boot with a message naming the key and the allowed range. Common rejections: ports outside 1–65535, negative caps, `MaxCharacters` below 1, empty `ServerName`, cert file configured without its key sibling. Fix the value and start again; the validator runs before the pid claim, so a rejected config never blocks a corrected retry.
+`AtherizSettingsValidator` runs at startup (`ValidateOnStart`) — a value outside its range fails boot with a message naming the key and the allowed range. Common rejections: ports outside 1–65535, negative caps, `MaxCharacters` below 1, empty `ServerName`, a key file without its cert. Fix the value and start again; range validation runs before the pid claim, so a rejected config never blocks a corrected retry.
 
 Environment variables read individually (no prefix-stripping pass — each name below is matched exactly):
 
 | Variable | Equivalent setting | Notes |
 |---|---|---|
 | `ATHERIZ_TELNET_PORT` | `TelnetPort` | Also aliased as `Atheriz__TelnetPort`. CLI `--telnet-port` wins over both. |
-| `ATHERIZ_SSL_CERTFILE` | `SslCertFile` | Requires the sibling below. |
-| `ATHERIZ_SSL_KEYFILE` | `SslKeyFile` | Missing sibling with cert set fails validation. |
+| `ATHERIZ_SSL_CERTFILE` | `SslCertFile` | A cert without a key file is valid (combined PEM). |
+| `ATHERIZ_SSL_KEYFILE` | `SslKeyFile` | A key without a cert fails validation. |
 | `ATHERIZ_SUPERUSER_USERNAME` | seed credential | Honored by `InitialSetup.ResolveCredentials` (`new`, `reset`, first boot). |
 | `ATHERIZ_SUPERUSER_PASSWORD` | seed credential | Same callers; never logged. |
 | `ATHERIZ_ROOT` | — | Wrapper scripts only (locate the engine checkout). Not a server setting. |
@@ -310,7 +315,7 @@ Expected: the rebuild refreshes the game `web/` tree from `webclient/src/` plus 
 Goal: a game reachable by browser clients at `https://play.example.com` and telnet clients at `play.example.com:4444`, starting from a local-only game folder.
 
 1. Set the public bind and name in the game folder's `appsettings.json` (§2 public-host override), keeping 9999/4444 unless the host policy says otherwise.
-2. Place the certificate pair and set `SslCertFile` / `SslKeyFile` (or the `ATHERIZ_SSL_CERTFILE` / `ATHERIZ_SSL_KEYFILE` pair) — then foreground-start once and watch for the boot spine (§1.1). Any cert problem throws before the pid claim, so a bad path never strands a half-started server.
+2. Place the certificate pair and set `SslCertFile` / `SslKeyFile` (or the `ATHERIZ_SSL_CERTFILE` / `ATHERIZ_SSL_KEYFILE` pair) — then foreground-start once and watch for the boot spine (§1.1). A cert that cannot load throws at bind time, after the pid claim and world load, so read `save/server.log` and let the process-exit hook release the claim.
 3. Probe from the host itself: `/health` → ok, `/ready` → ok (not `starting`), webclient `look` → `limbo`. Only then open the firewall.
 4. Probe from outside: `curl --max-time 5 https://play.example.com/health` and `telnet play.example.com 4444`. A working TLS front with a refused telnet port means the web bind is right and the telnet bind (or its firewall rule) is wrong — the two listeners configure independently.
 5. Leave `WebclientSyncCheck` on. The first startup warning about drift (§6.1) is normal after copying a game folder between machines; `./build.sh --web` plus `restart` clears it.
@@ -320,9 +325,9 @@ Roll back the same way if anything misbehaves: restore the `127.0.0.1` bind, `re
 ## 8. Settings checklist before going public
 
 - [ ] `ServerName` set (shows on `/`, `/health`, banners).
-- [ ] `ServerHostname` an explicit IP (`0.0.0.0` / `::` for any-interface, or the single public IP).
+- [ ] `WebserverInterface` an explicit IP (`0.0.0.0` / `::` for any-interface, or the single public IP).
 - [ ] TLS pair configured, or `AllowInsecureTlsFallback` consciously accepted (plaintext on the open net is a choice, not a default).
-- [ ] Connection caps reviewed against expected event load (caps refuse past the limit — see [Connecting: webclient and telnet](09-connecting.md)).
+- [ ] Connection caps left at defaults (500 total; per-IP 2 only matters for shared-IP groups — see [Connecting: webclient and telnet](09-connecting.md)).
 - [ ] `secret/salt.txt` backed up next to `save/` (password logins depend on it), plus any TLS pair kept in `secret/` — see [Saves and backups](10-persistence-saves.md).
 - [ ] `/health` vs `/ready` wired into the supervisor or load balancer the right way round (§3): liveness restarts dead processes, readiness gates traffic during slow boots.
 
@@ -342,9 +347,9 @@ Admin verbs fail but the game plays: token mismatch (§4.1) — recover there, n
 
 Players see a stale webclient after an upgrade: entry HTML is no-cache but old hashed bundles can linger behind proxies — confirm the `/static` cache headers (§3.1), redeploy with `./build.sh --web`, and have players hard-refresh before investigating further.
 
-Prefer explicit IPs over wildcards on multi-homed hosts: binding the game to its public address (rather than `0.0.0.0`) keeps game traffic off management interfaces. (Admin routes are loopback-gated independently of the bind — the bind choice does not change admin exposure.)
+On multi-homed hosts bind the game's public address rather than `0.0.0.0`. (Admin routes are loopback-gated regardless of bind.)
 
-Hot-reload (`reload`) never rebinds listeners, re-reads ports, or flips hosting modes — it rewires game logic inside the running host. Mode, bind, TLS, and route changes all need `restart`. Code changes need rebuild plus `reload`. Keep the two apart and half of all "my change did nothing" mysteries disappear.
+Hot-reload (`reload`) never rebinds listeners, re-reads ports, flips hosting modes, or reloads engine code — it rebuilds stale game projects and rewires game logic inside the running host. Mode, bind, TLS, engine, and route changes all need `restart`. Game-code changes need `reload`. Keep the two apart and half of all "my change did nothing" mysteries disappear.
 
 One last hosted-service note: the telnet listener has no readiness endpoint of its own — there is no telnet equivalent of `/health`. Liveness for the MUD port is the TCP accept itself (`telnet host 4444` connects and the banner appears) plus the pid-claim check from [Running the server](07-server-lifecycle-cli.md). Monitoring that needs both protocols should probe `/health` for the web side and open a TCP connection for the telnet side.
 

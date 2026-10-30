@@ -2,11 +2,11 @@
 
 > Covers: `src/Atheriz.Server/Program.cs`, `src/Atheriz.Server/Cli/`, `src/Atheriz.Server/Infrastructure/`, `atheriz.sh`, `atheriz.cmd`, `build.sh`, `build.cmd`. You learn how to run, stop, restart, reload, wipe, and populate a game from the command line, which files track the live server, and how to triage a server that will not start. Game-code authoring details live in [Custom code and hot reload](11-custom-code-plugins.md); hosting and settings live in [Hosting and configuration](08-hosting-configuration.md).
 
-Game-folder commands need your current directory to be the game folder, so run them through the game folder's own launcher (`./atheriz.sh ...`). The engine is version 0.27.0.0 at the time of writing; see `../CHANGELOG.md` for history.
+Game-folder commands need your current directory to be the game folder, so run them through the game folder's own launcher (`./atheriz.sh ...`). The engine is version 0.37.0.0 at the time of writing; see `../CHANGELOG.md` for history.
 
 ## 1. CLI overview
 
-Every invocation starts at `Program.cs`, which hands off to `AtherizCli.InvokeAsync` (System.CommandLine 2.0.0). There are 8 commands:
+Every invocation starts at `Program.cs`, which hands off to `AtherizCli.InvokeAsync` (System.CommandLine 2.0.0). There are 9 commands:
 
 ```bash
 ./atheriz.sh start --help
@@ -17,6 +17,7 @@ Every invocation starts at `Program.cs`, which hands off to `AtherizCli.InvokeAs
 ./atheriz.sh create --help
 ./atheriz.sh new --help
 ./atheriz.sh test --help
+./atheriz.sh deploy --help   # deploy game --web-root <dir>: stage webclient bundles into a game web folder
 ```
 
 Or with a built DLL directly (same arguments after `--` with `dotnet run`):
@@ -102,9 +103,9 @@ Stop is two-phase, and the phases run in order:
             (SIGTERM on Unix; there is no separate SIGKILL step)
 ```
 
-Phase (a) is graceful: `ShutdownClient` posts to `/_internal/shutdown`, retrying with the TLS setting flipped once (plain vs TLS) so a cert mismatch does not look like a dead server. A clean accept returns exit code 0. An auth rejection aborts the whole stop — never escalate to kill when the token disagrees, because you would be killing a server you cannot prove is yours.
+Phase (a) is graceful: `ShutdownClient` posts to `/_internal/shutdown`, retrying with the TLS setting flipped once so a cert mismatch does not look like a dead server. A clean accept returns exit code 0; an auth rejection aborts the whole stop — never escalate to kill when the token disagrees.
 
-Phase (b) is the verified kill. It reads the pid claim, confirms the pid really is this server process (stale claims from recycled pids are rejected), confirms something is actually listening on the game ports, then signals, waits 3 seconds, and signals again if still alive. On Unix the signal is `SIGTERM`; there is no separate `SIGKILL` step.
+Phase (b) is the verified kill: pid claim plus process identity plus port listener plus terminal re-verify, then Kill → wait 3 s → Kill (SIGTERM on Unix; no separate SIGKILL step).
 
 Two refusal cases protect you from shooting the wrong process:
 
@@ -122,29 +123,32 @@ cd mygame
 
 `restart` runs `StopAsync`, invalidates the settings cache so edited `appsettings.json` values are picked up, waits for the claimed pid to exit (escalating to `Kill` after re-verification if it lingers), then waits up to 10 seconds for BOTH the web and telnet ports to go free via `WaitForPortFreeAsync` before spawning the replacement (`SpawnStart`) or running in-process (`RunForeground` with `--foreground`).
 
-Reach for `restart` when you changed settings, ports, or the bind address — `reload` does not re-read those (see §5).
+Reach for `restart` when you changed settings, ports, the bind address, engine code under `src/`, or web files — `reload` does not re-read those (see §5).
 
-## 5. `reload`: hot-load built code, never compiles
+## 5. `reload`: build first, then hot-load (game code only)
 
 ```bash
 cd mygame
 ./atheriz.sh reload
 ```
 
-`reload` posts to `/_internal/hot_reload` (request body cap 4096 bytes). On the server side, `AdminRoutes` wraps `PluginReloader.ReloadGameLogicAsync` plus `ServerLifecycle.DoReload` in a 60-second watchdog. If the work finishes in time you get the result; if the watchdog fires you get a `200` with `{status:error}` while the reload keeps running in the background — check `save/server.log` for the outcome instead of firing a second reload on top.
+`reload` POSTs to `/_internal/hot_reload` (request body cap 4096 bytes). On the server side, `AdminRoutes` wraps `PluginReloader.ReloadGameLogicWithBuildAsync` plus `ServerLifecycle.DoReload` in a 60-second watchdog. The reloader rebuilds stale game projects (`dotnet build -c Release`, 10-minute timeout) before loading — the in-game `reload` verb runs this same path, so both verbs share one behavior. A failed build aborts with `Reload aborted: build failed (...)` and the live code is untouched; when nothing changed the result is `Reload not needed; already up to date.` You get the result, or (after 60 s) a `200` `{status:error}` while the reload continues in the background — watch `save/server.log`, don't fire a second reload.
 
-The one rule that bites newcomers:
+What `reload` picks up: game-project code (commands, objects, scripts, effects). What it never picks up:
 
-> `reload` never compiles. If your sources are newer than your built plugin, the message from `PluginReloader` tells you to run `dotnet build` first.
+- engine code under `src/` (`Atheriz.Core` loads once, excluded from discovery) — `restart` for that;
+- settings, ports, TLS, hosting mode — `restart` (see §4);
+- webclient files in `web/` — `./build.sh --web` plus `restart` (static resolution runs at boot);
+- world shape — `reset` wipes and reseeds (§6).
 
-The intended loop is edit → rebuild → reload. The per-game launcher shortens it:
+The intended loop is edit → reload → verify. The per-game launcher shortens nothing semantically, just combines steps:
 
 ```bash
 cd mygame
 ./build.sh --reload   # build, then hot-load into the live server
 ```
 
-`--reload` means build-then-hot-load; plain `reload` means hot-load only. When to use what: `reload` after a plugin rebuild; `restart` after settings/port changes; `reset` when you want to start the world over (§6). Full mechanics (assembly unload, live-object patching) live in [Custom code and hot reload](11-custom-code-plugins.md).
+`--reload` means build locally, then hot-load into the live server (the server rebuilds anything still stale, so the second build is usually a no-op). When to use what: `reload` for game-code edits (it builds what is stale); `restart` after settings/port changes, engine-code edits, or web file changes; `reset` when you want to start the world over (§6). Full mechanics (assembly unload, live-object patching) live in [Custom code and hot reload](11-custom-code-plugins.md).
 
 ## 6. `reset`: wipe the world and reseed (always asks)
 
@@ -163,7 +167,7 @@ With confirmation, the sequence is:
 4. Park background savers through `DbWriteGate` (30-second hold).
 5. `CloseDatabase`, then `GuardWipePath` verifies the wipe target is really inside this game folder's `save/` tree — a guard failure aborts the reset rather than deleting the wrong directory.
 6. Recursive `save/` delete (a file-sweep variant on Windows, where memory-mapped files behave differently), then re-create the directory and `ReopenDatabase`.
-7. `InitialSetup.RunSetup(Prompt:false)` reseeds superuser credentials (from `ATHERIZ_SUPERUSER_*` when set, else stored/prompted defaults), areas, and the `limbo` start room.
+7. `InitialSetup.RunSetup(Prompt:false)` seeds areas and the `limbo` start room. Credentials come from `ATHERIZ_SUPERUSER_*` when set — otherwise the world is seeded with no superuser (add one with `create`).
 8. Start the server again (background by default, `--foreground` if you passed it).
 
 What this means for you: `reset` destroys players, rooms, builds, and history, then gives you a fresh world with the same game code. Back up `save/` first if there is anything you want to keep — the backup procedure is in [Saves and backups](10-persistence-saves.md).
@@ -197,7 +201,7 @@ Folder-name rules: the last path segment becomes the game identifier and must be
 
 - `DenyRoot`: you cannot scaffold directly onto a filesystem root.
 - A nested-folder warning when the target sits inside another game folder or repo checkout.
-- Without `--overwrite`, an existing non-empty target aborts. With `--overwrite`, the handler holds the wipe, probes for a live server on the target's ports, wipes `save/**` plus any stale `admin.token`, then scaffolds.
+- Without `--overwrite`, an existing target prompts `Replace files? (y/n)` and aborts unless you answer `y`. With `--overwrite`, the handler holds the wipe, probes for a live server on the target's ports, wipes `save/**` plus any stale `admin.token`, then scaffolds.
 
 Credentials: the command prompts for a superuser name/password unless `ATHERIZ_SUPERUSER_*` is set in the environment. Those variables are also honored by `InitialSetup.ResolveCredentials` (used by `reset` and first boot), so they are not `new`-only. Non-interactive `--overwrite` requires the env vars — there is nobody to answer the prompt in a pipeline.
 
@@ -216,8 +220,7 @@ All paths are inside the game folder:
 | `save/server.pid` | `0600` | Pid claim for the live server: the pid on line 1, the UTC claim time on line 2. Read by `stop`/`restart`/liveness probes; a claim is rejected when its process is gone or its pid now belongs to a process that started later (a recycled pid). A one-line file from an older engine is still read on the pid alone. |
 | `secret/admin.token` | `0600` | Shared secret for `/_internal/*` admin routes, sent as `X-Admin-Token`. A zero-byte file is treated as poisoned and regenerated on next boot. |
 | `save/server.log` | — | The server log. Read FIRST on any issue, before curl or `ss`. |
-| `save/.wipe-lock` (`.wipe-lock`) | — | Taken during `reset` wipes so savers and starters serialize against the delete. |
-| `wwwroot/.webclient-hash` | — | Hash of the shipped webclient; the sync checker compares the game folder's `web/` tree against it at startup. |
+| `save/.wipe-lock` | — | Taken during `reset` wipes so savers and starters serialize against the delete. |
 
 `save/` and `secret/` directories themselves are created `0700`. The database (`save/database.sqlite3`) and the rest of the `save/` layout are covered in [Saves and backups](10-persistence-saves.md).
 
@@ -235,7 +238,7 @@ The current directory is preserved (game-folder commands depend on it). For `sta
 Per-game forwarders (scaffolded into each game folder by `new`) resolve the engine back to this repo:
 
 - `atheriz.sh`: honor `ATHERIZ_ROOT` if set, else search upward from the game folder for the engine checkout, else fall back to the path baked in at scaffold time.
-- `atheriz.cmd`: environment variable or baked path only — there is no upward-search loop on Windows. The forwarder never changes directory on your behalf.
+- `atheriz.cmd`: same three steps (environment override, upward search, baked path) on Windows. Neither forwarder changes directory on your behalf.
 
 `build.sh` / `build.cmd` flags:
 
@@ -261,7 +264,7 @@ Work this list top to bottom; stop at the first step that explains the failure.
 
 ## 2.1 Background daemon details
 
-The detached child redirects stdout/stderr to `save/server.log` and writes crashes through `DaemonCrashLog`, so a child that dies during `DoStartup` still leaves a readable trail — the parent's readiness poll simply times out and points at the log. `DaemonDetach` owns the platform split (process-group detach on Unix, creation-flags detach on Windows) and `DaemonSpawner` owns the argument forwarding: every flag you passed to `start` (port, host, telnet-port) is forwarded to the child verbatim, which is why `--port 1234` on the parent produces a child listening on 1234 and a readiness poll against 1234.
+The detached child redirects stdout/stderr to `/dev/null`; the readable trail is `save/server.log`, written by the logger. A crash during `DoStartup` still leaves a readable trail via `DaemonCrashLog` — the parent's readiness poll simply times out and points at the log. `DaemonDetach` owns the platform split (process-group detach on Unix, creation-flags detach on Windows) and `DaemonSpawner` owns the argument forwarding: every flag you passed to `start` (port, host, telnet-port) is forwarded to the child verbatim, which is why `--port 1234` on the parent produces a child listening on 1234 and a readiness poll against 1234.
 
 ```bash
 cd mygame
@@ -297,24 +300,27 @@ Expected: nonzero exit, a message naming the token rejection, and the server sti
 
 ## 5.1 Reload transcripts
 
-Happy path after rebuilding the plugin:
-
-```bash
-cd mygame
-./build.sh --reload
-./atheriz.sh reload
-```
-
-Expected: build succeeds, the reload posts to `/_internal/hot_reload`, and the response reports success with the new game logic live — walk to a room your change touches and confirm the new behavior in-client.
-
-Stale sources (you edited game code but forgot to build):
+Happy path after editing game code:
 
 ```bash
 cd mygame
 ./atheriz.sh reload
 ```
 
-Expected: a message from `PluginReloader` telling you to run `dotnet build` first. The live server keeps running the old logic untouched. Build, then reload again — or use `./build.sh --reload` to do both steps in one command.
+Expected: the server rebuilds the stale game project, the reload posts to `/_internal/hot_reload`, and the response reports success (e.g. `Built 1 project(s); Reloaded 1 modules...`) with the new game logic live — walk to a room your change touches and confirm the new behavior in-client. `./build.sh --reload` does the same thing with a local build first.
+
+Build failure (you edited game code but it does not compile):
+
+```bash
+cd mygame
+./atheriz.sh reload
+```
+
+Expected: `Reload aborted: build failed (...)` naming the project. The live server keeps running the old logic untouched. Fix the errors and reload again.
+
+No changes (sources and dlls already match):
+
+Expected: `Reload not needed; already up to date.` Nothing loads, nothing patches, nothing restarts.
 
 Watchdog timeout (a very large world where rewire exceeds 60 seconds):
 

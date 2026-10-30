@@ -15,7 +15,7 @@ Before login you get the unlogged-in set. Name rules: at least 3 characters, at 
 | `quit` | anyone | — | `Goodbye!`, closes the connection |
 | `help` | anyone | `[topic]` | shows help text |
 | `info` | anyone | — | server info block (`## BEGIN INFO` … `## END INFO`) |
-| `screenreader` | anyone | `on\|off` | toggles screen-reader-friendly output |
+| `screenreader` | anyone | — | toggles screen-reader-friendly output (`Screenreader mode on/off.`) |
 
 ## 2. In-game groups
 
@@ -123,7 +123,7 @@ Admin (builder+ only — one-gate rule noted: each of these carries ONE privileg
 | `accounts` | superuser | `[--delete <account>]` | stats, or deletes an account with its characters |
 | `reset` | superuser | — | checkpoint save plus the reload hooks (cold reboot) |
 | `shutdown` | superuser | — | stops the server (saves first) |
-| `reload` | superuser | — | announces `Server is reloading...`, hot-loads |
+| `reload` | superuser | — | announces `Server is reloading...`, rebuilds stale game code, hot-loads |
 | `save` | superuser | — | checkpoints the world |
 | `spam` | superuser | `<count>` | creates test accounts/characters |
 
@@ -160,7 +160,7 @@ public sealed class WaveCommand : LoggedInCommand
 cmdSet.Add(new WaveCommand());
 ```
 
-`UseParser => false` matters: with the default parser on, a missing `ParsedArgs` bag prints help instead of running. `ctx.Puppet` is only set on the parser path — `RunPuppetRaw` receives the resolved puppet directly. The room announce excludes the waver so they see only `You wave.` while everyone else sees `{name} waves.`
+`UseParser => false` matters: with the default parser on, a missing `ParsedArgs` bag prints help instead of running. Both paths resolve the puppet into `ctx` — `RunPuppetRaw` receives it directly. The room announce excludes the waver so they see only `You wave.` while everyone else sees `{name} waves.`
 
 Try-it transcript:
 
@@ -191,10 +191,10 @@ Subclass decision table, in 5 lines: subclass `Command` for anything (you handle
 One ASCII pipeline:
 
 ```text
-raw text → tokenize (shlex) → dispatch → alias expand → parser → Run(ctx) → Msg
+raw text → nick expand → tokenize (shlex) → dispatch (global → glued → local → auto-alias) → Access → parser → LagCheck → Run(ctx) → Msg
 ```
 
-Tokenize splits respecting quotes; dispatch finds the command (global registry + per-object `CmdSet` sorted snapshot); alias expansion rewrites known aliases — except single-character `n/s/e/w/u/d`, which are in `NoAliasCommands` and always mean movement, never an alias; the parser fills `ParsedArgs` (dest derivation, nargs, keyword split, remainder drain, typed option pairs keyed by `ParsedArgKeys`); `Run` executes; `Msg` delivers. Argument parsing outcomes: missing required args print usage; unknown options print the error; `--help` throws `CommandHelpException` (a `CommandError` subclass) to show help instead of running.
+Tokenize splits respecting quotes after input nicks rewrite the line (existing commands and movement keys win inside the nick expansion); dispatch finds the command (global registry, then the glued single-char retry, then per-object `CmdSet`, then auto-alias — except single-character `n/s/e/w/u/d`, which are in `NoAliasCommands` and always mean movement, never an alias); Access checks permission; the parser fills `ParsedArgs` (dest derivation, nargs, keyword split, remainder drain, typed option pairs keyed by `ParsedArgKeys`); `Run` executes; `Msg` delivers. Argument parsing outcomes: missing required args print usage; unknown options print the error; `--help` throws `CommandHelpException` (a `CommandError` subclass) to show help instead of running.
 
 ## 6. Example: a builder-only "smite" command
 
@@ -214,11 +214,9 @@ public sealed class SmiteCommand : BuilderCommand
     protected override void RunPuppet(GameObject puppet, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
         var query = pa.GetString(ParsedArgKeys.Target);
-        if (string.IsNullOrWhiteSpace(query))
-            throw new CommandError("Smite whom?");
+        if (string.IsNullOrWhiteSpace(query)) { puppet.Msg("Smite whom?"); return; }
         var target = CommandHelpers.ResolveObject(puppet, query);
-        if (target is null)
-            throw new CommandError(CommandHelpers.FormatCouldNotFind(query));
+        if (target is null) { puppet.Msg(CommandHelpers.FormatCouldNotFind(query)); return; }
         target.Msg("A bolt from above strikes you!");
     }
 }
@@ -227,7 +225,7 @@ public sealed class SmiteCommand : BuilderCommand
 cmdSet.Add(new SmiteCommand());
 ```
 
-`CommandError` is an `Exception` subclass: dispatch catches it, messages the text, then prints usage. (`CommandHelpException` extends it for `--help`.) Target lookup goes through the public `CommandHelpers.ResolveObject` (null on miss) — the tuple-returning `TargetResolution.ResolveObject` beside it is internal to the engine.
+A `CommandError` thrown from `RunPuppet` faults the pool work item — the player sees nothing, so message the player directly as above. The dispatch catch only turns *parse-time* errors into message-plus-usage. (`CommandHelpException` extends it for `--help`.) Target lookup goes through the public `CommandHelpers.ResolveObject` (null on miss) — the tuple-returning `TargetResolution.ResolveObject` beside it is internal to the engine.
 
 ```text
 > smite goblin
@@ -241,16 +239,16 @@ Smite whom?
 ```text
 > channel -s town
 > town The market is open!
-(town) [12:00:01] Bryn: The market is open!
+(town) [30 October, 2026 12:00:01] Bryn: The market is open!
 > town -r
-(town) [12:00:01] Bryn: The market is open!
+(town) [30 October, 2026 12:00:01] Bryn: The market is open!
 ```
 
 Lines render as `({channel}) [{timestamp}] {speaker}: {text}`. History replays your own recent entries through the same format. A leading channel name routes to the channel even if an object shares the name. Permission messages are fixed strings (`You do not have permission to send to this channel.`, `You do not have permission to view this channel.`); subscribe/unsubscribe are silent.
 
 ## 8. Parser and error outcomes
 
-`GameArgumentParser` fills `ParsedArgs` keyed by `ParsedArgKeys`: dest derivation (option name → key), nargs (how many values each option takes), keyword split (`SplitOnFirstKeyword` for `from`/`to`/`with`), remainder drain (leftover tokens stay positional), typed option pairs (`--count 3` arrives typed).
+`GameArgumentParser` fills `ParsedArgs` keyed by `ParsedArgKeys`: dest derivation (option name → key), nargs (how many values each option takes), keyword split (`SplitOnFirstKeyword` for `from`/`to`/`in` (`into`)), remainder drain (leftover tokens stay positional), typed option pairs (`--count 3` arrives typed).
 
 ```csharp
 var parser = new GameArgumentParser();
@@ -258,7 +256,7 @@ parser.AddArgument(ParsedArgKeys.Target).Help("Who to wave at").Nargs("?");
 parser.AddArgument(ParsedArgKeys.Message).Help("What to say").Nargs("*");
 ```
 
-`AddArgument` returns a builder (`.Help(…)` / `.Nargs("?")` / `.Action(…)` chain). Commands declare theirs in `SetupParser`; dispatch parses the raw tokens and hands `RunPuppet` a filled `ParsedArgs` (dest derivation, nargs, keyword split via `SplitOnFirstKeyword` for `from`/`to`/`with`, remainder drain, typed option pairs like `--count 3`).
+`AddArgument` returns a builder (`.Help(…)` / `.Nargs("?")` / `.Action(…)` chain). Commands declare theirs in `SetupParser`; dispatch parses the raw tokens and hands `RunPuppet` a filled `ParsedArgs` (dest derivation, nargs, keyword split via `SplitOnFirstKeyword` for `from`/`to`/`in` (`into`), remainder drain, typed option pairs like `--count 3`).
 
 ```text
 > wave --help
@@ -378,7 +376,7 @@ You say, "Hello, town!"
 > emote grins.
 Bryn grins.
 > town The market is open!
-(town) [12:00:01] Bryn: The market is open!
+(town) [30 October, 2026 12:00:01] Bryn: The market is open!
 ```
 
 `say` reaches the room through `AtSay`/`AtSayFull` (self text vs room text, hookable); emote routes through the same entry with the literal `{name} {text}` for both audiences. A leading channel name routes to the channel instead. Item flows check the `get` lock and announce to the room:
@@ -409,7 +407,7 @@ Registration recap (the rule, quoted): game commands register with explicit `Add
 
 ## 13. Under the hood
 
-`Command.cs`: per-command parser setup + shlex-style tokenizing (mirrors `shlex.split`) + `Execute` → `Run(ctx)`; `CommandError` surfaces its message plus usage, `CommandHelpException` (a `CommandError`) shows help instead of running. `CommandContext`: `Caller`, `Puppet`, `Args`, `RawText`, `Ct`. `CommandDispatcher`: routing across registries + the `NoAliasCommands` single-char rule (`["n","s","e","w","u","d"]` — a one-character input matching these is always movement) + the `LagCheck` hook (`Func<IMessageTarget,bool>?`, silent drop; same predicate shape as `Command.GlobalLagCheck` / `LagGateCommand`, via `ILagInfo`).
+`Command.cs`: per-command parser setup + shlex-style tokenizing (mirrors `shlex.split`) + `Execute` → `Run(ctx)`; a `CommandError` from parsing surfaces its message plus usage, `CommandHelpException` (a `CommandError`) shows help instead of running. `CommandContext`: `Caller`, `Puppet`, `Args`, `RawText`, `Ct`. `CommandDispatcher`: routing across registries + the `NoAliasCommands` single-char rule (`["n","s","e","w","u","d"]` — a one-character input matching these is always movement) + the `LagCheck` hook (`Func<IMessageTarget,bool>?`, silent drop; same predicate shape as `Command.GlobalLagCheck` / `LagGateCommand`, via `ILagInfo`).
 
 `CommandRegistry` (global command table) + `CmdSet` (per-object sorted snapshot used for dispatch precedence). `GameArgumentParser` + `ParsedArgs` + `ParsedArgKeys`: dest derivation, nargs, keyword split, remainder drain, typed option pairs. `BaseChannelCommand`/`ChannelAction`: channel precedence (channel name beats object name), parser-reset, permission messages, silence handling. `CommandPermissions`: `IsBuilder` / `IsSuperUser` / `HasBuilderPrivilege` (raw level check behind the gates), plus hidden-target gating (unseen targets stay unusable). `TargetResolution`: internal name search behind the verbs — `ResolveById` (`#id` plain-only) / `ResolveObject` (name search from the caller), coord search, comma-coord parsing, global lookup, channel resolution, `SplitOnFirstKeyword` (split a token list on the first keyword occurrence). Game code calls the public `CommandHelpers.ResolveObject` (null on miss) instead.
 

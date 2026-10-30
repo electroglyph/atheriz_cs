@@ -104,7 +104,7 @@ repeating scheduler: alarms, tick callbacks, and registered coroutines.
 
 - Ticking objects plug in here: `GameObject.Create` and
   `ResolveRelations` register each object's `AtTick` with the ticker
-  (`src/Atheriz.Core/Objects/GameObject.cs:692,877`), and `Node` overrides
+  (`src/Atheriz.Core/Objects/GameObject.cs:835,697`), and `Node` overrides
   `AtTick` for room-side behavior. Hot reload re-registers ticks after
   patching, so ticking objects survive reload
   (→ [Custom code and hot reload](11-custom-code-plugins.md)).
@@ -163,16 +163,11 @@ When in doubt, do less under a lock: copy, release, compute, re-lock,
 apply. Locking call sites for commands live in [Commands](06-commands.md);
 per-object gates in [Hooks, scripts, and text](05-hooks-scripts-text.md).
 
-The door/handler pair shows the discipline in full. Door state locks
-first and handler bookkeeping (door-modified marks on the node handler)
-happens after the door lock releases — the order is always door toward
-handler. The reverse edge exists exactly once (`RemapDoors` takes the
-handler lock toward doors), and the two never nest: per-setter marks are
+The door/handler pair shows the discipline in full: per-setter marks are
 suppressed for bodies that already hold the door write lock, precisely so
 no path can hold both edges at once. That is the template for every new
-lock pair in the engine: pick one direction, enforce it at every call
-site, and suppress the automatic mark/side-effect on paths that already
-hold the outer lock.
+lock pair: pick one direction, enforce it at every call site, and
+suppress the automatic mark on paths that already hold the outer lock.
 
 Checklist before introducing any new lock or lock edge in engine code:
 
@@ -253,14 +248,11 @@ if (route is not null)
 (`Coord`, areas, and grids from the user's side live in
 [World and maps](04-world-maps.md).)
 
-Path reconstruction walks parent links: each `PathNode` carries its
-position and its parent, and the result is built by walking parents back
-to the start and reversing (`Pathfind.cs:7-18`). The walk is allocation
-proportional to path length — one list, one reverse — so even a long
-North Road amble costs the pool thread almost nothing beyond the search
-itself. Keep routes before moving (snapshot the list, then walk it)
-rather than re-querying per step; the world may change between steps, and
-per-step searches multiply cap-burning searches across one stroll.
+Path reconstruction walks parent links back to the start and reverses
+(`Pathfind.cs:7-18`). Keep routes before moving (snapshot the list, then
+walk it) rather than re-querying per step; the world may change between
+steps, and per-step searches multiply cap-burning searches across one
+stroll.
 
 ## 7. Helpers: text, match, random, files, TLS
 
@@ -289,7 +281,7 @@ Small, dependency-free, and safe to call from any game thread:
 - `PathGuards` (`src/Atheriz.Core/Utils/PathGuards.cs`): traversal and
   placement guards — `GuardSavePath`/`GuardSecretPath` (`:14-19`) pin the
   database and secret paths, `DenyRoot` (`:82`) refuses filesystem roots,
-  `GuardWipePath` (`:111`) constrains destructive wipes,
+  `GuardWipePath` (`:119`) constrains destructive wipes,
   `EnsureSaveDirectory`/`EnsureSecretDirectory` (`:33-35`) create with
   guards applied.
 - `TlsCertLoader` (`src/Atheriz.Core/Utils/TlsCertLoader.cs:13`):
@@ -324,14 +316,10 @@ anymore (shutdown teardown) — everywhere else they hide category routing
 for no benefit.
 
 `ServerEvents.AtCharCreate`
-(`src/Atheriz.Core/ServerEvents.cs:57`) runs under the creation lock —
-and the lock is narrow on purpose. It guards only the check-then-insert
-sequence (reserve the name, commit the character) so two concurrent
-signups serialize instead of double-claiming. Everything around it stays
-outside: home-room resolution runs before the lock, password verification
-runs before the lock (hashing cost must never serialize signups), and
-console output plus hook calls run after it releases. No console I/O
-happens under the creation lock. The ordered shape of one signup:
+(`src/Atheriz.Core/ServerEvents.cs:56`) runs under the creation lock —
+and the lock is narrow on purpose: it guards only the check-then-insert,
+so two concurrent signups serialize instead of double-claiming. The
+ordered shape of one signup:
 
 1. Resolve the home room (no lock; handler reads are lock-safe).
 2. Verify the password hash (no lock; hashing cost stays off the
@@ -340,10 +328,9 @@ happens under the creation lock. The ordered shape of one signup:
    character, release.
 4. After release: print the success output, fire the creation hooks.
 
-Steps 1–2 may run concurrently for any number of signups; only step 3
-serializes, and it holds nothing but the check-then-insert. A slow signup
-storm therefore queues at step 3 for milliseconds, not for hashes or
-room lookups — which is the entire point of the narrowing.
+Only step 3 serializes, holding nothing but the check-then-insert — a
+signup storm queues there for milliseconds, which is the entire point of
+the narrowing.
 
 The 60-second create and reload watchdogs live in `AdminRoutes`, not in
 `ServerEvents` — events fan out; routes bound time. (Reload's watchdog is
@@ -364,8 +351,8 @@ shutdown: ServerLifecycle.DoShutdown → StartStop.DoShutdown → save
   runs engine startup and registers each loaded object's `AtTick`
   through typed dispatch — every tickable is a `GameObject` (`Node`
   overrides `AtTick`), and tick faults are caught and logged per object
-  (`StartStop.cs:375-381`), so one bad tick never kills the ticker.
-  `StartStop.DoShutdown` (`:186`) reverses it. The `Started` flag guards
+  (`StartStop.cs:376-382`), so one bad tick never kills the ticker.
+  `StartStop.DoShutdown` (`:187`) reverses it. The `Started` flag guards
   re-entry.
 - Startup and shutdown are asymmetric on purpose. Startup registers:
   every loaded object gets its tick slot, the pool and ticker start
@@ -391,7 +378,7 @@ shutdown: ServerLifecycle.DoShutdown → StartStop.DoShutdown → save
 - `Autosave` (`src/Atheriz.Core/Globals/Autosave.cs:11`) schedules
   checkpoints on the ticker: `StartAutosave(ticker, settings)` (`:99`,
   settings-only overload at `:126`) begins the schedule,
-  `StopAutosave()` (`:140`, ticker overload at `:151`) ends it. Timing and
+  `StopAutosave()` (`:140`, ticker overload at `:150`) ends it. Timing and
   guarantees live in [Saves and backups](10-persistence-saves.md).
   Scheduling on the ticker (rather than a private timer) keeps saves on
   the same scheduler as ticks, so lifecycle ordering stays simple:

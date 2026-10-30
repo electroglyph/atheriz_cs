@@ -18,6 +18,10 @@ internal sealed class GamePluginLoadContext : AssemblyLoadContext
         : base($"game-{Guid.NewGuid():N}", isCollectible: true)
     {
         ArgumentException.ThrowIfNullOrEmpty(pluginPath);
+        // Resolver stays bound to the REAL path (its deps.json + probing
+        // directory): the per-generation copy shares the directory but has
+        // no deps.json of its own, so resolving through the copy's name
+        // would lose plugin-local managed deps.
         _resolver = new AssemblyDependencyResolver(pluginPath);
     }
 

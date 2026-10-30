@@ -11,7 +11,7 @@ Game-folder commands need the current directory to be the game folder, so create
 cd /tmp/MyGame
 ```
 
-`new` accepts `[--overwrite/--force] [--port] [--host] [--telnet-port] [--foreground]`. Without `--overwrite` (or `--force`), `new` refuses to touch an existing folder. With it, the folder contents are replaced — stop the server first if one is running from that folder.
+`new` accepts `[--overwrite/--force] [--port] [--host] [--telnet-port] [--foreground]`. Without `--overwrite` (or `--force`), `new` asks `Replace files? (y/n)` before touching an existing folder. With it, the folder contents are replaced — stop the server first if one is running from that folder.
 
 `new` prompts for superuser credentials. For scripts and CI, pass them through the environment instead:
 
@@ -21,14 +21,14 @@ ATHERIZ_SUPERUSER_USERNAME=admin ATHERIZ_SUPERUSER_PASSWORD=admin1234 ./atheriz.
 
 The folder name becomes a C# identifier for the game project, so names with spaces or leading digits are rejected with an identifier error (C# plus Python keywords are checked). Creating directly on the filesystem root is refused (`DenyRoot`), and nesting a game folder inside another live game folder warns — pick an empty directory.
 
-Success looks like this: a folder holding `MyGame.csproj`, `GameSettings.cs`, `README.md`, `atheriz.sh` / `atheriz.cmd`, `build.sh` / `build.cmd`, plus fresh `save/`, `secret/`, and `web/` directories.
+Success looks like this: a folder holding `MyGame.csproj`, `GameSettings.cs`, `AssemblyInfo.cs`, `README.md`, `atheriz.sh` / `atheriz.cmd` / `atheriz.ps1`, `build.sh` / `build.cmd` / `build.ps1`, and `.gitignore`, plus fresh `save/`, `secret/`, and `web/` directories.
 
 ## 2. Tour the scaffold
 
 | File | What it is | What you do with it |
 |---|---|---|
 | `MyGame.csproj` | Game project on `net10.0` with a `ProjectReference` to the engine (`../Atheriz.Core`; generated folders get a NuGet-fallback variant instead). | Add game code files here; they compile into the plugin `reload` hot-loads. |
-| `GameSettings.cs` | Game bootstrap: 39 lines, mostly comments around two `const` overrides (`ServerName`, `WebclientSyncCheck`). Doubles as the game-folder marker next to the csproj. | Conventional display name / sync flag for game code; server branding comes from `appsettings.json` (§2). |
+| `GameSettings.cs` | Two `const` overrides (`ServerName`, `WebclientSyncCheck`) with a doc comment. Doubles as the game-folder marker next to the csproj. | Conventional display name / sync flag for game code; server branding comes from `appsettings.json` (§2). |
 | `AssemblyInfo.cs` | Assembly metadata for the game plugin. | Leave alone unless branding the build. |
 | `GlobalUsings.cs` | Shared `using` lines in the repo template (generated folders rely on `ImplicitUsings` instead and do not get this file). | Copy one in if the game wants project-wide usings. |
 | `README.md` | Per-game readme written by the scaffold. | Notes for anyone joining the game project. |
@@ -36,11 +36,9 @@ Success looks like this: a folder holding `MyGame.csproj`, `GameSettings.cs`, `R
 | `build.sh` / `build.cmd` | Per-game build: `--no-web` / `--web` / `--reload` / `--no-engine`. | Rebuild the plugin, redeploy `web/`, optionally hot-load. |
 | `web/` | Overridable client files served for this game. | Customize pages and assets; never hand-edit the host `wwwroot/` copy. |
 
-The shape of `GameSettings.cs` (39 lines on disk; `namespace MyGame` pattern — a generated folder uses `namespace <YourGame>`):
+The shape of `GameSettings.cs` (a few lines — no `namespace`, just the class):
 
 ```csharp
-namespace MyGame;
-
 public static class GameSettings
 {
     public const string ServerName = "MyGame";
@@ -66,10 +64,9 @@ townSquare.AddLink(new NodeLink("north", roadCoord));
 northRoad.AddLink(new NodeLink("south", squareCoord));
 ```
 
-Then build and hot-load, and walk in:
+Then hot-load and walk in:
 
 ```bash
-./build.sh --no-web
 ./atheriz.sh reload
 ```
 
@@ -88,7 +85,7 @@ A cobbled square with a fountain in the middle.
 Exits: north
 ```
 
-If `look` shows `limbo`, the fresh-game start room, the new rooms did not load — confirm the snippet ran in setup/seed and that the build preceded `reload`. If a lookup misses, players see the standard message from `CommandHelpers.FormatCouldNotFind`, e.g. `Could not find 'fountain'.`. The full object API (names, descriptions, tags) is in [Objects: creating and using them](03-objects-library.md).
+If `look` shows `limbo`, the fresh-game start room, the new rooms did not load — confirm the snippet ran in setup/seed and that `reload` rebuilt and loaded the plugin (check `save/server.log` for a build failure). If a lookup misses, players see the standard message from `CommandHelpers.FormatCouldNotFind`, e.g. `Could not find 'fountain'.`. The full object API (names, descriptions, tags) is in [Objects: creating and using them](03-objects-library.md).
 
 ## 4. EXAMPLE 2 — a takeable object
 
@@ -102,10 +99,9 @@ torch.MoveTo(townSquare);
 var found = townSquare.Search("torch");
 ```
 
-Build, reload, and play:
+Reload and play:
 
 ```bash
-./build.sh --no-web
 ./atheriz.sh reload
 ```
 
@@ -116,11 +112,11 @@ A cobbled square with a fountain in the middle.
 You see: torch.
 Exits: north
 > get torch
-You picked up: torch.
+You picked up: torch
 > inventory
-You are carrying: torch.
+You are carrying: torch
 > drop torch
-You dropped: torch.
+You dropped: torch
 ```
 
 `get`, `inventory`, and `drop` are the standard item verbs from [Commands: using and writing them](06-commands.md); containment rules (put, get, give, containers) are in [Objects: creating and using them](03-objects-library.md).
@@ -143,8 +139,8 @@ public sealed class WaveCommand : LoggedInCommand
     }
 }
 
-// Registration (explicit, one line per command):
-myCmdSet.Add(new WaveCommand());
+// Registration (explicit, one line per command, in your command-set setup):
+cmdSet.Add(new WaveCommand());
 ```
 
 Build with hot-load in one step and try it next to the torch:
@@ -165,11 +161,10 @@ Everyone else in Town Square sees `MyChar waves.` The full authoring guide — p
 The loop for all three examples above is the same:
 
 1. Edit game code.
-2. `./build.sh` (add `--no-web` for plugin-only speed while iterating on C#).
-3. `./atheriz.sh reload` to hot-load the rebuilt plugin.
-4. Try it in the client (`look`, `get torch`, `wave`).
+2. `./atheriz.sh reload` — it rebuilds stale projects itself before hot-loading (use `./build.sh --no-web --reload` to also skip the web redeploy).
+3. Try it in the client (`look`, `get torch`, `wave`).
 
-`reload` never compiles — stale sources answer with "run `dotnet build` first", which means re-run `./build.sh` before reloading. When settings or ports change, `reload` is not enough: `restart` (stop plus start) instead. When the world itself needs a fresh start, `reset` wipes `save/` and reseeds — it always prompts `[y/N]` and has no force flag, by design. Never edit `save/database.sqlite3` by hand; build in game or code, then save (why is in [Saves and backups](10-persistence-saves.md)).
+`reload` builds before it loads — a compile error aborts with `Reload aborted: build failed (...)` and the live code is untouched. When settings or ports change, `reload` is not enough: `restart` (stop plus start) instead — engine-code edits need `restart` too. When the world itself needs a fresh start, `reset` wipes `save/` and reseeds — it always prompts `[y/N]` and has no force flag, by design. Never edit `save/database.sqlite3` by hand; build in game or code, then save (why is in [Saves and backups](10-persistence-saves.md)).
 
 ## 7. Invite someone
 

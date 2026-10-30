@@ -10,7 +10,7 @@ Follow this page top to bottom and you end with a running game: the server liste
 
 | Need | Version | Check | Notes |
 |---|---|---|---|
-| .NET SDK | 10.0.100 or newer (`global.json` pins `10.0.100`, `latestPatch`) | `dotnet --version` | Required for everything. |
+| .NET SDK | 10.0.100 or newer (`global.json` pins `10.0.100`, `latestFeature`) | `dotnet --version` | Required for everything. |
 | Node + npm | Node 18+ | `node --version`, `npm --version` | Only needed to build the webclient. |
 
 On Arch: `sudo pacman -S dotnet-sdk aspnet-targeting-pack nodejs npm` (`aspnet-targeting-pack` is required: without it the `Atheriz.Server` web project fails at restore with `NETSDK1226: Prune Package data not found`).
@@ -62,7 +62,7 @@ cd /tmp/MyGame
 ./atheriz.sh start --foreground                 # runs on 0.0.0.0:9999 (web) + 0.0.0.0:4444 (telnet)
 ```
 
-`new` prompts for superuser credentials unless the `ATHERIZ_SUPERUSER_USERNAME` / `ATHERIZ_SUPERUSER_PASSWORD` environment variables are set. `create` adds an account and character to the game: `create <account> <character> <password>` — the superuser from `new` can log in and play directly, and each further `create` adds another account. `start` launches the server; `stop` shuts it down, `reload` hot-loads rebuilt game code (never compiles — build first), and `reset` wipes the world and reseeds it (always prompts `[y/N]`, no force flag). Full detail is in [Running the server](07-server-lifecycle-cli.md).
+`new` prompts for superuser credentials unless the `ATHERIZ_SUPERUSER_USERNAME` / `ATHERIZ_SUPERUSER_PASSWORD` environment variables are set. `create` adds an account and character to the game: `create <account> <character> <password>` — the superuser from `new` can log in and play directly, and each further `create` adds another account. `start` launches the server; `stop` shuts it down, `reload` rebuilds stale game code and hot-loads it (game code only — engine edits and settings need `restart`), and `reset` wipes the world and reseeds it (always prompts `[y/N]`, no force flag). Full detail is in [Running the server](07-server-lifecycle-cli.md).
 
 Now open the webclient at `http://localhost:9999/` (or `/webclient`), log in as `myaccount`, select `MyChar`, and type:
 
@@ -92,7 +92,7 @@ curl --max-time 5 http://localhost:9999/ready
 ss -lptn 'sport = :9999'
 ```
 
-`curl /health` should print `{"status":"ok",server:...}`; `ss` should show a LISTEN row for port `9999`. `/ready` prints `ok` once `DoStartup completed` is in the log, and `503` with `starting` before that. In practice: `/health` tells you the process is alive, `/ready` tells you it finished booting — scripts and supervisors should gate on `/ready` before sending players or `create` calls at it.
+`curl /health` should print `{"status":"ok",server:...}`; `ss` should show a LISTEN row for port `9999`. `/health` = process alive; `/ready` = boot finished (`ok`, else `503 starting`). Gate scripts and `create` calls on `/ready`, not `/health`.
 
 On any issue, read the game folder's `save/server.log` first. A healthy boot ends with `DoStartup completed`; a log stuck at `Starting` means startup hung before the world was ready. If the port is held by a leftover process, stop it via `./atheriz.sh stop` (or remove the stale claim with `kill $(cat save/server.pid)` only after confirming the server is truly dead). The ordered triage checklist (log → health → socket → `look` → pid claim) is in [Running the server](07-server-lifecycle-cli.md).
 
@@ -142,7 +142,7 @@ CLI flags (`--port`, `--host`, `--telnet-port`) and `ATHERIZ_*` environment vari
 
 The `ATHERIZ_SUPERUSER_USERNAME` / `ATHERIZ_SUPERUSER_PASSWORD` variables are honored anywhere initial credentials are resolved — `new` and the seed paths such as `reset` — so the same non-interactive export works for scripted wipes.
 
-Full precedence (CLI overlay, then `ATHERIZ_*` variables, then environment-specific JSON, then `appsettings.json`) plus TLS certificates and the per-game `web/` overrides are in [Hosting and configuration](08-hosting-configuration.md). Port and host changes need a `restart`, not a `reload` — `reload` hot-loads game code only, and never compiles. The `MapEnabled` / `LegendEnabled` toggles control the map view and legend the client shows; maps themselves are built in [World and maps](04-world-maps.md) and drawn in [Map editor](13-map-editor.md).
+Full precedence (CLI overlay, then `ATHERIZ_*` variables, then environment-specific JSON, then `appsettings.json`) plus TLS certificates and the per-game `web/` overrides are in [Hosting and configuration](08-hosting-configuration.md). Port and host changes need a `restart`, not a `reload` — `reload` rebuilds and hot-loads game code only (engine code, settings, and web files need `restart`). The `MapEnabled` / `LegendEnabled` toggles control the map view and legend the client shows; maps themselves are built in [World and maps](04-world-maps.md) and drawn in [Map editor](13-map-editor.md).
 
 If a game-folder command fails with `Cannot determine save path ...` (or `... secret path ...`), the current directory is not a game folder — `cd` into the folder `new` created (the one holding the game `.csproj` and `GameSettings.cs`) and retry.
 
