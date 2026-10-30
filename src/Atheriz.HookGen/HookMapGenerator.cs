@@ -92,7 +92,16 @@ public sealed class HookMapGenerator : IIncrementalGenerator
         sb.AppendLine("    internal static HookName? TryParseName(string? funcName) => funcName switch");
         sb.AppendLine("    {");
         foreach (var e in entries)
+        {
             sb.Append("        HookNames.").Append(e.Member).Append(" => HookName.").Append(e.Member).AppendLine(",");
+            // CLR override spellings are PascalCase (AtTick overrides AtTick);
+            // without this arm only the lowercase value spelling parses, so a
+            // hook installed by method name silently falls back to a custom
+            // string install that no dispatch site looks up. Emit only when
+            // distinct: identical spellings would duplicate the switch arm.
+            if (!string.Equals(e.Member, e.Value, StringComparison.Ordinal))
+                sb.Append("        nameof(HookName.").Append(e.Member).Append(") => HookName.").Append(e.Member).AppendLine(",");
+        }
         sb.AppendLine("        _ => null,");
         sb.AppendLine("    };");
         sb.AppendLine();

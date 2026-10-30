@@ -23,7 +23,14 @@ internal static class HookMarkerCache
             List<(string, MethodInfo, HookKind)> list = [];
             foreach (var m in type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
             {
-                if (!m.Name.StartsWith("at_", StringComparison.Ordinal)) continue;
+                // Two hook spellings: the Python legacy names methods at_*
+                // (FollowScript.at_pre_move), while C# overrides must be
+                // PascalCase (AtTick overrides GameObject.AtTick) — a
+                // lowercase-only scan silently installs nothing for every
+                // PascalCase hook. Unmarked methods stay excluded either way;
+                // an unresolvable name still installs as a custom string hook.
+                if (!m.Name.StartsWith("at_", StringComparison.OrdinalIgnoreCase)
+                    && HookNameExtensions.TryParseName(m.Name) is null) continue;
                 var kind = Classify(m);
                 if (kind != HookKind.None) list.Add((m.Name, m, kind));
             }

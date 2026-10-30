@@ -68,7 +68,9 @@ public class Script : GameObject
     }
 
     /// <summary>
-    /// Scans methods of this Script for [Before]/[After]/[Replace] on at_* and installs onto child.
+    /// Scans methods of this Script for [Before]/[After]/[Replace] on at_*
+    /// or PascalCase At* names (AtTick overrides GameObject.AtTick) and
+    /// installs onto child.
     /// Mirrors <c>Script.install_hooks</c> base_script.py:180-209.
     /// </summary>
     public void InstallHooks(GameObject child)

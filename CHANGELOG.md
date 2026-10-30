@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.36.0.0] - 2026-10-30
+
+Script hooks: methods marked `[Before]`/`[After]`/`[Replace]` whose names
+use the C# PascalCase spelling (`AtTick`, ...) now install on their child
+like the lowercase `at_*` spellings always did. The marker scan only matched
+lowercase `at_*` names, so a PascalCase hook silently never installed and
+never fired. Names resolving to an engine hook install under that hook;
+anything else keeps the previous custom-name install.
+
 ## [0.35.0.0] - 2026-10-27
 
 Create: the one-line `create <account> <password>` form now starts character
