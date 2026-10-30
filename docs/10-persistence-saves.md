@@ -1,6 +1,6 @@
 # Saves and backups
 
-> Covers: `src/Atheriz.Core/Persistence/`, `src/Atheriz.Core/Globals/IdGenerator.cs`, `src/Atheriz.Core/Globals/SaltProvider.cs`, `src/Atheriz.Core/Globals/IpBanStore.cs`, `src/Atheriz.Core/Globals/CreationCooldownStore.cs`, `src/Atheriz.Core/Globals/BoundedDictionary.cs`, `save/` + `secret/` layout, `../persist.md`. You learn when your world is saved, which files matter, how to back up and restore a live game, and what survives each of reload, restart, and reset. CLI verbs (`stop`, `reset`) live in [Running the server](07-server-lifecycle-cli.md); what of your objects persists lives with the object guide in [Objects: creating and using them](03-objects-library.md).
+> When the world is saved, what survives what, how to back up and restore.
 
 ## 1. The one discipline
 
@@ -17,7 +17,7 @@ What this means for YOU:
 
 ## 1.1 The crash story, concretely
 
-The scheduler is opt-in: `AutosaveMinutes` defaults to `0`, which disables timed checkpoints entirely, so a default server only saves on the `save` command and on clean shutdown. Timeline on a server with autosave set (say every 20 minutes): 12:00 checkpoint commits. 12:00–12:20 players build two rooms, link them, lock a door between them, and chat. 12:20 power dies. On reboot the loader takes the 12:00 commit: the two rooms do not exist, the link does not exist, the door was never locked — but neither does any corruption exist, because the uncommitted 20 minutes were memory-only and memory is gone. The chat scrollback rewinds too (history bounded and checkpointed like everything else). Nobody's account broke, nobody's old inventory duplicated, nothing half-applied: the rewind is total and clean, which is exactly what "the unit of durability is the checkpoint" guarantees. The operator's announcement writes itself from the log's last commit line: "we rewound to 12:00." Compare the alternative the discipline refuses: per-action writes that could leave the link without its rooms, the lock without its door — a half-applied world no reboot can explain. Total rewinds are legible; partial saves are mysteries. The discipline chooses legibility.
+Autosave is opt-in (`AutosaveMinutes` defaults to `0`, disabled). Example with 20-minute intervals: 12:00 commits, 12:20 power dies — reboot loads 12:00, the 20 minutes are gone, nothing half-applied. Total rewinds are legible; partial saves would be mysteries.
 
 ## 1.2 What the discipline asks of each role
 
@@ -55,7 +55,7 @@ There is no per-action durability knob. If it matters, save; if it does not, the
 
 ## 2.2 Why nothing is durable immediately (and why that is fine)
 
-Per-action durability (fsync on every `get`, every step, every word) would make each command pay disk latency — the game would feel the database on every keystroke. Batching durability into checkpoints flips the cost: gameplay runs at memory speed and the disk pays once per interval for the whole dirty set. The price is the crash window (§1: everything since the last save), and the currency that buys it back is the interval knob (§7.4) plus deliberate saves around what matters (§5: before events, after build sessions, on shutdown). Operators who understand the trade tune it; operators who fight it (demanding per-command durability) tax every player for insurance nobody feels. The discipline is one sentence long because the mechanism is one mechanism: memory leads, checkpoints commit, crashes rewind to the last commit.
+Per-action fsync would tax every command with disk latency. Batching into checkpoints keeps play at memory speed; the price is the crash window. Tune it with the interval plus saves around what matters.
 
 ## 2.3 Reading the save state from in-game
 
@@ -80,7 +80,7 @@ The headline rule: `save/database.sqlite3` is the world, and `secret/salt.txt` i
 
 ## 3.2 Secret continuity (why `secret/` usually stays home)
 
-`secret/admin.token` is the admin-route credential from [Running the server](07-server-lifecycle-cli.md) and [Hosting and configuration](08-hosting-configuration.md): every `stop`, `reload`, and live `create` presents it as `X-Admin-Token`. In web mode the token is per-boot by design — a clean shutdown deletes the file and the next boot mints fresh hex at `0600` — so after the stop-then-copy backup below there is normally no token file to copy, and none is needed: the restored server mints its own and the CLI reads whatever is current. Do not chase "token continuity" across migrations; it does not exist to preserve. The one exception is deliberate rotation (compromised token, or a stale token left by a crash): stop the server, delete `secret/admin.token`, start — boot regenerates fresh hex at `0600` and the old token dies with the old file. Rotation is a stop-delete-start sequence, never an edit (a zero-byte file from a truncated write is poison: regenerated, never accepted empty).
+`secret/admin.token` is per-boot: clean shutdown deletes it, next boot mints fresh hex. No continuity to preserve. Rotation is stop-delete-start, never edit.
 
 TLS-adjacent files also live under `secret/` when configured that way (`SslCertFile`/`SslKeyFile` pointing into `secret/` is the common layout). They travel under the same rule: the pair moves with the game, permissions preserved (`0700` dirs, `0600` files), or the new host serves plaintext/fails validation per `AllowInsecureTlsFallback`. A migration checklist that names `database.sqlite3` but forgets the cert pair produces a host that plays over telnet while browsers refuse the TLS front — copy the whole `secret/` tree, not just the token.
 
@@ -153,7 +153,7 @@ Expected: checksum passes before start (identical bytes — a mismatch means the
 
 ## 4.3 Backup retention (how many copies to keep)
 
-Keep three generations: the last known-good (verified by a boot — §7.3), the pre-change copy before every `reset`/migration/upgrade, and the rolling periodic copy. Name each with date and reason (`game-backup-2026-09-28-pre-reset-save`), checksum each at copy time (§7.3), and store the checksums with the copies. Prune oldest-first, never newest-first, and never keep exactly one — a single backup is a single point of failure wearing a backup's name. Test restores on a staging copy quarterly: an untested backup is a rumor, and the staging boot (`DoStartup completed` + `look` in a known room showing backup-era descriptions) is the whole test. Retention lives outside the game folder (separate disk, separate host) — a backup beside the database it mirrors protects against operator error, not disk failure.
+Keep three generations: last known-good, pre-change, rolling periodic. Name with date and reason, checksum at copy, store off-host. Test restores on staging: an untested backup is a rumor.
 
 ## 5. Autosave and shutdown saves
 

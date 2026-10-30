@@ -1,40 +1,10 @@
 # Custom code and hot reload
 
-> Covers: `src/Atheriz.Core/Plugins/` (`PluginLoader`, `GamePluginLoadContext`, `PluginReloader`, `EntityReplacementAttribute`, `IMigrateFrom`), `src/Atheriz.Core/IGameSetup.cs`, `src/Atheriz.Server/Infrastructure/GameTemplateGenerator.cs`, per-game `build.sh`/`build.cmd`. You learn where game code lives, how to substitute engine types while keeping live state, and how to rebuild and hot-reload a running server. The HTTP side of reload (route, caps, client flags) lives in [Running the server](07-server-lifecycle-cli.md); what a save guarantees lives in [Saves and backups](10-persistence-saves.md).
+> Where game code lives, how to replace types live, how to reload.
 
 ## 1. Plugin model: your game is a loadable assembly
 
-Your game project is a plain C# class library. The server loads its
-compiled dll into a collectible assembly-load context at boot
-(`src/Atheriz.Core/Plugins/PluginLoader.cs`, context in
-`src/Atheriz.Core/Plugins/GamePluginLoadContext.cs:13-18`):
-
-- One collectible context per load (`isCollectible: true`), so an old
-  plugin version can unload on reload instead of pinning memory forever.
-- The loader records `[EntityReplacement]` markers found in the assembly
-  as old-type to new-type pairs (applied in §2 and §3).
-- Loading at boot is best-effort
-  (`PluginReloader.LoadGameAssembliesAtBoot`,
-  `src/Atheriz.Core/Plugins/PluginReloader.cs:815`). When no game
-  assembly is found the server keeps going engine-only and prints:
-
-  `[Boot] No game assembly discovered — running engine-only. Build the game project first (dotnet build) so its dll is discoverable next to the game folder.`
-
-- A plugin that fails to load never stops the server. The failure is
-  logged and boot continues with engine types.
-- Unload path: `PluginLoader.Unload()` drops the context,
-  `WaitForUnload()` confirms collection, `Dispose()` releases. Live
-  patched instances root the old context, so unload cannot strand
-  half-migrated objects — reload patches instances first (§2) and only
-  then unloads the previous version.
-
-Discovery in game code is always explicit: commands register with
-`Add(new MyCommand())` (never an assembly scan), and world setup goes
-through `IGameSetup` (§6). Game code never scans assemblies for types.
-At boot the engine discovers the game assembly next to the game folder
-and then discovers new plugin modules inside it; both discovery steps are
-best-effort and log-and-continue, so a half-built plugin directory still
-boots the server on engine types.
+Your game is a plain C# class library, loaded into a collectible context at boot. No game dll means engine-only boot. Load failures log and continue; unload drops the context after instances are patched.
 
 What reload does not do, explicitly:
 

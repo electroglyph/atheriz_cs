@@ -1,6 +1,6 @@
 # Running the server
 
-> Covers: `src/Atheriz.Server/Program.cs`, `src/Atheriz.Server/Cli/`, `src/Atheriz.Server/Infrastructure/`, `atheriz.sh`, `atheriz.cmd`, `build.sh`, `build.cmd`. You learn how to run, stop, restart, reload, wipe, and populate a game from the command line, which files track the live server, and how to triage a server that will not start. Game-code authoring details live in [Custom code and hot reload](11-custom-code-plugins.md); hosting and settings live in [Hosting and configuration](08-hosting-configuration.md).
+> Run, stop, restart, reload, wipe, and populate a game from the command line.
 
 Game-folder commands need your current directory to be the game folder, so run them through the game folder's own launcher (`./atheriz.sh ...`). The engine is version 0.37.0.0 at the time of writing; see `../CHANGELOG.md` for history.
 
@@ -103,9 +103,7 @@ Stop is two-phase, and the phases run in order:
             (SIGTERM on Unix; there is no separate SIGKILL step)
 ```
 
-Phase (a) is graceful: `ShutdownClient` posts to `/_internal/shutdown`, retrying with the TLS setting flipped once so a cert mismatch does not look like a dead server. A clean accept returns exit code 0; an auth rejection aborts the whole stop — never escalate to kill when the token disagrees.
-
-Phase (b) is the verified kill: pid claim plus process identity plus port listener plus terminal re-verify, then Kill → wait 3 s → Kill (SIGTERM on Unix; no separate SIGKILL step).
+Phase (b) is the verified kill: pid claim, process identity, port listener, then Kill → wait 3 s → Kill (SIGTERM; no SIGKILL step).
 
 Two refusal cases protect you from shooting the wrong process:
 
@@ -121,9 +119,7 @@ cd mygame
 ./atheriz.sh restart --foreground
 ```
 
-`restart` runs `StopAsync`, invalidates the settings cache so edited `appsettings.json` values are picked up, waits for the claimed pid to exit (escalating to `Kill` after re-verification if it lingers), then waits up to 10 seconds for BOTH the web and telnet ports to go free via `WaitForPortFreeAsync` before spawning the replacement (`SpawnStart`) or running in-process (`RunForeground` with `--foreground`).
-
-Reach for `restart` when you changed settings, ports, the bind address, engine code under `src/`, or web files — `reload` does not re-read those (see §5).
+`restart` stops, waits up to 10 s for both ports to free, then starts again. Use it for settings, ports, binds, engine code, web files — `reload` skips those.
 
 ## 5. `reload`: build first, then hot-load (game code only)
 

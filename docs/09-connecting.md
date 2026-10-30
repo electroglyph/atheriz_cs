@@ -1,6 +1,6 @@
 # Connecting: webclient and telnet
 
-> Covers: `src/Atheriz.Core/Network/`, `src/Atheriz.Server/Hosting/WebSocketHandler.cs`, `src/Atheriz.Server/Hosting/Protocols.cs`, `web/templates/index.html`, `web/templates/webclient/index.html`, `wwwroot/` (compiled `webclient/`, `atheriz_draw/`). You learn how to open the webclient, how to reach the server over telnet, what the login flow looks like, and which connection limits an operator should know. Server-side ports, TLS, and routes live in [Hosting and configuration](08-hosting-configuration.md); the client deep-dive lives in [Webclient: terminal client](12-webclient.md).
+> Open the webclient, reach the server over telnet, log in, mind the limits.
 
 The server listens on two ports by default: 9999 for HTTP/WebSocket (browser clients, health endpoints) and 4444 for telnet (terminal and MUD clients). Both default values can change per game folder — when a connection fails, confirm the actual ports in `appsettings.json` before assuming the defaults (see [Hosting and configuration](08-hosting-configuration.md)).
 
@@ -28,25 +28,13 @@ telnet localhost 4444
 
 Any telnet client works; a dedicated MUD client gives you scrollback, triggers, and keypad movement on top of the same wire. Set the client to UTF-8 — the server speaks UTF-8 in both directions and assumes your side does too.
 
-On connect the server negotiates terminal capabilities through the `telnet_cs` library (`NegotiateAsync` — the engine only sets UTF-8, charset-off, window-size-on and delegates); no action is needed on your side. The wire order you will see in client logs is:
-
-> `DO TTYPE` on connect, then `WILL SGA` / `WILL BINARY` / `DO NAWS`; charset negotiation off; UTF-8 both ways.
-
-In practice that means: the server learns your terminal type, switches both directions to binary mode with single-character handling (`SGA`), learns your window size (`NAWS`), and skips charset negotiation because UTF-8 is already fixed. If your client logs negotiation bytes, the sequence above is what a healthy handshake looks like. `telnet_cs` is pinned exact at `0.19.0` (`Directory.Packages.props:16`).
+On connect the server negotiates terminal capabilities (`telnet_cs` `NegotiateAsync`, pin `0.19.0`): `DO TTYPE`, then `WILL SGA` / `WILL BINARY` / `DO NAWS`, charset off, UTF-8 both ways. No action needed on your side.
 
 Players using a screen reader can switch to the screen-reader command once logged in — it trims map art and decorative spacing from room output while keeping exits, contents, and names intact. The full command catalog lives in [Commands: using and writing them](06-commands.md).
 
 ## 1.1 The webclient panes up close
 
-The landing page (`/` or `/webclient`) is a static shell; the game begins when you press Play. Three regions share the window:
-
-- The terminal pane (left, largest): scrolling game output with input history on Up/Down, pager prompts on long output, and a focused input line that never loses keystrokes to output bursts.
-- The map pane (right): your room centered with linked neighbors at their exits, legend colors per terrain, re-rendered on every move and every `map`. Builders see committed edits appear without a client refresh.
-- The status strip: connection state (connected / reconnecting), the audio toggle, and the editor button that opens the drawing/map editor in a new window (allow popups — the blocked-popup banner means the browser ate it, not that the editor is broken).
-
-First-visit checklist: page loads, Play opens the client, the connection banner names the game's `ServerName`, and after login `look` describes `limbo` on a fresh game. If the banner names the wrong game, the browser tab is pointed at the wrong port — compare against the game folder's `appsettings.json` before reporting anything.
-
-Reconnect behavior: dropping the tab and reopening it starts a new transport but the same account — log in, select the character, and the world resumes. History restarts empty (per-session recall); position, inventory, and channels resume (server-side state). A `ready: starting` window during server reboots shows the client retrying instead of failing — wait for `DoStartup completed` server-side rather than hammering reconnect.
+Landing page (`/` or `/webclient`) is a static shell; Play starts the game. Terminal left, map right, status strip (connection state, audio, editor button) across. Reconnect starts a new transport, same account — history clears, world resumes.
 
 ## 2.1 Telnet clients: profiles that work
 
@@ -59,19 +47,8 @@ encoding: UTF-8
 negotiation: enabled (TTYPE + SGA + BINARY + NAWS)
 ```
 
-Keep negotiation enabled. The server opens with `DO TTYPE` and continues `WILL SGA` / `WILL BINARY` / `DO NAWS` with charset negotiation off and UTF-8 fixed both ways (the `telnet_cs` `NegotiateAsync` opening preset, exact pin `0.19.0`; see §2). A client that answers the probes gets window-size-aware map rendering; a client that ignores them still plays, but the server never learns the terminal width and map art falls back to a default width. If your client's log shows the §2 wire order, the handshake is healthy — there is nothing further to configure.
-
-Screen-reader players: switch to the screen-reader command after login. It strips map art and decorative spacing while keeping exits, contents, and names — the same world, linearized. The command catalog (including the reader) lives in [Commands: using and writing them](06-commands.md).
-
-## 2.2 Negotiation failure modes (and why most are harmless)
-
-A client that answers nothing to `DO TTYPE` gets the defaults: unknown terminal type, no window size, UTF-8 assumed. The session plays normally except map art uses the fallback width — annoying, not broken. Enable negotiation in the client profile (§2.1) and the next connection picks up the real width.
-
-A client that half-negotiates (answers `TTYPE` but ignores `NAWS`) gets a named terminal with a default width — better, still not exact. Same fix: the missing piece is the client's `NAWS` response, not anything server-side.
-
-Garbled text in one direction only is almost always an encoding mismatch: the client is set to Latin-1 or a local code page while the server speaks UTF-8 both ways. Set the client to UTF-8 (§2.1 profile) and accented names, room descriptions, and channel chatter render correctly. Garbling in logs but not on screen points at the log viewer, not the connection.
-
-A connection that drops during negotiation — banner never appears — is the one case worth operator attention: something between client and server (a proxy with telnet-unaware filtering, a firewall doing protocol inspection) is interfering with the option bytes. Raw `telnet(1)` from the server host itself distinguishes local misconfiguration from middlebox interference: banner locally means the path is at fault, no banner locally means the game listener is (check `save/server.log` and the triage list in [Running the server](07-server-lifecycle-cli.md)).
+Keep negotiation enabled. Without it the session still plays but map art falls back to a default width.
+Most failures are harmless: no answer means defaults, half-answers mean default width, one-way garble means the client isn't UTF-8. Only a drop before the banner needs an operator (middlebox eating option bytes — test with raw `telnet(1)` from the host).
 
 ## 3. The session: banner, login, puppet, quit
 
@@ -112,29 +89,23 @@ MUD-client extras worth enabling: scrollback (thousands of lines — room text s
 
 ## 3.1 The panes and prompts in detail
 
-The terminal pane shows game output oldest-at-top with room text, chat, and command results interleaved in arrival order. Long output pages rather than flooding — when a command produces more than a screenful, the client holds the remainder behind a pager prompt instead of scrolling it past. The input line keeps focus during output bursts, so combat or chatty rooms never steal keystrokes.
+Terminal shows output oldest-at-top; long output pages. History is per browser tab; world state is server-side. Map re-renders on move and `map`. Audio toggle persists per browser.
 
-History (Up/Down) is per browser session: closing the tab starts a fresh recall buffer, while the character, its inventory, and its position persist server-side. Reconnecting resumes the world where you left it — the client forgets, the server remembers.
-
-The map pane draws the rooms around your character from live map data: your room centered, linked neighbors at their exits, legend colors per terrain. It re-renders on every movement and on `map`. Builders editing the world see their changes appear in the pane as soon as the edit commits — no client refresh needed, because the pane subscribes to the same data the `map` command reads.
-
-The audio toggle covers event sounds (movement, messages, alarms). Off means silent; the toggle persists per browser so a muted laptop stays muted across visits.
-
-Name and password rules in one paragraph: account names are unique, case-insensitive, and bounded in length; character names draw from the same uniqueness pool per account cap (`MaxCharacters`, default 5); passwords have a minimum length and are hashed with the single static salt (`SaltProvider` — see [Saves and backups](10-persistence-saves.md)) so the database never holds plaintext. Rejections name the failed rule without leaking which accounts exist.
+Names: accounts unique, case-insensitive; characters capped by `MaxCharacters` (default 5); passwords hashed, never plaintext. Rejections name the rule, never which accounts exist.
 
 ## 3.2 Puppet edge cases
 
 One character, one driver: puppeting a character that is already puppeted elsewhere is refused with `This character is not available.` — the old session keeps control, the new one does not fight for input. Deleting a character unpuppets every session attached to it first — sessions survive, puppets do not linger on deleted avatars.
 
-Connection loss mid-puppet (closed laptop, dead socket) leaves the character unpuppeted but intact in its room: reconnect, log in, select, and you are back where the transport died. Position and inventory kept living in server memory the whole time — the disconnect dropped a socket, not a savegame. What does NOT survive a simultaneous server crash is anything since the last checkpoint (see [Saves and backups](10-persistence-saves.md)) — reconnecting after a crash may rewind minutes, which is the save discipline working as documented, not lost data.
+Connection loss mid-puppet leaves the character intact in its room: reconnect and resume. A simultaneous server crash rewinds to the last checkpoint (see [Saves and backups](10-persistence-saves.md)).
 
 ## 4. Operator notes: caps, bans, throttles, size limits
 
-Per-IP and total connection caps (`MaxConnectionsPerIp`, `MaxTotalConnections`) bound how many simultaneous connections the server accepts. Past the cap, the new socket is closed at registration — the client sees the connection drop with no message; the reason (`per-IP limit … reached` / `total limit … reached`) goes to the server log, not the client. Nothing is queued. The caps live in settings; the enforcement lives in `ConnectionManager` (see Under the hood). If legitimate players hit the cap during an event, raise it and `restart` (settings changes need a restart, not a `reload`).
+Per-IP and total connection caps (`MaxConnectionsPerIp`, `MaxTotalConnections`) bound how many simultaneous connections the server accepts. Past the cap, the socket closes with no message; the reason goes to the server log. Nothing is queued. Raise caps with `restart` (settings need restart, not `reload`).
 
 Bans: a banned IP is refused at connect time — the socket closes with no message and the reason goes to the server log (`IpBanStore` outcomes). Persistent bans (the `IsBanned` flag on a character or account) survive restarts by design; temporary IP bans clear on reboot (the ban verb reports them as `banned until server restart`). Ban and unban through the in-game admin verbs (catalog in [Commands: using and writing them](06-commands.md)); never hand-edit the ban rows in the database file.
 
-Creation throttles: account creation is rate-limited per source. Too-fast repeat `create` attempts are rejected with a wait-and-retry message — this is the creation throttle doing its job against bots, not a bug. Legitimate bursts (a classroom signing up at once) should pace themselves or ask the operator to create accounts from the server side (`create` CLI verb, [Running the server](07-server-lifecycle-cli.md)).
+Creation throttles: too-fast `create` is rejected with wait-and-retry. Pace classroom signups or use the `create` CLI verb.
 
 Message size caps — both directions, both protocols:
 
@@ -143,9 +114,7 @@ Message size caps — both directions, both protocols:
 | `WebsocketMaxMessageSize` | 65536 | 64 KB max per inbound WebSocket message. Oversize input closes the socket (`MessageTooBig`); the server log records the drop. |
 | `TelnetMaxLine` | 65536 | 64 KB max per telnet line. Oversize input is dropped silently; the connection stays up. |
 
-Both caps are 64 KB (65536). Reads run a 64 KB fragment/line loop: WebSocket frames accumulate up to the cap and an oversize message closes the socket (`MessageTooBig`, logged server-side); telnet bytes accumulate to end-of-line up to the cap and anything past it vanishes without a reply to the sender (the server log records the drop, throttled) rather than disconnecting them.
-
-Log triage for connection complaints: `save/server.log` first, then the ordered checklist (`/health`, `ss`, `look` → `limbo`, pid claim) in [Running the server](07-server-lifecycle-cli.md).
+Log triage: `save/server.log` first, then `/health`, `ss`, `look` → `limbo` ([Running the server](07-server-lifecycle-cli.md)).
 
 ## 4.1 Message examples (what each outcome looks like)
 
@@ -164,13 +133,11 @@ Creation is temporarily rate-limited. Please try again later.
 Invalid password.
 ```
 
-The cap/ban/throttle/login wordings above are quoted verbatim from the code (`ConnectionManager`, `WebSocketHandler`, `ConnectCommand`, `CreationCooldownHelper`); over-cap and banned sockets close with no client-facing text (the reasons land in `save/server.log`) — there is no "busy" message. Throttle, login, and creation outcomes answer as §4.1 quotes, except the size gate, which stays silent on telnet and closes the socket on WebSocket.
-
 ## 4.3 Ban lifecycle (operator view)
 
-Bans are set and cleared through the in-game admin verbs — never by editing the database. A ban records the address (or range), the reason, and the setter; the banned source is refused at connect time from the next connection onward (existing sessions from that source are dropped when the ban lands). Unban reverses it the same way: next connection from the address succeeds. Persistent bans survive restarts — the ban list is world state in `save/database.sqlite3`, covered in [Saves and backups](10-persistence-saves.md) — while temporary IP bans clear on reboot, so a reboot is never a pardon and never a sentence. Review standing bans the next day rather than assuming a reboot cleared them; stale event-night bans are the commonest cause of "it worked yesterday" complaints.
+Bans go through in-game admin verbs, never DB edits. Persistent bans survive restarts; temp IP bans clear on reboot. Stale event-night bans cause most "it worked yesterday" complaints.
 
-Creation throttles need no administration at all: windows slide, counters decay, and a throttled source succeeds on retry after waiting. Operators should resist clearing throttle state by hand — the decay is the feature, and manual clears teach nothing about whether the burst was a classroom or a botnet. The log's `ThrottledLog` summaries show the rate shapes; classrooms spike once and decay, botnets sustain.
+Throttles need no admin: wait and retry succeeds.
 
 ## 5. Full session transcript (fresh game)
 

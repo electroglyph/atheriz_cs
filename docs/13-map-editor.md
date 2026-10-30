@@ -1,6 +1,6 @@
 # Map editor
 
-> Covers: the `/atheriz_draw` entry (AtheriZ Draw), the in-game `mapedit` launch and its one-time grant, the canvas model and the violet server grid, drawing tools, the room overlay and Room panel, Create/Delete Rooms, Save to server, legend editing, and the ack/deny round-trip. You learn to draw map art, create and wire rooms, and get the result onto the live map. The terminal client lives in [Webclient: terminal client](12-webclient.md); map data, legends, and builder commands live in [World and maps](04-world-maps.md).
+> Draw map art, create and wire rooms, get the result onto the live map.
 
 ## 1. Opening the editor
 

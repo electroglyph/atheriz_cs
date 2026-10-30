@@ -1,6 +1,6 @@
 # Engine internals: threads, locks, utils
 
-> Covers: `src/Atheriz.Core/Concurrency/` (`AsyncThreadPool`, `AsyncTicker`), `src/Atheriz.Core/Utils/` (`Pathfind`/`PathNode`, `GameUtils`, `StringDistance`, `GameClock`/`ITimeProvider`/`SystemTimeProvider`, `CryptoRandom`, `FsUtil`/`PathGuards`, `TlsCertLoader`), `src/Atheriz.Core/Logger.cs`, `src/Atheriz.Core/ServerEvents.cs`, `src/Atheriz.Core/Globals/` (`GlobalServices`, `StartStop`, `Autosave`), `src/Atheriz.Server/Infrastructure/ServerLifecycle.cs`. The one doc allowed to lead with internals: what runs where, what the locking rules are, and what helpers exist. Game-code rules that follow from these internals live in [Custom code and hot reload](11-custom-code-plugins.md); save mechanics live in [Saves and backups](10-persistence-saves.md).
+> Covers threads, locks, utils. Game-code rules in [Custom code](11-custom-code-plugins.md); saves in [Saves](10-persistence-saves.md).
 
 ## 1. Threading model in one page
 
@@ -13,21 +13,7 @@ Three kinds of work, three places it runs:
 - The database gate serializes writes (→ [Saves and backups](10-persistence-saves.md)).
   The world lives in memory; the database is written only on save.
 
-Two consequences shape every other section. First, world mutation happens
-under documented locks (§4) — game code touches the world through
-`GameObject` and command APIs that take the right locks, never by
-reaching around them. Second, there are no sleeps or polling loops in
-game code: handlers run on shared threads, so a blocking handler stalls
-everyone. Queue work (pathfind-then-move, §6) instead of waiting for it.
-
-Which thread runs a given piece of game code: command `Run` bodies and
-hook handlers run on pool threads (one per queued item, relief when
-saturated); `AtTick` bodies, alarms, and registered coroutines run on the
-ticker; `Delay` callbacks return to the pool. None of these is the
-network thread and none is stable across calls — the same torch may tick
-on different ticker turns — so per-call state lives in arguments and
-object fields under locks, never in thread-locals or "the current
-thread".
+Two rules: mutate through `GameObject`/command APIs (they take the right locks), and never block — handlers share threads.
 
 ## 2. AsyncThreadPool: bounded workers, relief, watchdog
 

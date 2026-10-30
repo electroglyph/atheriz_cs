@@ -1,6 +1,6 @@
 # World and maps: areas, nodes, links
 
-> Covers: `src/Atheriz.Core/Objects/Node.cs`, `Node.Links.cs`, `Node.Settable.cs`, `NodeArea.cs`, `NodeGrid.cs`, `NodeLink.cs`, `Globals/NodeHandler.cs`, `NodeHandler.Partial.cs`, `Globals/MapHandler.cs`, `MapInfo.cs`, `MapEdit*.cs` (4), `Globals/GameTime.cs`, `Settings/AtherizSettings.cs` (MapEnabled/LegendEnabled). You learn to lay out areas and rooms, link them, edit maps in-game, and run timed behavior; tick scripts in full are in [Hooks, scripts, and text](05-hooks-scripts-text.md).
+> Covers areas, rooms, links, maps. Tick scripts in [Hooks](05-hooks-scripts-text.md).
 
 ## 1. Areas, grids, nodes in one page
 

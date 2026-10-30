@@ -1,6 +1,6 @@
 # Objects: creating and using them
 
-> Covers: `src/Atheriz.Core/Objects/GameObject*.cs` (7 partials), `ContentUtils.cs`, `Flags.cs`, `ISettable.cs`, `IGenderProvider.cs`, `Account.cs`, `Session.cs`, `Channel.cs`, `Door.cs`, `Globals/ObjectRegistry.cs`. You learn how to create, find, move, and message objects from game code; save mechanics live in [Saves and backups](10-persistence-saves.md).
+> Create, find, move, and message objects from game code.
 
 ## 1. The model in one page
 

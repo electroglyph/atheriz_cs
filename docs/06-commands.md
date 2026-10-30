@@ -1,6 +1,6 @@
 # Commands: using and writing them
 
-> Covers: `src/Atheriz.Core/Commands/Command.cs`, `CommandContext.cs`, `CommandDispatcher.cs`, `CommandRegistry.cs`, `CmdSet.cs`, `GameArgumentParser.cs` (+`ParsedArgs`), `ParsedArgKeys.cs`, `CommandError.cs`, `CommandHelpException.cs`, `CommandHelpers.cs`, `Formatting.cs`, `HelpFormatter.cs`, `LoggedInCommand.cs`, `BuilderCommand.cs`, `LagGateCommand.cs`, `BaseChannelCommand.cs`, `ChannelAction.cs`, `CommandPermissions.cs`, `TargetResolution.cs`, `SessionLifecycle.cs` (`ConnectionHelper`+`CreationCooldownHelper`), `IMessageTarget.cs`, `ISessionProvider.cs`, `ILagInfo.cs`, `UnloggedIn/` (13), `LoggedIn/` (12). First half: what you can type. Second half: how to add a verb. Room/link mechanics are in [World and maps](04-world-maps.md); the tutorial teaser is in [Creating a game](02-creating-a-game.md).
+> Covers `Commands/*`. First half: what you can type. Second half: how to add a verb.
 
 ## 1. Connection-screen verbs
 

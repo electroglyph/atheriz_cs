@@ -1,6 +1,6 @@
 # Getting started
 
-> Covers: [`build.sh`](../build.sh), [`build.cmd`](../build.cmd), [`atheriz.sh`](../atheriz.sh), `src/Atheriz.Server/appsettings.json`, `webclient/`. What the reader learns: install prerequisites, build the engine, create a game folder, connect a first client, and check the server is healthy. Configuration detail lives in [Hosting and configuration](08-hosting-configuration.md); client detail in [Webclient: terminal client](12-webclient.md).
+> Install, build, create a game folder, connect, check health.
 
 ## 1. Overview
 

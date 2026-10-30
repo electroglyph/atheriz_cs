@@ -1,6 +1,6 @@
 # Creating a game
 
-> Covers: `src/Atheriz.GameTemplate/` (csproj, `GameSettings.cs`, `AssemblyInfo.cs`, `GlobalUsings.cs`, `README.md`), per-game `atheriz.sh` / `atheriz.cmd` and `build.sh` / `build.cmd`, the `new` / `create` / `reload` CLI path. What the reader learns: scaffold a game folder, read every file in it, add two rooms, a takeable torch, and a wave command, then play them. The full object API is in [Objects: creating and using them](03-objects-library.md); links and nodes in [World and maps](04-world-maps.md).
+> Scaffold a folder, add rooms, a torch, and a wave command, then play them.
 
 ## 1. Create the folder
 

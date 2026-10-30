@@ -1,6 +1,6 @@
 # Hosting and configuration
 
-> Covers: `src/Atheriz.Server/Hosting/`, `src/Atheriz.Server/Infrastructure/ServerLifecycle.cs`, `src/Atheriz.Core/Settings/`, `appsettings.json`, `appsettings.Development.json`, `Properties/launchSettings.json`. You learn the two hosting modes, which ports and routes the server exposes, how admin authentication works, and how every setting resolves from CLI flags down to defaults. CLI verbs themselves live in [Running the server](07-server-lifecycle-cli.md); connecting as a player lives in [Connecting: webclient and telnet](09-connecting.md).
+> Two hosting modes, ports and routes, admin auth, settings.
 
 ## 1. Two modes: web app vs headless host
 
@@ -191,7 +191,7 @@ DoStartup completed
 Web server listening on http://0.0.0.0:9999
 ```
 
-`PID … acquired at …` means the pid claim succeeded — no other server owns this game folder. `Admin token ensured at …` means the per-boot admin secret is ready. `DoStartup completed` means the world loaded, schedulers started, and `/ready` flipped from `503 starting` to `200 ok`. `Web server listening on …` names the actual bind (scheme + address + port — `https` only when the cert loads). If the log stops before the first line, another process holds the claim; if it stops between the lines, the world load hung and the lines above the stall name the subsystem.
+`PID … acquired` = claim won. `DoStartup completed` = world loaded, `/ready` is `200 ok`. `Listening on …` = actual bind. Stall between lines names the hung subsystem.
 
 Shutdown mirrors the order: `DoShutdown` checkpoints, releases the pid claim, and deletes the token file (fresh secret next boot — by design, not a loss), all inside the 5-second `ShutdownTimeout`. A shutdown that exceeds the timeout is cut off — the log says so, and the next boot recovers from the last completed checkpoint (see [Saves and backups](10-persistence-saves.md)).
 

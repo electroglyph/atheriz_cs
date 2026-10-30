@@ -1,10 +1,10 @@
 # Hooks, scripts, and text
 
-> Covers: `src/Atheriz.Core/Objects/Hooks.cs`, `HookName.cs`, `HookNames.cs`, `HookMarkers.cs`, `HookRegistry.cs`, `DelegateInvoker.cs`, `Script.cs`, `FollowScript.cs`, `LockTable.cs`, `LockEntry.cs`, `LockPolicies.cs`, `FuncParser/` (2 files), `VerbConjugation/Conjugate.cs`, `Pronouns.cs`, `Messaging/GameObjectMessaging.cs`, `Menu.cs` (at the `Atheriz.Core` root), `Root: Privilege.cs`. You learn to react to events, run tick code, gate access, format text, and build multi-step menus; the verbs that check locks are cataloged in [Commands](06-commands.md).
+> React to events, run tick code, gate access, format text, build menus.
 
 ## 1. Example: react to entering a room
 
-Hook sites fire at fixed points (receiving/leaving on move, rendering on look, teardown on delete, speech on say). Entering and leaving run through the receive/leave pair: `AtObjectLeave(destination, toExit)` fires on the mover and `AtObjectReceive(source, fromExit)` on the destination — each handler receives the other side plus the exit name. Register a handler on the object with `InstallHook`; query with `HasHook`. There is no per-delegate uninstall — hook removal is script-scoped (`Script.RemoveHooks`, which unwires that script's marker-attributed methods) or whole-registry (`Clear` at delete teardown). A script that no longer applies removes itself the same way `FollowScript` does when its leader is gone.
+Hook sites fire at fixed points (move, look, delete, say). `AtObjectLeave` fires on the mover, `AtObjectReceive` on the destination. Register with `InstallHook`; removal is script-scoped or whole-registry — no per-delegate uninstall.
 
 ```csharp
 // Greet anyone entering Town Square. Installed on the room: the site calls
