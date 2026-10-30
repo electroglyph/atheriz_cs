@@ -9,10 +9,18 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
 - The in-game `reload` command now rebuilds stale game projects (Release)
   before reloading, so edited code is picked up without a separate build
   step. A failed build aborts the reload, leaving live code untouched.
+  Builds time out after 10 minutes instead of hanging the reload.
 - Reloading with nothing changed is now a no-op ("already up to date")
   instead of pointlessly reloading the same assemblies.
 - Reloading already-converted code no longer needs a restart: live objects
   convert to the new generation in place, so command changes take effect.
+- Plugin discovery ignores engine/template projects in both the CLI and the
+  in-game paths, and boot cleanup also sweeps orphaned load copies out of
+  the plugin drop folders.
+- The CLI `reload` and the in-game `reload` verb now share one path: the CLI
+  only asks the server to reload, and the server rebuilds stale game
+  projects before loading — the same build-first reload the verb already
+  ran. A failed build comes back as an error from either verb.
 
 ## [0.36.0.0] - 2026-10-30
 

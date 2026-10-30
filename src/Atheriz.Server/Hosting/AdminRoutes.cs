@@ -40,7 +40,12 @@ public static class AdminRoutes
                     {
                         var ticker = GlobalServices.GetAsyncTicker();
                         var pool = GlobalServices.GetAsyncThreadPool();
-                        msg = await PluginReloader.ReloadGameLogicAsync(ticker, pool, settings).ConfigureAwait(false);
+                        // Same build-first path as the in-game `reload` verb:
+                        // stale game projects are rebuilt before loading, so
+                        // the CLI (which only triggers this route) and the
+                        // verb share one behavior. A failed build aborts with
+                        // its message; nothing live is touched.
+                        msg = await PluginReloader.ReloadGameLogicWithBuildAsync(ticker, pool, settings).ConfigureAwait(false);
                         try { ServerLifecycle.DoReload(settings); } catch (Exception ex) { AtherizLogger.LogError($"[HotReload] DoReload failed: {ex.Message}"); }
                     }
                     catch (Exception ex)

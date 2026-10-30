@@ -238,9 +238,10 @@ public class PortedAtherizMainTests
     {
         using var env = GlobalTestEnv.Enter();
         var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/AdminRoutes.cs");
-        // hot_reload endpoint should be async and not block loop (uses PluginReloader)
+        // hot_reload endpoint should be async and not block loop (uses PluginReloader).
+        // It drives the build-first path, shared with the in-game reload verb.
         Assert.Contains("hot_reload", src);
-        Assert.Contains("ReloadGameLogicAsync", src);
+        Assert.Contains("ReloadGameLogicWithBuildAsync", src);
     }
     [Fact] public void ShutdownBlocksLoop()
     {

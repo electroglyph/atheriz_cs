@@ -3,44 +3,16 @@ namespace Atheriz.Server.Cli;
 
 public static class ReloadHandler
 {
-    private static readonly TimeSpan PluginBuildTimeout = TimeSpan.FromMinutes(10);
-
     /// <summary>
-    /// Hot reloads game logic on the running server. When the current folder
-    /// holds game plugin projects they are rebuilt (Release) first, so the
-    /// reload picks up fresh code. A failed build aborts before contacting
-    /// the server, leaving the running code untouched.
+    /// Hot reloads game logic on the running server by triggering its
+    /// <c>/_internal/hot_reload</c> route. The server rebuilds stale game
+    /// projects (Release) before reloading — the same build-first path as
+    /// the in-game <c>reload</c> verb — so the CLI never builds locally and
+    /// both verbs share one behavior. A failed build aborts server-side and
+    /// its message is reported here.
     /// </summary>
-    public static Task<int> ReloadAsync(int? portOverride)
-        => ReloadAsync(portOverride, Directory.GetCurrentDirectory(), BuildPluginAsync);
-
-    /// <summary>
-    /// Build-then-reload with the plugin folder and build step injected
-    /// (production passes the current folder and the dotnet build runner).
-    /// </summary>
-    public static async Task<int> ReloadAsync(
-        int? portOverride,
-        string pluginDirectory,
-        Func<string, CancellationToken, Task<bool>> buildAsync)
+    public static async Task<int> ReloadAsync(int? portOverride)
     {
-        ArgumentNullException.ThrowIfNull(pluginDirectory);
-        ArgumentNullException.ThrowIfNull(buildAsync);
-        using var buildTimeout = new CancellationTokenSource(PluginBuildTimeout);
-        foreach (var csproj in FindPluginProjects(pluginDirectory))
-        {
-            bool built;
-            try
-            {
-                built = await buildAsync(csproj, buildTimeout.Token).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Build of {Path.GetFileName(csproj)} failed: {ex.Message}");
-                return 1;
-            }
-            if (!built) return 1;
-        }
-
         var settings = StopHandler.EffectiveSettingsValue;
         var port = portOverride ?? settings.WebserverPort;
         var tlsOn = !string.IsNullOrEmpty(settings.SslCertFile);
@@ -63,21 +35,4 @@ public static class ReloadHandler
         }
         catch { Console.WriteLine($"Response: {body}"); return 1; }
     }
-
-    /// <summary>
-    /// Game plugin projects in a folder: top-level *.csproj files, excluding
-    /// the server project itself and test projects (reload never builds those).
-    /// Shared implementation lives in Core so the in-game reload builds the
-    /// same set the CLI builds.
-    /// </summary>
-    public static IReadOnlyList<string> FindPluginProjects(string directory)
-        => Atheriz.Core.Plugins.PluginBuilder.FindPluginProjects(directory);
-
-    /// <summary>
-    /// Runs dotnet build on one plugin project (Release). Build output is
-    /// printed only on failure. Returns false when the SDK is missing, the
-    /// build fails, or the timeout elapses.
-    /// </summary>
-    public static Task<bool> BuildPluginAsync(string csprojPath, CancellationToken cancellationToken)
-        => Atheriz.Core.Plugins.PluginBuilder.BuildAsync(csprojPath, cancellationToken);
 }
