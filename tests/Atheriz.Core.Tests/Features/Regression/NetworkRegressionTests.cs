@@ -122,11 +122,13 @@ public class NetworkRegressionTests
     }
 
     // plugin staleness must see subdirectory edits, not just top-level files
-    // (csproj discovery itself stays top-level).
+    // (csproj discovery itself stays top-level). The rule lives in
+    // PluginBuilder (shared with the build-first reload); the loader only
+    // consumes it.
     [Fact]
     public void PluginStaleness_Recurses()
     {
-        var src = SourceScan.Read("src", "Atheriz.Core", "Plugins", "PluginReloader.cs");
+        var src = SourceScan.Read("src", "Atheriz.Core", "Plugins", "PluginBuilder.cs");
         Assert.Contains("GetFiles(dir, \"*.cs\", SearchOption.AllDirectories)", src);
     }
 

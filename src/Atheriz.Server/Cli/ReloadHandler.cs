@@ -67,82 +67,17 @@ public static class ReloadHandler
     /// <summary>
     /// Game plugin projects in a folder: top-level *.csproj files, excluding
     /// the server project itself and test projects (reload never builds those).
+    /// Shared implementation lives in Core so the in-game reload builds the
+    /// same set the CLI builds.
     /// </summary>
     public static IReadOnlyList<string> FindPluginProjects(string directory)
-    {
-        ArgumentNullException.ThrowIfNull(directory);
-        if (!Directory.Exists(directory)) return [];
-        var found = new List<string>();
-        foreach (var csproj in Directory.GetFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly))
-        {
-            var name = Path.GetFileName(csproj);
-            if (name.Equals("Atheriz.Server.csproj", StringComparison.OrdinalIgnoreCase)) continue;
-            if (name.EndsWith(".Tests.csproj", StringComparison.OrdinalIgnoreCase)) continue;
-            found.Add(csproj);
-        }
-        return found;
-    }
+        => Atheriz.Core.Plugins.PluginBuilder.FindPluginProjects(directory);
 
     /// <summary>
     /// Runs dotnet build on one plugin project (Release). Build output is
     /// printed only on failure. Returns false when the SDK is missing, the
     /// build fails, or the timeout elapses.
     /// </summary>
-    public static async Task<bool> BuildPluginAsync(string csprojPath, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(csprojPath);
-        Console.WriteLine($"Building {Path.GetFileName(csprojPath)}...");
-        var output = new StringBuilder();
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo("dotnet", $"build \"{csprojPath}\" -c Release --nologo")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            },
-        };
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
-        try
-        {
-            if (!process.Start())
-            {
-                Console.WriteLine($"Could not start dotnet to build {csprojPath}.");
-                return false;
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Could not start dotnet to build {csprojPath}: {ex.Message}");
-            return false;
-        }
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            try
-            {
-                process.Kill(entireProcessTree: true);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Build timed out; stopping the build left: {ex.Message}");
-            }
-            Console.WriteLine($"Build of {csprojPath} timed out after {PluginBuildTimeout.TotalMinutes:F0} minutes.");
-            return false;
-        }
-        if (process.ExitCode != 0)
-        {
-            Console.WriteLine($"Build of {csprojPath} failed (exit {process.ExitCode}):");
-            Console.WriteLine(output.ToString());
-            return false;
-        }
-        Console.WriteLine($"Built {Path.GetFileName(csprojPath)}.");
-        return true;
-    }
+    public static Task<bool> BuildPluginAsync(string csprojPath, CancellationToken cancellationToken)
+        => Atheriz.Core.Plugins.PluginBuilder.BuildAsync(csprojPath, cancellationToken);
 }

@@ -32,6 +32,10 @@ public sealed class PluginLoader : IDisposable
 
     public bool IsLoaded => _loaded is not null;
 
+    // Unique-path copy backing the loaded assembly (see Load): the load
+    // path is never reused across generations.
+    private string? _genPath;
+
     /// <summary>
     /// The currently loaded plugin assembly (null after <see cref="Unload"/>).
     /// Lets reload callers identify instances rooted in a replaced load —
@@ -81,11 +85,23 @@ public sealed class PluginLoader : IDisposable
         _alc = new GamePluginLoadContext(full);
         // Snapshot mtime before load; re-checked after (discovery→load TOCTOU guard).
         var tsBefore = File.GetLastWriteTimeUtc(full);
+        // Load from a unique per-generation copy beside the real dll: a
+        // replaced-on-disk game dll can serve the previous generation when
+        // reloaded into a fresh ALC while the old one is still alive, so the
+        // load path is never reused across generations.
+        string genPath;
+        try { genPath = StageGenerationCopy(full); }
+        catch (Exception ex)
+        {
+            try { _alc.Unload(); } catch { }
+            _alc = null;
+            throw new IOException($"Plugin assembly {full} could not be staged for load: {ex.Message}", ex);
+        }
         try
         {
             // Default load through the context; plugin-local deps resolve
             // via its AssemblyDependencyResolver during the scan below.
-            _loaded = _alc.LoadFromAssemblyPath(full);
+            _loaded = _alc.LoadFromAssemblyPath(genPath);
         }
         catch (Exception ex)
         {
@@ -93,14 +109,21 @@ public sealed class PluginLoader : IDisposable
             // Unload the stillborn ALC — overwriting _alc without unloading leaks it.
             try { _alc.Unload(); } catch { }
             _alc = null;
+            DeleteGenerationCopy(genPath);
             throw;
         }
         if (File.GetLastWriteTimeUtc(full) != tsBefore)
         {
             AtherizLogger.LogWarning($"[PluginLoader] {full} changed during load; unloading (TOCTOU).", "PluginLoader");
             Unload();
+            DeleteGenerationCopy(genPath);
             throw new IOException($"Plugin assembly {full} changed during load; refusing to patch from a torn file.");
         }
+        // Superseded generation copy goes away (best-effort: on Windows the
+        // previous ALC may still map it, so orphans wait for boot cleanup).
+        var prevGen = _genPath;
+        _genPath = genPath;
+        if (prevGen is not null) DeleteGenerationCopy(prevGen);
 
         int found = 0;
         Type? gameSetupType = null;
@@ -200,6 +223,32 @@ public sealed class PluginLoader : IDisposable
         return true;
     }
 
+    // Unique per-load copy beside the real dll (same directory, so
+    // assembly-relative probing keeps working). Same-path reloads after a
+    // build can serve the previous generation while it is still alive, so
+    // the load path is never reused across generations. The pdb rides along
+    // (best-effort) for stack traces.
+    private static string StageGenerationCopy(string full)
+    {
+        var dir = Path.GetDirectoryName(full) ?? throw new IOException($"Plugin assembly {full} has no directory.");
+        var name = Path.GetFileNameWithoutExtension(full);
+        var genPath = Path.Combine(dir, $"{name}.gen-{Guid.NewGuid():N}.dll");
+        File.Copy(full, genPath);
+        var pdb = Path.ChangeExtension(full, ".pdb");
+        if (File.Exists(pdb))
+        {
+            try { File.Copy(pdb, Path.ChangeExtension(genPath, ".pdb"), overwrite: false); }
+            catch { }
+        }
+        return genPath;
+    }
+
+    private static void DeleteGenerationCopy(string genPath)
+    {
+        try { File.Delete(genPath); } catch { }
+        try { File.Delete(Path.ChangeExtension(genPath, ".pdb")); } catch { }
+    }
+
     /// <summary>
     /// Unload collectible ALC — mirrors Python reload dropping old modules.
     /// Call <c>GC.Collect()</c> after to finalize.
@@ -218,6 +267,12 @@ public sealed class PluginLoader : IDisposable
             try { _alc.Unload(); } catch (Exception ex) { AtherizLogger.LogError($"[PluginLoader] Unload failed: {ex.Message}", "PluginLoader"); }
             _alc = null;
         }
+        // The superseded generation copy goes away (best-effort: the file
+        // may still be mapped, which Windows refuses to delete — orphans
+        // wait for boot cleanup).
+        var gen = _genPath;
+        _genPath = null;
+        if (gen is not null) DeleteGenerationCopy(gen);
         AtherizLogger.LogInformation("[PluginLoader] Unloaded.", "PluginLoader");
     }
 

@@ -60,6 +60,36 @@ public static class PluginReloader
     private static bool TryEnterGate() => _gate.TryEnter();
     private static void ExitGate() => _gate.Exit();
     private static PluginLoader? _loader;
+    // Last-loaded dll stamps (full path → build time): a reload whose
+    // candidates all match is a no-op instead of churning the ALC.
+    private static readonly Dictionary<string, DateTime> _loadedStamps = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Lock _stampsLock = new();
+    private static void RecordStamp(string fullPath)
+    {
+        try
+        {
+            var stamp = File.GetLastWriteTimeUtc(fullPath);
+            lock (_stampsLock) _loadedStamps[Path.GetFullPath(fullPath)] = stamp;
+        }
+        catch (Exception ex) { Suppress("RecordStamp", ex); }
+    }
+    private static bool StampsMatch(List<string> candidates)
+    {
+        try
+        {
+            lock (_stampsLock)
+            {
+                foreach (var p in candidates)
+                {
+                    var full = Path.GetFullPath(p);
+                    if (!_loadedStamps.TryGetValue(full, out var stamp)) return false;
+                    if (!File.Exists(full) || File.GetLastWriteTimeUtc(full) != stamp) return false;
+                }
+                return true;
+            }
+        }
+        catch (Exception ex) { Suppress("StampsMatch", ex); return false; }
+    }
     // spellings (session/listeners/command) never matched a field — the port
     // renamed them _-prefixed — so only the resolving spellings are listed:
     // a rename that stops resolving is caught by the field-coverage test.
@@ -116,67 +146,8 @@ public static class PluginReloader
         return false;
     }
     private static bool IsExcluded(string p) => IsExcludedAssembly(p);
-    // True for .cs files that can never feed the game dll, so they must not
-    // count toward staleness: generated outputs under obj/bin segments, and
-    // test sources (any ancestor dir named test/tests or ending in Tests, e.g.
-    // Grotto.Tests/). Pure path-string check, no IO. Convention cost: game
-    // code must not live under such names (a change there would load a stale
-    // dll instead of skipping loudly).
-    // Path segments that never feed the game assembly: build output and test
-    // projects. A change there must not make the built dll look stale.
-    private static bool IsIgnoredPathSegment(string segment) =>
-        segment.Equals("obj", StringComparison.OrdinalIgnoreCase) ||
-        segment.Equals("bin", StringComparison.OrdinalIgnoreCase) ||
-        segment.Equals("test", StringComparison.OrdinalIgnoreCase) ||
-        segment.Equals("tests", StringComparison.OrdinalIgnoreCase) ||
-        segment.EndsWith("Tests", StringComparison.OrdinalIgnoreCase);
-
-    // Project names that are the engine and its template, never a game.
-    private static bool IsEngineProjectName(string name) =>
-        string.Equals(name, "Atheriz.Server", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(name, "Atheriz.Core", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(name, "Atheriz.GameTemplate", StringComparison.OrdinalIgnoreCase);
-
-    // Directories under a scan root that hold their own project file. Their
-    // sources belong to that project, not to the game assembly, so editing one
-    // cannot make the game dll stale. Without this, a tool project living
-    // inside the game folder (a launcher, a generator) disables the game
-    // plugin on the next reset.
-    private static HashSet<string> NestedProjectDirectories(string scanRoot)
-    {
-        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            foreach (var project in Directory.EnumerateFiles(scanRoot, "*.csproj", SearchOption.AllDirectories))
-            {
-                var directory = Path.GetDirectoryName(project);
-                if (directory is null || string.Equals(directory, scanRoot, StringComparison.OrdinalIgnoreCase)) continue;
-                var relative = Path.GetRelativePath(scanRoot, directory);
-                if (relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]).Any(IsIgnoredPathSegment)) continue;
-                directories.Add(directory);
-            }
-        }
-        catch (Exception ex) { Suppress("DiscoverGameAssembly", ex); }
-        return directories;
-    }
-
-    private static bool IsNonGameSource(string gameDir, string file, IReadOnlySet<string> projectDirectories)
-    {
-        try
-        {
-            var rel = Path.GetRelativePath(gameDir, file);
-            if (rel.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]).Any(IsIgnoredPathSegment))
-                return true;
-
-            for (var directory = Path.GetDirectoryName(file); !string.IsNullOrEmpty(directory); directory = Path.GetDirectoryName(directory))
-            {
-                if (projectDirectories.Contains(directory)) return true;
-                if (string.Equals(directory, gameDir, StringComparison.OrdinalIgnoreCase)) break;
-            }
-        }
-        catch (Exception ex) { Suppress("DiscoverGameAssembly", ex); }
-        return false;
-    }
+    // Game-source staleness rules live in PluginBuilder (shared with the
+    // build-first reload); discovery below only consumes them.
     // Shared suppressed-log helper: the op string is preserved verbatim so
     // the emitted text stays byte-identical to the inlined LogDebug calls.
     private static void Suppress(string op, Exception ex) => AtherizLogger.LogDebug("Suppressed PluginReloader." + op + ": " + ex.Message, "PluginReloader");
@@ -266,15 +237,39 @@ public static class PluginReloader
         try { newLoader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
         if (_loader is not null) { try{_loader.Unload();}catch (Exception logEx) { Suppress("ReloadAsync", logEx); } _loader=null; GC.Collect(); }
         _loader = newLoader;
+        RecordStamp(full);
         Console.Error.WriteLine($"[HotReload] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
         // A previous load already converted the world when live instances
         // carry plugin types (non-Core assembly deriving a pair base):
-        // exact-match patching can't see them, so a second conversion
-        // would patch nothing while eviction destroyed the working
-        // commands. Skip both loudly instead (restart picks up new code).
+        // exact-match patching can't see them, so convert generation to
+        // generation (same type full name, new assembly) instead of
+        // skipping. New command code takes effect; a restart is no longer
+        // needed for it.
         if (WorldAlreadyConverted(_loader.Replacements))
         {
-            Console.Error.WriteLine("[HotReload] World already converted by a previous load; skipping object patch and command eviction (restart to pick up new code).");
+            int converted = 0;
+            // takes per-object write + handler read locks, same outermost
+            // direction as DoShutdown, so no ABBA. Load/scan stay outside
+            // (I/O, no locks held).
+            lock (StartStop.WorldLock)
+            {
+                // Stale command instances first, so the reinstall that
+                // converted objects trigger via AtInit re-adds fresh ones
+                // instead of colliding with (and keeping) the dead ones.
+                try { EvictStaleCommands(oldAsm); } catch (Exception ex) { Suppress("ReloadAsync", ex); }
+                foreach (var kv in _loader.Replacements.ToList())
+                { try { converted += PatchGenerationInstances(kv.Value); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] Convert {kv.Key.Name}->{kv.Value.Name}: {ex.Message}"); } }
+                try
+                {
+                    var asm = _loader.LoadedAssembly;
+                    if (asm is not null)
+                        foreach (var o in ObjectRegistry.FilterBy(o => o is not null && ReferenceEquals(o.GetType().Assembly, asm)))
+                            try { o.ResolveRelations(); } catch (Exception logEx) { Suppress("ReloadAsync", logEx); }
+                }
+                catch (Exception ex) { Suppress("ReloadAsync", ex); }
+                try { ReregisterTicks(ticker); } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] ReregisterTicks: {ex.Message}"); }
+            }
+            Console.Error.WriteLine($"[HotReload] ReloadAsync converted {converted}.");
             return true;
         }
         int patched=0;
@@ -306,6 +301,21 @@ public static class PluginReloader
         var newLive=ObjectRegistry.FilterBy(o=>o.GetType()==newType);
         foreach(var obj in newLive){ try{ obj.ResolveRelations(); }catch (Exception logEx) { Suppress("PatchLiveObjects", logEx); }}
         return patched;
+    }
+    // Generation-to-generation conversion for an already-converted world:
+    // live instances carry the previous load's plugin types, so exact-match
+    // PatchLiveObjects sees nothing. Match by type full name instead (same
+    // type, new assembly) and patch each onto the new generation. Callers
+    // must hold StartStop.WorldLock (see ReloadCoreAsync).
+    private static int PatchGenerationInstances(Type newType)
+    {
+        if (newType is null) return 0;
+        var live = ObjectRegistry.FilterBy(o => o.GetType() != newType &&
+            string.Equals(o.GetType().FullName, newType.FullName, StringComparison.Ordinal));
+        if (live.Count == 0) return 0;
+        int converted = 0;
+        foreach (var obj in live.ToList()) { try { if (PatchSingleObject(obj, newType)) converted++; } catch (Exception ex) { Console.Error.WriteLine($"[HotReload] convert {obj.Id}: {ex.Message}"); } }
+        return converted;
     }
     /// <summary>
     /// Rewire direct object refs from the pre-patch instance to its replacement
@@ -597,35 +607,13 @@ public static class PluginReloader
     }
 // scan plugins + game project
     // Game project discovery: look for already-built dlls near CWD / SavePath parent (mirrors Python game folder import).
-    // Never builds: Python imports source (no build step); a dropped-in .csproj must not trigger compilation on reload.
-    /// <summary>
-    /// Directories a game project may live in: the current directory, the
-    /// directory holding the save folder, and that directory's parent.
-    /// </summary>
-    private static List<string> GameSearchDirectories(AtherizSettings settings)
-    {
-        var searchDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try { searchDirs.Add(Directory.GetCurrentDirectory()); } catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
-        try
-        {
-            var sp = settings.SavePath;
-            if (!string.IsNullOrWhiteSpace(sp))
-            {
-                var abs = Path.IsPathRooted(sp) ? sp : Path.Combine(Directory.GetCurrentDirectory(), sp);
-                var gameRoot = Path.GetDirectoryName(Path.GetFullPath(abs));
-                if (!string.IsNullOrWhiteSpace(gameRoot) && Directory.Exists(gameRoot)) searchDirs.Add(gameRoot);
-                // also parent of gameRoot (handles save/ inside mygame)
-                try { var parent = Path.GetDirectoryName(gameRoot!); if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent)) searchDirs.Add(parent); } catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
-            }
-        }
-        catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
-        return [.. searchDirs];
-    }
-
+    // Discovery itself never builds: boot must never shell a compiler (a
+    // dropped-in .csproj must not trigger compilation there). The build-first
+    // reload path rebuilds stale projects before discovering.
     public static int DiscoverGameAssembly(AtherizSettings settings, List<string> outList)
     {
         int added = 0;
-        var searchDirs = GameSearchDirectories(settings);
+        var searchDirs = PluginBuilder.GameSearchDirectories(settings);
         foreach (var dir in searchDirs)
         {
             string[] csprojs;
@@ -634,53 +622,21 @@ public static class PluginReloader
             {
                 // skip server/core templates themselves
                 var name = Path.GetFileNameWithoutExtension(csproj);
-                if (IsEngineProjectName(name)) continue;
-                // Try already-built dll first
-                var dllRelease = Path.Combine(dir, "bin", "Release", "net10.0", $"{name}.dll");
-                var dllDebug = Path.Combine(dir, "bin", "Debug", "net10.0", $"{name}.dll");
-                string? dll = null;
-                if (File.Exists(dllRelease)) dll = dllRelease;
-                else if (File.Exists(dllDebug)) dll = dllDebug;
-                // Build if missing or csproj newer than dll
-                bool needBuild = dll is null;
-                string reason = dll is null ? "no built dll" : "";
-                if (!needBuild)
+                if (PluginBuilder.IsEngineProjectName(name)) continue;
+                // Already-built dll only: a stale or missing dll is skipped
+                // here (boot stays build-free); the build-first reload
+                // rebuilds before discovering, so it never sees one.
+                var dll = PluginBuilder.BuiltDllPath(csproj);
+                if (dll is null)
                 {
-                    try
-                    {
-                        var dllTime = File.GetLastWriteTimeUtc(dll!);
-                        if (File.GetLastWriteTimeUtc(csproj) > dllTime)
-                        {
-                            needBuild = true;
-                            reason = $"{Path.GetFileName(csproj)} is newer than {Path.GetFileName(dll)}";
-                        }
-                        else
-                        {
-                            // Also build if any game *.cs is newer (recursive:
-                            // subdirectory edits must not look "up to date") —
-                            // but only sources that feed the game dll. Generated
-                            // outputs (obj/bin), test projects, and sources
-                            // owned by a nested project never do.
-                            var projectDirectories = NestedProjectDirectories(dir);
-                            foreach (var cs in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
-                            {
-                                if (IsNonGameSource(dir, cs, projectDirectories)) continue;
-                                if (File.GetLastWriteTimeUtc(cs) > dllTime)
-                                {
-                                    needBuild = true;
-                                    reason = $"{Path.GetRelativePath(dir, cs)} is newer than {Path.GetFileName(dll)}";
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception logEx) { Suppress("DiscoverGameAssembly", logEx); }
+                    var missing = $"[HotReload] Skipping {name}: no built dll (rebuild the game project, then reload).";
+                    Console.Error.WriteLine(missing);
+                    AtherizLogger.LogWarning(missing, "PluginReloader");
+                    continue;
                 }
-                // Reload never shells a compiler (pipe-deadlock + trust: a dropped-in
-                // .csproj must not trigger compilation). Only use already-built dlls.
-                if (needBuild)
+                if (PluginBuilder.DllNeedsBuild(csproj, out var reason))
                 {
-                    var message = $"[HotReload] Skipping {name}: {reason} (run 'dotnet build' first; reload never builds).";
+                    var message = $"[HotReload] Skipping {name}: {reason} (rebuild the game project, then reload).";
                     Console.Error.WriteLine(message);
                     AtherizLogger.LogWarning(message, "PluginReloader");
                     continue;
@@ -705,7 +661,7 @@ public static class PluginReloader
     public static bool HasGameProject(AtherizSettings settings, out string? projectName)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        foreach (var dir in GameSearchDirectories(settings))
+        foreach (var dir in PluginBuilder.GameSearchDirectories(settings))
         {
             string[] csprojs;
             try { csprojs = Directory.GetFiles(dir, "*.csproj", SearchOption.TopDirectoryOnly); }
@@ -713,7 +669,7 @@ public static class PluginReloader
             foreach (var csproj in csprojs)
             {
                 var name = Path.GetFileNameWithoutExtension(csproj);
-                if (IsEngineProjectName(name)) continue;
+                if (PluginBuilder.IsEngineProjectName(name)) continue;
                 projectName = name;
                 return true;
             }
@@ -747,7 +703,7 @@ public static class PluginReloader
             {
                 foreach (var f in Directory.GetFiles(pd, "*.dll"))
                 {
-                    if (IsExcluded(f)) continue;
+                    if (IsExcluded(f) || PluginBuilder.IsGenerationCopy(f)) continue;
                     if (!outList.Contains(f)) { outList.Add(f); discovered++; }
                 }
             }
@@ -756,7 +712,7 @@ public static class PluginReloader
             {
                 foreach (var f in Directory.GetFiles(alt, "*.dll"))
                 {
-                    if (IsExcluded(f)) continue;
+                    if (IsExcluded(f) || PluginBuilder.IsGenerationCopy(f)) continue;
                     if (!outList.Contains(f)) { outList.Add(f); discovered++; }
                 }
             }
@@ -780,6 +736,14 @@ public static class PluginReloader
             DiscoverNewPluginModules(settings,cands);
             cands=cands.Where(p=>!IsExcluded(p)&&File.Exists(p)).Distinct().ToList();
             Console.Error.WriteLine($"[HotReload] Found {cands.Count} plugin assemblies.");
+            // No-op: every candidate matches the last loaded generation, so a
+            // fresh load would only churn the ALC for identical code.
+            if (cands.Count > 0 && _loader is not null && StampsMatch(cands))
+            {
+                const string noop = "Reload not needed; already up to date.";
+                Console.Error.WriteLine($"[HotReload] {noop}");
+                return noop;
+            }
             foreach(var p in cands){ try{ if(await ReloadCoreAsync(p,ticker,pool).ConfigureAwait(false)) reloaded++; }catch(Exception ex){ var m=$"Failed {p}: {ex.Message}"; Console.Error.WriteLine($"[HotReload] {m}"); errors.Add(m);} }
             // No dead second pass (load-then-immediately-unload scanned nothing) and no
             // double patch: ReloadAsync already patched each assembly's replacements.
@@ -793,6 +757,49 @@ public static class PluginReloader
     }
     public static Task<string> ReloadGameLogicAsync(AsyncTicker ticker, AtherizSettings settings)=>ReloadGameLogicAsync(ticker,GlobalServices.GetAsyncThreadPool(),settings);
     public static Task<string> ReloadGameLogicAsync(AtherizSettings settings)=>ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(),GlobalServices.GetAsyncThreadPool(),settings);
+    // Build-first reload for the in-game command: rebuilds stale game
+    // projects (dotnet build, Release) before the normal discover→load→patch
+    // pass, so new command code is picked up without a separate build step.
+    // A failed build aborts before touching the live code. The build runs
+    // outside the reload gate; with no stale projects this is just a fast
+    // staleness scan. When nothing changed anywhere, the load pass reports
+    // the no-op itself.
+    public static Task<string> ReloadGameLogicWithBuildAsync(AsyncTicker ticker, AsyncThreadPool pool, AtherizSettings settings)
+        => ReloadGameLogicWithBuildAsync(ticker, pool, settings, PluginBuilder.BuildAsync, CancellationToken.None);
+    public static Task<string> ReloadGameLogicWithBuildAsync(AsyncTicker ticker, AtherizSettings settings)
+        => ReloadGameLogicWithBuildAsync(ticker, GlobalServices.GetAsyncThreadPool(), settings, PluginBuilder.BuildAsync, CancellationToken.None);
+    public static async Task<string> ReloadGameLogicWithBuildAsync(AsyncTicker ticker, AsyncThreadPool pool, AtherizSettings settings, Func<string, CancellationToken, Task<bool>> buildAsync, CancellationToken cancellationToken)
+    {
+        settings ??= AtherizSettings.Global;
+        ArgumentNullException.ThrowIfNull(buildAsync);
+        int built = 0;
+        var failures = new List<string>();
+        foreach (var csproj in PluginBuilder.FindGameProjects(settings))
+        {
+            bool stale;
+            try { stale = PluginBuilder.DllNeedsBuild(csproj, out _); }
+            catch (Exception ex) { failures.Add($"{Path.GetFileName(csproj)}: staleness check failed: {ex.Message}"); continue; }
+            if (!stale) continue;
+            bool ok;
+            try { ok = await buildAsync(csproj, cancellationToken).ConfigureAwait(false); }
+            catch (Exception ex) { ok = false; failures.Add($"{Path.GetFileName(csproj)}: build threw: {ex.Message}"); }
+            if (!ok)
+            {
+                if (!failures.Any(f => f.Contains(Path.GetFileName(csproj), StringComparison.Ordinal)))
+                    failures.Add($"{Path.GetFileName(csproj)}: build failed.");
+                var abort = $"Reload aborted: build failed ({string.Join("; ", failures)}). Live code untouched.";
+                Console.Error.WriteLine($"[HotReload] {abort}");
+                return abort;
+            }
+            built++;
+        }
+        var result = await ReloadGameLogicAsync(ticker, pool, settings).ConfigureAwait(false);
+        if (built > 0 && !result.StartsWith("Reload aborted", StringComparison.Ordinal) && !result.StartsWith("Reload not needed", StringComparison.Ordinal))
+            result = $"Built {built} project(s); {result}";
+        if (failures.Count > 0)
+            result += $"\nBuild warnings: {string.Join("; ", failures)}";
+        return result;
+    }
     // Boot-time game load: same discover→load→patch as a hot reload, minus the
     // async reload orchestration (ticker reregistration, map-edit clearing),
     // which only makes sense for an already-running world. Runs synchronously;
@@ -813,6 +820,7 @@ public static class PluginReloader
         try
         {
             List<string> cands = [];
+            try { PluginBuilder.DeleteStaleGenerationCopies(settings); } catch (Exception ex) { Suppress("LoadGameAssembliesAtBoot.Cleanup", ex); }
             try { DiscoverGameAssembly(settings, cands); } catch (Exception ex) { Suppress("LoadGameAssembliesAtBoot.Discover", ex); }
             try { DiscoverNewPluginModules(settings, cands); } catch (Exception ex) { Suppress("LoadGameAssembliesAtBoot.Discover", ex); }
             cands = cands.Where(p => !IsExcluded(p) && File.Exists(p)).Distinct().ToList();
@@ -841,6 +849,7 @@ public static class PluginReloader
                     catch (Exception ex) { Console.Error.WriteLine($"[Boot] Load failed: {ex.Message}"); continue; }
                     if (_loader is not null) { try { _loader.Unload(); } catch (Exception logEx) { Suppress("LoadGameAssembliesAtBoot", logEx); } _loader = null; GC.Collect(); }
                     _loader = newLoader;
+                    RecordStamp(full);
                     if (discovered is not null) gameSetup = discovered;
                     Console.Error.WriteLine($"[Boot] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
                     lock (StartStop.WorldLock)

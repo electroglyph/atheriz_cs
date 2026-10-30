@@ -36,7 +36,7 @@ public sealed class ReloadCommand : LoggedInCommand
             // Arguments evaluate here (not inside the async method) so a
             // throwing ticker fetch lands in this catch, as before.
             _ = FinishReloadAsync(
-                Atheriz.Core.Plugins.PluginReloader.ReloadGameLogicAsync(GlobalServices.GetAsyncTicker(), AtherizSettings.Global),
+                Atheriz.Core.Plugins.PluginReloader.ReloadGameLogicWithBuildAsync(GlobalServices.GetAsyncTicker(), AtherizSettings.Global),
                 capturedGo, capturedChannel);
         }
         catch (Exception ex) { try { go.Msg($"Reload failed: {ex.Message}"); } catch (Exception) { } }

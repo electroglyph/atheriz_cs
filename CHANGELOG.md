@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.37.0.0] - 2026-10-30
+
+- The in-game `reload` command now rebuilds stale game projects (Release)
+  before reloading, so edited code is picked up without a separate build
+  step. A failed build aborts the reload, leaving live code untouched.
+- Reloading with nothing changed is now a no-op ("already up to date")
+  instead of pointlessly reloading the same assemblies.
+- Reloading already-converted code no longer needs a restart: live objects
+  convert to the new generation in place, so command changes take effect.
+
 ## [0.36.0.0] - 2026-10-30
 
 Script hooks: methods marked `[Before]`/`[After]`/`[Replace]` whose names
