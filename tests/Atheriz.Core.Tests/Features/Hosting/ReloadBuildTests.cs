@@ -5,6 +5,7 @@ using Atheriz.Core.Objects;
 using Atheriz.Core.Plugins;
 using Atheriz.Core.Settings;
 using Atheriz.Core.Tests;
+using Atheriz.Core.Tests.Features.Regression;
 using Atheriz.Server.Cli;
 using Atheriz.Server.Hosting;
 using Microsoft.AspNetCore.Builder;
@@ -143,6 +144,70 @@ public class ReloadBuildTests
         {
             try { Directory.Delete(root, true); } catch { }
         }
+    }
+
+    [Fact]
+    public void FindPluginProjects_MatchesUppercaseExtensionOnAllPlatforms()
+    {
+        // Windows matches globs case-insensitively, Linux does not: reload
+        // discovery forces case-insensitive matching so an uppercase
+        // extension is a game project everywhere, not just on Windows.
+        var root = MakePluginDir("GAME.CSPROJ");
+        try
+        {
+            Assert.Single(PluginBuilder.FindPluginProjects(root));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Loader_RecordsLengthAlongsideStamp()
+    {
+        // The no-op stamp pairs mtime with length so a rebuild inside a
+        // coarse timestamp tick (FAT/exFAT 2s) still invalidates it. Load a
+        // real assembly and check both landed from the same bytes.
+        var self = typeof(ReloadBuildTests).Assembly.Location;
+        var loader = new PluginLoader();
+        try
+        {
+            loader.Load(self);
+            Assert.Equal(File.GetLastWriteTimeUtc(self), loader.LoadedStamp);
+            Assert.Equal(new FileInfo(self).Length, loader.LoadedLength);
+        }
+        finally { loader.Dispose(); }
+    }
+
+    [Fact]
+    public void BuildAsync_ShellsThroughArgumentList()
+    {
+        // A pre-quoted `build "..."` command line splits by different rules
+        // on Windows and Unix; ArgumentList lets the runtime quote for the
+        // receiving platform. Pin the shape via a portable source read.
+        var src = SourceScan.Read("src", "Atheriz.Core", "Plugins", "PluginBuilder.cs");
+        Assert.Contains("ArgumentList.Add(\"build\")", src, StringComparison.Ordinal);
+        Assert.DoesNotContain("build \\\"{csprojPath}\\\"", src, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Discovery_MatchesCaseInsensitivelyOnAllPlatforms()
+    {
+        // Every reload glob states its case-insensitivity explicitly instead
+        // of inheriting the OS default (Windows yes, Linux no).
+        var src = SourceScan.Read("src", "Atheriz.Core", "Plugins", "PluginBuilder.cs");
+        Assert.Contains("MatchCasing.CaseInsensitive", src, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PathKeys_FollowFilesystemCaseRules()
+    {
+        // Path-key equality matches the filesystem — insensitive on Windows,
+        // sensitive elsewhere (ResetHandler precedent) — never one rule for
+        // every OS.
+        var src = SourceScan.Read("src", "Atheriz.Core", "Plugins", "PluginBuilder.cs");
+        Assert.Contains("OperatingSystem.IsWindows()", src, StringComparison.Ordinal);
     }
 
     [Fact]

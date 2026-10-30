@@ -48,9 +48,14 @@ public sealed class PluginLoader : IDisposable
     /// verified unchanged after the load (the discovery→load TOCTOU guard).
     /// Reload stamps must record this — not a fresh read — or a concurrent
     /// build landing between the load and the stamp would pin the new mtime
-    /// to old bytes and no-op every future reload.
+    /// to old bytes and no-op every future reload. Length rides along so a
+    /// rebuild landing inside a coarse timestamp tick (FAT/exFAT 2s) still
+    /// invalidates the stamp.
     /// </summary>
     public DateTime LoadedStamp { get; private set; }
+
+    /// <summary>Byte length of the assembly image recorded in <see cref="LoadedStamp"/>.</summary>
+    public long LoadedLength { get; private set; }
 
     /// <summary>
     /// Creates collectible ALC, loads assembly, scans for <see cref="EntityReplacementAttribute"/>, registers.
@@ -92,8 +97,9 @@ public sealed class PluginLoader : IDisposable
         // plugin dll); engine/framework assemblies unify with the default
         // context there, never as second copies.
         _alc = new GamePluginLoadContext(full);
-        // Snapshot mtime before load; re-checked after (discovery→load TOCTOU guard).
+        // Snapshot mtime + length before load; re-checked after (discovery→load TOCTOU guard).
         var tsBefore = File.GetLastWriteTimeUtc(full);
+        var lenBefore = PluginBuilder.FileLengthOrNegative(full);
         // Load from a unique per-generation copy beside the real dll: a
         // replaced-on-disk game dll can serve the previous generation when
         // reloaded into a fresh ALC while the old one is still alive, so the
@@ -121,7 +127,7 @@ public sealed class PluginLoader : IDisposable
             DeleteGenerationCopy(genPath);
             throw;
         }
-        if (File.GetLastWriteTimeUtc(full) != tsBefore)
+        if (File.GetLastWriteTimeUtc(full) != tsBefore || PluginBuilder.FileLengthOrNegative(full) != lenBefore)
         {
             AtherizLogger.LogWarning($"[PluginLoader] {full} changed during load; unloading (TOCTOU).", "PluginLoader");
             Unload();
@@ -131,6 +137,7 @@ public sealed class PluginLoader : IDisposable
         // The bytes on disk still match tsBefore, so the staged copy (taken
         // after the snapshot) holds exactly those bytes: stamp them.
         LoadedStamp = tsBefore;
+        LoadedLength = lenBefore;
         // Superseded generation copy goes away (best-effort: on Windows the
         // previous ALC may still map it, so orphans wait for boot cleanup).
         var prevGen = _genPath;
@@ -270,6 +277,7 @@ public sealed class PluginLoader : IDisposable
         Replacements.Clear();
         _loaded = null;
         LoadedStamp = default;
+        LoadedLength = 0;
         if (_alc is not null)
         {
             // keep a weak handle so the unload can be VERIFIED.

@@ -11,13 +11,45 @@ public static class PluginBuilder
 {
     private static readonly TimeSpan BuildTimeout = TimeSpan.FromMinutes(10);
 
+    // Path-key equality follows the filesystem: case-insensitive on Windows
+    // (same precedent as ResetHandler), case-sensitive elsewhere. Always
+    // ignoring case would collapse distinct files on Linux; never ignoring
+    // it would double-scan one file on Windows.
+    internal static StringComparer PathComparer =>
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    // File globs match case-insensitively on Windows but case-sensitively on
+    // Linux/macOS. Reload discovery must agree everywhere, so every glob
+    // below matches case-insensitively on all platforms.
+    internal static readonly EnumerationOptions TopOnlyFiles = new()
+    {
+        MatchCasing = MatchCasing.CaseInsensitive,
+        RecurseSubdirectories = false,
+        IgnoreInaccessible = true,
+    };
+    internal static readonly EnumerationOptions RecursiveFiles = new()
+    {
+        MatchCasing = MatchCasing.CaseInsensitive,
+        RecurseSubdirectories = true,
+        IgnoreInaccessible = true,
+    };
+
+    // File length, or -1 when the file cannot be read. Pairs with the mtime
+    // in the load stamps: coarse filesystems (FAT/exFAT 2s granularity) can
+    // stamp a rebuild with the same mtime, so length breaks the tie.
+    internal static long FileLengthOrNegative(string path)
+    {
+        try { return new FileInfo(path).Length; }
+        catch { return -1; }
+    }
+
     /// <summary>
     /// Directories a game project may live in: the current directory, the
     /// directory holding the save folder, and that directory's parent.
     /// </summary>
     public static List<string> GameSearchDirectories(AtherizSettings settings)
     {
-        var searchDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var searchDirs = new HashSet<string>(PathComparer);
         try { searchDirs.Add(Directory.GetCurrentDirectory()); } catch { }
         try
         {
@@ -54,13 +86,13 @@ public static class PluginBuilder
     // sources belong to that project, not to the game assembly.
     internal static HashSet<string> NestedProjectDirectories(string scanRoot)
     {
-        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var directories = new HashSet<string>(PathComparer);
         try
         {
-            foreach (var project in Directory.EnumerateFiles(scanRoot, "*.csproj", SearchOption.AllDirectories))
+            foreach (var project in Directory.EnumerateFiles(scanRoot, "*.csproj", RecursiveFiles))
             {
                 var directory = Path.GetDirectoryName(project);
-                if (directory is null || string.Equals(directory, scanRoot, StringComparison.OrdinalIgnoreCase)) continue;
+                if (directory is null || PathComparer.Equals(directory, scanRoot)) continue;
                 var relative = Path.GetRelativePath(scanRoot, directory);
                 if (relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]).Any(IsIgnoredPathSegment)) continue;
                 directories.Add(directory);
@@ -81,7 +113,7 @@ public static class PluginBuilder
             for (var directory = Path.GetDirectoryName(file); !string.IsNullOrEmpty(directory); directory = Path.GetDirectoryName(directory))
             {
                 if (projectDirectories.Contains(directory)) return true;
-                if (string.Equals(directory, gameDir, StringComparison.OrdinalIgnoreCase)) break;
+                if (PathComparer.Equals(directory, gameDir)) break;
             }
         }
         catch { }
@@ -97,7 +129,7 @@ public static class PluginBuilder
         ArgumentNullException.ThrowIfNull(directory);
         if (!Directory.Exists(directory)) return [];
         var found = new List<string>();
-        foreach (var csproj in Directory.GetFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly))
+        foreach (var csproj in Directory.GetFiles(directory, "*.csproj", TopOnlyFiles))
         {
             if (!IsGameProjectFile(csproj)) continue;
             found.Add(csproj);
@@ -132,7 +164,7 @@ public static class PluginBuilder
             catch { continue; }
             foreach (var csproj in csprojs)
             {
-                if (!found.Contains(csproj, StringComparer.OrdinalIgnoreCase)) found.Add(csproj);
+                if (!found.Contains(csproj, PathComparer)) found.Add(csproj);
             }
         }
         return found;
@@ -167,7 +199,7 @@ public static class PluginBuilder
             {
                 var bin = Path.Combine(dir, "bin", config, "net10.0");
                 string[] files;
-                try { files = Directory.GetFiles(bin, $"{name}.gen-*.dll"); }
+                try { files = Directory.GetFiles(bin, $"{name}.gen-*.dll", TopOnlyFiles); }
                 catch { continue; }
                 foreach (var f in files)
                 {
@@ -180,7 +212,7 @@ public static class PluginBuilder
         foreach (var plugins in PluginDropDirectories(settings))
         {
             string[] files;
-            try { files = Directory.GetFiles(plugins, "*.gen-*.dll"); }
+            try { files = Directory.GetFiles(plugins, "*.gen-*.dll", TopOnlyFiles); }
             catch { continue; }
             foreach (var f in files)
             {
@@ -192,7 +224,7 @@ public static class PluginBuilder
 
     private static IEnumerable<string> PluginDropDirectories(AtherizSettings settings)
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(PathComparer);
         foreach (var dir in new[]
         {
             Path.Combine(AppContext.BaseDirectory, "plugins"),
@@ -243,7 +275,7 @@ public static class PluginBuilder
             // Any game *.cs newer (recursive: subdirectory edits must not
             // look "up to date") — but only sources that feed the game dll.
             var projectDirectories = NestedProjectDirectories(dir);
-            foreach (var cs in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
+            foreach (var cs in Directory.GetFiles(dir, "*.cs", RecursiveFiles))
             {
                 if (IsNonGameSource(dir, cs, projectDirectories)) continue;
                 if (File.GetLastWriteTimeUtc(cs) > dllTime)
@@ -276,14 +308,27 @@ public static class PluginBuilder
         timeoutCts.CancelAfter(limit);
         var buildToken = timeoutCts.Token;
         var output = new StringBuilder();
+        // ArgumentList, not a pre-quoted command line: Windows and Unix split
+        // a raw argument string by different quoting rules, so a hand-quoted
+        // path breaks on the platform it was not written for. The runtime
+        // quotes each argument the receiving platform's way. UTF-8 decoding
+        // keeps non-ASCII paths and errors intact under non-UTF-8 locales.
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+        startInfo.ArgumentList.Add("build");
+        startInfo.ArgumentList.Add(csprojPath);
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("Release");
+        startInfo.ArgumentList.Add("--nologo");
         using var process = new Process
         {
-            StartInfo = new ProcessStartInfo("dotnet", $"build \"{csprojPath}\" -c Release --nologo")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            },
+            StartInfo = startInfo,
         };
         process.OutputDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
         process.ErrorDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };

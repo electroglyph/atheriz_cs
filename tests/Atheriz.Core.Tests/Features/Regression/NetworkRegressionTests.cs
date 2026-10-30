@@ -124,12 +124,15 @@ public class NetworkRegressionTests
     // plugin staleness must see subdirectory edits, not just top-level files
     // (csproj discovery itself stays top-level). The rule lives in
     // PluginBuilder (shared with the build-first reload); the loader only
-    // consumes it.
+    // consumes it. The glob moved into the shared RecursiveFiles options;
+    // the pin follows the behavior there, not the old inline literal.
     [Fact]
     public void PluginStaleness_Recurses()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Plugins", "PluginBuilder.cs");
-        Assert.Contains("GetFiles(dir, \"*.cs\", SearchOption.AllDirectories)", src);
+        Assert.Contains("GetFiles(dir, \"*.cs\", RecursiveFiles)", src);
+        var region = SourceScan.Region(src, "internal static readonly EnumerationOptions RecursiveFiles");
+        Assert.Contains("RecurseSubdirectories = true", region);
     }
 
     // ticker shutdown must not nest locks, must dispose its CTS, and must

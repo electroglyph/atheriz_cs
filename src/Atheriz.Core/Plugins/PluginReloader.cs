@@ -60,15 +60,17 @@ public static class PluginReloader
     private static bool TryEnterGate() => _gate.TryEnter();
     private static void ExitGate() => _gate.Exit();
     private static PluginLoader? _loader;
-    // Last-loaded dll stamps (full path → build time): a reload whose
-    // candidates all match is a no-op instead of churning the ALC.
-    private static readonly Dictionary<string, DateTime> _loadedStamps = new(StringComparer.OrdinalIgnoreCase);
+    // Last-loaded dll stamps (full path → build time + length): a reload
+    // whose candidates all match is a no-op instead of churning the ALC.
+    // Length rides along because coarse filesystems (FAT/exFAT 2s ticks) can
+    // stamp a rebuild with an unchanged mtime.
+    private static readonly Dictionary<string, (DateTime Mtime, long Length)> _loadedStamps = new(PluginBuilder.PathComparer);
     private static readonly Lock _stampsLock = new();
-    private static void RecordStamp(string fullPath, DateTime stamp)
+    private static void RecordStamp(string fullPath, DateTime stamp, long length)
     {
         try
         {
-            lock (_stampsLock) _loadedStamps[Path.GetFullPath(fullPath)] = stamp;
+            lock (_stampsLock) _loadedStamps[Path.GetFullPath(fullPath)] = (stamp, length);
         }
         catch (Exception ex) { Suppress("RecordStamp", ex); }
     }
@@ -82,7 +84,9 @@ public static class PluginReloader
                 {
                     var full = Path.GetFullPath(p);
                     if (!_loadedStamps.TryGetValue(full, out var stamp)) return false;
-                    if (!File.Exists(full) || File.GetLastWriteTimeUtc(full) != stamp) return false;
+                    if (!File.Exists(full)) return false;
+                    if (File.GetLastWriteTimeUtc(full) != stamp.Mtime) return false;
+                    if (PluginBuilder.FileLengthOrNegative(full) != stamp.Length) return false;
                 }
                 return true;
             }
@@ -236,7 +240,7 @@ public static class PluginReloader
         try { newLoader.Load(full); } catch (Exception ex){ Console.Error.WriteLine($"[HotReload] Load failed: {ex.Message}"); return false; }
         if (_loader is not null) { try{_loader.Unload();}catch (Exception logEx) { Suppress("ReloadAsync", logEx); } _loader=null; GC.Collect(); }
         _loader = newLoader;
-        RecordStamp(full, newLoader.LoadedStamp);
+        RecordStamp(full, newLoader.LoadedStamp, newLoader.LoadedLength);
         Console.Error.WriteLine($"[HotReload] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
         // A previous load already converted the world when live instances
         // carry plugin types (non-Core assembly deriving a pair base):
@@ -616,7 +620,7 @@ public static class PluginReloader
         foreach (var dir in searchDirs)
         {
             string[] csprojs;
-            try { csprojs = Directory.GetFiles(dir, "*.csproj", SearchOption.TopDirectoryOnly); } catch { continue; }
+            try { csprojs = Directory.GetFiles(dir, "*.csproj", PluginBuilder.TopOnlyFiles); } catch { continue; }
             foreach (var csproj in csprojs)
             {
                 // skip server/core templates themselves, and never test projects
@@ -640,7 +644,7 @@ public static class PluginReloader
                     AtherizLogger.LogWarning(message, "PluginReloader");
                     continue;
                 }
-                if (dll is not null && File.Exists(dll) && !outList.Contains(dll, StringComparer.OrdinalIgnoreCase) && !IsExcluded(dll))
+                if (dll is not null && File.Exists(dll) && !outList.Contains(dll, PluginBuilder.PathComparer) && !IsExcluded(dll))
                 {
                     outList.Add(dll);
                     added++;
@@ -663,7 +667,7 @@ public static class PluginReloader
         foreach (var dir in PluginBuilder.GameSearchDirectories(settings))
         {
             string[] csprojs;
-            try { csprojs = Directory.GetFiles(dir, "*.csproj", SearchOption.TopDirectoryOnly); }
+            try { csprojs = Directory.GetFiles(dir, "*.csproj", PluginBuilder.TopOnlyFiles); }
             catch { continue; }
             foreach (var csproj in csprojs)
             {
@@ -699,19 +703,19 @@ public static class PluginReloader
             var pd = Path.Combine(baseDir, "plugins");
             if (Directory.Exists(pd))
             {
-                foreach (var f in Directory.GetFiles(pd, "*.dll"))
+                foreach (var f in Directory.GetFiles(pd, "*.dll", PluginBuilder.TopOnlyFiles))
                 {
                     if (IsExcluded(f) || PluginBuilder.IsGenerationCopy(f)) continue;
-                    if (!outList.Contains(f)) { outList.Add(f); discovered++; }
+                    if (!outList.Contains(f, PluginBuilder.PathComparer)) { outList.Add(f); discovered++; }
                 }
             }
             var alt = Path.Combine(settings.SavePath, "plugins");
             if (Directory.Exists(alt))
             {
-                foreach (var f in Directory.GetFiles(alt, "*.dll"))
+                foreach (var f in Directory.GetFiles(alt, "*.dll", PluginBuilder.TopOnlyFiles))
                 {
                     if (IsExcluded(f) || PluginBuilder.IsGenerationCopy(f)) continue;
-                    if (!outList.Contains(f)) { outList.Add(f); discovered++; }
+                    if (!outList.Contains(f, PluginBuilder.PathComparer)) { outList.Add(f); discovered++; }
                 }
             }
             if (discovered > 0) Console.Error.WriteLine($"[HotReload] Discovered {discovered} new plugin module(s).");
@@ -732,7 +736,7 @@ public static class PluginReloader
             List<string> cands = [];
             DiscoverGameAssembly(settings,cands);
             DiscoverNewPluginModules(settings,cands);
-            cands=cands.Where(p=>!IsExcluded(p)&&File.Exists(p)).Distinct().ToList();
+            cands=cands.Where(p=>!IsExcluded(p)&&File.Exists(p)).Distinct(PluginBuilder.PathComparer).ToList();
             Console.Error.WriteLine($"[HotReload] Found {cands.Count} plugin assemblies.");
             // No-op: every candidate matches the last loaded generation, so a
             // fresh load would only churn the ALC for identical code.
@@ -825,7 +829,7 @@ public static class PluginReloader
             try { PluginBuilder.DeleteStaleGenerationCopies(settings); } catch (Exception ex) { Suppress("LoadGameAssembliesAtBoot.Cleanup", ex); }
             try { DiscoverGameAssembly(settings, cands); } catch (Exception ex) { Suppress("LoadGameAssembliesAtBoot.Discover", ex); }
             try { DiscoverNewPluginModules(settings, cands); } catch (Exception ex) { Suppress("LoadGameAssembliesAtBoot.Discover", ex); }
-            cands = cands.Where(p => !IsExcluded(p) && File.Exists(p)).Distinct().ToList();
+            cands = cands.Where(p => !IsExcluded(p) && File.Exists(p)).Distinct(PluginBuilder.PathComparer).ToList();
             if (cands.Count == 0)
             {
                 Console.Error.WriteLine("[Boot] No game assembly discovered — running engine-only. Build the game project first (dotnet build) so its dll is discoverable next to the game folder.");
@@ -851,7 +855,7 @@ public static class PluginReloader
                     catch (Exception ex) { Console.Error.WriteLine($"[Boot] Load failed: {ex.Message}"); continue; }
                     if (_loader is not null) { try { _loader.Unload(); } catch (Exception logEx) { Suppress("LoadGameAssembliesAtBoot", logEx); } _loader = null; GC.Collect(); }
                     _loader = newLoader;
-                    RecordStamp(full, newLoader.LoadedStamp);
+                    RecordStamp(full, newLoader.LoadedStamp, newLoader.LoadedLength);
                     if (discovered is not null) gameSetup = discovered;
                     Console.Error.WriteLine($"[Boot] Loaded {_loader.Replacements.Count} repl from {Path.GetFileName(full)}.");
                     lock (StartStop.WorldLock)

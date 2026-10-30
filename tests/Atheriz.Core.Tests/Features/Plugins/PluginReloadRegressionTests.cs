@@ -102,6 +102,30 @@ public class PluginReloadRegressionTests
     }
 
     [Fact]
+    public void DiscoverGameAssembly_NestedGameSourceNewerThanDll_SkipsGameAssembly()
+    {
+        // Staleness recurses: a game-owned source in a subdirectory (no
+        // project of its own) newer than the dll marks the build stale.
+        var root = NewGameRoot(out var game);
+        try
+        {
+            WriteGameProject(game, "game");
+            var sub = Path.Combine(game, "src");
+            Directory.CreateDirectory(sub);
+            var newer = Path.Combine(sub, "Newer.cs");
+            File.WriteAllText(newer, "// game source in a subdirectory");
+            File.SetLastWriteTimeUtc(newer, DateTime.UtcNow.AddHours(1));
+
+            var found = new List<string>();
+            var added = PluginReloader.DiscoverGameAssembly(SettingsFor(game), found);
+
+            Assert.Equal(0, added);
+            Assert.Empty(found);
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    [Fact]
     public void WorldCanBeRebuilt_NestedProjectSourceNewerThanDll_IsTrue()
     {
         var root = NewGameRoot(out var game);

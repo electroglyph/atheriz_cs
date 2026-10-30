@@ -237,7 +237,20 @@ public class PortedAtherizMainTests
     [Fact] public void HotReloadBlocksLoop()
     {
         using var env = GlobalTestEnv.Enter();
-        var src = File.ReadAllText("/home/anon/atheriz-cs/src/Atheriz.Server/Hosting/AdminRoutes.cs");
+        // Repo-root resolution walks up from the test binaries: the old
+        // hardcoded checkout path only exists on Linux CI.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        string? root = null;
+        for (; dir is not null; dir = dir.Parent)
+        {
+            if (Directory.Exists(Path.Combine(dir.FullName, "src", "Atheriz.Server")))
+            {
+                root = dir.FullName;
+                break;
+            }
+        }
+        Assert.NotNull(root);
+        var src = File.ReadAllText(Path.Combine(root, "src", "Atheriz.Server", "Hosting", "AdminRoutes.cs"));
         // hot_reload endpoint should be async and not block loop (uses PluginReloader).
         // It drives the build-first path, shared with the in-game reload verb.
         Assert.Contains("hot_reload", src);

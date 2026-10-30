@@ -24,6 +24,11 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
 - Reload discovery never treats a top-level test project as game code, and
   the up-to-date check stamps the bytes actually loaded, so a build racing
   a reload cannot wedge later reloads into a false no-op.
+- Reload is portable across operating systems: the compiler is invoked
+  through an argument list (no shell quoting), file discovery matches
+  case-insensitively everywhere, path-key comparison follows the
+  filesystem, and the up-to-date stamp pairs mtime with length so coarse
+  timestamp granularity cannot fake a no-op.
 
 ## [0.36.0.0] - 2026-10-30
 
