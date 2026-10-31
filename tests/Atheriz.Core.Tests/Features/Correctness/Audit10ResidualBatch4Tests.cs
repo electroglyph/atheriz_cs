@@ -25,7 +25,7 @@ public sealed class Audit10ResidualBatch4Tests
         // the boot loop must do the same. Neuter (assign-then-load) brings
         // back `_loader = new PluginLoader();` and fails the last guard.
         var src = SourceScan.Read("src", "Atheriz.Core", "Plugins", "PluginReloader.cs");
-        var region = SourceScan.Region(src, "public static int LoadGameAssembliesAtBoot(AtherizSettings? settings, out IGameSetup? gameSetup)");
+        var region = SourceScan.Region(src, "public static int LoadGameAssembliesAtBoot(AtherizSettings? settings, out IGameSetup? gameSetup, out int failedLoads)");
         Assert.Contains("var newLoader = new PluginLoader();", region, StringComparison.Ordinal);
         Assert.Contains("_loader = newLoader;", region, StringComparison.Ordinal);
         Assert.DoesNotContain("_loader = new PluginLoader();", region, StringComparison.Ordinal);

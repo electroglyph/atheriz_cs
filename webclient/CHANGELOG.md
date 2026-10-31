@@ -3,6 +3,11 @@
 Webclient (`webclient/`) release notes, split out from the engine `CHANGELOG.md`
 2026-09-25. Versioning follows `webclient/package.json`.
 
+## [1.12.0] - 2026-10-31
+
+- The map pane legend now uses the same light gray as uncolored
+  main-pane text, so legend borders and descriptions match.
+
 ## [1.11.3] - 2026-10-02
 
 - The landing-page log section starts hidden and only reveals itself

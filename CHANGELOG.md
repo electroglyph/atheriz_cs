@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.37.0.1] - 2026-10-31
+
+- `reset` no longer wipes the world and then refuses to rebuild it for
+  template-derived games. A game assembly that loads cleanly but provides
+  no world-setup entry (the shape of every scaffolded game) now falls back
+  to the engine template world instead of aborting with no world at all.
+  The refusal is kept for genuine load failures and for assemblies that
+  disappear mid-reset, and the boot load reports how many candidates
+  failed so the two cases stay distinguishable.
+
 ## [0.37.0.0] - 2026-10-30
 
 - The in-game `reload` command now rebuilds stale game projects (Release)

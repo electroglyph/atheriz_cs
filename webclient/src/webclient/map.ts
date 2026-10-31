@@ -1,5 +1,5 @@
 import { MapBackground, MapLegendEntry, MapPayload } from './types';
-import { stripAnsiBroad, stripNonSgrAnsi } from './text';
+import { DEFAULT_TEXT_COLOR, DEFAULT_TEXT_RESET, stripAnsiBroad, stripNonSgrAnsi } from './text';
 
 const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const RESET = '\x1b[0m';
@@ -124,7 +124,7 @@ function buildLegend(payload: MapPayload, entries: MapLegendEntry[], columns: nu
 
     const headerText = `╭─ ${title} ─`;
     const header = `${headerText}${'─'.repeat(Math.max(0, totalWidth - 1 - visibleLength(headerText)))}╮`;
-    const output = [header];
+    const raw = [header];
     for (let row = 0; row < rowCount; row += 1) {
         let line = '│';
         for (let column = 0; column < chosenColumns; column += 1) {
@@ -136,14 +136,21 @@ function buildLegend(payload: MapPayload, entries: MapLegendEntry[], columns: nu
                 : rawText;
             line += ` ${text}${' '.repeat(Math.max(0, width - visibleLength(text)))} │`;
         }
-        output.push(line);
+        raw.push(line);
     }
     let footer = '╰';
     for (let column = 0; column < chosenColumns; column += 1) {
         footer += `${'─'.repeat(columnWidths[column] + 2)}${column === chosenColumns - 1 ? '╯' : '┴'}`;
     }
-    output.push(footer);
-    return output;
+    raw.push(footer);
+    // Uncolored legend prose uses the main-pane default gray so the map
+    // legend reads the same as uncolored text. Explicit symbol colors
+    // survive: each reset inside the line falls back to gray.
+    return raw.map(colorizeLegendLine);
+}
+
+function colorizeLegendLine(line: string): string {
+    return `${DEFAULT_TEXT_COLOR}${line.replaceAll(RESET, DEFAULT_TEXT_RESET)}${RESET}`;
 }
 
 function processLegend(entries: MapLegendEntry[], columns: number): MapLegendEntry[] {

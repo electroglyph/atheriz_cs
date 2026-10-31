@@ -5,6 +5,23 @@ namespace Atheriz.Server.Cli;
 
 public static class ResetHandler
 {
+    /// <summary>
+    /// Post-wipe template-fallback gate: true when falling back to the engine
+    /// template world would be wrong — the game assembly failed to load, or it
+    /// is no longer discoverable (deleted or rebuilt stale mid-reset). A clean
+    /// load that simply provides no <c>IGameSetup</c> entry (every scaffolded
+    /// game) returns false: the template world is its intended world.
+    /// Fails closed: any discovery error refuses.
+    /// </summary>
+    public static bool TemplateFallbackRefused(AtherizSettings settings, int failedLoads)
+    {
+        if (failedLoads > 0) return true;
+        var rediscovered = new List<string>();
+        try { Atheriz.Core.Plugins.PluginReloader.DiscoverGameAssembly(settings, rediscovered); }
+        catch { return true; }
+        return rediscovered.Count == 0;
+    }
+
     public static async Task<int> ResetAsync(int? portOverride, int? telnetOverride, bool foreground = true)
     {
         // Reset always confirms: there is no --force skip. The prompt is the
@@ -201,18 +218,27 @@ public static class ResetHandler
             // Load the game (if any) so setup below dispatches to it; best-effort
             // and never fatal — without a game the template setup still runs.
             Atheriz.Core.IGameSetup? game = null;
-            try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings, out game); }
-            catch (Exception ex) { Console.Error.WriteLine($"[reset] Game load failed ({ex.Message}); using template setup."); }
-            // Discovery passed before the wipe, so this is only reached when the
-            // assembly exists but cannot be loaded. Stop instead of building a
-            // template world in a game folder the operator will keep using.
-            if (game is null && gameProject is not null)
+            int failedLoads = 0;
+            bool loadCrashed = false;
+            try { Atheriz.Core.Plugins.PluginReloader.LoadGameAssembliesAtBoot(settings, out game, out failedLoads); }
+            catch (Exception ex) { Console.Error.WriteLine($"[reset] Game load failed ({ex.Message}); using template setup."); loadCrashed = true; }
+            // A null setup is the normal shape for template-derived games
+            // (the scaffold ships no IGameSetup entry): only refuse the
+            // template world when the load actually failed or the assembly
+            // is gone. Refusing on a clean load would wipe the world and
+            // leave the operator with nothing.
+            if (game is null && gameProject is not null && (loadCrashed || TemplateFallbackRefused(settings, failedLoads)))
             {
                 Console.Error.WriteLine(
                     $"The world was wiped but {gameProject} could not be loaded; refusing to create the engine template world. " +
                     "Keep the server stopped, fix the build, and reset again.");
                 Infrastructure.PidFile.ReleaseWipeLock(wipeB, savePath);
                 return 1;
+            }
+            if (game is null && gameProject is not null)
+            {
+                Console.Error.WriteLine(
+                    $"[reset] {gameProject} provides no world setup entry; creating the engine template world.");
             }
 
             Console.WriteLine("Setting up new world...");

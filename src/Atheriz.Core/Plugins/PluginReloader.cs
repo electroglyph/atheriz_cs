@@ -819,8 +819,19 @@ public static class PluginReloader
     // (last loaded wins, matching the old static slot) for explicit CLI
     // dispatch; null when no game assembly provides one.
     public static int LoadGameAssembliesAtBoot(AtherizSettings? settings, out IGameSetup? gameSetup)
+        => LoadGameAssembliesAtBoot(settings, out gameSetup, out _);
+
+    /// <summary>
+    /// Boot-time game load that also reports how many discovered candidates
+    /// failed to load. A null <paramref name="gameSetup"/> with zero
+    /// <paramref name="failedLoads"/> is the normal shape for
+    /// template-derived games (they load cleanly but provide no setup
+    /// entry); callers must not mistake it for a broken build.
+    /// </summary>
+    public static int LoadGameAssembliesAtBoot(AtherizSettings? settings, out IGameSetup? gameSetup, out int failedLoads)
     {
         gameSetup = null;
+        failedLoads = 0;
         settings ??= AtherizSettings.Global;
         if (!TryEnterGate()) { Console.Error.WriteLine("[Boot] Game load already in progress; skipping."); return 0; }
         try
@@ -852,7 +863,7 @@ public static class PluginReloader
                     {
                         discovered = newLoader.Load(full);
                     }
-                    catch (Exception ex) { Console.Error.WriteLine($"[Boot] Load failed: {ex.Message}"); continue; }
+                    catch (Exception ex) { Console.Error.WriteLine($"[Boot] Load failed: {ex.Message}"); failedLoads++; continue; }
                     if (_loader is not null) { try { _loader.Unload(); } catch (Exception logEx) { Suppress("LoadGameAssembliesAtBoot", logEx); } _loader = null; GC.Collect(); }
                     _loader = newLoader;
                     RecordStamp(full, newLoader.LoadedStamp, newLoader.LoadedLength);
@@ -867,7 +878,7 @@ public static class PluginReloader
                         }
                     }
                 }
-                catch (Exception ex) { Console.Error.WriteLine($"[Boot] Failed {p}: {ex.Message}"); }
+                catch (Exception ex) { Console.Error.WriteLine($"[Boot] Failed {p}: {ex.Message}"); failedLoads++; }
             }
             Console.Error.WriteLine($"[Boot] Game load patched {patched} of {ObjectRegistry.Count} objects.");
             return patched;

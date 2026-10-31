@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mergeBackgrounds, parseBackground, renderMap } from '../src/webclient/map';
+import { DEFAULT_TEXT_COLOR, DEFAULT_TEXT_RESET } from '../src/webclient/text';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -112,7 +113,11 @@ describe('map legend duplicate handling', () => {
     it('assigns distinct colors to many duplicates without early collision', () => {
         const dup = Array.from({ length: 10 }, () => ({ symbol: 'x', desc: 'Door' }));
         const output = renderMap({ map: 'x', max_y: 0, legend: dup } as unknown as Parameters<typeof renderMap>[0], 60, 20);
-        const colors = [...output.matchAll(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g)].map((m) => m[0]);
+        // The legend body now carries the main-pane default gray; only the
+        // assigned duplicate colors must be distinct.
+        const colors = [...output.matchAll(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g)]
+            .map((m) => m[0])
+            .filter((color) => color !== DEFAULT_TEXT_COLOR);
         const unique = new Set(colors);
         expect(unique.size).toBeGreaterThanOrEqual(2);
         const early = colors.slice(0, 7);
@@ -162,5 +167,33 @@ describe('map background and wide character handling', () => {
     it('ignores empty background payloads', () => {
         const output = renderMap({ map: 'ab', max_y: 0, background: { color: [1, 2, 3], coords: [] } as unknown as Parameters<typeof renderMap>[0]['background'], show_legend: false } as unknown as Parameters<typeof renderMap>[0], 10, 4);
         expect(output).not.toContain('\x1b[48;2;1;2;3m');
+    });
+});
+
+describe('map legend default color', () => {
+    it('renders the legend box in the main-pane gray', () => {
+        const output = renderMap({ map: 'ab', max_y: 0, legend: [{ symbol: 'x', desc: 'Exit' }] } as unknown as Parameters<typeof renderMap>[0], 30, 12);
+        expect(output).toContain(`${DEFAULT_TEXT_COLOR}╭`);
+    });
+
+    it('restores gray after a colored legend symbol', () => {
+        const output = renderMap(
+            { map: 'x', max_y: 0, legend: [{ symbol: '\x1b[38;2;255;0;0mX\x1b[0m', desc: 'Door' }] } as unknown as Parameters<typeof renderMap>[0],
+            30, 12,
+        );
+        expect(output).toContain(`\x1b[38;2;255;0;0mX${DEFAULT_TEXT_RESET}`);
+    });
+
+    it('keeps the white player symbol while the legend body stays gray', () => {
+        const output = renderMap({
+            map: 'abc\ndef',
+            max_y: 1,
+            pos: [1, 1],
+            symbol: '@',
+            area: 'Room',
+            legend: [{ symbol: 'x', desc: 'Exit' }],
+        } as unknown as Parameters<typeof renderMap>[0], 20, 10);
+        expect(output).toContain('\x1b[38;2;255;255;255m@');
+        expect(output).toContain(DEFAULT_TEXT_COLOR);
     });
 });
