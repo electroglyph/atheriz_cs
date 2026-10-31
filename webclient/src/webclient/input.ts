@@ -15,6 +15,20 @@ export function inputHeight(scrollHeight: number, minimum = 30, maximum = 300): 
     return Math.min(Math.max(scrollHeight, minimum), maximum);
 }
 
+// Ghost completion is only meaningful when the caret sits collapsed at the
+// very end of the input: anywhere else the grey hint would render under
+// existing text while ArrowRight just moves the caret (and Tab replacing
+// the whole value would discard the caret position). Both the display and
+// the accept paths gate on this so a visible hint is always completable.
+export function isCaretAtEnd(
+    value: string,
+    selectionStart: number | null,
+    selectionEnd: number | null,
+): boolean {
+    if (selectionStart === null || selectionEnd === null) return false;
+    return selectionStart === value.length && selectionEnd === value.length;
+}
+
 export function shouldClearSubmittedInput(
     key: string,
     submitted: boolean,

@@ -1,6 +1,6 @@
 # Webclient: terminal client
 
-> Play through the browser and ship it with your game. Webclient 1.12.0.
+> Play through the browser and ship it with your game. Webclient 1.12.1.
 
 To reach the client you need a running server and its web address (host
 and port from the game operator, defaults in

@@ -13,7 +13,7 @@ import { MapPayload, WebClientElements, WireMessage } from './types';
 import { SessionRecorder } from './recorder';
 import { MAP_CLEAR_SEQUENCE, mergeBackgrounds, parseBackground, renderMap as renderMapText } from './map';
 import { mapLayout, recordingDividerPct, resizeWidth } from './layout';
-import { inputHeight, shouldClearSubmittedInput, shouldFocusInputOnKeydown, shouldNavigateHistory, submissionFeedback } from './input';
+import { inputHeight, isCaretAtEnd, shouldClearSubmittedInput, shouldFocusInputOnKeydown, shouldNavigateHistory, submissionFeedback } from './input';
 import { formatPrompt, formatTextOutput, stripAnsiBroad } from './text';
 import { SequentialWriter, chunkEndsWithNewline, drainTrailer } from './buffer';
 import { playAudio as playAudioElement } from './audio';
@@ -229,7 +229,11 @@ function installInputHandlers(): void {
         window.setTimeout(fitAndReportSize, 0);
     };
     const updateHint = () => {
-        hint.value = history.getSuggestion();
+        // Only show the ghost when the caret is collapsed at the end;
+        // otherwise the hint would paint under existing text while
+        // ArrowRight just steps the caret and looks broken.
+        const atEnd = isCaretAtEnd(elements.input.value, elements.input.selectionStart, elements.input.selectionEnd);
+        hint.value = atEnd ? history.getSuggestion() : '';
         hint.scrollTop = elements.input.scrollTop;
         hint.scrollLeft = elements.input.scrollLeft;
     };
@@ -243,9 +247,11 @@ function installInputHandlers(): void {
             return;
         }
         const suggestion = history.getSuggestion();
-        if (suggestion && (event.key === 'Tab' || (event.key === 'ArrowRight' && elements.input.selectionStart === elements.input.value.length))) {
+        const caretAtEnd = isCaretAtEnd(elements.input.value, elements.input.selectionStart, elements.input.selectionEnd);
+        if (suggestion && caretAtEnd && (event.key === 'Tab' || event.key === 'ArrowRight')) {
             event.preventDefault();
             elements.input.value = suggestion;
+            elements.input.setSelectionRange(suggestion.length, suggestion.length);
             history.reset();
             resizeInput();
             updateHint();
@@ -268,6 +274,7 @@ function installInputHandlers(): void {
             )) {
                 event.preventDefault();
                 elements.input.value = history.navigate(event.key === 'ArrowUp' ? 'up' : 'down', elements.input.value);
+                elements.input.setSelectionRange(elements.input.value.length, elements.input.value.length);
                 history.findCompletions(elements.input.value);
                 resizeInput();
                 updateHint();
@@ -320,6 +327,13 @@ function installInputHandlers(): void {
         hint.scrollTop = elements.input.scrollTop;
         hint.scrollLeft = elements.input.scrollLeft;
     });
+    // Caret moves (arrow keys, mouse, select-all) never fire `input`, so the
+    // ghost would otherwise linger while the caret is mid-line — visible but
+    // uncompletable, since acceptance requires the caret at the end. Refresh
+    // on caret movement so display and ArrowRight/Tab stay in sync.
+    elements.input.addEventListener('keyup', updateHint);
+    elements.input.addEventListener('click', updateHint);
+    elements.input.addEventListener('select', updateHint);
     // Typing anywhere outside an editable lands in the command input.
     // Capture phase: xterm.js stops keydown propagation inside the
     // terminal panes, so a bubble listener never sees those keys.

@@ -3,6 +3,14 @@
 Webclient (`webclient/`) release notes, split out from the engine `CHANGELOG.md`
 2026-09-25. Versioning follows `webclient/package.json`.
 
+## [1.12.1] - 2026-10-31
+
+- Fixed the ghost autocomplete showing while the caret sits mid-line, where
+  Right arrow just steps the caret and looks broken. The hint now only shows
+  when the caret is collapsed at the very end (both Tab and Right arrow use
+  the same gate), refreshes on caret moves, and the caret parks at the end
+  after accepting or recalling history.
+
 ## [1.12.0] - 2026-10-31
 
 - The game client now waits out a server-announced restart: the `restarting`
