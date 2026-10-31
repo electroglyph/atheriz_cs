@@ -1,6 +1,6 @@
 # Webclient: terminal client
 
-> Play through the browser and ship it with your game. Webclient 1.11.3.
+> Play through the browser and ship it with your game. Webclient 1.12.0.
 
 To reach the client you need a running server and its web address (host
 and port from the game operator, defaults in
@@ -47,6 +47,8 @@ tab; the latest grant is kept, so waiting a moment and retrying opens
 the current session.
 
 Prompt behavior, one line: typed input echoes locally and the prompt redraws after each burst, so a late `wave` is lag, not a lost keystroke — resend only after the output settles.
+
+Restart behavior, one paragraph: an announced restart shows `======== The server is restarting. Waiting for it to come back up...` and the client redials quietly for up to five minutes without counting the attempts, then returns to the login prompt by itself — log back in, no page reload needed. Past the wait the terminal says `Connection lost. Reload the page to reconnect.` Unannounced drops (blips, crashes, CLI restarts) still print the per-attempt `Connecting...` / `Connection lost. Retrying...` lines under the normal retry budget (→ [Connecting: webclient and telnet](09-connecting.md)).
 
 ## 2. Fonts
 

@@ -99,6 +99,10 @@ One character, one driver: puppeting a character that is already puppeted elsewh
 
 Connection loss mid-puppet leaves the character intact in its room: reconnect and resume. A simultaneous server crash rewinds to the last checkpoint (see [Saves and backups](10-persistence-saves.md)).
 
+## 3.3 Announced restarts (what the player sees)
+
+An in-game `restart` warns first: every session sees `Server is restarting! It will be back up shortly.`, then the connection drops while the replacement process binds the same ports. The webclient shows `======== The server is restarting. Waiting for it to come back up...` and keeps redialing quietly for up to five minutes — no per-attempt lost/retrying spam — then lands back at the login prompt on its own. Sessions and puppets do not survive the restart (connection state is in-memory), so log in and repuppet: the character waited in its room. If the wait runs out first the terminal says `Connection lost. Reload the page to reconnect.` — reload and log in. Telnet clients get only the text notice and reconnect by hand; a CLI `./atheriz.sh restart` gives no advance warning at all, just the drop.
+
 ## 4. Operator notes: caps, bans, throttles, size limits
 
 Per-IP and total connection caps (`MaxConnectionsPerIp`, `MaxTotalConnections`) bound how many simultaneous connections the server accepts. Past the cap, the socket closes with no message; the reason goes to the server log. Nothing is queued. Raise caps with `restart` (settings need restart, not `reload`).
@@ -129,6 +133,10 @@ Creation is temporarily rate-limited. Please try again later.
 (no reply at all — the drop is silent; only the server log records it)
 # Overlong WebSocket message (64 KB cap):
 (the socket closes with MessageTooBig; only the server log records it)
+# Announced restart (in-game `restart` verb):
+Server is restarting! It will be back up shortly.
+======== The server is restarting. Waiting for it to come back up...
+(then the login prompt, once the replacement binds — sessions are in-memory and do not survive)
 # Bad login (account and password both hidden):
 Invalid password.
 ```

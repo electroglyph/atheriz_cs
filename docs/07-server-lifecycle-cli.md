@@ -119,7 +119,9 @@ cd mygame
 ./atheriz.sh restart --foreground
 ```
 
-`restart` stops, waits up to 10 s for both ports to free, then starts again. Use it for settings, ports, binds, engine code, web files — `reload` skips those.
+`restart` builds first, then stops, waits up to 10 s for both ports to free, and starts again. The engine server is rebuilt when stale and every game project is rebuilt, so engine changes take effect on restart; a failed build aborts with the old server still running. Use it for settings, ports, binds, engine code, web files — `reload` skips those. The CLI form gives no advance warning beyond the shutdown messages — players just see the connection drop.
+
+The in-game `restart` verb (superuser) runs the same build-first pass, then checkpoints, warns every connected session (`Server is restarting! It will be back up shortly.`), and hands over to a freshly spawned process that binds the same ports — no CLI needed. A failed build or save aborts with the server still running, and overlapping restarts refuse instead of double-spawning. The webclient holds its connection on the warning and reconnects on its own (→ [Connecting: webclient and telnet](09-connecting.md)); telnet clients see only the text notice and reconnect by hand.
 
 ## 5. `reload`: build first, then hot-load (game code only)
 
@@ -155,7 +157,7 @@ cd mygame
 
 `reset` always prompts `[y/N]` and there is no `--force` or `--yes` flag by design — wiping is destructive and the prompt is the guardrail. Answer anything but `y`/`Y` and nothing happens.
 
-With confirmation, the sequence is:
+With confirmation, the engine server is rebuilt when stale and every game project is rebuilt first — a failed build aborts with the world and any running server untouched. Then the sequence is:
 
 1. Port-listener guard over the override, configured, and telnet ports.
 2. Stop the live server if one is claimed.

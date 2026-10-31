@@ -121,9 +121,10 @@ Admin (builder+ only — one-gate rule noted: each of these carries ONE privileg
 | `perm` | superuser | `<object> [= <rank>]` | views or grants player/helper/builder/admin |
 | `wall` | superuser | `<message>` | announces to every session, logged in or not |
 | `accounts` | superuser | `[--delete <account>]` | stats, or deletes an account with its characters |
-| `reset` | superuser | — | checkpoint save plus the reload hooks (cold reboot) |
+| `reset` | superuser | — | rebuilds stale game code, then a checkpoint save plus the reload hooks (cold reboot) |
 | `shutdown` | superuser | — | stops the server (saves first) |
-| `reload` | superuser | — | announces `Server is reloading...`, rebuilds stale game code, hot-loads |
+| `reload` | superuser | — | announces `Server is reloading...`, rebuilds stale game code, hot-loads, reports the outcome as a follow-up message |
+| `restart` | superuser | — | rebuilds, checkpoints, warns all sessions (`Server is restarting! It will be back up shortly.`), hands over to a fresh process; the webclient waits and reconnects |
 | `save` | superuser | — | checkpoints the world |
 | `spam` | superuser | `<count>` | creates test accounts/characters |
 

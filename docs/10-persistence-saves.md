@@ -241,7 +241,7 @@ Crash anatomy, concrete: power dies halfway between checkpoints — same story a
 | Goal | Command | State | Connections | Settings |
 |---|---|---|---|---|
 | New game code live | `reload` (builds stale projects, then hot-loads) | kept | kept | not re-read |
-| New engine code live | rebuild + `restart` | saved, reloaded | dropped | re-read |
+| New engine code live | `restart` (builds stale code first) | saved, reloaded | dropped | re-read |
 | New settings/ports live | `restart` | saved, reloaded | dropped | re-read |
 | Fresh world, same code | `reset` (`[y/N]`, no force) | wiped + reseeded | dropped | kept |
 | Durable now | `save` (superuser command) | kept | kept | kept |
