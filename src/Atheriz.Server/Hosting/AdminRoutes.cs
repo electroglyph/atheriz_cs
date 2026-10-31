@@ -71,6 +71,34 @@ public static class AdminRoutes
             }
         }).RequireAuthorization(AdminAuthServices.Policy);
 
+        app.MapPost("/_internal/restart", async (HttpContext ctx, IHostApplicationLifetime lifetime) =>
+        {
+            if (IsBodyTooLarge(ctx))
+                return AdminError("Request body too large.");
+            try
+            {
+                // Same 60 s watchdog shape as hot_reload: a hung build must
+                // not pin the worker. On timeout the background restart keeps
+                // running; the caller retries or inspects the log (same
+                // 200+{status:error} contract).
+                async Task<RestartCoordinator.RestartOutcome> DoRestartWork() =>
+                    await RestartCoordinator.RestartAsync(settings, lifetime).ConfigureAwait(false);
+                var work = Task.Run(DoRestartWork);
+                var done = await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(60))).ConfigureAwait(false);
+                if (done != work)
+                {
+                    AtherizLogger.LogError("[Restart] Restart exceeded 60s watchdog; continuing in background.");
+                    return AdminError("Restart timed out after 60s; still running in background.");
+                }
+                var outcome = await work.ConfigureAwait(false);
+                return outcome.Ok ? AdminOk(outcome.Message) : AdminError(outcome.Message);
+            }
+            catch (Exception ex)
+            {
+                return AdminError(ex.Message);
+            }
+        }).RequireAuthorization(AdminAuthServices.Policy);
+
         app.MapPost("/_internal/shutdown", (HttpContext ctx, IHostApplicationLifetime lifetime) =>
         {
             if (IsBodyTooLarge(ctx))

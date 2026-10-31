@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WebSocketConnection, WebSocketLike, gameTokenFromFragment, websocketUrl } from '../src/webclient/connection';
+import { WebSocketConnection, WebSocketLike, GAME_CLIENT_MAX_RECONNECT_ATTEMPTS, gameTokenFromFragment, websocketUrl } from '../src/webclient/connection';
 
 class FakeSocket implements WebSocketLike {
     readyState = 0;
@@ -271,6 +271,134 @@ describe('webclient connection', () => {
         connection.close();
         vi.restoreAllMocks();
         vi.useRealTimers();
+    });
+
+    it('game client budget survives a restart-length outage', () => {
+        vi.useFakeTimers();
+        vi.spyOn(Math, 'random').mockReturnValue(0);
+        const sockets: FakeSocket[] = [];
+        const connection = new WebSocketConnection({
+            createSocket: () => {
+                const socket = new FakeSocket();
+                sockets.push(socket);
+                return socket;
+            },
+            onMessage: () => undefined,
+            maxReconnectAttempts: GAME_CLIENT_MAX_RECONNECT_ATTEMPTS,
+        });
+
+        connection.connect();
+        sockets[0].open();
+        // In-game restart: the server drops the socket and stays down
+        // through build + checkpoint + handover + boot (~6 s fast path,
+        // longer when the build is cold). Every redial fails too.
+        sockets[0].drop();
+        for (let elapsed = 0; elapsed < 80_000; elapsed += 16_000) {
+            vi.advanceTimersByTime(16_000);
+            for (const socket of sockets) socket.drop();
+        }
+
+        // Still retrying: the class default of 3 gives up after ~3.5 s,
+        // so outliving 80 s proves the game budget, not the default.
+        expect(sockets.length).toBeGreaterThan(4);
+        expect(connection.getState()).not.toBe('failed');
+        // The replacement server finally answers the next redial.
+        vi.advanceTimersByTime(16_000);
+        expect(connection.getState()).toBe('connecting');
+        sockets[sockets.length - 1].open();
+        expect(connection.getState()).toBe('open');
+        connection.close();
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+    });
+
+    it('waits out an announced restart without consuming the retry budget', () => {
+        vi.useFakeTimers();
+        vi.spyOn(Math, 'random').mockReturnValue(0);
+        const sockets: FakeSocket[] = [];
+        const connection = new WebSocketConnection({
+            createSocket: () => {
+                const socket = new FakeSocket();
+                sockets.push(socket);
+                return socket;
+            },
+            onMessage: () => undefined,
+            minReconnectDelayMs: 100,
+            maxReconnectDelayMs: 100,
+        });
+
+        connection.connect();
+        sockets[0].open();
+        connection.notifyRestarting(60_000);
+        expect(connection.isWaitingForRestart()).toBe(true);
+        // Ten refused redials would fail the default budget three times
+        // over; the announced wait rides them all out.
+        for (let i = 0; i < 10; i += 1) {
+            for (const socket of sockets) socket.drop();
+            vi.advanceTimersByTime(1000);
+        }
+
+        expect(sockets.length).toBeGreaterThan(4);
+        expect(connection.getState()).not.toBe('failed');
+        expect(connection.isWaitingForRestart()).toBe(true);
+        // The replacement binds inside the wait: back promptly.
+        sockets[sockets.length - 1].open();
+        expect(connection.getState()).toBe('open');
+        expect(connection.isWaitingForRestart()).toBe(false);
+        connection.close();
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+    });
+
+    it('hands a fresh budget to the world after the restart wait expires', () => {
+        vi.useFakeTimers();
+        vi.spyOn(Math, 'random').mockReturnValue(0);
+        const sockets: FakeSocket[] = [];
+        const connection = new WebSocketConnection({
+            createSocket: () => {
+                const socket = new FakeSocket();
+                sockets.push(socket);
+                return socket;
+            },
+            onMessage: () => undefined,
+            minReconnectDelayMs: 100,
+            maxReconnectDelayMs: 100,
+        });
+
+        connection.connect();
+        sockets[0].open();
+        connection.notifyRestarting(500);
+        for (const socket of sockets) socket.drop();
+        vi.advanceTimersByTime(1000);
+        expect(connection.isWaitingForRestart()).toBe(false);
+
+        // Past the wait the normal budget applies from zero: attempts
+        // burned while waiting must neither fail instantly nor never.
+        for (const socket of sockets) socket.drop();
+        vi.advanceTimersByTime(100);
+        for (const socket of sockets) socket.drop();
+        vi.advanceTimersByTime(100);
+        for (const socket of sockets) socket.drop();
+        vi.advanceTimersByTime(100);
+        for (const socket of sockets) socket.drop();
+        vi.advanceTimersByTime(60_000);
+
+        expect(connection.getState()).toBe('failed');
+        connection.close();
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+    });
+
+    it('manual close drops a pending restart wait', () => {
+        const connection = new WebSocketConnection({
+            createSocket: () => new FakeSocket(),
+            onMessage: () => undefined,
+        });
+
+        connection.notifyRestarting();
+        expect(connection.isWaitingForRestart()).toBe(true);
+        connection.close();
+        expect(connection.isWaitingForRestart()).toBe(false);
     });
 
     it('reports errors from the active socket', () => {

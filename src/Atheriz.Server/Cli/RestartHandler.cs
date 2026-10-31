@@ -1,3 +1,4 @@
+using Atheriz.Core.Plugins;
 using Atheriz.Server.Hosting;
 
 namespace Atheriz.Server.Cli;
@@ -6,8 +7,24 @@ public static class RestartHandler
 {
     // Stop the old server, then run the replacement in this process.
     // Returns the process exit code.
-    public static async Task<int> RestartAsync(int? port, string? host, int? telnetPort, bool foreground = true)
+    public static async Task<int> RestartAsync(
+        int? port,
+        string? host,
+        int? telnetPort,
+        bool foreground = true,
+        Func<AtherizSettings, CancellationToken, Task<BuildCoordinator.BuildAllResult>>? buildAll = null)
     {
+        // Build-first, before stopping anything: restart exists to pull in
+        // engine changes, and a failed build must leave the old server
+        // running instead of taking it down with nothing to replace it.
+        var buildSettings = StopHandler.EffectiveSettingsValue;
+        var build = await (buildAll ?? ((s, ct) => BuildCoordinator.EnsureAllBuiltAsync(s, cancellationToken: ct)))(
+            buildSettings, CancellationToken.None).ConfigureAwait(false);
+        if (!build.Ok)
+        {
+            Console.Error.WriteLine($"{build.Summary} The server was left running.");
+            return 1;
+        }
         var sw = Stopwatch.StartNew();
         _ = await StopHandler.StopAsync(port).ConfigureAwait(false);
         // The stop above ran against cached settings; re-read so the waits

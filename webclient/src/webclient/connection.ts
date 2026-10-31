@@ -25,6 +25,16 @@ export interface ConnectionOptions {
 
 const STABLE_CONNECTION_MS = 30_000;
 const CONNECT_TIMEOUT_MS = 10_000;
+// How long a server-announced restart is waited out before the normal
+// retry budget applies again: build + checkpoint + handover + boot runs
+// seconds on the fast path and a minute or more when the build is cold.
+export const RESTART_WAIT_MS = 5 * 60_000;
+// Game-terminal retry budget: an in-game restart drops the socket for the
+// build + checkpoint + handover + boot gap (the observed fast path is ~6 s;
+// a build-first restart runs a minute or more), far longer than the
+// blip-sized default of 3 below. The terminal client passes this so a
+// restart reconnects on its own instead of stranding the player.
+export const GAME_CLIENT_MAX_RECONNECT_ATTEMPTS = 20;
 export const OPEN_STATE = 1;
 // Inbound frames larger than this are treated as invalid instead of parsed.
 export const MAX_INBOUND_FRAME_BYTES = 4 * 1024 * 1024;
@@ -114,6 +124,11 @@ export class WebSocketConnection {
     private openedAt = 0;
     private manuallyClosed = false;
     private state: ConnectionState = 'idle';
+    // Set when the server announces a committed restart (`restarting`
+    // wire frame, sent just before it stops): reconnects until this
+    // timestamp don't consume the retry budget, so the restart gap —
+    // far longer than a blip — never strands the client.
+    private restartWaitUntil = 0;
 
     constructor(options: ConnectionOptions) {
         this.createSocket = options.createSocket ?? ((url) => new WebSocket(url));
@@ -130,7 +145,10 @@ export class WebSocketConnection {
     connect(): void {
         const wasManuallyClosed = this.manuallyClosed;
         this.manuallyClosed = false;
-        if (this.state === 'failed' || wasManuallyClosed) this.reconnectAttempt = 0;
+        if (this.state === 'failed' || wasManuallyClosed) {
+            this.reconnectAttempt = 0;
+            this.restartWaitUntil = 0;
+        }
         this.clearReconnectTimer();
         if (this.socket?.readyState === OPEN_STATE || this.state === 'connecting') return;
 
@@ -146,6 +164,11 @@ export class WebSocketConnection {
             if (this.socket !== socket) return;
             this.clearConnectTimer();
             this.openedAt = Date.now();
+            // Attempts burned while waiting out a restart belong to the
+            // gap, not to the new session: the first flap after a restart
+            // gets the full budget instead of failing instantly.
+            if (this.restartWaitUntil !== 0) this.reconnectAttempt = 0;
+            this.restartWaitUntil = 0;
             this.setState('open');
         };
         socket.onmessage = (event) => {
@@ -188,6 +211,17 @@ export class WebSocketConnection {
                 this.setState('closed');
                 return;
             }
+            // A restart the server announced is waited out, not counted:
+            // the gap until the replacement binds dwarfs the blip budget.
+            // Once the wait expires the budget starts fresh (see
+            // consumeExpiredRestartWait), so only an unannounced outage
+            // fails here.
+            if (this.isWaitingForRestart()) {
+                this.scheduleReconnect();
+                this.setState('closed');
+                return;
+            }
+            this.consumeExpiredRestartWait();
             if (this.reconnectAttempt >= this.maxReconnectAttempts) {
                 this.setState('failed');
                 return;
@@ -203,6 +237,7 @@ export class WebSocketConnection {
 
     close(): void {
         this.manuallyClosed = true;
+        this.restartWaitUntil = 0;
         this.clearReconnectTimer();
         this.clearConnectTimer();
         this.socket?.close();
@@ -222,6 +257,30 @@ export class WebSocketConnection {
 
     getState(): ConnectionState {
         return this.state;
+    }
+
+    /**
+     * The server announced a committed restart just before stopping.
+     * Reconnects keep going until `patienceMs` runs out without consuming
+     * the retry budget — the caller shows the waiting notice.
+     */
+    notifyRestarting(patienceMs: number = RESTART_WAIT_MS): void {
+        this.restartWaitUntil = Date.now() + Math.max(0, patienceMs);
+    }
+
+    /** Whether a server-announced restart is still being waited out. */
+    isWaitingForRestart(): boolean {
+        return Date.now() < this.restartWaitUntil;
+    }
+
+    // A wait that ran out hands a fresh budget to the world after the
+    // restart: attempts burned while waiting must not fail the first
+    // redials of whatever came back (or didn't).
+    private consumeExpiredRestartWait(): void {
+        if (this.restartWaitUntil !== 0 && !this.isWaitingForRestart()) {
+            this.restartWaitUntil = 0;
+            this.reconnectAttempt = 0;
+        }
     }
 
     private handleRaw(raw: string): void {
@@ -244,6 +303,12 @@ export class WebSocketConnection {
         if (this.socket !== socket) return;
         this.socket = null;
         this.openedAt = 0;
+        if (this.isWaitingForRestart()) {
+            this.scheduleReconnect();
+            this.setState('closed');
+            return;
+        }
+        this.consumeExpiredRestartWait();
         if (this.reconnectAttempt >= this.maxReconnectAttempts) {
             this.setState('failed');
             return;

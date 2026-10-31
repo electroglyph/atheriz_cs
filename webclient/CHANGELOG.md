@@ -5,6 +5,15 @@ Webclient (`webclient/`) release notes, split out from the engine `CHANGELOG.md`
 
 ## [1.12.0] - 2026-10-31
 
+- The game client now waits out a server-announced restart: the `restarting`
+  frame arrives before the drop, and reconnects during the handover hold
+  without consuming the retry budget or spamming connection-lost banners.
+  When the wait runs out the normal budget applies from zero, and the
+  give-up message tells the player to reload the page.
+- The game client keeps retrying the game socket for several minutes
+  instead of giving up after ~3 seconds, so an in-game `restart`
+  (build plus handover plus boot) reconnects on its own. If retries
+  do run out, the terminal now says to reload the page.
 - The map pane legend now uses the same light gray as uncolored
   main-pane text, so legend borders and descriptions match.
 

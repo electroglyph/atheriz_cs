@@ -89,6 +89,20 @@ public static class AtherizCli
         restart.SetAction((ParseResult pr) => RestartHandler.RestartAsync(
             pr.GetValue(restartPort), pr.GetValue(restartHost), TelnetPortOrEnv(pr.GetValue(restartTelnet)), pr.GetValue(restartFg)));
 
+        // Internal child side of an in-game restart: spawned by the running
+        // server (RestartCoordinator), never by operators directly.
+        var takeover = new Command("takeover", "Internal: complete an in-game restart handover");
+        var takeoverPid = new Option<int>("--pid")
+        {
+            Description = "Parent server process to wait for before binding"
+        };
+        var takeoverPort = PortOption(); var takeoverHost = HostOption(); var takeoverTelnet = TelnetPortOption();
+        takeover.Options.Add(takeoverPid); takeover.Options.Add(takeoverPort); takeover.Options.Add(takeoverHost); takeover.Options.Add(takeoverTelnet);
+        takeover.SetAction((ParseResult pr) => TakeoverHandler.TakeoverAsync(
+            StopHandler.LoadSettingsFor(Directory.GetCurrentDirectory()),
+            pr.GetValue(takeoverPid),
+            pr.GetValue(takeoverPort), pr.GetValue(takeoverHost), TelnetPortOrEnv(pr.GetValue(takeoverTelnet))));
+
         var reload = new Command("reload", "Hot reload game logic");
         var reloadPort = PortOption();
         reload.Options.Add(reloadPort);
@@ -135,7 +149,7 @@ public static class AtherizCli
         deployGame.SetAction((ParseResult pr) => DeployHandler.DeployGameAsync(pr.GetValue(webRootOpt)!, pr.GetValue(noCleanOpt)));
         deploy.Subcommands.Add(deployGame);
 
-        root.Subcommands.Add(start); root.Subcommands.Add(stop); root.Subcommands.Add(restart);
+        root.Subcommands.Add(start); root.Subcommands.Add(stop); root.Subcommands.Add(restart); root.Subcommands.Add(takeover);
         root.Subcommands.Add(reload); root.Subcommands.Add(reset); root.Subcommands.Add(create);
         root.Subcommands.Add(@new); root.Subcommands.Add(test); root.Subcommands.Add(deploy);
         return root;

@@ -90,7 +90,8 @@ public sealed class InGameShutdownTests
         var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminCommands.cs");
         Assert.DoesNotContain("ServerEvents.AtServerStop", src);
         Assert.Contains("SslCertFile", src);
-        Assert.Contains("ServerCertificateCustomValidationCallback", src);
-        Assert.Contains("TryPostShutdownAsync(second", src);
+        Assert.Contains("AdminEndpointClient.TryPostAsync(second", src);
+        var client = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminEndpointClient.cs");
+        Assert.Contains("ServerCertificateCustomValidationCallback", client);
     }
 }

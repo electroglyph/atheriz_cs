@@ -12,7 +12,7 @@ using System.Text.Json;
 
 namespace Atheriz.Core.Tests.Features.Hosting;
 
-// Shared 4096-byte guard for the hot_reload/shutdown admin routes:
+// Shared 4096-byte guard for the hot_reload/shutdown/restart admin routes:
 // oversized declared bodies are rejected with byte-identical JSON,
 // a missing Content-Length (chunked) still falls through.
 [Collection("Ported")]
@@ -123,6 +123,18 @@ public class AdminBodyGuardTests
     }
 
     [Fact]
+    public async Task Restart_OversizedBody_ReturnsTooLargeErrorWithoutRestarting()
+    {
+        await using var b = await BootAsync();
+        using var doc = await PostSizedBody(b.Client, "/_internal/restart", b.Token, 5000);
+        Assert.Equal("error", doc.RootElement.GetProperty("status").GetString());
+        Assert.Equal("Request body too large.", doc.RootElement.GetProperty("message").GetString());
+        // Early return runs before any build or spawn: the app still serves.
+        using var health = JsonDocument.Parse(await b.Client.GetStringAsync("/health"));
+        Assert.Equal("ok", health.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task CreateAccount_SmallInvalidBody_DoesNotUseAdminLimit()
     {
         // create_account caps through its own 64 KiB JSON reader, not the
@@ -139,13 +151,13 @@ public class AdminBodyGuardTests
     }
 
     [Fact]
-    public void AdminBodyGuard_DefinedOnce_UsedTwice()
+    public void AdminBodyGuard_DefinedOnce_UsedThrice()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Hosting", "AdminRoutes.cs");
         Assert.Equal(1, SourceScan.Count(src, "MaxAdminBodyBytes = 4096"));
-        Assert.Equal(2, SourceScan.Count(src, "IsBodyTooLarge(ctx)"));
+        Assert.Equal(3, SourceScan.Count(src, "IsBodyTooLarge(ctx)"));
         Assert.Equal(0, SourceScan.Count(src, "ContentLength > 4096"));
-        Assert.Equal(2, SourceScan.Count(src, "\"Request body too large.\""));
+        Assert.Equal(3, SourceScan.Count(src, "\"Request body too large.\""));
         Assert.Contains("ReadCappedJsonBodyAsync(ctx, 64 * 1024)", src);
     }
 }

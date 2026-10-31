@@ -134,7 +134,12 @@ public class GameBuildScaffoldTests
                 Assert.DoesNotContain("EnableDelayedExpansion", cmdText);
                 Assert.DoesNotContain("!CD!", cmdText);
                 Assert.DoesNotContain("!errorlevel!", cmdText);
-                Assert.Contains("for %%p in (.) do set \"ENGINE_ROOT=%%~fp\"", cmdText);
+                // Baked and upward engine resolution live in subroutines (same
+                // 12-deep rule as build.sh/build.ps1); the baked rel is only
+                // accepted when it holds the engine sources.
+                Assert.Contains(":find_upward_root", cmdText);
+                Assert.Contains(":find_baked_root", cmdText);
+                Assert.Contains("set \"ENGINE_ROOT=%DIR%\"", cmdText);
                 Assert.Contains("$env:SERVER_DLL", cmdText);
                 Assert.Contains("$env:ENGINE_ROOT", cmdText);
             }

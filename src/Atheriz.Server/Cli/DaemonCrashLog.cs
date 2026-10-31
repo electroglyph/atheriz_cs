@@ -25,12 +25,17 @@ public static class DaemonCrashLog
 
     private static string? ResolveSaveDir()
     {
-        try
-        {
-            var path = AtherizSettings.Global.SavePath;
-            if (!string.IsNullOrWhiteSpace(path)) return path;
-        }
+        string? path = null;
+        try { path = AtherizSettings.Global.SavePath; }
         catch { }
-        try { return StopHandler.EffectiveSettingsValue.SavePath; } catch { return null; }
+        if (string.IsNullOrWhiteSpace(path))
+            try { path = StopHandler.EffectiveSettingsValue.SavePath; } catch { return null; }
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        // Never plant a relative save folder outside a game folder: the
+        // engine checkout itself is not a game, so there is no crash log to
+        // write there.
+        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(path); }
+        catch { return null; }
+        return path;
     }
 }

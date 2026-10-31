@@ -40,16 +40,20 @@ public class ScreenReaderShutdownExitTests
     // Shutdown dials the admin endpoint with the same scheme the server
     // listens on (SslCertFile set => https), tolerates loopback
     // self-signed certs, and retries once with the flipped scheme — on a
-    // pool thread, with no raw OS thread per invocation.
+    // pool thread, with no raw OS thread per invocation. The loopback post
+    // lives in the shared AdminEndpointClient used by both process-level
+    // verbs (shutdown, restart), not inline in the command.
     [Fact]
     public void Shutdown_SelectsSchemeAndToleratesLoopbackCert_PoolThread()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminCommands.cs");
         Assert.Contains("SslCertFile", src);
-        Assert.Contains("ServerCertificateCustomValidationCallback", src);
         Assert.DoesNotContain("http://localhost:", src);
         Assert.DoesNotContain("SharedShutdownClient", src);
         Assert.DoesNotContain("new Thread(", src);
+        Assert.Contains("AdminEndpointClient.TryPostAsync", src);
+        var client = SourceScan.Read("src", "Atheriz.Core", "Commands", "LoggedIn", "AdminEndpointClient.cs");
+        Assert.Contains("ServerCertificateCustomValidationCallback", client);
     }
 
     // The door re-close after a refused/failed exit move lives in one helper

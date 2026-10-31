@@ -12,7 +12,7 @@ using System.Reflection;
 namespace Atheriz.Core.Tests.Features.Simplify;
 
 // Merged from AdminGuardHelperTests.cs
-// One admin guard-result shape for the three /_internal endpoints; the auth
+// One admin guard-result shape for the four /_internal endpoints; the auth
 // gate is the shared Admin policy (one RequireAuthorization per endpoint).
 // The Validate* one-line forwards are gone —
 // the create-account site calls Validation directly.
@@ -20,13 +20,13 @@ namespace Atheriz.Core.Tests.Features.Simplify;
 public class AdminGuardHelperTests
 {
     [Fact]
-    public void GuardHelpers_DefinedOnce_UsedThrice()
+    public void GuardHelpers_DefinedOnce_UsedFourTimes()
     {
         var src = SourceScan.Read("src", "Atheriz.Server", "Hosting", "AdminRoutes.cs");
         Assert.Equal(0, SourceScan.Count(src, "bool RequireAdmin("));
         Assert.Equal(1, SourceScan.Count(src, "static IResult AdminError("));
         Assert.Equal(1, SourceScan.Count(src, "static IResult AdminOk("));
-        Assert.Equal(3, SourceScan.Count(src, ".RequireAuthorization(AdminAuthServices.Policy)"));
+        Assert.Equal(4, SourceScan.Count(src, ".RequireAuthorization(AdminAuthServices.Policy)"));
     }
 
     [Fact]

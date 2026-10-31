@@ -6,7 +6,7 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import '../../fonts/FiraCode.css';
 import '../../fonts/KreativeSquare.css';
-import { WebSocketConnection } from './connection';
+import { WebSocketConnection, GAME_CLIENT_MAX_RECONNECT_ATTEMPTS } from './connection';
 import { CommandHistory } from './history';
 import { launchDraw } from './launch';
 import { MapPayload, WebClientElements, WireMessage } from './types';
@@ -111,19 +111,29 @@ write(`version \x1b[1;97m${__WEBCLIENT_VERSION__}\x1b[0m\n`);
 write('Enter :help for a list of \x1b[1;97mxtermia3\x1b[0m commands');
 
 const connection = new WebSocketConnection({
+    // Restart-sized retry budget (see GAME_CLIENT_MAX_RECONNECT_ATTEMPTS):
+    // a restart gap is seconds to minutes, not a blip. The class default
+    // of 3 gives up after ~3.5 s, before the replacement binds. On top of
+    // that, a server-announced restart is waited out below without
+    // consuming the budget at all.
+    maxReconnectAttempts: GAME_CLIENT_MAX_RECONNECT_ATTEMPTS,
     onMessage: handleMessage,
     onStateChange: (state) => {
         const wasConnected = connected;
         connected = state === 'open';
         if (shouldResetSession(wasConnected, state)) resetSessionState();
         if (state === 'idle') return;
-        if (state === 'connecting') write('\n======== Connecting...\n');
-        if (state === 'closed') {
+        // While waiting out a server-announced restart the notice on the
+        // `restarting` frame stands on its own: per-attempt connecting /
+        // lost banners would just spam until the replacement binds.
+        const waiting = connection.isWaitingForRestart();
+        if (state === 'connecting' && !waiting) write('\n======== Connecting...\n');
+        if (state === 'closed' && !waiting) {
             write('\n======== Connection lost. Retrying...\n');
             if (autosaveSetting) saveTerminalHistory();
         }
         if (state === 'failed') {
-            write('\n======== Connection lost.\n');
+            write('\n======== Connection lost. Reload the page to reconnect.\n');
             if (autosaveSetting) saveTerminalHistory();
         }
         if (state === 'open') {
@@ -136,7 +146,7 @@ const connection = new WebSocketConnection({
     onInvalidMessage: () => write('\n======== Invalid server message.\n'),
     onError: (event) => {
         console.error('WebSocket error', event);
-        write('\n======== Connection error.\n');
+        if (!connection.isWaitingForRestart()) write('\n======== Connection error.\n');
     },
 });
 
@@ -404,6 +414,14 @@ function handleMessage(message: WireMessage): void {
     switch (message.command) {
         case 'text':
             writeText(asString(message.args[0]));
+            break;
+        case 'restarting':
+            // The server's handover is committed and it is about to stop:
+            // hold reconnects (see notifyRestarting) instead of treating
+            // the drop as a failure. Sessions die with the old process, so
+            // the replacement greets back at the login prompt.
+            connection.notifyRestarting();
+            write('\r\n======== The server is restarting. Waiting for it to come back up...\r\n');
             break;
         case 'prompt':
             setPrompt(asString(message.args[0]));

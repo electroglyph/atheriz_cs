@@ -469,6 +469,10 @@ public sealed class PidFile : IDisposable
     {
         try
         {
+            // Never plant a relative save folder outside a game folder: the
+            // engine checkout itself is not a game, and `reset` from there
+            // would otherwise leave ./save/.wipe-lock behind.
+            try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch { return null; }
             if (IsWipeLocked(savePath)) return null;
             Directory.CreateDirectory(savePath);
             // OpenOrCreate (never truncate): exclusion comes from FileShare.None,

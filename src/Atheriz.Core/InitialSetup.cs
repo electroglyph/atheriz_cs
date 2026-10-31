@@ -107,6 +107,11 @@ public static class InitialSetup
     // locked-down permissions.
     private static (string AbsSave, string AbsSecret) PrepareDirectories(string savePath, string? secretPath)
     {
+        // Refuse before creating anything: resolving a relative path outside
+        // a game folder would otherwise plant save/secret leaves in the
+        // caller's working directory (e.g. the engine checkout).
+        Utils.PathGuards.GuardSavePath(savePath);
+        if (secretPath is not null) Utils.PathGuards.GuardSecretPath(secretPath);
         // Ensure savePath absolute for guard
         var absSave = Path.GetFullPath(savePath);
         var absSecret = secretPath is not null ? Path.GetFullPath(secretPath) : Path.Combine(Path.GetDirectoryName(absSave) ?? ".", "secret");

@@ -1,4 +1,5 @@
 using System.Net.NetworkInformation;
+using Atheriz.Core.Plugins;
 using Atheriz.Server.Hosting;
 
 namespace Atheriz.Server.Cli;
@@ -22,7 +23,11 @@ public static class ResetHandler
         return rediscovered.Count == 0;
     }
 
-    public static async Task<int> ResetAsync(int? portOverride, int? telnetOverride, bool foreground = true)
+    public static async Task<int> ResetAsync(
+        int? portOverride,
+        int? telnetOverride,
+        bool foreground = true,
+        Func<AtherizSettings, CancellationToken, Task<BuildCoordinator.BuildAllResult>>? buildAll = null)
     {
         // Reset always confirms: there is no --force skip. The prompt is the
         // operator guard; the port checks, server stop, and world-marker wipe
@@ -31,18 +36,6 @@ public static class ResetHandler
         var port = portOverride ?? settings.WebserverPort;
         var savePath = settings.SavePath;
         var pidPath = Path.Combine(savePath, "server.pid");
-
-        // A reset replaces the world with whatever setup runs next. When the
-        // folder holds a game project but no up-to-date build of it, that setup
-        // is the engine template — so refuse before anything is deleted
-        // instead of handing back a world the game's own setup never saw.
-        if (!Atheriz.Core.Plugins.PluginReloader.WorldCanBeRebuilt(settings, out var gameProject))
-        {
-            Console.Error.WriteLine(
-                $"No up-to-date build of {gameProject} was found, so reset would recreate the world from the engine template. " +
-                $"Run build.sh (or dotnet build {gameProject}) and reset again. Nothing was deleted.");
-            return 1;
-        }
         bool isRunning = false;
         int? pid = null;
         // Only a claim that still names one of our live servers counts as
@@ -59,6 +52,28 @@ public static class ResetHandler
         Console.Write("Are you sure you want to continue? [y/N] ");
         var resp = Console.ReadLine();
         if (!string.Equals(resp, "y", StringComparison.OrdinalIgnoreCase)) { Console.WriteLine("Aborted."); return 1; }
+        // Build-first: a reset replaces the world with whatever setup runs
+        // next, so it must run on fresh binaries — never refuse for a
+        // missing build when the compiler could produce one. Engine before
+        // game (same order as the per-game scripts). Any failure aborts
+        // here: nothing is deleted and a running server is untouched.
+        var build = await (buildAll ?? ((s, ct) => BuildCoordinator.EnsureAllBuiltAsync(s, cancellationToken: ct)))(
+            settings, CancellationToken.None).ConfigureAwait(false);
+        if (!build.Ok)
+        {
+            Console.Error.WriteLine($"{build.Summary} Nothing was deleted; the server (if running) was left untouched.");
+            return 1;
+        }
+        // Re-check after building: a game project with no discoverable
+        // assembly even now would hand back the engine template world, so
+        // refuse before anything is deleted instead.
+        if (!PluginReloader.WorldCanBeRebuilt(settings, out var gameProject))
+        {
+            Console.Error.WriteLine(
+                $"No up-to-date build of {gameProject} was found even after building, so reset would recreate the world from the engine template. " +
+                $"Fix the build and reset again. Nothing was deleted.");
+            return 1;
+        }
         // Ports that must be free before the wipe: the CLI override plus the
         // configured ports, so a mismatched --port cannot blind the guard
         // to the running server's real listeners.
@@ -107,6 +122,11 @@ public static class ResetHandler
         // blocks the recursive delete with a sharing violation, so the
         // sweep there skips the lock file and the hold is released only at
         // the re-arm below.
+        // Guard before the wipe hold: TryAcquireWipeLock creates the save
+        // leaf, so acquiring first would plant ./save/.wipe-lock in the
+        // engine checkout (which is not a game folder) before the guard
+        // below could refuse. The guard message is also the correct refusal.
+        try { Atheriz.Core.Utils.PathGuards.GuardSavePath(savePath); } catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
         FileStream? wipeA = Infrastructure.PidFile.TryAcquireWipeLock(savePath);
         if (wipeA is null) { Console.WriteLine("Another wipe is in progress; aborting reset."); return 1; }
         var absSave = Path.GetFullPath(savePath);

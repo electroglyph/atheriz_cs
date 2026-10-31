@@ -184,6 +184,11 @@ public static class AtherizLogger
         try
         {
             var dir = _savePath;
+            // Never plant a relative save folder outside a game folder: the
+            // engine checkout itself is not a game, and setup/tests log with
+            // the default relative path before any game is selected. Console
+            // echo above still runs; only the file write is skipped.
+            if (!Path.IsPathRooted(dir) && !Utils.GameUtils.IsInGameFolder()) return;
             // mirrors save/server.log RotatingFileHandler 5M*5
             var file = Path.Combine(dir, "server.log");
             // Single encode: this byte array feeds the rotation size check

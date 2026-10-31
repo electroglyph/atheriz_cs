@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.38.0.0] - 2026-10-31
+
+- The in-game `restart` now warns connected clients before stopping: every
+  session gets a `restarting` wire frame plus a plain-text "Server is
+  restarting!" notice (its only warning on telnet), so the game client can
+  hold its reconnects instead of treating the drop as a failure.
+- Running engine commands or tests from the engine checkout no longer
+  plants a save directory there. The file log, the wipe lock, the
+  daemon crash log, and the restart handover marker all refuse relative
+  save paths outside a game folder instead of creating them, and `reset`
+  checks the save path before taking its wipe hold. World setup refuses
+  such paths before creating anything.
+- `reset` (CLI) now builds before wiping: the engine server is rebuilt when
+  stale and every game project is rebuilt, instead of refusing when no
+  up-to-date game assembly exists. A failed build aborts with the world and
+  any running server untouched; the refusal is kept for projects that still
+  have no discoverable assembly after building.
+- `restart` (CLI) now builds before stopping: the engine server is rebuilt
+  when stale and every game project is rebuilt, so engine changes take
+  effect on restart. A failed build leaves the old server running.
+- New in-game `restart` command (superuser): rebuilds, checkpoints, hands
+  over to a freshly spawned process, then stops itself. A failed build or
+  save aborts with the server still running, and overlapping restarts
+  refuse instead of double-spawning.
+- The in-game `reset` command now runs the same build-first pass before its
+  checkpoint and reload hooks, and reports that a restart is needed when
+  the engine binary was rebuilt (it cannot swap in-process).
+- One engine-freshness rule backs the CLI, the in-game commands, and the
+  per-game build scripts: `build.sh`/`build.cmd`/`build.ps1` all watch the
+  SDK pin (`global.json`) now, matching what `build.cmd` already checked.
+  `build.cmd` also uses the same upward engine search and `src`-scoped
+  scan as the others: it previously failed on moved game folders and
+  rebuilt the engine whenever game sources changed.
+
 ## [0.37.0.1] - 2026-10-31
 
 - `reset` no longer wipes the world and then refuses to rebuild it for

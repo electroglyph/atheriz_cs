@@ -18,7 +18,7 @@ public sealed class CommandRegistryFamilyTests
         try
         {
             var all = CommandRegistry.LoggedIn.GetAll();
-            Assert.Equal(77, all.Count);
+            Assert.Equal(78, all.Count);
             var keys = all.Select(c => c.Key).OrderBy(k => k, StringComparer.Ordinal).ToList();
             Assert.Equal(
             [
@@ -29,7 +29,7 @@ public sealed class CommandRegistryFamilyTests
                 "home", "info", "inventory", "lock", "look", "map", "mapedit",
                 "maze", "move", "name", "nick", "nofollow", "none", "noun",
                 "objects", "open", "page", "password", "perm", "puppet", "put",
-                "quell", "quit", "reload", "reset", "save", "say",
+                "quell", "quit", "reload", "reset", "restart", "save", "say",
                 "screenreader", "scripts", "sessions", "set", "shutdown",
                 "socials", "spam", "tag", "teleport", "time", "unban",
                 "unfollow", "unlock", "unpuppet", "unquell", "unset",

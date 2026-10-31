@@ -596,6 +596,7 @@ public static class GameTemplateGenerator
           if [ "$SERVER_CSPROJ" -nt "$SERVER_DLL" ]; then return 0; fi
           if [ -f "$ENGINE_ROOT/Directory.Build.props" ] && [ "$ENGINE_ROOT/Directory.Build.props" -nt "$SERVER_DLL" ]; then return 0; fi
           if [ -f "$ENGINE_ROOT/Directory.Packages.props" ] && [ "$ENGINE_ROOT/Directory.Packages.props" -nt "$SERVER_DLL" ]; then return 0; fi
+          if [ -f "$ENGINE_ROOT/global.json" ] && [ "$ENGINE_ROOT/global.json" -nt "$SERVER_DLL" ]; then return 0; fi
           if find "$ENGINE_ROOT/src" -type d \( -name bin -o -name obj \) -prune -o -type f \( -name '*.cs' -o -name '*.csproj' \) -newer "$SERVER_DLL" -print -quit 2>/dev/null | grep -q .; then
             return 0
           fi
@@ -678,8 +679,8 @@ public static class GameTemplateGenerator
         REM   --reload    after a successful build, reload the running server so it
         REM               hot-loads the fresh dll (fails loudly if no server runs)
         REM   --no-engine skip the engine freshness check (trust the current server dll)
-        REM Engine resolution: ATHERIZ_ROOT wins, else the relative path baked in
-        REM at `new` time, resolved against this script's directory.
+        REM Engine resolution: ATHERIZ_ROOT wins, then an upward search for the
+        REM engine checkout, then the relative path baked in at `new` time.
         REM Plain setlocal: delayed expansion is not needed (and would corrupt
         REM a game path containing `!`).
         setlocal
@@ -687,13 +688,8 @@ public static class GameTemplateGenerator
         if "%GAME_DIR:~-1%"=="\" set "GAME_DIR=%GAME_DIR:~0,-1%"
         set "ENGINE_ROOT="
         if defined ATHERIZ_ROOT set "ENGINE_ROOT=%ATHERIZ_ROOT%"
-        if not defined ENGINE_ROOT (
-          pushd "%GAME_DIR%\__ATHERIZ_ENGINE_REL__" 2>nul
-          if not errorlevel 1 (
-            for %%p in (.) do set "ENGINE_ROOT=%%~fp"
-            popd
-          )
-        )
+        if not defined ENGINE_ROOT call :find_upward_root
+        if not defined ENGINE_ROOT call :find_baked_root
         if not defined ENGINE_ROOT (
           echo error: engine checkout not found ^(set ATHERIZ_ROOT to the engine checkout^) 1>&2
           exit /b 1
@@ -762,7 +758,7 @@ public static class GameTemplateGenerator
         REM Paths reach PowerShell through the environment ($env:SERVER_DLL /
         REM $env:ENGINE_ROOT), never pasted into the command text: quotes,
         REM %, !, & and spaces in the checkout path stay harmless.
-        powershell -NoProfile -Command "$d=(Get-Item -LiteralPath $env:SERVER_DLL).LastWriteTimeUtc; $f=Get-ChildItem -LiteralPath $env:ENGINE_ROOT -Recurse -File -Include *.cs,*.csproj -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notlike '*\bin\*' -and $_.FullName -notlike '*\obj\*' }; $f+=Get-ChildItem -LiteralPath $env:ENGINE_ROOT -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.props' -or $_.Name -eq 'global.json' }; $n=$f | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1; if ($n -ne $null -and $n.LastWriteTimeUtc -gt $d) { exit 1 } else { exit 0 }"
+        powershell -NoProfile -Command "$d=(Get-Item -LiteralPath $env:SERVER_DLL).LastWriteTimeUtc; $f=Get-ChildItem -LiteralPath (Join-Path $env:ENGINE_ROOT 'src') -Recurse -File -Include *.cs,*.csproj -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notlike '*\bin\*' -and $_.FullName -notlike '*\obj\*' }; $f+=Get-ChildItem -LiteralPath $env:ENGINE_ROOT -File -ErrorAction SilentlyContinue | Where-Object { ($_.Name -eq 'Directory.Build.props') -or ($_.Name -eq 'Directory.Packages.props') -or ($_.Name -eq 'global.json') }; $n=$f | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1; if ($n -ne $null -and $n.LastWriteTimeUtc -gt $d) { exit 1 } else { exit 0 }"
         if errorlevel 1 goto :do_engine_build
         echo Engine server is up to date - skipping.
         exit /b 0
@@ -770,6 +766,34 @@ public static class GameTemplateGenerator
         echo Engine server is stale - rebuilding...
         dotnet build "%SERVER_CSPROJ%" -c Release
         if errorlevel 1 exit /b 1
+        exit /b 0
+        :find_upward_root
+        REM Upward search for the engine checkout (covers moved/copied game
+        REM folders): the same 12-deep rule as build.sh/build.ps1 and the
+        REM launchers.
+        set "DIR=%GAME_DIR%"
+        set "DEPTH=0"
+        :find_upward_loop
+        if exist "%DIR%\src\Atheriz.Server\Atheriz.Server.csproj" (
+          set "ENGINE_ROOT=%DIR%"
+          exit /b 0
+        )
+        for %%p in ("%DIR%\..") do set "PARENT=%%~fp"
+        if "%PARENT%"=="%DIR%" exit /b 0
+        set "DIR=%PARENT%"
+        set /a DEPTH+=1
+        if %DEPTH% lss 12 goto :find_upward_loop
+        exit /b 0
+        :find_baked_root
+        REM Relative path baked in at `new` time (moves with engine+game
+        REM together). Only accepted when it actually holds the engine
+        REM sources, so an empty or stale rel falls through instead of
+        REM pinning a wrong directory.
+        pushd "%GAME_DIR%\__ATHERIZ_ENGINE_REL__" 2>nul
+        if errorlevel 1 exit /b 0
+        for %%p in (.) do set "DIR=%%~fp"
+        popd
+        if exist "%DIR%\src\Atheriz.Server\Atheriz.Server.csproj" set "ENGINE_ROOT=%DIR%"
         exit /b 0
         """.Replace("__GAME_NAME__", gameName).Replace("__ATHERIZ_ENGINE_REL__", engineRel ?? "") + "\n";
     // Per-game PowerShell build: same contract as BuildSh (engine Release
@@ -824,7 +848,7 @@ public static class GameTemplateGenerator
           if (-not (Test-Path $serverCsproj -PathType Leaf)) { return $false }
           $dllTime = (Get-Item $serverDll).LastWriteTimeUtc
           if ((Get-Item $serverCsproj).LastWriteTimeUtc -gt $dllTime) { return $true }
-          foreach ($p in @((Join-Path $engineRoot 'Directory.Build.props'), (Join-Path $engineRoot 'Directory.Packages.props'))) {
+          foreach ($p in @((Join-Path $engineRoot 'Directory.Build.props'), (Join-Path $engineRoot 'Directory.Packages.props'), (Join-Path $engineRoot 'global.json'))) {
             if ((Test-Path $p -PathType Leaf) -and ((Get-Item $p).LastWriteTimeUtc -gt $dllTime)) { return $true }
           }
           $newer = @(Get-ChildItem -Path (Join-Path $engineRoot 'src/*') -Include *.cs,*.csproj -Recurse -File -ErrorAction SilentlyContinue | Where-Object { ($_.FullName -notlike '*\bin\*') -and ($_.FullName -notlike '*\obj\*') -and ($_.LastWriteTimeUtc -gt $dllTime) })

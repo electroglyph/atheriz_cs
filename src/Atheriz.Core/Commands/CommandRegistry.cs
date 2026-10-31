@@ -72,6 +72,7 @@ public static class CommandRegistry
         new LoggedIn.PermCommand(),
         new LoggedIn.ReloadCommand(),
         new LoggedIn.ResetCommand(),
+        new LoggedIn.RestartCommand(),
         new LoggedIn.SaveCommand(),
         new LoggedIn.ShutdownCommand(),
         new LoggedIn.SpamCommand(),

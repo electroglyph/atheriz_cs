@@ -1,5 +1,4 @@
 using System.IO;
-using System.Net.Http;
 using Atheriz.Core.Commands.UnloggedIn;
 using Atheriz.Core.Network;
 
@@ -127,39 +126,6 @@ public sealed class ShutdownCommand : LoggedInCommand
     public override bool Hide => true;
     public override bool UseParser => false;
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
-    // Loopback-tolerant client factory (mirrors ShutdownClient.PostAdminAsync
-    // in Atheriz.Server, which Core cannot reference): self-signed dev certs
-    // cannot chain-verify, so chain/name errors are tolerated ONLY on a
-    // loopback host — never blind-trust a non-loopback peer.
-    private static HttpClient CreateLoopbackClient()
-    {
-        var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (req, cert, chain, errors) =>
-        {
-            if (req.RequestUri is not Uri u) return false;
-            bool loopback = u.Host == "localhost" || u.Host == "127.0.0.1" || u.Host == "::1";
-            if (errors == System.Net.Security.SslPolicyErrors.None) return true;
-            if (!loopback || cert is null) return false;
-            const System.Net.Security.SslPolicyErrors tolerated =
-                System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors | System.Net.Security.SslPolicyErrors.RemoteCertificateNameMismatch;
-            return (errors & ~tolerated) == 0;
-        } };
-        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
-    }
-    // One shutdown POST attempt over the given scheme. Null on any failure
-    // so the caller can retry with the flipped scheme.
-    private static async Task<(bool Ok, int StatusCode, string Body)?> TryPostShutdownAsync(string scheme, int port, string token)
-    {
-        try
-        {
-            using var client = CreateLoopbackClient();
-            using var req = new HttpRequestMessage(HttpMethod.Post, $"{scheme}://localhost:{port}/_internal/shutdown");
-            req.Headers.Add("X-Admin-Token", token);
-            using var resp = await client.SendAsync(req).ConfigureAwait(false);
-            var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-            return (resp.IsSuccessStatusCode, (int)resp.StatusCode, body);
-        }
-        catch { return null; }
-    }
     protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
     {
         go.Msg("Initiating server shutdown...");
@@ -205,8 +171,8 @@ public sealed class ShutdownCommand : LoggedInCommand
             {
                 try
                 {
-                    var attempt = await TryPostShutdownAsync(first, port, capturedToken).ConfigureAwait(false)
-                        ?? await TryPostShutdownAsync(second, port, capturedToken).ConfigureAwait(false);
+                    var attempt = await AdminEndpointClient.TryPostAsync(first, port, capturedToken, "/_internal/shutdown").ConfigureAwait(false)
+                        ?? await AdminEndpointClient.TryPostAsync(second, port, capturedToken, "/_internal/shutdown").ConfigureAwait(false);
                     if (attempt is null)
                     {
                         capturedGo.Msg("Error connecting to shutdown endpoint: no response (tried http and https).");
@@ -247,6 +213,89 @@ public sealed class ShutdownCommand : LoggedInCommand
             });
         }
         catch (Exception ex) { go.Msg($"Shutdown error: {ex.Message}"); }
+    }
+}
+
+public sealed class RestartCommand : LoggedInCommand
+{
+    public override string Key => "restart";
+    public override string Desc => "Rebuild and restart the server.";
+    public override string Category => "Admin";
+    public override bool Hide => true;
+    public override bool UseParser => false;
+    public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);
+    protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
+    {
+        go.Msg("Initiating server restart...");
+        var settings = AtherizSettings.Global;
+        int port = settings.WebserverPort;
+        string secretPath = settings.SecretPath;
+        var tokenFile = Path.Combine(secretPath, "admin.token");
+        if (!File.Exists(tokenFile))
+        {
+            go.Msg("Error: admin.token not found.");
+            return;
+        }
+        string token;
+        try { token = File.ReadAllText(tokenFile).Trim(); }
+        catch (Exception ex) { go.Msg($"Error reading token: {ex.Message}"); return; }
+        // Same fail-closed blank-token shape as shutdown: the server would
+        // only answer "Invalid token." after "Initiating...".
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            go.Msg("Error: admin.token not found.");
+            return;
+        }
+        // Same scheme selection and flipped-scheme retry as shutdown: the
+        // setting may not match the live listener.
+        var capturedGo = go;
+        var capturedToken = token;
+        bool tlsOn = !string.IsNullOrEmpty(settings.SslCertFile);
+        string first = tlsOn ? "https" : "http";
+        string second = tlsOn ? "http" : "https";
+        try
+        {
+            // Same background semantics as shutdown: the pool thread reports
+            // back through Msg, which is safe cross-thread.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var attempt = await AdminEndpointClient.TryPostAsync(first, port, capturedToken, "/_internal/restart").ConfigureAwait(false)
+                        ?? await AdminEndpointClient.TryPostAsync(second, port, capturedToken, "/_internal/restart").ConfigureAwait(false);
+                    if (attempt is null)
+                    {
+                        capturedGo.Msg("Error connecting to restart endpoint: no response (tried http and https).");
+                        return;
+                    }
+                    var (ok, statusCode, body) = attempt.Value;
+                    if (ok)
+                    {
+                        try
+                        {
+                            using var doc = System.Text.Json.JsonDocument.Parse(body);
+                            string? status = null, msg = null;
+                            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                                throw new InvalidOperationException("Unexpected restart response.");
+                            if (doc.RootElement.TryGetProperty("status", out var statusProp)) status = statusProp.GetString();
+                            if (doc.RootElement.TryGetProperty("message", out var messageProp)) msg = messageProp.GetString();
+                            switch (status)
+                            {
+                                case "ok": capturedGo.Msg("Server restart initiated successfully."); break;
+                                default: capturedGo.Msg($"Restart failed: {msg}"); break;
+                            }
+                        }
+                        catch { capturedGo.Msg("Server restart initiated successfully."); }
+                    }
+                    else
+                    {
+                        capturedGo.Msg($"Restart failed with HTTP {statusCode}");
+                    }
+                }
+                catch (Exception ex) { capturedGo.Msg($"Restart error: {ex.Message}"); }
+            });
+        }
+        catch (Exception ex) { go.Msg($"Restart error: {ex.Message}"); }
     }
 }
 
@@ -563,18 +612,68 @@ public sealed class ResetCommand : LoggedInCommand
     protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)
     {
         go.Msg("Resetting...");
-        var settings = AtherizSettings.Global;
+        var capturedGo = go;
+        void Say(string message) { try { capturedGo.Msg(message); } catch (Exception) { } }
+        try
+        {
+            _ = FinishResetAsync(
+                RunResetCoreAsync(AtherizSettings.Global, engineBuild: null, gameBuild: null, Say, ct,
+                    caller: $"{go.Name} ({go.Id})"),
+                Say);
+        }
+        catch (Exception ex) { Say($"Reset failed: {ex.Message}"); }
+    }
+
+    private static async Task FinishResetAsync(Task runTask, Action<string> say)
+    {
+        ArgumentNullException.ThrowIfNull(runTask);
+        ArgumentNullException.ThrowIfNull(say);
+        try
+        {
+            await runTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { say("Reset canceled."); }
+        catch (Exception ex) { say($"Reset failed: {ex.Message}"); }
+    }
+
+    // Build-first reset core, shared by the verb above and tests: rebuilds
+    // the engine server when stale plus every stale game project (the same
+    // pass CLI reset runs), then the historical checkpoint plus reload
+    // hooks. Any build failure aborts before the checkpoint — live state
+    // untouched. A rebuilt engine cannot swap in-process, so the outcome
+    // names the required restart.
+    internal static async Task RunResetCoreAsync(
+        AtherizSettings settings,
+        Func<string, CancellationToken, Task<bool>>? engineBuild,
+        Func<string, CancellationToken, Task<bool>>? gameBuild,
+        Action<string> say,
+        CancellationToken cancellationToken,
+        string? engineRoot = null,
+        IReadOnlyList<string>? gameProjects = null,
+        string? caller = null)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(say);
+        Atheriz.Core.Plugins.BuildCoordinator.BuildAllResult build;
+        try
+        {
+            build = await Atheriz.Core.Plugins.BuildCoordinator.EnsureAllBuiltAsync(
+                settings, engineRoot, gameProjects, engineBuild, gameBuild, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) { say($"Reset failed: {ex.Message}"); return; }
+        if (!build.Ok) { say($"Reset aborted: {build.Summary} Live state untouched."); return; }
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var failures = Persistence.CheckpointWriter.WriteCheckpoint(
             settings, "save",
             forceNodes: true,
             includeTime: settings.TimeSystemEnabled);
-        foreach (var f in failures) go.Msg($"Save {f.Name} failed: {f.Message}");
+        foreach (var f in failures) say($"Save {f.Name} failed: {f.Message}");
         sw.Stop();
-        if (failures.Count != 0) { go.Msg($"Reset aborted with {failures.Count} save error(s)."); return; }
+        if (failures.Count != 0) { say($"Reset aborted with {failures.Count} save error(s)."); return; }
         try { Atheriz.Core.ServerEvents.AtServerReload(); }
-        catch (Exception ex) { go.Msg($"Reset failed: {ex.Message}"); return; }
-        try { AtherizLogger.LogInformation($"Reset triggered by {go.Name} ({go.Id}) in {sw.Elapsed.TotalMilliseconds} milliseconds."); } catch (Exception) { }
-        go.Msg($"Reset complete in {sw.Elapsed.TotalMilliseconds} milliseconds.");
+        catch (Exception ex) { say($"Reset failed: {ex.Message}"); return; }
+        try { AtherizLogger.LogInformation($"Reset triggered by {caller ?? "unknown"} in {sw.Elapsed.TotalMilliseconds} milliseconds."); } catch (Exception) { }
+        say($"Reset complete in {sw.Elapsed.TotalMilliseconds} milliseconds.");
+        if (build.EngineBuilt) say("Engine was rebuilt; restart the server to run the new server binary.");
     }
 }
