@@ -275,8 +275,8 @@ public static class ResetHandler
             Infrastructure.PidFile.ReleaseWipeLock(wipeB, savePath);
         }
 
-        Console.WriteLine("Starting server...");
         if (!foreground) return await DaemonSpawner.SpawnStart(Directory.GetCurrentDirectory(), portOverride, null, telnetOverride).ConfigureAwait(false);
+        Console.WriteLine("Starting server...");
         return await ServerHost.RunForegroundAsync(port, null, telnetOverride).ConfigureAwait(false);
     }
 }

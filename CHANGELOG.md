@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.38.0.1] - 2026-11-04
+
+- `reset` without `--foreground` no longer prints `Starting server...` twice.
+  The line now comes only from the background spawner; the foreground path
+  keeps its own line.
+
 ## [0.38.0.0] - 2026-10-31
 
 - The in-game `restart` now warns connected clients before stopping: every
