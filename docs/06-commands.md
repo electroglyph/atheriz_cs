@@ -240,12 +240,12 @@ Smite whom?
 ```text
 > channel -s town
 > town The market is open!
-(town) [30 October, 2026 12:00:01] Bryn: The market is open!
+(town) [30 October, 2026 12:00:01] : Bryn: The market is open!
 > town -r
-(town) [30 October, 2026 12:00:01] Bryn: The market is open!
+(town) [30 October, 2026 12:00:01] : Bryn: The market is open!
 ```
 
-Lines render as `({channel}) [{timestamp}] {speaker}: {text}`. History replays your own recent entries through the same format. A leading channel name routes to the channel even if an object shares the name. Permission messages are fixed strings (`You do not have permission to send to this channel.`, `You do not have permission to view this channel.`); subscribe/unsubscribe are silent.
+Lines render as `({channel}) [{timestamp}] : {speaker}: {text}` (parens/brackets in bright white, channel name in orange, 24-bit color). History replays your own recent entries through the same format. A leading channel name routes to the channel even if an object shares the name. Permission messages are fixed strings (`You do not have permission to send to this channel.`, `You do not have permission to view this channel.`); subscribe/unsubscribe are silent.
 
 ## 8. Parser and error outcomes
 

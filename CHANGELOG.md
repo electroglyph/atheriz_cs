@@ -6,6 +6,10 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
 
 ## [Unreleased]
 
+- Channel lines now render with 24-bit color: bright-white parens around the
+  channel name, orange channel name, bright-white brackets around the
+  timestamp, and a ` : ` separator between the timestamp and the message
+  (`(name) [timestamp] : sender: text`).
 - Help usage lines now name every option flag, not just positionals:
   `channel` shows `usage: channel [-h] [-l] [-m] [-c CHANNEL] [-s] ...`
   instead of the bare `usage: channel [-h]`. Value options show their

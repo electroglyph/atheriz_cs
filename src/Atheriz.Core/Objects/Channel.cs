@@ -333,10 +333,12 @@ public class Channel : GameObject
 
     public virtual string FormatMessage(long timestamp, string sender, string message)
     {
+        const string White = "\x1b[38;2;255;255;255m";
+        const string Orange = "\x1b[38;2;255;165;0m";
+        const string Reset = "\x1b[0m";
         var ts = DateTimeOffset.FromUnixTimeSeconds(timestamp).ToString("dd MMMM, yyyy HH:mm:ss");
-        var prefix = $"({Name}) [{ts}] ";
-        if (!string.IsNullOrEmpty(sender)) return $"{prefix}{sender}: {message}";
-        return $"{prefix}{message}";
+        string body = !string.IsNullOrEmpty(sender) ? $"{sender}: {message}" : message;
+        return $"{White}({Reset}{Orange}{Name}{Reset}{White}){Reset} {White}[{Reset}{ts}{White}]{Reset} : {body}";
     }
 
     public string GetHistory(int count)

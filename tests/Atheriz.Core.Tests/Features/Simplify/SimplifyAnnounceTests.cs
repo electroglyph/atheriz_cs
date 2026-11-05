@@ -288,10 +288,33 @@ public class ChannelHistoryTailTests
             var ch = new Channel();
             ch.Name = "chan";
             var named = ch.FormatMessage(0, "Bob", "hi");
-            Assert.StartsWith("(chan) [", named);
-            Assert.Contains("Bob: hi", named);
+            var plainNamed = Atheriz.Core.Utils.GameUtils.StripAnsi(named);
+            Assert.StartsWith("(chan) [", plainNamed);
+            Assert.Contains("Bob: hi", plainNamed);
+            Assert.Contains("] : Bob: hi", plainNamed);
             var anon = ch.FormatMessage(0, "", "hi");
-            Assert.EndsWith("] hi", anon);
+            var plainAnon = Atheriz.Core.Utils.GameUtils.StripAnsi(anon);
+            Assert.EndsWith("] : hi", plainAnon);
+        }
+        finally { ObjectRegistry.ClearAll(); }
+    }
+
+    [Fact]
+    public void FormatMessage_UsesBrightWhiteDelimitersAndOrangeName()
+    {
+        ObjectRegistry.ClearAll();
+        try
+        {
+            var ch = new Channel();
+            ch.Name = "chan";
+            var named = ch.FormatMessage(0, "Bob", "hi");
+            Assert.Contains("\x1b[38;2;255;255;255m(", named);
+            Assert.Contains("\x1b[38;2;255;165;0mchan", named);
+            Assert.Contains("\x1b[38;2;255;255;255m[", named);
+            Assert.Contains("\x1b[38;2;255;255;255m]", named);
+            Assert.DoesNotContain("\x1b[37m", named);
+            Assert.DoesNotContain("\x1b[97m", named);
+            Assert.DoesNotContain("\x1b[90m", named);
         }
         finally { ObjectRegistry.ClearAll(); }
     }

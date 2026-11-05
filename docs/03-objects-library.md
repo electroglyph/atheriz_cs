@@ -186,13 +186,13 @@ town?.Send("The market is open!", speaker);
 ```text
 > channel -s -c town
 > town Hello?
-(town) [04 October, 2026 12:00:00] Bryn: Hello?
+(town) [04 October, 2026 12:00:00] : Bryn: Hello?
 > town -r
-(town) [04 October, 2026 12:00:00] Bryn: Hello?
+(town) [04 October, 2026 12:00:00] : Bryn: Hello?
 > channel -u -c town
 ```
 
-Subscribe and unsubscribe are silent; sends render as `(name) [<timestamp>] <sender>: <text>`. `channel -l` lists visible channels; `town -r` replays history (`No history available.` when empty).
+Subscribe and unsubscribe are silent; sends render as `(name) [<timestamp>] : <sender>: <text>` (parens/brackets in bright white, name in orange, 24-bit color). `channel -l` lists visible channels; `town -r` replays history (`No history available.` when empty).
 
 Doors gate exits with open/locked/remove flows; direction names on doors are case-insensitive like links. `open north`, `unlock north with iron key`, `lock north`, and builder `door --remove north` (short: `door -r north`) cover the lifecycle.
 
