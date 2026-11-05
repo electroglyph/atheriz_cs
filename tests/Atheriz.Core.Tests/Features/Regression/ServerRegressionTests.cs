@@ -31,6 +31,23 @@ public class ServerRegressionTests
         Assert.True(between.Contains("IsServerProcess") || between.Contains("IsPortListening"));
     }
 
+    // reset must escalate like restart when the grace wait expires: a slow
+    // shutdown (pool drain / save under load) must get a signal, never a
+    // straight abort that leaves the server up. Shape pinned, not wording:
+    // second wait, with a claim re-check and a signal between the waits.
+    [Fact]
+    public void Reset_EscalatesWhenGraceExpires()
+    {
+        var src = SourceScan.Read("src", "Atheriz.Server", "Cli", "ResetHandler.cs");
+        int first = src.IndexOf("WaitForPidExitAsync", StringComparison.Ordinal);
+        Assert.True(first >= 0);
+        int second = src.IndexOf("WaitForPidExitAsync", first + 1, StringComparison.Ordinal);
+        Assert.True(second > first, "reset must wait a second time after escalating");
+        var between = src.Substring(first, second - first);
+        Assert.Contains("TryReadClaim(", between);
+        Assert.Contains(".Kill(", between);
+    }
+
     // No shell spawns: servers run in-process (foreground), so no
     // bash -c armor, quoting, or $! parsing exists anywhere.
     [Fact]

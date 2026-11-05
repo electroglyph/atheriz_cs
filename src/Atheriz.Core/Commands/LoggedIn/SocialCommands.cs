@@ -38,6 +38,7 @@ public sealed class SocialsCommand : LoggedInCommand
     }
     public override string Desc => "Social commands. Use 'help socials' for list.";
     public override string Category => "Socials";
+    public override string ExtraDesc => "Use '<social> [<target>]' to perform a social, optionally directed at someone. Use 'help socials' to list the available socials.";
     public static readonly Dictionary<string, (string self, string target)> SocialsDict = new(StringComparer.OrdinalIgnoreCase)
     {
         ["smile"] = ("$You() $conj(smile).", "$You() $conj(smile) at $you(target)."),
@@ -96,7 +97,7 @@ public sealed class SocialsCommand : LoggedInCommand
     public override string PrintHelp()
     {
         string baseHelp = Parser?.FormatHelp() ?? "";
-        return $"{baseHelp}\nAvailable socials:\n{string.Join(", ", Aliases)}\n";
+        return $"{baseHelp}\nAvailable socials:\n{string.Join(", ", Aliases)}\n" + ExtraDesc;
     }
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Target, nargs: "*", help: "Who or what to do this to."); }
     protected override bool AllowMissingArgs => true;

@@ -10,6 +10,7 @@ public class BaseChannelCommand : LoggedInCommand
     public override string Key => _key;
     public override string Desc => _desc;
     public override string Category => "Communication";
+    public override string ExtraDesc => "Use '<name> <message>' to send, '<name> -r' to replay history, and '<name> -u' to unsubscribe.";
 
     /// <summary>
     /// Keeps the lazy path working: commands are built parameterless and then

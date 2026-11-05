@@ -5,7 +5,7 @@ public sealed class NoneCommand : Command
 {
     public override string Key => "none";
     public override bool Hide => true;
-    public override string Desc => "None.";
+    public override string Desc => "Fallback for unknown commands.";
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.None, nargs: "*", help: "None."); }
     // Suggestions compare the first word of the input, gated like the
     // logged-in twin and help: hidden

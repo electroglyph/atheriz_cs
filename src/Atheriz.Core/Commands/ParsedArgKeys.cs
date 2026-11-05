@@ -31,6 +31,7 @@ public static class ParsedArgKeys
     public const string IsTickable = "is_tickable";
     public const string List = "list";
     public const string Message = "message";
+    public const string Mine = "mine";
     public const string N = "n";
     public const string Name = "name";
     public const string None = "none";

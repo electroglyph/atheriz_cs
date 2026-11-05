@@ -69,6 +69,7 @@ public sealed class GetCommand : LoggedInCommand
 {
     public override string Key => "get";
     public override string Desc => "Get an object.";
+    public override string ExtraDesc => "Use 'get <object> [from <container>]', or 'get all [from <container>]' to take everything.";
     protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument(ParsedArgKeys.Target, nargs: "*", help: "object to get, optionally 'from <container>'"); }
     protected override void RunPuppet(GameObject go, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
@@ -170,6 +171,7 @@ public sealed class GiveCommand : LoggedInCommand
 {
     public override string Key => "give";
     public override string Desc => "Give an object to someone else.";
+    public override string ExtraDesc => "Use 'give <object> to <target>' (the 'to' may be omitted: 'give <object> <target>'). Use 'all' to give everything you carry.";
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Args, nargs: "*", help: "object to give, optionally 'to <target>'"); }
     protected override void RunPuppet(GameObject go, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
@@ -314,6 +316,7 @@ public sealed class PutCommand : LoggedInCommand
 {
     public override string Key => "put";
     public override string Desc => "Put an object somewhere.";
+    public override string ExtraDesc => "Use 'put <object> in <container>' ('into' also works). Use 'all' to put everything you carry.";
     protected override bool AllowMissingArgs => true;
     protected override string? DenyMessage => PrintHelp();
     protected override void SetupParser(GameArgumentParser parser) { parser.AddArgument(ParsedArgKeys.Args, nargs: "REMAINDER", help: "object to put, optionally 'in <container>'"); }

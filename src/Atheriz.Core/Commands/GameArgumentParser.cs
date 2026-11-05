@@ -189,14 +189,26 @@ public sealed class GameArgumentParser
         lock (_cacheLock) return _defs.ToList();
     }
 
-    // usage names positionals (argparse shape), shared by help/usage.
+    // usage names positionals (argparse shape) AND option flags, shared by
+    // help/usage. Options used to be skipped entirely, so `usage: channel
+    // [-h]` hid every flag that mattered (-c especially) and the syntax was
+    // unguessable. Flags render argparse-style: value options show their
+    // placeholder ([-c, --channel CHANNEL]), bare switches show names only
+    // ([-s, --subscribe]), required options drop the brackets.
     private string BuildUsage()
     {
         var sb = new StringBuilder($"usage: {Prog}");
         if (AddHelp) sb.Append(" [-h]");
         foreach (var d in SnapshotDefs())
         {
-            if (d.IsHelp || d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal))) continue;
+            if (d.IsHelp) continue;
+            if (d.Names.Any(n => n.StartsWith("-", StringComparison.Ordinal)))
+            {
+                bool takesValue = d.Action is ArgAction.Store or ArgAction.Append;
+                string token = string.Join(", ", d.Names) + (takesValue ? $" {d.Dest.ToUpperInvariant()}" : "");
+                sb.Append(d.Required ? $" {token}" : $" [{token}]");
+                continue;
+            }
             sb.Append(d.Nargs switch
             {
                 NargsKind.Optional => $" [{d.Dest}]",

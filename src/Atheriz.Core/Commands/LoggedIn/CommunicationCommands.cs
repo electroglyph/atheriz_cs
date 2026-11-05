@@ -24,9 +24,11 @@ public sealed class ChannelCommand : LoggedInCommand
     {
         ChannelActionParser.AddCommonArgs(p);
         p.AddArgument("-l", "--list").Help("List all channels").Action(GameArgumentParser.ArgAction.StoreTrue);
-        p.AddArgument("-c", "--channel").Help("Channel to target");
+        p.AddArgument("-m", "--mine").Help("List channels you are subscribed to").Action(GameArgumentParser.ArgAction.StoreTrue);
+        p.AddArgument("-c", "--channel").Help("Channel to target, e.g. -c public (required for -s, -u, -r and sending)");
         p.AddArgument("-s", "--subscribe").Help("Subscribe to channel").Action(GameArgumentParser.ArgAction.StoreTrue);
     }
+    public override string ExtraDesc => "Use 'channel -l' to list all channels, 'channel -m' to list your subscriptions, 'channel -c <name> -s' to subscribe, 'channel -c <name> -u' to unsubscribe, 'channel -c <name> -r' to replay history, and 'channel -c <name> <message>' to send. The channel name always goes in -c.";
     protected override void RunPuppet(GameObject go, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
         var action = ChannelActionParser.Parse(pa);
@@ -36,10 +38,29 @@ public sealed class ChannelCommand : LoggedInCommand
             var visible = channels.Where(c => c.Access(go, "view")).ToList();
             if (visible.Count > 0)
             {
-                var msg = string.Join("\n", visible.Select(ch => $"{GameUtils.WrapXterm256(ch.Name, fg:15, bold:true)}: {ch.Desc}"));
+                var msg = string.Join("\n", visible.Select(ch => $"{GameUtils.WrapXterm256(ch.Name, fg: 15, bold: true)}: {ch.Desc}"));
                 go.Msg($"{visible.Count} available channels:\n{msg}");
             }
             else go.Msg("No channels found.");
+            return;
+        }
+        if (action is ChannelAction.Mine)
+        {
+            // Own subscriptions, listed like -l. No view gate and no -c
+            // needed: these are channels the caller already knows (they
+            // subscribed), so nothing is probed; stale ids resolve to
+            // nothing and drop.
+            var mine = go.ChannelsSnapshot
+                .Select(id => ObjectRegistry.GetSingle(id))
+                .OfType<Channel>()
+                .Where(ch => !ch.IsDeleted)
+                .ToList();
+            if (mine.Count > 0)
+            {
+                var lines = string.Join("\n", mine.Select(ch => $"{GameUtils.WrapXterm256(ch.Name, fg: 15, bold: true)}: {ch.Desc}"));
+                go.Msg($"{mine.Count} subscribed channels:\n{lines}");
+            }
+            else go.Msg("You are not subscribed to any channels.");
             return;
         }
         var chName = pa.GetString(ParsedArgKeys.Channel);
@@ -512,6 +533,7 @@ public sealed class YellCommand : LoggedInCommand
     public override string Key => "yell";
     public override string Desc => "Yell a message to the surrounding area.";
     public override string Category => "Communication";
+    public override string ExtraDesc => "Use 'yell <message>' to yell to the surrounding area. Bare 'yell' with no message toggles your yell preference.";
     public override bool UseParser => false;
 
     protected override void RunPuppetRaw(GameObject go, string raw, CancellationToken ct)

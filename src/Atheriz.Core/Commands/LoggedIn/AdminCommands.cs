@@ -76,6 +76,7 @@ public sealed class SaveCommand : LoggedInCommand
     public override string Key => "save";
     public override string Desc => "Save all the things. `save export <file>` dumps the object rows to a JSON file.";
     public override string Category => "Admin";
+    public override string ExtraDesc => "Use 'save' to checkpoint, 'save export <file>' to dump object rows to JSON.";
     public override bool Hide => false;
     public override bool UseParser => false;
     public override bool Access(IMessageTarget caller) => CommandPermissions.IsSuperUser(caller);

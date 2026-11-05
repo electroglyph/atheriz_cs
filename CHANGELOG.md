@@ -4,11 +4,32 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [Unreleased]
+
+- Help usage lines now name every option flag, not just positionals:
+  `channel` shows `usage: channel [-h] [-l] [-m] [-c CHANNEL] [-s] ...`
+  instead of the bare `usage: channel [-h]`. Value options show their
+  placeholder and required options drop the brackets.
+- New `channel -m` flag lists the channels you are subscribed to, with the
+  same name-and-description shape as `channel -l`. Bare `channel -m` needs
+  no `-c`; a new subscription is still made with `channel -c <name> -s`.
+- Commands with non-obvious syntax now carry a one-line `Use '...'` example
+  in their help (`give`, `get`, `put`, `ban`, `create`, `set`, `move`,
+  `teleport`-style builders, account/character creation, and others);
+  `exit` and unlogged-in `none` lost their placeholder descriptions.
+
 ## [0.38.0.1] - 2026-11-04
 
 - `reset` without `--foreground` no longer prints `Starting server...` twice.
   The line now comes only from the background spawner; the foreground path
   keeps its own line.
+- `reset` now escalates like `restart` when graceful shutdown is slow: it
+  waits up to 20s for graceful death (slow pool drain, save, and Kestrel
+  drain under load could exceed the old 5s wait on a healthy server), then
+  re-verifies the pid claim and signals the process, then waits again
+  instead of aborting with the server left running. The liveness re-check
+  before the wipe is unchanged: a server that survives the signal still
+  aborts the reset with its data untouched.
 
 ## [0.38.0.0] - 2026-10-31
 

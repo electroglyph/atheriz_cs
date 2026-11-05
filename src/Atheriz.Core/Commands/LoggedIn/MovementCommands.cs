@@ -274,7 +274,7 @@ public sealed class UnlockCommand : DoorDirectionCommand
 public sealed class LoggedInExitCommand : Command
 {
     public override string Key => "exit";
-    public override string Desc => "bleh";
+    public override string Desc => "Move through an exit to another room.";
     public override bool Hide => true;
     public override bool UseParser => false;
     public int CallerId { get; set; } = -1;

@@ -9,6 +9,7 @@ public sealed class BanCommand : BuilderCommand
     public override string Key => "ban";
     public override string Desc => "Ban a player character, optionally their account and/or IP.";
     public override string Category => "Building";
+    public override string ExtraDesc => "Use 'ban <character> [--account] [--ip] [-r <reason>]'.";
     protected override void SetupParser(GameArgumentParser p)
     {
         p.AddArgument(ParsedArgKeys.Target).Help("Player character to ban (name or #id).");
@@ -100,6 +101,7 @@ public sealed class BuildCommand : BuilderCommand
     public override string Key => "build";
     public override string Desc => "Build rooms, roads, and paths.";
     public override string Category => "Building";
+    public override string ExtraDesc => "Use 'build --room -n' (directions -n/-e/-s/-w/-u/-d/-x combine; --room/--road/--path picks the kind, --desc <text> sets the description).";
     protected override void SetupParser(GameArgumentParser parser)
     {
         parser.AddArgument("--room", help: "Build a room").Action(GameArgumentParser.ArgAction.StoreTrue);
@@ -367,6 +369,7 @@ public sealed class CreateCommand : BuilderCommand
     public override string Key => "create";
     public override string Desc => "Create a new object.";
     public override string Category => "Building";
+    public override string ExtraDesc => "Use 'create <name> [-p/-i/-n/-m/-c/-t] [<desc>]'.";
     protected override void SetupParser(GameArgumentParser p)
     {
         p.AddArgument(ParsedArgKeys.Name).Help("name of the object to create");
@@ -449,6 +452,7 @@ public sealed class DoorCommand : BuilderCommand
     public override string Key => "door";
     public override string Desc => "Manage doors.";
     public override string Category => "Building";
+    public override string ExtraDesc => "Use 'door <direction> [-a]' to create, 'door --remove <direction>' to remove (direction words work with or without dashes).";
     // Removal rows (long, short) in established removal order; opposites live
     // in the creation table below (n<->s, e<->w, u<->d — verify both tables
     // agree when editing either).
@@ -975,6 +979,7 @@ public sealed class MoveCommand : BuilderCommand
     public override string Key => "move";
     public override string Desc => "Move to a coordinate.";
     public override string Category => "Building";
+    public override string ExtraDesc => "Use 'move <area> <x> <y> <z>' or 'move (<area>,<x>,<y>,<z>)'.";
     protected override bool AllowMissingArgs => true;
     protected override void SetupParser(GameArgumentParser p)
     {
@@ -1027,6 +1032,7 @@ public sealed class NounCommand : BuilderCommand
     public override string Key => "noun";
     public override string Desc => "Set noun description in current room";
     public override string Category => "Building";
+    public override string ExtraDesc => "Use 'noun <noun> <desc>'.";
     protected override bool AllowMissingArgs => true;
     protected override void SetupParser(GameArgumentParser p)
     {
@@ -1138,6 +1144,7 @@ public sealed class SetCommand : BuilderCommand
     public override string Key => "set";
     public override string Desc => "Set an attribute on an object.";
     public override string Category => "Building";
+    public override string ExtraDesc => "Use 'set <object> <attribute> <value>' (<object> is a name, #id, 'me', or 'here').";
     // Serializes PC renames: check-then-SetAttr must not straddle a
     // rival rename to the same fresh name. Shared with the dedicated
     // rename verb (same reserve, one lock).
@@ -1370,6 +1377,7 @@ public sealed class UnbanCommand : BuilderCommand
     public override string Key => "unban";
     public override string Desc => "Unban a player character, optionally their account and/or IP.";
     public override string Category => "Building";
+    public override string ExtraDesc => "Use 'unban <character> [--account] [--ip]'.";
     protected override void SetupParser(GameArgumentParser p)
     {
         p.AddArgument(ParsedArgKeys.Target).Help("Player character to unban (name or #id).");
@@ -1441,6 +1449,7 @@ public sealed class UnsetCommand : BuilderCommand
     public override string Key => "unset";
     public override string Desc => "Delete an attribute from an object.";
     public override string Category => "Building";
+    public override string ExtraDesc => "Use 'unset <object> <attribute>' (<object> is a name, #id, 'me', or 'here').";
     protected override void SetupParser(GameArgumentParser p)
     {
         p.AddArgument(ParsedArgKeys.Target, help: "Object to modify (name, #id, 'me', or 'here').");

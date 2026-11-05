@@ -6,6 +6,7 @@ public sealed class CreateAccountCommand : Command
 {
     public override string Key => "create";
     public override string Desc => "Create a new account.";
+    public override string ExtraDesc => "Use 'create <account> <password>'.";
     public override bool UseParser => false;
 
     // Per-verb core shared by Run + RunAsync: account-name then password

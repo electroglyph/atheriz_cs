@@ -140,6 +140,7 @@ public class TypedDispatchTests
         Assert.Equal("is_tickable", ParsedArgKeys.IsTickable);
         Assert.Equal("list", ParsedArgKeys.List);
         Assert.Equal("message", ParsedArgKeys.Message);
+        Assert.Equal("mine", ParsedArgKeys.Mine);
         Assert.Equal("n", ParsedArgKeys.N);
         Assert.Equal("name", ParsedArgKeys.Name);
         Assert.Equal("none", ParsedArgKeys.None);
@@ -168,7 +169,7 @@ public class TypedDispatchTests
         Assert.Equal("w", ParsedArgKeys.W);
         Assert.Equal("west", ParsedArgKeys.West);
         Assert.Equal("x", ParsedArgKeys.X);
-        Assert.Equal(52, typeof(ParsedArgKeys).GetFields(
+        Assert.Equal(53, typeof(ParsedArgKeys).GetFields(
             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static).Length);
     }
 

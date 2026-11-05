@@ -42,8 +42,10 @@ public static class ResetHandler
         // running: a number the OS recycled onto an unrelated process must
         // not be stopped, nor must it block the wipe as "our listener".
         var runningClaim = Infrastructure.PidFile.TryReadClaim(pidPath);
+        Infrastructure.PidClaim? stopClaim = null;
         if (runningClaim is Infrastructure.PidClaim claim && Infrastructure.PidFile.ClaimNamesLiveServer(claim))
         {
+            stopClaim = claim;
             pid = claim.Pid;
             isRunning = true;
         }
@@ -97,11 +99,31 @@ public static class ResetHandler
         }
         catch { }
 
-        if (isRunning && pid is not null)
+        if (isRunning && pid is not null && stopClaim is Infrastructure.PidClaim stop)
         {
             Console.WriteLine("Stopping server...");
             _ = await StopHandler.StopAsync(port).ConfigureAwait(false);
-            bool stopped = await ProcessHelper.WaitForPidExitAsync(pid.Value).ConfigureAwait(false);
+            // Generous grace: a loaded shutdown runs pool drain (up to 10s)
+            // + save + Kestrel drain (5s) before the process exits, so the
+            // old 5s wait expired on healthy-but-slow servers and reset
+            // aborted with the server left running. Fast deaths return on
+            // the first poll, so the long bound costs nothing on success.
+            bool stopped = await ProcessHelper.WaitForPidExitAsync(pid.Value, TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+            if (!stopped)
+            {
+                // Grace expired and the server is stuck finishing shutdown
+                // (slow pool drain / save under load): escalate to a signal,
+                // exactly like restart does — but only while the pid file
+                // still holds this exact claim, so a recycled pid is never
+                // signalled. The wipe below must never run over live data.
+                bool ours = false;
+                try { ours = Infrastructure.PidFile.TryReadClaim(pidPath) == stop && Infrastructure.PidFile.ClaimNamesLiveServer(stop); } catch { }
+                if (ours)
+                {
+                    try { using var stuck = System.Diagnostics.Process.GetProcessById(pid.Value); try { stuck.Kill(entireProcessTree: false); } catch { } } catch { }
+                    stopped = await ProcessHelper.WaitForPidExitAsync(pid.Value, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                }
+            }
             await Task.Delay(500).ConfigureAwait(false);
             // Liveness re-check before the irreversible wipe: the stop above
             // may have missed (e.g. a --port override that doesn't match the

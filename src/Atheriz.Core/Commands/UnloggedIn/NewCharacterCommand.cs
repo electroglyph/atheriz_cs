@@ -6,6 +6,7 @@ public sealed class NewCharacterCommand : Command
 {
     public override string Key => "new";
     public override string Desc => "Create a new character for your account.";
+    public override string ExtraDesc => "Use 'new <name> [<gender> [<description>]]'.";
     public override bool UseParser => false;
 
     // Per-verb core shared by Run + RunAsync: atomic unique registration of
