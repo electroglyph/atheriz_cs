@@ -117,9 +117,7 @@ public class PortedMoreCommandsTests
         ObjectRegistry.AddObject(room); // Explicit registration: the constructor does not publish.
         var c = MakeCaller();
         c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
-        var pa = new GameArgumentParser.ParsedArgs();
-        pa["text"] = new List<string>{"waves","happily"};
-        new EmoteCommand().Run(c, pa);
+        new EmoteCommand().Run(c, "waves happily");
         // Check that room's other contents got message? For simplicity check that caller got broadcast via room
         // Our Emote does room.MsgContents, so if we put an observer in room we can check
         var observer = GameObject.Create("Bob");
@@ -127,7 +125,7 @@ public class PortedMoreCommandsTests
         observer.MoveTo(room);
         observer.ClearMessages();
         c.ClearMessages();
-        new EmoteCommand().Run(c, pa);
+        new EmoteCommand().Run(c, "waves happily");
         Assert.Contains(observer.PeekMessages(), m => m.Contains("Alice") && m.Contains("waves happily"));
     }
 
@@ -135,6 +133,27 @@ public class PortedMoreCommandsTests
     public void Emote_AliasIsColon()
     {
         Assert.Contains(":", new EmoteCommand().Aliases);
+    }
+
+    [Fact]
+    public void Emote_ApostropheLine_EmotesVerbatim()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var coord = new Coord("test_emote_apos", 0, 0, 0);
+        var room = new Node(coord, desc: "Room");
+        ObjectRegistry.AddObject(room);
+        var c = MakeCaller();
+        c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
+        var observer = GameObject.Create("Bob");
+        ObjectRegistry.AddObject(observer);
+        observer.MoveTo(room);
+        observer.ClearMessages();
+        c.ClearMessages();
+        var (func, caller, args) = new EmoteCommand().Execute(c, "that's how it's done");
+        Assert.NotNull(func);
+        func!(caller!, args);
+        Assert.DoesNotContain(c.PeekMessages(), m => m.Contains("Unbalanced quote"));
+        Assert.Contains(observer.PeekMessages(), m => m.Contains("that's how it's done"));
     }
 
     // ----- Give -----
@@ -348,8 +367,7 @@ public class PortedMoreCommandsTests
         using var env=GlobalTestEnv.Enter();
         var c=MakeCaller();
         c.Location=Persistence.Dto.LocationRef.NullLocation.Instance;
-        var pa=new GameArgumentParser.ParsedArgs(); pa["text"]=new List<string>{"waves"};
-        new EmoteCommand().Run(c, pa);
+        new EmoteCommand().Run(c, "waves");
         Assert.Single(c.PeekMessages());
         Assert.DoesNotContain(c.PeekMessages(), m=>m.Contains("waves"));
     }
@@ -500,9 +518,7 @@ public class PortedMoreCommandsTests
         var rec = new SayHookRecorder();
         c.InstallHook("at_say", (Action<object?, object?, object?, object?, object?, object?, object?, object?>)rec.Record);
         c.ClearMessages(); observer.ClearMessages();
-        var pa = new GameArgumentParser.ParsedArgs();
-        pa["text"] = new List<string> { "waves", "happily" };
-        new EmoteCommand().Run(c, pa);
+        new EmoteCommand().Run(c, "waves happily");
         // Routed through the AtSay entry: game-code at_say hooks observe emotes.
         Assert.Equal(1, rec.Fired);
         // Established wording unchanged for actor and room.

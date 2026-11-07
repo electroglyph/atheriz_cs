@@ -158,22 +158,22 @@ public sealed class EmoteCommand : LoggedInCommand
     public override IReadOnlyList<string> Aliases => [":", "pose"];
     public override string Category => "Communication";
     public override string Desc => "Emote something.";
-    protected override void SetupParser(GameArgumentParser p)
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject puppet, string raw, CancellationToken ct)
     {
-        p.AddArgument(ParsedArgKeys.Text).Nargs("REMAINDER").Help("Text to emote.");
-    }
-    protected override void RunPuppet(GameObject p, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
-    {
-        var lst = pa.GetList(ParsedArgKeys.Text);
-        if (lst.Count > 0 && p.ResolveLocationObject() is not null)
+        // Free text, not structured args: the raw line emotes verbatim, so
+        // apostrophes and unbalanced quotes can never fail the command
+        // (the old shlex split aborted them with "Unbalanced quote").
+        string text = (raw ?? "").Trim();
+        if (text.Length > 0 && puppet.ResolveLocationObject() is not null)
         {
-            string text = $"{p.Name} {string.Join(" ", lst)}";
+            string line = $"{puppet.Name} {text}";
             // Same AtSay entry as say so game-code hooks observe emotes; the
             // literal text keeps the established wording for actor and room.
-            p.AtSayFull(text, msgSelf: text, msgLocation: text, msgType: "emote",
-                mapping: new Dictionary<string, object?> { ["you"] = p });
+            puppet.AtSayFull(line, msgSelf: line, msgLocation: line, msgType: "emote",
+                mapping: new Dictionary<string, object?> { ["you"] = puppet });
         }
-        else p.Msg(PrintHelp());
+        else puppet.Msg(PrintHelp());
     }
 }
 
@@ -506,18 +506,17 @@ public sealed class SayCommand : LoggedInCommand
     public override IReadOnlyList<string> Aliases => ["'"];
     public override string Desc => "Say something.";
     public override string Category => "Communication";
-    protected override void SetupParser(GameArgumentParser p)
+    public override bool UseParser => false;
+    protected override void RunPuppetRaw(GameObject puppet, string raw, CancellationToken ct)
     {
-        p.AddArgument(ParsedArgKeys.Text).Nargs("REMAINDER").Help("Text to say.");
-    }
-    protected override void RunPuppet(GameObject puppet, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
-    {
-        var lst = pa.GetList(ParsedArgKeys.Text);
-        if (lst.Count > 0)
-        {
-            puppet.AtSay(string.Join(" ", lst), msgSelf: true);
-        }
-        else puppet.Msg(PrintHelp());
+        // Free text, not structured args: the raw line is spoken verbatim,
+        // so apostrophes and unbalanced quotes can never fail the command
+        // (the old shlex split aborted them with "Unbalanced quote").
+        // Only a bare line shows help; even -h/--help are spoken, exactly
+        // as the old REMAINDER positional absorbed them.
+        string text = (raw ?? "").Trim();
+        if (text.Length == 0) { puppet.Msg(PrintHelp()); return; }
+        puppet.AtSay(text, msgSelf: true);
     }
 }
 

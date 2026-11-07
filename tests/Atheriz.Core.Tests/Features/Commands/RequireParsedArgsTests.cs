@@ -149,13 +149,23 @@ public sealed class RequireParsedArgsTests
     }
 
     [Fact]
-    public void EmoteCommand_NullOrRawArgs_SendsPrintHelp()
+    public void EmoteCommand_NullShowsHelp_RawTextEmotes()
     {
+        // Raw free-text verb: null/empty shows help, but any non-empty raw
+        // line emotes verbatim instead of printing help.
         using var env = GlobalTestEnv.Enter();
         var builder = EnterBuilder("b21emote", "b21_emote_builder");
         try
         {
-            AssertHelpOnNullAndRaw(builder, "emote waves", new EmoteCommand().PrintHelp());
+            var job = CommandDispatcher.DispatchLoggedIn(builder, "emote waves", immediate: true);
+            Assert.NotNull(job);
+            builder.ClearMessages();
+            job!.Func(job.Caller, null);
+            Assert.Contains(new EmoteCommand().PrintHelp(), builder.PeekMessages());
+            builder.ClearMessages();
+            job.Func(job.Caller, "some raw string");
+            Assert.DoesNotContain(new EmoteCommand().PrintHelp(), builder.PeekMessages());
+            Assert.Contains(builder.PeekMessages(), m => m.Contains("some raw string"));
         }
         finally { NodeHandler.SetCurrent(null); }
     }
@@ -187,13 +197,23 @@ public sealed class RequireParsedArgsTests
     }
 
     [Fact]
-    public void SayCommand_NullOrRawArgs_SendsPrintHelp()
+    public void SayCommand_NullShowsHelp_RawTextSpeaks()
     {
+        // Raw free-text verb: null/empty shows help, but any non-empty raw
+        // line is spoken verbatim instead of printing help.
         using var env = GlobalTestEnv.Enter();
         var builder = EnterBuilder("b21say", "b21_say_builder");
         try
         {
-            AssertHelpOnNullAndRaw(builder, "say hello", new SayCommand().PrintHelp());
+            var job = CommandDispatcher.DispatchLoggedIn(builder, "say hello", immediate: true);
+            Assert.NotNull(job);
+            builder.ClearMessages();
+            job!.Func(job.Caller, null);
+            Assert.Contains(new SayCommand().PrintHelp(), builder.PeekMessages());
+            builder.ClearMessages();
+            job.Func(job.Caller, "some raw string");
+            Assert.DoesNotContain(new SayCommand().PrintHelp(), builder.PeekMessages());
+            Assert.Contains(builder.PeekMessages(), m => m.Contains("some raw string"));
         }
         finally { NodeHandler.SetCurrent(null); }
     }

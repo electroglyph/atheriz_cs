@@ -84,14 +84,12 @@ public class PortedSimpleCommandsTests
     }
 
     [Fact]
-    public void Say_CallsAtSayWithJoinedText()
+    public void Say_CallsAtSayWithRawText()
     {
         using var env = GlobalTestEnv.Enter();
         var c = new TestSayCaller("Alice");
         ObjectRegistry.AddObject(c);
-        var pa = new GameArgumentParser.ParsedArgs();
-        pa["text"] = new List<string>{"hello","world"};
-        new SayCommand().Run(c, pa);
+        new SayCommand().Run(c, "hello world");
         Assert.True(c.AtSayCalled);
         Assert.Equal("hello world", c.AtSayText);
         Assert.True(c.AtSayMsgSelf);
@@ -110,9 +108,7 @@ public class PortedSimpleCommandsTests
         using var env = GlobalTestEnv.Enter();
         var c = new TestSayCaller("Alice");
         ObjectRegistry.AddObject(c);
-        var pa = new GameArgumentParser.ParsedArgs();
-        pa["text"] = new List<string>();
-        new SayCommand().Run(c, pa);
+        new SayCommand().Run(c, "");
         Assert.False(c.AtSayCalled);
         Assert.Single(c.PeekMessages());
     }
@@ -121,6 +117,49 @@ public class PortedSimpleCommandsTests
     public void Say_AliasIsApostrophe()
     {
         Assert.Contains("'", new SayCommand().Aliases);
+    }
+
+    [Fact]
+    public void Say_ApostropheLine_SpeaksVerbatim()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var coord = new Coord("test_say_apos", 0, 0, 0);
+        var room = new Node(coord, desc: "Room");
+        ObjectRegistry.AddObject(room);
+        var c = MakeCaller();
+        c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
+        var observer = GameObject.Create("Bob");
+        ObjectRegistry.AddObject(observer);
+        observer.MoveTo(room);
+        observer.ClearMessages();
+        c.ClearMessages();
+        var cmd = new SayCommand();
+        var (func, caller, args) = cmd.Execute(c, "what the fuck, i literally told u to eat a dick and that's how u respond?");
+        Assert.NotNull(func);
+        func!(caller!, args);
+        Assert.DoesNotContain(c.PeekMessages(), m => m.Contains("Unbalanced quote"));
+        Assert.Contains(observer.PeekMessages(), m => m.Contains("that's how u respond?"));
+    }
+
+    [Fact]
+    public void Say_GluedAlias_ApostropheLine_SpeaksVerbatim()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var coord = new Coord("test_say_glued", 0, 0, 0);
+        var room = new Node(coord, desc: "Room");
+        ObjectRegistry.AddObject(room);
+        var c = MakeCaller();
+        c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
+        var observer = GameObject.Create("Bob");
+        ObjectRegistry.AddObject(observer);
+        observer.MoveTo(room);
+        observer.ClearMessages();
+        c.ClearMessages();
+        var job = CommandDispatcher.DispatchLoggedIn(c, "'that's how u respond?", immediate: true);
+        Assert.NotNull(job);
+        job!.Func(job.Caller, job.Args);
+        Assert.DoesNotContain(c.PeekMessages(), m => m.Contains("Unbalanced quote"));
+        Assert.Contains(observer.PeekMessages(), m => m.Contains("that's how u respond?"));
     }
 
     // ----- Quit -----

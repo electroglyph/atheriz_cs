@@ -6,6 +6,11 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
 
 ## [Unreleased]
 
+- `say` and `emote` are raw free-text verbs now instead of parser commands:
+  every non-empty line is spoken verbatim, so apostrophes and unbalanced
+  quotes can never fail them with "Unbalanced quote in command" again.
+  Bare `say`/`emote` still show help; `-h`/`--help` are spoken, exactly as
+  the old REMAINDER positional absorbed them.
 - Channel lines now render with 24-bit color: bright-white parens around the
   channel name, orange channel name, bright-white brackets around the
   timestamp, and a ` : ` separator between the timestamp and the message
@@ -21,6 +26,18 @@ Webclient release notes live in `webclient/CHANGELOG.md`.
   in their help (`give`, `get`, `put`, `ban`, `create`, `set`, `move`,
   `teleport`-style builders, account/character creation, and others);
   `exit` and unlogged-in `none` lost their placeholder descriptions.
+
+## [0.38.0.2] - 2026-11-07
+
+- Background `start`/`reset`/`restart`/`new` no longer report a still-booting
+  server as already running: the spawner's post-timeout check now recognizes
+  its own child as well as its own parent pid, so a slow boot falls through
+  to the "did not become ready" report with the log tail instead of the
+  false rival message that orphaned a healthy server behind an exit-1 refusal.
+- The background-start readiness wait is 120s instead of 15s. Game boots with
+  plugin discovery and world setup take about 46s, so the old bound expired
+  on every healthy slow boot. A crashed child still fails fast, and Ctrl-C
+  still interrupts the wait.
 
 ## [0.38.0.1] - 2026-11-04
 

@@ -92,4 +92,103 @@ public sealed class DaemonSpawnerTests
         Assert.Contains("continuing attached", src);
         Assert.Contains("TryDetachThisProcess", src);
     }
+
+    [Fact]
+    public void RivalRefusal_NoClaimant_ReturnsNull()
+    {
+        Assert.Null(DaemonSpawner.RivalRefusal(null, parentPid: 100, childPid: 200));
+    }
+
+    [Fact]
+    public void RivalRefusal_OwnChild_ReturnsNull()
+    {
+        // Our own still-booting child holds a live claim while slow-booting:
+        // not ready, never a rival starter.
+        Assert.Null(DaemonSpawner.RivalRefusal(200, parentPid: 100, childPid: 200));
+    }
+
+    [Fact]
+    public void RivalRefusal_OwnParent_ReturnsNull()
+    {
+        Assert.Null(DaemonSpawner.RivalRefusal(100, parentPid: 100, childPid: 200));
+    }
+
+    [Fact]
+    public void RivalRefusal_GenuineRival_NamesPid()
+    {
+        var refusal = DaemonSpawner.RivalRefusal(300, parentPid: 100, childPid: 200);
+        Assert.NotNull(refusal);
+        Assert.Contains("300", refusal, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WaitForReady_SlowChild_EventuallyReady()
+    {
+        // The incident shape with a mocked clock: the child's claim and port
+        // arrive late (slower than any fast boot) but inside the timeout —
+        // the spawner waits instead of refusing.
+        int polls = 0;
+        var (ready, died) = await DaemonSpawner.WaitForReadyAsync(
+            readClaim: () => ++polls >= 3 ? 200 : (int?)null,
+            childPid: 200,
+            portOpen: () => polls >= 5,
+            childAlive: () => true,
+            timeout: TimeSpan.FromSeconds(5),
+            cadence: TimeSpan.FromMilliseconds(1),
+            CancellationToken.None);
+        Assert.True(ready);
+        Assert.False(died);
+    }
+
+    [Fact]
+    public async Task WaitForReady_OwnChildNeverReady_ReturnsNotReadyNotDied()
+    {
+        // Own child holds a live claim but the port never opens: not ready
+        // (the caller prints the log tail), and RivalRefusal stays silent
+        // for it — never a rival report.
+        var (ready, died) = await DaemonSpawner.WaitForReadyAsync(
+            readClaim: () => 200,
+            childPid: 200,
+            portOpen: () => false,
+            childAlive: () => true,
+            timeout: TimeSpan.FromMilliseconds(50),
+            cadence: TimeSpan.FromMilliseconds(1),
+            CancellationToken.None);
+        Assert.False(ready);
+        Assert.False(died);
+        Assert.Null(DaemonSpawner.RivalRefusal(200, parentPid: 100, childPid: 200));
+    }
+
+    [Fact]
+    public async Task WaitForReady_DeadChild_ReturnsDied()
+    {
+        var (ready, died) = await DaemonSpawner.WaitForReadyAsync(
+            readClaim: () => null,
+            childPid: 200,
+            portOpen: () => false,
+            childAlive: () => false,
+            timeout: TimeSpan.FromSeconds(5),
+            cadence: TimeSpan.FromMilliseconds(1),
+            CancellationToken.None);
+        Assert.False(ready);
+        Assert.True(died);
+    }
+
+    [Fact]
+    public async Task WaitForReady_RivalClaim_NeverMatches()
+    {
+        // A rival starter's claim (different pid) with an open port must not
+        // satisfy the poll; the timeout expires and RivalRefusal names it.
+        var (ready, died) = await DaemonSpawner.WaitForReadyAsync(
+            readClaim: () => 300,
+            childPid: 200,
+            portOpen: () => true,
+            childAlive: () => true,
+            timeout: TimeSpan.FromMilliseconds(50),
+            cadence: TimeSpan.FromMilliseconds(1),
+            CancellationToken.None);
+        Assert.False(ready);
+        Assert.False(died);
+        Assert.NotNull(DaemonSpawner.RivalRefusal(300, parentPid: 100, childPid: 200));
+    }
 }

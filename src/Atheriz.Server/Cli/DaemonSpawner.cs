@@ -11,8 +11,69 @@ public static class DaemonSpawner
 {
     internal const string DaemonEnvKey = "ATHERIZ_DAEMON";
 
-    private static readonly TimeSpan ReadinessTimeout = TimeSpan.FromSeconds(15);
+    // Bounded readiness wait: game boots with plugin discovery, database
+    // setup, and DoStartup run ~46s on ordinary hardware, so a tight bound
+    // expires on every healthy slow boot and orphans a running server behind
+    // an exit-1 refusal. A genuinely broken child still fails fast through
+    // the died branch below; Ctrl-C interrupts the wait via OnCancel.
+    private static readonly TimeSpan ReadinessTimeout = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan PollCadence = TimeSpan.FromMilliseconds(200);
+    /// <summary>
+    /// Readiness poll for a spawned child: ready when the pid file names our
+    /// own child (a rival starter winning the gap must never satisfy it —
+    /// identity comes from the live child handle, since pid reuse is
+    /// impossible while it is open) and its port answers. Dies fast when the
+    /// child exits; the timeout (and Ctrl-C via <paramref name="cancel"/>)
+    /// ends the wait for a hung boot. The probes are parameters so tests can
+    /// drive slow, dead, and rival starters without processes.
+    /// </summary>
+    public static async Task<(bool Ready, bool Died)> WaitForReadyAsync(
+        Func<int?> readClaim,
+        int childPid,
+        Func<bool> portOpen,
+        Func<bool> childAlive,
+        TimeSpan timeout,
+        TimeSpan cadence,
+        CancellationToken cancel)
+    {
+        ArgumentNullException.ThrowIfNull(readClaim);
+        ArgumentNullException.ThrowIfNull(portOpen);
+        ArgumentNullException.ThrowIfNull(childAlive);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        try { timeoutCts.CancelAfter(timeout); } catch { }
+        while (!timeoutCts.Token.IsCancellationRequested)
+        {
+            bool alive;
+            try { alive = childAlive(); }
+            catch { return (false, true); }
+            if (!alive) return (false, true);
+            int? claim = null;
+            try { claim = readClaim(); } catch { }
+            bool claimOk = false;
+            try { claimOk = claim is int c && c == childPid && childPid != -1; } catch { }
+            bool open = false;
+            try { open = portOpen(); } catch { }
+            if (claimOk && open) return (true, false);
+            try { await Task.Delay(cadence, timeoutCts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { break; }
+        }
+        return (false, false);
+    }
+
+    /// <summary>
+    /// The "already running" refusal for a live rival claimant, or null when
+    /// there is no rival to name: no claimant, our own parent pid, or our own
+    /// still-booting child. A child of ours that holds a live claim is simply
+    /// not ready yet — reporting it as a rival lies to the operator and
+    /// orphans a healthy server behind the refusal.
+    /// </summary>
+    public static string? RivalRefusal(int? rival, int parentPid, int childPid)
+    {
+        if (rival is null) return null;
+        if (rival == parentPid) return null;
+        if (childPid != -1 && rival == childPid) return null;
+        return $"{PidFile.AlreadyRunningMessagePrefix} {rival}";
+    }
 
     // Shared host gate with ServerHost.RunForegroundAsync: one rule, one
     // message shape, fail-fast exit 2.
@@ -70,35 +131,27 @@ public static class DaemonSpawner
             Console.CancelKeyPress += OnCancel;
             try
             {
-                bool ready = false, died = false;
                 // The readiness claim must name OUR child: a rival
                 // starter winning the gap would otherwise satisfy this poll
                 // and declare ready for a server we did not start.
                 int childPid;
                 try { childPid = child.Id; } catch { childPid = -1; }
-                while (!timeoutCts.Token.IsCancellationRequested)
-                {
-                    try
-                    {
-                        if (child.HasExited) { died = true; break; }
-                    }
-                    catch { died = true; break; }
-                    int? claim = PidFile.TryReadPid(pidPath);
-                    bool claimOk = false;
-                    // Identity comes from the live child handle, not
-                    // IsServerProcess: pid reuse is impossible while this
-                    // handle is open, and IsServerProcess reads /proc
-                    // cmdlines so it always fails for dotnet-hosted
-                    // servers on Windows (dotnet.exe, no /proc) — that
-                    // flapped every background start into a false "did
-                    // not become ready" on healthy servers. The c ==
-                    // childPid match still refuses a rival starter's claim.
-                    try { claimOk = claim is int c && c == childPid && childPid != -1 && !child.HasExited; } catch { }
-                    bool portOk = !webEnabled || PidFile.IsPortListening(expectedPort);
-                    if (claimOk && portOk) { ready = true; break; }
-                    try { await Task.Delay(PollCadence, timeoutCts.Token).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { break; }
-                }
+                // Identity comes from the live child handle, not
+                // IsServerProcess: pid reuse is impossible while this
+                // handle is open, and IsServerProcess reads /proc
+                // cmdlines so it always fails for dotnet-hosted
+                // servers on Windows (dotnet.exe, no /proc) — that
+                // flapped every background start into a false "did
+                // not become ready" on healthy servers. The c ==
+                // childPid match still refuses a rival starter's claim.
+                var (ready, died) = await WaitForReadyAsync(
+                    () => PidFile.TryReadPid(pidPath),
+                    childPid,
+                    () => !webEnabled || PidFile.IsPortListening(expectedPort),
+                    () => !child.HasExited,
+                    ReadinessTimeout,
+                    PollCadence,
+                    timeoutCts.Token).ConfigureAwait(false);
 
                 if (ready)
                 {
@@ -112,8 +165,8 @@ public static class DaemonSpawner
                     catch { Console.Error.WriteLine("Spawn interrupted; a child process may still be starting."); }
                     return 1;
                 }
-                if (!died && PidFile.IsLiveClaim(pidPath, out int rival) && rival != parentPid)
-                { Console.WriteLine($"{PidFile.AlreadyRunningMessagePrefix} {rival}"); return 1; }
+                if (!died && PidFile.IsLiveClaim(pidPath, out int rival) && RivalRefusal(rival, parentPid, childPid) is string refusal)
+                { Console.WriteLine(refusal); return 1; }
                 int exitCode = -1;
                 try { exitCode = child.HasExited ? child.ExitCode : exitCode; } catch { }
                 try { Console.Error.WriteLine($"Server did not become ready (child process {child.Id}, exit {exitCode})."); }

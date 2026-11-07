@@ -41,32 +41,24 @@ public class PortedPlatformAndSetupTests
         using var env=GlobalTestEnv.Enter();
         var cmd=new Commands.LoggedIn.SayCommand();
         var caller=GameObject.Create("tester");
-        // Simulate patching os.name nt vs posix distinct branches: quoted string vs backslash
-        // In python they patch os.name and call execute with same args_string, assert equality
-        foreach (var osName in new[]{"nt","posix"})
-        {
-            // Our C# parser should be OS-agnostic, so both give same result
-            var (fnNt,_,aNt) = cmd.Execute(GameObject.Create("c1"), "\"hello world\"");
-            var (fnPosix,_,aPosix) = cmd.Execute(GameObject.Create("c2"), "\"hello world\"");
-            var pNt = aNt as Atheriz.Core.Commands.GameArgumentParser.ParsedArgs;
-            var pPosix = aPosix as Atheriz.Core.Commands.GameArgumentParser.ParsedArgs;
-            Assert.NotNull(pNt); Assert.NotNull(pPosix);
-            Assert.Equal("hello world", pNt!.GetList("text")[0]);
-            Assert.Equal("hello world", pPosix!.GetList("text")[0]);
-        }
-        // direct comparison: same args_string gives same arg_list regardless of os.name
+        // Say is a raw free-text verb (no shlex split), so quoting and
+        // backslashes pass through byte-identical with no OS-dependent
+        // branch left to diverge: same input, same raw output, everywhere.
+        var (fnNt,_,aNt) = cmd.Execute(GameObject.Create("c1"), "\"hello world\"");
+        var (fnPosix,_,aPosix) = cmd.Execute(GameObject.Create("c2"), "\"hello world\"");
+        Assert.NotNull(fnNt); Assert.NotNull(fnPosix);
+        Assert.Equal("\"hello world\"", Assert.IsType<string>(aNt));
+        Assert.Equal("\"hello world\"", Assert.IsType<string>(aPosix));
+        // direct comparison: same args_string gives same raw string regardless of os.name
         var caller1=GameObject.Create("t1"); var caller2=GameObject.Create("t2");
-        var (_,_,parsedNt)=cmd.Execute(caller1, "\"hello world\"");
-        var (_,_,parsedPosix)=cmd.Execute(caller2, "\"hello world\"");
-        var pn = parsedNt as Atheriz.Core.Commands.GameArgumentParser.ParsedArgs;
-        var pp = parsedPosix as Atheriz.Core.Commands.GameArgumentParser.ParsedArgs;
-        Assert.NotNull(pn); Assert.NotNull(pp);
-        Assert.Equal(pn!.GetList("text")[0], pp!.GetList("text")[0]);
+        var (_,_,rawNt)=cmd.Execute(caller1, "\"hello world\"");
+        var (_,_,rawPosix)=cmd.Execute(caller2, "\"hello world\"");
+        Assert.Equal(Assert.IsType<string>(rawNt), Assert.IsType<string>(rawPosix));
         // backslash should not be mangled on either
         var (_,_,pNtBack)=cmd.Execute(GameObject.Create("b1"), @"C:\new\file");
         var (_,_,pPosixBack)=cmd.Execute(GameObject.Create("b2"), @"C:\new\file");
-        var qNt = (pNtBack as Atheriz.Core.Commands.GameArgumentParser.ParsedArgs)!.GetList("text")[0];
-        var qPosix = (pPosixBack as Atheriz.Core.Commands.GameArgumentParser.ParsedArgs)!.GetList("text")[0];
+        var qNt = Assert.IsType<string>(pNtBack);
+        var qPosix = Assert.IsType<string>(pPosixBack);
         Assert.Equal(qNt, qPosix);
         Assert.Equal(@"C:\new\file", qNt);
     }
