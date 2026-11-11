@@ -390,13 +390,13 @@ public class AsyncThreadPool : IDisposable
 
     public virtual bool AddTask(Action action)
     {
-        if (action is null) throw new ArgumentNullException(nameof(action));
+        ArgumentNullException.ThrowIfNull(action);
         string name = action.Method.Name ?? "action";
         return AddInternal(() => { action(); return Task.CompletedTask; }, name);
     }
     public virtual bool AddTask(Func<Task> asyncFunc)
     {
-        if (asyncFunc is null) throw new ArgumentNullException(nameof(asyncFunc));
+        ArgumentNullException.ThrowIfNull(asyncFunc);
         string name = asyncFunc.Method.Name ?? "asyncFunc";
         return AddInternal(asyncFunc, name);
     }
@@ -406,7 +406,7 @@ public class AsyncThreadPool : IDisposable
     // the worker runs the item. No pool rewrite; the wrapper stays Func<Task>.
     public virtual bool AddTask(Func<CancellationToken, Task> work, string? name = null, CancellationToken ct = default)
     {
-        if (work is null) throw new ArgumentNullException(nameof(work));
+        ArgumentNullException.ThrowIfNull(work);
         return AddInternal(() => work(ct), name ?? work.Method.Name ?? "work");
     }
 
@@ -423,9 +423,8 @@ public class AsyncThreadPool : IDisposable
             if (del is Func<Task> ft) return () => ft();
             throw new ArgumentException($"Unsupported 0-arg delegate shape {del.Method.Name}; use an Action/Func<Task> overload.", nameof(del));
         }
-        if (args.Length == 1)
+        if (args is [var a0])
         {
-            var a0 = args[0];
             // Reference-type parameters via contravariance (covers Action<string> etc.).
             // Null arg passes through as null, matching the old DynamicInvoke behavior.
             if (del is Action<object> ao) return () => { ao(a0!); return null; };

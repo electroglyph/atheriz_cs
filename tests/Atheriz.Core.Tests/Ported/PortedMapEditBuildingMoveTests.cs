@@ -91,7 +91,7 @@ public class PortedMapEditBuildingMoveTests
     private static string Handshake(FakeConn conn)
     {
         // Ensure builder puppet
-        if (conn.Session.Puppet == null || !conn.Session.Puppet.IsBuilder)
+        if (conn.Session.Puppet is null || !conn.Session.Puppet.IsBuilder)
         {
             var b = GameObject.Create("Builder", isPc:true); b.PrivilegeLevel = Privilege.Builder;
             conn.Session.Puppet = b;

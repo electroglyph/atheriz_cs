@@ -192,12 +192,12 @@ public partial class NodeHandler
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt area row {row.Name}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt area row {row.Name}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load: {logEx.Message}", "NodeHandler"); }
                     throw;
                 }
             });
             foreach (var n in loadEvict)
-                try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+                try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load: {logEx.Message}", "NodeHandler"); }
             JsonTableLoader.LoadInto(db.Transitions, Lock2, json => JsonSerializer.Deserialize<Transition>(json, JsonOptions.Default), (dto, row) =>
             {
                 _transitions[(dto.FromCoord, dto.ToCoord)] = dto;
@@ -218,7 +218,7 @@ public partial class NodeHandler
             try
             {
                 HashSet<string>? dbAreaNames = null;
-                try { dbAreaNames = new HashSet<string>(db.Areas.AsNoTracking().Select(r => r.Name).ToList()); } catch { dbAreaNames = null; }
+                try { dbAreaNames = new(db.Areas.AsNoTracking().Select(r => r.Name).ToList()); } catch { dbAreaNames = null; }
                 if (dbAreaNames is not null)
                 {
                     // Compute + remove under ONE write hold: the old split
@@ -239,12 +239,12 @@ public partial class NodeHandler
                     {
                         foreach (var g in removed.Grids.Values)
                             foreach (var n in g.Nodes.Values.ToList())
-                                try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
-                        try { AtherizLogger.LogWarning($"[Load] evicting deleted area {name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+                                try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load: {logEx.Message}", "NodeHandler"); }
+                        try { AtherizLogger.LogWarning($"[Load] evicting deleted area {name}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load: {logEx.Message}", "NodeHandler"); }
                     }
                 }
                 HashSet<(string FA, int FX, int FY, int FZ, string TA, int TX, int TY, int TZ)>? dbTransKeys = null;
-                try { dbTransKeys = new HashSet<(string FA, int FX, int FY, int FZ, string TA, int TX, int TY, int TZ)>(db.Transitions.AsNoTracking().Select(r => new { r.FromArea, r.FromX, r.FromY, r.FromZ, r.ToArea, r.ToX, r.ToY, r.ToZ }).ToList().Select(a => (FA: a.FromArea, FX: a.FromX, FY: a.FromY, FZ: a.FromZ, TA: a.ToArea, TX: a.ToX, TY: a.ToY, TZ: a.ToZ)).ToList()); } catch { dbTransKeys = null; }
+                try { dbTransKeys = new(db.Transitions.AsNoTracking().Select(r => new { r.FromArea, r.FromX, r.FromY, r.FromZ, r.ToArea, r.ToX, r.ToY, r.ToZ }).ToList().Select(a => (FA: a.FromArea, FX: a.FromX, FY: a.FromY, FZ: a.FromZ, TA: a.ToArea, TX: a.ToX, TY: a.ToY, TZ: a.ToZ)).ToList()); } catch { dbTransKeys = null; }
                 if (dbTransKeys is not null)
                 {
                     Lock2.EnterWriteLock();
@@ -256,7 +256,7 @@ public partial class NodeHandler
                     finally { Lock2.ExitWriteLock(); }
                 }
                 HashSet<(string, int, int, int)>? dbDoorKeys = null;
-                try { dbDoorKeys = new HashSet<(string, int, int, int)>(db.Doors.AsNoTracking().Select(r => new ValueTuple<string, int, int, int>(r.Area, r.X, r.Y, r.Z)).ToList()); } catch { dbDoorKeys = null; }
+                try { dbDoorKeys = new(db.Doors.AsNoTracking().Select(r => new ValueTuple<string, int, int, int>(r.Area, r.X, r.Y, r.Z)).ToList()); } catch { dbDoorKeys = null; }
                 if (dbDoorKeys is not null)
                 {
                     Lock3.EnterWriteLock();
@@ -268,12 +268,12 @@ public partial class NodeHandler
                     finally { Lock3.ExitWriteLock(); }
                 }
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load: {logEx.Message}", "NodeHandler"); }
         }
         catch (Exception ex)
         {
             // Load-swallow: a failed load keeps live state, but never silently.
-            try { AtherizLogger.LogWarning($"[Load] node load failed, keeping live state: {ex.GetType().Name} {ex.Message}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+            try { AtherizLogger.LogWarning($"[Load] node load failed, keeping live state: {ex.GetType().Name} {ex.Message}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load: {logEx.Message}", "NodeHandler"); }
             return;
         }
 
@@ -296,19 +296,19 @@ public partial class NodeHandler
                 {
                     if (node.Id > maxNodeId) maxNodeId = node.Id;
                     var existing = ObjectRegistry.Get(node.Id);
-                    if (existing.Count > 0 && !ReferenceEquals(existing[0], node))
+                    if (existing is [var e0, ..] && !ReferenceEquals(e0, node))
                     {
                         bool liveModified = false;
-                        try { liveModified = existing[0].IsModified; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+                        try { liveModified = e0.IsModified; } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load: {logEx.Message}", "NodeHandler"); }
                         if (liveModified)
                         {
-                            try { AtherizLogger.LogWarning($"[Load] skipping stale node row {node.Id} (live modified)"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+                            try { AtherizLogger.LogWarning($"[Load] skipping stale node row {node.Id} (live modified)"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load: {logEx.Message}", "NodeHandler"); }
                             continue;
                         }
                     }
                     ObjectRegistry.AddObject(node);
 // reinstall script hooks, ticker, at_init
-                    try { node.ResolveRelations(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Load: " + logEx.Message, "NodeHandler"); }
+                    try { node.ResolveRelations(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load: {logEx.Message}", "NodeHandler"); }
                 }
             }
         }
@@ -324,7 +324,7 @@ public partial class NodeHandler
         // carry no contents list), so a fresh load leaves every room empty
         // while objects still point at their coords. Never throws: failures
         // log and the world stays usable, just unrestored as before.
-        try { RestoreRoomContents(); } catch (Exception ex) { try { AtherizLogger.LogDebug("Suppressed NodeHandler.Load room contents restore: " + ex.Message, "NodeHandler"); } catch (Exception) { } }
+        try { RestoreRoomContents(); } catch (Exception ex) { try { AtherizLogger.LogDebug($"Suppressed NodeHandler.Load room contents restore: {ex.Message}", "NodeHandler"); } catch (Exception) { } }
     }
 
     /// <summary>
@@ -345,20 +345,20 @@ public partial class NodeHandler
             int id;
             LocationRef loc;
             try { id = o.Id; loc = o.Location; }
-            catch (Exception logEx) { try { AtherizLogger.LogDebug("Suppressed NodeHandler.RestoreRoomContents: skipping object, could not read its id/location: " + logEx.Message, "NodeHandler"); } catch (Exception) { } continue; }
+            catch (Exception logEx) { try { AtherizLogger.LogDebug($"Suppressed NodeHandler.RestoreRoomContents: skipping object, could not read its id/location: {logEx.Message}", "NodeHandler"); } catch (Exception) { } continue; }
             if (loc is LocationRef.CoordLocation cl) placed.Add((id, cl.Coord));
         }
         foreach (var (id, coord) in placed)
         {
             Node? node;
             try { node = TryGetNodeAt(coord); }
-            catch (Exception logEx) { try { AtherizLogger.LogDebug("Suppressed NodeHandler.RestoreRoomContents: skipping room lookup at " + coord + ": " + logEx.Message, "NodeHandler"); } catch (Exception) { } continue; }
+            catch (Exception logEx) { try { AtherizLogger.LogDebug($"Suppressed NodeHandler.RestoreRoomContents: skipping room lookup at {coord}: {logEx.Message}", "NodeHandler"); } catch (Exception) { } continue; }
             if (node is null) continue;
             try
             {
                 if (!node.ContentsSnapshot.Contains(id)) node.AddContent(id);
             }
-            catch (Exception logEx) { try { AtherizLogger.LogDebug("Suppressed NodeHandler.RestoreRoomContents: could not return object " + id + " to its room: " + logEx.Message, "NodeHandler"); } catch (Exception) { } }
+            catch (Exception logEx) { try { AtherizLogger.LogDebug($"Suppressed NodeHandler.RestoreRoomContents: could not return object {id} to its room: {logEx.Message}", "NodeHandler"); } catch (Exception) { } }
         }
     }
 

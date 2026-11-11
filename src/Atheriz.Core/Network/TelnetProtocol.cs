@@ -710,7 +710,7 @@ public static class TelnetProtocol
         // connection.Dispose tears down writer (which owns the session) and
         // reader, so every path below exits through it exactly once.
         if (!manager.RegisterConnection(connId, connection)) { try { connection.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.HandleSessionAsync: " + logEx.Message, "TelnetProtocol"); } return; }
-        try { writer.Write("\r\n\x1b[1;1H\x1b[2J"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.HandleSessionAsync: " + logEx.Message, "TelnetProtocol"); }
+        try { writer.Write("\r\n\e[1;1H\e[2J"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed TelnetProtocol.HandleSessionAsync: {logEx.Message}", "TelnetProtocol"); }
         ApplyNaws(writer, connection, settings);
         manager.Dispatch(connection, "client_ready", [], []);
         try { var maxLine = settings.TelnetMaxLine; await foreach (var rawLine in ReadCappedLines(reader, maxLine).ConfigureAwait(false)) { if (rawLine is null) { if (connection.ShouldLogOverlongDrop(host)) Atheriz.Core.AtherizLogger.LogWarning($"[Telnet] dropped overlong input line from {connId}"); continue; } var line = rawLine; // Session text is already negotiation-decoded, but keep the stray-IAC guard: a peer can still emit bare 0xFF, which decodes as U+FFFD.
@@ -731,7 +731,7 @@ public static class TelnetProtocol
                 logLine = parts.Length >= 2 ? $"connect {parts[1]} ***" : "connect ***";
             }
             Atheriz.Core.AtherizLogger.LogDebug($"[Telnet] recv '{logLine}' from {connId} host={host}");
-            manager.Dispatch(connection, "text", new List<object?> { line }, []); } }
+            manager.Dispatch(connection, "text", [line], []); } }
         catch (OperationCanceledException) { } catch (Exception e) { Atheriz.Core.AtherizLogger.LogError($"[Telnet] Error in shell for {connId}: {e}"); }
         finally { manager.Disconnect(connection); try { connection.Dispose(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed TelnetProtocol.HandleSessionAsync: " + logEx.Message, "TelnetProtocol"); } }
     }

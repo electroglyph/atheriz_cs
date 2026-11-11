@@ -40,7 +40,7 @@ public class PortedWebclientSyncTests
     private static string MakeGame(string tmp, Dictionary<string, Dictionary<string,string>>? files = null)
     {
         var game = Path.Combine(tmp, "game");
-        if (files != null)
+        if (files is not null)
         {
             foreach (var area in files)
                 MakeTree(Path.Combine(game, "web", area.Key), area.Value);

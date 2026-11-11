@@ -177,7 +177,7 @@ public class PortedMoreCommandsTests
         c.Location = new Persistence.Dto.LocationRef.CoordLocation(coord);
         // give via dispatcher with no args should show help or "Give it to whom?"
         var job = CommandDispatcher.DispatchLoggedIn(c, "give", immediate: true);
-        if (job != null) job.Func(job.Caller, job.Args);
+        if (job is not null) job.Func(job.Caller, job.Args);
         Assert.Contains(c.PeekMessages(), m => m.ToLowerInvariant().Contains("give") || m.Contains("whom"));
     }
 
@@ -219,8 +219,8 @@ public class PortedMoreCommandsTests
         public override List<GameObject> Search(string query, bool recursive = true, GameObject? looker = null)
         {
             var q = query.ToLowerInvariant();
-            if (q.Contains("apple") && Apple != null) return new List<GameObject>{Apple};
-            if (q.Contains("bob") && Target != null) return new List<GameObject>{Target};
+            if (q.Contains("apple") && Apple is not null) return new List<GameObject>{Apple};
+            if (q.Contains("bob") && Target is not null) return new List<GameObject>{Target};
             return new List<GameObject>();
         }
     }

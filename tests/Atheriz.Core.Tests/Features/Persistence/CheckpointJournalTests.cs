@@ -59,7 +59,7 @@ public class CheckpointJournalTests
                 ex = Record.Exception(() => StartStop.DoStartup(settings: settings));
                 log = cap.Read();
             }
-            Assert.True(ex != null || !string.IsNullOrWhiteSpace(log),
+            Assert.True(ex is not null || !string.IsNullOrWhiteSpace(log),
                 "torn checkpoint (map rows missing) must surface an error, not load silently");
         }
         finally

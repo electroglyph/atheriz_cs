@@ -67,13 +67,14 @@ public static class DaemonSpawner
     /// not ready yet — reporting it as a rival lies to the operator and
     /// orphans a healthy server behind the refusal.
     /// </summary>
-    public static string? RivalRefusal(int? rival, int parentPid, int childPid)
-    {
-        if (rival is null) return null;
-        if (rival == parentPid) return null;
-        if (childPid != -1 && rival == childPid) return null;
-        return $"{PidFile.AlreadyRunningMessagePrefix} {rival}";
-    }
+    public static string? RivalRefusal(int? rival, int parentPid, int childPid) =>
+        rival switch
+        {
+            null => null,
+            _ when rival == parentPid => null,
+            _ when childPid != -1 && rival == childPid => null,
+            _ => $"{PidFile.AlreadyRunningMessagePrefix} {rival}",
+        };
 
     // Shared host gate with ServerHost.RunForegroundAsync: one rule, one
     // message shape, fail-fast exit 2.

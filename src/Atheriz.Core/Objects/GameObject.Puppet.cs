@@ -21,7 +21,7 @@ public partial class GameObject
     private static void Suppress(string context, Action action)
     {
         try { action(); }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject." + context + ": " + logEx.Message, "GameObject"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.{context}: {logEx.Message}", "GameObject"); }
     }
 
     // Snapshot + null-guard + send core for the three AtPostPuppet session
@@ -110,7 +110,7 @@ public partial class GameObject
                 if (npc.Session is not null && npc.Session != session) return false; // already puppeted
                 if (npc.IsDeleted) return false;
                 if (!npc.Access(this, "puppet")) return false;
-                snapshot = new PuppetRestoreSnapshot(npc.IsPc, npc.PrivilegeLevel);
+                snapshot = new(npc.IsPc, npc.PrivilegeLevel);
                 callerPriv = this.PrivilegeLevel;
             }
             finally { npc.SyncRoot.ExitReadLock(); }
@@ -311,7 +311,7 @@ public partial class GameObject
             foreach (var key in SocialsCommand.SnapshotSocialNames())
                 commands.Add(key);
         });
-        Suppress("AtPostPuppet", () => SendSessionCommand("player_commands", new List<object?> { commands }, null));
+        Suppress("AtPostPuppet", () => SendSessionCommand("player_commands", [commands], null));
         Suppress("AtPostPuppet", () =>
         {
             var wrapped = GameUtils.WrapXterm256(Name ?? "", fg: 15, bold: true);
@@ -367,10 +367,10 @@ public partial class GameObject
                 bool mapEnabled2 = false;
                 bool selfMapEnabled = false;
                 TryGetGlobalMapEnabled(out mapEnabled2);
-                try { selfMapEnabled = MapEnabled; } catch { try { selfMapEnabled = IsMapable; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtPostPuppet: " + logEx.Message, "GameObject"); } }
+                try { selfMapEnabled = MapEnabled; } catch { try { selfMapEnabled = IsMapable; } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.AtPostPuppet: {logEx.Message}", "GameObject"); } }
                 if (mapEnabled2 && selfMapEnabled)
                 {
-                    Suppress("AtPostPuppet", () => SendSessionCommand("map_enable", new List<object?> { "" }, null));
+                    Suppress("AtPostPuppet", () => SendSessionCommand("map_enable", [""], null));
                     Suppress("AtPostPuppet", () =>
                     {
                         Coord? coord = null;
@@ -447,11 +447,11 @@ public partial class GameObject
 
     public virtual void AtSolarEvent(string message)
     {
-        Hookable(HookName.AtSolarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtSolarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
+        Hookable(HookName.AtSolarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.AtSolarEvent: {logEx.Message}", "GameObject"); } return 0; }, message);
     }
     public virtual void AtLunarEvent(string message)
     {
-        Hookable(HookName.AtLunarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLunarEvent: " + logEx.Message, "GameObject"); } return 0; }, message);
+        Hookable(HookName.AtLunarEvent, () => { try { Msg(message); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.AtLunarEvent: {logEx.Message}", "GameObject"); } return 0; }, message);
     }
     public virtual void AtAlarm(Globals.GameTime.GameTimeInfo time, Dictionary<string, System.Text.Json.JsonElement>? data)
     {

@@ -89,19 +89,19 @@ public sealed class CaptureAtherizLog : IDisposable
         public override void Write(string? value)
         {
             var w = _asyncWriter.Value ?? _globalWriter;
-            if (w != null) { lock (w) w.Write(value); return; }
+            if (w is not null) { lock (w) w.Write(value); return; }
             _fallback.Write(value);
         }
         public override void WriteLine(string? value)
         {
             var w = _asyncWriter.Value ?? _globalWriter;
-            if (w != null) { lock (w) w.WriteLine(value); return; }
+            if (w is not null) { lock (w) w.WriteLine(value); return; }
             _fallback.WriteLine(value);
         }
         public override void Write(char value)
         {
             var w = _asyncWriter.Value ?? _globalWriter;
-            if (w != null) { lock (w) w.Write(value); return; }
+            if (w is not null) { lock (w) w.Write(value); return; }
             _fallback.Write(value);
         }
         public override void WriteLine() { WriteLine(string.Empty); }
@@ -120,7 +120,7 @@ public sealed class CaptureAtherizLog : IDisposable
         _writer = new StringWriter();
         _asyncWriter.Value = _writer;
         _globalWriter = _writer;
-        if (_routingInstalled == null)
+        if (_routingInstalled is null)
         {
             _origError = Console.Error;
             _routingInstalled = new RoutingWriter(_origError);
@@ -167,11 +167,11 @@ public static class FakesHelper
         foreach (var (k, v) in attrs)
         {
             var prop = typeof(GameObject).GetProperty(k);
-            if (prop != null && prop.CanWrite) try { prop.SetValue(obj, v); } catch { }
+            if (prop is not null && prop.CanWrite) try { prop.SetValue(obj, v); } catch { }
             else
             {
                 var field = typeof(GameObject).GetField($"_{char.ToLowerInvariant(k[0])}{k.Substring(1)}", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (field != null) try { field.SetValue(obj, v); } catch { }
+                if (field is not null) try { field.SetValue(obj, v); } catch { }
             }
         }
         return obj;

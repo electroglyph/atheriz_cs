@@ -127,7 +127,7 @@ public sealed class FollowCommand : LoggedInCommand
         Atheriz.Core.Objects.FollowScript? fresh = null;
         if (!target.GetScriptsByType("FollowScript").Any())
         {
-            fresh = new Atheriz.Core.Objects.FollowScript();
+            fresh = new();
             fresh.Name = $"FollowScript_for_{go.Id}";
             fresh.IsModified = true;
             Atheriz.Core.Globals.ObjectRegistry.AddObject(fresh);
@@ -144,7 +144,7 @@ public sealed class FollowCommand : LoggedInCommand
             var prev = Atheriz.Core.Globals.ObjectRegistry.GetSingle(prevId.Value);
             if (prev is not null)
             {
-                try { prev.RemoveFollower(go.Id); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed FollowCommand old-leader cleanup: " + logEx.Message, "FollowCommand"); }
+                try { prev.RemoveFollower(go.Id); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug($"Suppressed FollowCommand old-leader cleanup: {logEx.Message}", "FollowCommand"); }
             }
         }
         // Ordered pair acquire by Id (FollowLockOrder above): holding target
@@ -169,9 +169,9 @@ public sealed class FollowCommand : LoggedInCommand
         {
             if (!ReferenceEquals(first, second))
             {
-                try { second.SyncRoot.ExitWriteLock(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed FollowCommand unlock: " + logEx.Message, "FollowCommand"); }
+                try { second.SyncRoot.ExitWriteLock(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug($"Suppressed FollowCommand unlock: {logEx.Message}", "FollowCommand"); }
             }
-            try { first.SyncRoot.ExitWriteLock(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed FollowCommand unlock: " + logEx.Message, "FollowCommand"); }
+            try { first.SyncRoot.ExitWriteLock(); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug($"Suppressed FollowCommand unlock: {logEx.Message}", "FollowCommand"); }
         }
         if (orphan is not null) Atheriz.Core.Globals.ObjectRegistry.RemoveObject(orphan);
         var loc2 = go.ResolveLocationObject();

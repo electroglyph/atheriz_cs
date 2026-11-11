@@ -68,7 +68,7 @@ public static class RestartCoordinator
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(lifetime);
         if (Interlocked.Exchange(ref _running, 1) == 1)
-            return new RestartOutcome(false, "Restart already in progress.");
+            return new(false, "Restart already in progress.");
         try
         {
             // Rebuild first, while the old server still runs: a failed build
@@ -76,7 +76,7 @@ public static class RestartCoordinator
             // to boot.
             var build = await (buildAll ?? ((s, ct) => BuildCoordinator.EnsureAllBuiltAsync(s, cancellationToken: ct)))(
                 settings, cancellationToken).ConfigureAwait(false);
-            if (!build.Ok) return new RestartOutcome(false, $"{build.Summary} Server keeps running.");
+            if (!build.Ok) return new(false, $"{build.Summary} Server keeps running.");
             List<CheckpointWriter.SectionFailure> failures;
             try
             {
@@ -85,13 +85,13 @@ public static class RestartCoordinator
             }
             catch (Exception ex)
             {
-                return new RestartOutcome(false, $"Restart aborted: checkpoint failed: {ex.Message} Server keeps running.");
+                return new(false, $"Restart aborted: checkpoint failed: {ex.Message} Server keeps running.");
             }
             if (failures.Count != 0)
-                return new RestartOutcome(false, $"Restart aborted with {failures.Count} save error(s). Server keeps running.");
+                return new(false, $"Restart aborted with {failures.Count} save error(s). Server keeps running.");
             var gameFolder = Directory.GetCurrentDirectory();
             if (!DaemonSpawner.TryResolveChildExe(out var fileName, out var dllArg, out var exeError))
-                return new RestartOutcome(false, $"Restart aborted: {exeError} Server keeps running.");
+                return new(false, $"Restart aborted: {exeError} Server keeps running.");
             // A stale marker from a crashed restart must not satisfy the wait
             // below: the child writes its own marker when it starts waiting.
             var marker = TakeoverHandler.HandoverMarkerPath(settings);
@@ -130,17 +130,17 @@ public static class RestartCoordinator
             try { child = (spawn ?? (info => Process.Start(info)))(psi); }
             catch (Exception ex)
             {
-                return new RestartOutcome(false, $"Restart aborted: could not spawn replacement: {ex.Message} Server keeps running.");
+                return new(false, $"Restart aborted: could not spawn replacement: {ex.Message} Server keeps running.");
             }
             if (child is null)
-                return new RestartOutcome(false, "Restart aborted: could not spawn replacement. Server keeps running.");
+                return new(false, "Restart aborted: could not spawn replacement. Server keeps running.");
             using (child)
             {
                 // The child only boots after this process exits, so it cannot
                 // race the old listener; stopping before it waits would leave
                 // no server at all if the child then fails.
                 if (!await WaitForHandoverAsync(marker, child, TimeSpan.FromSeconds(10)).ConfigureAwait(false))
-                    return new RestartOutcome(false, "Restart aborted: replacement did not start waiting. Server keeps running.");
+                    return new(false, "Restart aborted: replacement did not start waiting. Server keeps running.");
             }
             // Committed: the replacement is waiting, so this process will
             // stop. Warn connected clients first — the webclient holds its
@@ -156,7 +156,7 @@ public static class RestartCoordinator
                 try { ServerLifecycle.DoShutdown(settings); }
                 finally { try { lifetime.StopApplication(); } catch { } }
             });
-            return new RestartOutcome(true, "Server is restarting...");
+            return new(true, "Server is restarting...");
         }
         finally { Interlocked.Exchange(ref _running, 0); }
     }

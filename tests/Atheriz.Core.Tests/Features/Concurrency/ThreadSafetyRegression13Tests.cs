@@ -170,6 +170,10 @@ public sealed class ThreadSafetyRegression13Tests
     public void NewOverwrite_NonLiveFolder_SucceedsWithDoubleCheck()
     {
         var dir = Path.Combine(Path.GetTempPath(), "atheriz_f14_" + Guid.NewGuid().ToString("N"));
+        // CreateGameFolder runs InitialSetup.RunSetup, which reseeds the
+        // global salt slot (ResetWorldState); save and restore it so later
+        // tests keep testsalt.
+        var origSalt = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             Assert.True(GameTemplateGenerator.CreateGameFolder(dir, "f14game", overwrite: false));
@@ -177,7 +181,12 @@ public sealed class ThreadSafetyRegression13Tests
             var src = Features.Regression.SourceScan.Read("src", "Atheriz.Server", "Infrastructure", "GameTemplateGenerator.cs");
             Assert.True(Features.Regression.SourceScan.Count(src, "IsLiveServerFolder(folderPath)") >= 2);
         }
-        finally { try { Directory.Delete(dir, true); } catch { } }
+        finally
+        {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt);
+            try { Directory.Delete(dir, true); } catch { }
+        }
     }
 
     private sealed class SharedSubtypeProbe : GameObject { }

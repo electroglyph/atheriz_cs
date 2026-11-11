@@ -244,15 +244,15 @@ public static class AtherizLogger
             var dir = Path.GetDirectoryName(file) ?? ".";
             var baseName = Path.GetFileName(file);
             // delete oldest .5
-            var oldest = Path.Combine(dir, baseName + $".{MaxFiles}");
+            var oldest = Path.Combine(dir, $"{baseName}.{MaxFiles}");
             try { if (File.Exists(oldest)) File.Delete(oldest); } catch { }
             for (int i = MaxFiles - 1; i >= 1; i--)
             {
-                var src = Path.Combine(dir, baseName + $".{i}");
-                var dst = Path.Combine(dir, baseName + $".{i + 1}");
+                var src = Path.Combine(dir, $"{baseName}.{i}");
+                var dst = Path.Combine(dir, $"{baseName}.{i + 1}");
                 try { if (File.Exists(src)) File.Move(src, dst, overwrite: true); } catch { }
             }
-            var first = Path.Combine(dir, baseName + ".1");
+            var first = Path.Combine(dir, $"{baseName}.1");
             try { if (File.Exists(file)) File.Move(file, first, overwrite: true); } catch { }
         }
         catch { }
@@ -315,9 +315,12 @@ public static class AtherizLogger
     {
         try
         {
-            if (level == LogLevel.Error) LogError(message);
-            else if (level == LogLevel.Warning) LogWarning(message);
-            else LogInformation(message);
+            switch (level)
+            {
+                case LogLevel.Error: LogError(message); break;
+                case LogLevel.Warning: LogWarning(message); break;
+                default: LogInformation(message); break;
+            }
         }
         catch { try { Console.Error.WriteLine(message); } catch { } }
     }

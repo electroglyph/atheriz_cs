@@ -104,7 +104,7 @@ public class GameTime
             catch (Exception ex)
             {
                 // Per-row report: corrupt ticks zero out loudly, not silently.
-                try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.Load: " + logEx.Message, LogScope); }
+                try { AtherizLogger.LogWarning($"[Load] skipping corrupt gametime row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameTime.Load: {logEx.Message}", LogScope); }
                 ResetLocked();
                 return;
             }
@@ -137,7 +137,7 @@ public class GameTime
             // Preserve live ticks/alarms: only the pinned missing-row and
             // corrupt-row paths above reset to zero. An unexpected failure
             // here must be loud, not a silent live-state wipe.
-            try { AtherizLogger.LogError($"[Load] unexpected gametime load failure; preserving live state: {ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.Load: " + logEx.Message, LogScope); }
+            try { AtherizLogger.LogError($"[Load] unexpected gametime load failure; preserving live state: {ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameTime.Load: {logEx.Message}", LogScope); }
         }
     }
 
@@ -203,7 +203,7 @@ public class GameTime
                 Save(db);
             }
             catch { return false; }
-            try { File.Delete(path); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTime.TryLoadLegacyFile: " + logEx.Message, LogScope); }
+            try { File.Delete(path); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameTime.TryLoadLegacyFile: {logEx.Message}", LogScope); }
             return true;
         }
         catch { return false; }
@@ -314,8 +314,7 @@ public class GameTime
         {
             if (_alarms.TryGetValue((hour, minute), out var list))
             {
-                int idx = -1;
-                for (int i = 0; i < list.Count; i++) if (list[i].CallerId == callerId) { idx = i; break; }
+                int idx = list.FindIndex(e => e.CallerId == callerId);
                 if (idx >= 0) list.RemoveAt(idx);
                 if (list.Count == 0) _alarms.Remove((hour, minute));
             }
@@ -337,8 +336,8 @@ public class GameTime
         {
             if (_alarms.TryGetValue((hour, minute), out var list))
             {
-                for (int i = 0; i < list.Count; i++)
-                    if (ReferenceEquals(list[i], entry)) { list.RemoveAt(i); break; }
+                int idx = list.IndexOf(entry);
+                if (idx >= 0) list.RemoveAt(idx);
                 if (list.Count == 0) _alarms.Remove((hour, minute));
             }
         }
@@ -381,8 +380,8 @@ public class GameTime
     // Runs with _ownedLock already held (OwnedPool takes it via the wrapper).
     // Split out so OwnedTicker does not nest a second take of the
     // non-reentrant lock while building the ticker from its pool.
-    private AsyncThreadPool OwnedPoolLocked() => _poolOverride ?? (_ownedPool ??= new AsyncThreadPool());
-    private AsyncTicker OwnedTicker() { lock (_ownedLock) return _ownedTicker ??= new AsyncTicker(OwnedPoolLocked()); }
+    private AsyncThreadPool OwnedPoolLocked() => _poolOverride ?? (_ownedPool ??= new());
+    private AsyncTicker OwnedTicker() { lock (_ownedLock) return _ownedTicker ??= new(OwnedPoolLocked()); }
 
     public void Start() => StartCore(_tickerOverride ?? GlobalServices.TryGetTicker() ?? OwnedTicker());
     public void Start(AsyncTicker ticker) => StartCore(ticker);
@@ -416,7 +415,7 @@ public class GameTime
         ticker?.RemoveCoro(OnTick, iv);
         StopOwnedFallbacks();
         // see Stop(ticker) above — settings path, not ambient.
-        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, LogScope); }
+        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameTimePersistDto.Stop: {logEx.Message}", LogScope); }
     }
     public void Stop(AsyncTicker ticker)
     {
@@ -438,15 +437,15 @@ public class GameTime
         if (ours) StopOwnedFallbacks();
         // persist to this instance's settings path, not the ambient
         // Global (DoShutdown may run under explicit settings).
-        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.Stop: " + logEx.Message, LogScope); }
+        try { Save(AtherizDbContextFactory.CreateForSettings(_settings)); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameTimePersistDto.Stop: {logEx.Message}", LogScope); }
     }
 
     private void StopOwnedFallbacks()
     {
         var t = Interlocked.Exchange(ref _ownedTicker, null);
-        if (t is not null) try { t.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, LogScope); }
+        if (t is not null) try { t.Stop(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameTimePersistDto.StopOwnedFallbacks: {logEx.Message}", LogScope); }
         var p = Interlocked.Exchange(ref _ownedPool, null);
-        if (p is not null) try { p.Stop(wait: false); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.StopOwnedFallbacks: " + logEx.Message, LogScope); }
+        if (p is not null) try { p.Stop(wait: false); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameTimePersistDto.StopOwnedFallbacks: {logEx.Message}", LogScope); }
     }
 
     public bool SunUp()
@@ -506,7 +505,7 @@ public class GameTime
                     var capturedData = entry.Data?.ToDictionary(kv => kv.Key, kv => kv.Value.Clone());
                     var capturedAfter = after;
                     // every GameObject exposes AtAlarm, so no reflection is needed.
-                    Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, LogScope); } };
+                    Action act = () => { try { target.AtAlarm(capturedAfter, capturedData); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameTimePersistDto.OnTick: {logEx.Message}", LogScope); } };
                     if (!pool.AddTask(act, $"alarm:{entry.CallerId}"))
                     {
                         AtherizLogger.LogWarning($"Task queue full; alarm for {target} retrying.");
@@ -535,7 +534,7 @@ public class GameTime
         {
             foreach (var obj in ObjectRegistry.FilterBy(o => { try { return recv(o); } catch { return o.IsPc && o.IsConnected; } }))
             {
-                try { send(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameTimePersistDto.OnTick: " + logEx.Message, LogScope); }
+                try { send(obj); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameTimePersistDto.OnTick: {logEx.Message}", LogScope); }
             }
         }
         if (beforePhase != afterPhase)

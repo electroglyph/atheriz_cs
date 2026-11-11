@@ -21,7 +21,7 @@ public class InGameResetBuildTests
         File.SetLastWriteTimeUtc(csproj, old);
         if (!stale)
         {
-            var binDir = Path.Combine(serverDir, "bin", "Release", "net10.0");
+            var binDir = Path.Combine(serverDir, "bin", "Release", "net11.0");
             Directory.CreateDirectory(binDir);
             var dll = Path.Combine(binDir, "Atheriz.Server.dll");
             File.WriteAllBytes(dll, [1]);

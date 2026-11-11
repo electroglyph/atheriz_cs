@@ -57,7 +57,7 @@ public class PortedScriptsTests
             string kk = kwarg1 ?? "None";
             if (Child is DummyObj d) d.Log.Add($"before: {arg1}, {kk}");
             else if (Child is DummyNode dn) dn.Log.Add($"before: {arg1}, {kk}");
-            else if (Child != null) try { ((dynamic)Child).Log.Add($"before: {arg1}, {kk}"); } catch {}
+            else if (Child is not null) try { ((dynamic)Child).Log.Add($"before: {arg1}, {kk}"); } catch {}
         }
     }
     class DummyAfterScript : Script
@@ -67,7 +67,7 @@ public class PortedScriptsTests
             string kk = kwarg1 ?? "None";
             if (Child is DummyObj d) d.Log.Add($"after: {arg1}, {kk}");
             else if (Child is DummyNode dn) dn.Log.Add($"after: {arg1}, {kk}");
-            else if (Child != null) try { ((dynamic)Child).Log.Add($"after: {arg1}, {kk}"); } catch {}
+            else if (Child is not null) try { ((dynamic)Child).Log.Add($"after: {arg1}, {kk}"); } catch {}
             return "after_result";
         }
     }
@@ -78,7 +78,7 @@ public class PortedScriptsTests
             string kk = kwarg1 ?? "None";
             if (Child is DummyObj d) d.Log.Add($"replace: {arg1}, {kk}");
             else if (Child is DummyNode dn) dn.Log.Add($"replace: {arg1}, {kk}");
-            else if (Child != null) try { ((dynamic)Child).Log.Add($"replace: {arg1}, {kk}"); } catch {}
+            else if (Child is not null) try { ((dynamic)Child).Log.Add($"replace: {arg1}, {kk}"); } catch {}
             return "replace_result";
         }
     }
@@ -184,11 +184,11 @@ public class PortedScriptsTests
         Assert.Equal("Test Description", loaded[0].Desc);
         var f2 = typeof(GameObject).GetField("_extra", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         var loadedExtra = (Dictionary<string, JsonElement>)f2.GetValue(loaded[0])!;
-        var hasDate = loadedExtra.ContainsKey("date_created") || loaded[0].GetType().GetProperty("DateCreated") != null || loaded[0].GetType().GetField("date_created", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) != null;
+        var hasDate = loadedExtra.ContainsKey("date_created") || loaded[0].GetType().GetProperty("DateCreated") is not null || loaded[0].GetType().GetField("date_created", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) is not null;
         // Try reflection for DateCreated property if exists
         object? dateVal = null;
         var prop = loaded[0].GetType().GetProperty("DateCreated") ?? loaded[0].GetType().GetProperty("date_created");
-        if (prop != null) dateVal = prop.GetValue(loaded[0]);
+        if (prop is not null) dateVal = prop.GetValue(loaded[0]);
         else if (loadedExtra.TryGetValue("date_created", out var je)) dateVal = je.ValueKind != JsonValueKind.Null ? (object)je : null;
         Assert.NotNull(dateVal);
         if (dateVal is JsonElement je2) Assert.True(je2.ValueKind != JsonValueKind.Null);

@@ -21,7 +21,7 @@ public class EngineBuilderTests
         }
         if (withDll)
         {
-            var binDir = Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net10.0");
+            var binDir = Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net11.0");
             Directory.CreateDirectory(binDir);
             File.WriteAllBytes(Path.Combine(binDir, "Atheriz.Server.dll"), [1, 2, 3]);
         }
@@ -59,7 +59,7 @@ public class EngineBuilderTests
         {
             TouchAll(root, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             File.SetLastWriteTimeUtc(
-                Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net10.0", "Atheriz.Server.dll"),
+                Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net11.0", "Atheriz.Server.dll"),
                 new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
             Assert.False(EngineBuilder.EngineNeedsBuild(root, out var reason));
             Assert.Empty(reason);
@@ -75,7 +75,7 @@ public class EngineBuilderTests
         {
             TouchAll(root, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             File.SetLastWriteTimeUtc(
-                Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net10.0", "Atheriz.Server.dll"),
+                Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net11.0", "Atheriz.Server.dll"),
                 new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
             File.SetLastWriteTimeUtc(
                 Path.Combine(root, "src", "Core", "a.cs"),
@@ -94,7 +94,7 @@ public class EngineBuilderTests
         try
         {
             TouchAll(root, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
-            var dll = Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net10.0", "Atheriz.Server.dll");
+            var dll = Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net11.0", "Atheriz.Server.dll");
             File.SetLastWriteTimeUtc(dll, new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
             var objCopy = Path.Combine(root, "src", "Core", "obj", "a.cs");
             Directory.CreateDirectory(Path.GetDirectoryName(objCopy)!);
@@ -113,7 +113,7 @@ public class EngineBuilderTests
         {
             TouchAll(root, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             File.SetLastWriteTimeUtc(
-                Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net10.0", "Atheriz.Server.dll"),
+                Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net11.0", "Atheriz.Server.dll"),
                 new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
             File.WriteAllText(Path.Combine(root, "Directory.Build.props"), "<Project></Project>");
             File.SetLastWriteTimeUtc(
@@ -145,7 +145,7 @@ public class EngineBuilderTests
         {
             TouchAll(root, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             File.SetLastWriteTimeUtc(
-                Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net10.0", "Atheriz.Server.dll"),
+                Path.Combine(root, "src", "Atheriz.Server", "bin", "Release", "net11.0", "Atheriz.Server.dll"),
                 new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
             var called = false;
             var result = await EngineBuilder.EnsureEngineBuiltAsync(root,

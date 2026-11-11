@@ -136,7 +136,7 @@ public class GlbMutationPersistenceTests
             var stored = MapEdit.GetChain(res.NewKey!);
             Assert.NotNull(stored);
             Assert.DoesNotContain(new Coord("evil", 1, 2, 3), stored!.Chain);
-            Assert.True(stored.Validation == null || !stored.Validation.Contains(999));
+            Assert.True(stored.Validation is null || !stored.Validation.Contains(999));
         }
         finally { MapEdit.Reset(); }
     }

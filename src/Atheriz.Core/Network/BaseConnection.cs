@@ -388,12 +388,12 @@ public abstract class BaseConnection : Atheriz.Core.Commands.IMessageTarget, Ath
     public void Msg(string text)
     {
         // Single-arg text path — most common via broadcast
-        MsgInternal(new List<object?> { text }, []);
+        MsgInternal([text], []);
     }
     // Faithful overloads for Python's flexible msg(*args, **kwargs)
     public void Msg() => MsgInternal([], []);
-    public void Msg(object? arg) => MsgInternal(new List<object?>{arg}, []);
-    public void Msg(object? arg1, object? arg2) => MsgInternal(new List<object?>{arg1, arg2}, []);
+    public void Msg(object? arg) => MsgInternal([arg], []);
+    public void Msg(object? arg1, object? arg2) => MsgInternal([arg1, arg2], []);
     public void Msg(Dictionary<string, object?> kwargs) => MsgInternal([], kwargs);
     public void Msg(List<object?> args, Dictionary<string, object?> kwargs) => MsgInternal(args, kwargs);
     // Expose internal for tests that need kwargs path like msg(text="hi") or msg(prompt=">")

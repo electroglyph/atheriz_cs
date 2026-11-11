@@ -11,7 +11,7 @@ public partial class GameObject
         if (string.IsNullOrEmpty(raw)) return;
         // In C# we use Commands.CommandDispatcher
         // session param ignored for compatibility; this object's own session is used for message routing (but we just dispatch)
-        try { Commands.CommandDispatcher.DispatchLoggedIn(this, raw); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ExecuteCommand: " + logEx.Message, "GameObject"); }
+        try { Commands.CommandDispatcher.DispatchLoggedIn(this, raw); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.ExecuteCommand: {logEx.Message}", "GameObject"); }
     }
 
     public virtual string AtLook(GameObject? target)
@@ -25,7 +25,7 @@ public partial class GameObject
             if (!target.Access(this, "view")) return $"You can't look at '{target.GetDisplayName(this)}'.";
             // Virtual dispatch already reaches the Node override — no type test needed.
             string desc = target.ReturnAppearance(this);
-            try { target.AtDesc(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLook: " + logEx.Message, "GameObject"); }
+            try { target.AtDesc(this); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.AtLook: {logEx.Message}", "GameObject"); }
             return desc;
         }, target);
     }
@@ -56,7 +56,7 @@ public partial class GameObject
         if (IsContainer && visible.Count > 0)
         {
             var grouped = ContentUtils.GroupByName(visible, looker);
-            return "\n\nInside you see: " + grouped;
+            return $"\n\nInside you see: {grouped}";
         }
         return "";
     }

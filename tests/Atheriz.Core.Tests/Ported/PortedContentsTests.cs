@@ -13,7 +13,7 @@ public class PortedContentsTests
     private static GameObject MakeObj(string name, int? id = null)
     {
         var o = GameObject.Create(name);
-        if (id != null) o.Id = id.Value;
+        if (id is not null) o.Id = id.Value;
         ObjectRegistry.AddObject(o);
         return o;
     }

@@ -54,7 +54,7 @@ public static class WebDeployer
     public static void CleanGeneratedOutput(string staticRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(staticRoot);
-        foreach (var rel in new[] { "assets", "atheriz_draw", "chafa.wasm", "gfonts" })
+        foreach (var rel in new[] {"assets", "atheriz_draw", "chafa.wasm", "gfonts"})
             RemovePath(Path.Combine(staticRoot, rel));
         RemovePath(Path.Combine(staticRoot, "webclient", "index.html"));
     }
@@ -126,7 +126,7 @@ public static class WebDeployer
         var env = Environment.GetEnvironmentVariable("ATHERIZ_ROOT");
         if (!string.IsNullOrWhiteSpace(env) && Directory.Exists(env))
             return Path.GetFullPath(env);
-        foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        foreach (var start in new[] {Directory.GetCurrentDirectory(), AppContext.BaseDirectory})
         {
             var dir = new DirectoryInfo(Path.GetFullPath(start));
             for (int i = 0; i < 10 && dir is not null; i++, dir = dir.Parent)

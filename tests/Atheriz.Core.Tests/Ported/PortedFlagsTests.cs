@@ -84,8 +84,8 @@ public class PortedFlagsTests
     [Fact] public void HasListAnyMatch() { var o=NewFlags(); o.AddTags(new[]{"a","b"}); Assert.True(o.HasTags(new[]{"a","c","d"})); Assert.False(o.HasTags(new[]{"x","y","z"})); }
     [Fact] public void HasListAllMatch() { var o=NewFlags(); o.AddTags(new[]{"a","b"}); Assert.True(o.HasTags(new[]{"a","b"}, all:true)); Assert.False(o.HasTags(new[]{"a","c"}, all:true)); }
     [Fact] public void HasSetWithAll() { var o=NewFlags(); o.AddTags(new HashSet<string>{"a","b","c"}); Assert.True(o.HasTags(new HashSet<string>{"a","b"}, all:true)); Assert.False(o.HasTags(new HashSet<string>{"a","z"}, all:true)); }
-    [Fact] public void HasEmptyListAny() { var o=NewFlags(); Assert.False(o.HasTags(Array.Empty<string>())); }
-    [Fact] public void HasEmptyListAll() { var o=NewFlags(); Assert.True(o.HasTags(Array.Empty<string>(), all:true)); }
+    [Fact] public void HasEmptyListAny() { var o=NewFlags(); Assert.False(o.HasTags([])); }
+    [Fact] public void HasEmptyListAll() { var o=NewFlags(); Assert.True(o.HasTags([], all:true)); }
     [Fact] public void HasTagReturnsBool() { var o=NewFlags(); var r=o.HasTag("a"); Assert.IsType<bool>(r); }
     [Fact] public void HasTagSetWithAny() { var o=NewFlags(); o.AddTag("a"); Assert.True(o.HasTags(new HashSet<string>{"a","b"})); }
 

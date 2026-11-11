@@ -66,12 +66,12 @@ public class PortedServerIntegrationTests
             CreateNoWindow = true,
             WorkingDirectory = workingDir ?? Directory.GetCurrentDirectory(),
         };
-        if (env != null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
+        if (env is not null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
         var sbOut = new StringBuilder();
         var sbErr = new StringBuilder();
         using var proc = new Process { StartInfo = psi };
-        proc.OutputDataReceived += (s,e) => { if (e.Data != null) sbOut.AppendLine(e.Data); };
-        proc.ErrorDataReceived += (s,e) => { if (e.Data != null) sbErr.AppendLine(e.Data); };
+        proc.OutputDataReceived += (s,e) => { if (e.Data is not null) sbOut.AppendLine(e.Data); };
+        proc.ErrorDataReceived += (s,e) => { if (e.Data is not null) sbErr.AppendLine(e.Data); };
         proc.Start();
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
@@ -100,10 +100,10 @@ public class PortedServerIntegrationTests
             };
             psi.ArgumentList.Add(dll);
             foreach (var a in args) psi.ArgumentList.Add(a);
-            if (env != null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
+            if (env is not null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
             var srv = new BackgroundServer(Process.Start(psi)!);
-            srv.Proc.OutputDataReceived += (s, e) => { if (e.Data != null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
-            srv.Proc.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
+            srv.Proc.OutputDataReceived += (s, e) => { if (e.Data is not null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
+            srv.Proc.ErrorDataReceived += (s, e) => { if (e.Data is not null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
             srv.Proc.BeginOutputReadLine();
             srv.Proc.BeginErrorReadLine();
             return srv;
@@ -122,7 +122,7 @@ public class PortedServerIntegrationTests
     {
         if (!OperatingSystem.IsLinux()) return; // only on linux where loopback spawns work
         var repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return; // skip if not built
         var port = FindFreePortInt();
         var telnetPort = FindFreePortInt();
@@ -247,7 +247,7 @@ public class PortedServerIntegrationTests
         // `dotnet <dll> stop` (the stop path under test is not .sh-only).
         if (!OperatingSystem.IsLinux()) return; // SIGHUP is Unix-only
         var repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return; // skip if not built
         var port = FindFreePortInt();
         var telnetPort = FindFreePortInt();
@@ -318,7 +318,7 @@ public class PortedServerIntegrationTests
     {
         if (!OperatingSystem.IsLinux()) return;
         var repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePortInt();
         var telnetPort = FindFreePortInt();
@@ -477,7 +477,7 @@ public class PortedServerIntegrationTests
             return msgs;
         }
         // client_ready should trigger welcome + prompt
-        await SendAsync("client_ready", Array.Empty<object>());
+        await SendAsync("client_ready", []);
         var welcomeMsgs = await RecvAllAsync(2000);
         Assert.Contains(welcomeMsgs, m => m.Contains("ATHERIZ VERSION"));
         Assert.Contains(welcomeMsgs, m => m.Contains("prompt"));

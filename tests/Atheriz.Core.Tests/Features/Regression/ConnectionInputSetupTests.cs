@@ -52,7 +52,7 @@ public class ConnectionInputSetupTests
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Network", "ConnectionManager.cs");
         var region = SourceScan.Region(src, "public virtual void Disconnect(");
-        Assert.DoesNotContain("else if (connId == null", region);
+        Assert.DoesNotContain("else if (connId is null", region);
         Assert.DoesNotContain("lock (connection.Lock) { connection.SetDisconnected(true); }", region);
         Assert.Contains("connection.SetDisconnected(true);", region);
     }

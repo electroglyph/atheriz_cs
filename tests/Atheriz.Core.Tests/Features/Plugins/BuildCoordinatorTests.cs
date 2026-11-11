@@ -19,7 +19,7 @@ public class BuildCoordinatorTests
         File.SetLastWriteTimeUtc(Path.Combine(serverDir, "Atheriz.Server.csproj"), old);
         if (!stale)
         {
-            var binDir = Path.Combine(serverDir, "bin", "Release", "net10.0");
+            var binDir = Path.Combine(serverDir, "bin", "Release", "net11.0");
             Directory.CreateDirectory(binDir);
             File.WriteAllBytes(Path.Combine(binDir, "Atheriz.Server.dll"), [1]);
             File.SetLastWriteTimeUtc(Path.Combine(binDir, "Atheriz.Server.dll"),
@@ -34,7 +34,7 @@ public class BuildCoordinatorTests
         Directory.CreateDirectory(dir);
         var csproj = Path.Combine(dir, "mygame.csproj");
         File.WriteAllText(csproj, "<Project></Project>");
-        var dllDir = Path.Combine(dir, "bin", "Release", "net10.0");
+        var dllDir = Path.Combine(dir, "bin", "Release", "net11.0");
         Directory.CreateDirectory(dllDir);
         var dll = Path.Combine(dllDir, "mygame.dll");
         File.WriteAllBytes(dll, [1]);

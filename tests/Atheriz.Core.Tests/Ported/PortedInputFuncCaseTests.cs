@@ -37,7 +37,7 @@ public class PortedInputFuncCaseTests
     {
         private readonly Command _cmd = new _ShortAliasCmd();
         public override Command? Get(string key) => key == "b" ? _cmd : null;
-        public override IReadOnlyList<string> GetKeys() => Array.Empty<string>();
+        public override IReadOnlyList<string> GetKeys() => [];
     }
 
     [Fact]

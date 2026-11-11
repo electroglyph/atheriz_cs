@@ -6,7 +6,7 @@ namespace Atheriz.Core.Tests.Features.Plugins;
 
 // Audit 10 finding 11: a failed plugin load must not displace the live
 // loader. The old code assigned _loader before the load was known to
-// succeed, so one bad deploy left LoadedAssembly == null and the next
+// succeed, so one bad deploy left LoadedAssembly is null and the next
 // reload's EvictStaleCommands(null) no-op'd, keeping stale command
 // instances alive. Neuter (assign-then-load) replaces the loader with an
 // empty one and both identity assertions fail.

@@ -283,7 +283,7 @@ public class LoggedInCommandTests
         var (func, caller, args) = cmd.Execute(conn, "hi there");
         Assert.NotNull(func);
         func!(caller!, args);
-        Assert.Contains(conn.Sent, t => t.Args.Any(a => a != null && a.ToString()!.Contains("You can't do that.")));
+        Assert.Contains(conn.Sent, t => t.Args.Any(a => a is not null && a.ToString()!.Contains("You can't do that.")));
     }
 
     [Fact]
@@ -295,7 +295,7 @@ public class LoggedInCommandTests
         var (func, caller, args) = cmd.Execute(conn, "smiles");
         Assert.NotNull(func);
         func!(caller!, args);
-        Assert.Contains(conn.Sent, t => t.Args.Any(a => a != null && a.ToString()!.Contains("You can't do that.")));
+        Assert.Contains(conn.Sent, t => t.Args.Any(a => a is not null && a.ToString()!.Contains("You can't do that.")));
     }
 
     [Fact]

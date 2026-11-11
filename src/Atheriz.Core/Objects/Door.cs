@@ -252,7 +252,7 @@ public class Door
             nh.Lock3.EnterWriteLock();
             try { nh.MarkDoorsModified(); } finally { nh.Lock3.ExitWriteLock(); }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Door.MarkNodeDoorsModified: " + logEx.Message, "Door"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Door.MarkNodeDoorsModified: {logEx.Message}", "Door"); }
     }
 
     // Mark send + generation bump.
@@ -393,7 +393,7 @@ public class Door
             else return "Door desc: unexpected coord.";
             // DoorDesc is builder flavor persisted with the door (never
             // rendered until now): appended verbatim when set.
-            if (!string.IsNullOrEmpty(DoorDesc)) text += " " + DoorDesc;
+            if (!string.IsNullOrEmpty(DoorDesc)) text += $" {DoorDesc}";
             return text;
         }
     }
@@ -468,7 +468,7 @@ public class Door
             toNode?.MsgContents($"$You(target) $conj(open) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             AtOpen(caller);
         }
-        catch (Exception ex) { AtherizLogger.LogDebug("Suppressed Door.TryOpen post-open: " + ex.Message, "Door"); }
+        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed Door.TryOpen post-open: {ex.Message}", "Door"); }
         return true;
     }
     // A null caller bypasses access/map/hooks, so the fallback is an explicit
@@ -537,7 +537,7 @@ public class Door
             toNode?.MsgContents($"$You(target) $conj(close) the door.", exclude: null, fromObj: caller, mapping: TargetMapping(caller));
             AtClose(caller);
         }
-        catch (Exception ex) { AtherizLogger.LogDebug("Suppressed Door.TryClose post-close: " + ex.Message, "Door"); }
+        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed Door.TryClose post-close: {ex.Message}", "Door"); }
         return true;
     }
     public bool Close(GameObject? caller = null) => caller is not null ? TryClose(caller) : ForceClose();
@@ -669,7 +669,7 @@ public class Door
         var mh = GlobalServices.GetMapHandlerOrDefault();
         if (mh is null) return;
         HashSet<(string, int)> seen = [];
-        foreach (var coord in new[] { FromCoord, ToCoord })
+        foreach (var coord in new[] {FromCoord, ToCoord})
         {
             var key = (coord.Area, coord.Z);
             if (!seen.Add(key)) continue;

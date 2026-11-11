@@ -24,7 +24,7 @@ public class PortedDoorPathfindTests
         areaObj.AddGrid(grid);
         nh.AddArea(areaObj);
         var door = new Door(new Coord(area, 0, 0, 0), new Coord(area, 1, 0, 0), "east", "west", null, "", "", closed, locked);
-        if (accessMock != null)
+        if (accessMock is not null)
         {
             // Simplified: original used MagicMock side_effect for access; we use AddLock for "open" that records call
             // But we need per-perm mock; caller will provide delegate that checks perm via closure

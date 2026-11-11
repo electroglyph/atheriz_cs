@@ -29,7 +29,7 @@ public class PortedPyHardeningTests
         using var env = GlobalTestEnv.Enter();
         var obj = GameObject.Create("HardeningVictim");
         // Ensure GameObject does not expose dangerous reflection via python-style getattr
-        var hasUnsafe = obj.GetType().GetMethod("GetAttribute") != null;
+        var hasUnsafe = obj.GetType().GetMethod("GetAttribute") is not null;
         Assert.False(hasUnsafe);
     }
     [Fact] public void PyHardening_NoImport_NoExecution()
@@ -52,7 +52,7 @@ public class PortedPyHardeningTests
         // Valid command should still run
         var look = new Atheriz.Core.Commands.LoggedIn.LookCommand();
         var (fn, caller, args) = look.Execute(admin, "", "look");
-        if (fn != null) fn(caller!, args);
+        if (fn is not null) fn(caller!, args);
         Assert.True(admin.PeekMessages().Count > 0);
     }
 }

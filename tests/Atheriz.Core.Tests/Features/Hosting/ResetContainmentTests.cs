@@ -136,9 +136,16 @@ public class ResetContainmentTests
         var oldP = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", "suadmin");
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", "supersecret123");
+        // CreateGameFolder runs InitialSetup.RunSetup, which reseeds the
+        // global salt slot (ResetWorldState); save and restore it so later
+        // tests keep testsalt. (GlobalTestEnv.Enter() alone cannot heal
+        // this: it preserves a non-null slot.)
+        var origSalt = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try { body(); }
         finally
         {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", oldU);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", oldP);
         }

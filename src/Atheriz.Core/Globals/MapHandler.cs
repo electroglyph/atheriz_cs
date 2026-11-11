@@ -59,7 +59,7 @@ public class MapHandler
         // Settings-pinned load, mirroring NodeHandler: the handler was
         // constructed with settings, so it must read that same database
         // rather than the ambient factory path (audit 10 finding 3).
-        try { using var db = new AtherizDbContext(_settings); Load(db); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
+        try { using var db = new AtherizDbContext(_settings); Load(db); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed MapHandler.Load: {logEx.Message}", "MapHandler"); }
     }
     public void Load(AtherizDbContext db)
     {
@@ -77,7 +77,7 @@ public class MapHandler
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt map chunk {row.Area}:{row.Z}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt map chunk {row.Area}:{row.Z}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed MapHandler.Load: {logEx.Message}", "MapHandler"); }
                 }
             });
             // the existence query runs BEFORE the write lock (all
@@ -100,13 +100,13 @@ public class MapHandler
                 bool shouldSwap = buffer.Count > 0 || (!dbCheckFailed && !dbHasRows);
                 if (!shouldSwap)
                 {
-                    try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
+                    try { AtherizLogger.LogWarning("[Load] map load yielded no usable rows; preserving live map"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed MapHandler.Load: {logEx.Message}", "MapHandler"); }
                 }
                 else { _data.Clear(); foreach (var kv in buffer) _data[kv.Key] = kv.Value; _removedSinceSave.RemoveWhere(k => _data.ContainsKey(k)); }
             }
             finally { Lock.ExitWriteLock(); }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Load: " + logEx.Message, "MapHandler"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed MapHandler.Load: {logEx.Message}", "MapHandler"); }
     }
 
     /// <summary>
@@ -126,7 +126,7 @@ public class MapHandler
             // But if Create throws before Save(db) is entered, flags were not yet cleared, so nothing to restore
             // log instead of swallowing (map.py logs save errors),
             // so "skipped, still dirty" is distinguishable from "failed".
-            try { AtherizLogger.LogWarning($"MapHandler.Save failed, flags left dirty: {ex.GetType().Name}: {ex.Message}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MapHandler.Save: " + logEx.Message, "MapHandler"); }
+            try { AtherizLogger.LogWarning($"MapHandler.Save failed, flags left dirty: {ex.GetType().Name}: {ex.Message}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed MapHandler.Save: {logEx.Message}", "MapHandler"); }
         }
     }
     public virtual void Save(AtherizDbContext db, bool force = false)
@@ -143,7 +143,7 @@ public class MapHandler
             refs = _data.Select(kv => (kv.Key, kv.Value)).ToList();
             // A key re-added after Clear() (SetMapInfo/GetOrCreate) is live
             // again and must not be deleted.
-            deletes = new HashSet<(string Area, int Z)>(_removedSinceSave);
+            deletes = new(_removedSinceSave);
             deletes.ExceptWith(_data.Keys);
         }
 
@@ -389,7 +389,7 @@ public class MapHandler
 
     private static void SendUnbackground(GameObject listener)
     {
-        MapInfo.Suppress(() => { listener.Session?.Connection?.SendCommand("unbackground", new List<object?> { "" }, null); }, "SendUnbackground");
+        MapInfo.Suppress(() => { listener.Session?.Connection?.SendCommand("unbackground", [""], null); }, "SendUnbackground");
     }
 
     public void MoveMapable(GameObject mapable, Coord toCoord, Coord? fromCoord = null)

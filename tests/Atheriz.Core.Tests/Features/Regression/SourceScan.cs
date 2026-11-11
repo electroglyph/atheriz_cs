@@ -20,7 +20,7 @@ internal static class SourceScan
             if (Directory.Exists(Path.Combine(c, "src"))) return c;
         var cwd = Directory.GetCurrentDirectory();
         var d = new DirectoryInfo(cwd);
-        while (d != null)
+        while (d is not null)
         {
             if (Directory.Exists(Path.Combine(d.FullName, "src"))) return d.FullName;
             d = d.Parent;

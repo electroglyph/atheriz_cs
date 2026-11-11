@@ -169,7 +169,7 @@ public static class GameTemplateGenerator
                 }
                 catch { }
                 var dbFile = Path.Combine(folderPath, "save", "database.sqlite3");
-                foreach (var f in new[] { dbFile, dbFile + "-wal", dbFile + "-shm", dbFile + ".journal" })
+                foreach (var f in new[] {dbFile, $"{dbFile}-wal", $"{dbFile}-shm", $"{dbFile}.journal"})
                     try { if (File.Exists(f)) File.Delete(f); } catch { }
             } catch { }
         }
@@ -187,7 +187,12 @@ public static class GameTemplateGenerator
         FsUtil.TryChmod0700(savePath);
         var secretPath = Path.Combine(folderPath, "secret"); Directory.CreateDirectory(secretPath);
         FsUtil.TryChmod0700(secretPath);
-        try { var gi = Path.Combine(folderPath, ".gitignore"); if (!File.Exists(gi)) File.WriteAllText(gi, "save/\nsecret/\nbin/\nobj/\n"); } catch { }
+        try { var gi = Path.Combine(folderPath, ".gitignore"); if (!File.Exists(gi)) File.WriteAllText(gi, """
+            save/
+            secret/
+            bin/
+            obj/
+            """); } catch { }
         if (shouldSetup)
         {
             // Fail fast on invalid credentials: DoSetup would either throw
@@ -262,7 +267,7 @@ public static class GameTemplateGenerator
     }
     private static void Scaffold(string folderPath, string gameName)
     {
-        var csprojName = gameName + ".csproj"; var csprojPath = Path.Combine(folderPath, csprojName);
+        var csprojName = $"{gameName}.csproj"; var csprojPath = Path.Combine(folderPath, csprojName);
         string coreRef = "../src/Atheriz.Core/Atheriz.Core.csproj";
         bool coreFound = false;
         // Engine checkout root (the directory containing src/) for the
@@ -284,16 +289,21 @@ public static class GameTemplateGenerator
         // relative default dangles, so fall back to the NuGet package and
         // the scaffold always references a resolvable Atheriz.Core.
         string refXml;
-        if (coreFound) refXml = $"<ProjectReference Include=\"{coreRef}\" />";
+        if (coreFound) refXml = $"""<ProjectReference Include="{coreRef}" />""";
         else
         {
             var coreVersion = typeof(Atheriz.Core.Globals.ObjectRegistry).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
-            refXml = $"<PackageReference Include=\"Atheriz.Core\" Version=\"{coreVersion}\" />";
+            refXml = $"""<PackageReference Include="Atheriz.Core" Version="{coreVersion}" />""";
         }
-        var csproj = $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>\n  <ItemGroup>{refXml}</ItemGroup>\n</Project>\n";
+        var csproj = $"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net11.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+              <ItemGroup>{refXml}</ItemGroup>
+            </Project>
+            """;
         Console.WriteLine($"  Creating {csprojName}...");
         File.WriteAllText(csprojPath, csproj);
-        var files = new Dictionary<string, string> { ["GameSettings.cs"] = GS(gameName) };
+        Dictionary<string, string> files = new() { ["GameSettings.cs"] = GS(gameName) };
         files["AssemblyInfo.cs"] = AI(gameName);
         files["README.md"] = RM(gameName);
         // Baked relative engine path for the per-game build scripts: valid
@@ -331,7 +341,14 @@ public static class GameTemplateGenerator
         Atheriz.Core.Utils.FsUtil.TryChmod0755(Path.Combine(folderPath, "build.sh"));
         Console.WriteLine("  Copying web folder...");
     }
-    private static string GS(string ns) => $" // mirrors settings.py. See AtherizSettings.</summary>\npublic static class GameSettings\n{{\n    public const string ServerName = \"{ns}\";\n    public const bool WebclientSyncCheck = true;\n}}\n";
+    private static string GS(string ns) => $$"""
+         // mirrors settings.py. See AtherizSettings.</summary>
+        public static class GameSettings
+        {
+            public const string ServerName = "{{ns}}";
+            public const bool WebclientSyncCheck = true;
+        }
+        """;
     private static string FriendlyType(Type t)
     {
         if (t == typeof(void)) return "void";
@@ -343,7 +360,7 @@ public static class GameTemplateGenerator
         if (t == typeof(float)) return "float";
         if (t == typeof(object)) return "object";
         if (t.IsGenericParameter) return t.Name;
-        if (t.IsArray) return FriendlyType(t.GetElementType()!) + "[]";
+        if (t.IsArray) return $"{FriendlyType(t.GetElementType()!)}[]";
         if (t.IsGenericType)
         {
             var def = t.GetGenericTypeDefinition();
@@ -351,7 +368,7 @@ public static class GameTemplateGenerator
             var name = def.Name;
             var tick = name.IndexOf('`');
             if (tick >= 0) name = name.Substring(0, tick);
-            if (def == typeof(Nullable<>)) return FriendlyType(t.GetGenericArguments()[0]) + "?";
+            if (def == typeof(Nullable<>)) return $"{FriendlyType(t.GetGenericArguments()[0])}?";
             if (def == typeof(List<>)) return $"List<{string.Join(", ", args)}>";
             if (def == typeof(Dictionary<,>)) return $"Dictionary<{string.Join(", ", args)}>";
             if (def == typeof(IEnumerable<>)) return $"IEnumerable<{string.Join(", ", args)}>";
@@ -415,22 +432,24 @@ public static class GameTemplateGenerator
                 // Heuristic: many base hooks use nullable GameObject? — if FriendlyType is GameObject without ?, and param allows null, add ?
                 if (p.HasDefaultValue && p.DefaultValue is null) isNullable = true;
             }
-            if (isNullable && !t.EndsWith("?", StringComparison.Ordinal) && pt.IsClass) t += "?";
+            if (isNullable && !t.EndsWith("?", StringComparison.Ordinal) && pt.IsClass) t = $"{t}?";
             // ValueTuple nullable not needed
             var name = p.Name ?? "arg";
             string decl = $"{(isParams ? "params " : "")}{modifier}{t} {name}";
             if (p.HasDefaultValue && !p.IsOut)
             {
                 var dv = p.DefaultValue;
-                string ds;
-                if (dv is null) ds = "null";
-                else if (dv is string s) ds = "\"" + EscapeCsString(s) + "\"";
-                else if (dv is bool b) ds = b ? "true" : "false";
-                else if (dv is char c) ds = "'" + EscapeCsString(c.ToString()).Replace("'", "\\'") + "'";
-                // InvariantCulture: a locale decimal comma would emit
-                // uncompilable code (e.g. `= 1,5` parses as two args).
-                else if (dv is IFormattable fmt) ds = fmt.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
-                else ds = dv.ToString() ?? "null";
+                string ds = dv switch
+                {
+                    null => "null",
+                    string s => $"\"{EscapeCsString(s)}\"",
+                    bool b => b ? "true" : "false",
+                    char c => $"'{EscapeCsString(c.ToString()).Replace("'", "\\'")}'",
+                    // InvariantCulture: a locale decimal comma would emit
+                    // uncompilable code (e.g. `= 1,5` parses as two args).
+                    IFormattable fmt => fmt.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+                    _ => dv.ToString() ?? "null",
+                };
                 decl += $" = {ds}";
             }
             parts.Add(decl);
@@ -443,9 +462,28 @@ public static class GameTemplateGenerator
         // Call-site mirrors of the modifiers (ref/out/in/params pass-through).
         return string.Join(", ", ps.Select(p => ModifierPrefix(p) + (p.Name ?? "arg")));
     }
-    private static string RM(string ns) => $"# {ns} — Atheriz Game Folder\nGenerated via `atheriz-cs new {ns}` (ports `atheriz/new.py:784`).\n## Run\n```\n# From this folder (the wrappers forward to the engine launcher):\n./atheriz.sh start\n# (atheriz.cmd / atheriz.ps1 start on Windows; set ATHERIZ_ROOT if the engine moved)\n# Rebuild this game (engine server when stale + plugin Release + webclient redeploy):\n./build.sh\n# (build.cmd / build.ps1 on Windows; --no-web for code only, --web for web only,\n# --reload to hot-load a running server, --no-engine to trust the server dll)\n# Game code is a class library loaded by the server (no Program.cs needed).\n# Direct alternative:\ndotnet run --project ../src/Atheriz.Server -- start\n```\n";
+    private static string RM(string ns) => $"""
+        # {ns} — Atheriz Game Folder
+        Generated via `atheriz-cs new {ns}` (ports `atheriz/new.py:784`).
+        ## Run
+        ```
+        # From this folder (the wrappers forward to the engine launcher):
+        ./atheriz.sh start
+        # (atheriz.cmd / atheriz.ps1 start on Windows; set ATHERIZ_ROOT if the engine moved)
+        # Rebuild this game (engine server when stale + plugin Release + webclient redeploy):
+        ./build.sh
+        # (build.cmd / build.ps1 on Windows; --no-web for code only, --web for web only,
+        # --reload to hot-load a running server, --no-engine to trust the server dll)
+        # Game code is a class library loaded by the server (no Program.cs needed).
+        # Direct alternative:
+        dotnet run --project ../src/Atheriz.Server -- start
+        ```
+        """;
     // Assembly attributes for scaffolded games (checked-in template carries AssemblyInfo.cs with the same shape).
-    private static string AI(string ns) => $"using System.Reflection;\n[assembly: AssemblyDescription(\"{ns} — Atheriz game plugin, loaded by Atheriz.Server via PluginLoader.\")]\n";
+    private static string AI(string ns) => $"""
+        using System.Reflection;
+        [assembly: AssemblyDescription("{ns} — Atheriz game plugin, loaded by Atheriz.Server via PluginLoader.")]
+        """;
     // Per-game launchers: thin forwarders to the engine's atheriz.sh/cmd.
     // Engine resolution is ATHERIZ_ROOT env override first, then an upward
     // search for the engine checkout (covers moved/copied game folders),
@@ -583,7 +621,7 @@ public static class GameTemplateGenerator
         fi
         if [ -z "$ENGINE_ROOT" ]; then ENGINE_ROOT="$GAME_DIR/__ATHERIZ_ENGINE_REL__"; fi
         SERVER_CSPROJ="$ENGINE_ROOT/src/Atheriz.Server/Atheriz.Server.csproj"
-        SERVER_DLL="$ENGINE_ROOT/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll"
+        SERVER_DLL="$ENGINE_ROOT/src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll"
         # True (0) when the server Release dll is missing or any engine
         # source is newer than it. A stale server runs an older Atheriz.Core
         # than the plugin about to build, and the loader unifies engine
@@ -699,7 +737,7 @@ public static class GameTemplateGenerator
         set "DO_RELOAD=0"
         set "DO_ENGINE=1"
         set "SERVER_CSPROJ=%ENGINE_ROOT%\src\Atheriz.Server\Atheriz.Server.csproj"
-        set "SERVER_DLL=%ENGINE_ROOT%\src\Atheriz.Server\bin\Release\net10.0\Atheriz.Server.dll"
+        set "SERVER_DLL=%ENGINE_ROOT%\src\Atheriz.Server\bin\Release\net11.0\Atheriz.Server.dll"
         :parse
         if "%~1"=="" goto :parsed
         if /i "%~1"=="--no-web" ( set "DO_WEB=0" ) else if /i "%~1"=="--web" ( set "DO_BUILD=0" ) else if /i "%~1"=="--reload" ( set "DO_RELOAD=1" ) else if /i "%~1"=="--no-engine" ( set "DO_ENGINE=0" ) else if /i "%~1"=="--help" ( call :usage & exit /b 0 ) else ( echo error: unknown arg: %~1 1>&2 & exit /b 1 )
@@ -840,7 +878,7 @@ public static class GameTemplateGenerator
         }
         if ([string]::IsNullOrEmpty($engineRoot)) { $engineRoot = Join-Path $gameDir '__ATHERIZ_ENGINE_REL__' }
         $serverCsproj = Join-Path $engineRoot 'src/Atheriz.Server/Atheriz.Server.csproj'
-        $serverDll = Join-Path $engineRoot 'src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll'
+        $serverDll = Join-Path $engineRoot 'src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll'
         # True when the server Release dll is missing or any engine source
         # is newer than it (same rule as build.sh; bin/obj never count).
         function Test-EngineStale {

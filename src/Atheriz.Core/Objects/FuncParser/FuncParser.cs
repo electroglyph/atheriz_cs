@@ -4,7 +4,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Atheriz.Core;
-using Atheriz.Core.Objects.VerbConjugation;namespace Atheriz.Core.Objects;
+using Atheriz.Core.Objects.VerbConjugation;
+
+namespace Atheriz.Core.Objects;
 
 /// <summary>
 /// Parses and executes `$`-expressions in message text: `$` opens a call,
@@ -123,7 +125,7 @@ public class FuncParser
             ["random"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ if(a[0].Contains('.')){ double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); return rnd.NextDouble()*mx; } int.TryParse(a[0], out var mx2); return (int)rnd.NextInt64(0, (long)mx2+1); } { double.TryParse(a[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mn); double.TryParse(a[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mx); bool isFloat=a[0].Contains('.')||a[1].Contains('.'); if(isFloat) return mn + (mx-mn)*rnd.NextDouble(); return (int)rnd.NextInt64((int)mn,(long)(int)mx+1); } },
             ["randint"] = (a,k,ctx,raw) => { var rnd=Random.Shared; if(a.Length==0) return rnd.Next(0,2); if(a.Length==1){ int.TryParse(a[0], out var mx2); return (int)rnd.NextInt64(0, (long)mx2+1); } int.TryParse(a[0], out var mn2); int.TryParse(a[1], out var mx3); return (int)rnd.NextInt64(mn2,(long)mx3+1); },
             ["choice"] = (a,k,ctx,raw) => { if(a.Length==0) return ""; var rnd=Random.Shared;
-                if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[", StringComparison.Ordinal)&&single.EndsWith("]", StringComparison.Ordinal)){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.Choice: " + logEx.Message, "ParsedFunc"); } } try{
+                if(a.Length==1){ var single=a[0].Trim(); if(single.StartsWith("[", StringComparison.Ordinal)&&single.EndsWith("]", StringComparison.Ordinal)){ try{ var inner=single.Substring(1,single.Length-2); var items=inner.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).ToArray(); if(items.Length>0) return items[rnd.Next(items.Length)].Trim('\'','"'); }catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed ParsedFunc.Choice: {logEx.Message}", "ParsedFunc"); } } try{
                         var conv = FuncParserHelpers.SafeConvertToTypes([FuncParserHelpers.PyConverter], new object?[]{single}, new Dictionary<string,object?>(), raiseErrors: ctx.RaiseErrors); if(conv.args.Length>0 && conv.args[0] is System.Collections.IEnumerable en && !(conv.args[0] is string)){ var list=en.Cast<object?>().ToArray(); if(list.Length>0) return list[rnd.Next(list.Length)]?.ToString()??""; } }catch{ if(ctx.RaiseErrors) throw; }
                 } else {
                     // Multi-arg: convert each arg through the literal converter, then pick one.
@@ -226,7 +228,7 @@ public class FuncParser
             if(v is string str) return str;
             if(v is System.Collections.IList list) return "["+string.Join(",", list.Cast<object?>())+"]";
             return v?.ToString()??"";
-        }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ParsedFunc.SafePyEval: " + logEx.Message, "ParsedFunc"); }
+        }catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed ParsedFunc.SafePyEval: {logEx.Message}", "ParsedFunc"); }
         if(int.TryParse(s, out var i2)) return i2.ToString();
         if(double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d2)) return d2.ToString(System.Globalization.CultureInfo.InvariantCulture);
         if(s.StartsWith("[", StringComparison.Ordinal)&&s.EndsWith("]", StringComparison.Ordinal)) return s;
@@ -238,7 +240,7 @@ public class FuncParser
 
     private static object? HandleYou(string[] args, Dictionary<string,string> kwargs, ParserContext ctx, ParsedFunc raw)
     {
-        GameObject? caller = ResolveMappedActor(ctx.Mapping, args.Length > 0 ? args[0] : null, ctx.Caller);
+        GameObject? caller = ResolveMappedActor(ctx.Mapping, args is [var a0, ..] ? a0 : null, ctx.Caller);
         if (caller is null || ctx.Receiver is null)
         {
             if(ctx.RaiseErrors) throw new ParsingError("No caller or receiver supplied to $you callable.");
@@ -252,7 +254,7 @@ public class FuncParser
     }
     private static object? HandleYour(string[] args, Dictionary<string,string> kwargs, ParserContext ctx, ParsedFunc raw)
     {
-        GameObject? caller = ResolveMappedActor(ctx.Mapping, args.Length > 0 ? args[0] : null, ctx.Caller);
+        GameObject? caller = ResolveMappedActor(ctx.Mapping, args is [var a0, ..] ? a0 : null, ctx.Caller);
         if (caller is null || ctx.Receiver is null)
         {
             if(ctx.RaiseErrors) throw new ParsingError("No caller or receiver supplied to $your callable.");
@@ -263,7 +265,7 @@ public class FuncParser
         if (kwargs.TryGetValue("capitalize", out var capStr)) cap = capStr.Equals("true", StringComparison.OrdinalIgnoreCase) || capStr=="1";
         if (caller == ctx.Receiver) return cap? "Your":"your";
         var name = caller.GetDisplayName(ctx.Receiver);
-        return name + "'s";
+        return $"{name}'s";
     }
 
     private static object? HandleConj(string[] args, Dictionary<string,string> kwargs, ParserContext ctx, ParsedFunc raw)

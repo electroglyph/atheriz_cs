@@ -33,7 +33,7 @@ public abstract class LoggedInCommand : Command
         {
             var pa = ctx.Args;
             if (pa is null && !AllowMissingArgs) { go.Msg(PrintHelp()); return; }
-            RunParsed(ctx with { Puppet = go, Args = pa ?? new GameArgumentParser.ParsedArgs() });
+            RunParsed(ctx with { Puppet = go, Args = pa ?? new() });
         }
         else
         {

@@ -35,9 +35,9 @@ public class PortedMazePathfindTests
         var cmd = new MazeCommand();
         caller.ClearMessages();
         cmd.Run(caller, null);
-        Assert.True(nh.GetArea("maze1") != null);
-        Assert.True(nh.GetArea("maze2") != null);
-        Assert.True(nh.GetArea("maze3") != null);
+        Assert.True(nh.GetArea("maze1") is not null);
+        Assert.True(nh.GetArea("maze2") is not null);
+        Assert.True(nh.GetArea("maze3") is not null);
         var txt = string.Join(" ", caller.PeekMessages());
         Assert.Contains("created 3", txt);
     }

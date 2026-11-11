@@ -16,7 +16,7 @@ public class PortedNodeHooksTests
         public override bool AtPreObjectLeave(GameObject? destination, string? toExit = null)
         {
             // Like a mischievous hook: relocate the mover mid-gate, allow the move.
-            if (!_yanked && Victim != null && Elsewhere != null) { _yanked = true; Victim.MoveTo(Elsewhere); }
+            if (!_yanked && Victim is not null && Elsewhere is not null) { _yanked = true; Victim.MoveTo(Elsewhere); }
             return true;
         }
     }

@@ -220,7 +220,7 @@ public class InputFuncs
     public static void SendDefaultPrompt(BaseConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        try { connection.SendCommand("prompt", new List<object?> { ">" }, []); }
+        try { connection.SendCommand("prompt", [">"], []); }
         catch (Exception) { }
     }
 
@@ -236,7 +236,7 @@ public class InputFuncs
         if (connection.Session.Account is not null) return;
         var welcome = ConnectionScreen.Render(connection.Session);
         connection.Msg(welcome);
-        connection.SendCommand("prompt", new List<object?> { ">" }, []);
+        connection.SendCommand("prompt", [">"], []);
     }
 
     private static bool IsColor(object? v)
@@ -451,7 +451,7 @@ public class InputFuncs
         var result = Globals.MapEdit.Consume(key!, ip, seq);
         if (result.Status == Globals.MapEditStatus.Reject)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ result.Reason }, []);
+            connection.SendCommand("map_edit_reject", [result.Reason], []);
             // A dead key (grant→disconnect race) fails closed with no
             // hint — tell the user to reopen the editor. The wire reason is
             // unchanged for older clients.
@@ -497,16 +497,16 @@ public class InputFuncs
             if (cell.Count == 0) { failIndex = idx; return false; }
             // Convert possible JsonElement string first element
             object? first = cell[0];
-            if (first is System.Text.Json.JsonElement jef && jef.ValueKind == System.Text.Json.JsonValueKind.String) first = jef.GetString();
+            if (first is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } jef) first = jef.GetString();
             if (first is string fs && fs == "room")
             {
                 if (cell.Count != 5) { failIndex = idx; return false; }
                 for (int i = 1; i < 5; i++)
                 {
                     var v = cell[i];
-                    if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) { failIndex = idx; return false; } }
-                    else if (v is not int && v is not long) { failIndex = idx; return false; }
-                    else if (v is long lroom && (lroom < int.MinValue || lroom > int.MaxValue)) { failIndex = idx; return false; }
+                    if (v is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Number } jen1) { if (!jen1.TryGetInt32(out _)) { failIndex = idx; return false; } }
+                    else if (v is not (int or long)) { failIndex = idx; return false; }
+                    else if (v is long lroom && lroom is (< int.MinValue or > int.MaxValue)) { failIndex = idx; return false; }
                 }
                 parsed.Add(new MapEditCell(true, ToInt(cell[1]), ToInt(cell[2]), ToInt(cell[3]), ToInt(cell[4]), "", null, null, null, false));
                 continue;
@@ -516,9 +516,9 @@ public class InputFuncs
             for (int i = 0; i < 2; i++)
             {
                 var v = cell[i];
-                if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number) { if (!je.TryGetInt32(out _)) { failIndex = idx; return false; } }
-                else if (v is not int && v is not long) { failIndex = idx; return false; }
-                else if (v is long lxy && (lxy < int.MinValue || lxy > int.MaxValue)) { failIndex = idx; return false; }
+                if (v is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Number } jen2) { if (!jen2.TryGetInt32(out _)) { failIndex = idx; return false; } }
+                else if (v is not (int or long)) { failIndex = idx; return false; }
+                else if (v is long lxy && lxy is (< int.MinValue or > int.MaxValue)) { failIndex = idx; return false; }
             }
             if (cell[2] is not string)
             {
@@ -560,7 +560,7 @@ public class InputFuncs
             // A failing cell must reject loudly like a failing legend entry —
             // silently dropping the whole edit hides validation disagreements
             // (e.g. scalar cell colors, which the cell gate rejects by design).
-            connection.SendCommand("map_edit_reject", new List<object?> { $"Invalid map edit cell at index {failIndex}." }, []);
+            connection.SendCommand("map_edit_reject", [$"Invalid map edit cell at index {failIndex}."], []);
             return;
         }
         // Optional editor-settings fourth arg (explicit save-to-server only):
@@ -572,7 +572,7 @@ public class InputFuncs
         {
             if (!MapEditorSettings.TryParse(args[3], out editorSettings, out var settingsError))
             {
-                connection.SendCommand("map_edit_reject", new List<object?> { $"Invalid map editor settings: {settingsError}" }, []);
+                connection.SendCommand("map_edit_reject", [$"Invalid map editor settings: {settingsError}"], []);
                 return;
             }
         }
@@ -580,7 +580,7 @@ public class InputFuncs
         if (result is null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
         {
-            connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
+            connection.SendCommand("map_ack", [seq, result.NewKey], []);
             return;
         }
         // Process edits
@@ -662,7 +662,7 @@ public class InputFuncs
                 {
                     try { Atheriz.Core.AtherizLogger.LogWarning($"[MapEdit] ApplyMoves refused {failed.Count}/{roomMoves.Count} moves on {result.Chain.Area} z={result.Chain.Z}: {string.Join(";", failed.Take(5))}"); }
                     catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.MapEditHandler: " + logEx.Message, "ConnectionManager"); }
-                    try { connection.SendCommand("moves_denied", new List<object?> { seq, result.NewKey, failed }, []); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ConnectionManager.MapEditHandler: " + logEx.Message, "ConnectionManager"); }
+                    try { connection.SendCommand("moves_denied", [seq, result.NewKey, failed], []); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed ConnectionManager.MapEditHandler: {logEx.Message}", "ConnectionManager"); }
                 }
             }
         }
@@ -674,7 +674,7 @@ public class InputFuncs
             // a missing account (tests, logged-out grant) ack without storing.
             result.Chain!.Session?.Account?.SetMapEditorSettings(editorSettings.ToJson());
         }
-        connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
+        connection.SendCommand("map_ack", [seq, result.NewKey], []);
     }
 
     public void MapValidateMovesHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
@@ -746,15 +746,15 @@ public class InputFuncs
 
     private void SendMoveVerdict(BaseConnection connection, int seq, string newKey, List<int> denied)
     {
-        if (denied.Count>0) connection.SendCommand("moves_denied", new List<object?>{ seq, newKey, denied }, []);
-        else connection.SendCommand("moves_ok", new List<object?>{ seq, newKey }, []);
+        if (denied.Count>0) connection.SendCommand("moves_denied", [seq, newKey, denied], []);
+        else connection.SendCommand("moves_ok", [seq, newKey], []);
     }
 
     public void MapEditLegendHandler(BaseConnection connection, List<object?> args, Dictionary<string, object?> kwargs)
     {
         if (args.Count < 3)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid legend payload."], []);
             return;
         }
         var key = args[0] as string;
@@ -762,12 +762,12 @@ public class InputFuncs
         var legendObj = args[2];
         if (key is null || legendObj is null)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid legend payload."], []);
             return;
         }
-        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid legend payload." }, []); return; }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", ["Invalid legend payload."], []); return; }
         var legend = ToList(legendObj);
-        if (legend.Count>200) { connection.SendCommand("map_edit_reject", new List<object?>{ "Too many legend entries (max 200)." }, []); return; }
+        if (legend.Count>200) { connection.SendCommand("map_edit_reject", ["Too many legend entries (max 200)."], []); return; }
         // Single validating parse: normalize once per entry, in index order
         // with first-failure reject, and share the dicts with the apply phase.
         var parsedLegend = new List<Dictionary<string, object?>>(legend.Count);
@@ -776,7 +776,7 @@ public class InputFuncs
             var dict = NormalizeDict(legend[idx]);
             if (dict is null || !IsLegendEntry(dict))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid legend entry at index {idx}." }, []);
+                connection.SendCommand("map_edit_reject", [$"Invalid legend entry at index {idx}."], []);
                 return;
             }
             parsedLegend.Add(dict);
@@ -785,7 +785,7 @@ public class InputFuncs
         if (result is null) return;
         if (result.Status == Globals.MapEditStatus.Retry)
         {
-            connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
+            connection.SendCommand("map_ack", [seq, result.NewKey], []);
             // legacy also sends legend_ok? Python for retry only sends map_ack (no legend_ok). Check python: for retry it does connection.send_command("map_ack", seq, new_key) return (no legend_ok). So only ack.
             return;
         }
@@ -847,8 +847,8 @@ public class InputFuncs
         }
         mi.ReplaceLegendEntries(newEntries);
         mi.RenderLegend();
-        connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
-        connection.SendCommand("legend_ok", new List<object?>{ seq, result.NewKey }, []);
+        connection.SendCommand("map_ack", [seq, result.NewKey], []);
+        connection.SendCommand("legend_ok", [seq, result.NewKey], []);
     }
 
     // Room-coordinate coercion for map_edit_room: int/long/JSON-number only,
@@ -883,7 +883,7 @@ public class InputFuncs
         if (!room.TryGetValue(field, out var o) || o is null) return true;
         if (o is not string s || s.Length > maxLength)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid room {field}." }, []);
+            connection.SendCommand("map_edit_reject", [$"Invalid room {field}."], []);
             return false;
         }
         value = s;
@@ -894,7 +894,7 @@ public class InputFuncs
     {
         if (args.Count < 3)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid room payload."], []);
             return;
         }
         var key = args[0] as string;
@@ -902,15 +902,15 @@ public class InputFuncs
         var roomObj = args[2];
         if (key is null || roomObj is null)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid room payload."], []);
             return;
         }
-        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room payload." }, []); return; }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", ["Invalid room payload."], []); return; }
         var room = NormalizeDict(roomObj);
-        if (room is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room payload." }, []); return; }
+        if (room is null) { connection.SendCommand("map_edit_reject", ["Invalid room payload."], []); return; }
         if (!TryGetRoomCoord(room, "x", out var x) || !TryGetRoomCoord(room, "y", out var y))
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid room coordinates."], []);
             return;
         }
         if (!TakeRoomText(connection, room, "name", 200, out var name)) return;
@@ -927,15 +927,15 @@ public class InputFuncs
         {
             // The key is already consumed: rotate it like moves_denied so the
             // session survives (map_edit_reject would kill the client).
-            connection.SendCommand("room_denied", new List<object?>{ seq, result.NewKey, $"No room at ({x}, {y})." }, []);
+            connection.SendCommand("room_denied", [seq, result.NewKey, $"No room at ({x}, {y})."], []);
             return;
         }
         // Plain Node.Name stays coord-derived by pin; the editable room
         // name is DisplayName. Desc always applies.
         if (name is not null) node.DisplayName = name;
         if (desc is not null) node.Desc = desc;
-        connection.SendCommand("map_ack", new List<object?>{ seq, result.NewKey }, []);
-        connection.SendCommand("room_ok", new List<object?>{ seq, result.NewKey }, []);
+        connection.SendCommand("map_ack", [seq, result.NewKey], []);
+        connection.SendCommand("room_ok", [seq, result.NewKey], []);
     }
 
     // Single exit validation for map_edit_exits: name/aliases statics, coord
@@ -944,10 +944,10 @@ public class InputFuncs
     {
         link = null;
         var dict = NormalizeDict(exitObj);
-        if (dict is null) { connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit at index {index}." }, []); return false; }
+        if (dict is null) { connection.SendCommand("map_edit_reject", [$"Invalid exit at index {index}."], []); return false; }
         if (!dict.TryGetValue("name", out var nameObj) || nameObj is not string exitName || exitName.Length == 0 || exitName.Length > 64)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit name at index {index}." }, []);
+            connection.SendCommand("map_edit_reject", [$"Invalid exit name at index {index}."], []);
             return false;
         }
         List<string> aliases = [];
@@ -956,19 +956,19 @@ public class InputFuncs
             var aliasList = ToList(aliasesObj);
             if (aliasesObj is not List<object?> && !(aliasesObj is System.Text.Json.JsonElement jeArr && jeArr.ValueKind == System.Text.Json.JsonValueKind.Array))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit aliases at index {index}." }, []);
+                connection.SendCommand("map_edit_reject", [$"Invalid exit aliases at index {index}."], []);
                 return false;
             }
             if (aliasList.Count > 16)
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ $"Too many exit aliases at index {index} (max 16)." }, []);
+                connection.SendCommand("map_edit_reject", [$"Too many exit aliases at index {index} (max 16)."], []);
                 return false;
             }
             foreach (var a in aliasList)
             {
                 if (a is not string alias || alias.Length == 0 || alias.Length > 32)
                 {
-                    connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit alias at index {index}." }, []);
+                    connection.SendCommand("map_edit_reject", [$"Invalid exit alias at index {index}."], []);
                     return false;
                 }
                 aliases.Add(alias);
@@ -976,24 +976,24 @@ public class InputFuncs
         }
         if (!dict.TryGetValue("coord", out var coordObj) || coordObj is null)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit coord at index {index}." }, []);
+            connection.SendCommand("map_edit_reject", [$"Invalid exit coord at index {index}."], []);
             return false;
         }
         var coordList = ToList(coordObj);
         if (coordList.Count != 4)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit coord at index {index}." }, []);
+            connection.SendCommand("map_edit_reject", [$"Invalid exit coord at index {index}."], []);
             return false;
         }
         var area = coordList[0] as string;
         if (string.IsNullOrEmpty(area) || area.Length > 64)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit coord at index {index}." }, []);
+            connection.SendCommand("map_edit_reject", [$"Invalid exit coord at index {index}."], []);
             return false;
         }
         if (!TryCoerceExitInt(coordList[1], out var cx) || !TryCoerceExitInt(coordList[2], out var cy) || !TryCoerceExitInt(coordList[3], out var cz))
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ $"Invalid exit coord at index {index}." }, []);
+            connection.SendCommand("map_edit_reject", [$"Invalid exit coord at index {index}."], []);
             return false;
         }
         link = new Objects.NodeLink(exitName, new Coord(area, cx, cy, cz), aliases);
@@ -1024,7 +1024,7 @@ public class InputFuncs
     {
         if (args.Count < 3)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid exits payload."], []);
             return;
         }
         var key = args[0] as string;
@@ -1032,31 +1032,31 @@ public class InputFuncs
         var roomObj = args[2];
         if (key is null || roomObj is null)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid exits payload."], []);
             return;
         }
-        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []); return; }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", ["Invalid exits payload."], []); return; }
         var room = NormalizeDict(roomObj);
-        if (room is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []); return; }
+        if (room is null) { connection.SendCommand("map_edit_reject", ["Invalid exits payload."], []); return; }
         if (!TryGetRoomCoord(room, "x", out var x) || !TryGetRoomCoord(room, "y", out var y))
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid room coordinates."], []);
             return;
         }
         if (!room.TryGetValue("exits", out var exitsObj) || exitsObj is null)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid exits payload."], []);
             return;
         }
         var exitList = ToList(exitsObj);
         if (exitsObj is not List<object?> && !(exitsObj is System.Text.Json.JsonElement jeEx && jeEx.ValueKind == System.Text.Json.JsonValueKind.Array))
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid exits payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid exits payload."], []);
             return;
         }
         if (exitList.Count > 64)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Too many exits (max 64)." }, []);
+            connection.SendCommand("map_edit_reject", ["Too many exits (max 64)."], []);
             return;
         }
         List<Objects.NodeLink> parsed = new(exitList.Count);
@@ -1066,7 +1066,7 @@ public class InputFuncs
             if (!TryParseExit(connection, exitList[idx], idx, out var link)) return;
             if (!seenNames.Add(link!.Name))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate exit name '{link.Name}'." }, []);
+                connection.SendCommand("map_edit_reject", [$"Duplicate exit name '{link.Name}'."], []);
                 return;
             }
             parsed.Add(link);
@@ -1088,7 +1088,7 @@ public class InputFuncs
         var node = nh.GetArea(area)?.GetGrid(z)?.GetNode(x, y);
         if (node is null)
         {
-            connection.SendCommand("exits_denied", new List<object?>{ seq, newKey, $"No room at ({x}, {y})." }, []);
+            connection.SendCommand("exits_denied", [seq, newKey, $"No room at ({x}, {y})."], []);
             return;
         }
         foreach (var link in parsed)
@@ -1096,14 +1096,14 @@ public class InputFuncs
             var target = nh.GetArea(link.Coord.Area)?.GetGrid(link.Coord.Z)?.GetNode(link.Coord.X, link.Coord.Y);
             if (target is null)
             {
-                connection.SendCommand("exits_denied", new List<object?>{ seq, newKey, $"No room at {link.Coord} for exit '{link.Name}'." }, []);
+                connection.SendCommand("exits_denied", [seq, newKey, $"No room at {link.Coord} for exit '{link.Name}'."], []);
                 return;
             }
         }
         foreach (var old in node.GetLinks()) node.RemoveLink(old.Name);
         foreach (var link in parsed) node.AddLink(new Objects.NodeLink(link.Name, link.Coord, link.Aliases));
-        connection.SendCommand("map_ack", new List<object?>{ seq, newKey }, []);
-        connection.SendCommand("exits_ok", new List<object?>{ seq, newKey }, []);
+        connection.SendCommand("map_ack", [seq, newKey], []);
+        connection.SendCommand("exits_ok", [seq, newKey], []);
     }
 
     // Room-creation batch for map_create_rooms: payload
@@ -1116,7 +1116,7 @@ public class InputFuncs
     {
         if (args.Count < 3)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid create payload."], []);
             return;
         }
         var key = args[0] as string;
@@ -1124,27 +1124,27 @@ public class InputFuncs
         var payloadObj = args[2];
         if (key is null || payloadObj is null)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid create payload."], []);
             return;
         }
-        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []); return; }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", ["Invalid create payload."], []); return; }
         var payload = NormalizeDict(payloadObj);
-        if (payload is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []); return; }
+        if (payload is null) { connection.SendCommand("map_edit_reject", ["Invalid create payload."], []); return; }
         if (!payload.TryGetValue("rooms", out var roomsObj) || roomsObj is null
             || (roomsObj is not List<object?> && !(roomsObj is System.Text.Json.JsonElement jeRooms && jeRooms.ValueKind == System.Text.Json.JsonValueKind.Array)))
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid create payload."], []);
             return;
         }
         var roomList = ToList(roomsObj);
         if (roomList.Count == 0)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid create payload."], []);
             return;
         }
         if (roomList.Count > 256)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Too many rooms (max 256)." }, []);
+            connection.SendCommand("map_edit_reject", ["Too many rooms (max 256)."], []);
             return;
         }
         List<(int x, int y, string? name, string? desc)> rooms = new(roomList.Count);
@@ -1152,15 +1152,15 @@ public class InputFuncs
         for (int idx = 0; idx < roomList.Count; idx++)
         {
             var dict = NormalizeDict(roomList[idx]);
-            if (dict is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []); return; }
+            if (dict is null) { connection.SendCommand("map_edit_reject", ["Invalid create payload."], []); return; }
             if (!TryGetRoomCoord(dict, "x", out var x) || !TryGetRoomCoord(dict, "y", out var y))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+                connection.SendCommand("map_edit_reject", ["Invalid room coordinates."], []);
                 return;
             }
             if (!seenRooms.Add((x, y)))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate room at ({x}, {y})." }, []);
+                connection.SendCommand("map_edit_reject", [$"Duplicate room at ({x}, {y})."], []);
                 return;
             }
             if (!TakeRoomText(connection, dict, "name", 200, out var name)) return;
@@ -1170,7 +1170,7 @@ public class InputFuncs
         if (!payload.TryGetValue("exits", out var exitsObj) || exitsObj is null
             || (exitsObj is not List<object?> && !(exitsObj is System.Text.Json.JsonElement jeEx && jeEx.ValueKind == System.Text.Json.JsonValueKind.Array)))
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid create payload."], []);
             return;
         }
         var exitsList = ToList(exitsObj);
@@ -1179,27 +1179,27 @@ public class InputFuncs
         for (int idx = 0; idx < exitsList.Count; idx++)
         {
             var dict = NormalizeDict(exitsList[idx]);
-            if (dict is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []); return; }
+            if (dict is null) { connection.SendCommand("map_edit_reject", ["Invalid create payload."], []); return; }
             if (!TryGetRoomCoord(dict, "x", out var x) || !TryGetRoomCoord(dict, "y", out var y))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+                connection.SendCommand("map_edit_reject", ["Invalid room coordinates."], []);
                 return;
             }
             if (!seenExits.Add((x, y)))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate exits for room ({x}, {y})." }, []);
+                connection.SendCommand("map_edit_reject", [$"Duplicate exits for room ({x}, {y})."], []);
                 return;
             }
             if (!dict.TryGetValue("exits", out var roomExitsObj) || roomExitsObj is null
                 || (roomExitsObj is not List<object?> && !(roomExitsObj is System.Text.Json.JsonElement jeRe && jeRe.ValueKind == System.Text.Json.JsonValueKind.Array)))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid create payload." }, []);
+                connection.SendCommand("map_edit_reject", ["Invalid create payload."], []);
                 return;
             }
             var roomExitList = ToList(roomExitsObj);
             if (roomExitList.Count > 64)
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ "Too many exits (max 64)." }, []);
+                connection.SendCommand("map_edit_reject", ["Too many exits (max 64)."], []);
                 return;
             }
             List<Objects.NodeLink> parsed = new(roomExitList.Count);
@@ -1209,7 +1209,7 @@ public class InputFuncs
                 if (!TryParseExit(connection, roomExitList[eidx], eidx, out var link)) return;
                 if (!seenNames.Add(link!.Name))
                 {
-                    connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate exit name '{link.Name}'." }, []);
+                    connection.SendCommand("map_edit_reject", [$"Duplicate exit name '{link.Name}'."], []);
                     return;
                 }
                 parsed.Add(link);
@@ -1239,7 +1239,7 @@ public class InputFuncs
         {
             if (!roomKnown(x, y))
             {
-                connection.SendCommand("create_denied", new List<object?>{ seq, newKey, $"No room at ({x}, {y})." }, []);
+                connection.SendCommand("create_denied", [seq, newKey, $"No room at ({x}, {y})."], []);
                 return;
             }
         }
@@ -1251,7 +1251,7 @@ public class InputFuncs
                 var target = nh.GetArea(t.Area)?.GetGrid(t.Z)?.GetNode(t.X, t.Y);
                 if (target is null && !(t.Area == area && t.Z == z && creates.Contains((t.X, t.Y))))
                 {
-                    connection.SendCommand("create_denied", new List<object?>{ seq, newKey, $"No room at {link.Coord} for exit '{link.Name}'." }, []);
+                    connection.SendCommand("create_denied", [seq, newKey, $"No room at {link.Coord} for exit '{link.Name}'."], []);
                     return;
                 }
             }
@@ -1293,8 +1293,8 @@ public class InputFuncs
             }
         }
         catch (Exception mapEx) { AtherizLogger.LogDebug("Suppressed MapCreateRoomsHandler map stamp: " + mapEx.Message, "InputFuncs"); }
-        connection.SendCommand("map_ack", new List<object?>{ seq, newKey }, []);
-        connection.SendCommand("create_ok", new List<object?>{ seq, newKey }, []);
+        connection.SendCommand("map_ack", [seq, newKey], []);
+        connection.SendCommand("create_ok", [seq, newKey], []);
     }
 
     // Room-deletion batch for map_delete_rooms: payload
@@ -1310,7 +1310,7 @@ public class InputFuncs
     {
         if (args.Count < 3)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid delete payload."], []);
             return;
         }
         var key = args[0] as string;
@@ -1318,27 +1318,27 @@ public class InputFuncs
         var payloadObj = args[2];
         if (key is null || payloadObj is null)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid delete payload."], []);
             return;
         }
-        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []); return; }
+        if (!TryGetSeq(seqObj, out var seq)) { connection.SendCommand("map_edit_reject", ["Invalid delete payload."], []); return; }
         var payload = NormalizeDict(payloadObj);
-        if (payload is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []); return; }
+        if (payload is null) { connection.SendCommand("map_edit_reject", ["Invalid delete payload."], []); return; }
         if (!payload.TryGetValue("rooms", out var roomsObj) || roomsObj is null
             || (roomsObj is not List<object?> && !(roomsObj is System.Text.Json.JsonElement jeRooms && jeRooms.ValueKind == System.Text.Json.JsonValueKind.Array)))
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid delete payload."], []);
             return;
         }
         var roomList = ToList(roomsObj);
         if (roomList.Count == 0)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []);
+            connection.SendCommand("map_edit_reject", ["Invalid delete payload."], []);
             return;
         }
         if (roomList.Count > 256)
         {
-            connection.SendCommand("map_edit_reject", new List<object?>{ "Too many rooms (max 256)." }, []);
+            connection.SendCommand("map_edit_reject", ["Too many rooms (max 256)."], []);
             return;
         }
         List<(int x, int y, int fx, int fy, bool hasFallback)> rooms = new(roomList.Count);
@@ -1346,15 +1346,15 @@ public class InputFuncs
         for (int idx = 0; idx < roomList.Count; idx++)
         {
             var dict = NormalizeDict(roomList[idx]);
-            if (dict is null) { connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid delete payload." }, []); return; }
+            if (dict is null) { connection.SendCommand("map_edit_reject", ["Invalid delete payload."], []); return; }
             if (!TryGetRoomCoord(dict, "x", out var x) || !TryGetRoomCoord(dict, "y", out var y))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid room coordinates." }, []);
+                connection.SendCommand("map_edit_reject", ["Invalid room coordinates."], []);
                 return;
             }
             if (!seenRooms.Add((x, y)))
             {
-                connection.SendCommand("map_edit_reject", new List<object?>{ $"Duplicate room at ({x}, {y})." }, []);
+                connection.SendCommand("map_edit_reject", [$"Duplicate room at ({x}, {y})."], []);
                 return;
             }
             int fx = 0, fy = 0;
@@ -1364,7 +1364,7 @@ public class InputFuncs
                 var fallback = NormalizeDict(fallbackObj);
                 if (fallback is null || !TryGetRoomCoord(fallback, "x", out fx) || !TryGetRoomCoord(fallback, "y", out fy))
                 {
-                    connection.SendCommand("map_edit_reject", new List<object?>{ "Invalid fallback coordinates." }, []);
+                    connection.SendCommand("map_edit_reject", ["Invalid fallback coordinates."], []);
                     return;
                 }
                 hasFallback = true;
@@ -1401,12 +1401,12 @@ public class InputFuncs
             var doors = nh.GetDoors(new Coord(area, x, y, z));
             if (doors is not null && doors.Count > 0)
             {
-                connection.SendCommand("delete_denied", new List<object?>{ seq, newKey, $"Room at ({x}, {y}) is a door endpoint; remove the door first." }, []);
+                connection.SendCommand("delete_denied", [seq, newKey, $"Room at ({x}, {y}) is a door endpoint; remove the door first."], []);
                 return;
             }
             if (hasFallback && targets.Contains(new Coord(area, fx, fy, z)))
             {
-                connection.SendCommand("delete_denied", new List<object?>{ seq, newKey, $"Fallback room at ({fx}, {fy}) is also being deleted." }, []);
+                connection.SendCommand("delete_denied", [seq, newKey, $"Fallback room at ({fx}, {fy}) is also being deleted."], []);
                 return;
             }
             plan.Add((node, new Coord(area, fx, fy, z), hasFallback));
@@ -1420,7 +1420,7 @@ public class InputFuncs
                 if (hasFallback) fallbackNode = nh.GetArea(fallback.Area)?.GetGrid(fallback.Z)?.GetNode(fallback.X, fallback.Y);
                 if (fallbackNode is null)
                 {
-                    connection.SendCommand("delete_denied", new List<object?>{ seq, newKey, $"Room at ({c.X}, {c.Y}) is occupied." }, []);
+                    connection.SendCommand("delete_denied", [seq, newKey, $"Room at ({c.X}, {c.Y}) is occupied."], []);
                     return;
                 }
                 for (int sweep = 0; sweep < 3; sweep++)
@@ -1435,7 +1435,7 @@ public class InputFuncs
                 }
                 if (node.GetContents().Count != 0)
                 {
-                    connection.SendCommand("delete_denied", new List<object?>{ seq, newKey, $"Could not clear the room at ({c.X}, {c.Y}); occupants remain." }, []);
+                    connection.SendCommand("delete_denied", [seq, newKey, $"Could not clear the room at ({c.X}, {c.Y}); occupants remain."], []);
                     return;
                 }
             }
@@ -1460,7 +1460,7 @@ public class InputFuncs
                     holderNode.RemoveLink(link.Name);
             }
         }
-        connection.SendCommand("map_ack", new List<object?>{ seq, newKey }, []);
-        connection.SendCommand("delete_ok", new List<object?>{ seq, newKey }, []);
+        connection.SendCommand("map_ack", [seq, newKey], []);
+        connection.SendCommand("delete_ok", [seq, newKey], []);
     }
 }

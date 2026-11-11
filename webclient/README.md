@@ -12,7 +12,7 @@ To stage the compiled assets into a game web directory, build the
 webclient (`npm run build`) and run the engine server's `deploy game`
 verb:
 
-`dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll deploy game --web-root /path/to/game/web`
+`dotnet src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll deploy game --web-root /path/to/game/web`
 
 Pass `--no-clean` to keep files the stage would otherwise remove.
 

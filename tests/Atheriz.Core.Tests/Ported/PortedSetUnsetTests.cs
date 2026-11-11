@@ -26,7 +26,7 @@ public class PortedSetUnsetTests
         public TestCaller(string n) { Name = n; IsPc = true; }
         public override List<GameObject> Search(string q, bool rec=true, GameObject? looker=null)
         {
-            if (SearchResult != null) return SearchResult;
+            if (SearchResult is not null) return SearchResult;
             return base.Search(q, rec, looker);
         }
     }
@@ -244,7 +244,7 @@ public class PortedSetUnsetTests
         var c = MakeCaller(builder:true);
         var args = MakeUnsetArgs("me","lock");
         new UnsetCommand().Run(c, args);
-        Assert.True(SetHelper.HasAttr(c, "lock") || c.SyncRoot != null); // lock still exists
+        Assert.True(SetHelper.HasAttr(c, "lock") || c.SyncRoot is not null); // lock still exists
         Assert.Equal("Alice", c.Name);
         // Also ensure HasAttr for lock via SyncRoot considered protected still present
         // Alternative: check that lock object still same

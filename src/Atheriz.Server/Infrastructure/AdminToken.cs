@@ -61,7 +61,7 @@ public static class AdminToken
                     existing = TryReadTokenFile(tokenFile);
                 if (!string.IsNullOrEmpty(existing)) return existing;
                 try { File.Delete(tokenFile); }
-                catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed AdminToken poison cleanup: " + logEx.Message, "AdminToken"); }
+                catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug($"Suppressed AdminToken poison cleanup: {logEx.Message}", "AdminToken"); }
             }
         }
 

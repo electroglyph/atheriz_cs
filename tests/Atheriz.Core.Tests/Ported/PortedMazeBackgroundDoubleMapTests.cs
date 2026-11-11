@@ -49,8 +49,8 @@ public class PortedMazeBackgroundDoubleMapTests
         {
             if (value is Dictionary<string, object?> d)
             {
-                if (!d.TryGetValue("color", out var c) || c == null) return null;
-                if (!d.TryGetValue("coords", out var co) || co == null) return null;
+                if (!d.TryGetValue("color", out var c) || c is null) return null;
+                if (!d.TryGetValue("coords", out var co) || co is null) return null;
                 // already parsed
                 return d;
             }
@@ -58,10 +58,10 @@ public class PortedMazeBackgroundDoubleMapTests
         }
         private static Dictionary<string, object?> Merge(Dictionary<string, object?>? a, Dictionary<string, object?>? b)
         {
-            if (a == null) return b == null ? new() : new Dictionary<string, object?>(b);
-            if (b == null) return new Dictionary<string, object?>(a);
+            if (a is null) return b is null ? new() : new Dictionary<string, object?>(b);
+            if (b is null) return new Dictionary<string, object?>(a);
             // simple: merge backgrounds — for test we only care that background survives, so keep b if a is null else keep a's coords+color
-            // replicate mergeBackgrounds: later pending overwrites? Actually webclient mergeBackgrounds concatenates coords if same color? For test, just return b if a != null? Use b.
+            // replicate mergeBackgrounds: later pending overwrites? Actually webclient mergeBackgrounds concatenates coords if same color? For test, just return b if a is not null? Use b.
             return new Dictionary<string, object?>(b);
         }
         private static string RenderMapText(Dictionary<string, object?> payload, int cols = 80, int rows = 24)
@@ -92,25 +92,25 @@ public class PortedMazeBackgroundDoubleMapTests
                 case "map":
                     {
                         var p = args[0] as Dictionary<string, object?>;
-                        if (p == null && args[0] is JsonElement je)
+                        if (p is null && args[0] is JsonElement je)
                             p = JsonSerializer.Deserialize<Dictionary<string, object?>>(je.GetRawText());
                         // clone
-                        MapPayload = p == null ? null : new Dictionary<string, object?>(p);
-                        if (PendingBackground != null)
+                        MapPayload = p is null ? null : new Dictionary<string, object?>(p);
+                        if (PendingBackground is not null)
                         {
                             // merge pending into mapPayload.background
-                            var existing = MapPayload != null && MapPayload.TryGetValue("background", out var eb) ? eb as Dictionary<string, object?> : null;
+                            var existing = MapPayload is not null && MapPayload.TryGetValue("background", out var eb) ? eb as Dictionary<string, object?> : null;
                             MapPayload!["background"] = Merge(existing, PendingBackground);
                             PendingBackground = null;
                         }
-                        if (MapPayload != null) Renders.Add(RenderMapText(MapPayload));
+                        if (MapPayload is not null) Renders.Add(RenderMapText(MapPayload));
                         break;
                     }
                 case "background":
                     {
                         var bg = args[0] as Dictionary<string, object?>;
-                        if (bg == null) break;
-                        if (MapPayload != null)
+                        if (bg is null) break;
+                        if (MapPayload is not null)
                         {
                             var existing = MapPayload.TryGetValue("background", out var eb) ? eb as Dictionary<string, object?> : null;
                             MapPayload["background"] = Merge(existing, bg);
@@ -125,7 +125,7 @@ public class PortedMazeBackgroundDoubleMapTests
                 case "unbackground":
                     {
                         PendingBackground = null;
-                        if (MapPayload != null)
+                        if (MapPayload is not null)
                         {
                             MapPayload.Remove("background");
                             Renders.Add(RenderMapText(MapPayload));
@@ -183,7 +183,7 @@ public class PortedMazeBackgroundDoubleMapTests
             foreach (var (c, a) in snap) sim.Handle(c, a);
 
             Assert.NotNull(sim.MapPayload);
-            Assert.True(sim.MapPayload!.TryGetValue("background", out var bgObj) && bgObj != null, $"final mapPayload.background missing after replay; payload keys {string.Join(",", sim.MapPayload.Keys)} cmds order {string.Join("->", snap.Select(x=>x.Cmd))} renders {string.Join("|", sim.Renders)}");
+            Assert.True(sim.MapPayload!.TryGetValue("background", out var bgObj) && bgObj is not null, $"final mapPayload.background missing after replay; payload keys {string.Join(",", sim.MapPayload.Keys)} cmds order {string.Join("->", snap.Select(x=>x.Cmd))} renders {string.Join("|", sim.Renders)}");
             var bgDict = bgObj as Dictionary<string, object?>;
             Assert.NotNull(bgDict);
             // color must be valid

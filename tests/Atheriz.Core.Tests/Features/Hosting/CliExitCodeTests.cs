@@ -45,6 +45,10 @@ public class CliExitCodeTests
         var root = Path.Combine(Path.GetTempPath(), "atheriz_exitok_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         var origCwd = Directory.GetCurrentDirectory();
+        // TryCreateFolder runs InitialSetup.RunSetup, which reseeds the
+        // global salt slot (ResetWorldState); save and restore it so later
+        // tests keep testsalt.
+        var origSalt = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             Directory.SetCurrentDirectory(root);
@@ -53,6 +57,8 @@ public class CliExitCodeTests
         }
         finally
         {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt);
             try { Directory.SetCurrentDirectory(origCwd); } catch { }
             try { Directory.Delete(root, true); } catch { }
         }

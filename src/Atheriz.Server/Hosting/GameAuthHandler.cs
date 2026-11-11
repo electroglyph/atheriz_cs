@@ -32,11 +32,11 @@ public sealed class GameAuthHandler(
         if (account is null)
             return Task.FromResult(AuthenticateResult.Fail("Unknown or revoked game token."));
 
-        var claims = new[]
-        {
+        Claim[] claims =
+        [
             new Claim(ClaimTypes.NameIdentifier, account.Id.ToString()),
             new Claim(ClaimTypes.Name, account.Name),
-        };
+        ];
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, SchemeName));
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, SchemeName)));
     }

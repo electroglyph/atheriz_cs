@@ -18,8 +18,8 @@ public class TlsFailClosedTests
     {
         var s = BaseSettings();
         s.AllowInsecureTlsFallback = fallback;
-        if (certFile != null) s.SslCertFile = certFile;
-        if (keyFile != null) s.SslKeyFile = keyFile;
+        if (certFile is not null) s.SslCertFile = certFile;
+        if (keyFile is not null) s.SslKeyFile = keyFile;
         return s;
     }
 

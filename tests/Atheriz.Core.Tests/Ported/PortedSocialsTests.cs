@@ -15,7 +15,7 @@ public class PortedSocialsTests
         public Func<string, List<GameObject>>? SearchOverride;
         public override List<GameObject> Search(string query, bool recursive = true, GameObject? looker = null)
         {
-            if (SearchOverride != null) return SearchOverride(query);
+            if (SearchOverride is not null) return SearchOverride(query);
             return base.Search(query, recursive, looker);
         }
     }

@@ -198,9 +198,8 @@ public static partial class FuncParserHelpers
         return r;
     }
 
-    private sealed class SafeArithParser
+    private sealed class SafeArithParser(string s)
     {
-        private readonly string _s;
         private int _pos;
         // Nesting cap: parentheses (and unary-sign chains) recurse one frame
         // per level. _SafeEval falls back here when the literal parser
@@ -208,14 +207,13 @@ public static partial class FuncParserHelpers
         // input's stack overflow into this parser — cap both.
         private const int MaxNesting = 32;
         private int _depth;
-        public SafeArithParser(string s) { _s = s; _pos = 0; }
-        public double Parse() { var v = ParseExpr(); Skip(); if (_pos != _s.Length) throw new ArgumentException($"unsupported node at {_pos}"); return v; }
-        private void Skip() { while (_pos < _s.Length && char.IsWhiteSpace(_s[_pos])) _pos++; }
+        public double Parse() { var v = ParseExpr(); Skip(); if (_pos != s.Length) throw new ArgumentException($"unsupported node at {_pos}"); return v; }
+        private void Skip() { while (_pos < s.Length && char.IsWhiteSpace(s[_pos])) _pos++; }
         private double ParseExpr() => ParseAddSub();
         private double ParseAddSub()
         {
             var left = ParseMulDiv();
-            while (true) { Skip(); if (_pos >= _s.Length) break; char op = _s[_pos]; if (op != '+' && op != '-') break; _pos++; var right = ParseMulDiv(); left = op == '+' ? left + right : left - right; }
+            while (true) { Skip(); if (_pos >= s.Length) break; char op = s[_pos]; if (op != '+' && op != '-') break; _pos++; var right = ParseMulDiv(); left = op == '+' ? left + right : left - right; }
             return left;
         }
         private double ParseMulDiv()
@@ -225,12 +223,12 @@ public static partial class FuncParserHelpers
             var left = ParseUnary();
             while (true)
             {
-                Skip(); if (_pos >= _s.Length) break;
-                if (_pos + 1 < _s.Length && _s[_pos] == '/' && _s[_pos+1] == '/') { _pos+=2; var r=ParseUnary(); if (r == 0) throw new InvalidOperationException("integer division by zero"); left = Math.Floor(left / r); }
-                else if (_pos + 1 < _s.Length && _s[_pos] == '*' && _s[_pos+1] == '*') break; // handled in pow
-                else if (_s[_pos] == '*') { _pos++; var r=ParseUnary(); left = left * r; }
-                else if (_s[_pos] == '/') { _pos++; var r=ParseUnary(); if (r == 0) throw new InvalidOperationException("division by zero"); left = left / r; }
-                else if (_s[_pos] == '%') { _pos++; var r=ParseUnary(); if (r == 0) throw new InvalidOperationException("modulo by zero"); left = ((left % r) + r) % r; }
+                Skip(); if (_pos >= s.Length) break;
+                if (_pos + 1 < s.Length && s[_pos] == '/' && s[_pos+1] == '/') { _pos+=2; var r=ParseUnary(); if (r == 0) throw new InvalidOperationException("integer division by zero"); left = Math.Floor(left / r); }
+                else if (_pos + 1 < s.Length && s[_pos] == '*' && s[_pos+1] == '*') break; // handled in pow
+                else if (s[_pos] == '*') { _pos++; var r=ParseUnary(); left = left * r; }
+                else if (s[_pos] == '/') { _pos++; var r=ParseUnary(); if (r == 0) throw new InvalidOperationException("division by zero"); left = left / r; }
+                else if (s[_pos] == '%') { _pos++; var r=ParseUnary(); if (r == 0) throw new InvalidOperationException("modulo by zero"); left = ((left % r) + r) % r; }
                 else break;
             }
             return left;
@@ -239,7 +237,7 @@ public static partial class FuncParserHelpers
         {
             var left = ParsePrimary();
             Skip();
-            if (_pos + 1 < _s.Length && _s[_pos] == '*' && _s[_pos+1] == '*')
+            if (_pos + 1 < s.Length && s[_pos] == '*' && s[_pos+1] == '*')
             {
                 _pos+=2;
                 var right = ParseUnary(); // right-associative; unary allows negative exponents
@@ -261,19 +259,19 @@ public static partial class FuncParserHelpers
         }
         private double ParseUnary()
         {
-            Skip(); if (_pos < _s.Length && (_s[_pos] == '+' || _s[_pos] == '-')) { char op=_s[_pos++]; if (++_depth > MaxNesting) throw new ArgumentException("too deeply nested"); try { var v=ParseUnary(); return op=='-' ? -v : v; } finally { _depth--; } }
+            Skip(); if (_pos < s.Length && (s[_pos] == '+' || s[_pos] == '-')) { char op=s[_pos++]; if (++_depth > MaxNesting) throw new ArgumentException("too deeply nested"); try { var v=ParseUnary(); return op=='-' ? -v : v; } finally { _depth--; } }
             return ParsePow();
         }
         private double ParsePrimary()
         {
-            Skip(); if (_pos >= _s.Length) throw new ArgumentException("unexpected end");
-            if (_s[_pos] == '(') { _pos++; if (++_depth > MaxNesting) throw new ArgumentException("too deeply nested"); try { var v=ParseExpr(); Skip(); if (_pos >= _s.Length || _s[_pos] != ')') throw new ArgumentException("missing )"); _pos++; return v; } finally { _depth--; } }
+            Skip(); if (_pos >= s.Length) throw new ArgumentException("unexpected end");
+            if (s[_pos] == '(') { _pos++; if (++_depth > MaxNesting) throw new ArgumentException("too deeply nested"); try { var v=ParseExpr(); Skip(); if (_pos >= s.Length || s[_pos] != ')') throw new ArgumentException("missing )"); _pos++; return v; } finally { _depth--; } }
             // number
             int start=_pos;
             bool dot=false;
-            while (_pos < _s.Length && (char.IsDigit(_s[_pos]) || _s[_pos]=='.')) { if (_s[_pos]=='.') { if(dot) break; dot=true; } _pos++; }
+            while (_pos < s.Length && (char.IsDigit(s[_pos]) || s[_pos]=='.')) { if (s[_pos]=='.') { if(dot) break; dot=true; } _pos++; }
             if (start==_pos) throw new ArgumentException($"non-numeric constant at {_pos}");
-            var numStr=_s.Substring(start, _pos-start);
+            var numStr=s.Substring(start, _pos-start);
             if (double.TryParse(numStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d)) return d;
             throw new ArgumentException($"non-numeric constant: {numStr}");
         }
@@ -328,7 +326,7 @@ public static partial class FuncParserHelpers
                 }
             }
         }
-        return (args ?? Array.Empty<object?>(), kwargs ?? []);
+        return (args ?? [], kwargs ?? []);
     }
 
     private static object? _SafeEval(object? inp)
@@ -340,11 +338,11 @@ public static partial class FuncParserHelpers
         try{
             var lit = _TryLiteralEval(s);
             if(lit is not null || s.Trim()=="[]" || s.Trim()=="()") return lit;
-        }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser._SafeEval: " + logEx.Message, "SafeArithParser"); }
+        }catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed SafeArithParser._SafeEval: {logEx.Message}", "SafeArithParser"); }
         // try arith
         try{
             return SafeArithEval(s);
-        }catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed SafeArithParser._SafeEval: " + logEx.Message, "SafeArithParser"); }
+        }catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed SafeArithParser._SafeEval: {logEx.Message}", "SafeArithParser"); }
         // manual containers
         var parts = _ManualParseContainers(s);
         if(parts is not null) return parts;

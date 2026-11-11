@@ -8,21 +8,15 @@ namespace Atheriz.Core.Network;
 /// Faithful to Python: single lock, closing flag, maxBytes (+ optional maxCount), per-Task accounting
 /// for async sends and sync ReleaseSync in finally (fixes telnet leak).
 /// </summary>
-public sealed class PendingLimiter
+public sealed class PendingLimiter(int maxBytes, int? maxCount = null)
 {
-    private readonly int _maxBytes;
-    private readonly int? _maxCount;
+    private readonly int _maxBytes = maxBytes;
+    private readonly int? _maxCount = maxCount;
     private int _pendingBytes;
     private int _pendingCount;
     private readonly Dictionary<Task, int> _byTask = new();
     private readonly Lock _lock = new();
     private bool _closing;
-
-    public PendingLimiter(int maxBytes, int? maxCount = null)
-    {
-        _maxBytes = maxBytes;
-        _maxCount = maxCount;
-    }
 
     public bool IsClosing
     {

@@ -193,7 +193,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
             masked = InputMasked;
             InputMasked = false;
             Closed = true;
-            stack = new List<(GameObject? Prev, GameObject Target)>(_puppetStack);
+            stack = new(_puppetStack);
             ClearPuppetEntries();
             puppet = Puppet;
             Puppet = null;
@@ -226,7 +226,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
         }
         if (masked && Connection is not null)
         {
-            try { Connection.SendCommand("echo_on"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+            try { Connection.SendCommand("echo_on"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
         }
         if (future is not null)
         {
@@ -277,10 +277,10 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
                         // the old multi-node cleanup semantics for that case.
                         GameObject? primary = null;
                         try { primary = Globals.ObjectRegistry.FindNodeByCoord(cl.Coord); }
-                        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
                         if (primary is not null)
                         {
-                            try { primary.RemoveContent(puppet.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                            try { primary.RemoveContent(puppet.Id); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
                         }
                         else
                         {
@@ -289,25 +289,25 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
                                 var nodeObjs = Globals.ObjectRegistry.FilterBy(o => o.IsNode);
                                 foreach (var n in nodeObjs)
                                 {
-                                    try { n.RemoveContent(puppet.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                                    try { n.RemoveContent(puppet.Id); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
                                 }
                             }
-                            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
                         }
                     }
-                    try { puppet.Location = Atheriz.Core.Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                    try { puppet.Location = Atheriz.Core.Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
                 }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
-                try { Globals.ObjectRegistry.RemoveObject(puppet); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
-                try { puppet.IsDeleted = true; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+                catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
+                try { Globals.ObjectRegistry.RemoveObject(puppet); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
+                try { puppet.IsDeleted = true; } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
             }
         }
         if (Account is not null)
         {
-            try { Account.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+            try { Account.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
         }
         // only while this session is open.
-        try { Globals.MapEdit.DiscardSession(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.AtDisconnect: " + logEx.Message, "Session"); }
+        try { Globals.MapEdit.DiscardSession(this); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.AtDisconnect: {logEx.Message}", "Session"); }
     }
 
     public void Msg(string text) => Msg(text, null);
@@ -365,7 +365,7 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
             prev = InputFuture;
             prevMasked = InputMasked;
             // In C# we always use TaskCompletionSource with RunContinuationsAsynchronously (thread-safe)
-            future = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            future = new(TaskCreationOptions.RunContinuationsAsynchronously);
             if (prev?.Task.IsCompleted != false)
                 prev = null;
             else if (prevMasked && !mask)
@@ -380,15 +380,15 @@ public class Session : Atheriz.Core.Commands.ISessionProvider, Atheriz.Core.Comm
         }
         if (needRestore)
         {
-            try { Connection?.SendCommand("echo_on"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.Prompt: " + logEx.Message, "Session"); }
+            try { Connection?.SendCommand("echo_on"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.Prompt: {logEx.Message}", "Session"); }
         }
         if (mask)
         {
-            try { Connection?.SendCommand("prompt_masked", text); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.Prompt: " + logEx.Message, "Session"); }
+            try { Connection?.SendCommand("prompt_masked", text); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.Prompt: {logEx.Message}", "Session"); }
         }
         else
         {
-            try { Msg(text); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Session.Prompt: " + logEx.Message, "Session"); }
+            try { Msg(text); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Session.Prompt: {logEx.Message}", "Session"); }
         }
         return (future.Task, future);
     }

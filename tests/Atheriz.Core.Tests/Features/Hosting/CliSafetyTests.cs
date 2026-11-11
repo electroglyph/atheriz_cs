@@ -40,7 +40,7 @@ public class CliSafetyTests
     {
         if (!OperatingSystem.IsLinux()) return;
         // Release: the only configuration the build scripts produce.
-        var dll = "/home/anon/atheriz-cs/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+        var dll = "/home/anon/atheriz-cs/src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var dir = Path.Combine(Path.GetTempPath(), "atheriz-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);

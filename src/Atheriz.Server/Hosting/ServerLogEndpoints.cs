@@ -35,7 +35,7 @@ public static class ServerLogEndpoints
     {
         ArgumentNullException.ThrowIfNull(channel);
         var last = channel.GetWebLines(1);
-        return last.Count > 0 ? last[0].Seq : 0;
+        return last is [var l0, ..] ? l0.Seq : 0;
     }
 
     public static long ParseLastEventId(string? header)

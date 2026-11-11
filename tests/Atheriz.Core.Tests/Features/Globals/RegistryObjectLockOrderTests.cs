@@ -5,6 +5,10 @@ using Atheriz.Core.Tests.Features.Regression;
 
 namespace Atheriz.Core.Tests.Features.Globals;
 
+// Uses GlobalTestEnv (global salt/registry/db state), so it joins the
+// serialized Ported collection like every other fixture user.
+[Collection("Ported")]
+
 // Finding 23: IsStillSaveable took the object's read lock inside the
 // AllLock hold, the reverse of MoveTo (object write locks held across
 // GetSingle/FindNodeByCoord, which take AllLock). It now checks

@@ -24,7 +24,7 @@ Or with a built DLL directly (same arguments after `--` with `dotnet run`):
 
 ```bash
 dotnet run --project src/Atheriz.Server -- --help
-dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll start --foreground
+dotnet src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll start --foreground
 ```
 
 Global flags (accepted by the commands that need them):

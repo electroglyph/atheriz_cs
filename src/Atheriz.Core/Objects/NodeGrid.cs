@@ -135,7 +135,7 @@ public sealed class NodeGrid
         finally { Lock.ExitWriteLock(); }
         if (old is not null && !ReferenceEquals(old, node))
         {
-            try { AtherizLogger.LogWarning($"Overwriting node at {node.Coord}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeGrid.AddNode: " + logEx.Message, "NodeGrid"); }
+            try { AtherizLogger.LogWarning($"Overwriting node at {node.Coord}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeGrid.AddNode: {logEx.Message}", "NodeGrid"); }
             old.IsDeleted = true;
             ObjectRegistry.RemoveObject(old);
         }
@@ -277,11 +277,11 @@ public sealed class NodeGrid
                             && cl.Coord.Equals(oldCoord))
                         {
                             try { member.Location = Atheriz.Core.Persistence.Dto.LocationRef.FromCoord(newCoord); }
-                            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeGrid.ApplyMoves member remap: " + logEx.Message, "NodeGrid"); }
+                            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeGrid.ApplyMoves member remap: {logEx.Message}", "NodeGrid"); }
                         }
                     }
                 }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeGrid.ApplyMoves member scan: " + logEx.Message, "NodeGrid"); }
+                catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeGrid.ApplyMoves member scan: {logEx.Message}", "NodeGrid"); }
             }
             // rewrite links inside this grid
             affected = moved.ToDictionary(m => m.node.Id, m => m.node);
@@ -326,7 +326,7 @@ public sealed class NodeGrid
         // rebuild ExitCommands
         foreach (var node in affected.Values)
             foreach (var obj in node.GetContents())
-                try { node.AddExits(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeGrid.ApplyMoves: " + logEx.Message, "NodeGrid"); }
+                try { node.AddExits(obj); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeGrid.ApplyMoves: {logEx.Message}", "NodeGrid"); }
 
         return failed.ToList();
     }

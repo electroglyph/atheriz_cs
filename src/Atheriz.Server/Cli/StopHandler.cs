@@ -160,14 +160,14 @@ public static class StopHandler
     public static async Task<int> StopAsync(int? portOverride, bool force = false)
     {
         // One settings generation: port/secret/savedir never mix.
-        var effective = EffectiveSettings;
-        var port = portOverride ?? effective.WebserverPort;
+        var effective = EffectiveSettings;        var port = portOverride ?? effective.WebserverPort;
         var secretPath = effective.SecretPath;
         var tlsOn = !string.IsNullOrEmpty(effective.SslCertFile);
         switch (await ShutdownClient.TryRequestShutdownAsync(port, secretPath, tlsOn).ConfigureAwait(false))
         {
             case ShutdownRequestResult.Accepted:
                 Console.WriteLine("Graceful shutdown request accepted; the server will stop itself.");
+                await ServerExitWait.WaitForServerExitAsync(effective).ConfigureAwait(false);
                 return 0;
             case ShutdownRequestResult.AuthRejected:
                 // A live server refused us: abort here, never escalate into signals.

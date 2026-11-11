@@ -93,7 +93,7 @@ public class PersistenceRegressionTests
                 var p = c.GetParameters();
                 return p.Length == 2 && p[0].ParameterType == typeof(string) && p[1].ParameterType == typeof(int);
             });
-        Assert.True(ctor != null, "No (string,int) SqliteException ctor found");
+        Assert.True(ctor is not null, "No (string,int) SqliteException ctor found");
         return (Exception)ctor!.Invoke(["database is locked", 5]);
     }
 

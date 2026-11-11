@@ -427,8 +427,8 @@ public class PortedThreadPoolTests
     [Fact]
     public void DelayChecksStoppedUnderLock()
     {
-        var hasLock = typeof(AsyncThreadPool).GetField("_lock", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) != null;
-        var hasStopped = typeof(AsyncThreadPool).GetField("_stopped", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) != null;
+        var hasLock = typeof(AsyncThreadPool).GetField("_lock", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) is not null;
+        var hasStopped = typeof(AsyncThreadPool).GetField("_stopped", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) is not null;
         Assert.True(hasStopped);
         Assert.True(hasLock);
         string src = "";

@@ -44,6 +44,17 @@ public static class StartStop
             _shutdownCompleted = false;
             _shuttingDown = false;
             _started = true;
+            // Stage timings: a silent 39s gap was observed between the subtype
+            // log and DoStartup completion with no indication which stage ate
+            // it. Temporary instrumentation, keep until the slow stage is found.
+            var bootSw = Stopwatch.StartNew();
+            long bootLast = 0;
+            void MarkBootStage(string stage)
+            {
+                var now = bootSw.ElapsedMilliseconds;
+                AtherizLogger.LogInformation($"DoStartup stage '{stage}' took {now - bootLast}ms (total {now}ms).");
+                bootLast = now;
+            }
             // Engine-owned world subtypes (seeded dashboard, wanderers) must
             // be registered before rows convert, or they reload as their base
             // kind without their overrides.
@@ -62,6 +73,7 @@ public static class StartStop
                 try { Atheriz.Core.Persistence.PersistedTypes.LogRegisteredTypes(); } catch (Exception ex) { AtherizLogger.LogError($"DoStartup subtype log failed:\n{ex}"); }
             }
             catch (Exception ex) { AtherizLogger.LogError($"DoStartup game load failed:\n{ex}"); }
+            MarkBootStage("game_load");
             try
             {
                 // The ticker must exist before rows convert: ResolveRelations
@@ -72,6 +84,7 @@ public static class StartStop
                 ticker ??= GlobalServices.GetAsyncTicker();
             }
             catch (Exception ex) { AtherizLogger.LogError($"DoStartup GetAsyncTicker failed:\n{ex}"); }
+            MarkBootStage("ticker");
             try
             {
                 // Use savePath overload which handles DB EnsureCreated.
@@ -83,6 +96,7 @@ public static class StartStop
             {
                 AtherizLogger.LogError($"DoStartup LoadObjects failed:\n{ex}");
             }
+            MarkBootStage("load_objects");
 
             // Crash-consistency check: a dirty journal means the
             // previous checkpoint died between tables — the world may be torn.
@@ -99,12 +113,14 @@ public static class StartStop
             {
                 AtherizLogger.LogError($"DoStartup checkpoint check failed:\n{ex}");
             }
+            MarkBootStage("checkpoint_check");
 
             try
             {
                 pool ??= GlobalServices.GetAsyncThreadPool();
             }
             catch (Exception ex) { AtherizLogger.LogError($"DoStartup GetAsyncThreadPool failed:\n{ex}"); }
+            MarkBootStage("threadpool");
 
             MapHandler? mapHandler = null;
             try
@@ -112,6 +128,7 @@ public static class StartStop
                 mapHandler = GlobalServices.GetMapHandler(settings);
             }
             catch (Exception ex) { AtherizLogger.LogError($"DoStartup GetMapHandler failed:\n{ex}"); }
+            MarkBootStage("map_handler");
 
             NodeHandler? nodeHandler = null;
             try
@@ -119,6 +136,7 @@ public static class StartStop
                 nodeHandler = GlobalServices.GetNodeHandler(settings);
             }
             catch (Exception ex) { AtherizLogger.LogError($"DoStartup GetNodeHandler failed:\n{ex}"); }
+            MarkBootStage("node_handler");
 
             try
             {
@@ -126,6 +144,7 @@ public static class StartStop
                 TryInvokeServerEvent("AtServerStart");
             }
             catch (Exception ex) { AtherizLogger.LogError($"at_server_start failed:\n{ex}"); }
+            MarkBootStage("server_event");
 
             if (settings.TimeSystemEnabled)
             {
@@ -140,6 +159,7 @@ public static class StartStop
                 }
                 catch (Exception ex) { AtherizLogger.LogError($"GameTime start failed:\n{ex}"); }
             }
+            MarkBootStage("gametime");
 
             try
             {
@@ -152,6 +172,7 @@ public static class StartStop
                 }
             }
             catch (Exception ex) { AtherizLogger.LogError($"start_autosave failed:\n{ex}"); }
+            MarkBootStage("autosave");
         }
     }
 
@@ -524,7 +545,7 @@ public static class StartStop
         catch (Exception) { }
         // Game-side handlers registered via RegisterGameServerEvent.
         List<Action>? handlers = null;
-        lock (_gameServerEventLock) { if (_gameServerEventHandlers.TryGetValue(methodName, out var list)) handlers = new List<Action>(list); }
+        lock (_gameServerEventLock) { if (_gameServerEventHandlers.TryGetValue(methodName, out var list)) handlers = new(list); }
         if (handlers is not null)
         {
             foreach (var h in handlers)

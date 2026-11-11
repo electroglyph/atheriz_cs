@@ -84,6 +84,7 @@ public class GameFolderRejectTests
         var oldPass = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", "s1admin");
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", "s1Pass123");
+        var origSaltStale = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             Assert.True(GameTemplateGenerator.CreateGameFolder(folder, overwrite: true));
@@ -91,6 +92,8 @@ public class GameFolderRejectTests
         }
         finally
         {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSaltStale is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSaltStale);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", oldUser);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", oldPass);
             try { Directory.Delete(root, true); } catch { }
@@ -115,6 +118,7 @@ public class GameFolderRejectTests
         var oldPass = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", "s1admin");
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", "s1Pass123");
+        var origSaltTok = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             Assert.True(GameTemplateGenerator.CreateGameFolder(folder, overwrite: true));
@@ -125,6 +129,8 @@ public class GameFolderRejectTests
         }
         finally
         {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSaltTok is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSaltTok);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", oldUser);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", oldPass);
             try { Directory.Delete(root, true); } catch { }
@@ -153,8 +159,8 @@ public class GameFolderRejectTests
         foreach (var a in args) psi.ArgumentList.Add(a);
         foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
         var proc = new System.Diagnostics.Process { StartInfo = psi };
-        proc.OutputDataReceived += (s, e) => { if (e.Data != null) lock (output) output.AppendLine(e.Data); };
-        proc.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (output) output.AppendLine(e.Data); };
+        proc.OutputDataReceived += (s, e) => { if (e.Data is not null) lock (output) output.AppendLine(e.Data); };
+        proc.ErrorDataReceived += (s, e) => { if (e.Data is not null) lock (output) output.AppendLine(e.Data); };
         proc.Start();
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
@@ -173,11 +179,11 @@ public class GameFolderRejectTests
             CreateNoWindow = true,
             WorkingDirectory = workingDir ?? Directory.GetCurrentDirectory(),
         };
-        if (env != null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
+        if (env is not null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
         var sb = new System.Text.StringBuilder();
         using var proc = new System.Diagnostics.Process { StartInfo = psi };
-        proc.OutputDataReceived += (s, e) => { if (e.Data != null) sb.AppendLine(e.Data); };
-        proc.ErrorDataReceived += (s, e) => { if (e.Data != null) sb.AppendLine(e.Data); };
+        proc.OutputDataReceived += (s, e) => { if (e.Data is not null) sb.AppendLine(e.Data); };
+        proc.ErrorDataReceived += (s, e) => { if (e.Data is not null) sb.AppendLine(e.Data); };
         proc.Start();
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
@@ -234,7 +240,7 @@ public class GameFolderRejectTests
         // overwrite before anything is deleted.
         if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePort();
         var telnetPort = FindFreePort();

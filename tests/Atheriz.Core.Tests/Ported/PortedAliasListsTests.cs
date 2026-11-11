@@ -34,33 +34,33 @@ public class PortedAliasListsTests
         foreach (var n in new[] { "IgnoredCommands", "_IGNORED_COMMANDS", "_IgnoredCommands", "AutoAliasIgnoredKeys" })
         {
             var f = noneType.GetField(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            if (f != null) { ignoredCommands = f.GetValue(null) as string[]; if (ignoredCommands != null) break; }
+            if (f is not null) { ignoredCommands = f.GetValue(null) as string[]; if (ignoredCommands is not null) break; }
             var p = noneType.GetProperty(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            if (p != null) { ignoredCommands = p.GetValue(null) as string[]; if (ignoredCommands != null) break; }
+            if (p is not null) { ignoredCommands = p.GetValue(null) as string[]; if (ignoredCommands is not null) break; }
         }
         string[]? ignoreKeys = null;
         var dispType = typeof(Atheriz.Core.Commands.CommandDispatcher);
         foreach (var n in new[] { "IgnoreKeys", "_IGNORE_KEYS", "_IgnoreKeys", "AutoAliasIgnoredKeys" })
         {
             var f = dispType.GetField(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            if (f != null) { ignoreKeys = f.GetValue(null) as string[]; if (ignoreKeys != null) break; }
+            if (f is not null) { ignoreKeys = f.GetValue(null) as string[]; if (ignoreKeys is not null) break; }
             var p = dispType.GetProperty(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            if (p != null) { ignoreKeys = p.GetValue(null) as string[]; if (ignoreKeys != null) break; }
+            if (p is not null) { ignoreKeys = p.GetValue(null) as string[]; if (ignoreKeys is not null) break; }
         }
-        if (ignoreKeys == null)
+        if (ignoreKeys is null)
         {
             var inputFuncsType = Type.GetType("Atheriz.Core.InputFuncs") ?? Type.GetType("Atheriz.Core.Commands.InputFuncs");
-            if (inputFuncsType != null)
+            if (inputFuncsType is not null)
             {
                 foreach (var n in new[] { "IgnoreKeys", "_IGNORE_KEYS", "_IgnoreKeys" })
                 {
                     var f = inputFuncsType.GetField(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-                    if (f != null) { ignoreKeys = f.GetValue(null) as string[]; if (ignoreKeys != null) break; }
+                    if (f is not null) { ignoreKeys = f.GetValue(null) as string[]; if (ignoreKeys is not null) break; }
                 }
             }
         }
-        if (ignoredCommands == null) ignoredCommands = new Atheriz.Core.Settings.AtherizSettings().AutoAliasIgnoredKeys;
-        if (ignoreKeys == null) ignoreKeys = new Atheriz.Core.Settings.AtherizSettings().AutoAliasIgnoredKeys;
+        if (ignoredCommands is null) ignoredCommands = new Atheriz.Core.Settings.AtherizSettings().AutoAliasIgnoredKeys;
+        if (ignoreKeys is null) ignoreKeys = new Atheriz.Core.Settings.AtherizSettings().AutoAliasIgnoredKeys;
         Assert.Equal(new HashSet<string>(ignoredCommands), new HashSet<string>(ignoreKeys));
     }
     [Fact] public void AutoAliasIgnoredKeysAreWithheldFromSuggestions()
@@ -72,19 +72,19 @@ public class PortedAliasListsTests
         foreach (var n in new[] { "IgnoredCommands", "_IGNORED_COMMANDS", "_IgnoredCommands", "AutoAliasIgnoredKeys" })
         {
             var f = noneType.GetField(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            if (f != null) { ignoredCommands = f.GetValue(null) as string[]; if (ignoredCommands != null) break; }
+            if (f is not null) { ignoredCommands = f.GetValue(null) as string[]; if (ignoredCommands is not null) break; }
             var p = noneType.GetProperty(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            if (p != null) { ignoredCommands = p.GetValue(null) as string[]; if (ignoredCommands != null) break; }
+            if (p is not null) { ignoredCommands = p.GetValue(null) as string[]; if (ignoredCommands is not null) break; }
         }
         string[]? ignoreKeys = null;
         var dispType = typeof(Atheriz.Core.Commands.CommandDispatcher);
         foreach (var n in new[] { "IgnoreKeys", "_IGNORE_KEYS", "_IgnoreKeys", "AutoAliasIgnoredKeys" })
         {
             var f = dispType.GetField(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            if (f != null) { ignoreKeys = f.GetValue(null) as string[]; if (ignoreKeys != null) break; }
+            if (f is not null) { ignoreKeys = f.GetValue(null) as string[]; if (ignoreKeys is not null) break; }
         }
-        if (ignoredCommands == null) ignoredCommands = new Atheriz.Core.Settings.AtherizSettings().AutoAliasIgnoredKeys;
-        if (ignoreKeys == null) ignoreKeys = new Atheriz.Core.Settings.AtherizSettings().AutoAliasIgnoredKeys;
+        if (ignoredCommands is null) ignoredCommands = new Atheriz.Core.Settings.AtherizSettings().AutoAliasIgnoredKeys;
+        if (ignoreKeys is null) ignoreKeys = new Atheriz.Core.Settings.AtherizSettings().AutoAliasIgnoredKeys;
         var setIgnore = new HashSet<string>(ignoreKeys);
         var setIgnoredCommands = new HashSet<string>(ignoredCommands);
         Assert.True(setIgnore.IsSubsetOf(setIgnoredCommands));
@@ -114,7 +114,7 @@ public class PortedAliasListsTests
         }
         finally
         {
-            if (old != null) field?.SetValue(null, old);
+            if (old is not null) field?.SetValue(null, old);
             CommandDispatcher.SetSettings(new Atheriz.Core.Settings.AtherizSettings());
         }
     }
@@ -140,7 +140,7 @@ public class PortedAliasListsTests
             Assert.DoesNotContain("save", msg.ToLowerInvariant());
             Assert.DoesNotContain("none", msg.ToLowerInvariant());
         }
-        finally { if (old != null) field?.SetValue(null, old); }
+        finally { if (old is not null) field?.SetValue(null, old); }
     }
     [Fact] public void UnloggedinAutoAliasNeverResolvesBlocklistedKey()
     {
@@ -157,10 +157,10 @@ public class PortedAliasListsTests
             var conn = new TestConnection();
             var result = CommandDispatcher.ResolveUnloggedIn(conn, "qu");
             Assert.NotNull(result);
-            var isNone = result!.Func.Method.DeclaringType?.Name.Contains("None") == true || cmdset.Get("none") != null;
+            var isNone = result!.Func.Method.DeclaringType?.Name.Contains("None") == true || cmdset.Get("none") is not null;
             Assert.True(isNone);
         }
-        finally { if (old != null) field?.SetValue(null, old); CommandDispatcher.SetSettings(new Atheriz.Core.Settings.AtherizSettings()); }
+        finally { if (old is not null) field?.SetValue(null, old); CommandDispatcher.SetSettings(new Atheriz.Core.Settings.AtherizSettings()); }
     }
     [Fact] public void UnloggedinNoneSuggestionsWithholdBlocklistedKeys()
     {
@@ -185,6 +185,6 @@ public class PortedAliasListsTests
             Assert.DoesNotContain("logout", m2.ToLowerInvariant());
             Assert.DoesNotContain("disconnect", m2.ToLowerInvariant());
         }
-        finally { if (old != null) field?.SetValue(null, old); }
+        finally { if (old is not null) field?.SetValue(null, old); }
     }
 }

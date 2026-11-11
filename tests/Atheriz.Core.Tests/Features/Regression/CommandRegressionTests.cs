@@ -940,11 +940,11 @@ public class CommandRegressionTests
     {
         var p = new GameArgumentParser("reg");
         p.AddArgument("target", required: false);
-        var args = p.ParseArgs(Array.Empty<string>());
+        var args = p.ParseArgs([]);
         Assert.Null(args["target"]);
         var p2 = new GameArgumentParser("regtest2");
         p2.AddArgument("--force", action: "store_true", required: true);
-        Assert.Throws<CommandError>(() => p2.ParseArgs(Array.Empty<string>()));
+        Assert.Throws<CommandError>(() => p2.ParseArgs([]));
     }
 
     // Both demanded removals contradict the Python original. exam.py:89-90 hides
@@ -978,9 +978,9 @@ public class CommandRegressionTests
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Menu.cs");
         Assert.Equal(1, SourceScan.Count(src, "public async Task RenderAsync()"));
-        var ctor = SourceScan.Region(src, "public MenuEngine(object? caller,");
-        Assert.Contains("CurrentNode = start", ctor);
-        Assert.DoesNotContain("RenderAsync", ctor);
+        var wiring = SourceScan.Region(src, "CurrentNode { get; private set; }");
+        Assert.Contains("= start", wiring);
+        Assert.DoesNotContain("RenderAsync", wiring);
     }
 
     // one spelling for the prompt-with-timeout loop.

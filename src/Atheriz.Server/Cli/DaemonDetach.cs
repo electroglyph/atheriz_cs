@@ -30,6 +30,7 @@ public static partial class DaemonDetach
         {
             TrySetsid();
             IgnoreSighup();
+            CloseInheritedPipesAndSockets();
             RedirectStdioToDevNull();
         }
         else
@@ -68,6 +69,51 @@ public static partial class DaemonDetach
     }
 
     private const int ReadWriteFlag = 2; // O_RDWR
+
+    // A background child inherits every inheritable fd of its parent,
+    // including duplicates of the redirected stdout/stderr pipes. .NET's
+    // Process.WaitForExitAsync waits for stream EOF, so a daemon that keeps
+    // those copies open hangs every programmatic launch (tests, harnesses)
+    // until the caller's own timeout — even though the server is ready in
+    // seconds. fds 0-2 are pointed at /dev/null below; here we close only
+    // fds aliasing those same pipes/sockets (matched by link target, so
+    // runtime-internal pipes like the signal-delivery pipe — closing which
+    // silently re-armed SIGHUP death — and regular files stay open).
+    // Linux-only: macOS keeps the old behavior (untestable on this host).
+    private static void CloseInheritedPipesAndSockets()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        HashSet<string> stdioTargets = new(StringComparer.Ordinal);
+        foreach (int std in new[] {0, 1, 2})
+        {
+            string? stdTarget;
+            try { stdTarget = new FileInfo($"/proc/self/fd/{std}").LinkTarget; } catch { continue; }
+            if (stdTarget is not null
+                && (stdTarget.StartsWith("pipe:", StringComparison.Ordinal) || stdTarget.StartsWith("socket:", StringComparison.Ordinal)))
+                stdioTargets.Add(stdTarget);
+        }
+        if (stdioTargets.Count == 0) return;
+        List<int> candidates = new();
+        try
+        {
+            foreach (var entry in Directory.EnumerateFiles("/proc/self/fd"))
+            {
+                var name = Path.GetFileName(entry);
+                if (int.TryParse(name, out int fd) && fd >= 3) candidates.Add(fd);
+            }
+        }
+        catch { return; }
+        foreach (int fd in candidates)
+        {
+            // Re-resolve immediately before closing: fd numbers can be
+            // recycled between the listing and the close, and only
+            // pipes/sockets may go.
+            string? target;
+            try { target = new FileInfo($"/proc/self/fd/{fd}").LinkTarget; } catch { continue; }
+            if (target is null || !stdioTargets.Contains(target)) continue;
+            try { CloseLibc(fd); } catch { }
+        }
+    }
 
     private static void RedirectStdioToDevNull()
     {

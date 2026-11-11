@@ -100,9 +100,9 @@ public class TelnetPersistenceShutdownTests
             bool found = types.Any(t =>
             {
                 var cur = t;
-                while (cur != null && cur != typeof(object))
+                while (cur is not null && cur != typeof(object))
                 {
-                    if (cur.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null)
+                    if (cur.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) is not null)
                         return true;
                     cur = cur.BaseType;
                 }

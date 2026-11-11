@@ -29,7 +29,7 @@ public class PortedBanCommandTests
         pc.Session = conn.Session;
         conn.Session.Puppet = pc;
         conn.Session.Connection = conn;
-        if (account != null)
+        if (account is not null)
         {
             conn.Session.Account = account;
             conn.Session.AccountId = account.Id;
@@ -285,7 +285,7 @@ public class PortedBanCommandTests
     {
         var f = typeof(ObjectRegistry).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Static);
         var bd = f?.GetValue(null);
-        if (bd == null) return -1;
+        if (bd is null) return -1;
         var prop = bd.GetType().GetProperty("Count");
         return (int)(prop?.GetValue(bd) ?? -1);
     }

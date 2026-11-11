@@ -30,16 +30,16 @@ public static partial class GameUtils
         bool inverse = false, bool strikethru = false, bool clear = false)
     {
         if (clear) input = StripAnsi(input);
-        if (fg is not null) input = $"\x1b[38;5;{fg}m{input}";
-        if (bg is not null) input = $"\x1b[48;5;{bg}m{input}";
+        if (fg is not null) input = $"\e[38;5;{fg}m{input}";
+        if (bg is not null) input = $"\e[48;5;{bg}m{input}";
         return ApplyStyleFlags(input, bold, italic, underline, inverse, strikethru);
     }
 
     public static string WrapRgb(string input, (byte R, byte G, byte B)? fg = null, (byte R, byte G, byte B)? bg = null,
         bool bold = false, bool italic = false, bool underline = false)
     {
-        input = bg is not null ? $"\x1b[48;2;{bg.Value.R};{bg.Value.G};{bg.Value.B}m{input}" : $"\x1b[48;2;0;0;0m{input}";
-        input = fg is not null ? $"\x1b[38;2;{fg.Value.R};{fg.Value.G};{fg.Value.B}m{input}" : $"\x1b[38;2;204;204;204m{input}";
+        input = bg is not null ? $"\e[48;2;{bg.Value.R};{bg.Value.G};{bg.Value.B}m{input}" : $"\e[48;2;0;0;0m{input}";
+        input = fg is not null ? $"\e[38;2;{fg.Value.R};{fg.Value.G};{fg.Value.B}m{input}" : $"\e[38;2;204;204;204m{input}";
         return ApplyStyleFlags(input, bold, italic, underline);
     }
 
@@ -52,19 +52,19 @@ public static partial class GameUtils
         if (bg is not null && bg != 0.0)
         {
             var (r, g, b) = HsvToRgb(bg.Value / 360.0, bgSat / 100.0, bgBright / 100.0);
-            input = $"\x1b[48;2;{r};{g};{b}m{input}";
+            input = $"\e[48;2;{r};{g};{b}m{input}";
         }
-        else input = $"\x1b[48;2;0;0;0m{input}";
+        else input = $"\e[48;2;0;0;0m{input}";
 
         if (fg is not null && fg != 0.0)
         {
             var (r, g, b) = HsvToRgb(fg.Value / 360.0, fgSat / 100.0, fgBright / 100.0);
-            input = $"\x1b[38;2;{r};{g};{b}m{input}";
+            input = $"\e[38;2;{r};{g};{b}m{input}";
         }
         else
         {
             var (r, g, b) = HsvToRgb(1.0, 0.0, 1.0);
-            input = $"\x1b[38;2;{r};{g};{b}m{input}";
+            input = $"\e[38;2;{r};{g};{b}m{input}";
         }
         return ApplyStyleFlags(input, bold, italic, underline, inverse, strikethru);
     }
@@ -75,12 +75,12 @@ public static partial class GameUtils
     // after the color codes, leaving each caller's color order untouched.
     private static string ApplyStyleFlags(string input, bool bold, bool italic, bool underline, bool inverse = false, bool strikethru = false)
     {
-        if (bold) input = $"\x1b[1m{input}";
-        if (italic) input = $"\x1b[3m{input}";
-        if (underline) input = $"\x1b[4m{input}";
-        if (inverse) input = $"\x1b[7m{input}";
-        if (strikethru) input = $"\x1b[9m{input}";
-        return $"{input}\x1b[0m";
+        if (bold) input = $"\e[1m{input}";
+        if (italic) input = $"\e[3m{input}";
+        if (underline) input = $"\e[4m{input}";
+        if (inverse) input = $"\e[7m{input}";
+        if (strikethru) input = $"\e[9m{input}";
+        return $"{input}\e[0m";
     }
 
     private static (int R, int G, int B) HsvToRgb(double h, double s, double v)
@@ -144,9 +144,8 @@ public static partial class GameUtils
     // Shared ns/ew-to-compass composition for GetDir.
     private static string DirFromDeltas(int ew, int ns)
     {
-        var dir = "";
-        if (ns > 0) dir = "north"; else if (ns < 0) dir = "south";
-        if (ew > 0) dir += "east"; else if (ew < 0) dir += "west";
+        string dir = ns switch { > 0 => "north", < 0 => "south", _ => "" };
+        dir += ew switch { > 0 => "east", < 0 => "west", _ => "" };
         return dir;
     }
 
@@ -350,7 +349,7 @@ public static partial class GameUtils
     public static IEnumerable<T> MakeIter<T>(T value)
     {
         if (value is IEnumerable<T> seq && value is not string) return seq;
-        return new[] { value };
+        return [value];
     }
 
     public static string CopyWordCase(string baseWord, string newWord)
@@ -392,9 +391,9 @@ public static partial class GameUtils
                 normEnd = " " + normEnd.Trim();
         }
         if (!Punctuation.Contains(normSep)) normSep = " " + normSep.Trim();
-        if (strs.Count == 1) return strs[0];
-        if (strs.Count == 2) return string.Join(normEnd + " ", strs);
-        return string.Join(normSep + " ", strs.Take(strs.Count - 1)) + normEnd + " " + strs[^1];
+        if (strs is [var only]) return only;
+        if (strs.Count == 2) return string.Join($"{normEnd} ", strs);
+        return string.Join($"{normSep} ", strs.Take(strs.Count - 1)) + $"{normEnd} {strs[^1]}";
     }
 
 // deepcopy via JSON roundtrip (mirrors dill roundtrip)

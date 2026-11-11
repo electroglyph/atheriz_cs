@@ -70,13 +70,13 @@ public class ConnectionManager
     public ConnectionManager(AsyncThreadPool? pool = null, AtherizSettings? settings = null, InputFuncs? inputFuncs = null)
     {
         _settings = settings ?? AtherizSettings.Global;
-        Atp = pool ?? new AsyncThreadPool(
+        Atp = pool ?? new(
             maxThreads: _settings.ThreadpoolLimit,
             queueLimit: _settings.ThreadpoolQueueLimit,
             reliefLimit: _settings.ThreadpoolReliefLimit,
             watchdogSeconds: TimeSpan.FromSeconds(_settings.ThreadpoolWatchdogSeconds),
             watchdogInterval: TimeSpan.FromSeconds(_settings.ThreadpoolWatchdogInterval));
-        InputFuncs = inputFuncs ?? new InputFuncs();
+        InputFuncs = inputFuncs ?? new();
         foreach (var kv in InputFuncs.GetHandlers())
             RegisterHandler(kv.Key, kv.Value);
 

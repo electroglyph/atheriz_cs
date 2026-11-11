@@ -166,7 +166,7 @@ public class PortedGroupTests
     {
         try { return (int?)((dynamic)go).GroupChannel; } catch { }
         var f = go.GetType().GetField("_groupChannel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        if (f != null) return f.GetValue(go) as int?;
+        if (f is not null) return f.GetValue(go) as int?;
         var dtoField = typeof(GameObject).GetField("_extra", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         return null;
     }

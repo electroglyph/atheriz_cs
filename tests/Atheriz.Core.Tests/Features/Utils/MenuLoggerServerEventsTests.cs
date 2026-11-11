@@ -20,7 +20,7 @@ public class MenuLoggerServerEventsTests
         var s = new Session();
         var r = await MenuPrompt.PromptWithTimeoutAsync(s, "display", TimeSpan.FromMilliseconds(50));
         Assert.Null(r);
-        Assert.True(s.InputFuture == null || s.InputFuture.Task.IsCompleted);
+        Assert.True(s.InputFuture is null || s.InputFuture.Task.IsCompleted);
     }
 
     // CancelPrompt only completes the still-pending future (stale tokens are ignored
@@ -132,6 +132,9 @@ public class MenuLoggerServerEventsTests
         var tmp = Path.Combine(Path.GetTempPath(), "atheriz_pragma_" + Guid.NewGuid().ToString("N"));
         var save = Path.Combine(tmp, "save");
         var secret = Path.Combine(tmp, "secret");
+        // DoSetup reseeds the global salt slot (ResetWorldState); save and
+        // restore it so later tests keep testsalt.
+        var origSalt = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             InitialSetup.DoSetup(new SetupOptions(save, "admin", "password123", secret));
@@ -141,7 +144,12 @@ public class MenuLoggerServerEventsTests
             cmd.CommandText = "PRAGMA synchronous;";
             Assert.Equal(2L, (long)cmd.ExecuteScalar()!);
         }
-        finally { try { Directory.Delete(tmp, recursive: true); } catch { } }
+        finally
+        {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt);
+            try { Directory.Delete(tmp, recursive: true); } catch { }
+        }
     }
 
     private static int CountOccurrences(string hay, string needle)

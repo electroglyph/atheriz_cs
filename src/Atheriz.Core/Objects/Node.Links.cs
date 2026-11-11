@@ -134,7 +134,7 @@ public partial class Node
         int id = script is int i ? i : script is GameObject go ? go.Id : -1;
         if (id == -1) return;
         var objs = ObjectRegistry.Get(id);
-        if (objs.Count > 0 && objs[0] is Script s) s.RemoveHooks(this);
+        if (objs is [Script s, ..]) s.RemoveHooks(this);
         RemoveScriptId(id);
     }
     public NodeLink? GetRandomLink()
@@ -183,7 +183,7 @@ public partial class Node
     // logContext keeps the per-caller label.
     private void PublishLinkAdded(NodeLink link, string logContext)
     {
-        foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + logContext + ": " + logEx.Message, "Node"); }
+        foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {logContext}: {logEx.Message}", "Node"); }
         if (link.Coord.Area != Coord.Area)
         {
             var nh = NodeHandler.GetCurrent();
@@ -240,7 +240,7 @@ public partial class Node
         }
         // also refresh exits for occupants so surviving links stay usable
         if (found is not null)
-            foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveLink: " + logEx.Message, "Node"); }
+            foreach (var o in GetContents()) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.RemoveLink: {logEx.Message}", "Node"); }
     }
 
     public void AddExits(GameObject obj)
@@ -266,7 +266,7 @@ public partial class Node
         }
         var set = obj.InternalCmdSet;
         if (set is null) { set = new CmdSet(); obj.InternalCmdSet = set; }
-        try { set.Adds(cmds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddExits: " + logEx.Message, "Node"); }
+        try { set.Adds(cmds); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.AddExits: {logEx.Message}", "Node"); }
     }
     public new void AddExitsForObject(GameObject obj) => AddExits(obj);
 
@@ -283,8 +283,8 @@ public partial class Node
             foreach (var o in objs) { o.IsModified = true; }
         }
         finally { SyncRoot.ExitWriteLock(); }
-        foreach (var o in objs) try { o.Location = Persistence.Dto.LocationRef.FromCoord(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObjects: " + logEx.Message, "Node"); }
-        foreach (var o in objs) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObjects: " + logEx.Message, "Node"); }
+        foreach (var o in objs) try { o.Location = Persistence.Dto.LocationRef.FromCoord(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.AddObjects: {logEx.Message}", "Node"); }
+        foreach (var o in objs) try { AddExits(o); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.AddObjects: {logEx.Message}", "Node"); }
     }
     public new void AddObject(GameObject obj)
     {
@@ -298,8 +298,8 @@ public partial class Node
         }
         finally { SyncRoot.ExitWriteLock(); }
         // Like MoveTo into a node, membership implies the node's coord.
-        try { obj.Location = Persistence.Dto.LocationRef.FromCoord(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }
-        try { AddExits(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.AddObject: " + logEx.Message, "Node"); }
+        try { obj.Location = Persistence.Dto.LocationRef.FromCoord(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.AddObject: {logEx.Message}", "Node"); }
+        try { AddExits(obj); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.AddObject: {logEx.Message}", "Node"); }
     }
     public new void RemoveObject(GameObject obj)
     {
@@ -311,8 +311,8 @@ public partial class Node
             if (obj.Location is Persistence.Dto.LocationRef.CoordLocation cl && cl.Coord.Equals(Coord))
                 obj.Location = Persistence.Dto.LocationRef.NullLocation.Instance;
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveObject: " + logEx.Message, "Node"); }
-        try { obj.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.RemoveObject: " + logEx.Message, "Node"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.RemoveObject: {logEx.Message}", "Node"); }
+        try { obj.InternalCmdSet?.RemoveByTag("exits"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.RemoveObject: {logEx.Message}", "Node"); }
     }
 
     // Broadcast loop shared with the base overload via
@@ -385,12 +385,12 @@ public partial class Node
             parts.Add(s);
             idx++;
         }
-        return header + string.Join(", ", parts) + "\n";
+        return $"{header}{string.Join(", ", parts)}\n";
     }
     public string GetDisplayDesc(GameObject? looker = null)
     {
         SyncRoot.EnterReadLock();
-        try { return !string.IsNullOrEmpty(Desc) ? Desc + "\n" : "You see nothing special.\n"; }
+        try { return !string.IsNullOrEmpty(Desc) ? $"{Desc}\n" : "You see nothing special.\n"; }
         finally { SyncRoot.ExitReadLock(); }
     }
     public override string GetDisplayName(GameObject? looker = null)
@@ -403,9 +403,9 @@ public partial class Node
         try
         {
             var name = string.IsNullOrEmpty(DisplayName) ? Coord.ToString() : DisplayName;
-            if (!isBuilder) return name + "\n";
+            if (!isBuilder) return $"{name}\n";
             if (string.IsNullOrEmpty(DisplayName)) return GameUtils.WrapTruecolor($"({Coord.Area},{Coord.X},{Coord.Y},{Coord.Z})\n", fg: 170);
-            return name + " " + GameUtils.WrapTruecolor($"({Coord.Area},{Coord.X},{Coord.Y},{Coord.Z})\n", fg: 170);
+            return $"{name} {GameUtils.WrapTruecolor($"({Coord.Area},{Coord.X},{Coord.Y},{Coord.Z})\n", fg: 170)}";
         }
         finally { SyncRoot.ExitReadLock(); }
     }

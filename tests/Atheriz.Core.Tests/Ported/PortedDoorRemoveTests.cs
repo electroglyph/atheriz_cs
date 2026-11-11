@@ -49,8 +49,8 @@ public class PortedDoorRemoveTests
         nh.RemoveDoor(door);
         var d1 = nh.GetDoors(n1.Coord);
         var d2 = nh.GetDoors(n2.Coord);
-        Assert.True(d1 == null || !d1.ContainsKey("north"));
-        Assert.True(d2 == null || !d2.ContainsKey("south"));
+        Assert.True(d1 is null || !d1.ContainsKey("north"));
+        Assert.True(d2 is null || !d2.ContainsKey("south"));
     }
 
     [Fact]
@@ -91,8 +91,8 @@ public class PortedDoorRemoveTests
         nh.RemoveDoor(door);
         var d1 = nh.GetDoors(n1.Coord);
         var d2 = nh.GetDoors(n2.Coord);
-        Assert.True(d1 == null || !d1.ContainsKey("north"));
-        Assert.True(d2 == null || !d2.ContainsKey("south"));
+        Assert.True(d1 is null || !d1.ContainsKey("north"));
+        Assert.True(d2 is null || !d2.ContainsKey("south"));
         Assert.Null(n1.GetLinkByName("north"));
         Assert.Null(n2.GetLinkByName("south"));
     }

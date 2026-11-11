@@ -95,7 +95,7 @@ public class DeleteVetoTeardownTests
             {
                 start.SignalAndWait();
                 var r = box.Delete(owner, recursive: true);
-                if (r != null) { System.Threading.Interlocked.Increment(ref winners); System.Threading.Interlocked.Add(ref totalOps, r.Value.Operations.Count); }
+                if (r is not null) { System.Threading.Interlocked.Increment(ref winners); System.Threading.Interlocked.Add(ref totalOps, r.Value.Operations.Count); }
             })).ToArray();
             await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30));
             Assert.Equal(1, winners);

@@ -117,6 +117,9 @@ public class ServerRegressionTests
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", null);
         var dir = Path.Combine(Path.GetTempPath(), "atheriz_reg_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
+        // DoSetup reseeds the global salt slot (ResetWorldState); save and
+        // restore it like GlobalTestEnv does so later tests keep testsalt.
+        var origSalt = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             Atheriz.Core.InitialSetup.DoSetup(new Atheriz.Core.SetupOptions(dir, "", "", Path.Combine(dir, "secret")));
@@ -125,6 +128,8 @@ public class ServerRegressionTests
         }
         finally
         {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", ou);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", op);
             try { Directory.Delete(dir, recursive: true); } catch { }
@@ -363,6 +368,10 @@ public class ServerRegressionTests
     public void ScaffoldReference_AlwaysResolves()
     {
         var tmp = Path.Combine(Path.GetTempPath(), "atheriz_reg_" + Guid.NewGuid().ToString("N"));
+        // CreateGameFolder runs InitialSetup.RunSetup, which reseeds the
+        // global salt slot (ResetWorldState); save and restore it like
+        // GlobalTestEnv does so later tests keep testsalt.
+        var origSalt = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             Assert.True(GameTemplateGenerator.CreateGameFolder(tmp, "reggame", overwrite: true));
@@ -372,7 +381,12 @@ public class ServerRegressionTests
             Assert.True(m.Success);
             Assert.True(File.Exists(Path.GetFullPath(Path.Combine(tmp, m.Groups[1].Value))));
         }
-        finally { try { Directory.Delete(tmp, recursive: true); } catch { } }
+        finally
+        {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt);
+            try { Directory.Delete(tmp, recursive: true); } catch { }
+        }
     }
 
     // interactive replace must either setup the world or say so.

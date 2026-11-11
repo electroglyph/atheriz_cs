@@ -24,7 +24,7 @@ public class PortedBanAccountTests
         pc.Session = conn.Session;
         conn.Session.Puppet = pc;
         conn.Session.Connection = conn;
-        if (acct != null) { conn.Session.Account = acct; conn.Session.AccountId = acct.Id; }
+        if (acct is not null) { conn.Session.Account = acct; conn.Session.AccountId = acct.Id; }
         return conn;
     }
     [Fact] public void BanAccountDisconnectsAllOnlineCharacters()
@@ -65,7 +65,7 @@ public class PortedBanAccountTests
         // mirrors BanCommand.FindAccount private — replicate lookup logic
         var sess = target.Session;
         var acct = sess?.Account as GameObject;
-        if (acct != null) return acct;
+        if (acct is not null) return acct;
         var accounts = ObjectRegistry.FilterBy(o => o.IsAccount && (o as Account)?.Characters.Contains(target.Id) == true);
         return accounts.FirstOrDefault();
     }

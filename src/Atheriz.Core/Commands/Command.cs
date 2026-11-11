@@ -62,7 +62,7 @@ public abstract class Command
     public virtual string PrintHelp()
     {
         if (Parser is null) return HelpHelper.FormatNoParser(this);
-        return Parser.FormatHelp() + $"\nAliases: {HelpHelper.FormatAliasList(this)}\n" + ExtraDesc;
+        return $"{Parser.FormatHelp()}\nAliases: {HelpHelper.FormatAliasList(this)}\n{ExtraDesc}";
     }
 
     /// <summary>
@@ -311,7 +311,7 @@ public abstract class Command
         try
         {
             var p = Parser;
-            if (p is null) parsed = new GameArgumentParser.ParsedArgs();
+            if (p is null) parsed = new();
             else
             {
                 lock (_parserLock) { parsed = p.ParseArgs(argList); }

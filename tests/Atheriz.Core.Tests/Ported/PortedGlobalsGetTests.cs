@@ -225,7 +225,7 @@ public class PortedGlobalsGetTests
         var pool = GlobalServices.GetAsyncThreadPool();
         Assert.NotNull(pool);
         // Threadpool limit is at least 1
-        Assert.True(pool != null);
+        Assert.True(pool is not null);
     }
     // --- TestGetNodeHandler ---
     [Fact] public void GetNodeHandlerReturnsSingleton()

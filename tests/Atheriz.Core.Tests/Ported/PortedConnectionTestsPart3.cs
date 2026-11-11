@@ -23,7 +23,7 @@ public class PortedConnectionTestsPart3
         // Also clear the tuple cache
         try{
             var f = typeof(ConnectionScreen).GetField("_CACHE", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static);
-            if (f!=null) f.SetValue(null, (0.0,0,0));
+            if (f is not null) f.SetValue(null, (0.0,0,0));
         }catch{}
     }
     private GameObject MakePc(string name, object connected)
@@ -35,7 +35,7 @@ public class PortedConnectionTestsPart3
         else if (connected is int i) isConnected = i != 0;
         else if (connected is long l) isConnected = l != 0;
         else if (connected is string s) isConnected = !string.IsNullOrEmpty(s);
-        else isConnected = connected != null;
+        else isConnected = connected is not null;
         o.IsConnected = isConnected;
         ObjectRegistry.AddObject(o);
         return o;
@@ -189,7 +189,7 @@ public class PortedConnectionTestsPart3
     {
         // Check GUEST_TEXT constant via reflection or via Render text
         var field = typeof(ConnectionScreen).GetField("GUEST_TEXT", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic);
-        if (field != null)
+        if (field is not null)
         {
             var val = field.GetValue(null) as string;
             Assert.IsType<string>(val);
@@ -212,7 +212,7 @@ public class PortedConnectionTestsPart3
     [Fact] public void ScreenContainsPlaceholders()
     {
         var screenField = typeof(ConnectionScreen).GetField("Screen", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static);
-        if (screenField != null)
+        if (screenField is not null)
         {
             var screen = screenField.GetValue(null) as string ?? "";
             // In C# we use {0},{1} etc., in Python {version} etc. Check for any placeholder
@@ -227,7 +227,7 @@ public class PortedConnectionTestsPart3
     [Fact] public void Screen2ContainsPlaceholders()
     {
         var f = typeof(ConnectionScreen).GetField("Screen2", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static);
-        if (f != null)
+        if (f is not null)
         {
             var s = f.GetValue(null) as string ?? "";
             Assert.True(s.Contains("{0}") || s.Contains("{version}") || s.Contains("ATHERIZ VERSION"));
@@ -238,7 +238,7 @@ public class PortedConnectionTestsPart3
     {
         var f1 = typeof(ConnectionScreen).GetField("Screen", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static);
         var f2 = typeof(ConnectionScreen).GetField("Screen2", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static);
-        if (f1 != null && f2 != null)
+        if (f1 is not null && f2 is not null)
         {
             var s1 = f1.GetValue(null) as string ?? "";
             var s2 = f2.GetValue(null) as string ?? "";

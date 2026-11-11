@@ -58,7 +58,7 @@ public class PortedPuppetCommandTests
     private static (GameObject? target, string? err) FindTargetReflect(GameObject caller, string query)
     {
         var m = typeof(PuppetCommand).GetMethod("FindTarget", BindingFlags.NonPublic | BindingFlags.Static);
-        if (m == null) throw new InvalidOperationException("FindTarget not found");
+        if (m is null) throw new InvalidOperationException("FindTarget not found");
         var res = m.Invoke(null, new object[] { caller, query });
         return ((GameObject? t, string? err))res!;
     }
@@ -327,7 +327,7 @@ public class PortedPuppetCommandTests
         ObjectRegistry.AddObject(target);
         var cmd=new PuppetCommand();
         cmd.Run(caller, PArgs($"#{target.Id}"));
-        Assert.Contains(caller.Msgs, m=> m!=null && m.Contains("cannot puppet"));
+        Assert.Contains(caller.Msgs, m=> m is not null && m.Contains("cannot puppet"));
         Assert.False(target.IsPc);
         Assert.Null(GetRestore(target));
         Assert.Empty(sess.PuppetStack);
@@ -494,7 +494,7 @@ public class PortedPuppetCommandTests
         var sess=new Session(); caller.Session=sess; sess.Puppet=caller;
         var unpuppet=new UnpuppetCommand();
         unpuppet.Run(caller, null);
-        Assert.Contains(caller.Msgs, m=> m!=null && m.Contains("not puppeting"));
+        Assert.Contains(caller.Msgs, m=> m is not null && m.Contains("not puppeting"));
         Assert.Empty(sess.PuppetStack);
         Assert.Same(caller, sess.Puppet);
     }
@@ -559,7 +559,7 @@ public class PortedPuppetCommandTests
         var sess=new Session(); caller.Session=sess; sess.Puppet=caller; ObjectRegistry.AddObject(caller);
         var cmd=new PuppetCommand();
         cmd.Run(caller, PArgs($"#{caller.Id}"));
-        Assert.Contains(caller.Msgs, m=> m!=null && m.Contains("already puppeting yourself"));
+        Assert.Contains(caller.Msgs, m=> m is not null && m.Contains("already puppeting yourself"));
         Assert.Empty(sess.PuppetStack);
     }
 
@@ -573,7 +573,7 @@ public class PortedPuppetCommandTests
         var node=new Node(new Coord("TA",0,0,0)); ObjectRegistry.AddObject(node);
         var cmd=new PuppetCommand();
         cmd.Run(caller, PArgs($"#{node.Id}"));
-        Assert.Contains(caller.Msgs, m=> m!=null && m.Contains("cannot puppet"));
+        Assert.Contains(caller.Msgs, m=> m is not null && m.Contains("cannot puppet"));
         Assert.False(node.IsPc);
     }
 
@@ -591,7 +591,7 @@ public class PortedPuppetCommandTests
         {
             caller.Msgs.Clear();
             cmd.Run(caller, PArgs($"#{meta.Id}"));
-            Assert.Contains(caller.Msgs, m=> m!=null && m.Contains("cannot puppet"));
+            Assert.Contains(caller.Msgs, m=> m is not null && m.Contains("cannot puppet"));
             Assert.False(meta.IsPc);
         }
     }
@@ -608,7 +608,7 @@ public class PortedPuppetCommandTests
         ObjectRegistry.AddObject(target);
         var cmd=new PuppetCommand();
         cmd.Run(caller, PArgs($"#{target.Id}"));
-        Assert.Contains(caller.Msgs, m=> m!=null && m.Contains("already being puppeted"));
+        Assert.Contains(caller.Msgs, m=> m is not null && m.Contains("already being puppeted"));
         Assert.False(target.IsPc);
         Assert.Same(caller, sess.Puppet);
     }
@@ -620,7 +620,7 @@ public class PortedPuppetCommandTests
         caller.Session=null;
         var cmd=new PuppetCommand();
         cmd.Run(caller, PArgs("#1"));
-        Assert.Contains(caller.Msgs, m=> m!=null && m.Contains("no active session"));
+        Assert.Contains(caller.Msgs, m=> m is not null && m.Contains("no active session"));
     }
 
     [Fact]
@@ -630,7 +630,7 @@ public class PortedPuppetCommandTests
         caller.Session=null;
         var cmd=new UnpuppetCommand();
         cmd.Run(caller, null);
-        Assert.Contains(caller.Msgs, m=> m!=null && m.Contains("no active session"));
+        Assert.Contains(caller.Msgs, m=> m is not null && m.Contains("no active session"));
     }
 
     // -----------------------------------------------------------------------

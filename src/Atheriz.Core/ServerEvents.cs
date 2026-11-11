@@ -181,7 +181,7 @@ public static class ServerEvents
             // the success-path save is failure-captured — a dead disk
             // must not take down the signup flow with an unhandled throw.
             try { ObjectRegistry.SaveObjects(AtherizDbContextFactory.ResolveSavePath(settings)); }
-            catch (Exception saveEx) { string saveErr = "Save failed: " + saveEx.Message; Out(saveErr); return; }
+            catch (Exception saveEx) { string saveErr = $"Save failed: {saveEx.Message}"; Out(saveErr); return; }
             doneAcc.IsModified = true;
             Out(doneNewAccount ? "Success! Account and character created." : "Success! Character created.");
             // Pass the live objects (not a re-query of the registry).
@@ -205,7 +205,7 @@ public static class ServerEvents
 
     private static void InvokeHooks(HookName hookName, params object?[] args)
     {
-        args ??= Array.Empty<object?>();
+        args ??= [];
         string name = hookName.Name();
         try
         {

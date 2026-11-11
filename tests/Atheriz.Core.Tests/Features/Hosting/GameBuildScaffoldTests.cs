@@ -15,13 +15,18 @@ public class GameBuildScaffoldTests
         var oldPass = Environment.GetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD");
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", user);
         Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", pass);
-        return new RestoreEnv(oldUser, oldPass);
+        // CreateGameFolder runs InitialSetup.RunSetup, which reseeds the
+        // global salt slot (ResetWorldState); save and restore it so later
+        // tests keep testsalt.
+        return new RestoreEnv(oldUser, oldPass, Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests);
     }
 
-    private sealed class RestoreEnv(string? user, string? pass) : IDisposable
+    private sealed class RestoreEnv(string? user, string? pass, string? salt) : IDisposable
     {
         public void Dispose()
         {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (salt is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(salt);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", user);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", pass);
         }

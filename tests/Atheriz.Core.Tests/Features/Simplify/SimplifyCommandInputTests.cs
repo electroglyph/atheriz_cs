@@ -397,7 +397,7 @@ public class MenuPromptSingleTimerTests
         var s = new Session();
         var r = await MenuPrompt.PromptWithTimeoutAsync(s, "display", TimeSpan.FromMilliseconds(50));
         Assert.Null(r);
-        Assert.True(s.InputFuture == null || s.InputFuture.Task.IsCompleted);
+        Assert.True(s.InputFuture is null || s.InputFuture.Task.IsCompleted);
     }
 
     [Fact]
@@ -407,7 +407,7 @@ public class MenuPromptSingleTimerTests
         var s = new Session();
         var r = await MenuPrompt.PromptWithTimeout(s, "display", TimeSpan.FromMilliseconds(50));
         Assert.Null(r);
-        Assert.True(s.InputFuture == null || s.InputFuture.Task.IsCompleted);
+        Assert.True(s.InputFuture is null || s.InputFuture.Task.IsCompleted);
         Assert.NotNull(typeof(MenuPrompt).GetMethod("PromptWithTimeout"));
         Assert.NotNull(typeof(MenuPrompt).GetMethod("PromptWithTimeoutAsync"));
     }

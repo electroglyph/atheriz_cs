@@ -35,6 +35,10 @@ public class PortedMapInitRegressionTests
         Directory.CreateDirectory(tmp);
         var save = Path.Combine(tmp, "save");
         var secret = Path.Combine(tmp, "secret");
+        // DoSetup reseeds the global salt slot (ResetWorldState); save and
+        // restore it so later tests keep testsalt. (GlobalTestEnv.Enter()
+        // alone cannot heal this: it preserves a non-null slot.)
+        var origSalt = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             InitialSetup.DoSetup(new SetupOptions(save, "admin", "password123", secret));
@@ -61,6 +65,8 @@ public class PortedMapInitRegressionTests
         }
         finally
         {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt);
             try { Directory.Delete(tmp, true); } catch { }
             GlobalTestEnv.Enter().Dispose();
         }
@@ -74,6 +80,7 @@ public class PortedMapInitRegressionTests
         Directory.CreateDirectory(tmp);
         var save = Path.Combine(tmp, "save");
         var secret = Path.Combine(tmp, "secret");
+        var origSalt2 = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             InitialSetup.DoSetup(new SetupOptions(save, "admin2", "password123", secret));
@@ -98,6 +105,8 @@ public class PortedMapInitRegressionTests
         }
         finally
         {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt2 is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt2);
             try { Directory.Delete(tmp, true); } catch { }
             GlobalTestEnv.Enter().Dispose();
         }
@@ -140,7 +149,7 @@ public class PortedMapInitRegressionTests
         var sent = conn.Snapshot();
         Assert.Contains(sent, x => x.Cmd == "map_enable");
         var mapMsg = sent.FirstOrDefault(x => x.Cmd == "map");
-        Assert.False(mapMsg.Cmd == null, $"no 'map' command sent; sent: {string.Join(",", sent.Select(x=>x.Cmd))}");
+        Assert.False(mapMsg.Cmd is null, $"no 'map' command sent; sent: {string.Join(",", sent.Select(x=>x.Cmd))}");
         var payload = mapMsg.Args.FirstOrDefault() as Dictionary<string, object?>;
         Assert.NotNull(payload);
         Assert.True(payload!.TryGetValue("map", out var mapObj));
@@ -184,7 +193,7 @@ public class PortedMapInitRegressionTests
         mi.Render(force: true);
         var sent = conn.Snapshot();
         var mapMsg = sent.FirstOrDefault(x => x.Cmd == "map");
-        Assert.False(mapMsg.Cmd == null);
+        Assert.False(mapMsg.Cmd is null);
         var payload = mapMsg.Args[0] as Dictionary<string, object?>;
         var mapStr = payload!["map"] as string;
         Assert.False(string.IsNullOrWhiteSpace(mapStr));
@@ -286,6 +295,7 @@ public class PortedMapInitRegressionTests
         var capture = new StringWriter();
         var reader = new BlockingReader();
         Exception? bgEx = null;
+        var origSalt3 = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         var task = Task.Run(() =>
         {
             try { InitialSetup.DoSetup(new SetupOptions(save, Username: null, Password: "pw-provided", SecretPath: secret, Prompt: true, Input: reader)); }
@@ -308,6 +318,8 @@ public class PortedMapInitRegressionTests
             Console.SetOut(oldOut);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_USERNAME", oldUser);
             Environment.SetEnvironmentVariable("ATHERIZ_SUPERUSER_PASSWORD", oldPass);
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt3 is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt3);
             try { Directory.Delete(tmp, true); } catch { }
         }
     }

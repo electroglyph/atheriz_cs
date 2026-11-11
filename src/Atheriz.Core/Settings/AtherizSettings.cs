@@ -15,7 +15,7 @@ public sealed class AtherizSettings
     public static AtherizSettings Global
     {
         get => Volatile.Read(ref _global);
-        set => Volatile.Write(ref _global, value ?? new AtherizSettings());
+        set => Volatile.Write(ref _global, value ?? new());
     }
     // Paths
     public string SavePath { get; set; } = "save";
@@ -135,17 +135,17 @@ public sealed class AtherizSettings
     public string[] AllSymbols => [SingleWallPlaceholder, DoubleWallPlaceholder, RoundedWallPlaceholder, PathPlaceholder, RoadPlaceholder];
 
     // Door glyphs (ANSI) — exact defaults from settings.py.
-    // Shared color prefix for all eight glyphs: compile-time concat keeps the
+    // Shared color prefix for all eight glyphs: interpolation keeps the
     // default strings byte-identical while the color lives in one place.
-    private const string DoorGlyphPrefix = "\x1b[1m\x1b[38;2;166;97;0m\x1b[48;2;0;0;0m";
-    public string NsClosedDoor { get; set; } = DoorGlyphPrefix + "━\x1b[0m";
-    public string NsOpenDoor1 { get; set; } = DoorGlyphPrefix + "┚\x1b[0m";
-    public string NsOpenDoor2 { get; set; } = DoorGlyphPrefix + "┒\x1b[0m";
-    public string EwClosedDoor { get; set; } = DoorGlyphPrefix + "┃\x1b[0m";
-    public string EwOpenDoor1 { get; set; } = DoorGlyphPrefix + "┙\x1b[0m";
-    public string EwOpenDoor2 { get; set; } = DoorGlyphPrefix + "┕\x1b[0m";
-    public string UdClosedDoor { get; set; } = DoorGlyphPrefix + "╳\x1b[0m";
-    public string UdOpenDoor { get; set; } = DoorGlyphPrefix + "▽\x1b[0m";
+    private const string DoorGlyphPrefix = "\e[1m\e[38;2;166;97;0m\e[48;2;0;0;0m";
+    public string NsClosedDoor { get; set; } = $"{DoorGlyphPrefix}━\e[0m";
+    public string NsOpenDoor1 { get; set; } = $"{DoorGlyphPrefix}┚\e[0m";
+    public string NsOpenDoor2 { get; set; } = $"{DoorGlyphPrefix}┒\e[0m";
+    public string EwClosedDoor { get; set; } = $"{DoorGlyphPrefix}┃\e[0m";
+    public string EwOpenDoor1 { get; set; } = $"{DoorGlyphPrefix}┙\e[0m";
+    public string EwOpenDoor2 { get; set; } = $"{DoorGlyphPrefix}┕\e[0m";
+    public string UdClosedDoor { get; set; } = $"{DoorGlyphPrefix}╳\e[0m";
+    public string UdOpenDoor { get; set; } = $"{DoorGlyphPrefix}▽\e[0m";
 
     // Time
     public bool TimeSystemEnabled { get; set; } = true;

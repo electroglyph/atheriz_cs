@@ -12,7 +12,7 @@ namespace Atheriz.Core.Tests.Features.Plugins;
 public class BootLoadFailureSignalTests
 {
     // Stages a game dir: <tmp>/<name>.csproj (backdated, so fresh) +
-    // bin/Release/net10.0/<name>.dll with the given bytes (fresh).
+    // bin/Release/net11.0/<name>.dll with the given bytes (fresh).
     private static string StageGameDir(string name, byte[] dllBytes)
     {
         var dir = Path.Combine(Path.GetTempPath(), "atheriz_bootfail_" + Guid.NewGuid().ToString("N"));
@@ -20,7 +20,7 @@ public class BootLoadFailureSignalTests
         var csproj = Path.Combine(dir, name + ".csproj");
         File.WriteAllText(csproj, "<Project></Project>");
         File.SetLastWriteTimeUtc(csproj, DateTime.UtcNow.AddMinutes(-5));
-        var binDir = Path.Combine(dir, "bin", "Release", "net10.0");
+        var binDir = Path.Combine(dir, "bin", "Release", "net11.0");
         Directory.CreateDirectory(binDir);
         var dllPath = Path.Combine(binDir, name + ".dll");
         File.WriteAllBytes(dllPath, dllBytes);

@@ -62,7 +62,7 @@ public static class HelpFormatter
     private static List<string> BuildBox(string category, IEnumerable<string> keys, int boxWidth)
     {
         int inner = boxWidth - 4;
-        var lines = new List<string> { TopBorder(category, boxWidth) };
+        List<string> lines = [TopBorder(category, boxWidth)];
         lines.AddRange(WrapKeys(keys, inner).Select(text => $"│ {text.PadRight(inner)} │"));
         lines.Add($"╰{new string('─', boxWidth - 2)}╯");
         return lines;
@@ -86,8 +86,8 @@ public static class HelpFormatter
         var current = new StringBuilder();
         foreach (var raw in keys)
         {
-            string key = raw.Length > inner ? raw[..Math.Max(0, inner - 1)] + "…" : raw;
-            string piece = current.Length == 0 ? key : ", " + key;
+            string key = raw.Length > inner ? $"{raw[..Math.Max(0, inner - 1)]}…" : raw;
+            string piece = current.Length == 0 ? key : $", {key}";
             if (current.Length + piece.Length > inner)
             {
                 lines.Add(current.ToString());

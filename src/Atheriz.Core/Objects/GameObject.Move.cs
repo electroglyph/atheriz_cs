@@ -235,7 +235,7 @@ public partial class GameObject
                 finally
                 {
                     for (int i = pair.Count - 1; i >= 0; i--)
-                        try { pair[i].SyncRoot.ExitWriteLock(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
+                        try { pair[i].SyncRoot.ExitWriteLock(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.MoveTo: {logEx.Message}", "GameObject"); }
                 }
             }
             else
@@ -485,7 +485,7 @@ public partial class GameObject
             // Release in reverse order
             for (int i = toLock.Count - 1; i >= 0; i--)
             {
-                try { toLock[i].SyncRoot.ExitWriteLock(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
+                try { toLock[i].SyncRoot.ExitWriteLock(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.MoveTo: {logEx.Message}", "GameObject"); }
             }
         }
 
@@ -495,7 +495,7 @@ public partial class GameObject
         // locks released, alongside the leave/receive hooks below.
         if (installExits && destObj is Node exitNode)
         {
-            try { exitNode.AddExitsForObject(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
+            try { exitNode.AddExitsForObject(this); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.MoveTo: {logEx.Message}", "GameObject"); }
         }
 
         // advisory leave/receive hooks run AFTER location locks are
@@ -554,7 +554,7 @@ public partial class GameObject
                     }
                 }
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.MoveTo: {logEx.Message}", "GameObject"); }
         }
 
         // Follow/wander invalidation — Port spec: clear followers if needed
@@ -570,7 +570,7 @@ public partial class GameObject
                 var appearance = AtLook(destObj);
                 if (!string.IsNullOrEmpty(appearance)) Msg(appearance);
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.MoveTo: " + logEx.Message, "GameObject"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.MoveTo: {logEx.Message}", "GameObject"); }
         }
 
         return true;
@@ -617,7 +617,7 @@ public partial class GameObject
                 if (l.Coord.Equals(from.Coord)) return l.Name;
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.GetReverseLinkName: " + logEx.Message, "GameObject"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.GetReverseLinkName: {logEx.Message}", "GameObject"); }
         return null;
     }
 

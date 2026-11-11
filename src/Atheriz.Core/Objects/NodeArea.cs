@@ -60,11 +60,11 @@ public sealed class NodeArea
         // lock-free SetEquals threw when a link mutated mid-enumeration.
         HashSet<string>? myLinked;
         Lock.EnterReadLock();
-        try { myLinked = LinkedAreas is null ? null : new HashSet<string>(LinkedAreas, LinkedAreas.Comparer); }
+        try { myLinked = LinkedAreas is null ? null : new(LinkedAreas, LinkedAreas.Comparer); }
         finally { Lock.ExitReadLock(); }
         HashSet<string>? otherLinked;
         o.Lock.EnterReadLock();
-        try { otherLinked = o.LinkedAreas is null ? null : new HashSet<string>(o.LinkedAreas, o.LinkedAreas.Comparer); }
+        try { otherLinked = o.LinkedAreas is null ? null : new(o.LinkedAreas, o.LinkedAreas.Comparer); }
         finally { o.Lock.ExitReadLock(); }
         return (myLinked is null && otherLinked is null) || (myLinked is not null && otherLinked is not null && myLinked.SetEquals(otherLinked));
     }
@@ -78,7 +78,7 @@ public sealed class NodeArea
         foreach (var k in data.Keys.OrderBy(k => k, StringComparer.Ordinal)) { h.Add(k); h.Add(data[k].GetRawText()); }
         HashSet<string>? linked;
         Lock.EnterReadLock();
-        try { linked = LinkedAreas is null ? null : new HashSet<string>(LinkedAreas, LinkedAreas.Comparer); }
+        try { linked = LinkedAreas is null ? null : new(LinkedAreas, LinkedAreas.Comparer); }
         finally { Lock.ExitReadLock(); }
         if (linked is not null) foreach (var a in linked.OrderBy(a => a, StringComparer.Ordinal)) h.Add(a);
         return h.ToHashCode();
@@ -251,7 +251,7 @@ public sealed class NodeArea
         Lock.EnterWriteLock();
         try
         {
-            if (LinkedAreas is null) { LinkedAreas = new HashSet<string> { area }; IsModified = true; added = true; }
+            if (LinkedAreas is null) { LinkedAreas = [area]; IsModified = true; added = true; }
             else if (!LinkedAreas.Contains(area)) { LinkedAreas.Add(area); IsModified = true; added = true; }
         }
         finally { Lock.ExitWriteLock(); }

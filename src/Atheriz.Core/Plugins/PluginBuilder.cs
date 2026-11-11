@@ -195,9 +195,9 @@ public static class PluginBuilder
             var dir = Path.GetDirectoryName(Path.GetFullPath(csproj));
             if (dir is null) continue;
             var name = Path.GetFileNameWithoutExtension(csproj);
-            foreach (var config in new[] { "Release", "Debug" })
+            foreach (var config in new[] {"Release", "Debug"})
             {
-                var bin = Path.Combine(dir, "bin", config, "net10.0");
+                var bin = Path.Combine(dir, "bin", config, "net11.0");
                 string[] files;
                 try { files = Directory.GetFiles(bin, $"{name}.gen-*.dll", TopOnlyFiles); }
                 catch { continue; }
@@ -247,9 +247,9 @@ public static class PluginBuilder
         var dir = Path.GetDirectoryName(Path.GetFullPath(csprojPath));
         if (dir is null) return null;
         var name = Path.GetFileNameWithoutExtension(csprojPath);
-        var release = Path.Combine(dir, "bin", "Release", "net10.0", $"{name}.dll");
+        var release = Path.Combine(dir, "bin", "Release", "net11.0", $"{name}.dll");
         if (File.Exists(release)) return release;
-        var debug = Path.Combine(dir, "bin", "Debug", "net10.0", $"{name}.dll");
+        var debug = Path.Combine(dir, "bin", "Debug", "net11.0", $"{name}.dll");
         if (File.Exists(debug)) return debug;
         return null;
     }

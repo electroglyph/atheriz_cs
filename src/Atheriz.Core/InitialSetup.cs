@@ -197,8 +197,8 @@ public static class InitialSetup
                         if (ng is null) continue;
                         if (ng.GetNode(nx, ny) is not { } neighbor) continue;
                         // add_link both directions (mirrors Python double add_link)
-                        node.AddLink(new NodeLink(d.name, new Coord(LIMBO_AREA, nx, ny, nz), new List<string>{d.alias}));
-                        neighbor.AddLink(new NodeLink(d.revName, new Coord(LIMBO_AREA, x, y, z), new List<string>{d.revAlias}));
+                        node.AddLink(new NodeLink(d.name, new Coord(LIMBO_AREA, nx, ny, nz), [d.alias]));
+                        neighbor.AddLink(new NodeLink(d.revName, new Coord(LIMBO_AREA, x, y, z), [d.revAlias]));
                     }
                 }
         }
@@ -322,7 +322,7 @@ public static class InitialSetup
         // the one-time seed upgrades this connection to FULL so the initial world
         // state is fsync'd through the OS buffers, not just WAL-buffered.
         try { db.Database.ExecuteSqlRaw("PRAGMA synchronous=FULL;"); }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed InitialSetup.DoSetup fsync pragma: " + logEx.Message, "InitialSetup"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed InitialSetup.DoSetup fsync pragma: {logEx.Message}", "InitialSetup"); }
         using var setupTx = db.Database.BeginTransaction();
         world.Maps.Save(db);
         world.Nodes.Save(db);
@@ -379,7 +379,7 @@ public static class InitialSetup
         alarmObj.Name = "A flashing dashboard";
         alarmObj.Desc = "A large display showing a multitude of plots and status readouts.";
         alarmObj.IsItem = true;
-        alarmObj.Aliases = new List<string>{"dashboard"};
+        alarmObj.Aliases = ["dashboard"];
         alarmObj.IsModified = true;
         ObjectRegistry.AddObject(alarmObj);
         alarmObj.MoveTo(alarmNode);
@@ -422,7 +422,7 @@ public static class InitialSetup
             throw new InvalidOperationException($"Unknown lock policy '{LockPolicies.Builder}' while seeding world locks.");
         var button = GameObject.Create("A big red button", isItem: true);
         button.Desc = "A large button that glows with an ominous red light. Wonder if it does anything...";
-        button.Aliases = new List<string>{"button"};
+        button.Aliases = ["button"];
         button.AddLock("get", builderPred, LockPolicies.Builder);
         if (button.ExternalCmdSet is null) button.ExternalCmdSet = new Commands.CmdSet();
         button.ExternalCmdSet.Add(new PushCommand());

@@ -255,7 +255,7 @@ public class Channel : GameObject
             _listeners.Clear();
             _mutGen++;
         }
-        try { SetIsDeletedRaw(true); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Delete: " + logEx.Message, "Channel"); }
+        try { SetIsDeletedRaw(true); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Channel.Delete: {logEx.Message}", "Channel"); }
         foreach (var lid in toDetach)
         {
             var o = Globals.ObjectRegistry.GetSingle(lid);
@@ -271,7 +271,7 @@ public class Channel : GameObject
                     try { o.Unsubscribe(this); }
                     finally { o.SyncRoot.ExitWriteLock(); }
                 }
-                catch (Exception ex) { try { AtherizLogger.LogError($"channel delete detach failed for object {lid}: {ex.Message}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Delete: " + logEx.Message, "Channel"); } }
+                catch (Exception ex) { try { AtherizLogger.LogError($"channel delete detach failed for object {lid}: {ex.Message}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Channel.Delete: {logEx.Message}", "Channel"); } }
             }
         }
         Globals.ObjectRegistry.RemoveObject(this);
@@ -321,14 +321,14 @@ public class Channel : GameObject
             // FormatMessage is a pure function of (timestamp, sender, text), so
             // format once instead of once per listener. The sender rides along
             // so per-receiver hooks (at_msg_receive) keep provenance.
-            try { listener.Msg(formatted, from); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.Msg: " + logEx.Message, "Channel"); }
+            try { listener.Msg(formatted, from); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Channel.Msg: {logEx.Message}", "Channel"); }
         }
         // Live-log subscribers get the web text plus its epoch, outside the
         // lock and failure-isolated like listeners: a throwing stream must
         // never break game delivery. In-game listeners above keep receiving
         // the server-formatted bytes; only the web log renders viewer-local
         // times from the epoch.
-        try { MessagePosted?.Invoke(seq, timestamp, FormatWebText(senderName, text)); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Channel.MessagePosted: " + logEx.Message, "Channel"); }
+        try { MessagePosted?.Invoke(seq, timestamp, FormatWebText(senderName, text)); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Channel.MessagePosted: {logEx.Message}", "Channel"); }
     }
 
     public virtual string FormatMessage(long timestamp, string sender, string message)

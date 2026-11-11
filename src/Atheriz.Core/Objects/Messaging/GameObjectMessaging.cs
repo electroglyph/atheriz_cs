@@ -42,10 +42,10 @@ public partial class GameObject
             // AtMsgReceive runs through Hookable (below); a false return aborts the message.
             if (!AtMsgReceive(parsed, fromObj, msgType)) return;
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Msg: {logEx.Message}", "GameObject"); }
         if (fromObj is not null)
         {
-            try { fromObj.AtMsgSend(parsed, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
+            try { fromObj.AtMsgSend(parsed, this, msgType); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Msg: {logEx.Message}", "GameObject"); }
         }
         // single critical section — the log append and the session read
         // happen under one write hold, so a session swap between them can no
@@ -66,7 +66,7 @@ public partial class GameObject
         // Forward to session if puppeted — mirrors base_obj.py:904 if self.session is not None: self.session.msg(*args, **kwargs)
         if (sess is not null && sess.Connection is not null)
         {
-            try { sess.Msg(parsed); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Msg: " + logEx.Message, "GameObject"); }
+            try { sess.Msg(parsed); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Msg: {logEx.Message}", "GameObject"); }
         }
     }
 
@@ -219,7 +219,7 @@ public partial class GameObject
         foreach (var obj in contents)
         {
             if (excl is not null && excl.Contains(obj)) continue;
-            try { func(obj, kw); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ForContents: " + logEx.Message, "GameObject"); }
+            try { func(obj, kw); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.ForContents: {logEx.Message}", "GameObject"); }
         }
     }
 

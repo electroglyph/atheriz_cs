@@ -199,7 +199,7 @@ public sealed class ConnectCommand : Command
             // Single Prompt(display): menu + prompt line in one message, so the
             // webclient prints one trailing ">" (Msg + Prompt = double prompt).
             string choice;
-            try { choice = await caller.Session.Prompt(text + "Enter your choice:", false, ct).ConfigureAwait(false); }
+            try { choice = await caller.Session.Prompt($"{text}Enter your choice:", false, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
             catch { return; }
             if (choice is null) return;

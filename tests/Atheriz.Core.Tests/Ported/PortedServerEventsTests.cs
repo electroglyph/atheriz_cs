@@ -96,7 +96,7 @@ public class PortedServerEventsTests
         Assert.NotNull(ch!.Location);
         // home is real_home_node: ch.Home should be home coord
         var homeLoc = ch.Location as Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation;
-        if (homeLoc != null) Assert.Equal(home.Coord, homeLoc.Coord);
+        if (homeLoc is not null) Assert.Equal(home.Coord, homeLoc.Coord);
         else
         {
             var prop = ch.GetType().GetProperty("Home")?.GetValue(ch);
@@ -116,7 +116,7 @@ public class PortedServerEventsTests
         Assert.NotNull(ch!.Location);
         // move_to was called once with the home node -> location equals home or home added
         var locObj = ch.ResolveLocationObject() as Node;
-        if (locObj != null) Assert.Equal(home.Coord, locObj.Coord);
+        if (locObj is not null) Assert.Equal(home.Coord, locObj.Coord);
         else Assert.NotNull(ch.Location);
     }
     [Fact] public void AtCharCreate_NewAccount_CreatesBoth()
@@ -270,6 +270,6 @@ public class PortedServerEventsTests
         Assert.True(s.MinPasswordLength >= 8);
         Assert.NotNull(Validation.ValidatePassword("1234567"));
         var valid = Validation.ValidatePassword("12345678");
-        Assert.True(valid == null || !valid.Contains("at least"));
+        Assert.True(valid is null || !valid.Contains("at least"));
     }
 }

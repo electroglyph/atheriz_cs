@@ -39,7 +39,7 @@ public class PortedPyHardeningTestsPart2
         using var env = GlobalTestEnv.Enter();
         Assert.False(HasPyCommand);
         // C# has no time.sleep proxy; verify no traversal via reflection to settings
-        var hasTimeSleep = typeof(Atheriz.Core.Globals.GameTime).GetMethod("Sleep") != null;
+        var hasTimeSleep = typeof(Atheriz.Core.Globals.GameTime).GetMethod("Sleep") is not null;
         Assert.False(hasTimeSleep);
     }
 
@@ -137,7 +137,7 @@ public class PortedPyHardeningTestsPart2
         using var env = GlobalTestEnv.Enter();
         Assert.False(HasPyCommand);
         // Verify no sandbox lock exists in C#
-        var hasLock = typeof(Atheriz.Core.Commands.Command).GetField("_SANDBOX_LOCK", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic) != null;
+        var hasLock = typeof(Atheriz.Core.Commands.Command).GetField("_SANDBOX_LOCK", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic) is not null;
         Assert.False(hasLock);
     }
 

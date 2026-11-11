@@ -53,7 +53,7 @@ public static class PathGuards
     /// </summary>
     private static void ProbeWritable(string dir, string kind)
     {
-        var probe = Path.Combine(dir, ".atheriz_write_probe_" + Path.GetRandomFileName());
+        var probe = Path.Combine(dir, $".atheriz_write_probe_{Path.GetRandomFileName()}");
         try
         {
             using var fs = new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);

@@ -132,14 +132,14 @@ public sealed class PidFile : IDisposable
     {
         HashSet<string> targetInodes = [];
         tablesRead = false;
-        foreach (var netFile in new[] { "/proc/net/tcp", "/proc/net/tcp6" })
+        foreach (var netFile in new[] {"/proc/net/tcp", "/proc/net/tcp6"})
         {
             if (!File.Exists(netFile)) continue;
             tablesRead = true;
             var lines = File.ReadAllLines(netFile);
             foreach (var line in lines.Skip(1))
             {
-                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                var parts = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length < 10) continue;
                 var local = parts[1]; // 0100007F:0035
                 var st = parts[3];
@@ -337,7 +337,7 @@ public sealed class PidFile : IDisposable
     /// </summary>
     internal static PidClaim NewClaim(int pid)
     {
-        return new PidClaim(pid, ProcessStartUtc(pid) ?? DateTime.UtcNow);
+        return new(pid, ProcessStartUtc(pid) ?? DateTime.UtcNow);
     }
 
     /// <summary>
@@ -348,9 +348,7 @@ public sealed class PidFile : IDisposable
     {
         if (claim.WrittenUtc is not DateTime written)
             return claim.Pid.ToString(CultureInfo.InvariantCulture);
-        return claim.Pid.ToString(CultureInfo.InvariantCulture)
-            + "\n"
-            + written.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        return $"{claim.Pid.ToString(CultureInfo.InvariantCulture)}\n{written.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)}";
     }
 
     // The process's own start time in UTC, or null when it cannot be read
@@ -618,10 +616,10 @@ public sealed class PidFile : IDisposable
             if (lines.Length == 0) return null;
             if (!int.TryParse(lines[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid))
                 return null;
-            if (lines.Length < 2) return new PidClaim(pid, null);
+            if (lines.Length < 2) return new(pid, null);
             if (!DateTime.TryParse(lines[1].Trim(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var written))
                 return null;
-            return new PidClaim(pid, written.ToUniversalTime());
+            return new(pid, written.ToUniversalTime());
         }
         catch { return null; }
     }
@@ -687,7 +685,7 @@ public sealed class PidFile : IDisposable
         // move it, so deleting our renamed copy can never touch the live
         // claim. A non-matching file is moved back unless a successor
         // already claimed (then ours was stale — drop it).
-        string sidecar = pidPath + $".releasing-{Environment.ProcessId}";
+        string sidecar = $"{pidPath}.releasing-{Environment.ProcessId}";
         try
         {
             if (!File.Exists(pidPath)) return false;

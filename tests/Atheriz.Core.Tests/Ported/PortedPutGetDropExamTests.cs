@@ -29,7 +29,7 @@ public class PortedPutGetDropExamTests
         public override void Msg(string text, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null){ Msgs.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg); }
         public override List<GameObject> Search(string q, bool rec=true, GameObject? looker=null)
         {
-            if (SearchFunc != null) return SearchFunc(q);
+            if (SearchFunc is not null) return SearchFunc(q);
             var low = q.ToLowerInvariant().Trim();
             if (SearchMap.TryGetValue(q, out var v)) return new List<GameObject>(v);
             if (SearchMap.TryGetValue(low, out var v2)) return new List<GameObject>(v2);
@@ -48,7 +48,7 @@ public class PortedPutGetDropExamTests
         public TrackingNode(Coord c):base(c){}
         public override List<GameObject> Search(string q, bool rec=true, GameObject? looker=null)
         {
-            if (SearchHandler != null) return SearchHandler(q);
+            if (SearchHandler is not null) return SearchHandler(q);
             return base.Search(q, rec, looker);
         }
         public override void Msg(string text, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null){ Msgs.Add(text); base.Msg(text, fromObj, mapping, raiseErrors, msgType, rawMsg); }
@@ -248,7 +248,7 @@ public class PortedPutGetDropExamTests
         c.Location = LocationRef.NullLocation.Instance;
         var cmd = new GetCommand();
         var (fn, caller, pargs) = cmd.Execute(c, "apple", "get");
-        if (fn != null) fn(caller!, pargs);
+        if (fn is not null) fn(caller!, pargs);
         else cmd.Run(c, pargs);
         Assert.Contains("No.", string.Join(" ", c.PeekMessages()));
     }
@@ -262,7 +262,7 @@ public class PortedPutGetDropExamTests
         c.MoveTo(room);
         var cmd = new GetCommand();
         var (fn, caller, pargs) = cmd.Execute(c, "apple", "get");
-        if (fn != null) fn(caller!, pargs);
+        if (fn is not null) fn(caller!, pargs);
         else cmd.Run(c, pargs);
         Assert.Contains("You can't get something from here!", string.Join(" ", c.PeekMessages()));
     }
@@ -277,7 +277,7 @@ public class PortedPutGetDropExamTests
         c.MoveTo(room);
         var cmd = new GetCommand();
         var (fn, caller, pargs) = cmd.Execute(c, "all", "get");
-        if (fn != null) fn(caller!, pargs);
+        if (fn is not null) fn(caller!, pargs);
         else cmd.Run(c, pargs);
         Assert.Contains("You can't get something from here!", string.Join(" ", c.PeekMessages()));
         Assert.Contains(apple.Id, room.ContentsSnapshot);
@@ -294,7 +294,7 @@ public class PortedPutGetDropExamTests
         room.SearchHandler = q => q.ToLowerInvariant().Contains("apple") ? new List<GameObject>{ apple } : new List<GameObject>();
         var cmd = new GetCommand();
         var (fn, caller, pargs) = cmd.Execute(c, "apple", "get");
-        if (fn != null) fn(caller!, pargs);
+        if (fn is not null) fn(caller!, pargs);
         else cmd.Run(c, pargs);
         Assert.Contains(apple.Id, c.ContentsSnapshot);
     }
@@ -309,7 +309,7 @@ public class PortedPutGetDropExamTests
         room.SearchHandler = _=> new List<GameObject>();
         var cmd = new GetCommand();
         var (fn, caller, pargs) = cmd.Execute(c, "missing", "get");
-        if (fn != null) fn(caller!, pargs);
+        if (fn is not null) fn(caller!, pargs);
         else cmd.Run(c, pargs);
         Assert.Contains("Object not found.", string.Join(" ", c.PeekMessages()));
     }
@@ -324,7 +324,7 @@ public class PortedPutGetDropExamTests
         var b = GameObject.Create("B"); ObjectRegistry.AddObject(b); b.MoveTo(room);
         var cmd = new GetCommand();
         var (fn, caller, pargs) = cmd.Execute(c, "all", "get");
-        if (fn != null) fn(caller!, pargs);
+        if (fn is not null) fn(caller!, pargs);
         else cmd.Run(c, pargs);
         Assert.Contains(a.Id, c.ContentsSnapshot);
         Assert.Contains(b.Id, c.ContentsSnapshot);
@@ -468,7 +468,7 @@ public class PortedPutGetDropExamTests
         var c = MakeCaller("Alice", true);
         var exam = new ExamCommand();
         var (fn, caller, args) = exam.Execute(c, "me", "exam");
-        if (fn != null) fn(caller!, args);
+        if (fn is not null) fn(caller!, args);
         var msgs = string.Join(" ", c.PeekMessages());
         Assert.Contains("Examining", msgs);
     }
@@ -479,7 +479,7 @@ public class PortedPutGetDropExamTests
         var c = MakeCaller("Admin", true);
         var exam = new ExamCommand();
         var (fn, caller, args) = exam.Execute(c, "#99999", "exam");
-        if (fn != null) fn(caller!, args);
+        if (fn is not null) fn(caller!, args);
         Assert.Contains("No object found with ID 99999.", string.Join(" ", c.PeekMessages()));
     }
 
@@ -489,7 +489,7 @@ public class PortedPutGetDropExamTests
         var c = MakeCaller("Admin", true);
         var exam = new ExamCommand();
         var (fn, caller, args) = exam.Execute(c, "#abc", "exam");
-        if (fn != null) fn(caller!, args);
+        if (fn is not null) fn(caller!, args);
         Assert.Contains("Invalid ID format. Use #<number>.", string.Join(" ", c.PeekMessages()));
     }
 
@@ -591,7 +591,7 @@ public class PortedPutGetDropExamTests
         var pa = new Atheriz.Core.Commands.GameArgumentParser.ParsedArgs(); pa["target"]=$"#{target.Id}";
         exam.Run(c, pa);
         // Ensure target not mutated with leaked properties
-        var hasContents = target.GetType().GetProperty("Contents") != null; // should not leak as field
+        var hasContents = target.GetType().GetProperty("Contents") is not null; // should not leak as field
         // Check that calling exam didn't add is_superuser etc as fields
         var fields = target.GetType().GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).Select(f=>f.Name).ToHashSet();
         // We check via vars analogue: ensure no contents/is_superuser added to extra dict

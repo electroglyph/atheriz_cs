@@ -296,7 +296,7 @@ public class Account : GameObject
         // (swallow+log), so the account still registers below. (Python
         // base_account.py:45 is unguarded, but this matches
         // the C# GameObject.Create containment.)
-        try { acc.AtCreate(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Account.Create: " + logEx.Message, "Account"); }
+        try { acc.AtCreate(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Account.Create: {logEx.Message}", "Account"); }
         ObjectRegistry.AddObjectUnique(acc, o => o is Account a && string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase), $"Account with this name ({name}) already exists.");
         return acc;
     }

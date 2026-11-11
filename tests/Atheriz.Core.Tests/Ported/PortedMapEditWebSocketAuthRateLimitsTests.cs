@@ -192,7 +192,7 @@ public class PortedMapEditWebSocketAuthRateLimitsTests
             var passErr = Atheriz.Core.Commands.UnloggedIn.Validation.ValidatePassword(c.Password);
             // Check ANSI: our validation should reject ANSI
             if (c.AccountName.Contains("\x1b")) Assert.NotNull(accErr);
-            bool shouldFail = accErr != null || charErr != null || passErr != null;
+            bool shouldFail = accErr is not null || charErr is not null || passErr is not null;
             Assert.Equal(c.ShouldFail, shouldFail);
         }
         // Also test via direct Validation as in original

@@ -274,24 +274,24 @@ public static class AdminAccess
         if (!CanEdit(editor, target, out var why)) { error = why; return false; }
         if (Equals(target.Location, dest)) return true;
         bool moved;
-        if (dest is LocationRef.NullLocation)
-            moved = target.MoveToNowhere(force: true);
-        else if (dest is LocationRef.CoordLocation cl)
+        switch (dest)
         {
-            var node = ObjectRegistry.FindNodeByCoord(cl.Coord);
-            if (node is null) { error = $"No node found at {cl.Coord}."; return false; }
-            moved = target.MoveTo(node, force: true);
-        }
-        else if (dest is LocationRef.ObjectLocation ol)
-        {
-            var obj = ObjectRegistry.GetSingle(ol.ObjectId);
-            if (obj is null || obj.IsDeleted) { error = $"No object found with ID {ol.ObjectId}."; return false; }
-            moved = target.MoveTo(obj, force: true);
-        }
-        else
-        {
-            error = "'location' cannot be set from text.";
-            return false;
+            case LocationRef.NullLocation:
+                moved = target.MoveToNowhere(force: true);
+                break;
+            case LocationRef.CoordLocation cl:
+                var node = ObjectRegistry.FindNodeByCoord(cl.Coord);
+                if (node is null) { error = $"No node found at {cl.Coord}."; return false; }
+                moved = target.MoveTo(node, force: true);
+                break;
+            case LocationRef.ObjectLocation ol:
+                var obj = ObjectRegistry.GetSingle(ol.ObjectId);
+                if (obj is null || obj.IsDeleted) { error = $"No object found with ID {ol.ObjectId}."; return false; }
+                moved = target.MoveTo(obj, force: true);
+                break;
+            default:
+                error = "'location' cannot be set from text.";
+                return false;
         }
         if (!moved) { error = $"Could not move to {FormatLocationRef(dest)}."; return false; }
         try { target.LastTouchedBy = editor.Id; } catch { }

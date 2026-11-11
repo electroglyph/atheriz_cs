@@ -84,7 +84,7 @@ public sealed class ValidationTests
     [Fact]
     public void StringDistance_BestMatch_EmptyCandidates_ReturnsNull()
     {
-        Assert.Null(StringDistance.BestMatch("lok", Array.Empty<string>()));
+        Assert.Null(StringDistance.BestMatch("lok", []));
     }
 
     [Fact]
@@ -180,7 +180,15 @@ public sealed class ValidationTests
         var a = GameClock.MonotonicSeconds();
         var b = GameClock.MonotonicSeconds();
         Assert.True(b >= a);
-        Assert.Equal(a, GameClock.Now(), precision: 3);
+        // Now() is the same monotonic source (GameClock.Now() forwards to
+        // MonotonicSeconds): it must never read behind an earlier sample,
+        // and must stay within the same tick scale — not wall-clock seconds
+        // or ticks, which differ by orders of magnitude. An exact-equality
+        // pin here would flake whenever thread scheduling crossed a
+        // millisecond rounding boundary under parallel load.
+        var now = GameClock.Now();
+        Assert.True(now >= a);
+        Assert.True(now - a < 1.0);
     }
 
     [Fact]

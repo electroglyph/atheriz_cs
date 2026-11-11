@@ -214,7 +214,7 @@ public class PortedTickerTests
         // Good slot should still be stopped despite bad slot throwing
         var goodSlot = ticker.GetSlot(0.05);
         // After Stop, good slot Running should be false (Stop was attempted)
-        if (goodSlot != null) Assert.False(goodSlot.Running);
+        if (goodSlot is not null) Assert.False(goodSlot.Running);
         ticker.Clear();
         pool.Stop();
     }

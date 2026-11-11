@@ -22,7 +22,7 @@ public static class PortedHelpers
         if (id >= 0) c.Id = id;
         c.PrivilegeLevel = priv;
         c.Quelled = false;
-        if (nodeLocation != null)
+        if (nodeLocation is not null)
             c.Location = new LocationRef.CoordLocation(nodeLocation.Coord);
         if (ObjectRegistry.Get(c.Id).Count == 0)
         {
@@ -66,7 +66,7 @@ public static class PortedHelpers
     public static GameObject MakeCaller(string name, bool builder, bool superuser, GameObject? loc)
     {
         Node? node = null;
-        if (loc != null) node = loc.ResolveLocationObject() as Node;
+        if (loc is not null) node = loc.ResolveLocationObject() as Node;
         return MakeCaller(name, builder, superuser, node);
     }
 

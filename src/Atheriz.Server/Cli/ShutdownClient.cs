@@ -69,7 +69,7 @@ public static class ShutdownClient
             if (jsonPayload is not null) req.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
             var resp = await client.SendAsync(req).ConfigureAwait(false);
             var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-            return new AdminResponse((int)resp.StatusCode, body);
+            return new((int)resp.StatusCode, body);
         }
         catch { return null; }
     }

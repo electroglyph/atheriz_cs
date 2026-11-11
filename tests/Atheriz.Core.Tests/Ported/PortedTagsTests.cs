@@ -324,7 +324,7 @@ public class PortedTagsTests
         Assert.True(obj.HasTags(new[]{"warrior"}, all:true));
         Assert.False(obj.HasTags(new[]{"warrior","mage"}, all:true));
         Assert.False(obj.HasTags(new[]{"mage"}, all:true));
-        Assert.True(obj.HasTags(Array.Empty<string>(), all:true));
+        Assert.True(obj.HasTags([], all:true));
     }
     // Port of test_tags.py:323 aliases mutability
     [Fact] public void AliasesListIsCopiedNotReferenced()

@@ -113,7 +113,7 @@ public static class ObjectRegistry
             var indexed = NodeHandler.GetCurrent()?.TryGetNodeAt(coord);
             if (indexed is not null) return indexed;
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ObjectRegistry.FindNodeByCoord index lookup: " + logEx.Message, "ObjectRegistry"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed ObjectRegistry.FindNodeByCoord index lookup: {logEx.Message}", "ObjectRegistry"); }
         List<GameObject> snap;
         lock (AllLock) { snap = AllObjects.Values.ToList(); }
         foreach (var o in snap)
@@ -294,6 +294,17 @@ public static class ObjectRegistry
 
     public static void LoadObjects(AtherizDbContext db)
     {
+        // Temporary boot instrumentation (see StartStop.MarkBootStage): 36s
+        // was observed here on an 812K DB. Per-stage times + counts until the
+        // slow step is identified.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        long last = 0;
+        void Mark(string stage, string? extra = null)
+        {
+            var now = sw.ElapsedMilliseconds;
+            AtherizLogger.LogInformation($"[Load] stage '{stage}' took {now - last}ms (total {now}ms){(extra is null ? "" : $" {extra}")}.");
+            last = now;
+        }
         Dictionary<int, GameObject> objects = [];
         var maxId = -1;
         try
@@ -302,6 +313,8 @@ public static class ObjectRegistry
             // convert row by row. Corrupt rows are SKIPPED but REPORTED with
             // their row id — never silently dropped.
             var rows = JsonTableLoader.LoadRows(db.Objects);
+            Mark("load_rows", $"rows={rows.Count}");
+            int converted = 0;
             foreach (var row in rows)
             {
                 Persistence.Dto.GameObjectDto? dto;
@@ -311,12 +324,12 @@ public static class ObjectRegistry
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt object row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
+                    try { AtherizLogger.LogWarning($"[Load] skipping corrupt object row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed BoundedDictionary.LoadObjects: {logEx.Message}", "BoundedDictionary"); }
                     continue;
                 }
                 if (dto is null)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping null object row {row.Id}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
+                    try { AtherizLogger.LogWarning($"[Load] skipping null object row {row.Id}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed BoundedDictionary.LoadObjects: {logEx.Message}", "BoundedDictionary"); }
                     continue;
                 }
                 try
@@ -324,12 +337,14 @@ public static class ObjectRegistry
                     var obj = GameObject.FromDto(dto);
                     objects[row.Id] = obj;
                     if (row.Id > maxId) maxId = row.Id;
+                    converted++;
                 }
                 catch (Exception ex)
                 {
-                    try { AtherizLogger.LogWarning($"[Load] skipping unrestorable object row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
+                    try { AtherizLogger.LogWarning($"[Load] skipping unrestorable object row {row.Id}: {ex.GetType().Name}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed BoundedDictionary.LoadObjects: {logEx.Message}", "BoundedDictionary"); }
                 }
             }
+            Mark("convert_rows", $"converted={converted}");
         }
         catch (InvalidOperationException ex)
         {
@@ -350,7 +365,7 @@ public static class ObjectRegistry
             // unreadable rows all skipped above; empty table on a running
             // server likewise keeps live state). Mirrors MapHandler.Load /
             // NodeHandler.Load preserving live on zero usable rows.
-            try { AtherizLogger.LogWarning("[Load] object load yielded no usable rows; preserving live registry"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
+            try { AtherizLogger.LogWarning("[Load] object load yielded no usable rows; preserving live registry"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed BoundedDictionary.LoadObjects: {logEx.Message}", "BoundedDictionary"); }
             return;
         }
         // Swap + id watermark atomically under both locks: a concurrent
@@ -375,10 +390,41 @@ public static class ObjectRegistry
 
         List<GameObject> snap;
         lock (AllLock) { snap = AllObjects.Values.ToList(); }
-        foreach (var o in snap)
-        {
-            try { o.ResolveRelations(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.LoadObjects: " + logEx.Message, "BoundedDictionary"); }
-        }
+        Mark("swap", $"live={snap.Count}");
+        // Temporary: per-object resolve timing. resolve_relations showed
+        // 23x variance (1.5s vs 36.8s) on the same 132 rows — find which
+        // objects/hooks eat it.
+        var slowest = new List<(int Id, string Kind, long Ms)>(6);
+        object slowestLock = new();
+        // NPC talk-shard opens dominate this pass (~2s each, IO-bound), so
+        // resolve objects in parallel. Audited safe: every shared touchpoint
+        // is lock-guarded (GrottoRandom, *_Shared double-checks, queue,
+        // ticker AddCoro, per-instance _talkGate, loggers) and per-object
+        // state is disjoint (distinct qdrant shard dirs per NPC).
+        System.Threading.Tasks.Parallel.ForEach(snap,
+            new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
+            o =>
+            {
+                var one = System.Diagnostics.Stopwatch.StartNew();
+                try { o.ResolveRelations(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed BoundedDictionary.LoadObjects: {logEx.Message}", "BoundedDictionary"); }
+                one.Stop();
+                // Id/Kind reads are lock-guarded property fetches; if one ever
+                // throws, the per-object catch above logs it like any resolve
+                // failure instead of hiding behind a nested guard.
+                int id = o.Id;
+                string kind = o.GetType().Name;
+                lock (slowestLock)
+                {
+                    slowest.Add((id, kind, one.ElapsedMilliseconds));
+                    if (slowest.Count > 5)
+                    {
+                        slowest.Sort((a, b) => b.Ms.CompareTo(a.Ms));
+                        slowest.RemoveRange(5, slowest.Count - 5);
+                    }
+                }
+            });
+        slowest.Sort((a, b) => b.Ms.CompareTo(a.Ms));
+        Mark("resolve_relations", $"objects={snap.Count} top5=[{string.Join(", ", slowest.Select(s => $"{s.Kind}#{s.Id}:{s.Ms}ms"))}]");
     }
 
     // Closed-DB guard: the IsClosed flag decides (no message sniffing).
@@ -468,7 +514,7 @@ public static class ObjectRegistry
             {
                 lock (AllLock) { foreach (var id in tombstones) _pendingDeletions.Add(id); }
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.SaveObjects: " + logEx.Message, "BoundedDictionary"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed BoundedDictionary.SaveObjects: {logEx.Message}", "BoundedDictionary"); }
         }
 
         // Best-effort dirty-restore shared by every failure path below:
@@ -484,7 +530,7 @@ public static class ObjectRegistry
                     try { o.IsModified = true; }
                     finally { o.SyncRoot.ExitWriteLock(); }
                 }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BoundedDictionary.SaveObjects: " + logEx.Message, "BoundedDictionary"); }
+                catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed BoundedDictionary.SaveObjects: {logEx.Message}", "BoundedDictionary"); }
             }
         }
 
@@ -506,7 +552,7 @@ public static class ObjectRegistry
                 // Row-level skip-and-report: a poison row is logged and left
                 // dirty for the next checkpoint instead of aborting the whole
                 // checkpoint (healthy rows still commit below).
-                try { AtherizLogger.LogError($"Skipping unserializable object {obj.Id}; still dirty for next checkpoint:\n{ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed ObjectRegistry.SaveObjects poison log: " + logEx.Message, "BoundedDictionary"); }
+                try { AtherizLogger.LogError($"Skipping unserializable object {obj.Id}; still dirty for next checkpoint:\n{ex}"); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed ObjectRegistry.SaveObjects poison log: {logEx.Message}", "BoundedDictionary"); }
                 skipped.Add(obj);
             }
         }

@@ -55,13 +55,13 @@ public class PortedFollowGuardTests
         foreach (var fid in followers)
         {
             var fol = ObjectRegistry.Get(fid).FirstOrDefault();
-            if (fol == null) continue;
+            if (fol is null) continue;
             if (fol.Location is Persistence.Dto.LocationRef.CoordLocation cl && cl.Coord.Equals(oldLoc.Coord))
             {
                 bool moved = fol.MoveTo(dest);
                 if (!moved) fol.Msg($"You can't follow {leader.Name} there!");
             }
-            else if (fol.Location == null || fol.Location is Persistence.Dto.LocationRef.NullLocation)
+            else if (fol.Location is null || fol.Location is Persistence.Dto.LocationRef.NullLocation)
             {
                 // not moved
             }

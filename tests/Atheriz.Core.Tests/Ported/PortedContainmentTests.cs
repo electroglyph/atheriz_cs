@@ -294,7 +294,7 @@ public class PortedContainmentTests
         public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null) => Messages.Add(t);
         public override List<GameObject> Search(string query, bool rec=true, GameObject? looker=null)
         {
-            if (Bag != null && query.ToLowerInvariant().Contains("bag")) return new List<GameObject>{Bag};
+            if (Bag is not null && query.ToLowerInvariant().Contains("bag")) return new List<GameObject>{Bag};
             return new List<GameObject>();
         }
     }
@@ -335,8 +335,8 @@ public class PortedContainmentTests
         public override List<GameObject> Search(string q, bool r=true, GameObject? looker=null)
         {
             var low = q.ToLowerInvariant();
-            if (low.Contains("bag") && Bag != null) return new List<GameObject>{Bag};
-            if (low.Contains("pouch") && Pouch != null) return new List<GameObject>{Pouch};
+            if (low.Contains("bag") && Bag is not null) return new List<GameObject>{Bag};
+            if (low.Contains("pouch") && Pouch is not null) return new List<GameObject>{Pouch};
             return new List<GameObject>();
         }
     }
@@ -374,7 +374,7 @@ public class PortedContainmentTests
         public override void Msg(string t, GameObject? fromObj, IDictionary<string,object?>? mapping, bool raiseErrors=false, string? msgType=null, string? rawMsg = null) => Messages.Add(t);
         public override List<GameObject> Search(string q, bool r=true, GameObject? looker=null)
         {
-            if (q.ToLowerInvariant().Contains("pouch") && Pouch != null) return new List<GameObject>{Pouch};
+            if (q.ToLowerInvariant().Contains("pouch") && Pouch is not null) return new List<GameObject>{Pouch};
             return new List<GameObject>();
         }
     }
@@ -478,8 +478,8 @@ public class PortedContainmentTests
         public override List<GameObject> Search(string q, bool r=true, GameObject? looker=null)
         {
             var low = q.ToLowerInvariant();
-            if (low.Contains("deepest") && Deepest != null) return new List<GameObject>{Deepest};
-            if (low.Contains("outer") && Outer != null) return new List<GameObject>{Outer};
+            if (low.Contains("deepest") && Deepest is not null) return new List<GameObject>{Deepest};
+            if (low.Contains("outer") && Outer is not null) return new List<GameObject>{Outer};
             return new List<GameObject>();
         }
     }

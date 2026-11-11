@@ -24,7 +24,7 @@ public sealed class ShadowNodeProbe : Node
 public class PluginBootLoadTests
 {
     // Stages a fake game dir: <tmp>/bootgame_<guid>/bootgame.csproj (written
-    // first, so older) + bin/Release/net10.0/bootgame.dll (a copy of this test
+    // first, so older) + bin/Release/net11.0/bootgame.dll (a copy of this test
     // assembly, which carries the GoodProbeReplacement marker). Returns the
     // game dir; the caller owns cleanup.
     private static string StageFakeGame()
@@ -36,7 +36,7 @@ public class PluginBootLoadTests
         // Discovery treats a dll older than its csproj as stale (never builds):
         // backdate the csproj and stamp the copied dll as fresh.
         File.SetLastWriteTimeUtc(csproj, DateTime.UtcNow.AddMinutes(-5));
-        var binDir = Path.Combine(dir, "bin", "Release", "net10.0");
+        var binDir = Path.Combine(dir, "bin", "Release", "net11.0");
         Directory.CreateDirectory(binDir);
         var dllPath = Path.Combine(binDir, "bootgame.dll");
         File.Copy(typeof(PluginReloadRegressionTests).Assembly.Location, dllPath);
@@ -128,7 +128,7 @@ public class PluginBootLoadTests
         var dir = StageFakeGame();
         try
         {
-            var objDir = Path.Combine(dir, "obj", "Release", "net10.0");
+            var objDir = Path.Combine(dir, "obj", "Release", "net11.0");
             Directory.CreateDirectory(objDir);
             File.WriteAllText(Path.Combine(objDir, "bootgame.AssemblyInfo.cs"), "// generated");
             var testsDir = Path.Combine(dir, "bootgametests");

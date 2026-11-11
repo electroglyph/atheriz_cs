@@ -97,7 +97,7 @@ public sealed class SocialsCommand : LoggedInCommand
     public override string PrintHelp()
     {
         string baseHelp = Parser?.FormatHelp() ?? "";
-        return $"{baseHelp}\nAvailable socials:\n{string.Join(", ", Aliases)}\n" + ExtraDesc;
+        return $"{baseHelp}\nAvailable socials:\n{string.Join(", ", Aliases)}\n{ExtraDesc}";
     }
     protected override void SetupParser(GameArgumentParser p) { p.AddArgument(ParsedArgKeys.Target, nargs: "*", help: "Who or what to do this to."); }
     protected override bool AllowMissingArgs => true;

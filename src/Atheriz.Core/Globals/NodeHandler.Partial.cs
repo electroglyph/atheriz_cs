@@ -31,7 +31,7 @@ public partial class NodeHandler
         // nesting). MapClose/MapOpen already implement the post_grid (+pre_grid
         // if non-empty) stamp + render; the MapEnabled gate only skips render
         // work when maps are disabled.
-        try { if (door.Closed) door.MapClose(); else door.MapOpen(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.AddDoor: " + logEx.Message, "NodeHandler"); }
+        try { if (door.Closed) door.MapClose(); else door.MapOpen(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.AddDoor: {logEx.Message}", "NodeHandler"); }
     }
     // not by exit-name key.
     private static void RemoveDoorValue(Dictionary<string,Door> d, Door door)
@@ -65,7 +65,7 @@ public partial class NodeHandler
             if (mh is not null && door.SymbolCoord is not null)
             {
                 HashSet<(string, int)> seen = [];
-                foreach (var coord in new[] { door.FromCoord, door.ToCoord })
+                foreach (var coord in new[] {door.FromCoord, door.ToCoord})
                 {
                     if (coord.Equals(default(Coord))) continue;
                     if (!seen.Add((coord.Area, coord.Z))) continue;
@@ -73,7 +73,7 @@ public partial class NodeHandler
                 }
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemoveDoor: " + logEx.Message, "NodeHandler"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.RemoveDoor: {logEx.Message}", "NodeHandler"); }
     }
     public void AddNode(Node node)
     {
@@ -123,7 +123,7 @@ public partial class NodeHandler
         }
         finally { Lock.ExitWriteLock(); }
         foreach (var n in evict)
-            try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.ReplaceArea: " + logEx.Message, "NodeHandler"); }
+            try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.ReplaceArea: {logEx.Message}", "NodeHandler"); }
     }
     public void RemoveArea(string name)
     {
@@ -154,7 +154,7 @@ public partial class NodeHandler
         }
         finally { Lock.ExitWriteLock(); }
         foreach (var n in evict)
-            try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.Clear: " + logEx.Message, "NodeHandler"); }
+            try { ObjectRegistry.RemoveObject(n); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.Clear: {logEx.Message}", "NodeHandler"); }
         Lock2.EnterWriteLock();
         try { foreach (var k in _transitions.Keys) _removedTrans.Add(k); _transitions.Clear(); _modified2=true; _transGen++; }
         finally { Lock2.ExitWriteLock(); }
@@ -207,7 +207,7 @@ public partial class NodeHandler
         }
         finally { Lock.ExitWriteLock(); }
         if (node is not null)
-            try { ObjectRegistry.RemoveObject(node); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler.RemoveNode: " + logEx.Message, "NodeHandler"); }
+            try { ObjectRegistry.RemoveObject(node); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.RemoveNode: {logEx.Message}", "NodeHandler"); }
     }
     public List<Node> GetNodes(IEnumerable<Coord> coords)
     {
@@ -303,7 +303,7 @@ public partial class NodeHandler
         where TKey : notnull
     {
         if (!dst.TryAdd(key, value))
-            try { AtherizLogger.LogWarning(warnMsg); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed NodeHandler." + logScope + ": " + logEx.Message, "NodeHandler"); }
+            try { AtherizLogger.LogWarning(warnMsg); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed NodeHandler.{logScope}: {logEx.Message}", "NodeHandler"); }
     }
     public void RemapDoors(Dictionary<Coord, Coord> oldToNewFull, Dictionary<(int,int),(int,int)> remap)
     {

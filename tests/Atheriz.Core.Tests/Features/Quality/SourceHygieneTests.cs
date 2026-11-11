@@ -23,7 +23,7 @@ public class SourceHygieneTests
             if (Directory.Exists(Path.Combine(c, "src"))) return c;
         var cwd = Directory.GetCurrentDirectory();
         var d = new DirectoryInfo(cwd);
-        while (d != null)
+        while (d is not null)
         {
             if (Directory.Exists(Path.Combine(d.FullName, "src"))) return d.FullName;
             d = d.Parent;
@@ -45,8 +45,8 @@ public class SourceHygieneTests
             {
                 if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
                     file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
-                if (fileNameContains != null && !Path.GetFileName(file).Contains(fileNameContains)) continue;
-                if (excludeFiles != null && excludeFiles.Any(e => file.EndsWith(e))) continue;
+                if (fileNameContains is not null && !Path.GetFileName(file).Contains(fileNameContains)) continue;
+                if (excludeFiles is not null && excludeFiles.Any(e => file.EndsWith(e))) continue;
                 var lines = File.ReadAllLines(file);
                 bool inBlock = false;
                 for (int i = 0; i < lines.Length; i++)

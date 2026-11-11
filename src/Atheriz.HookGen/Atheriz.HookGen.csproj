@@ -4,6 +4,9 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Required by Roslyn 5.x (RS1036) for analyzer/generator projects; also
+         turns on the extended analyzer ruleset for this project. -->
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
   </PropertyGroup>
 
   <ItemGroup>

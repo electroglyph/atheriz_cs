@@ -18,7 +18,7 @@ public class PortedPyCommandTests
         Assert.DoesNotContain("py", allAliases);
         // Also ensure no is_open / drop-lock etc. needed — per AGENTS wontfix
         var dummy = GameObject.Create("PyVictim");
-        Assert.False(dummy.IsContainer && dummy.GetType().GetProperty("IsOpen") != null, "is_open not a feature on generic Object");
+        Assert.False(dummy.IsContainer && dummy.GetType().GetProperty("IsOpen") is not null, "is_open not a feature on generic Object");
     }
     [Fact] public void PyCommand_PrivilegeWouldRequireBuilderOrSuperuser()
     {

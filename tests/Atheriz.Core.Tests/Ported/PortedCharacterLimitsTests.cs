@@ -17,7 +17,7 @@ public class PortedCharacterLimitsTests
         ObjectRegistry.AddObject(home);
         var nh = GlobalServices.GetNodeHandler();
         var area = nh.GetArea("limbo");
-        if (area == null) { var a = new NodeArea("limbo"); nh.AddArea(a); area = a; }
+        if (area is null) { var a = new NodeArea("limbo"); nh.AddArea(a); area = a; }
         else
         {
             // Ensure we don't duplicate area; clear and reuse
@@ -89,7 +89,7 @@ public class PortedCharacterLimitsTests
         ObjectRegistry.AddObject(home);
         var nh = GlobalServices.GetNodeHandler();
         var area = nh.GetArea("limbo") ?? new NodeArea("limbo");
-        if (nh.GetArea("limbo") == null) nh.AddArea(area);
+        if (nh.GetArea("limbo") is null) nh.AddArea(area);
         area.GetOrAddGrid(0).AddNode(home);
         var orig = Atheriz.Core.Settings.AtherizSettings.Global.GuestEnabled;
         Atheriz.Core.Settings.AtherizSettings.Global.GuestEnabled = true;

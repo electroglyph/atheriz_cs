@@ -51,7 +51,7 @@ public class PluginReloadRegressionTests
         var project = Path.Combine(gameDir, name + ".csproj");
         File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>");
         File.SetLastWriteTimeUtc(project, DateTime.UtcNow.AddHours(-3));
-        var dllDir = Path.Combine(gameDir, "bin", "Release", "net10.0");
+        var dllDir = Path.Combine(gameDir, "bin", "Release", "net11.0");
         Directory.CreateDirectory(dllDir);
         var dll = Path.Combine(dllDir, name + ".dll");
         File.WriteAllBytes(dll, [0x4D, 0x5A]);

@@ -79,7 +79,7 @@ public class PortedDoorTestsPart2
         cmd.Run(caller, MakeArgs(remove:true, up:true));
         Assert.Contains(caller.PeekMessages(), m=>m.Contains("Removed"));
         var doors = nh.GetDoors(new Coord("TestArea", 0, 0, 0));
-        if (doors!=null) Assert.False(doors.ContainsKey("up"));
+        if (doors is not null) Assert.False(doors.ContainsKey("up"));
     }
 
     // test_door.py:563 test_remove_no_doors_here
@@ -237,8 +237,8 @@ public class PortedDoorTestsPart2
         nh.RemoveDoor(door);
         var doorsFrom = nh.GetDoors(new Coord("A",0,0,0));
         var doorsTo = nh.GetDoors(new Coord("A",0,2,0));
-        if (doorsFrom!=null) Assert.False(doorsFrom.ContainsKey("north"));
-        if (doorsTo!=null) Assert.False(doorsTo.ContainsKey("south"));
+        if (doorsFrom is not null) Assert.False(doorsFrom.ContainsKey("north"));
+        if (doorsTo is not null) Assert.False(doorsTo.ContainsKey("south"));
     }
 
     // test_door.py:769 test_nodehandler_get_doors_empty
@@ -289,7 +289,7 @@ public class PortedDoorTestsPart2
         public bool Closed = true;
         public bool Locked = false;
         public Func<GameObject,bool>? TryOpenFunc = null!;
-        public bool TryOpen(GameObject caller) => TryOpenFunc!=null ? TryOpenFunc(caller) : true;
+        public bool TryOpen(GameObject caller) => TryOpenFunc is not null ? TryOpenFunc(caller) : true;
         public bool TryClose(GameObject caller) => true;
     }
     private static (Node src, Node dest) MakeAreaForFollow(NodeHandler nh)
@@ -545,7 +545,7 @@ public class PortedDoorTestsPart2
             for (int i = 0; i < 100000; i++)
             {
                 var (from, to) = door.GetNodes();
-                if (from != null && to != null)
+                if (from is not null && to is not null)
                 {
                     paired++;
                     Assert.Equal(from.Coord.Area, to.Coord.Area);

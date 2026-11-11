@@ -50,7 +50,7 @@ public class PortedMazeBackgroundRegressionTests
     private static bool TryParseBackground(Dictionary<string, object?> payload, out string error)
     {
         error = "";
-        if (!payload.TryGetValue("color", out var colorObj) || colorObj == null)
+        if (!payload.TryGetValue("color", out var colorObj) || colorObj is null)
         {
             error = "missing color"; return false;
         }
@@ -80,12 +80,12 @@ public class PortedMazeBackgroundRegressionTests
         if (colorList.Count != 3) { error = $"color length {colorList.Count} !=3"; return false; }
         foreach (var c in colorList) if (c < 0 || c > 255) { error = $"color {c} out of 0-255"; return false; }
 
-        if (!payload.TryGetValue("coords", out var coordsObj) || coordsObj == null)
+        if (!payload.TryGetValue("coords", out var coordsObj) || coordsObj is null)
         {
             error = "missing coords"; return false;
         }
         var coordsEnumerable = coordsObj as System.Collections.IEnumerable;
-        if (coordsEnumerable == null) { error = "coords not enumerable"; return false; }
+        if (coordsEnumerable is null) { error = "coords not enumerable"; return false; }
         int count = 0;
         foreach (var coord in coordsEnumerable)
         {
@@ -118,7 +118,7 @@ public class PortedMazeBackgroundRegressionTests
         if (c is List<int> li) return li;
         var en = c as System.Collections.IEnumerable;
         var lst = new List<int>();
-        if (en != null) foreach (var item in en) lst.Add(Convert.ToInt32(item));
+        if (en is not null) foreach (var item in en) lst.Add(Convert.ToInt32(item));
         return lst;
     }
 
@@ -127,7 +127,7 @@ public class PortedMazeBackgroundRegressionTests
         var co = payload["coords"];
         var result = new List<List<int>>();
         var en = co as System.Collections.IEnumerable;
-        if (en == null) return result;
+        if (en is null) return result;
         foreach (var coord in en)
         {
             var inner = new List<int>();
@@ -183,7 +183,7 @@ public class PortedMazeBackgroundRegressionTests
             // Server now sends unbackground via MapHandler on area change (limbo→maze1) before map,
             // not via maze task; background via threadpool after map. Unbackground present for
             // new-area moves, optional for same-area. Accept 0 or 1.
-            if (ub.Cmd != null && ub.Args.Count > 0)
+            if (ub.Cmd is not null && ub.Args.Count > 0)
             {
                 var first = ub.Args[0]?.ToString() ?? "";
                 Assert.True(first == "" || string.IsNullOrEmpty(first), $"unbackground args[0] expected empty string, got '{first}'");
@@ -289,16 +289,16 @@ public class PortedMazeBackgroundRegressionTests
                 foreach (var areaName in new[] { "maze1", "maze2", "maze3" })
                 {
                     var candidate = nh.GetNode(new Coord(areaName, last[0], last[1], 0));
-                    if (candidate != null) { endNode = candidate; break; }
+                    if (candidate is not null) { endNode = candidate; break; }
                 }
                 // For maze1 path, end is within maze1; if not found, fallback to scanning bgCoords last
-                if (endNode == null)
+                if (endNode is null)
                 {
                     // try maze1 specifically
                     endNode = nh.GetNode(new Coord("maze1", last[0], last[1], 0));
                 }
                 // If we found end, re-run AStar to get expected path
-                if (endNode != null)
+                if (endNode is not null)
                 {
                     var (found, path, dead) = Pathfind.AStar(startNode!, endNode, hero, nh, 50000);
                     Assert.True(found, $"AStar should find path to {endNode.Coord} from {startNode!.Coord}");
@@ -316,7 +316,7 @@ public class PortedMazeBackgroundRegressionTests
                 {
                     // Fallback: at least ensure AStar from start to any reachable node yields path subset of bg
                     var anyEnd = nh.GetNode(new Coord("maze1", bgCoords.Last()[0], bgCoords.Last()[1], 0));
-                    if (anyEnd != null)
+                    if (anyEnd is not null)
                     {
                         var (found2, path2, _) = Pathfind.AStar(startNode!, anyEnd, hero, nh);
                         if (found2) Assert.True(path2.Count <= bgCoords.Count + 1, "path count should be <= bg coords");
@@ -429,7 +429,7 @@ public class PortedMazeBackgroundRegressionTests
                 var link = start.Links.First();
                 dest = nh.GetNode(link.Coord);
             }
-            if (dest == null)
+            if (dest is null)
             {
                 // fallback: any node adjacent to (0,0)
                 dest = nh.GetNode(new Coord("maze1", 1, 0, 0)) ?? nh.GetNode(new Coord("maze1", 0, 1, 0));
@@ -445,7 +445,7 @@ public class PortedMazeBackgroundRegressionTests
             // MoveTo should trigger map via MapHandler.MoveListener with force=true
             Assert.True(gotMap, $"map not sent after maze MoveTo; cmds: {string.Join(",", conn.Snapshot().Select(x=>x.Cmd))}");
             var mapMsg = conn.Snapshot().FirstOrDefault(x => x.Cmd == "map");
-            Assert.False(mapMsg.Cmd == null, "map cmd missing after move");
+            Assert.False(mapMsg.Cmd is null, "map cmd missing after move");
             var mapPayload = mapMsg.Args.FirstOrDefault() as Dictionary<string, object?>;
             Assert.NotNull(mapPayload);
             Assert.Equal("maze1", mapPayload!["area"] as string);

@@ -92,7 +92,7 @@ public class PortedDeleteTickableTests
         foreach (double stale in new[] { 1.0, 2.0, 3.0 }.Where(x => x != v))
         {
             var s = ticker.GetSlot(stale);
-            Assert.True(s == null || !s.CorosSnapshot.Any(d => d.Method.Name == "AtTick" && Equals(d.Target, node)),
+            Assert.True(s is null || !s.CorosSnapshot.Any(d => d.Method.Name == "AtTick" && Equals(d.Target, node)),
                 $"stale interval {stale} must not retain the ticker registration");
         }
     }

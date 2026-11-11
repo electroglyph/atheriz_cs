@@ -82,7 +82,7 @@ root (`--web-root` required; `--no-clean` keeps files the stage would
 otherwise remove):
 
 ```bash
-dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll deploy game --web-root mygame/web
+dotnet src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll deploy game --web-root mygame/web
 ```
 
 - Day to day you rarely call it directly: per-game `./build.sh [--web]`

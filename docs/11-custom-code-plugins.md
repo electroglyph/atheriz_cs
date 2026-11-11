@@ -181,7 +181,7 @@ Scaffolded files:
 
 | File | What it is |
 |---|---|
-| `<Game>.csproj` | Your plugin project (`net10.0`). References the engine by upward-search `ProjectReference`; generated folders get a NuGet-fallback variant instead. This is where all game code lives. |
+| `<Game>.csproj` | Your plugin project (`net11.0`). References the engine by upward-search `ProjectReference`; generated folders get a NuGet-fallback variant instead. This is where all game code lives. |
 | `GameSettings.cs` | `namespace <Game>;` with only differs-from-default values: `public const string ServerName = "<Game>"` and `public const bool WebclientSyncCheck = true` (game-code convention; server branding comes from `appsettings.json`, §4 of [Hosting and configuration](08-hosting-configuration.md)). |
 | `AssemblyInfo.cs` | Assembly metadata for the plugin. |
 | `README.md` | Run and rebuild notes for this game folder. |

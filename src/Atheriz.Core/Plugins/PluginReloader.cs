@@ -52,7 +52,7 @@ public static class PluginReloader
         {
             if (_recursion.Value > 1) { _recursion.Value--; return; }
             _recursion.Value = 0;
-            try { _sem.Release(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed PluginReloader.ExitGate: " + logEx.Message, "PluginReloader"); }
+            try { _sem.Release(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed PluginReloader.ExitGate: {logEx.Message}", "PluginReloader"); }
         }
     }
 
@@ -153,7 +153,7 @@ public static class PluginReloader
     // build-first reload); discovery below only consumes them.
     // Shared suppressed-log helper: the op string is preserved verbatim so
     // the emitted text stays byte-identical to the inlined LogDebug calls.
-    private static void Suppress(string op, Exception ex) => AtherizLogger.LogDebug("Suppressed PluginReloader." + op + ": " + ex.Message, "PluginReloader");
+    private static void Suppress(string op, Exception ex) => AtherizLogger.LogDebug($"Suppressed PluginReloader.{op}: {ex.Message}", "PluginReloader");
 // single load per assembly.
     // (The old pass1 scan-ALC existed only to count forward refs, then unloaded with
     // a stop-the-world triple GC while the gate was held; PluginLoader.Load scans

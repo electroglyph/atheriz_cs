@@ -361,7 +361,7 @@ public class PortedDoorTests
         cmd.Run(caller, MakeArgs(remove:true, north:true));
         Assert.Contains(caller.PeekMessages(), m => m.Contains("Removed"));
         var doors = nh.GetDoors(new Coord("TestArea", 0, 0, 0));
-        if (doors != null) Assert.False(doors.ContainsKey("north"));
+        if (doors is not null) Assert.False(doors.ContainsKey("north"));
     }
 
     // test_door.py:426 test_remove_door_south
@@ -376,7 +376,7 @@ public class PortedDoorTests
         cmd.Run(caller, MakeArgs(remove:true, south:true));
         Assert.Contains(caller.PeekMessages(), m => m.Contains("Removed"));
         var doors = nh.GetDoors(new Coord("TestArea", 0, 0, 0));
-        if (doors != null) Assert.False(doors.ContainsKey("south"));
+        if (doors is not null) Assert.False(doors.ContainsKey("south"));
     }
 
     // test_door.py:442 test_remove_door_east
@@ -391,7 +391,7 @@ public class PortedDoorTests
         cmd.Run(caller, MakeArgs(remove:true, east:true));
         Assert.Contains(caller.PeekMessages(), m => m.Contains("Removed"));
         var doors = nh.GetDoors(new Coord("TestArea", 0, 0, 0));
-        if (doors != null) Assert.False(doors.ContainsKey("east"));
+        if (doors is not null) Assert.False(doors.ContainsKey("east"));
     }
 
     // test_door.py:458 test_remove_door_west
@@ -406,7 +406,7 @@ public class PortedDoorTests
         cmd.Run(caller, MakeArgs(remove:true, west:true));
         Assert.Contains(caller.PeekMessages(), m => m.Contains("Removed"));
         var doors = nh.GetDoors(new Coord("TestArea", 0, 0, 0));
-        if (doors != null) Assert.False(doors.ContainsKey("west"));
+        if (doors is not null) Assert.False(doors.ContainsKey("west"));
     }
 
     // test_door.py:474 test_create_door_up_auto

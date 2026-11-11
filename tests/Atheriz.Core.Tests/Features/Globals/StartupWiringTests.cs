@@ -20,6 +20,9 @@ public class StartupWiringTests
         var tmp = Path.Combine(Path.GetTempPath(), "atheriz_initpin_" + Guid.NewGuid().ToString("N"));
         var save = Path.Combine(tmp, "save");
         var secret = Path.Combine(tmp, "secret");
+        // DoSetup reseeds the global salt slot (ResetWorldState); save and
+        // restore it so later tests keep testsalt.
+        var origSalt = Atheriz.Core.Globals.SaltProvider.CurrentSaltForTests;
         try
         {
             InitialSetup.DoSetup(new SetupOptions(save, "admin", "password123", secret));
@@ -39,6 +42,8 @@ public class StartupWiringTests
         }
         finally
         {
+            Atheriz.Core.Globals.SaltProvider.Clear();
+            if (origSalt is not null) Atheriz.Core.Globals.SaltProvider.SetSalt(origSalt);
             try { Directory.Delete(tmp, true); } catch { }
             GlobalTestEnv.Enter().Dispose();
         }

@@ -29,7 +29,7 @@ internal sealed class LockTable
             snapshot = [];
             return false;
         }
-        snapshot = new List<LockEntry>(lst);
+        snapshot = new(lst);
         return true;
     }
 

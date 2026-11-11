@@ -366,7 +366,7 @@ public class PortedThreadPoolTickerGapTests
         var ex = Record.Exception(()=> ticker.Stop());
         Assert.Null(ex);
         var goodSlot = ticker.GetSlot(0.05);
-        if(goodSlot!=null) Assert.False(goodSlot.Running);
+        if(goodSlot is not null) Assert.False(goodSlot.Running);
         ticker.Clear();
         pool.Stop();
     }
@@ -419,7 +419,7 @@ public class PortedThreadPoolTickerGapTests
     public void DelayChecksStoppedUnderLockFaithful()
     {
         // Verify Delay checks _stopped under lock – inspect source
-        var hasStopped = typeof(AsyncThreadPool).GetField("_stopped", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) != null;
+        var hasStopped = typeof(AsyncThreadPool).GetField("_stopped", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance) is not null;
         Assert.True(hasStopped);
         string src="";
         try{ src = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..","..","..","..","..","src","Atheriz.Core","Concurrency","AsyncThreadPool.cs")); }catch{}

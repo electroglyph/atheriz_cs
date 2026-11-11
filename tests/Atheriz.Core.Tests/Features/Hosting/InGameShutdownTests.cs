@@ -42,7 +42,7 @@ public sealed class InGameShutdownTests
         {
             SecretPath = secret,
             ServerName = "Pin13",
-            NetworkProtocols = Array.Empty<string>(),
+            NetworkProtocols = [],
             AutosaveOnShutdown = false,
             TimeSystemEnabled = false,
         };

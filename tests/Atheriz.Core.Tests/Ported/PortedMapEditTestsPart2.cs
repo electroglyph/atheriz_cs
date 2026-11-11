@@ -27,7 +27,7 @@ public class PortedMapEditTestsPart2
         new InputFuncs().MapEditHandler(conn, new List<object?>{key,0,new List<object?>()}, new Dictionary<string,object?>());
         return ((FakeConn2)conn).Sent.Last().Args[1] as string ?? throw new Exception("no handshake");
     }
-    private static MapInfo MakeMi(Dictionary<(int,int),string>? grid=null){ var mi=new MapInfo("TestArea"); if(grid!=null) foreach(var kv in grid) mi.SetPreCell(kv.Key, kv.Value); return mi; }
+    private static MapInfo MakeMi(Dictionary<(int,int),string>? grid=null){ var mi=new MapInfo("TestArea"); if(grid is not null) foreach(var kv in grid) mi.SetPreCell(kv.Key, kv.Value); return mi; }
     private static NodeGrid GridOf(NodeHandler nh) => nh.GetArea("TestArea")!.GetGrid(0)!;
 
     [Fact] public void MapEditHandshake()
@@ -223,14 +223,14 @@ public class PortedMapEditTestsPart2
         var seq = (int)((FakeConn2)conn).Sent[1].Args[0]!;
         var rawDenied = ((FakeConn2)conn).Sent[1].Args[2];
         var denied = rawDenied as List<int>;
-        if(denied==null){
+        if(denied is null){
             if(rawDenied is List<object?> lo) denied = lo.Cast<int>().ToList();
             else if(rawDenied is System.Collections.Generic.List<int> li) denied = li;
             else denied = new List<int>{0};
         }
         // In C# denied is List<int>
         var deniedList = ((FakeConn2)conn).Sent[1].Args[2] as List<int>;
-        if(deniedList==null) deniedList = ((FakeConn2)conn).Sent[1].Args[2] as List<object?> != null ? ((List<object?>)((FakeConn2)conn).Sent[1].Args[2]!).Select(o=> Convert.ToInt32(o)).ToList() : null;
+        if(deniedList is null) deniedList = ((FakeConn2)conn).Sent[1].Args[2] as List<object?> is not null ? ((List<object?>)((FakeConn2)conn).Sent[1].Args[2]!).Select(o=> Convert.ToInt32(o)).ToList() : null;
         Assert.NotNull(deniedList); Assert.Equal(new List<int>{0}, deniedList!);
         Assert.NotNull(GridOf(nh).GetNode((3,3)));
         Assert.NotNull(GridOf(nh).GetNode((4,3)));
@@ -267,7 +267,7 @@ public class PortedMapEditTestsPart2
         Assert.Equal(2, ((FakeConn2)conn).Sent.Count);
         Assert.Equal("moves_denied", ((FakeConn2)conn).Sent[1].Cmd);
         var denied = ((FakeConn2)conn).Sent[1].Args[2] as List<int>;
-        if(denied==null) denied = ((List<object?>)((FakeConn2)conn).Sent[1].Args[2]!).Select(o=>Convert.ToInt32(o)).ToList();
+        if(denied is null) denied = ((List<object?>)((FakeConn2)conn).Sent[1].Args[2]!).Select(o=>Convert.ToInt32(o)).ToList();
         Assert.Equal(new List<int>{0}, denied!);
     }
 
@@ -300,7 +300,7 @@ public class PortedMapEditTestsPart2
         new InputFuncs().MapValidateMovesHandler(conn, new List<object?>{key,1,new List<object?>{ new List<object?>{1,0,0,0}}}, new Dictionary<string,object?>());
         Assert.Equal("moves_denied", ((FakeConn2)conn).Sent[1].Cmd);
         var deniedTmp = ((FakeConn2)conn).Sent[1].Args[2] as List<int>;
-        if(deniedTmp==null) deniedTmp = ((List<object?>)((FakeConn2)conn).Sent[1].Args[2]!).Select(o=>Convert.ToInt32(o)).ToList();
+        if(deniedTmp is null) deniedTmp = ((List<object?>)((FakeConn2)conn).Sent[1].Args[2]!).Select(o=>Convert.ToInt32(o)).ToList();
         var denied = deniedTmp;
         Assert.Equal(new List<int>{0}, denied);
     }

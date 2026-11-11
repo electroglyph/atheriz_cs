@@ -80,7 +80,7 @@ public class WhitespaceCollapseTests
     public void IterToString_SinglePass_MatchesJoinTruncation()
     {
         Assert.Equal("", GameUtils.IterToString(null));
-        Assert.Equal("", GameUtils.IterToString(Array.Empty<object?>()));
+        Assert.Equal("", GameUtils.IterToString([]));
         Assert.Equal("solo", GameUtils.IterToString(new object?[] { "solo" }));
         Assert.Equal("1 and 2", GameUtils.IterToString(new object?[] { 1, 2 }, sep: " and ", endsep: " and "));
         Assert.Equal("1, 2, and 3", GameUtils.IterToString(new object?[] { 1, 2, 3 }, sep: ",", endsep: ", and "));
@@ -144,7 +144,7 @@ public class StringDistanceTwoRowTests
     [Fact]
     public void BestMatch_EmptyCandidates_ReturnsNull()
     {
-        Assert.Null(StringDistance.BestMatch("lok", Array.Empty<string>()));
+        Assert.Null(StringDistance.BestMatch("lok", []));
     }
 
     [Fact]

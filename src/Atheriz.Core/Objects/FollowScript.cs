@@ -45,10 +45,10 @@ public sealed class FollowScript : Script
         {
             foreach (var s in owner.GetScriptsByType("FollowScript"))
             {
-                try { if (s is FollowScript fs) fs.CancelPush(dest?.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed FollowScript.CancelPendingPush: " + logEx.Message, "FollowScript"); }
+                try { if (s is FollowScript fs) fs.CancelPush(dest?.Id); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed FollowScript.CancelPendingPush: {logEx.Message}", "FollowScript"); }
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed FollowScript.CancelPendingPush: " + logEx.Message, "FollowScript"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed FollowScript.CancelPendingPush: {logEx.Message}", "FollowScript"); }
     }
 
     private bool TryTakePush(int? destId, out GameObject? oldLoc)

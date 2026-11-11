@@ -131,7 +131,7 @@ public sealed class LoggedInCommandBaseTests
         // raw path too (parser verbs pin this in LoggedInCommandTests for say/emote).
         var conn = new TestConnection();
         new TimeCommand().Run(conn, null);
-        Assert.Contains(conn.Sent, t => t.Args.Any(a => a != null && a.ToString()!.Contains("You can't do that.")));
+        Assert.Contains(conn.Sent, t => t.Args.Any(a => a is not null && a.ToString()!.Contains("You can't do that.")));
     }
 
     [Fact]

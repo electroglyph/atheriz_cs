@@ -209,7 +209,7 @@ public class ObjectRegressionTests
     public void AtDisconnect_UnwindsInsideLock()
     {
         var src = SourceScan.Read("src", "Atheriz.Core", "Objects", "Session.cs");
-        int snap = src.IndexOf("stack = new List<(GameObject? Prev", StringComparison.Ordinal);
+        int snap = src.IndexOf("stack = new(_puppetStack);", StringComparison.Ordinal);
         int loop = src.IndexOf("while (stack.Count > 0)", StringComparison.Ordinal);
         Assert.True(snap >= 0 && loop > snap);
         var between = src.Substring(snap, loop - snap);

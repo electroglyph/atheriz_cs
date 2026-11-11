@@ -72,14 +72,13 @@ public static class ResetHandler
         if (!PluginReloader.WorldCanBeRebuilt(settings, out var gameProject))
         {
             Console.Error.WriteLine(
-                $"No up-to-date build of {gameProject} was found even after building, so reset would recreate the world from the engine template. " +
-                $"Fix the build and reset again. Nothing was deleted.");
+                $"No up-to-date build of {gameProject} was found even after building, so reset would recreate the world from the engine template. Fix the build and reset again. Nothing was deleted.");
             return 1;
         }
         // Ports that must be free before the wipe: the CLI override plus the
         // configured ports, so a mismatched --port cannot blind the guard
         // to the running server's real listeners.
-        var watchPorts = new List<int> { port };
+        List<int> watchPorts = [port];
         if (settings.WebserverPort != port) watchPorts.Add(settings.WebserverPort);
         if (settings.TelnetEnabled && !watchPorts.Contains(settings.TelnetPort)) watchPorts.Add(settings.TelnetPort);
         try
@@ -272,8 +271,7 @@ public static class ResetHandler
             if (game is null && gameProject is not null && (loadCrashed || TemplateFallbackRefused(settings, failedLoads)))
             {
                 Console.Error.WriteLine(
-                    $"The world was wiped but {gameProject} could not be loaded; refusing to create the engine template world. " +
-                    "Keep the server stopped, fix the build, and reset again.");
+                    $"The world was wiped but {gameProject} could not be loaded; refusing to create the engine template world. Keep the server stopped, fix the build, and reset again.");
                 Infrastructure.PidFile.ReleaseWipeLock(wipeB, savePath);
                 return 1;
             }

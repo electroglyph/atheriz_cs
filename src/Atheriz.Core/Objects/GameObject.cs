@@ -208,7 +208,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                         pos = (n.Coord.X - minX, maxY - n.Coord.Y);
                 }
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.AtMapUpdate: {logEx.Message}", "GameObject"); }
             bool sent = false;
             try
             {
@@ -230,17 +230,17 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 // become success stamps.
                 if (conn is not null)
                 {
-                    conn.SendCommand("map", new List<object?> { payload }, null);
+                    conn.SendCommand("map", [payload], null);
                     sent = true;
                 }
                 else
                 {
                     // Fallback for test harnesses without connection — store via _msgLog like original Python would via session.msg
                     // Use MsgInternal path via Session if available, otherwise log
-                    try { Msg($"[map:{name}]"); sent = true; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
+                    try { Msg($"[map:{name}]"); sent = true; } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.AtMapUpdate: {logEx.Message}", "GameObject"); }
                 }
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtMapUpdate: " + logEx.Message, "GameObject"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.AtMapUpdate: {logEx.Message}", "GameObject"); }
             if (sent) LastMapTime = global::Atheriz.Core.Utils.GameClock.MonotonicSeconds();
             return 0;
         }, mapStr, entries, minX, maxY, showLegend, name);
@@ -260,9 +260,9 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 Session? sess = Session;
                 var conn = sess?.Connection;
                 if (conn is not null)
-                    conn.SendCommand("legend", new List<object?> { payload }, null);
+                    conn.SendCommand("legend", [payload], null);
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.AtLegendUpdate: " + logEx.Message, "GameObject"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.AtLegendUpdate: {logEx.Message}", "GameObject"); }
             return 0;
         }, entries, show, area);
     }
@@ -422,7 +422,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             // deadlock against Msg delivery (channel → peer).
             if (channel.IsDeletedSnapshot())
             {
-                try { channel.RemoveListener(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Subscribe: " + logEx.Message, "GameObject"); }
+                try { channel.RemoveListener(this); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Subscribe: {logEx.Message}", "GameObject"); }
             }
             else if (!_channels.Contains(channel.Id))
             {
@@ -432,7 +432,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 // lock — allocating it outside (after release) let two racing
                 // Subscribes both see null, both allocate, and the second
                 // silently orphan the first channel's installed command.
-                InternalCmdSet ??= new Commands.CmdSet();
+                InternalCmdSet ??= new();
                 added = true;
             }
         }
@@ -446,7 +446,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 if (cmd is not null)
                 {
                     var cs = InternalCmdSet;
-                    if (cs is null) { cs = new Commands.CmdSet(); InternalCmdSet = cs; }
+                    if (cs is null) { cs = new(); InternalCmdSet = cs; }
                     try { cs.Add(cmd); }
                     catch (InvalidOperationException) { /* already installed */ }
                     // A Delete/Unsubscribe detach can land between the
@@ -465,11 +465,11 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                     if (stale)
                     {
                         try { cs.Remove(cmd); }
-                        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Subscribe: " + logEx.Message, "GameObject"); }
+                        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Subscribe: {logEx.Message}", "GameObject"); }
                     }
                 }
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Subscribe: " + logEx.Message, "GameObject"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Subscribe: {logEx.Message}", "GameObject"); }
         }
     }
     /// <summary>
@@ -513,7 +513,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
             // Subscribe re-add membership + install between GetCommand
             // and Remove, and deleted the newcomer.
             Commands.Command? cmd = null;
-            try { cmd = channel.GetCommand(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unsubscribe: " + logEx.Message, "GameObject"); }
+            try { cmd = channel.GetCommand(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Unsubscribe: {logEx.Message}", "GameObject"); }
             if (cmd is not null)
             {
                 // Re-check membership and remove atomically under the peer
@@ -527,7 +527,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
                 {
                     if (!_channels.Contains(channel.Id))
                         try { InternalCmdSet?.Remove(cmd); }
-                        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Unsubscribe: " + logEx.Message, "GameObject"); }
+                        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Unsubscribe: {logEx.Message}", "GameObject"); }
                 }
                 finally { _lock.ExitWriteLock(); }
             }
@@ -698,7 +698,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
     {
         if (IsTickable)
         {
-            try { Globals.GlobalServices.TryGetTicker()?.AddCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ResolveRelations: " + logEx.Message, "GameObject"); }
+            try { Globals.GlobalServices.TryGetTicker()?.AddCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.ResolveRelations: {logEx.Message}", "GameObject"); }
         }
         HashSet<int> scripts;
         _lock.EnterReadLock();
@@ -708,10 +708,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         {
             if (TryGetScript(id, out var s))
             {
-                try { s.InstallHooks(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ResolveRelations: " + logEx.Message, "GameObject"); }
+                try { s.InstallHooks(this); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.ResolveRelations: {logEx.Message}", "GameObject"); }
             }
         }
-        try { AtInit(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.ResolveRelations: " + logEx.Message, "GameObject"); }
+        try { AtInit(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.ResolveRelations: {logEx.Message}", "GameObject"); }
     }
 
     // --- DTO conversion (mirrors __getstate__/__setstate__) --- (persisted via Persistence/Converters/GameObjectDtoConverter.cs)
@@ -731,8 +731,8 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         o._name = dto.Name;
         o._desc = dto.Desc;
         o._displayName = dto.DisplayName;
-        o._aliases = new List<string>(dto.Aliases ?? []);
-        o._tags = new HashSet<string>(dto.Tags ?? []);
+        o._aliases = new(dto.Aliases ?? []);
+        o._tags = new(dto.Tags ?? []);
         o._flags.IsPc = dto.IsPc;
         o._flags.IsNpc = dto.IsNpc;
         o._flags.IsItem = dto.IsItem;
@@ -763,10 +763,10 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         o._gender = dto.Gender ?? "neutral";
         o._location = dto.Location ?? LocationRef.NullLocation.Instance;
         o._home = dto.Home ?? LocationRef.NullLocation.Instance;
-        o._contents = new HashSet<int>(dto.Contents ?? []);
-        o._scripts = new HashSet<int>(dto.Scripts ?? []);
-        o._channels = new List<int>(dto.Channels ?? []);
-        o._extra = new Dictionary<string, JsonElement>(dto.Extra ?? new());
+        o._contents = new(dto.Contents ?? []);
+        o._scripts = new(dto.Scripts ?? []);
+        o._channels = new(dto.Channels ?? []);
+        o._extra = new(dto.Extra ?? new());
         // Restore locks from declarative policies (F004). Unknown policies are dropped
         // with a loud log — never silently weakened, never executed from the save file.
         o._lockTable.Clear();
@@ -839,7 +839,7 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         var obj = new GameObject();
         obj._name = name;
         obj._desc = desc;
-        obj._aliases = aliases is null ? [] : new List<string>(aliases);
+        obj._aliases = aliases is null ? [] : new(aliases);
         obj._privilege = privilege;
         obj._flags.IsPc = isPc;
         obj._flags.IsNpc = isNpc;
@@ -880,12 +880,12 @@ public partial class GameObject : IMessageTarget, ISessionProvider
         // at the call site — auto-adding here would double-register); ticker
         // enrolment mirrors get_async_ticker().add_coro for fresh tickables
         // (load path re-registers via ResolveRelations).
-        obj._internalCmdSet = new Commands.CmdSet();
-        obj._externalCmdSet = new Commands.CmdSet();
-        try { obj.AtCreate(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Create: " + logEx.Message, "GameObject"); }
+        obj._internalCmdSet = new();
+        obj._externalCmdSet = new();
+        try { obj.AtCreate(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Create: {logEx.Message}", "GameObject"); }
         if (isTickable)
         {
-            try { Globals.GlobalServices.TryGetTicker()?.AddCoro(obj.AtTick, tickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Create: " + logEx.Message, "GameObject"); }
+            try { Globals.GlobalServices.TryGetTicker()?.AddCoro(obj.AtTick, tickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Create: {logEx.Message}", "GameObject"); }
         }
 
         return obj;

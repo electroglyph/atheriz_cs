@@ -10,7 +10,7 @@ Follow this page top to bottom and you end with a running game: the server liste
 
 | Need | Version | Check | Notes |
 |---|---|---|---|
-| .NET SDK | 10.0.100 or newer (`global.json` pins `10.0.100`, `latestFeature`) | `dotnet --version` | Required for everything. |
+| .NET SDK | 11.0.100 or newer (`global.json` pins `11.0.100`, `latestFeature`) | `dotnet --version` | Required for everything. |
 | Node + npm | Node 18+ | `node --version`, `npm --version` | Only needed to build the webclient. |
 
 On Arch: `sudo pacman -S dotnet-sdk aspnet-targeting-pack nodejs npm` (`aspnet-targeting-pack` is required: without it the `Atheriz.Server` web project fails at restore with `NETSDK1226: Prune Package data not found`).
@@ -18,7 +18,7 @@ On Arch: `sudo pacman -S dotnet-sdk aspnet-targeting-pack nodejs npm` (`aspnet-t
 Verify the toolchain before building:
 
 ```bash
-dotnet --version   # expect 10.0.100 or newer
+dotnet --version   # expect 11.0.100 or newer
 node --version     # expect 18+
 ```
 

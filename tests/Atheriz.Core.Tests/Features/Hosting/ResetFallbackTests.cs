@@ -28,7 +28,7 @@ public class ResetFallbackTests
         File.SetLastWriteTimeUtc(csproj, DateTime.UtcNow.AddMinutes(-5));
         if (dllBytes is not null)
         {
-            var binDir = Path.Combine(dir, "bin", "Release", "net10.0");
+            var binDir = Path.Combine(dir, "bin", "Release", "net11.0");
             Directory.CreateDirectory(binDir);
             var dllPath = Path.Combine(binDir, name + ".dll");
             File.WriteAllBytes(dllPath, dllBytes);

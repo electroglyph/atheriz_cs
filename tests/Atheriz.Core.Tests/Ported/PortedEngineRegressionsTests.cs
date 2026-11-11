@@ -68,7 +68,7 @@ public class PortedEngineRegressionsTests
         var realCs = CommandRegistry.UnloggedIn;
         var cmd = new RestrictedCommand(ran);
         // Avoid duplicate key error: if already exists, skip add
-        if (realCs.Get("secretcmd") == null) realCs.Add(cmd);
+        if (realCs.Get("secretcmd") is null) realCs.Add(cmd);
         try
         {
             var conn = new TestConnection();

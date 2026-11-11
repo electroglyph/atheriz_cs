@@ -259,8 +259,8 @@ public class PortedHelpPrivilegeTests
     {
         var c = MakeCaller(builder: true);
         var player = MakeCaller(builder: false);
-        var pyType = Type.GetType("Atheriz.Core.Commands.LoggedIn.PyCommand") ?? Type.GetType("Atheriz.Core.Commands.PyCommand") ?? AppDomain.CurrentDomain.GetAssemblies().SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } }).FirstOrDefault(t => t.Name == "PyCommand");
-        if (pyType != null)
+        var pyType = Type.GetType("Atheriz.Core.Commands.LoggedIn.PyCommand") ?? Type.GetType("Atheriz.Core.Commands.PyCommand") ?? AppDomain.CurrentDomain.GetAssemblies().SelectMany(a => { try { return a.GetTypes(); } catch { return []; } }).FirstOrDefault(t => t.Name == "PyCommand");
+        if (pyType is not null)
         {
             dynamic pyCmd = Activator.CreateInstance(pyType)!;
             Assert.True((bool)pyCmd.Access(c));
@@ -317,7 +317,7 @@ public class PortedHelpPrivilegeTests
         pa["value"] = "42";
         new SetCommand().Run(c, pa);
         // Check via Extra
-        var has = c.GetType().GetMethod("HasExtra") != null ? (bool)typeof(GameObject).GetMethod("HasExtra", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.Invoke(c, new object[]{"my_attr"})! : false;
+        var has = c.GetType().GetMethod("HasExtra") is not null ? (bool)typeof(GameObject).GetMethod("HasExtra", System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.Invoke(c, new object[]{"my_attr"})! : false;
         Assert.Contains(c.PeekMessages(), m => m.Contains("Set"));
     }
 

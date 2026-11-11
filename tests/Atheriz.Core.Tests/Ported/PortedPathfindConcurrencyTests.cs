@@ -21,7 +21,7 @@ public class PortedPathfindConcurrencyTests
         // ensure clean
         // remove any existing at coord
         var existing = nh.GetDoors(coord);
-        if (existing != null) foreach(var kv in existing.ToList()) { var d = kv.Value; nh.RemoveDoor(d); }
+        if (existing is not null) foreach(var kv in existing.ToList()) { var d = kv.Value; nh.RemoveDoor(d); }
         nh.AddDoor(door);
         var d1 = nh.GetDoors(coord);
         Assert.NotNull(d1);

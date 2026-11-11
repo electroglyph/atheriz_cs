@@ -61,7 +61,7 @@ public partial class GameObject
                 if (!string.IsNullOrEmpty(direction)) dirStr = $" to the {direction}";
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.HearDirection: " + logEx.Message, "GameObject"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.HearDirection: {logEx.Message}", "GameObject"); }
         return (zStr, dirStr);
     }
 
@@ -206,7 +206,7 @@ public partial class GameObject
                 return true;
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.EmitSound: " + logEx.Message, "GameObject"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.EmitSound: {logEx.Message}", "GameObject"); }
         AtEmitSound(soundDesc, soundMsg, loudness, isSay);
         return true;
     }

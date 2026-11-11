@@ -71,7 +71,7 @@ public class ReloadBuildTests
             $"""
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
-                <TargetFramework>net10.0</TargetFramework>
+                <TargetFramework>net11.0</TargetFramework>
                 <Nullable>enable</Nullable>
                 <ImplicitUsings>enable</ImplicitUsings>
               </PropertyGroup>
@@ -303,7 +303,7 @@ public class ReloadBuildTests
         {
             File.WriteAllText(Path.Combine(tmp, "mygame.csproj"), "<Project />");
             var save = Path.Combine(tmp, "save");
-            var bin = Path.Combine(tmp, "bin", "Release", "net10.0");
+            var bin = Path.Combine(tmp, "bin", "Release", "net11.0");
             var plugins = Path.Combine(save, "plugins");
             Directory.CreateDirectory(bin);
             Directory.CreateDirectory(plugins);
@@ -352,7 +352,7 @@ public class ReloadBuildTests
                 SavePath = Path.Combine(gameDir, "save"),
                 SecretPath = secret,
                 ServerName = "CliReloadPin",
-                NetworkProtocols = Array.Empty<string>(),
+                NetworkProtocols = [],
                 AutosaveOnShutdown = false,
                 TimeSystemEnabled = false,
             };
@@ -386,7 +386,7 @@ public class ReloadBuildTests
                 // generation via the server-side build.
                 WriteDotnetProject(gameDir, "minigame", BetaGeneration);
                 Assert.Equal(0, await ReloadHandler.ReloadAsync(port));
-                var dllPath = Path.Combine(gameDir, "bin", "Release", "net10.0", "minigame.dll");
+                var dllPath = Path.Combine(gameDir, "bin", "Release", "net11.0", "minigame.dll");
                 Assert.True(DllContainsGeneration(dllPath, BetaGeneration), "rebuilt dll must contain the new generation");
                 Assert.Equal(BetaGeneration, LiveProbeGeneration());
             }

@@ -67,7 +67,7 @@ public static class WebclientSyncChecker
         engineWeb ??= contentRoot;
 
         var summary = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.Ordinal);
-        foreach (var area in new[] { "templates", "static" })
+        foreach (var area in new[] {"templates", "static"})
         {
             // Without a web/ baseline there is nothing to judge game templates
             // against (the wwwroot layout ships no templates tree) — compare
@@ -160,14 +160,14 @@ public static class WebclientSyncChecker
         // resolves to the game's own web dir (self-compare, always clean),
         // so the layout-derived candidate goes last. The up-three-levels
         // probe mirrors the server-DLL lookup behind the `deploy game` hint in FormatWarning (bin /
-        // Debug|Release / net10.0 -> project dir).
-        var candidates = new[]
-        {
+        // Debug|Release / net11.0 -> project dir).
+        string[] candidates =
+        [
             Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "wwwroot", "atheriz_draw", "index.html")),
             Path.Combine(AppContext.BaseDirectory, "wwwroot", "atheriz_draw", "index.html"),
             Path.Combine(contentRoot, "wwwroot", "atheriz_draw", "index.html"),
             Path.Combine(engineWeb, "static", "atheriz_draw", "index.html"),
-        };
+        ];
         return candidates.FirstOrDefault(File.Exists);
     }
 
@@ -181,13 +181,13 @@ public static class WebclientSyncChecker
 
     private static string? ResolveEngineWeb(string contentRoot)
     {
-        var candidates = new[]
-        {
+        string[] candidates =
+        [
             Path.Combine(contentRoot, "web"),
             Path.Combine(AppContext.BaseDirectory, "web"),
             Path.Combine(AppContext.BaseDirectory, "..", "web"),
             Path.Combine(Directory.GetCurrentDirectory(), "web"),
-        };
+        ];
         var resolved = AssetPathResolver.ResolveCandidates(candidates.Select(Path.GetFullPath));
         if (resolved is not null) return resolved;
         if (Directory.Exists(Path.Combine(contentRoot, "wwwroot")))
@@ -205,8 +205,8 @@ public static class WebclientSyncChecker
     {
         osName ??= OperatingSystem.IsWindows() ? "nt" : "posix";
         string? engineWeb = engineWebOverride ?? ResolveEngineWeb(contentRoot) ?? Path.Combine(contentRoot, "web");
-        var lines = new List<string> { "WARNING: Game webclient is out of sync with the server's!" };
-        foreach (var area in new[] { "templates", "static", "atheriz_draw" })
+        List<string> lines = ["WARNING: Game webclient is out of sync with the server's!"];
+        foreach (var area in new[] {"templates", "static", "atheriz_draw"})
         {
             if (!summary.TryGetValue(area, out var d)) continue;
             var missing = d.TryGetValue("missing", out var m) ? m : [];
@@ -220,7 +220,7 @@ public static class WebclientSyncChecker
             var displayPath = area == "atheriz_draw" ? "web/static/atheriz_draw" : $"web/{area}/webclient";
             lines.Add($"  {displayPath}: {string.Join(", ", parts)}");
             var names = different.Concat(missing).Concat(extra).Take(3).ToList();
-            lines.Add("    e.g. " + string.Join(", ", names));
+            lines.Add($"    e.g. {string.Join(", ", names)}");
         }
         var compiledWebclient = File.Exists(Path.Combine(engineWeb, "static", "webclient", "index.html"))
             || File.Exists(Path.Combine(contentRoot, "wwwroot", "webclient", "index.html"))

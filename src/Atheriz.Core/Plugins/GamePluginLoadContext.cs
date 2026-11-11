@@ -27,7 +27,7 @@ internal sealed class GamePluginLoadContext : AssemblyLoadContext
 
     protected override Assembly? Load(AssemblyName assemblyName)
     {
-        if (assemblyName.Name is not null && PluginReloader.IsExcludedAssembly(assemblyName.Name + ".dll"))
+        if (assemblyName.Name is not null && PluginReloader.IsExcludedAssembly($"{assemblyName.Name}.dll"))
             return null;
         string? path;
         try { path = _resolver.ResolveAssemblyToPath(assemblyName); }

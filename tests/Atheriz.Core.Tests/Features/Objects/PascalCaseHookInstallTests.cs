@@ -6,6 +6,9 @@ namespace Atheriz.Core.Tests.Features.Objects;
 // PascalCase script hooks install and fire: C# overrides must be spelled
 // AtTick (not at_tick), so a lowercase-only marker scan silently installed
 // nothing for them and the hook never fired.
+// Mutates the global ObjectRegistry, so it joins the serialized Ported
+// collection like every other shared-state user.
+[Collection("Ported")]
 public class PascalCaseHookInstallTests
 {
     private sealed class TickProbeScript : Script

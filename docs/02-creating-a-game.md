@@ -27,7 +27,7 @@ Success looks like this: a folder holding `MyGame.csproj`, `GameSettings.cs`, `A
 
 | File | What it is | What you do with it |
 |---|---|---|
-| `MyGame.csproj` | Game project on `net10.0` with a `ProjectReference` to the engine (`../Atheriz.Core`; generated folders get a NuGet-fallback variant instead). | Add game code files here; they compile into the plugin `reload` hot-loads. |
+| `MyGame.csproj` | Game project on `net11.0` with a `ProjectReference` to the engine (`../Atheriz.Core`; generated folders get a NuGet-fallback variant instead). | Add game code files here; they compile into the plugin `reload` hot-loads. |
 | `GameSettings.cs` | Two `const` overrides (`ServerName`, `WebclientSyncCheck`) with a doc comment. Doubles as the game-folder marker next to the csproj. | Conventional display name / sync flag for game code; server branding comes from `appsettings.json` (§2). |
 | `AssemblyInfo.cs` | Assembly metadata for the game plugin. | Leave alone unless branding the build. |
 | `GlobalUsings.cs` | Shared `using` lines in the repo template (generated folders rely on `ImplicitUsings` instead and do not get this file). | Copy one in if the game wants project-wide usings. |

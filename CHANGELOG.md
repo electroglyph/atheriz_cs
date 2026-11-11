@@ -4,8 +4,52 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
-## [Unreleased]
+## [0.41.0.0] - 2026-11-11
 
+- Code modernization across the engine and host, with no user-visible
+  text, control flow, or wire behavior changed: argument guards use
+  `ArgumentNullException.ThrowIfNull`, count and first-element checks
+  use list patterns, scaffold templates (project file, game settings,
+  readme, assembly info, gitignore) use raw string literals, location
+  dispatch and option normalization use `switch`, the maze builder's
+  backtracking flag is a labeled `break`, and remaining message
+  concatenations use interpolation.
+
+## [0.40.0.0] - 2026-11-11
+
+- Code modernization across the engine and host, with no user-visible
+  text, control flow, or wire behavior changed: collection expressions
+  replace list initializers at call sites, target-typed `new` drops
+  repeated type names, string interpolation replaces `+` concatenation in
+  log and message paths, simple services use primary constructors, one
+  validated property uses the `field` keyword, `if`/`else` chains become
+  `switch` expressions, hand-rolled index loops become `FindIndex` /
+  `SequenceEqual` / `IndexOf`, ANSI escapes use `\e`, and quoted SQL
+  uses raw string literals.
+- `GameTime` alarm removal now uses list search primitives instead of
+  hand-rolled index loops, with identical removal semantics.
+
+## [0.39.0.0] - 2026-11-11
+
+- Upgraded to .NET 11 / C# 15: every project targets `net11.0`, the SDK pin
+  is 11.0.100, and packages moved to their .NET 11 releases (EF Core and
+  extensions 11.0.0, `System.CommandLine` 3.0.0, `telnet_cs` 0.20.0, test
+  SDK 18.11.1). `telnet_cs` 0.20.0 is a `net11.0`-only retarget with no
+  public API changes, so the adapter contract is unchanged.
+- Code modernization across the engine and host: collection expressions
+  replace `Array.Empty` and list initializers, string interpolation
+  replaces `+` concatenation in logs and messages, target-typed `new`
+  drops repeated type names, simple services use primary constructors,
+  `foreach` over inline lists uses collection expressions, and the last
+  block-scoped namespace is file-scoped. No user-visible text, control
+  flow, or wire behavior changed.
+- Hardened the test suite against the new toolchain's test ordering:
+  setup helpers that reseed the global salt now save and restore it, so
+  password tests no longer depend on which test ran first.
+- C# guidance now lives in one place: the best-practices rules moved out of
+  `AGENTS.md` into `csharp.md`, which also covers the new C# 15 features
+  (union types, closed hierarchies, collection expression arguments,
+  extension indexers, labeled `break`/`continue`).
 - `say` and `emote` are raw free-text verbs now instead of parser commands:
   every non-empty line is spoken verbatim, so apostrophes and unbalanced
   quotes can never fail them with "Unbalanced quote in command" again.

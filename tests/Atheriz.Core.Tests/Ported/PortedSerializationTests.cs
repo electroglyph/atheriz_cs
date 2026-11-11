@@ -171,7 +171,7 @@ public class PortedSerializationTests
         var dto = script.ToDto();
         var des = Script.FromDto(dto) as Script;
         // Fresh script has no child after roundtrip (child not persisted)
-        Assert.True(des == null || des.Child == null || des.Child.Id != obj.Id);
+        Assert.True(des is null || des.Child is null || des.Child.Id != obj.Id);
     }
     private class AlarmObj : GameObject
     {
@@ -272,7 +272,7 @@ public class PortedSerializationTests
         Assert.Contains("n", des.Aliases);
         // Verify meta via Extra-like check (if NodeLink had Meta property)
         var metaProp = typeof(NodeLink).GetProperty("Meta") ?? typeof(NodeLink).GetProperty("meta");
-        if (metaProp != null)
+        if (metaProp is not null)
         {
             var metaVal = metaProp.GetValue(des);
             Assert.NotNull(metaVal);

@@ -40,11 +40,11 @@ public class CreateSchemeMismatchTests
             CreateNoWindow = true,
             WorkingDirectory = workingDir ?? Directory.GetCurrentDirectory(),
         };
-        if (env != null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
+        if (env is not null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
         var sb = new StringBuilder();
         using var proc = new Process { StartInfo = psi };
-        proc.OutputDataReceived += (s, e) => { if (e.Data != null) sb.AppendLine(e.Data); };
-        proc.ErrorDataReceived += (s, e) => { if (e.Data != null) sb.AppendLine(e.Data); };
+        proc.OutputDataReceived += (s, e) => { if (e.Data is not null) sb.AppendLine(e.Data); };
+        proc.ErrorDataReceived += (s, e) => { if (e.Data is not null) sb.AppendLine(e.Data); };
         proc.Start();
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
@@ -88,10 +88,10 @@ public class CreateSchemeMismatchTests
             };
             psi.ArgumentList.Add(dll);
             foreach (var a in args) psi.ArgumentList.Add(a);
-            if (env != null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
+            if (env is not null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
             var srv = new BackgroundServer(Process.Start(psi)!);
-            srv.Proc.OutputDataReceived += (s, e) => { if (e.Data != null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
-            srv.Proc.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
+            srv.Proc.OutputDataReceived += (s, e) => { if (e.Data is not null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
+            srv.Proc.ErrorDataReceived += (s, e) => { if (e.Data is not null) lock (srv.Output) srv.Output.AppendLine(e.Data); };
             srv.Proc.BeginOutputReadLine();
             srv.Proc.BeginErrorReadLine();
             return srv;
@@ -110,7 +110,7 @@ public class CreateSchemeMismatchTests
     public async Task Create_SchemeMismatch_FlippedRetryFindsLiveServer()
     {        if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePort();
         var telnetPort = FindFreePort();
@@ -173,7 +173,7 @@ public class CreateSchemeMismatchTests
         // server live, offline direct-DB writes must be refused via the pid probe.
         if (!OperatingSystem.IsLinux()) return;
         const string repoRoot = "/home/anon/atheriz-cs";
-        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+        var dll = $"{repoRoot}/src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll";
         if (!File.Exists(dll)) return;
         var port = FindFreePort();
         var telnetPort = FindFreePort();

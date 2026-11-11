@@ -38,18 +38,18 @@ public class PortedMazeBackgroundWsIntegrationTests
         foreach(var a in args) psi.ArgumentList.Add(a);
         foreach(var kv in env) psi.Environment[kv.Key]=kv.Value;
         var proc=new Process{StartInfo=psi};
-        proc.OutputDataReceived+=(s,e)=>{if(e.Data!=null) lock(output) output.AppendLine(e.Data);};
-        proc.ErrorDataReceived+=(s,e)=>{if(e.Data!=null) lock(output) output.AppendLine(e.Data);};
+        proc.OutputDataReceived+=(s,e)=>{if(e.Data is not null) lock(output) output.AppendLine(e.Data);};
+        proc.ErrorDataReceived+=(s,e)=>{if(e.Data is not null) lock(output) output.AppendLine(e.Data);};
         proc.Start(); proc.BeginOutputReadLine(); proc.BeginErrorReadLine();
         return proc;
     }
     private static async Task<string> Run(string file, string args, string? wd=null, Dictionary<string,string>? env=null,int to=30000){
         var psi=new ProcessStartInfo{FileName=file,Arguments=args,RedirectStandardOutput=true,RedirectStandardError=true,UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=wd??Directory.GetCurrentDirectory()};
-        if(env!=null) foreach(var kv in env) psi.Environment[kv.Key]=kv.Value;
+        if(env is not null) foreach(var kv in env) psi.Environment[kv.Key]=kv.Value;
         var sb=new StringBuilder();
         using var proc=new Process{StartInfo=psi};
-        proc.OutputDataReceived+=(s,e)=>{if(e.Data!=null) sb.AppendLine(e.Data);};
-        proc.ErrorDataReceived+=(s,e)=>{if(e.Data!=null) sb.AppendLine(e.Data);};
+        proc.OutputDataReceived+=(s,e)=>{if(e.Data is not null) sb.AppendLine(e.Data);};
+        proc.ErrorDataReceived+=(s,e)=>{if(e.Data is not null) sb.AppendLine(e.Data);};
         proc.Start(); proc.BeginOutputReadLine(); proc.BeginErrorReadLine();
         var cts=new CancellationTokenSource(to);
         try{ await proc.WaitForExitAsync(cts.Token);}catch(OperationCanceledException){try{proc.Kill(entireProcessTree:true);}catch{}}
@@ -65,7 +65,7 @@ public class PortedMazeBackgroundWsIntegrationTests
     {
         if(!OperatingSystem.IsLinux()) return;
         var repoRoot="/home/anon/atheriz-cs";
-        var dll=$"{repoRoot}/src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+        var dll=$"{repoRoot}/src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll";
         if(!File.Exists(dll)) return;
         int port=FreePort(), telnetPort=FreePort();
         int attempts=0;
@@ -124,7 +124,7 @@ public class PortedMazeBackgroundWsIntegrationTests
                 }
                 return list;
             }
-            await Send("client_ready", Array.Empty<object>());
+            await Send("client_ready", []);
             var wel=await Drain(2000);
             Assert.Contains(wel,m=>m.Contains("ATHERIZ VERSION"));
             await Send("text", new object[]{$"connect mazeadmin mazepass123"});
@@ -168,7 +168,7 @@ public class PortedMazeBackgroundWsIntegrationTests
             Assert.True(gotMap,$"map not received");
             // Validate background payload directly (webclient merges pending -> map)
             var bgRaw=mazeMsgs.FirstOrDefault(m=>{ try{ var a=JsonDocument.Parse(m).RootElement; return a[0].GetString()=="background"; }catch{return false;}});
-            Assert.True(bgRaw!=null,"background missing");
+            Assert.True(bgRaw is not null,"background missing");
             var bgDoc=JsonDocument.Parse(bgRaw!);
             var bgArgs=bgDoc.RootElement[1];
             Assert.Equal(JsonValueKind.Array,bgArgs.ValueKind);
@@ -198,11 +198,11 @@ public class PortedMazeBackgroundWsIntegrationTests
                 if(arr[0].GetString()=="background") pendingBg=bgPayload;
                 if(arr[0].GetString()=="map") finalMap=arr[1][0];
             }
-            Assert.True(finalMap!=null,"map missing for client sim");
+            Assert.True(finalMap is not null,"map missing for client sim");
             // If background was before map, client stored pending and merged; if after, direct merge
             // With single map and background before map, pending should be consumed
             // Check that map payload itself does not yet contain background (server map doesn't include background), but client would merge pending -> we just ensure pending exists
-            Assert.True(pendingBg!=null || bgRaw!=null,"pending background should exist");
+            Assert.True(pendingBg is not null || bgRaw is not null,"pending background should exist");
             // Since server map is separate from background, we just verify both messages arrived in correct order for webclient to merge
             var bgIdx=mazeMsgs.FindIndex(m=>m.Contains("\"background\""));
             var mapIdx=mazeMsgs.FindIndex(m=>{ try{ return JsonDocument.Parse(m).RootElement[0].GetString()=="map"; }catch{return false;}});
@@ -220,7 +220,7 @@ public class PortedMazeBackgroundWsIntegrationTests
             Assert.Contains("Graceful shutdown",stopOut+TryLog(game));
         }finally{
             try{ await Run("bash",$"{repoRoot}/atheriz.sh stop --port {port}",game,null,5000);}catch{}
-            try{ if(server != null && !server.HasExited) server.Kill(entireProcessTree:true); }catch{}
+            try{ if(server is not null && !server.HasExited) server.Kill(entireProcessTree:true); }catch{}
             try{ server?.Dispose(); }catch{}
             await Task.Delay(800);
             try{ if(await IsListening(port)){ var pf=Path.Combine(game,"save","server.pid"); if(File.Exists(pf)&&int.TryParse(File.ReadLines(pf).FirstOrDefault()?.Trim(),out var pid)) try{ Process.GetProcessById(pid).Kill(); }catch{} } }catch{}
@@ -240,8 +240,8 @@ public class PortedMazeBackgroundWsIntegrationTests
         public Dictionary<string,object?>? Pending;
         public List<string> Renders=new();
         private static Dictionary<string,object?> Merge(Dictionary<string,object?>? a, Dictionary<string,object?>? b){
-            if(b==null) return a??new();
-            if(a==null) return new Dictionary<string,object?>(b);
+            if(b is null) return a??new();
+            if(a is null) return new Dictionary<string,object?>(b);
             return new Dictionary<string,object?>(b);
         }
         private static string Render(Dictionary<string,object?> p){
@@ -268,22 +268,22 @@ public class PortedMazeBackgroundWsIntegrationTests
             switch(cmd){
                 case "map":{
                     var p=args[0] as Dictionary<string,object?>;
-                    if(p==null && args[0] is JsonElement je) { p=new Dictionary<string,object?>(); foreach(var prop in je.EnumerateObject()){ if(prop.Name=="background"){ var bg=ParseBg(prop.Value); if(bg!=null) p[prop.Name]=bg; } else if(prop.Value.ValueKind==JsonValueKind.String) p[prop.Name]=prop.Value.GetString(); else if(prop.Value.ValueKind==JsonValueKind.Number) p[prop.Name]=prop.Value.GetInt32(); else p[prop.Name]=prop.Value.ToString(); } }
-                    MapPayload=p==null?null:new Dictionary<string,object?>(p);
-                    if(Pending!=null){ var ex=MapPayload!=null && MapPayload.TryGetValue("background",out var eb)? eb as Dictionary<string,object?>:null; MapPayload!["background"]=Merge(ex,Pending); Pending=null; }
-                    if(MapPayload!=null) Renders.Add(Render(MapPayload));
+                    if(p is null && args[0] is JsonElement je) { p=new Dictionary<string,object?>(); foreach(var prop in je.EnumerateObject()){ if(prop.Name=="background"){ var bg=ParseBg(prop.Value); if(bg is not null) p[prop.Name]=bg; } else if(prop.Value.ValueKind==JsonValueKind.String) p[prop.Name]=prop.Value.GetString(); else if(prop.Value.ValueKind==JsonValueKind.Number) p[prop.Name]=prop.Value.GetInt32(); else p[prop.Name]=prop.Value.ToString(); } }
+                    MapPayload=p is null?null:new Dictionary<string,object?>(p);
+                    if(Pending is not null){ var ex=MapPayload is not null && MapPayload.TryGetValue("background",out var eb)? eb as Dictionary<string,object?>:null; MapPayload!["background"]=Merge(ex,Pending); Pending=null; }
+                    if(MapPayload is not null) Renders.Add(Render(MapPayload));
                     break;
                 }
                 case "background":{
                     var bg=args[0] as Dictionary<string,object?>;
-                    if(bg==null && args[0] is JsonElement je2) bg=ParseBg(je2);
-                    if(bg==null) break;
+                    if(bg is null && args[0] is JsonElement je2) bg=ParseBg(je2);
+                    if(bg is null) break;
                     // ensure color list is List<int>
                     if(bg.TryGetValue("color",out var col) && col is JsonElement jeC && jeC.ValueKind==JsonValueKind.Array){ var li=new List<int>(); foreach(var n in jeC.EnumerateArray()) li.Add(n.GetInt32()); bg["color"]=li; }
-                    if(MapPayload!=null){ var ex2=MapPayload.TryGetValue("background",out var eb2)? eb2 as Dictionary<string,object?>:null; MapPayload["background"]=Merge(ex2,bg); Renders.Add(Render(MapPayload)); } else Pending=Merge(Pending,bg);
+                    if(MapPayload is not null){ var ex2=MapPayload.TryGetValue("background",out var eb2)? eb2 as Dictionary<string,object?>:null; MapPayload["background"]=Merge(ex2,bg); Renders.Add(Render(MapPayload)); } else Pending=Merge(Pending,bg);
                     break;
                 }
-                case "unbackground":{ Pending=null; if(MapPayload!=null){ MapPayload.Remove("background"); Renders.Add(Render(MapPayload)); } break; }
+                case "unbackground":{ Pending=null; if(MapPayload is not null){ MapPayload.Remove("background"); Renders.Add(Render(MapPayload)); } break; }
             }
         }
     }

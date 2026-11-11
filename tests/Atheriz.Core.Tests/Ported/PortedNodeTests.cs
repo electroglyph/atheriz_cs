@@ -555,7 +555,7 @@ public class PortedNodeTests
                 for (int i = 0; i < 20000 || (Volatile.Read(ref writerDone) == 0 && i < 2000000); i++)
                 {
                     var n = nh.GetNode(coord);
-                    if (n != null && !n.Coord.Equals(coord)) Interlocked.Increment(ref mismatched);
+                    if (n is not null && !n.Coord.Equals(coord)) Interlocked.Increment(ref mismatched);
                 }
             });
             start.Set();

@@ -250,7 +250,7 @@ public class PortedMapMoveRegressionTests
             // and background via threadpool after map. Unbackground is present for new-area moves
             // (1) but not for same-area; accept either.
             var bg = snap.FirstOrDefault(x => x.Cmd == "background");
-            Assert.False(bg.Cmd == null, "no background cmd");
+            Assert.False(bg.Cmd is null, "no background cmd");
             var bgPayload = bg.Args.FirstOrDefault() as Dictionary<string, object?>;
             Assert.NotNull(bgPayload);
             // color should be (83,128,56) for found path or (90,0,0) for deadend; we expect found path in most runs
@@ -258,12 +258,12 @@ public class PortedMapMoveRegressionTests
             object? colorObj = bgPayload!.TryGetValue("color", out var c) ? c : null;
             var colorList = colorObj as List<int>;
             // fallback: if serialized as List<object?> etc.
-            if (colorList == null && colorObj != null)
+            if (colorList is null && colorObj is not null)
             {
                 try
                 {
                     var enumerable = colorObj as System.Collections.IEnumerable;
-                    if (enumerable != null)
+                    if (enumerable is not null)
                     {
                         var lst = new List<int>();
                         foreach (var item in enumerable) lst.Add(Convert.ToInt32(item));
@@ -349,7 +349,7 @@ public class PortedMapMoveRegressionTests
         // MoveListener forces render, so updated grid should be sent
         var sent = conn.Snapshot();
         var mapMsg = sent.FirstOrDefault(x => x.Cmd == "map");
-        Assert.False(mapMsg.Cmd == null, $"no map after wall move; sent: {string.Join(",", sent.Select(x=>x.Cmd))}");
+        Assert.False(mapMsg.Cmd is null, $"no map after wall move; sent: {string.Join(",", sent.Select(x=>x.Cmd))}");
         var payload = mapMsg.Args[0] as Dictionary<string, object?>;
         var mapStr = payload!["map"] as string;
         Assert.False(string.IsNullOrWhiteSpace(mapStr));

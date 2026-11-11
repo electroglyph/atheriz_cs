@@ -163,7 +163,7 @@ public partial class Node : GameObject
                 return true;
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.TryCreatePersistedSubtype: " + logEx.Message, "Node"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.TryCreatePersistedSubtype: {logEx.Message}", "Node"); }
         node = null;
         return false;
     }
@@ -230,7 +230,7 @@ public partial class Node : GameObject
         foreach (var obj in contents)
         {
             if (excl is not null && excl.Contains(obj)) continue;
-            try { func(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".ForContents: " + logEx.Message, LogContext); }
+            try { func(obj); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {LogContext}.ForContents: {logEx.Message}", LogContext); }
         }
     }
 
@@ -241,17 +241,17 @@ public partial class Node : GameObject
         // must not abort relation resolution for the whole node.
         if (IsTickable)
         {
-            try { Globals.GlobalServices.TryGetTicker()?.AddCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
+            try { Globals.GlobalServices.TryGetTicker()?.AddCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.ResolveRelations: {logEx.Message}", "Node"); }
         }
         HashSet<int> scripts = ScriptsSnapshot;
         foreach (var id in scripts)
         {
             if (GameObject.TryGetScript(id, out var s))
             {
-                try { s.InstallHooks(this); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
+                try { s.InstallHooks(this); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.ResolveRelations: {logEx.Message}", "Node"); }
             }
         }
-        try { AtInit(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed Node.ResolveRelations: " + logEx.Message, "Node"); }
+        try { AtInit(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed Node.ResolveRelations: {logEx.Message}", "Node"); }
     }
 
     public override double TickSeconds
@@ -315,7 +315,7 @@ public partial class Node : GameObject
         bool open = false;
         var nh = NodeHandler.GetCurrent();
         Dictionary<string, Door>? doors = null;
-        try { doors = nh?.GetDoors(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".AtHear: " + logEx.Message, LogContext); }
+        try { doors = nh?.GetDoors(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {LogContext}.AtHear: {logEx.Message}", LogContext); }
         if (doors is not null && doors.Count > 0)
         {
             foreach (var d in doors.Values) { if (!d.Closed) { open = true; break; } }
@@ -333,7 +333,7 @@ public partial class Node : GameObject
                 if (!pre.ok) continue;
                 o.AtHear(pre.emitter, pre.desc, pre.msg, pre.loudness, pre.isSay);
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".AtHear: " + logEx.Message, LogContext); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {LogContext}.AtHear: {logEx.Message}", LogContext); }
         }
             return loud2 - attenuation;
         }, emitter, soundDesc, soundMsg, loudness, isSay);
@@ -421,8 +421,8 @@ public partial class Node : GameObject
                 {
                     if (ReferenceEquals(content.ResolveLocationObject(), obj))
                     {
-                        try { obj.RemoveObject(content); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
-                        try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
+                        try { obj.RemoveObject(content); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {LogContext}.Delete: {logEx.Message}", LogContext); }
+                        try { content.Location = Persistence.Dto.LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {LogContext}.Delete: {logEx.Message}", LogContext); }
                     }
                     var res = content.Delete(caller, true, maxDepth);
                     if (res is not null) { allOps.AddRange(res.Value.Operations); count += res.Value.Count; }
@@ -434,9 +434,9 @@ public partial class Node : GameObject
         {
             if (IsTickable)
             {
-                try { Globals.GlobalServices.TryGetTicker()?.RemoveCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
+                try { Globals.GlobalServices.TryGetTicker()?.RemoveCoro(AtTick, TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {LogContext}.Delete: {logEx.Message}", LogContext); }
             }
-            try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".Delete: " + logEx.Message, LogContext); }
+            try { NodeHandler.GetCurrent()?.RemoveNode(Coord); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {LogContext}.Delete: {logEx.Message}", LogContext); }
         }
         if (caller is not null && !AtDelete(caller)) return null;
         SyncRoot.EnterWriteLock();
@@ -470,7 +470,7 @@ public partial class Node : GameObject
         {
             if (!Access(caller, "delete"))
             {
-                try { caller?.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed " + LogContext + ".AtDelete: " + logEx.Message, LogContext); }
+                try { caller?.Msg($"You cannot delete {GetDisplayName(caller)}."); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {LogContext}.AtDelete: {logEx.Message}", LogContext); }
                 return false;
             }
             return true;

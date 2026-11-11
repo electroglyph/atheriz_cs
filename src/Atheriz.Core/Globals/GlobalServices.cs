@@ -147,7 +147,7 @@ public static class GlobalServices
         lock (_resetGate)
         {
             if (!slot.IsValueCreated)
-                slot = new Lazy<T>(factory, LazyThreadSafetyMode.ExecutionAndPublication);
+                slot = new(factory, LazyThreadSafetyMode.ExecutionAndPublication);
             try { return slot.Value; }
             catch
             {

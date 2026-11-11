@@ -242,7 +242,7 @@ public static class ExamFormatter
     private static object FormatLocks(object? val)
     {
         // Python returns list[str] where first is "" and rest are "lock: [lambda...]"
-        var lines = new List<string> { "" };
+        List<string> lines = [""];
         if (val is not null)
         {
             try

@@ -47,7 +47,7 @@ public class PortedSqliteTests
         using(var db=new AtherizDbContext(env.TempPath)){
             db.Database.EnsureCreated();
             var row = db.Objects.FirstOrDefault(o=>o.Id==obj.Id);
-            if(row!=null){ db.Objects.Remove(row); db.SaveChanges(); }
+            if(row is not null){ db.Objects.Remove(row); db.SaveChanges(); }
         }
         Assert.Equal(0, RowCount(obj.Id, env.TempPath));
     }
@@ -176,7 +176,7 @@ public class PortedSqliteTests
             nh.AddArea(area);
         }
         var areaTS = nh.GetArea("TestAreaTS")!;
-        if (areaTS.GetGrid(0) == null) areaTS.AddGrid(new NodeGrid("TestAreaTS",0));
+        if (areaTS.GetGrid(0) is null) areaTS.AddGrid(new NodeGrid("TestAreaTS",0));
         areaTS.GetGrid(0)!.AddNode(node);
         nh.Save(force:true);
 

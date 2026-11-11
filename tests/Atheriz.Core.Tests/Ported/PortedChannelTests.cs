@@ -70,7 +70,7 @@ public class PortedChannelTests
         caller.ClearMessages();
         var channel = Channel.Create("public");
         var cmd = new ChannelCommand();
-        var pa = cmd.Parser!.ParseArgs(Array.Empty<string>());
+        var pa = cmd.Parser!.ParseArgs([]);
         cmd.Run(caller, pa);
         var outText = string.Join(" ", caller.PeekMessages());
         Assert.Contains("usage:", outText.ToLower());
@@ -137,7 +137,7 @@ public class PortedChannelTests
         Assert.NotNull(cmd);
         var caller = MakeCaller();
         caller.ClearMessages();
-        var pa = cmd!.Parser!.ParseArgs(Array.Empty<string>());
+        var pa = cmd!.Parser!.ParseArgs([]);
         cmd.Run(caller, pa);
         var all = string.Join(" ", caller.PeekMessages());
         Assert.Contains("usage: server", all.ToLower());

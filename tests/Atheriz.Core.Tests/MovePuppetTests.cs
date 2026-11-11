@@ -101,7 +101,7 @@ public class MovePuppetTests
             HookRan = true;
             // Simulate the race: a second session puppets the target while the
             // first Unpuppet is inside AtUnpuppet (target.Session is null here).
-            if (S2 != null && P2 != null) P2.Puppet(S2, this);
+            if (S2 is not null && P2 is not null) P2.Puppet(S2, this);
         }
     }
 

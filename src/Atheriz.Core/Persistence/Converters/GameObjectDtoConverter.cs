@@ -120,8 +120,8 @@ internal static class GameObjectDtoConverter
             Name = obj.Name,
             DisplayName = obj.DisplayName,
             Desc = obj.Desc,
-            Aliases = new List<string>(obj.Aliases),
-            Tags = new HashSet<string>(obj.TagsSnapshot),
+            Aliases = new(obj.Aliases),
+            Tags = new(obj.TagsSnapshot),
             IsPc = serIsPc,
             IsNpc = obj.IsNpc,
             IsItem = obj.IsItem,
@@ -145,9 +145,9 @@ internal static class GameObjectDtoConverter
             Gender = obj.Gender,
             Location = loc,
             Home = obj.Home,
-            Contents = new HashSet<int>(obj.ContentsSnapshot),
-            Scripts = new HashSet<int>(obj.ScriptsSnapshot),
-            Channels = new List<int>(obj.ChannelsSnapshot),
+            Contents = new(obj.ContentsSnapshot),
+            Scripts = new(obj.ScriptsSnapshot),
+            Channels = new(obj.ChannelsSnapshot),
             Extra = obj.GetExtraSnapshot(),
             // Declarative lock policies (F004) — never Method.Name (which silently weakened locks on reload).
             Locks = BuildLockDefs(obj),
@@ -169,17 +169,17 @@ internal static class GameObjectDtoConverter
         }
 
         bool hadObjectMarker = dto.Extra.TryGetValue(markerObjectType, out var savedObjectMarker);
-        bool hadObjectVersion = dto.Extra.TryGetValue(markerObjectType + "_version", out var savedObjectVersion);
+        bool hadObjectVersion = dto.Extra.TryGetValue($"{markerObjectType}_version", out var savedObjectVersion);
         bool hadScriptMarker = dto.Extra.TryGetValue(markerScriptType, out var savedScriptMarker);
-        bool hadScriptVersion = dto.Extra.TryGetValue(markerScriptType + "_version", out var savedScriptVersion);
+        bool hadScriptVersion = dto.Extra.TryGetValue($"{markerScriptType}_version", out var savedScriptVersion);
         obj.SaveExtra(dto.Extra);
         // SaveExtra must not clobber the subtype markers above: a game hook
         // writing "__object_type" would silently rekey the row. Restore the
         // markers if they were removed or changed and say so loudly.
         RestoreMarker(dto, markerObjectType, hadObjectMarker, savedObjectMarker);
-        RestoreMarker(dto, markerObjectType + "_version", hadObjectVersion, savedObjectVersion);
+        RestoreMarker(dto, $"{markerObjectType}_version", hadObjectVersion, savedObjectVersion);
         RestoreMarker(dto, markerScriptType, hadScriptMarker, savedScriptMarker);
-        RestoreMarker(dto, markerScriptType + "_version", hadScriptVersion, savedScriptVersion);
+        RestoreMarker(dto, $"{markerScriptType}_version", hadScriptVersion, savedScriptVersion);
         return dto;
     }
 
@@ -209,7 +209,7 @@ internal static class GameObjectDtoConverter
         if (registered is not null)
         {
             dto.Extra[markerKey] = JsonOptions.ToElement(registered);
-            dto.Extra[markerKey + "_version"] = JsonOptions.ToElement(obj.PersistedTypeVersion);
+            dto.Extra[$"{markerKey}_version"] = JsonOptions.ToElement(obj.PersistedTypeVersion);
         }
         else
         {
@@ -262,7 +262,7 @@ internal static class GameObjectDtoConverter
                 clone.Remove("__script_type");
             }
         }
-        var view = dto with { Extra = clone ?? originalExtra ?? new Dictionary<string, JsonElement>() };
+        var view = dto with { Extra = clone ?? originalExtra ?? [] };
         return FromDtoCore(view, savedObjectType, hasObjectType, savedScriptType, hasScriptType);
     }
 
@@ -395,7 +395,7 @@ internal static class GameObjectDtoConverter
     internal static Coord ExtractCoord(GameObjectDto dto)
     {
         if (dto.Location is LocationRef.CoordLocation cl) return cl.Coord;
-        return new Coord("limbo", 0, 0, 0);
+        return new("limbo", 0, 0, 0);
     }
 
     public static Dto.SaveOperation GetSaveOperation(GameObject obj)
@@ -474,10 +474,10 @@ internal static class GameObjectDtoConverter
             if (el.ValueKind == JsonValueKind.Array)
             {
                 var parts = el.EnumerateArray().ToList();
-                long ts = parts.Count > 0 && parts[0].ValueKind == JsonValueKind.Number && parts[0].TryGetInt64(out var t) ? t : 0;
-                string sender = parts.Count > 1 && parts[1].ValueKind == JsonValueKind.String ? parts[1].GetString() ?? "" : "";
-                string msg = parts.Count > 2 && parts[2].ValueKind == JsonValueKind.String ? parts[2].GetString() ?? "" : "";
-                long seq = parts.Count > 3 && parts[3].ValueKind == JsonValueKind.Number && parts[3].TryGetInt64(out var s) ? s : 0;
+                long ts = parts is [var p0, ..] && p0.ValueKind == JsonValueKind.Number && p0.TryGetInt64(out var t) ? t : 0;
+                string sender = parts is [_, var p1, ..] && p1.ValueKind == JsonValueKind.String ? p1.GetString() ?? "" : "";
+                string msg = parts is [_, _, var p2, ..] && p2.ValueKind == JsonValueKind.String ? p2.GetString() ?? "" : "";
+                long seq = parts is [_, _, _, var p3, ..] && p3.ValueKind == JsonValueKind.Number && p3.TryGetInt64(out var s) ? s : 0;
                 entries.Add(new ChannelHistoryEntry(ts, sender, msg, seq));
             }
         }

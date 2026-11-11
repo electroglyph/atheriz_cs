@@ -193,7 +193,7 @@ public class PortedDeleteTests
         ObjectRegistry.SaveObjects(db, force:true);
         var res = ch.Delete(caller, false);
         Assert.NotNull(res);
-        if (res != null)
+        if (res is not null)
         {
             var ids = res.Value.Operations.Select(o => o.Id).ToList();
             if (ids.Count == 0) ids.Add(ch.Id);
@@ -230,7 +230,7 @@ public class PortedDeleteTests
         {
             // Plants a post-snapshot arrival: the walk already snapshotted the
             // parent, so this orphan is only reachable via the straggler sweep.
-            if (Parent != null && Planted == null)
+            if (Parent is not null && Planted is null)
             {
                 Planted = GameObject.Create("LateOrphan");
                 ObjectRegistry.AddObject(Planted);

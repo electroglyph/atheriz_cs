@@ -1,44 +1,29 @@
 namespace Atheriz.Core;
 
-public sealed class MenuContext
+public sealed class MenuContext(object? caller)
 {
-    public object? Caller { get; }
+    public object? Caller { get; } = caller;
     public Dictionary<string, object?> State { get; } = new();
-    public MenuContext(object? c) { Caller = c; }
 }
 
-public sealed class Choice
+public sealed class Choice(string key, string desc,
+    Func<MenuContext, Task<(string, List<Choice>)>>? gotoNode = null,
+    Func<MenuContext, Task>? callback = null,
+    bool stay = false)
 {
-    public string Key { get; }
-    public string Desc { get; }
-    public Func<MenuContext, Task<(string, List<Choice>)>>? Goto { get; }
-    public Func<MenuContext, Task>? Callback { get; }
-    public bool Stay { get; }
-    public Choice(string key, string desc,
-        Func<MenuContext, Task<(string, List<Choice>)>>? gotoNode = null,
-        Func<MenuContext, Task>? callback = null,
-        bool stay = false)
-    {
-        Key = key;
-        Desc = desc;
-        Goto = gotoNode;
-        Callback = callback;
-        Stay = stay;
-    }
+    public string Key { get; } = key;
+    public string Desc { get; } = desc;
+    public Func<MenuContext, Task<(string, List<Choice>)>>? Goto { get; } = gotoNode;
+    public Func<MenuContext, Task>? Callback { get; } = callback;
+    public bool Stay { get; } = stay;
 }
 
-public sealed class MenuEngine
+public sealed class MenuEngine(object? caller, Func<MenuContext, Task<(string, List<Choice>)>> start)
 {
-    public MenuContext Context { get; }
-    public Func<MenuContext, Task<(string, List<Choice>)>>? CurrentNode { get; private set; }
+    public MenuContext Context { get; } = new(caller);
+    public Func<MenuContext, Task<(string, List<Choice>)>>? CurrentNode { get; private set; } = start;
     string _text = "";
     Dictionary<string, Choice> _choices = new(StringComparer.OrdinalIgnoreCase);
-
-    public MenuEngine(object? caller, Func<MenuContext, Task<(string, List<Choice>)>> start)
-    {
-        Context = new(caller);
-        CurrentNode = start;
-    }
 
     public async Task RenderAsync()
     {
@@ -67,7 +52,7 @@ public sealed class MenuEngine
         get
         {
             if (CurrentNode is null) return "";
-            var lines = new List<string> { $"\n{_text}" };
+            List<string> lines = [$"\n{_text}"];
             foreach (var c in _choices.Values) lines.Add($"  [{c.Key}] {c.Desc}");
             return string.Join("\r\n", lines);
         }

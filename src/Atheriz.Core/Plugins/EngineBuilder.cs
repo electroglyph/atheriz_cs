@@ -13,7 +13,7 @@ public static class EngineBuilder
     // Relative layout of the engine checkout. These segments mirror the
     // per-game scripts exactly; changing them breaks every generated build.
     internal const string ServerCsprojRel = "src/Atheriz.Server/Atheriz.Server.csproj";
-    internal const string ServerDllRel = "src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll";
+    internal const string ServerDllRel = "src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll";
     internal const string SrcDirRel = "src";
 
     // Root-level files whose change invalidates the server dll. The scripts

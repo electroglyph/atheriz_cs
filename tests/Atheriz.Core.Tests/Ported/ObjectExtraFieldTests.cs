@@ -16,7 +16,7 @@ public class ObjectExtraFieldTests
     {
         var fi = typeof(GameObject).GetField("_extra", BindingFlags.NonPublic | BindingFlags.Instance);
         var dict = (Dictionary<string, System.Text.Json.JsonElement>)fi!.GetValue(obj)!;
-        if (value == null)
+        if (value is null)
         {
             dict.Remove(key);
         }

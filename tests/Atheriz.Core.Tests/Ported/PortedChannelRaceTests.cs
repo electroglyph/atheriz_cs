@@ -66,7 +66,7 @@ public class PortedChannelRaceTests
         cmd.Run(caller, args);
         // Verify cache contains
         bool cached = false;
-        if (cache != null)
+        if (cache is not null)
         {
             foreach (var kv in cache.Keys) if (kv.ToString()!.ToLower() == "stalechan") cached = true;
         }

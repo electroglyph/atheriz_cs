@@ -389,7 +389,7 @@ public sealed class GroupCommand : LoggedInCommand
         catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException)
         {
             try { return Channel.Create($"{go.Name}'s group {go.Id}", go); }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GroupCommand.CreateGroupChannel: " + logEx.Message, "GroupCommand"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GroupCommand.CreateGroupChannel: {logEx.Message}", "GroupCommand"); }
             go.Msg("Could not create a group channel; try again.");
             return null;
         }

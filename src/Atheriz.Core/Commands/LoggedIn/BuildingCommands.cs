@@ -176,7 +176,7 @@ public sealed class BuildCommand : BuilderCommand
             }
             else
             {
-                goCaller.Msg(PrintHelp() + "\n" + Parser!.FormatUsage());
+                goCaller.Msg($"{PrintHelp()}\n{Parser!.FormatUsage()}");
                 return;
             }
         }
@@ -216,10 +216,10 @@ public sealed class BuildCommand : BuilderCommand
                 string oppAlias = row.oppAlias;
                 int dx = row.dx;
                 int dy = row.dy;
-                node.AddLinkIfAbsent(name, () => new NodeLink(name, new Coord(node.Coord.Area, node.Coord.X + dx, node.Coord.Y + dy, node.Coord.Z), new List<string> { alias }));
+                node.AddLinkIfAbsent(name, () => new NodeLink(name, new Coord(node.Coord.Area, node.Coord.X + dx, node.Coord.Y + dy, node.Coord.Z), [alias]));
                 var toCoord = new Coord(node.Coord.Area, node.Coord.X + dx, node.Coord.Y + dy, node.Coord.Z);
                 var toNode = nh.GetNode(toCoord);
-                if (toNode is not null) toNode.AddLinkIfAbsent(opp, () => new NodeLink(opp, node.Coord, new List<string> { oppAlias }));
+                if (toNode is not null) toNode.AddLinkIfAbsent(opp, () => new NodeLink(opp, node.Coord, [oppAlias]));
             }
         }
 
@@ -283,7 +283,7 @@ public sealed class BuildCommand : BuilderCommand
 
             if (dKey != "x")
             {
-                loc.AddLinkIfAbsent(linkName, () => new NodeLink(linkName, newCoord, new List<string>{dKey}));
+                loc.AddLinkIfAbsent(linkName, () => new NodeLink(linkName, newCoord, [dKey]));
                 string alias = GetAlias(backLinkName);
                 var aliases = string.IsNullOrEmpty(alias) ? [] : new List<string>{alias};
                 newNode.AddLinkIfAbsent(backLinkName, () => new NodeLink(backLinkName, loc.Coord, aliases));
@@ -586,7 +586,7 @@ public sealed class DoorCommand : BuilderCommand
             }
             if (needDestLink)
             {
-                var link = new NodeLink(oppLong, loc.Coord, new List<string>{oppShort});
+                var link = new NodeLink(oppLong, loc.Coord, [oppShort]);
                 toNode.AddLink(link);
                 go.Msg($"Created link '{link.Name}' from node at {toCoord} linking to {loc.Coord}.");
             }
@@ -609,7 +609,7 @@ public sealed class DoorCommand : BuilderCommand
             }
             if (needHereLink)
             {
-                var link = new NodeLink(def.longName, toCoord, new List<string>{def.shortName});
+                var link = new NodeLink(def.longName, toCoord, [def.shortName]);
                 loc.AddLink(link);
                 go.Msg($"Created link '{link.Name}' from node at {loc.Coord} linking to {toCoord}.");
             }
@@ -733,7 +733,7 @@ public sealed class MazeCommand : BuilderCommand
         catch
         {
             // Same DB-discipline rule as the node fallback below: empty, never load.
-            try { Atheriz.Core.AtherizLogger.LogWarning("MazeCommand: no map handler available; using an empty one (world may be incomplete).", "MazeCommand"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed MazeCommand.MapHandlerFactory: " + logEx.Message, "MazeCommand"); }
+            try { Atheriz.Core.AtherizLogger.LogWarning("MazeCommand: no map handler available; using an empty one (world may be incomplete).", "MazeCommand"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug($"Suppressed MazeCommand.MapHandlerFactory: {logEx.Message}", "MazeCommand"); }
             return new MapHandler(autoLoad:false);
         }
     };
@@ -745,7 +745,7 @@ public sealed class MazeCommand : BuilderCommand
             // DB-discipline rule (AGENTS.md): never load mid-game. The fallback used to
             // autoLoad:true here (full DB load); an empty handler plus a loud warning
             // is the honest shape when no world exists.
-            try { Atheriz.Core.AtherizLogger.LogWarning("MazeCommand: no node handler available; using an empty one (world may be incomplete).", "MazeCommand"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed MazeCommand.NodeHandlerFactory: " + logEx.Message, "MazeCommand"); }
+            try { Atheriz.Core.AtherizLogger.LogWarning("MazeCommand: no node handler available; using an empty one (world may be incomplete).", "MazeCommand"); } catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug($"Suppressed MazeCommand.NodeHandlerFactory: {logEx.Message}", "MazeCommand"); }
             return NodeHandler.GetCurrent() ?? new NodeHandler(autoLoad:false);
         }
     };
@@ -805,15 +805,15 @@ public sealed class MazeCommand : BuilderCommand
         var maze2Exit = tuple2.grid.GetRandomNode();
         var maze3Exit = tuple3.grid.GetRandomNode();
         string exitSymbol = GameUtils.WrapXterm256("!", fg: 9);
-        var mi1 = new MapInfo("maze1", tuple1.map, null, new List<LegendEntry> { new LegendEntry(exitSymbol, "to maze2", maze1Exit is not null ? (maze1Exit.Coord.X, maze1Exit.Coord.Y) : null) });
-        var mi2 = new MapInfo("maze2", tuple2.map, null, new List<LegendEntry> { new LegendEntry(exitSymbol, "to maze3", maze2Exit is not null ? (maze2Exit.Coord.X, maze2Exit.Coord.Y) : null) });
-        var mi3 = new MapInfo("maze3", tuple3.map, null, new List<LegendEntry> { new LegendEntry(exitSymbol, "to maze1", maze3Exit is not null ? (maze3Exit.Coord.X, maze3Exit.Coord.Y) : null) });
+        var mi1 = new MapInfo("maze1", tuple1.map, null, [new LegendEntry(exitSymbol, "to maze2", maze1Exit is not null ? (maze1Exit.Coord.X, maze1Exit.Coord.Y) : null)]);
+        var mi2 = new MapInfo("maze2", tuple2.map, null, [new LegendEntry(exitSymbol, "to maze3", maze2Exit is not null ? (maze2Exit.Coord.X, maze2Exit.Coord.Y) : null)]);
+        var mi3 = new MapInfo("maze3", tuple3.map, null, [new LegendEntry(exitSymbol, "to maze1", maze3Exit is not null ? (maze3Exit.Coord.X, maze3Exit.Coord.Y) : null)]);
         mh.SetMapInfo("maze1", 0, mi1);
         mh.SetMapInfo("maze2", 0, mi2);
         mh.SetMapInfo("maze3", 0, mi3);
-        if (maze1Exit is not null && maze2Exit is not null) maze1Exit.AddLink(new NodeLink("down", new Coord("maze2", 0, 0, 0), new List<string>{"d"}));
-        if (maze2Exit is not null && maze3Exit is not null) maze2Exit.AddLink(new NodeLink("down", new Coord("maze3", 0, 0, 0), new List<string>{"d"}));
-        if (maze3Exit is not null) maze3Exit.AddLink(new NodeLink("down", new Coord("maze1", 0, 0, 0), new List<string>{"d"}));
+        if (maze1Exit is not null && maze2Exit is not null) maze1Exit.AddLink(new NodeLink("down", new Coord("maze2", 0, 0, 0), ["d"]));
+        if (maze2Exit is not null && maze3Exit is not null) maze2Exit.AddLink(new NodeLink("down", new Coord("maze3", 0, 0, 0), ["d"]));
+        if (maze3Exit is not null) maze3Exit.AddLink(new NodeLink("down", new Coord("maze1", 0, 0, 0), ["d"]));
         var start = nh.GetNode(new Coord("maze1", 0, 0, 0));
         var end = maze1Exit;
         // Faithful to atheriz/commands/loggedin/maze.py:97-107 — queue do_pathfind first,
@@ -837,7 +837,7 @@ public sealed class MazeCommand : BuilderCommand
                             var (found, path, dead) = Pathfind.AStar(start, end, go, nh);
                             sw2.Stop();
                             // Verbatim maze.py do_pathfind: unbackground first, then background.
-                            try { capturedConn?.SendCommand("unbackground", new List<object?> { "" }, null); } catch (Exception) { }
+                            try { capturedConn?.SendCommand("unbackground", [""], null); } catch (Exception) { }
                             if (found)
                             {
                                 go.Msg($"path found in: {sw2.Elapsed.TotalMilliseconds:F2} milliseconds");
@@ -882,8 +882,8 @@ public sealed class MazeCommand : BuilderCommand
     private static void SendBackground(Atheriz.Core.Network.BaseConnection? conn, GameObject go, List<int> color, List<object> coords)
     {
         var bgPayload = new Dictionary<string, object?> { ["color"] = color, ["coords"] = coords };
-        try { conn?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
-        if (conn is null) try { go.Session?.Connection?.SendCommand("background", new List<object?> { bgPayload }, null); } catch (Exception) { }
+        try { conn?.SendCommand("background", [bgPayload], null); } catch (Exception) { }
+        if (conn is null) try { go.Session?.Connection?.SendCommand("background", [bgPayload], null); } catch (Exception) { }
     }
 
     public static (Dictionary<(int,int), string> map, NodeGrid grid) GenMapAndGrid(int w, int h, string area)
@@ -909,21 +909,20 @@ public sealed class MazeCommand : BuilderCommand
         List<(int,int)> path = [];
         Dictionary<(int,int), List<(int,int)>> maze = [];
         var nodes = maze.GetValueOrDefault(current, []);
-        bool done = false;
-        while (!done)
+        maze: while (true)
         {
-            if (valid.Count == 0) { if (path.Count == 0) { done = true; break; } path.RemoveAt(path.Count - 1); if (path.Count == 0) { done = true; break; } current = path.Last(); nodes = maze.GetValueOrDefault(current, []); valid = GetValid(current); continue; }
+            if (valid.Count == 0) { if (path.Count == 0) { break maze; } path.RemoveAt(path.Count - 1); if (path.Count == 0) { break maze; } current = path.Last(); nodes = maze.GetValueOrDefault(current, []); valid = GetValid(current); continue; }
             var c = valid[Random.Shared.Next(valid.Count)];
             visited.Add(c);
             path.Add(c);
-            if (nodes.Count == 0) maze[current] = new List<(int,int)>{c}; else { nodes.Add(c); maze[current] = nodes; }
+            if (nodes.Count == 0) maze[current] = [c]; else { nodes.Add(c); maze[current] = nodes; }
             current = c;
             nodes = maze.GetValueOrDefault(current, []);
             valid = GetValid(current);
             while (valid.Count == 0)
             {
                 path.RemoveAt(path.Count - 1);
-                if (path.Count == 0) { done = true; break; }
+                if (path.Count == 0) { break maze; }
                 current = path.Last();
                 nodes = maze.GetValueOrDefault(current, []);
                 valid = GetValid(current);
@@ -951,10 +950,10 @@ public sealed class MazeCommand : BuilderCommand
             if (k.Item2 > 0 && maze.GetValueOrDefault((k.Item1,k.Item2-1), []).Contains(k)) s=true;
             if (k.Item2 < height-1 && maze.GetValueOrDefault((k.Item1,k.Item2+1), []).Contains(k)) n=true;
             var node = new Node(new Coord(area, k.Item1, k.Item2, 0), "Somewhere in a mysterious maze.");
-            if (n) node.AddLink(new NodeLink("north", new Coord(area, k.Item1, k.Item2+1, 0), new List<string>{"n"}));
-            if (s) node.AddLink(new NodeLink("south", new Coord(area, k.Item1, k.Item2-1, 0), new List<string>{"s"}));
-            if (e) node.AddLink(new NodeLink("east", new Coord(area, k.Item1+1, k.Item2, 0), new List<string>{"e"}));
-            if (w) node.AddLink(new NodeLink("west", new Coord(area, k.Item1-1, k.Item2, 0), new List<string>{"w"}));
+            if (n) node.AddLink(new NodeLink("north", new Coord(area, k.Item1, k.Item2+1, 0), ["n"]));
+            if (s) node.AddLink(new NodeLink("south", new Coord(area, k.Item1, k.Item2-1, 0), ["s"]));
+            if (e) node.AddLink(new NodeLink("east", new Coord(area, k.Item1+1, k.Item2, 0), ["e"]));
+            if (w) node.AddLink(new NodeLink("west", new Coord(area, k.Item1-1, k.Item2, 0), ["w"]));
             grid.AddNode(node);
             // the Node ctor no longer publishes to the registry —
             // register explicitly (mirrors NodeHandler.AddNode's order).
@@ -1259,7 +1258,7 @@ public sealed class SetCommand : BuilderCommand
             {
                 string inner = trimmed.Substring(1, trimmed.Length - 2).Trim();
                 if (inner.EndsWith(",", StringComparison.Ordinal)) inner = inner.Substring(0, inner.Length - 1).TrimEnd();
-                string norm = "[" + inner + "]";
+                string norm = $"[{inner}]";
                 norm = NormalizeValueText(norm);
                 try
                 {
@@ -1275,7 +1274,7 @@ public sealed class SetCommand : BuilderCommand
                 string candidate = raw;
                 string candTrim = candidate.TrimStart();
                 if (candTrim.StartsWith("+", StringComparison.Ordinal)) candidate = candTrim.Substring(1);
-                else if (candTrim.StartsWith(".", StringComparison.Ordinal)) candidate = "0" + trimStart;
+                else if (candTrim.StartsWith(".", StringComparison.Ordinal)) candidate = $"0{trimStart}";
                 try { value = JsonSerializer.Deserialize<JsonElement>(candidate); }
                 catch { value = null; }
                 if (value is null)
@@ -1741,7 +1740,7 @@ public sealed class WipeCommand : BuilderCommand
         if (pattern is { Length: > 0 })
         {
             var rxs = pattern.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
-                .Select(p => "^" + Regex.Escape(p).Replace(@"\*", ".*").Replace(@"\?", ".") + "$")
+                .Select(p => $"^{Regex.Escape(p).Replace(@"\*", ".*").Replace(@"\?", ".")}$")
                 .ToList();
             keys = keys.Where(k => rxs.Any(rx => Regex.IsMatch(k, rx, RegexOptions.IgnoreCase))).ToList();
         }
@@ -1928,10 +1927,10 @@ public sealed class TeleportCommand : BuilderCommand
         while (true)
         {
             string t = text.TrimStart();
-            bool dash = t.StartsWith("--" + flag, StringComparison.OrdinalIgnoreCase);
-            bool slash = t.StartsWith("/" + flag, StringComparison.OrdinalIgnoreCase);
+            bool dash = t.StartsWith($"--{flag}", StringComparison.OrdinalIgnoreCase);
+            bool slash = t.StartsWith($"/{flag}", StringComparison.OrdinalIgnoreCase);
             if (!dash && !slash) break;
-            string token = dash ? "--" + flag : "/" + flag;
+            string token = dash ? $"--{flag}" : $"/{flag}";
             if (t.Length > token.Length && !char.IsWhiteSpace(t[token.Length])) break;
             found = true;
             text = t[token.Length..].TrimStart();

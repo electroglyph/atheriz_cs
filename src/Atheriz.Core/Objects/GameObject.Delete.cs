@@ -22,7 +22,7 @@ public partial class GameObject
         {
             bool vetoed;
             try { vetoed = !AtDelete(caller); }
-            catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
+            catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning($"GameObject.Delete AtDelete threw (treated as vetoed): {logEx.Message}", "GameObject"); }
             if (vetoed) return null;
         }
         // quick check already deleted
@@ -66,7 +66,7 @@ public partial class GameObject
                 // snapshot contents safely
                 List<int> contentIds;
                 obj._lock.EnterReadLock();
-                try { contentIds = new List<int>(obj._contents); }
+                try { contentIds = new(obj._contents); }
                 finally { obj._lock.ExitReadLock(); }
                 foreach (var cid in contentIds)
                 {
@@ -84,7 +84,7 @@ public partial class GameObject
                         bool vetoed = false;
                         // a throwing AtDelete must not vanish silently —
                         // log the failure and treat it as "vetoed".
-                        try { vetoed = !content.AtDelete(caller); } catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
+                        try { vetoed = !content.AtDelete(caller); } catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning($"GameObject.Delete AtDelete threw (treated as vetoed): {logEx.Message}", "GameObject"); }
                         if (vetoed) continue;
                     }
                     if (depth + 1 >= maxDepth)
@@ -133,14 +133,14 @@ public partial class GameObject
                 else { continue; }
                 if (locId.HasValue && seen.Contains(locId.Value))
                 {
-                    try { locObj?.RemoveContent(survivor.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                    try { locObj?.RemoveContent(survivor.Id); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                     try
                     {
                         survivor._lock.EnterWriteLock();
                         try { survivor._location = LocationRef.NullLocation.Instance; survivor._flags.IsModified = true; }
                         finally { survivor._lock.ExitWriteLock(); }
                     }
-                    catch { try { survivor.Location = LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); } }
+                    catch { try { survivor.Location = LocationRef.NullLocation.Instance; } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); } }
                 }
             }
             // actually need to ensure toDelete contains order reversed already; truncated survivors stay alive
@@ -154,9 +154,9 @@ public partial class GameObject
                     var loc = obj.ResolveLocationObject();
                     if (loc is not null)
                     {
-                        try { loc.RemoveContent(obj.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                        try { loc.RemoveContent(obj.Id); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                     }
-                } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                 // Only the thread that flips the flag tears down. A sibling delete
                 // (overlapping roots) that arrives late skips the physical section
                 // instead of double-closing sessions / removing tickers.
@@ -177,7 +177,7 @@ public partial class GameObject
                         // Don't override truncated handling for toDelete objects
                     }
                     finally { obj._lock.ExitWriteLock(); }
-                } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                 if (mine)
                 {
                     ObjectRegistry.RemoveObject(obj);
@@ -190,7 +190,7 @@ public partial class GameObject
                     // a deleted parent.
                     List<int> fresh;
                     obj._lock.EnterReadLock();
-                    try { fresh = new List<int>(obj._contents); }
+                    try { fresh = new(obj._contents); }
                     finally { obj._lock.ExitReadLock(); }
                     foreach (var cid in fresh)
                     {
@@ -210,7 +210,7 @@ public partial class GameObject
                         try { r = straggler.Delete(caller, true, maxDepth); }
                         catch (Exception logEx)
                         {
-                            AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject");
+                            AtherizLogger.LogWarning($"GameObject.Delete AtDelete threw (treated as vetoed): {logEx.Message}", "GameObject");
                             continue;
                         }
                         if (r is not null) { ops.AddRange(r.Value.Operations); extraCount += r.Value.Count; }
@@ -223,16 +223,16 @@ public partial class GameObject
                             // the detach a racy sibling left behind.
                             bool vetoed = false;
                             try { vetoed = caller is not null && !straggler.AtDelete(caller); }
-                            catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
+                            catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning($"GameObject.Delete AtDelete threw (treated as vetoed): {logEx.Message}", "GameObject"); }
                             if (vetoed) continue;
-                            try { obj.RemoveContent(straggler.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                            try { obj.RemoveContent(straggler.Id); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                             try
                             {
                                 straggler._lock.EnterWriteLock();
                                 try { straggler._location = LocationRef.NullLocation.Instance; straggler._flags.IsModified = true; }
                                 finally { straggler._lock.ExitWriteLock(); }
                             }
-                            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                         }
                     }
                 }
@@ -244,10 +244,10 @@ public partial class GameObject
         {
             // non-recursive: move contents to self's location (Python _move_contents)
             GameObject? loc = null;
-            try { loc = this.ResolveLocationObject(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+            try { loc = this.ResolveLocationObject(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
             List<int> contentIds;
             _lock.EnterReadLock();
-            try { contentIds = new List<int>(_contents); }
+            try { contentIds = new(_contents); }
             finally { _lock.ExitReadLock(); }
             var contentObjs = contentIds.Select(id => ObjectRegistry.Get(id).FirstOrDefault()).OfType<GameObject>().ToList();
             int deletedKids = 0;
@@ -266,18 +266,18 @@ public partial class GameObject
                 {
                     bool vetoed = false;
                     try { vetoed = !content.AtDelete(caller); }
-                    catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning("GameObject.Delete AtDelete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
+                    catch (Exception logEx) { vetoed = true; AtherizLogger.LogWarning($"GameObject.Delete AtDelete threw (treated as vetoed): {logEx.Message}", "GameObject"); }
                     if (vetoed)
                     {
                         // A vetoed child survives (walk semantics): detach it
                         // to nowhere without deleting.
-                        try { this.RemoveContent(content.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                        try { this.RemoveContent(content.Id); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                         try
                         {
                             content._lock.EnterWriteLock();
                             try { content._location = LocationRef.NullLocation.Instance; content._flags.IsModified = true; }
                             finally { content._lock.ExitWriteLock(); }
-                        } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                        } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                         return;
                     }
                 }
@@ -295,13 +295,13 @@ public partial class GameObject
                     finally { content._lock.ExitReadLock(); }
                     if (stillAtThis)
                     {
-                        try { this.RemoveContent(content.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                        try { this.RemoveContent(content.Id); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                         try
                         {
                             content._lock.EnterWriteLock();
                             try { content._location = LocationRef.NullLocation.Instance; content._flags.IsModified = true; }
                             finally { content._lock.ExitWriteLock(); }
-                        } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+                        } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
                     }
                     // then collect recursively (delete content and its children).
                     // Guarded: the pre-detach probe above already passed, but a
@@ -310,7 +310,7 @@ public partial class GameObject
                     // not abort the sibling loop with the parent half-processed.
                     (int Count, List<DeleteOperation> Operations)? r = null;
                     try { r = content.Delete(caller, true, maxDepth); }
-                    catch (Exception logEx) { AtherizLogger.LogWarning("GameObject.Delete re-delete threw (treated as vetoed): " + logEx.Message, "GameObject"); }
+                    catch (Exception logEx) { AtherizLogger.LogWarning($"GameObject.Delete re-delete threw (treated as vetoed): {logEx.Message}", "GameObject"); }
                     if (r is not null) { ops.AddRange(r.Value.Operations); deletedKids += r.Value.Count; }
                 }
                 else
@@ -339,7 +339,7 @@ public partial class GameObject
             // escaping with a dangling location.
             List<int> freshIds;
             _lock.EnterReadLock();
-            try { freshIds = new List<int>(_contents); }
+            try { freshIds = new(_contents); }
             finally { _lock.ExitReadLock(); }
             foreach (var fid in freshIds)
             {
@@ -360,7 +360,7 @@ public partial class GameObject
             {
                 var loc2 = this.ResolveLocationObject();
                 if (loc2 is not null) loc2.RemoveContent(this.Id);
-            } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.Delete: " + logEx.Message, "GameObject"); }
+            } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.Delete: {logEx.Message}", "GameObject"); }
             if (!this.IsTemporary)
             {
                 ops.Add(this.GetDeleteOperation());
@@ -388,16 +388,16 @@ public partial class GameObject
             var leaderId = obj.Following;
             if (leaderId.HasValue)
             {
-                try { obj.Following = null; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                try { obj.Following = null; } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
                 try
                 {
                     var leader = ObjectRegistry.Get(leaderId.Value).FirstOrDefault();
-                    try { leader?.RemoveFollower(obj.Id); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                    try { leader?.RemoveFollower(obj.Id); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
                 }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
         try
         {
             foreach (var fid in obj.FollowersSnapshot)
@@ -406,12 +406,12 @@ public partial class GameObject
                 {
                     var follower = ObjectRegistry.Get(fid).FirstOrDefault();
                     if (follower is not null && follower.Following == obj.Id)
-                        try { follower.Following = null; } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                        try { follower.Following = null; } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
                 }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
         try
         {
             foreach (var chId in obj.ChannelsSnapshot)
@@ -419,13 +419,13 @@ public partial class GameObject
                 try
                 {
                     var ch = ObjectRegistry.Get(chId).FirstOrDefault();
-                    if (ch is not null) try { ch.RemoveListener(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                    if (ch is not null) try { ch.RemoveListener(obj); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
                 }
-                catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
-                try { obj.UnsubscribeById(chId); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
+                try { obj.UnsubscribeById(chId); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
         try
         {
             // Captured before AtDisconnect: the hook nulls obj.Session, so
@@ -433,18 +433,18 @@ public partial class GameObject
             var sess = obj.Session;
             if (sess is not null)
             {
-                try { obj.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
-                try { sess.Connection?.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                try { obj.AtDisconnect(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
+                try { sess.Connection?.Close(); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
                 // A deleted id must not linger in the puppet stack or as the
                 // session's live puppet — Unpuppet would otherwise pop it and
                 // rewire the session onto a deleted object.
-                try { lock (sess.Lock) { sess.RemovePuppetEntriesFor(obj); } } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
-                try { lock (sess.Lock) { if (ReferenceEquals(sess.Puppet, obj)) sess.Puppet = null; if (ReferenceEquals(sess.LastPuppet, obj)) sess.LastPuppet = null; } } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                try { lock (sess.Lock) { sess.RemovePuppetEntriesFor(obj); } } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
+                try { lock (sess.Lock) { if (ReferenceEquals(sess.Puppet, obj)) sess.Puppet = null; if (ReferenceEquals(sess.LastPuppet, obj)) sess.LastPuppet = null; } } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
                 // A deleted PC must free its account character slot, or the
                 // cap keeps rejecting new characters for a PC that is gone.
                 // RemoveCharacter is a no-op when the id is not listed, so
                 // non-character deletions pass through unchanged.
-                try { sess.Account?.RemoveCharacter(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                try { sess.Account?.RemoveCharacter(obj); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
             }
             // Offline fallback: a PC deleted while unpuppeted (Session null)
             // or whose session carries no account never entered the block
@@ -459,15 +459,15 @@ public partial class GameObject
                     try { owners = ObjectRegistry.FilterBy(o => o is Account a && a.Characters.Contains(obj.Id)).OfType<Account>().ToList(); }
                     catch { owners = []; }
                     foreach (var owner in owners)
-                        try { owner.RemoveCharacter(obj); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+                        try { owner.RemoveCharacter(obj); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
                 }
             }
-            catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+            catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
-        try { Globals.GlobalServices.TryGetTicker()?.RemoveCoro(obj.AtTick, obj.TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
+        try { Globals.GlobalServices.TryGetTicker()?.RemoveCoro(obj.AtTick, obj.TickSeconds); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
         // leave no dangling residue — a deleted id must not stay
         // readable via PeekMessages/scans or keep installed hooks alive.
-        try { obj.Write(() => { obj._msgLog.Clear(); obj._hookRegistry.Clear(); }); } catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed GameObject.TeardownDeleted: " + logEx.Message, "GameObject"); }
+        try { obj.Write(() => { obj._msgLog.Clear(); obj._hookRegistry.Clear(); }); } catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed GameObject.TeardownDeleted: {logEx.Message}", "GameObject"); }
     }
 }

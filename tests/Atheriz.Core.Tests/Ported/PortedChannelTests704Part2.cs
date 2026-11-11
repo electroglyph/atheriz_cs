@@ -352,7 +352,7 @@ public class PortedChannelTests704Part2
         var caller = GameObject.Create("a", isPc: true);
         ObjectRegistry.AddObject(caller);
         caller.ClearMessages();
-        var pa = cmd!.Parser!.ParseArgs(Array.Empty<string>());
+        var pa = cmd!.Parser!.ParseArgs([]);
         cmd.Run(caller, pa);
         var outText = string.Join(" ", caller.PeekMessages()).ToLower();
         Assert.Contains("usage:", outText);

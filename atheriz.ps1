@@ -237,8 +237,8 @@ function Invoke-Atheriz {
         $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
     }
     $serverProj = Join-Path $projectRoot 'src/Atheriz.Server/Atheriz.Server.csproj'
-    $serverDllDebug = Join-Path $projectRoot 'src/Atheriz.Server/bin/Debug/net10.0/Atheriz.Server.dll'
-    $serverDllRelease = Join-Path $projectRoot 'src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll'
+    $serverDllDebug = Join-Path $projectRoot 'src/Atheriz.Server/bin/Debug/net11.0/Atheriz.Server.dll'
+    $serverDllRelease = Join-Path $projectRoot 'src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll'
     $publishDll = Join-Path $projectRoot 'publish/Atheriz.Server.dll'
 
     if ($null -eq (Get-Command dotnet -ErrorAction SilentlyContinue)) {

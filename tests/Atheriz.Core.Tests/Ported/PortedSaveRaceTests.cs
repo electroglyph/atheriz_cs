@@ -13,7 +13,7 @@ public class PortedSaveRaceTests
     {
         using var db = new AtherizDbContext(tempPath);
         var row = db.Objects.FirstOrDefault(o=>o.Id==id);
-        if (row==null) return null;
+        if (row is null) return null;
         var dto = GameObjectDtoSerializer.FromJson(row.Data);
         return GameObject.FromDto(dto);
     }
@@ -25,7 +25,7 @@ public class PortedSaveRaceTests
         {
             var res = base.GetSaveOperationClearing();
             // Mutate alpha when beta is being serialized (as in Python racing_dumps for beta)
-            if (Alpha != null)
+            if (Alpha is not null)
             {
                 Alpha.Name = "mutated-during-checkpoint";
                 Alpha.Desc = "mutated";

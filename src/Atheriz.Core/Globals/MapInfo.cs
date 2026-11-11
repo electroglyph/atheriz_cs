@@ -16,13 +16,12 @@ public class MapInfo
     // every MapChanged=true bumps the dirty generation, so Render
     // can clear only dirtiness it already rendered (an UpdateGrid landing
     // between PreRender and the clear must survive for the next render).
-    private bool _mapChanged = true;
     private long _mapGen;
     public bool MapChanged
     {
-        get => _mapChanged;
-        set { if (value) System.Threading.Interlocked.Increment(ref _mapGen); _mapChanged = value; }
-    }
+        get;
+        set { if (value) System.Threading.Interlocked.Increment(ref _mapGen); field = value; }
+    } = true;
     public bool IsModified { get; set; } = false; // for parity with Python getattr is_modified
     // Snapshot copies: the getters return copies under the read lock, so a
     // reader enumerating the copy never races a concurrent mutator. The lock
@@ -99,8 +98,7 @@ public class MapInfo
         if (!myPost.OrderBy(kv => kv.Key).SequenceEqual(otherPost.OrderBy(kv => kv.Key))) return false;
         var myLegend = LegendEntries; var otherLegend = other.LegendEntries;
         if (myLegend.Count != otherLegend.Count) return false;
-        for (int i = 0; i < myLegend.Count; i++) if (!myLegend[i].Equals(otherLegend[i])) return false;
-        return true;
+        return myLegend.SequenceEqual(otherLegend);
     }
 
     // --- grid helpers ---
@@ -320,7 +318,7 @@ public class MapInfo
                 return false;
             }
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed BatchScope.TryGetLocationCoord: " + logEx.Message, "BatchScope"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed BatchScope.TryGetLocationCoord: {logEx.Message}", "BatchScope"); }
         return false;
     }
 
@@ -330,13 +328,13 @@ public class MapInfo
     internal static T Suppress<T>(Func<T> call, T fallback, string what)
     {
         try { return call(); }
-        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed MapHandler.{what}: " + ex.Message, "MapHandler"); return fallback; }
+        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed MapHandler.{what}: {ex.Message}", "MapHandler"); return fallback; }
     }
 
     internal static void Suppress(Action call, string what)
     {
         try { call(); }
-        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed MapHandler.{what}: " + ex.Message, "MapHandler"); }
+        catch (Exception ex) { AtherizLogger.LogDebug($"Suppressed MapHandler.{what}: {ex.Message}", "MapHandler"); }
     }
 
     private static (List<(int oid, (string sym, string desc, (int x, int y) coord) entry)> objEntries, List<(string, string, (int, int))> staticEntries)
@@ -456,7 +454,7 @@ public class MapInfo
             listeners = _listeners.Values.ToList();
             objectsSnapshot = _objects.Values.ToList();
             staticSnapshot = _legendEntries.ToList();
-            gridSnapshot = new Dictionary<(int X, int Y), string>(_postGrid);
+            gridSnapshot = new(_postGrid);
         }
 
         var (objEntries, staticEntries) = BuildEntries(objectsSnapshot, staticSnapshot);
@@ -625,7 +623,7 @@ public class MapInfo
             foreach (var kv in PreGrid)
             {
                 var parts = kv.Key.Split(',');
-                if (parts.Length == 2 && int.TryParse(parts[0], out var x) && int.TryParse(parts[1], out var y))
+                if (parts is [var x0, var y0] && int.TryParse(x0, out var x) && int.TryParse(y0, out var y))
                     mi._preGrid[(x, y)] = kv.Value;
                 // malformed persisted grid keys warn, not vanish silently.
                 else AtherizLogger.LogWarning($"[Load] skipping malformed pre-grid key '{kv.Key}' in area '{Name}'.");
@@ -633,7 +631,7 @@ public class MapInfo
             foreach (var kv in PostGrid)
             {
                 var parts = kv.Key.Split(',');
-                if (parts.Length == 2 && int.TryParse(parts[0], out var x) && int.TryParse(parts[1], out var y))
+                if (parts is [var x0, var y0] && int.TryParse(x0, out var x) && int.TryParse(y0, out var y))
                     mi._postGrid[(x, y)] = kv.Value;
                 else AtherizLogger.LogWarning($"[Load] skipping malformed post-grid key '{kv.Key}' in area '{Name}'.");
             }
@@ -668,12 +666,12 @@ public class MapInfo
             {
                 Symbol = e.Symbol,
                 Desc = e.Desc,
-                Coord = e.Coord is null ? null : new List<int> { e.Coord.Value.X, e.Coord.Value.Y },
+                Coord = e.Coord is null ? null : [e.Coord.Value.X, e.Coord.Value.Y],
                 Show = e.Show,
                 Fg = e.Fg,
                 Bg = e.Bg,
-                FgRgb = e.FgRgb is null ? null : new List<int>(e.FgRgb),
-                BgRgb = e.BgRgb is null ? null : new List<int>(e.BgRgb),
+                FgRgb = e.FgRgb is null ? null : new(e.FgRgb),
+                BgRgb = e.BgRgb is null ? null : new(e.BgRgb),
             };
         }
 
@@ -694,8 +692,8 @@ public class MapInfo
             e.Show = Show;
             e.Fg = Fg;
             e.Bg = Bg;
-            e.FgRgb = FgRgb is null ? null : new List<int>(FgRgb);
-            e.BgRgb = BgRgb is null ? null : new List<int>(BgRgb);
+            e.FgRgb = FgRgb is null ? null : new(FgRgb);
+            e.BgRgb = BgRgb is null ? null : new(BgRgb);
             return e;
         }
     }

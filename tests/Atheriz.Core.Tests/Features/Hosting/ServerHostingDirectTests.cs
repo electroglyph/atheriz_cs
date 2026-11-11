@@ -60,7 +60,7 @@ public class ServerHostingDirectTests
         {
             SecretPath = Path.Combine(tmp, "secret"),
             ServerName = "TestSrv",
-            NetworkProtocols = Array.Empty<string>(),
+            NetworkProtocols = [],
         };
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = tmp });
         builder.WebHost.UseUrls("http://127.0.0.1:0");

@@ -69,7 +69,7 @@ public sealed class HelpGlobalLookupTests
         Assert.NotNull(job);
         job!.Func(job.Caller, job.Args);
 
-        Assert.Contains(conn.Sent, t => t.Args.Any(a => a != null && a.ToString()!.Contains("Command not found.")));
+        Assert.Contains(conn.Sent, t => t.Args.Any(a => a is not null && a.ToString()!.Contains("Command not found.")));
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public sealed class HelpGlobalLookupTests
         Assert.NotNull(job);
         job!.Func(job.Caller, job.Args);
 
-        Assert.Contains(conn.Sent, t => t.Args.Any(a => a != null && a.ToString()!.Contains("Command not found.")));
+        Assert.Contains(conn.Sent, t => t.Args.Any(a => a is not null && a.ToString()!.Contains("Command not found.")));
     }
 
     [Fact]
@@ -95,8 +95,8 @@ public sealed class HelpGlobalLookupTests
         Assert.NotNull(job);
         job!.Func(job.Caller, job.Args);
 
-        Assert.DoesNotContain(conn.Sent, t => t.Args.Any(a => a != null && a.ToString()!.Contains("Command not found.")));
-        Assert.Contains(conn.Sent, t => t.Args.Any(a => a != null && a.ToString()!.Length > 0));
+        Assert.DoesNotContain(conn.Sent, t => t.Args.Any(a => a is not null && a.ToString()!.Contains("Command not found.")));
+        Assert.Contains(conn.Sent, t => t.Args.Any(a => a is not null && a.ToString()!.Length > 0));
     }
 
     [Fact]

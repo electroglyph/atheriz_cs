@@ -96,7 +96,7 @@ public static class AtherizDbContextFactory
                 && sqliteConn.DataSource != ":memory:")
                 lockDir = Path.GetDirectoryName(Path.GetFullPath(sqliteConn.DataSource));
         }
-        catch (Exception logEx) { AtherizLogger.LogDebug("Suppressed MigrateTransitionsTable lock-dir resolve: " + logEx.Message, "AtherizDbContextFactory"); }
+        catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed MigrateTransitionsTable lock-dir resolve: {logEx.Message}", "AtherizDbContextFactory"); }
         if (lockDir is null)
         {
             MigrateTransitionsTableCore(ctx);
@@ -116,7 +116,7 @@ public static class AtherizDbContextFactory
                 try { Directory.CreateDirectory(lockDir); } catch (Exception) { }
                 // Exclusive open (FileShare.None): the second starter gets a
                 // sharing violation while the first holds the migration.
-                held = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                held = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
             catch (IOException) { held = null; }
             catch (UnauthorizedAccessException) { held = null; }
@@ -148,7 +148,7 @@ public static class AtherizDbContextFactory
             {
                 bool hasTable = false, hasSource = false;
                 using var pragma = conn.CreateCommand();
-                pragma.CommandText = "PRAGMA table_info(\"transitions\")";
+                pragma.CommandText = """PRAGMA table_info("transitions")""";
                 using var r = pragma.ExecuteReader();
                 while (r.Read())
                 {
@@ -172,14 +172,14 @@ public static class AtherizDbContextFactory
                 }
                 int dropped = 0;
                 using var txn = conn.BeginTransaction();
-                ExecuteNonQuery(conn, txn, "CREATE TABLE IF NOT EXISTS \"transitions_new\" (\"FromArea\" TEXT NOT NULL, \"FromX\" INTEGER NOT NULL, \"FromY\" INTEGER NOT NULL, \"FromZ\" INTEGER NOT NULL, \"ToArea\" TEXT NOT NULL, \"ToX\" INTEGER NOT NULL, \"ToY\" INTEGER NOT NULL, \"ToZ\" INTEGER NOT NULL, \"Data\" TEXT, PRIMARY KEY (\"FromArea\",\"FromX\",\"FromY\",\"FromZ\",\"ToArea\",\"ToX\",\"ToY\",\"ToZ\"))");
+                ExecuteNonQuery(conn, txn, """CREATE TABLE IF NOT EXISTS "transitions_new" ("FromArea" TEXT NOT NULL, "FromX" INTEGER NOT NULL, "FromY" INTEGER NOT NULL, "FromZ" INTEGER NOT NULL, "ToArea" TEXT NOT NULL, "ToX" INTEGER NOT NULL, "ToY" INTEGER NOT NULL, "ToZ" INTEGER NOT NULL, "Data" TEXT, PRIMARY KEY ("FromArea","FromX","FromY","FromZ","ToArea","ToX","ToY","ToZ"))""");
                 // One INSERT command for the whole loop, rebound per row: minting a
                 // command + eight parameters per row dominated large migrations.
                 // Every parameter is rebound for EVERY row below — a stale binding
                 // would silently write the previous row's values.
                 using var ins = conn.CreateCommand();
                 ins.Transaction = txn;
-                ins.CommandText = "INSERT INTO \"transitions_new\" VALUES (@fa,@fx,@fy,@fz,@ta,@tx,@ty,@tz,@d)";
+                ins.CommandText = """INSERT INTO "transitions_new" VALUES (@fa,@fx,@fy,@fz,@ta,@tx,@ty,@tz,@d)""";
                 var pFa = AddParam(ins, "@fa", DBNull.Value);
                 var pFx = AddParam(ins, "@fx", DBNull.Value);
                 var pFy = AddParam(ins, "@fy", DBNull.Value);

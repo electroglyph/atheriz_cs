@@ -36,12 +36,12 @@ namespace Atheriz.Core.Commands.UnloggedIn
         // connection session (unique per drain), with
         // an identity-hash fallback for non-connection callers.
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Guid> _owners = new();
-        private static string OwnerKey(IMessageTarget caller, string kind) => OwnerKey(caller) + "\0" + kind;
+        private static string OwnerKey(IMessageTarget caller, string kind) => $"{OwnerKey(caller)}\0{kind}";
         private static string OwnerKey(IMessageTarget caller)
         {
-            if (caller is BaseConnection bc && bc.SessionId is not null) return "conn:" + bc.SessionId;
+            if (caller is BaseConnection bc && bc.SessionId is not null) return $"conn:{bc.SessionId}";
             if (caller is null) return "?";
-            return "obj:" + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(caller);
+            return $"obj:{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(caller)}";
         }
         public static string RateKey(IMessageTarget caller)
         {

@@ -119,7 +119,7 @@ public sealed class DrawCommand : Command
         var roomsList = (List<Dictionary<string, object?>>)payload["rooms"]!;
         foreach (var kv in gridSnap)
         {
-            gridList.Add(new List<object?>{ kv.Key.X, kv.Key.Y, kv.Value });
+            gridList.Add([kv.Key.X, kv.Key.Y, kv.Value]);
             if (nodeGrid is null) continue;
             var node = nodeGrid.GetNode(kv.Key);
             if (node is null) continue;
@@ -160,7 +160,7 @@ public sealed class DrawCommand : Command
 
         try
         {
-            var argsList = new List<object?> { key, payload };
+            List<object?> argsList = [key, payload];
             Dictionary<string, object?> kw = [];
             conn.SendCommand("launch_draw", argsList, kw);
             caller.Msg("Opening AtheriZ Draw in a new tab.");
@@ -197,7 +197,7 @@ public sealed class HelpCommand : Command
                 try { tw = (goc.Session?.TermWidth ?? 80) - 2; if (tw < 20) tw = 20; } catch { tw = 80; }
             }
             var all = CommandRegistry.LoggedIn.GetAll().Where(c => !c.Hide && c.Access(caller)).ToList();
-            var sb = new StringBuilder("\n" + HelpFormatter.Format(all, sr, tw + 2));
+            var sb = new StringBuilder($"\n{HelpFormatter.Format(all, sr, tw + 2)}");
             // local commands from location/inventory (single session lookup above)
             if (caller is Objects.GameObject go)
             {
@@ -321,7 +321,7 @@ public sealed class MapCommand : LoggedInCommand
         if (enabled)
         {
             go.Msg("Map enabled.");
-            try { go.Session?.Connection?.SendCommand("map_enable", new List<object?> { "" }, null); } catch (Exception) { }
+            try { go.Session?.Connection?.SendCommand("map_enable", [""], null); } catch (Exception) { }
             if (AtherizSettings.Global.MapEnabled)
             {
                 var loc = go.ResolveLocationObject() as Node;
@@ -340,7 +340,7 @@ public sealed class MapCommand : LoggedInCommand
         else
         {
             go.Msg("Map disabled.");
-            try { go.Session?.Connection?.SendCommand("map_disable", new List<object?> { "" }, null); } catch (Exception) { }
+            try { go.Session?.Connection?.SendCommand("map_disable", [""], null); } catch (Exception) { }
         }
     }
 }
@@ -386,7 +386,7 @@ public sealed class NoneCommand : Command
                     foreach (var c in set.GetAll())
                         if (!ignored.Contains(c.Key) && !c.Hide && c.Access(go2)) CommandHelpers.TryAddChoice(choices, seen, c.Key);
             }
-            catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed NoneCommand externals: " + logEx.Message, "NoneCommand"); }
+            catch (Exception logEx) { Atheriz.Core.AtherizLogger.LogDebug($"Suppressed NoneCommand externals: {logEx.Message}", "NoneCommand"); }
         }
         if (choices.Count > 0)
         {
@@ -536,7 +536,7 @@ public sealed class AccessCommand : LoggedInCommand
         var flags = new List<string>();
         if (go.IsBuilder) flags.Add("builder");
         if (go.IsSuperUser) flags.Add("superuser");
-        string self = $"You are: {go.PrivilegeLevel}" + (flags.Count > 0 ? $" ({string.Join(", ", flags)})" : "");
+        string self = $"You are: {go.PrivilegeLevel}{(flags.Count > 0 ? $" ({string.Join(", ", flags)})" : "")}";
         go.Msg($"Permission hierarchy: {chain}\n{self}");
     }
 
@@ -627,8 +627,8 @@ public sealed class NickCommand : LoggedInCommand
         var words = left.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string scope = "inputline";
         string key;
-        if (words.Length == 1) key = words[0];
-        else if (words.Length == 2 && IsScope(words[0])) { scope = words[0].ToLowerInvariant(); key = words[1]; }
+        if (words is [var k0]) key = k0;
+        else if (words is [var s0, var k1] && IsScope(s0)) { scope = s0.ToLowerInvariant(); key = k1; }
         else { go.Msg(help); return; }
         // Expansion only rewrites words longer than one character; rejecting
         // shorter keys here keeps a stored nick from existing but doing nothing.
@@ -658,8 +658,8 @@ public sealed class NickCommand : LoggedInCommand
         var words = query.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string scope = "inputline";
         string key;
-        if (words.Length == 1) key = words[0];
-        else if (words.Length == 2 && IsScope(words[0])) { scope = words[0].ToLowerInvariant(); key = words[1]; }
+        if (words is [var k0]) key = k0;
+        else if (words is [var s0, var k1] && IsScope(s0)) { scope = s0.ToLowerInvariant(); key = k1; }
         else { go.Msg(help); return; }
         if (nicks.TryGetValue($"{scope}:{key.ToLowerInvariant()}", out var replacement))
             go.Msg($"{key} = {replacement}");
@@ -671,11 +671,11 @@ public sealed class NickCommand : LoggedInCommand
         var words = tail.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string? scope = null;
         string key;
-        if (words.Length == 1 && words[0].Length > 0) key = words[0];
+        if (words is [var k0] && k0.Length > 0) key = k0;
         else if (words.Length == 2 && IsScope(words[0])) { scope = words[0].ToLowerInvariant(); key = words[1]; }
         else { go.Msg(help); return; }
         var nicks = ReadNicks(acc);
-        string suffix = ":" + key.ToLowerInvariant();
+        string suffix = $":{key.ToLowerInvariant()}";
         var doomed = nicks.Keys
             .Where(k => scope is not null ? k.Equals($"{scope}:{key.ToLowerInvariant()}", StringComparison.OrdinalIgnoreCase) : k.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -717,10 +717,10 @@ public sealed class NickCommand : LoggedInCommand
         if (go.InternalCmdSet?.Get(first) is not null) return text;
         var acc = go.Session?.Account;
         if (acc is null) return text;
-        if (!ReadNicks(acc).TryGetValue("inputline:" + first, out var replacement)) return text;
+        if (!ReadNicks(acc).TryGetValue($"inputline:{first}", out var replacement)) return text;
         if (string.IsNullOrWhiteSpace(replacement)) return text;
         string rest = parsed.CmdArgs;
-        return rest.Length == 0 ? replacement : replacement + " " + rest;
+        return rest.Length == 0 ? replacement : $"{replacement} {rest}";
     }
 }
 
@@ -808,11 +808,11 @@ public sealed class ColorCommand : LoggedInCommand
         var basic = new List<string>();
         for (int i = 0; i < 8; i++) basic.Add($"\x1b[{30 + i}mSample {30 + i}\x1b[0m");
         for (int i = 0; i < 8; i++) basic.Add($"\x1b[{90 + i}mSample {90 + i}\x1b[0m");
-        go.Msg("Standard 16:\n" + string.Join(" ", basic));
+        go.Msg($"Standard 16:\n{string.Join(" ", basic)}");
         int[] cube = [16, 52, 88, 124, 160, 196, 21, 51, 87, 231];
-        go.Msg("256 colors:\n" + string.Join(" ", cube.Select(v => $"\x1b[38;5;{v}mSample {v}\x1b[0m")));
+        go.Msg($"256 colors:\n{string.Join(" ", cube.Select(v => $"\x1b[38;5;{v}mSample {v}\x1b[0m"))}");
         (int R, int G, int B)[] rgb = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)];
-        go.Msg("Truecolor:\n" + string.Join(" ", rgb.Select(c => $"\x1b[38;2;{c.R};{c.G};{c.B}mSample\x1b[0m")));
+        go.Msg($"Truecolor:\n{string.Join(" ", rgb.Select(c => $"\x1b[38;2;{c.R};{c.G};{c.B}mSample\x1b[0m"))}");
     }
 }
 
@@ -835,7 +835,7 @@ public sealed class InfoCommand : LoggedInCommand
         int count;
         try { count = GlobalServices.GetConnectionManager().ConnectionCount; }
         catch { count = 0; }
-        return "## BEGIN INFO\n"
+        return $"## BEGIN INFO\n"
             + $"Name: {AtherizSettings.Global.ServerName}\n"
             + $"Version: {AboutCommand.VersionText()}\n"
             + $"Uptime: {(ok ? TimeCommand.FormatUptime(up) : "unknown")}\n"

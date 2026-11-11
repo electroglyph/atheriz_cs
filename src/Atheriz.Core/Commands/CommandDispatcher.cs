@@ -153,7 +153,7 @@ public static class CommandDispatcher
         int ws = stripped.IndexOfAny(WhitespaceChars);
         string rawFirstToken = ws < 0 ? stripped : stripped[..ws];
         string gluedRemainder = rawFirstToken.Length > 1 ? rawFirstToken[1..] : "";
-        if (!string.IsNullOrEmpty(cmdArgs)) gluedRemainder = gluedRemainder.Length > 0 ? gluedRemainder + " " + cmdArgs : cmdArgs;
+        if (!string.IsNullOrEmpty(cmdArgs)) gluedRemainder = gluedRemainder.Length > 0 ? $"{gluedRemainder} {cmdArgs}" : cmdArgs;
         cmdArgs = gluedRemainder.TrimStart(WhitespaceChars);
         return cmd;
     }

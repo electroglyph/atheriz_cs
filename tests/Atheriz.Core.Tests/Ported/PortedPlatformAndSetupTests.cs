@@ -77,7 +77,7 @@ public class PortedPlatformAndSetupTests
         // Fallback to checking StartStop.WorldLock usage
         bool hasLock = src.Contains("Lock") || src.Contains("lock") || src.Contains("WEBSERVER_PORT");
         // If file not found, check via type existence
-        if (string.IsNullOrEmpty(src)) hasLock = typeof(Atheriz.Core.Globals.StartStop).GetProperty("WorldLock") != null;
+        if (string.IsNullOrEmpty(src)) hasLock = typeof(Atheriz.Core.Globals.StartStop).GetProperty("WorldLock") is not null;
         Assert.True(hasLock); // placeholder faithful to python assert has_lock
         // Concurrent mutation test already covers thread safety functional
     }

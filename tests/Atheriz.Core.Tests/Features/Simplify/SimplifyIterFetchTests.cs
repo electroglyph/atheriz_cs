@@ -373,7 +373,7 @@ public class DelegateInvokerCacheTests
     {
         Func<int, int> f = x => x * 2;
 
-        Assert.Throws<TargetParameterCountException>(() => DelegateInvoker.Invoke(f, Array.Empty<object?>()));
+        Assert.Throws<TargetParameterCountException>(() => DelegateInvoker.Invoke(f, []));
         Assert.Throws<TargetParameterCountException>(() => DelegateInvoker.Invoke(f, new object?[] { 1, 2 }));
         Assert.Throws<TargetParameterCountException>(() => DelegateInvoker.Invoke(f, new object?[] { "x" }));
         Assert.Throws<TargetParameterCountException>(() => DelegateInvoker.Invoke(f, new object?[] { null }));

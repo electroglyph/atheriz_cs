@@ -136,7 +136,7 @@ public static class Pronouns
         // defaults from source pronoun's attributes
         if (!PronounTypeSet.Contains(pronounType ?? ""))
         {
-            pronounType = sourceType.Length > 0 ? sourceType[0] : DefaultPronounType;
+            pronounType = sourceType is [var t0, ..] ? t0 : DefaultPronounType;
         }
         if (!ViewpointSet.Contains(viewpoint ?? ""))
         {
@@ -144,7 +144,7 @@ public static class Pronouns
         }
         if (!GenderSet.Contains(gender ?? ""))
         {
-            gender = sourceGender.Length > 0 ? sourceGender[0] : DefaultGender;
+            gender = sourceGender is [var g0, ..] ? g0 : DefaultGender;
         }
 
         if (options is not null)
@@ -152,15 +152,13 @@ public static class Pronouns
             // Single pass: normalize (trim, lower, alias) and classify each
             // option immediately, in order — same decisions as the old
             // collect-then-normalize-then-classify chain.
-            IEnumerable<string> raw;
-            if (options is string sopt)
-                raw = sopt.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
-            else if (options is IEnumerable<string> es)
-                raw = es;
-            else if (options is IEnumerable<object> eo)
-                raw = eo.Select(o => o?.ToString() ?? "");
-            else
-                raw = [options.ToString() ?? ""];
+            IEnumerable<string> raw = options switch
+            {
+                string sopt => sopt.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries),
+                IEnumerable<string> es => es,
+                IEnumerable<object> eo => eo.Select(o => o?.ToString() ?? ""),
+                _ => [options.ToString() ?? ""],
+            };
 
             foreach (var item in raw)
             {
@@ -186,7 +184,7 @@ public static class Pronouns
             // requested a different valid type (parameter or options): defaulting
             // above can only reproduce the source type here, so any other valid
             // value is an explicit request and must survive.
-            var single = sourceType.Length > 0 ? sourceType[0] : DefaultPronounType;
+            var single = sourceType is [var st0, ..] ? st0 : DefaultPronounType;
             if (!PronounTypeSet.Contains(pronounType ?? "") || pronounType == single)
                 pronounType = single;
         }

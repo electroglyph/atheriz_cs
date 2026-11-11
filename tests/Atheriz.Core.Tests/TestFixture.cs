@@ -124,9 +124,9 @@ public static class GlobalTestEnv
         try
         {
             var t = GlobalServices.TryGetTicker();
-            if (t != null) { try { t.Clear(); } catch { } try { t.Stop(); } catch { } }
+            if (t is not null) { try { t.Clear(); } catch { } try { t.Stop(); } catch { } }
             var p = GlobalServices.TryGetPool();
-            if (p != null) { try { p.Stop(wait: false); } catch { } }
+            if (p is not null) { try { p.Stop(wait: false); } catch { } }
         }
         catch { }
     }

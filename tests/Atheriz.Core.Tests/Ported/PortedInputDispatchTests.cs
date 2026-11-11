@@ -187,7 +187,7 @@ public class PortedInputDispatchTests
     private static bool IsInputRunning(BaseConnection c)
     {
         var f = typeof(BaseConnection).GetField("_inputRunning", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        return f != null && (bool)(f.GetValue(c) ?? false);
+        return f is not null && (bool)(f.GetValue(c) ?? false);
     }
     private static System.Collections.ICollection GetInputQueue(BaseConnection c)
     {

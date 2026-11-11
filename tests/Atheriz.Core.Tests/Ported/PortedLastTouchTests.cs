@@ -28,7 +28,7 @@ public class PortedLastTouchTests
         Assert.True(walker.Location is Persistence.Dto.LocationRef.CoordLocation cl && cl.Coord.Equals(node.Coord));
         // LastTouchedBy is stored as id of last room; after fix it equals node.Id
         var fld = typeof(GameObject).GetField("_lastTouchedBy", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        if (fld != null)
+        if (fld is not null)
         {
             var val = (int)(fld.GetValue(walker) ?? -1);
             Assert.NotEqual(-1, val);
@@ -38,7 +38,7 @@ public class PortedLastTouchTests
         {
             // fallback: check via property if exists
             var prop = typeof(GameObject).GetProperty("LastTouchedBy");
-            if (prop != null) Assert.NotEqual(-1, (int)prop.GetValue(walker)!);
+            if (prop is not null) Assert.NotEqual(-1, (int)prop.GetValue(walker)!);
         }
     }
 }

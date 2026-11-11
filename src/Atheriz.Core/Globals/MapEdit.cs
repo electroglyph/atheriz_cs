@@ -156,8 +156,8 @@ public static class MapEdit
     {
         PreviousKey = c.PreviousKey,
         Seq = c.Seq,
-        Validation = c.Validation is null ? null : new List<int>(c.Validation),
-        Chain = new List<Coord>(c.Chain),
+        Validation = c.Validation is null ? null : new(c.Validation),
+        Chain = new(c.Chain),
         CreatedAt = c.CreatedAt,
         CreatedMonotonic = c.CreatedMonotonic,
     };
@@ -174,7 +174,7 @@ public static class MapEdit
         {
             if (!_chains.TryGetValue(key, out var c)) return;
             var updated = CopyOf(c);
-            updated.Validation = new List<int>(denied);
+            updated.Validation = new(denied);
             _chains[key] = updated;
         }
         finally { Lock.ExitWriteLock(); }
@@ -195,7 +195,7 @@ public static class MapEdit
             if (_chains.TryGetValue(key, out var existing))
             {
                 var updated = CopyOf(existing);
-                updated.Chain = new List<Coord>(chain);
+                updated.Chain = new(chain);
                 updated.CreatedAt = DateTime.UtcNow;
                 updated.CreatedMonotonic = GetMonotonic();
                 _chains[key] = updated;
@@ -204,7 +204,7 @@ public static class MapEdit
             {
                 var c = new MapEditChain(key, "?", "?", 0, session)
                 {
-                    Chain = new List<Coord>(chain),
+                    Chain = new(chain),
                     CreatedAt = DateTime.UtcNow,
                     CreatedMonotonic = GetMonotonic()
                 };
@@ -382,7 +382,6 @@ public static class MapEdit
         var c = GetChain(key);
         if (c is null) return false;
         if (c.Chain.Count != expected.Count) return false;
-        for (int i = 0; i < expected.Count; i++) if (!c.Chain[i].Equals(expected[i])) return false;
-        return true;
+        return c.Chain.SequenceEqual(expected);
     }
 }

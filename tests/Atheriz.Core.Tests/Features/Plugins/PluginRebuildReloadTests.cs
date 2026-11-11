@@ -18,7 +18,7 @@ public class PluginRebuildReloadTests
     private const string BetaGeneration = "GENERATION_BETA_4D2E81";
 
     // Locate the engine project without hardcoding the checkout path: walk
-    // up from the test binaries (bin/Release/net10.0 → repo root), then
+    // up from the test binaries (bin/Release/net11.0 → repo root), then
     // from the current directory. Fails closed with a clear message instead
     // of silently referencing a stale absolute path.
     private static string CoreCsprojPath()
@@ -54,7 +54,7 @@ public class PluginRebuildReloadTests
             $"""
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
-                <TargetFramework>net10.0</TargetFramework>
+                <TargetFramework>net11.0</TargetFramework>
                 <Nullable>enable</Nullable>
                 <ImplicitUsings>enable</ImplicitUsings>
               </PropertyGroup>
@@ -120,14 +120,14 @@ public class PluginRebuildReloadTests
         {
             // Stale project (no dll yet) for the build phase; the fake build
             // stages this test assembly as the project's OWN bin output
-            // (bin/Release/net10.0/fakegame.dll), which DiscoverGameAssembly
+            // (bin/Release/net11.0/fakegame.dll), which DiscoverGameAssembly
             // then picks up exactly like a real `dotnet build` product.
             File.WriteAllText(Path.Combine(dir, "fakegame.csproj"), "<Project />");
             ObjectRegistry.AddObject(new GameObject());
             var settings = GameSettings(dir);
             Task<bool> build(string csproj, CancellationToken ct)
             {
-                var bin = Path.Combine(dir, "bin", "Release", "net10.0");
+                var bin = Path.Combine(dir, "bin", "Release", "net11.0");
                 Directory.CreateDirectory(bin);
                 // WriteAllBytes (not File.Copy): File.Copy preserves the
                 // source mtime, so the staged dll would predate the csproj
@@ -169,7 +169,7 @@ public class PluginRebuildReloadTests
                 File.WriteAllBytes(Path.Combine(plugins, "noopgame.dll"), dllBytes);
                 // Also stamp the project's own output, or the csproj would
                 // stay stale and every reload would rebuild.
-                var bin = Path.Combine(dir, "bin", "Release", "net10.0");
+                var bin = Path.Combine(dir, "bin", "Release", "net11.0");
                 Directory.CreateDirectory(bin);
                 File.WriteAllBytes(Path.Combine(bin, "noopgame.dll"), dllBytes);
                 return Task.FromResult(true);
@@ -212,7 +212,7 @@ public class PluginRebuildReloadTests
             Assert.Contains("Built 1 project(s)", second);
             Assert.Contains("Reloaded", second);
             Assert.Contains("Errors: 0", second);
-            var dllPath = Path.Combine(dir, "bin", "Release", "net10.0", "minigame.dll");
+            var dllPath = Path.Combine(dir, "bin", "Release", "net11.0", "minigame.dll");
             Assert.True(DllContainsGeneration(dllPath, BetaGeneration), "rebuilt dll must contain the new generation");
             Assert.Equal(BetaGeneration, LiveProbeGeneration());
 

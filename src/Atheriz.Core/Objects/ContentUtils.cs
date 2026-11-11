@@ -180,7 +180,7 @@ public static class ContentUtils
             else if (token.Length > 3 && token.EndsWith("ies", StringComparison.Ordinal))
             {
                 if (count == 1) count = 0;
-                required.Add(token[..^3] + "y");
+                required.Add($"{token[..^3]}y");
                 optional.Add(token);
             }
             else if (token.Length > 2 && token.EndsWith("es", StringComparison.Ordinal))
@@ -199,7 +199,7 @@ public static class ContentUtils
             else if (token.Length > 1 && token.EndsWith("i", StringComparison.Ordinal))
             {
                 if (count == 1) count = 0;
-                required.Add(token[..^1] + "us");
+                required.Add($"{token[..^1]}us");
                 optional.Add(token);
             }
             else required.Add(token);
@@ -218,15 +218,15 @@ public static class ContentUtils
             if (matches.Count == count && index == 0) return matches;
             return null;
         }
-        for (var i = 0; i < objs.Count; i++)
+        foreach (var o in objs)
         {
-            var terms = LoweredSearchTerms(objs[i]);
+            var terms = LoweredSearchTerms(o);
             // An empty required set matches nothing (found stays false), as
             // before — All() alone would be vacuously true.
             bool found = required.Count > 0 && required.All(terms.Contains);
             if (found)
             {
-                var done = RecordMatch(objs[i]);
+                var done = RecordMatch(o);
                 if (done is not null) return done;
                 continue;
             }
@@ -234,7 +234,7 @@ public static class ContentUtils
             {
                 if (terms.Contains(s))
                 {
-                    var done = RecordMatch(objs[i]);
+                    var done = RecordMatch(o);
                     if (done is not null) return done;
                     break;
                 }
@@ -296,7 +296,7 @@ public static class ContentUtils
         // AtSayFull). Other broadcasts have no speech key, so rawMsg stays
         // null and memory/classify paths skip them. Mapping stays nulled.
         string? rawSpeech = map.TryGetValue("speech", out var speechObj) ? speechObj as string : null;
-        HashSet<GameObject>? excl = exclude is not null ? new HashSet<GameObject>(exclude) : null;
+        HashSet<GameObject>? excl = exclude is not null ? new(exclude) : null;
         string logContext = nodeSemantics ? "Node" : "GameObject";
         foreach (var receiver in receivers)
         {
@@ -316,7 +316,7 @@ public static class ContentUtils
             else
             {
                 try { receiver.Msg(outMessage, fromObj, null, false, msgType, rawSpeech); }
-                catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {logContext}.MsgContents: " + logEx.Message, logContext); }
+                catch (Exception logEx) { AtherizLogger.LogDebug($"Suppressed {logContext}.MsgContents: {logEx.Message}", logContext); }
             }
         }
     }

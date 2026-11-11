@@ -21,7 +21,7 @@ public static class HelpHelper
     public static string FormatNoParser(Command cmd)
     {
         string aliasStr = FormatAliasList(cmd);
-        return $"\n{cmd.Desc}\n\nAliases: {aliasStr}\n" + cmd.ExtraDesc;
+        return $"\n{cmd.Desc}\n\nAliases: {aliasStr}\n{cmd.ExtraDesc}";
     }
 
     /// <summary>

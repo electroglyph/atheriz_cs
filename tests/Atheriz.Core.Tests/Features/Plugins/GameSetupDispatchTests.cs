@@ -62,7 +62,7 @@ public class GameSetupDispatchTests
         var csproj = Path.Combine(dir, "setupgame.csproj");
         File.WriteAllText(csproj, "<Project></Project>");
         File.SetLastWriteTimeUtc(csproj, DateTime.UtcNow.AddMinutes(-5));
-        var binDir = Path.Combine(dir, "bin", "Release", "net10.0");
+        var binDir = Path.Combine(dir, "bin", "Release", "net11.0");
         Directory.CreateDirectory(binDir);
         var dllPath = Path.Combine(binDir, "setupgame.dll");
         File.Copy(typeof(GameSetupDispatchTests).Assembly.Location, dllPath);

@@ -6,7 +6,7 @@ public static class TestHandler
     // Returns the process exit code; the host entry point applies it. Never Environment.Exit here.
     public static int HandleTest(string[] a)
     {
-        if (a.Length > 0 && a[0] == "core") a = a.Skip(1).ToArray();
+        if (a is ["core", ..]) a = a.Skip(1).ToArray();
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",

@@ -22,7 +22,7 @@ public class PortedNewHooksTests
         foreach(var m in methods)
         {
             var body = m.GetMethodBody();
-            var isEmpty = body != null && body.GetILAsByteArray() is byte[] il && il.Length <= 5; // heuristic
+            var isEmpty = body is not null && body.GetILAsByteArray() is byte[] il && il.Length <= 5; // heuristic
             // More accurate: check if method is empty (no-op) via source inspection not available
             // We treat AtEmptyHook as empty
             bool empty = m.Name=="AtEmptyHook";

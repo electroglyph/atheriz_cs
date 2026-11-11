@@ -2,11 +2,11 @@
 
 (everything here is 100% clanker generated, but i've tried to do it as sanely as possible)
 
-C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included — see the [changelog](CHANGELOG.md) and the [webclient changelog](webclient/CHANGELOG.md). User guides (install, game creation, commands, hosting, saves, plugins) live in [docs/](docs/README.md).
+C# port of `atheriz` (Python MUD server) on **.NET 11** (C# 15, `net11.0`). Core engine is in `src/Atheriz.Core`, the server in `src/Atheriz.Server`, and game templates in `src/Atheriz.GameTemplate`. The webclient (terminal + drawing editor) is included — see the [changelog](CHANGELOG.md) and the [webclient changelog](webclient/CHANGELOG.md). User guides (install, game creation, commands, hosting, saves, plugins) live in [docs/](docs/README.md).
 
 ## Prereqs
 
-- **.NET 10 SDK** (`10.0.100` or newer, see `global.json`):
+- **.NET 11 SDK** (`11.0.100` or newer, see `global.json`):
   ```bash
   dotnet --version
   ```
@@ -18,14 +18,14 @@ C# port of `atheriz` (Python MUD server) on **.NET 10** (C# 14, `net10.0`). Core
 
 ### Windows
 
-**.NET 10 SDK** — either option (both install system-wide, run as admin):
+**.NET 11 SDK** — either option (both install system-wide, run as admin):
 
 - Installer: download the Windows x64 SDK from
-  [dotnet.microsoft.com/en-us/download/dotnet/10.0](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
+  [dotnet.microsoft.com/en-us/download/dotnet/11.0](https://dotnet.microsoft.com/en-us/download/dotnet/11.0)
   and run it. Pick **x64** unless you know you need x86/Arm64.
 - Or via winget:
   ```powershell
-  winget install Microsoft.DotNet.SDK.10
+  winget install Microsoft.DotNet.SDK.11
   ```
   ([Microsoft Learn: Install .NET on Windows](https://learn.microsoft.com/en-us/dotnet/core/install/windows))
 
@@ -35,11 +35,11 @@ and run it, then verify with `node --version` / `npm --version`.
 
 ### Ubuntu
 
-**.NET 10 SDK** ([Microsoft Learn: Install .NET on Ubuntu](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu)):
+**.NET 11 SDK** ([Microsoft Learn: Install .NET on Ubuntu](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu)):
 
 ```bash
 sudo apt-get update && \
-  sudo apt-get install -y dotnet-sdk-10.0
+  sudo apt-get install -y dotnet-sdk-11.0
 ```
 
 On Ubuntu 22.04 the SDK is not in the built-in feed — add the
@@ -136,7 +136,7 @@ Game folders also get their own `build.sh` / `build.cmd`. From inside the game f
 The plugin build is what `reload` picks up (the server rebuilds stale game projects itself before hot-loading; a failed build aborts the reload with the old logic untouched). The web step is equivalent to running this from the repo root:
 
 ```bash
-dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll deploy game --web-root "/tmp/MyGame/web"
+dotnet src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll deploy game --web-root "/tmp/MyGame/web"
 ```
 
 If you prefer `dotnet` directly:
@@ -146,7 +146,7 @@ dotnet run --project src/Atheriz.Server -- --help
 # game-folder commands need to keep your current directory as the game folder,
 # so use the built dll:
 dotnet build src/Atheriz.Server
-dotnet src/Atheriz.Server/bin/Release/net10.0/Atheriz.Server.dll create myaccount MyChar pass
+dotnet src/Atheriz.Server/bin/Release/net11.0/Atheriz.Server.dll create myaccount MyChar pass
 ```
 
 The server also supports `restart` and `test` (`test [core] [args...]` forwards to the test runner).
@@ -176,7 +176,7 @@ Game folders require `GameSettings.cs` + `*.csproj` (created by `new`). Running 
 
 `telnet_cs` is pre-1.0 and ships breaking changes between minor versions (its README calls this out), so the
 package stays exact-pinned in `Directory.Packages.props` — float only deliberately. The Atheriz telnet adapter
-(`TelnetCsWriter` / `TelnetProtocol`) targets the 0.19.0 contract: the ECHO API (`ServerSession.SetEchoAsync` /
+(`TelnetCsWriter` / `TelnetProtocol`) targets the 0.20.0 contract: the ECHO API (`ServerSession.SetEchoAsync` /
 `WriteWithEchoAsync`, new in 0.13.0), the clean-close guarantee (peer FIN / TLS close_notify unwind the
 session), the latched handshake-deadline mapping (`TimeoutException`, never raw OCE), the end-of-stream drain
 (no CR LF truncation), and the single verdict filter (`AcceptFilter` takes `AcceptDecision`; the bool form is
@@ -184,8 +184,8 @@ gone). 0.17.0–0.19.0 add nothing the adapter uses: 0.17 adds a client-side `Cr
 the TLS flag at session construction (MCCP correctly refused over TLS); 0.18 renames only client-side/relocated
 types (`BaseClient` to `TelnetSessionBase`, `MccpWriteFilter` to `telnet_cs.IO`, `DuplexEnd` top-level) and folds
 `ServerSession.SetTimeout` into the settable `Timeout` property (the adapter never calls it); 0.19 removes the
-blocking `Client` constructors (`CreateAsync`-only; the adapter never constructs a client). No wire, preset, or
-default changes.
+blocking `Client` constructors (`CreateAsync`-only; the adapter never constructs a client); 0.20 is a
+net11.0-only retarget with no public API changes. No wire, preset, or default changes.
 
 ## Project Layout
 

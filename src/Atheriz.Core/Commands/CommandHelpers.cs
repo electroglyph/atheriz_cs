@@ -96,7 +96,7 @@ public static partial class CommandHelpers
     internal static string FirstWord(string text)
     {
         var words = text.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
-        return words.Length > 0 ? words[0] : text;
+        return words is [var w0, ..] ? w0 : text;
     }
     /// <summary>
     /// Narrow comma-form coord parse: the exact shape SearchWithFallback has

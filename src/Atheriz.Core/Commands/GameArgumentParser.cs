@@ -72,23 +72,21 @@ public sealed class GameArgumentParser
         public bool IsHelp;
     }
 
-    public sealed class Builder
+    public sealed class Builder(ArgumentDef def)
     {
-        private readonly ArgumentDef _def;
         private Action? _invalidate;
-        public Builder(ArgumentDef def) => _def = def;
         internal void AttachInvalidation(Action invalidate) => _invalidate = invalidate;
         private void Touch() => _invalidate?.Invoke();
-        public Builder Help(string h) { _def.Help = h; Touch(); return this; }
-        public Builder Required(bool v = true) { _def.Required = v; _def.RequiredExplicit = true; Touch(); return this; }
-        public Builder Action(ArgAction a) { _def.Action = a; Touch(); return this; }
-        public Builder Nargs(NargsKind k) { _def.Nargs = k; Touch(); return this; }
+        public Builder Help(string h) { def.Help = h; Touch(); return this; }
+        public Builder Required(bool v = true) { def.Required = v; def.RequiredExplicit = true; Touch(); return this; }
+        public Builder Action(ArgAction a) { def.Action = a; Touch(); return this; }
+        public Builder Nargs(NargsKind k) { def.Nargs = k; Touch(); return this; }
         public Builder Nargs(string s) => Nargs(ParseNargs(s));
-        public Builder Type<T>() { _def.Type = typeof(T); Touch(); return this; }
-        public Builder Type(Type t) { _def.Type = t; Touch(); return this; }
-        public Builder Default(object? v) { _def.DefaultValue = v; Touch(); return this; }
-        public Builder Const(object? v) { _def.ConstValue = v; Touch(); return this; }
-        public Builder Choices(params string[] c) { _def.Choices = c; Touch(); return this; }
+        public Builder Type<T>() { def.Type = typeof(T); Touch(); return this; }
+        public Builder Type(Type t) { def.Type = t; Touch(); return this; }
+        public Builder Default(object? v) { def.DefaultValue = v; Touch(); return this; }
+        public Builder Const(object? v) { def.ConstValue = v; Touch(); return this; }
+        public Builder Choices(params string[] c) { def.Choices = c; Touch(); return this; }
     }
 
     // Dest derivation shared by both AddArgument overloads: like argparse,
@@ -235,7 +233,7 @@ public sealed class GameArgumentParser
         return sb.ToString();
     }
 
-    public string FormatUsage() => BuildUsage() + "\n";
+    public string FormatUsage() => $"{BuildUsage()}\n";
 
     public void PrintHelp() => throw new CommandHelpException(FormatHelp());
     // the file overload honors file (argparse print_help(file=...));
