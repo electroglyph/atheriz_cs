@@ -322,7 +322,7 @@ describe('MapEditSession', () => {
         vi.advanceTimersByTime(2000);
         sockets[3].drop();
 
-        expect(events).toEqual(['synced', 'error:Connection failed.']);
+        expect(events).toEqual(['synced', 'error:Connection failed. The server may be full — close extra game tabs and run mapedit again.']);
 
         canvas.setCell(0, 0, { char: 'X', fg: [0, 0, 0], bg: [-1, -1, -1] });
         session.scheduleSync();

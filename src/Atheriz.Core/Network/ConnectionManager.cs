@@ -372,6 +372,20 @@ public class ConnectionManager
         get { lock (_lock) return _connections.Count; }
     }
 
+    // Per-IP budget introspection for pre-admission warnings (the mapedit
+    // verb tells the builder the server is full before opening a tab that
+    // could never connect). Counts use the same buckets as registration.
+    public int MaxConnectionsPerIpLimit
+    {
+        get { lock (_lock) return _settings.MaxConnectionsPerIp; }
+    }
+
+    public int GetConnectionCountForHost(string host)
+    {
+        if (host == "?") return 0;
+        lock (_lock) return _perIpCounts.TryGetValue(host, out var cnt) ? cnt : 0;
+    }
+
     public List<BaseConnection> GetAllConnections()
     {
         lock (_lock)

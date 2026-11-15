@@ -58,6 +58,25 @@ public sealed class DrawCommand : Command
             mh.SetMapInfo(area, z, mi);
         }
         string ip = conn.ClientHost ?? "?";
+        // The Draw tab needs its own socket: when this address already holds
+        // the whole per-IP budget, the tab's connects all refuse and it ends
+        // on "Connection failed." Say so here, before minting a grant that
+        // could never connect.
+        try
+        {
+            var cm = Atheriz.Core.Globals.GlobalServices.TryGetConnectionManager() ?? Atheriz.Core.Network.ConnectionManager.GlobalInstance;
+            if (cm is not null)
+            {
+                int limit = cm.MaxConnectionsPerIpLimit;
+                int used = cm.GetConnectionCountForHost(ip);
+                if (limit > 0 && ip != "?" && used >= limit)
+                {
+                    caller.Msg($"Server is full ({used}/{limit} connections from your address). Close an extra tab, then run mapedit again.");
+                    return;
+                }
+            }
+        }
+        catch (Exception capEx) { Atheriz.Core.AtherizLogger.LogDebug("Suppressed DrawCommand cap pre-check: " + capEx.Message, "DrawCommand"); }
 
         string key = MapEdit.Grant(ip, area, z, session);
         string rawSym = go?.Symbol ?? "X";

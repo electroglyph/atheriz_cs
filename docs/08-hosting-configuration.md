@@ -126,7 +126,7 @@ Settings type: `src/Atheriz.Core/Settings/AtherizSettings.cs`. Validation: `src/
 | `TelnetInterface` | `0.0.0.0` | Telnet bind address (literal IP only). |
 | `ServerHostname` | `localhost` | Unused legacy key — nothing binds from it. Leave it alone. |
 | `MaxTotalConnections` | 500 | Whole-server socket cap (0 = unlimited). |
-| `MaxConnectionsPerIp` | 2 | Simultaneous sockets per IP (0 = unlimited; shared-IP groups feel this first). |
+| `MaxConnectionsPerIp` | 4 | Simultaneous sockets per IP (0 = unlimited; shared-IP groups feel this first). |
 | `CreationCooldown` | 60 | Seconds between creation attempts per source. |
 | `WebserverPort` | 9999 | HTTP/WebSocket port. |
 | `TelnetPort` | 4444 | Telnet port. |
@@ -327,7 +327,7 @@ Roll back the same way if anything misbehaves: restore the `127.0.0.1` bind, `re
 - [ ] `ServerName` set (shows on `/`, `/health`, banners).
 - [ ] `WebserverInterface` an explicit IP (`0.0.0.0` / `::` for any-interface, or the single public IP).
 - [ ] TLS pair configured, or `AllowInsecureTlsFallback` consciously accepted (plaintext on the open net is a choice, not a default).
-- [ ] Connection caps left at defaults (500 total; per-IP 2 only matters for shared-IP groups — see [Connecting: webclient and telnet](09-connecting.md)).
+- [ ] Connection caps left at defaults (500 total; per-IP 4 covers one builder's game plus map-editor tab, with room for a spare — see [Connecting: webclient and telnet](09-connecting.md)).
 - [ ] `secret/salt.txt` backed up next to `save/` (password logins depend on it), plus any TLS pair kept in `secret/` — see [Saves and backups](10-persistence-saves.md).
 - [ ] `/health` vs `/ready` wired into the supervisor or load balancer the right way round (§3): liveness restarts dead processes, readiness gates traffic during slow boots.
 

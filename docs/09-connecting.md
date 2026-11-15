@@ -105,7 +105,7 @@ An in-game `restart` warns first: every session sees `Server is restarting! It w
 
 ## 4. Operator notes: caps, bans, throttles, size limits
 
-Per-IP and total connection caps (`MaxConnectionsPerIp`, `MaxTotalConnections`) bound how many simultaneous connections the server accepts. Past the cap, the socket closes with no message; the reason goes to the server log. Nothing is queued. Raise caps with `restart` (settings need restart, not `reload`).
+Per-IP and total connection caps (`MaxConnectionsPerIp`, `MaxTotalConnections`) bound how many simultaneous connections the server accepts. Past the cap, the socket closes with no message; the reason goes to the server log. Nothing is queued. A builder needs two sockets (game tab plus map-editor tab), so the default per-IP cap is 4. Raise caps with `restart` (settings need restart, not `reload`).
 
 Bans: a banned IP is refused at connect time — the socket closes with no message and the reason goes to the server log (`IpBanStore` outcomes). Persistent bans (the `IsBanned` flag on a character or account) survive restarts by design; temporary IP bans clear on reboot (the ban verb reports them as `banned until server restart`). Ban and unban through the in-game admin verbs (catalog in [Commands: using and writing them](06-commands.md)); never hand-edit the ban rows in the database file.
 
@@ -125,6 +125,9 @@ Log triage: `save/server.log` first, then `/health`, `ss`, `look` → `limbo` ([
 ```text
 # Past the connection cap (per-IP or total):
 (the connection closes with no message; the server log names the limit)
+(a builder running `mapedit` at the cap is told in-game instead:
+Server is full (4/4 connections from your address). Close an extra tab, then run mapedit again.
+the Draw tab itself reports: Connection failed. The server may be full — close extra game tabs and run mapedit again.)
 # Banned IP at connect time:
 (the connection closes with no message; the log notes the banned host)
 # Too-fast repeat creation:

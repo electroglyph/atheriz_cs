@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.42.0.0] - 2026-11-15
+
+- The per-IP connection cap default is now 4 instead of 2. A builder
+  needs two sockets (game tab plus map-editor tab), so the old default
+  left no spare once a second tab or same-network user connected, and
+  the map editor ended on "Connection failed." Game configs that set
+  the value explicitly are unchanged.
+- `mapedit` now warns in-game when the caller's address already holds
+  the whole per-IP budget, instead of opening a Draw tab that can never
+  connect. The Draw tab's give-up message names a full server as the
+  likely cause and suggests closing extra tabs.
+
 ## [0.41.0.0] - 2026-11-11
 
 - Code modernization across the engine and host, with no user-visible

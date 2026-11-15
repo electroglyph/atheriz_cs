@@ -101,7 +101,7 @@ public sealed class AtherizSettings
     public int ChannelHistoryLimit { get; set; } = 50;
     public int MaxLoginAttempts { get; set; } = 3;
     public int LoginAttemptCooldown { get; set; } = 100;
-    public int MaxConnectionsPerIp { get; set; } = 2;
+    public int MaxConnectionsPerIp { get; set; } = 4;
     /// <summary>Total-connection admission cap (0 = unlimited).</summary>
     public int MaxTotalConnections { get; set; } = 500;
     public int MenuPromptTimeout { get; set; } = 60;

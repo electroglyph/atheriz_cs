@@ -3,6 +3,12 @@
 Webclient (`webclient/`) release notes, split out from the engine `CHANGELOG.md`
 2026-09-25. Versioning follows `webclient/package.json`.
 
+## [1.12.2] - 2026-11-15
+
+- The map editor's give-up message now names a full server as the likely
+  cause and suggests closing extra game tabs before running `mapedit`
+  again, instead of the bare "Connection failed."
+
 ## [1.12.1] - 2026-10-31
 
 - Fixed the ghost autocomplete showing while the caret sits mid-line, where

@@ -716,7 +716,10 @@ export class MapEditSession {
             }
         } else if (state === 'failed') {
             this.stopped = true;
-            this.listener?.({ type: 'error', message: 'Connection failed.' });
+            // Retries are spent: the socket never went open (server full,
+            // unreachable, or gone). Name the likeliest in-game cause first
+            // so the next step is obvious.
+            this.listener?.({ type: 'error', message: 'Connection failed. The server may be full — close extra game tabs and run mapedit again.' });
         }
     }
 
