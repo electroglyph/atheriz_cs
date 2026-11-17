@@ -1,25 +1,41 @@
 namespace Atheriz.Server.Deployment;
 
-// C# port of webclient/deploy.py (deleted): stages the built webclient
-// (dist/) into a game web/static dir and syncs the engine landing
-// template into the game web dir. Staging never builds — vite stays in
-// build.sh, so this is deploy.py's --no-build path made the only path.
+// C# port of webclient/deploy.py (deleted): builds the webclient bundle
+// when its sources are newer than dist/, stages it into a game web/static
+// dir, and syncs the engine landing template into the game web dir.
 // All roots are explicit parameters (never CWD-sniffed) so tests drive
 // the real logic against temp dirs; the CLI verb resolves them.
 public static class WebDeployer
 {
     // Game deploy entry point. Returns a process exit code; expected
-    // failures (missing dist/template) print to err and return 1, so the
-    // CLI contract is exit 0/nonzero plus stderr, no stack traces.
-    public static int DeployGame(
+    // failures (missing dist/template, failed build) print to err and
+    // return 1, so the CLI contract is exit 0/nonzero plus stderr, no
+    // stack traces.
+    public static async Task<int> DeployGameAsync(
         string distRoot, string? fontsDir, string engineTemplateFile,
-        string gameWebRoot, bool clean, TextWriter log, TextWriter err)
+        string gameWebRoot, bool clean, TextWriter log, TextWriter err,
+        Atheriz.Core.Plugins.WebclientBuilder.NpmRunner? runNpm = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(distRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(engineTemplateFile);
         ArgumentException.ThrowIfNullOrWhiteSpace(gameWebRoot);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(err);
+        // Build-first, like restart/reset: the per-game build.sh scripts
+        // delegate here, so a webclient edit followed by ./build.sh must
+        // be served, not silently skipped as stale dist/.
+        if (TryResolveWebclientRoot(distRoot, out var webclientRoot) && webclientRoot is not null)
+        {
+            var built = await Atheriz.Core.Plugins.WebclientBuilder.EnsureBuiltAsync(
+                webclientRoot, runNpm, cancellationToken).ConfigureAwait(false);
+            log.WriteLine($"Webclient: {built.Message.ToLowerInvariant()}.");
+            if (!built.Ok)
+            {
+                err.WriteLine(built.Message);
+                return 1;
+            }
+        }
         if (!Directory.Exists(distRoot))
         {
             err.WriteLine($"Build output not found at {distRoot}; run `npm run build` first in webclient/");
@@ -45,6 +61,27 @@ public static class WebDeployer
         }
         SyncLandingTemplate(engineTemplateFile, gameWebRoot, log);
         return 0;
+    }
+
+    // The webclient checkout behind a dist/ dir: dist's parent when it
+    // looks like <checkout>/dist with a package.json. Test doubles (bare
+    // temp dirs) resolve to null and keep the old stage-only behavior.
+    internal static bool TryResolveWebclientRoot(string distRoot, out string? webclientRoot)
+    {
+        webclientRoot = null;
+        try
+        {
+            if (!string.Equals(Path.GetFileName(Path.GetFullPath(distRoot)), "dist", StringComparison.Ordinal))
+                return false;
+            var parent = Path.GetDirectoryName(Path.GetFullPath(distRoot));
+            if (parent is not null && File.Exists(Path.Combine(parent, "package.json")))
+            {
+                webclientRoot = parent;
+                return true;
+            }
+        }
+        catch { }
+        return false;
     }
 
     // Remove only paths owned by the build, never arbitrary game assets.

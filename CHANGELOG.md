@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.43.0.0] - 2026-11-17
+
+- `restart` and `reset` (CLI and in-game) now rebuild the webclient
+  bundle when its sources are newer than the last build and re-stage
+  the game's web folder, so browser-only changes take effect without a
+  manual rebuild. Fresh trees skip the step, and a missing toolchain
+  serves the existing bundle with a warning instead of aborting.
+  `deploy game` (used by the per-game `build.sh`/`build.cmd`/`build.ps1`
+  scripts) builds first the same way, so `./build.sh` after a webclient
+  edit is served instead of silently skipped.
+
 ## [0.42.0.0] - 2026-11-15
 
 - The per-IP connection cap default is now 4 instead of 2. A builder

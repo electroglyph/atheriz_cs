@@ -2,15 +2,16 @@ using Atheriz.Server.Deployment;
 
 namespace Atheriz.Server.Cli;
 
-// `deploy game`: stage the engine's built webclient into a game web
-// folder. Paths resolve from the engine checkout (never the game CWD)
-// and are injected for tests; production passes Console streams.
+// `deploy game`: build the engine webclient when stale and stage it
+// into a game web folder. Paths resolve from the engine checkout (never
+// the game CWD) and are injected for tests; production passes Console
+// streams.
 public static class DeployHandler
 {
     public static Task<int> DeployGameAsync(string webRoot, bool noClean)
-        => Task.FromResult(DeployGame(webRoot, noClean, Console.Out, Console.Error));
+        => DeployGame(webRoot, noClean, Console.Out, Console.Error);
 
-    internal static int DeployGame(string webRoot, bool noClean, TextWriter log, TextWriter err)
+    internal static async Task<int> DeployGame(string webRoot, bool noClean, TextWriter log, TextWriter err)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(err);
@@ -27,11 +28,11 @@ public static class DeployHandler
         }
         try
         {
-            return WebDeployer.DeployGame(
+            return await WebDeployer.DeployGameAsync(
                 Path.Combine(root, "webclient", "dist"),
                 Path.Combine(root, "webclient", "fonts"),
                 Path.Combine(root, "src", "Atheriz.Server", "web", "templates", "index.html"),
-                webRoot, clean: !noClean, log, err);
+                webRoot, clean: !noClean, log, err).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

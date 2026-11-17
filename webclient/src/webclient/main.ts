@@ -196,11 +196,15 @@ function resetSessionState(): void {
     censorInput = true;
     prompt = '';
     promptPrinted = false;
-    // The map stays up across reconnects with its last known payload:
-    // hiding it on every blip strands the player without their map, and
-    // the server re-pushes map_enable plus fresh map frames on login.
-    // mapPayload, pendingBackground, mapWanted, and map visibility are
-    // deliberately left untouched here.
+    // The stale map frame is wiped and its payload dropped: keeping the
+    // payload repainted the old map on the next fit (open ->
+    // fitAndReportSize -> renderMap), which is exactly the bug. The server
+    // re-pushes map_enable plus fresh map frames on login; mapWanted and
+    // map visibility are deliberately left untouched here.
+    right.write(MAP_CLEAR_SEQUENCE);
+    recorder.output('r', MAP_CLEAR_SEQUENCE);
+    mapPayload = null;
+    pendingBackground = undefined;
     commandSubmitted = false;
     writer.clear();
     audio?.pause();

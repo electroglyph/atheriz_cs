@@ -659,7 +659,7 @@ public sealed class ResetCommand : LoggedInCommand
         try
         {
             build = await Atheriz.Core.Plugins.BuildCoordinator.EnsureAllBuiltAsync(
-                settings, engineRoot, gameProjects, engineBuild, gameBuild, cancellationToken).ConfigureAwait(false);
+                settings, engineRoot, gameProjects, engineBuild, gameBuild, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) { say($"Reset failed: {ex.Message}"); return; }
         if (!build.Ok) { say($"Reset aborted: {build.Summary} Live state untouched."); return; }

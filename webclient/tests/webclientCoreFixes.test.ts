@@ -194,13 +194,17 @@ describe('webclient/main.ts regression wiring (source pins)', () => {
   const resetStart = main.indexOf('function resetSessionState');
   const resetFn = main.slice(resetStart, main.indexOf('\n}', resetStart));
 
-  it('resetSessionState keeps the map up across reconnects', () => {
+  it('resetSessionState clears the map terminal and drops its payload', () => {
     expect(resetStart).toBeGreaterThan(-1);
     expect(resetFn).toContain('writer.clear();');
     expect(resetFn).toContain('audio?.pause();');
     expect(resetFn).toContain('recorder');
+    expect(resetFn).toContain('right.write(MAP_CLEAR_SEQUENCE);');
+    // The payload must go too: keeping it repaints the stale map on the
+    // next fitAndReportSize -> renderMap after reconnect.
+    expect(resetFn).toContain('mapPayload = null;');
+    expect(resetFn).toContain('pendingBackground = undefined;');
     expect(resetFn).not.toContain('mapWanted = false;');
-    expect(resetFn).not.toContain('mapPayload = null;');
     expect(resetFn).not.toContain('setMapVisibility(false);');
   });
 

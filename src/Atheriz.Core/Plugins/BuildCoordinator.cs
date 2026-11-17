@@ -18,7 +18,9 @@ public static class BuildCoordinator
     public sealed record BuildAllResult(bool Ok, bool EngineBuilt, int GameBuilt, string Summary);
 
     /// <summary>
-    /// Builds the engine server when stale, then every stale game project.
+    /// Builds the engine server when stale, then every stale game project,
+    /// then the webclient bundle when its sources are newer than dist/
+    /// (rebuilt with npm and re-staged into the game's web folder).
     /// Pass explicit roots/projects in tests; the defaults discover from the
     /// environment exactly like the per-game scripts and the reload path do.
     /// </summary>
@@ -28,6 +30,7 @@ public static class BuildCoordinator
         IReadOnlyList<string>? gameProjects = null,
         Func<string, CancellationToken, Task<bool>>? engineBuild = null,
         Func<string, CancellationToken, Task<bool>>? gameBuild = null,
+        Func<AtherizSettings, string?, CancellationToken, Task<WebclientBuilder.WebclientBuildResult>>? webclientBuild = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -61,6 +64,37 @@ public static class BuildCoordinator
             built++;
         }
         var summary = $"Build check done: engine {(engine.WasBuilt ? "rebuilt" : "up to date")}, {built} game project(s) built.";
-        return new BuildAllResult(true, engine.WasBuilt, built, summary);
+        // The browser bundle is a build artifact too: a webclient-only
+        // change otherwise sits unserved until someone rebuilds by hand.
+        var webRoot = engineRoot;
+        if (string.IsNullOrWhiteSpace(webRoot) && !EngineBuilder.TryResolveEngineRoot(out webRoot))
+            webRoot = null;
+        WebclientBuilder.WebclientBuildResult web;
+        try
+        {
+            web = await (webclientBuild ?? DefaultWebclientBuildAsync)(settings, webRoot, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return new BuildAllResult(false, engine.WasBuilt, built,
+                $"Build failed: webclient step threw: {ex.Message}");
+        }
+        if (!web.Ok)
+        {
+            return new BuildAllResult(false, engine.WasBuilt, built,
+                $"Build failed: {web.Message} Live code untouched.");
+        }
+        return new BuildAllResult(true, engine.WasBuilt, built,
+            $"{summary} Webclient: {web.Message.ToLowerInvariant()}.");
+    }
+
+    private static Task<WebclientBuilder.WebclientBuildResult> DefaultWebclientBuildAsync(
+        AtherizSettings settings, string? webRoot, CancellationToken cancellationToken)
+    {
+        var gameWeb = WebclientBuilder.DeriveGameWebRoot(settings);
+        if (string.IsNullOrWhiteSpace(webRoot) || string.IsNullOrWhiteSpace(gameWeb))
+            return Task.FromResult(new WebclientBuilder.WebclientBuildResult(
+                true, false, "webclient skipped: no checkout or game web folder"));
+        return WebclientBuilder.EnsureWebclientDeployedAsync(webRoot, gameWeb, cancellationToken: cancellationToken);
     }
 }
