@@ -121,6 +121,47 @@ public sealed class BuildCommand : BuilderCommand
         parser.AddArgument("--none", help: "No room walls").Action(GameArgumentParser.ArgAction.StoreTrue);
     }
 
+    // Shared room-neighbor scan and bidirectional auto-link: DigCommand
+    // reuses both so dug rooms join the same link graph as built rooms.
+    internal static (bool N, bool S, bool E, bool W) GetRoomDirsShared(MapInfo mi, (int X, int Y) coord)
+    {
+        var settings = AtherizSettings.Global;
+        bool nn = false, ss = false, ee = false, ww = false;
+        // Single snapshot under the info read lock (a second access
+        // would re-enter the NoRecursion lock).
+        var pre = mi.PreGrid;
+        if (pre.TryGetValue((coord.X, coord.Y + 1), out var v) && v == settings.RoomPlaceholder) nn = true;
+        if (pre.TryGetValue((coord.X, coord.Y - 1), out v) && v == settings.RoomPlaceholder) ss = true;
+        if (pre.TryGetValue((coord.X + 1, coord.Y), out v) && v == settings.RoomPlaceholder) ee = true;
+        if (pre.TryGetValue((coord.X - 1, coord.Y), out v) && v == settings.RoomPlaceholder) ww = true;
+        return (nn, ss, ee, ww);
+    }
+
+    internal static void EnsureLinksShared(NodeHandler nh, Node node, bool nn, bool ss, bool ee, bool ww)
+    {
+        var rows = new (bool active, string name, string alias, int dx, int dy, string opp, string oppAlias)[]
+        {
+            (nn, "north", "n", 0, 1, "south", "s"),
+            (ss, "south", "s", 0, -1, "north", "n"),
+            (ee, "east", "e", 1, 0, "west", "w"),
+            (ww, "west", "w", -1, 0, "east", "e"),
+        };
+        foreach (var row in rows)
+        {
+            if (!row.active) continue;
+            string name = row.name;
+            string alias = row.alias;
+            string opp = row.opp;
+            string oppAlias = row.oppAlias;
+            int dx = row.dx;
+            int dy = row.dy;
+            node.AddLinkIfAbsent(name, () => new NodeLink(name, new Coord(node.Coord.Area, node.Coord.X + dx, node.Coord.Y + dy, node.Coord.Z), [alias]));
+            var toCoord = new Coord(node.Coord.Area, node.Coord.X + dx, node.Coord.Y + dy, node.Coord.Z);
+            var toNode = nh.GetNode(toCoord);
+            if (toNode is not null) toNode.AddLinkIfAbsent(opp, () => new NodeLink(opp, node.Coord, [oppAlias]));
+        }
+    }
+
     protected override void RunPuppet(GameObject goCaller, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
     {
         // Resolve args to flags (production Run receives ParsedArgs via UseParser).
@@ -184,44 +225,9 @@ public sealed class BuildCommand : BuilderCommand
         if (!room && !road && !path)
             room = true;
 
-        // Helpers
-        (bool N,bool S,bool E,bool W) GetRoomDirs(MapInfo mi, (int X,int Y) coord)
-        {
-            var settings = AtherizSettings.Global;
-            bool nn=false, ss=false, ee=false, ww=false;
-            // Single snapshot under the info read lock (a second access
-            // would re-enter the NoRecursion lock).
-            var pre = mi.PreGrid;
-            if (pre.TryGetValue((coord.X, coord.Y+1), out var v) && v == settings.RoomPlaceholder) nn=true;
-            if (pre.TryGetValue((coord.X, coord.Y-1), out v) && v == settings.RoomPlaceholder) ss=true;
-            if (pre.TryGetValue((coord.X+1, coord.Y), out v) && v == settings.RoomPlaceholder) ee=true;
-            if (pre.TryGetValue((coord.X-1, coord.Y), out v) && v == settings.RoomPlaceholder) ww=true;
-            return (nn, ss, ee, ww);
-        }
-        void EnsureLinks(Node node, bool nn,bool ss,bool ee,bool ww)
-        {
-            var rows = new (bool active, string name, string alias, int dx, int dy, string opp, string oppAlias)[]
-            {
-                (nn, "north", "n", 0, 1, "south", "s"),
-                (ss, "south", "s", 0, -1, "north", "n"),
-                (ee, "east", "e", 1, 0, "west", "w"),
-                (ww, "west", "w", -1, 0, "east", "e"),
-            };
-            foreach (var row in rows)
-            {
-                if (!row.active) continue;
-                string name = row.name;
-                string alias = row.alias;
-                string opp = row.opp;
-                string oppAlias = row.oppAlias;
-                int dx = row.dx;
-                int dy = row.dy;
-                node.AddLinkIfAbsent(name, () => new NodeLink(name, new Coord(node.Coord.Area, node.Coord.X + dx, node.Coord.Y + dy, node.Coord.Z), [alias]));
-                var toCoord = new Coord(node.Coord.Area, node.Coord.X + dx, node.Coord.Y + dy, node.Coord.Z);
-                var toNode = nh.GetNode(toCoord);
-                if (toNode is not null) toNode.AddLinkIfAbsent(opp, () => new NodeLink(opp, node.Coord, [oppAlias]));
-            }
-        }
+        // Helpers (shared with DigCommand, see the shared statics above)
+        (bool N, bool S, bool E, bool W) GetRoomDirs(MapInfo mi, (int X, int Y) coord) => GetRoomDirsShared(mi, coord);
+        void EnsureLinks(Node node, bool nn, bool ss, bool ee, bool ww) => EnsureLinksShared(nh, node, nn, ss, ee, ww);
 
         Node? lastNewNode = null;
         foreach (var dKey in targets)
@@ -362,6 +368,300 @@ public sealed class BuildCommand : BuilderCommand
     // Python compat names
     public bool _has_link(Node node, string linkName) => HasLink(node, linkName);
     public string _get_alias(string name) => GetAlias(name);
+}
+
+public sealed class DigCommand : BuilderCommand
+{
+    public override string Key => "dig";
+    public override string Desc => "Dig a new room out of adjoining wall or floor.";
+    public override string Category => "Building";
+    public override string ExtraDesc => "Use 'dig <direction>' (n/s/e/w/u/d or north/south/east/west/up/down). Digs one room; requires a wall or floor in that direction.";
+
+    public const string NewRoomDesc = "A freshly dug area.";
+
+    protected override void SetupParser(GameArgumentParser parser)
+    {
+        parser.AddArgument("-n", "--north").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Dig north");
+        parser.AddArgument("-s", "--south").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Dig south");
+        parser.AddArgument("-e", "--east").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Dig east");
+        parser.AddArgument("-w", "--west").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Dig west");
+        parser.AddArgument("-u", "--up").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Dig up");
+        parser.AddArgument("-d", "--down").Action(GameArgumentParser.ArgAction.StoreTrue).Help("Dig down");
+        parser.AddArgument(ParsedArgKeys.Args, nargs: "*", help: "Direction to dig");
+    }
+
+    protected override void RunPuppet(GameObject goCaller, GameArgumentParser.ParsedArgs pa, CancellationToken ct)
+    {
+        // Node and map handlers via Singletons (same shape as BuildCommand).
+        var nh = NodeHandler.GetCurrent() ?? GlobalServices.GetNodeHandler();
+        MapHandler mh;
+        try { mh = GlobalServices.GetMapHandler(); } catch { mh = new MapHandler(autoLoad: false); }
+
+        Node? loc = goCaller.ResolveLocationObject() as Node;
+        if (loc is null)
+        {
+            goCaller.Msg("You must be in a valid location to build.");
+            return;
+        }
+
+        // Exactly one direction: dash flags and bare words (leading dashes
+        // optional, any case) vote together; anything else shows help.
+        List<string> picked = [];
+        void Vote(string key)
+        {
+            if (!picked.Contains(key)) picked.Add(key);
+        }
+        if (pa.GetBool(ParsedArgKeys.North)) Vote("n");
+        if (pa.GetBool(ParsedArgKeys.South)) Vote("s");
+        if (pa.GetBool(ParsedArgKeys.East)) Vote("e");
+        if (pa.GetBool(ParsedArgKeys.West)) Vote("w");
+        if (pa.GetBool(ParsedArgKeys.Up)) Vote("u");
+        if (pa.GetBool(ParsedArgKeys.Down)) Vote("d");
+        foreach (var raw in pa.GetList(ParsedArgKeys.Args))
+        {
+            var key = raw.Trim().TrimStart('-').ToLowerInvariant() switch
+            {
+                "n" or "north" => "n",
+                "s" or "south" => "s",
+                "e" or "east" => "e",
+                "w" or "west" => "w",
+                "u" or "up" => "u",
+                "d" or "down" => "d",
+                _ => "",
+            };
+            if (key == "")
+            {
+                goCaller.Msg(PrintHelp());
+                return;
+            }
+            Vote(key);
+        }
+        if (picked.Count != 1)
+        {
+            goCaller.Msg(PrintHelp());
+            return;
+        }
+        var dKey = picked[0];
+        var dData = BuildCommand.Directions[dKey];
+        int dx = dData.dx, dy = dData.dy, dz = dData.dz;
+        string linkName = dData.link, backLinkName = dData.back;
+
+        var c = loc.Coord;
+        var newCoord = new Coord(c.Area, c.X + dx, c.Y + dy, c.Z + dz);
+        if (nh.GetNode(newCoord) is not null)
+        {
+            goCaller.Msg($"There is already a room to the {linkName}.");
+            return;
+        }
+
+        // The dig needs drawn wall or floor at the target cell. Up/down
+        // target another level, which may not have a map yet — a missing
+        // level is fresh rock, not a refusal.
+        var mi = mh.EnsureMapInfo(newCoord.Area, newCoord.Z);
+        bool vertical = dKey is "u" or "d";
+        if (!vertical && !CellIsDiggable(mi, (newCoord.X, newCoord.Y)))
+        {
+            goCaller.Msg($"There is nothing to dig into to the {linkName}.");
+            return;
+        }
+
+        var areaObj = nh.GetArea(c.Area);
+        if (areaObj is null)
+        {
+            goCaller.Msg("Error: Current area not found.");
+            return;
+        }
+        NodeGrid grid;
+        areaObj.Lock.EnterWriteLock();
+        try
+        {
+            grid = areaObj.GetGrid(newCoord.Z) ?? new NodeGrid(c.Area, newCoord.Z);
+            if (areaObj.GetGrid(newCoord.Z) is null) areaObj.AddGrid(grid);
+        }
+        finally { areaObj.Lock.ExitWriteLock(); }
+        Node newNode;
+        grid.Lock.EnterWriteLock();
+        try
+        {
+            // Locked recheck (same race window BuildCommand closes).
+            if (grid.GetNode(newCoord.X, newCoord.Y) is not null)
+            {
+                goCaller.Msg($"There is already a room to the {linkName}.");
+                return;
+            }
+            newNode = new Node(newCoord, desc: NewRoomDesc);
+            // Hold the grid write lock across creation+insert (no exit/re-enter window).
+            grid.AddNode(newNode);
+            // the Node ctor no longer publishes to the
+            // registry — register explicitly (mirrors
+            // NodeHandler.AddNode's insert-then-publish order).
+            Atheriz.Core.Globals.ObjectRegistry.AddObject(newNode);
+        }
+        finally { grid.Lock.ExitWriteLock(); }
+
+        // Wall style comes from the dug-through wall when it has one,
+        // else the modal style of the sampled map, else rounded.
+        // Sideways digs sample the current level; up/down sample the
+        // level being dug into.
+        string wallRaw = DetectWallPlaceholder(mi, (newCoord.X, newCoord.Y));
+        if (vertical)
+        {
+            // Stairwell pair: the level left behind keeps the direction
+            // dug, the new level gets the way back. Each marker takes its
+            // own map's wall color. The current map has no batch coming,
+            // so it renders now; the target map renders with the stamp.
+            var fromMi = mh.EnsureMapInfo(c.Area, c.Z);
+            var (fromLabel, fromGlyphs) = dKey == "d"
+                ? ("down", DownMarkerGlyphs)
+                : ("up", UpMarkerGlyphs);
+            var (toLabel, toGlyphs) = dKey == "d"
+                ? ("up", UpMarkerGlyphs)
+                : ("down", DownMarkerGlyphs);
+            AddStairMarker(fromMi, (c.X, c.Y), fromLabel, fromGlyphs);
+            fromMi.Render(true);
+            AddStairMarker(mi, (newCoord.X, newCoord.Y), toLabel, toGlyphs);
+        }
+        using (mi.BatchUpdate())
+        {
+            // Single-generation read: the stamp below must not mix
+            // settings generations on a swap.
+            var roomPH = AtherizSettings.Global.RoomPlaceholder;
+            mi.UpdateGrid((newCoord.X, newCoord.Y), roomPH);
+            mi.PlaceWalls((newCoord.X, newCoord.Y), wallRaw);
+            var (nn, ss, ee, ww) = BuildCommand.GetRoomDirsShared(mi, (newCoord.X, newCoord.Y));
+            BuildCommand.EnsureLinksShared(nh, newNode, nn, ss, ee, ww);
+        }
+
+        loc.AddLinkIfAbsent(linkName, () => new NodeLink(linkName, newCoord, [dKey]));
+        string backAlias = backLinkName switch { "north" => "n", "south" => "s", "east" => "e", "west" => "w", "up" => "u", "down" => "d", _ => "" };
+        var backAliases = string.IsNullOrEmpty(backAlias) ? [] : new List<string> { backAlias };
+        newNode.AddLinkIfAbsent(backLinkName, () => new NodeLink(backLinkName, loc.Coord, backAliases));
+
+        goCaller.Msg($"You dig {linkName} into solid rock, opening a new chamber.");
+        if (!goCaller.MoveTo(newNode))
+            goCaller.Msg($"Could not move to {newNode.Coord}.");
+    }
+
+    // Style buckets for pre-grid cores (already StripAnsi'd). "shared"
+    // covers the T-junction/cross glyphs both single and rounded rooms use.
+    public static string ClassifyDigCell(string core, AtherizSettings sset)
+    {
+        ArgumentNullException.ThrowIfNull(core);
+        ArgumentNullException.ThrowIfNull(sset);        if (core == sset.SingleWallPlaceholder) return "single";
+        if (core == sset.DoubleWallPlaceholder) return "double";
+        if (core == sset.RoundedWallPlaceholder) return "rounded";
+        if (core == sset.PathPlaceholder) return "rounded";
+        if (core == sset.RoadPlaceholder) return "double";
+        if (core == sset.RoomPlaceholder) return "floor";
+        if (core.Length == 1)
+        {
+            if ("═║╔╗╚╝╠╣╦╩╬".Contains(core, StringComparison.Ordinal)) return "double";
+            if ("╭╮╯╰".Contains(core, StringComparison.Ordinal)) return "rounded";
+            if ("┌┐└┘".Contains(core, StringComparison.Ordinal)) return "single";
+            if ("─│├┤┬┴┼".Contains(core, StringComparison.Ordinal)) return "shared";
+        }
+        return "other";
+    }
+
+    // Diggable means drawn content: any wall style or floor, or (for
+    // placeholder-less generated levels) any post-grid cell.
+    public static bool CellIsDiggable(MapInfo mi, (int X, int Y) cell)
+    {
+        ArgumentNullException.ThrowIfNull(mi);
+        var sset = AtherizSettings.Global;
+        var pre = mi.PreGrid;
+        if (pre.TryGetValue(cell, out var raw))
+        {
+            var core = GameUtils.StripAnsi(raw);
+            if (core.Length == 0) return false;
+            return ClassifyDigCell(core, sset) != "other";
+        }
+        return mi.PostGrid.ContainsKey(cell);
+    }
+
+    // Full pre-grid wall string (with any color wrapper) to stamp for the
+    // new room: the dug-through wall's own string when it has one, else
+    // the most common raw string of the modal style, else the bare
+    // rounded placeholder.
+    public static string DetectWallPlaceholder(MapInfo mi, (int X, int Y) preferCell)
+    {
+        ArgumentNullException.ThrowIfNull(mi);
+        var sset = AtherizSettings.Global;
+        var pre = mi.PreGrid;
+        if (pre.TryGetValue(preferCell, out var firstRaw))
+        {
+            var firstCls = ClassifyDigCell(GameUtils.StripAnsi(firstRaw), sset);
+            if (firstCls is "single" or "double" or "rounded" or "shared") return firstRaw;
+        }
+        return ModalWallRaw(pre, sset) ?? sset.RoundedWallPlaceholder;
+    }
+
+    // Modal wall raw string for a map: most common raw string of the
+    // winning style (shared T/cross glyphs vote for both single and
+    // rounded). Null when the map holds no walls at all.
+    private static string? ModalWallRaw(Dictionary<(int X, int Y), string> pre, AtherizSettings sset)
+    {
+        int single = 0, dbl = 0, rounded = 0;
+        foreach (var kv in pre)
+        {
+            switch (ClassifyDigCell(GameUtils.StripAnsi(kv.Value), sset))
+            {
+                case "single": single++; break;
+                case "double": dbl++; break;
+                case "rounded": rounded++; break;
+                case "shared": single++; rounded++; break;
+            }
+        }
+        string winner = "rounded";
+        if (dbl > single && dbl > rounded) winner = "double";
+        else if (single > dbl && single > rounded) winner = "single";
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        string? best = null;
+        int bestN = 0;
+        foreach (var kv in pre)
+        {
+            var cls = ClassifyDigCell(GameUtils.StripAnsi(kv.Value), sset);
+            bool match = cls == winner || (cls == "shared" && winner != "double");
+            if (!match) continue;
+            int n = counts.TryGetValue(kv.Value, out var had) ? had + 1 : 1;
+            counts[kv.Value] = n;
+            if (n > bestN) { bestN = n; best = kv.Value; }
+        }
+        return best;
+    }
+
+    // Modal wall color wrapper for a map: the ANSI prefix/suffix of its
+    // most common wall string. Bare when the map has no wrapped walls.
+    public static (string Prefix, string Suffix) DetectWallWrapper(MapInfo mi)
+    {
+        ArgumentNullException.ThrowIfNull(mi);
+        var best = ModalWallRaw(mi.PreGrid, AtherizSettings.Global);
+        if (best is null) return ("", "");
+        var core = GameUtils.StripAnsi(best);
+        if (core.Length == 0) return ("", "");
+        int idx = best.IndexOf(core, StringComparison.Ordinal);
+        if (idx < 0) return ("", "");
+        return (best[..idx], best[(idx + core.Length)..]);
+    }
+
+    // Stairwell glyph sets: the level left behind gets the direction dug,
+    // the level dug into gets the way back.
+    public static readonly string[] DownMarkerGlyphs = ["\u25A2", "\u25CB", "\u25CC", "\u2394", "\u25A1"];
+    public static readonly string[] UpMarkerGlyphs = [char.ConvertFromUtf32(0x1CE09), "\uF68B", "\u2B9D", "\u2B06"];
+
+    // Stamps one stairwell marker on a map legend: a random glyph from the
+    // set, wrapped in the map's own modal wall color. Returns the placed
+    // symbol.
+    public static string AddStairMarker(MapInfo mi, (int X, int Y) cell, string label, string[] glyphs)
+    {
+        ArgumentNullException.ThrowIfNull(mi);
+        ArgumentNullException.ThrowIfNull(glyphs);
+        if (glyphs.Length == 0) throw new ArgumentException("Glyph set must not be empty.", nameof(glyphs));
+        var (prefix, suffix) = DetectWallWrapper(mi);
+        string symbol = string.Concat(prefix, glyphs[Random.Shared.Next(glyphs.Length)], suffix);
+        mi.AddLegendEntry(new LegendEntry(symbol, label, cell));
+        return symbol;
+    }
 }
 
 public sealed class CreateCommand : BuilderCommand

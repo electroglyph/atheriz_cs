@@ -67,7 +67,7 @@ public sealed class LoggedInCommandBaseTests
         var expected = new HashSet<string>(StringComparer.Ordinal)
         {
             "AliasCommand", "BanCommand", "BuildCommand", "CopyCommand",
-            "CreateCommand", "DeleteCommand", "DescCommand", "DoorCommand",
+            "CreateCommand", "DeleteCommand", "DescCommand", "DigCommand", "DoorCommand",
             "EmitCommand", "ExamCommand", "FindCommand", "ForceCommand",
             "MazeCommand", "MoveCommand", "NameCommand", "NounCommand",
             "ObjectsCommand", "PuppetCommand", "ScriptsCommand", "SetCommand",

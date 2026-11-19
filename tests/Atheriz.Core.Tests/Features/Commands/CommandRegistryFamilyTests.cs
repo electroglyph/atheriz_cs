@@ -18,13 +18,13 @@ public sealed class CommandRegistryFamilyTests
         try
         {
             var all = CommandRegistry.LoggedIn.GetAll();
-            Assert.Equal(78, all.Count);
+            Assert.Equal(79, all.Count);
             var keys = all.Select(c => c.Key).OrderBy(k => k, StringComparer.Ordinal).ToList();
             Assert.Equal(
             [
                 "about", "access", "accounts", "alias", "ban", "boot", "build",
                 "channel", "chardelete", "close", "color", "copy", "create",
-                "delete", "desc", "door", "drop", "emit", "emote", "examine",
+                "delete", "desc", "dig", "door", "drop", "emit", "emote", "examine",
                 "find", "follow", "force", "get", "give", "group", "help",
                 "home", "info", "inventory", "lock", "look", "map", "mapedit",
                 "maze", "move", "name", "nick", "nofollow", "none", "noun",

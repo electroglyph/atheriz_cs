@@ -231,10 +231,15 @@ public class MapInfo
             Dictionary<(int, int), string> toPlace = [];
             foreach (var kv in _preGrid)
             {
-                if (placeholderStyles.TryGetValue(kv.Value, out var style))
+                // StripAnsi first: colored walls carry the same placeholder
+                // core with an ANSI wrapper, and they must resolve to box
+                // glyphs that keep their color (bare placeholders take the
+                // byte-identical path via RewrapWall).
+                var core = GameUtils.StripAnsi(kv.Value);
+                if (placeholderStyles.TryGetValue(core, out var style))
                 {
                     var (n, s, e, w) = GetDirs(_preGrid, kv.Key, allSymbols);
-                    toPlace[kv.Key] = ResolveChar(n, s, e, w, style);
+                    toPlace[kv.Key] = RewrapWall(kv.Value, core, ResolveChar(n, s, e, w, style));
                 }
                 else if (kv.Value == Settings.RoomPlaceholder)
                 {
@@ -245,6 +250,17 @@ public class MapInfo
             _postGrid.EnsureCapacity(_preGrid.Count);
             foreach (var kv in _preGrid) _postGrid[kv.Key] = toPlace.TryGetValue(kv.Key, out var resolved) ? resolved : kv.Value;
         }
+    }
+
+    // Re-apply a colored placeholder's ANSI wrapper to its resolved box
+    // glyph. Bare placeholders resolve unchanged (byte-identical path).
+    private static string RewrapWall(string raw, string core, string resolved)
+    {
+        if (raw == core) return resolved;
+        if (core.Length == 0) return resolved;
+        int idx = raw.IndexOf(core, StringComparison.Ordinal);
+        if (idx < 0) return resolved;
+        return string.Concat(raw.AsSpan(0, idx), resolved, raw.AsSpan(idx + core.Length));
     }
 
     public void UpdateGrid((int X, int Y) coord, string newSymbol)

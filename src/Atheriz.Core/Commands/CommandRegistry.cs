@@ -90,6 +90,7 @@ public static class CommandRegistry
         new LoggedIn.CreateCommand(),
         new LoggedIn.DeleteCommand(),
         new LoggedIn.DescCommand(),
+        new LoggedIn.DigCommand(),
         new LoggedIn.DoorCommand(),
         new LoggedIn.EmitCommand(),
         new LoggedIn.ExamCommand(),

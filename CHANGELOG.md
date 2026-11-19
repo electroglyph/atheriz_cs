@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.45.0.0] - 2026-11-19
+
+- New builder command `dig <direction>` (`n/s/e/w/u/d` or the full
+  word) carves one room out of adjoining wall or floor, linking it
+  both ways and moving the digger in. New walls copy the neighboring
+  walls' box-drawing style and color, falling back to rounded when
+  there is nothing to copy.
+- Digging up or down also marks the stairwell on both maps' legends:
+  the level left behind gets the direction dug, the new level gets the
+  way back, each in its own map's wall color.
+- Colored map walls now keep their color when placeholders resolve
+  into box-drawing glyphs; a wrapped placeholder used to render as the
+  raw placeholder character instead of the joined wall glyph.
+
 ## [0.43.0.0] - 2026-11-17
 
 - `restart` and `reset` (CLI and in-game) now rebuild the webclient

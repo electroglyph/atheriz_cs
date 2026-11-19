@@ -385,7 +385,11 @@ public class PortedMapTests
         mi.SetPreCell((0,-1), ansiWall);
         mi.PreRender();
         Assert.Equal("┼", mi.PostGrid[(0,0)]);
-        Assert.Equal(ansiWall, mi.PostGrid[(1,0)]);
+        // Colored placeholders resolve like bare ones (single style here:
+        // west-only neighbor), keeping their ANSI wrapper.
+        string prefix = ansiWall[..ansiWall.IndexOf(s.SingleWallPlaceholder, StringComparison.Ordinal)];
+        string suffix = ansiWall[(ansiWall.IndexOf(s.SingleWallPlaceholder, StringComparison.Ordinal) + s.SingleWallPlaceholder.Length)..];
+        Assert.Equal(prefix + "─" + suffix, mi.PostGrid[(1,0)]);
     }
 
     // --- UpdateGrid 3 ---
