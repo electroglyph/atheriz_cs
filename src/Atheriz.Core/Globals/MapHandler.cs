@@ -237,6 +237,14 @@ public class MapHandler
         using (WriteScope()) _data[(area, z)] = mapInfo;
     }
 
+    public void RemoveMapInfo(string area, int z)
+    {
+        using (WriteScope())
+        {
+            if (_data.Remove((area, z))) _removedSinceSave.Add((area, z));
+        }
+    }
+
     public MapInfo? GetMapInfo(string area, int z)
     {
         using (ReadScope()) return _data.TryGetValue((area, z), out var mi) ? mi : null;

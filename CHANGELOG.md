@@ -4,6 +4,46 @@ All notable changes to this project are documented here. Versioning is
 `Major.Minor.Build.Revision` (see `Directory.Build.props`).
 Webclient release notes live in `webclient/CHANGELOG.md`.
 
+## [0.50.0.0] - 2026-11-20
+
+- `dig` up/down now copies the wall style of the destination level. A
+  level with no walls yet falls back to single line with rounded
+  corners instead of carrying the source level's style down the column.
+
+## [0.49.0.0] - 2026-11-20
+
+- `maze` now sends the path highlight after the move's map frames on the
+  command thread instead of from the pool thread. The pool send raced the
+  move's area-change wipe, so the first maze of a session (limbo to
+  maze1) could show the path and then lose it to a late wipe with no map
+  left to restore it.
+
+## [0.48.0.0] - 2026-11-20
+
+- `dig` always carves a new room in the given direction. The old
+  "nothing to dig into" refusal for cells with no drawn wall or floor
+  is gone, so digging south from a maze edge (or into any unmapped
+  cell) opens a chamber instead of refusing.
+
+## [0.47.0.0] - 2026-11-20
+
+- `dig` up or down into a level with no walls now copies the wall style
+  of the level dug from instead of falling back to rounded, so digging
+  down from a double-walled maze keeps double walls.
+- `dig` no longer stamps a resolved box glyph (maze art such as a corner
+  piece) literally all around the new room: the dug-through wall maps
+  back to its style's placeholder, so the new ring renders corners and
+  straights in the right places.
+
+## [0.46.0.0] - 2026-11-20
+
+- The `maze` command now builds one stacked area instead of three
+  separate areas: levels live at `z=0`, `-1`, and `-2` in `maze1`,
+  with `down` exits dropping to the next level down.
+- `dig` into an existing room now links it both ways and moves in
+  with the usual flavor text when no exit covers that direction;
+  digging where an exit already exists still refuses.
+
 ## [0.45.0.0] - 2026-11-19
 
 - New builder command `dig <direction>` (`n/s/e/w/u/d` or the full

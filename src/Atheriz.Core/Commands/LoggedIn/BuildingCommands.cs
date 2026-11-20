@@ -375,7 +375,7 @@ public sealed class DigCommand : BuilderCommand
     public override string Key => "dig";
     public override string Desc => "Dig a new room out of adjoining wall or floor.";
     public override string Category => "Building";
-    public override string ExtraDesc => "Use 'dig <direction>' (n/s/e/w/u/d or north/south/east/west/up/down). Digs one room; requires a wall or floor in that direction.";
+    public override string ExtraDesc => "Use 'dig <direction>' (n/s/e/w/u/d or north/south/east/west/up/down). Digs one room in that direction.";
 
     public const string NewRoomDesc = "A freshly dug area.";
 
@@ -448,22 +448,19 @@ public sealed class DigCommand : BuilderCommand
 
         var c = loc.Coord;
         var newCoord = new Coord(c.Area, c.X + dx, c.Y + dy, c.Z + dz);
-        if (nh.GetNode(newCoord) is not null)
+        var existingDest = nh.GetNode(newCoord);
+        if (existingDest is not null && loc.GetLinks().Any(l => l.Name == linkName))
         {
             goCaller.Msg($"There is already a room to the {linkName}.");
             return;
         }
 
-        // The dig needs drawn wall or floor at the target cell. Up/down
-        // target another level, which may not have a map yet — a missing
-        // level is fresh rock, not a refusal.
+        // Digging always creates: a missing target cell is fresh rock,
+        // not a refusal. Linking into an existing room needs no wall:
+        // the chamber is already there. The wall style falls back to
+        // the modal style of the sampled map, else rounded.
         var mi = mh.EnsureMapInfo(newCoord.Area, newCoord.Z);
         bool vertical = dKey is "u" or "d";
-        if (!vertical && !CellIsDiggable(mi, (newCoord.X, newCoord.Y)))
-        {
-            goCaller.Msg($"There is nothing to dig into to the {linkName}.");
-            return;
-        }
 
         var areaObj = nh.GetArea(c.Area);
         if (areaObj is null)
@@ -484,41 +481,56 @@ public sealed class DigCommand : BuilderCommand
         try
         {
             // Locked recheck (same race window BuildCommand closes).
-            if (grid.GetNode(newCoord.X, newCoord.Y) is not null)
+            var lockedExisting = grid.GetNode(newCoord.X, newCoord.Y);
+            if (lockedExisting is not null)
             {
-                goCaller.Msg($"There is already a room to the {linkName}.");
-                return;
+                if (loc.GetLinks().Any(l => l.Name == linkName))
+                {
+                    goCaller.Msg($"There is already a room to the {linkName}.");
+                    return;
+                }
+                newNode = lockedExisting;
             }
-            newNode = new Node(newCoord, desc: NewRoomDesc);
-            // Hold the grid write lock across creation+insert (no exit/re-enter window).
-            grid.AddNode(newNode);
-            // the Node ctor no longer publishes to the
-            // registry — register explicitly (mirrors
-            // NodeHandler.AddNode's insert-then-publish order).
-            Atheriz.Core.Globals.ObjectRegistry.AddObject(newNode);
+            else
+            {
+                newNode = new Node(newCoord, desc: NewRoomDesc);
+                // Hold the grid write lock across creation+insert (no exit/re-enter window).
+                grid.AddNode(newNode);
+                // the Node ctor no longer publishes to the
+                // registry — register explicitly (mirrors
+                // NodeHandler.AddNode's insert-then-publish order).
+                Atheriz.Core.Globals.ObjectRegistry.AddObject(newNode);
+            }
         }
         finally { grid.Lock.ExitWriteLock(); }
 
-        // Wall style comes from the dug-through wall when it has one,
-        // else the modal style of the sampled map, else rounded.
-        // Sideways digs sample the current level; up/down sample the
-        // level being dug into.
+        // The new room copies the destination level's wall style. A
+        // level with no walls yet has no style to copy, so it falls back
+        // to single line with rounded corners (the rounded placeholder).
         string wallRaw = DetectWallPlaceholder(mi, (newCoord.X, newCoord.Y));
+        MapInfo? fromMi = vertical ? mh.EnsureMapInfo(c.Area, c.Z) : null;
         if (vertical)
         {
-            // Stairwell pair: the level left behind keeps the direction
-            // dug, the new level gets the way back. Each marker takes its
-            // own map's wall color. The current map has no batch coming,
-            // so it renders now; the target map renders with the stamp.
-            var fromMi = mh.EnsureMapInfo(c.Area, c.Z);
-            var (fromLabel, fromGlyphs) = dKey == "d"
-                ? ("down", DownMarkerGlyphs)
-                : ("up", UpMarkerGlyphs);
-            var (toLabel, toGlyphs) = dKey == "d"
-                ? ("up", UpMarkerGlyphs)
-                : ("down", DownMarkerGlyphs);
-            AddStairMarker(fromMi, (c.X, c.Y), fromLabel, fromGlyphs);
-            fromMi.Render(true);
+            // Stairwell markers. A spot that already has the opposite
+            // exit becomes two-way: one bidirectional marker instead of
+            // a single. The target map always gets the way back.
+            var fromMap = fromMi!;
+            string opposite = dKey == "d" ? "up" : "down";
+            if (loc.GetLinks().Any(l => l.Name == opposite))
+            {
+                foreach (var e in fromMap.LegendEntries.Where(e => e.Coord is var cc && cc.HasValue && cc.Value == (c.X, c.Y)).ToList())
+                    fromMap.RemoveLegendEntry(e);
+                var (bothPrefix, bothSuffix) = DetectWallWrapper(fromMap);
+                string both = string.Concat(bothPrefix, TwoWayMarkerGlyphs[Random.Shared.Next(TwoWayMarkerGlyphs.Length)], bothSuffix);
+                fromMap.AddLegendEntry(new LegendEntry(both, "up, down", (c.X, c.Y)));
+            }
+            else
+            {
+                var (fromLabel, fromGlyphs) = dKey == "d" ? ("down", DownMarkerGlyphs) : ("up", UpMarkerGlyphs);
+                AddStairMarker(fromMap, (c.X, c.Y), fromLabel, fromGlyphs);
+            }
+            fromMap.Render(true);
+            var (toLabel, toGlyphs) = dKey == "d" ? ("up", UpMarkerGlyphs) : ("down", DownMarkerGlyphs);
             AddStairMarker(mi, (newCoord.X, newCoord.Y), toLabel, toGlyphs);
         }
         using (mi.BatchUpdate())
@@ -579,10 +591,12 @@ public sealed class DigCommand : BuilderCommand
         return mi.PostGrid.ContainsKey(cell);
     }
 
-    // Full pre-grid wall string (with any color wrapper) to stamp for the
-    // new room: the dug-through wall's own string when it has one, else
-    // the most common raw string of the modal style, else the bare
-    // rounded placeholder.
+    // Wall placeholder (with any color wrapper) to stamp for the new
+    // room: the dug-through wall's style when it has one, else the most
+    // common placeholder of the modal style, else the bare rounded
+    // placeholder. Resolved box glyphs (maze levels store final art like
+    // ╝ or ╬ in pre-grid) never stamp literally: they map back to their
+    // style's placeholder so PreRender resolves fresh corners/straights.
     public static string DetectWallPlaceholder(MapInfo mi, (int X, int Y) preferCell)
     {
         ArgumentNullException.ThrowIfNull(mi);
@@ -590,15 +604,47 @@ public sealed class DigCommand : BuilderCommand
         var pre = mi.PreGrid;
         if (pre.TryGetValue(preferCell, out var firstRaw))
         {
-            var firstCls = ClassifyDigCell(GameUtils.StripAnsi(firstRaw), sset);
-            if (firstCls is "single" or "double" or "rounded" or "shared") return firstRaw;
+            var core = GameUtils.StripAnsi(firstRaw);
+            var firstCls = ClassifyDigCell(core, sset);
+            if (firstCls is "single" or "double" or "rounded")
+            {
+                if (IsStampablePlaceholder(core, sset)) return firstRaw;
+                return WrapLike(firstRaw, core, PlaceholderForStyle(sset, firstCls));
+            }
+            // "shared" glyphs (─│├┤...) belong to both single and
+            // rounded: fall through to the modal winner, not a guess.
         }
         return ModalWallRaw(pre, sset) ?? sset.RoundedWallPlaceholder;
     }
 
-    // Modal wall raw string for a map: most common raw string of the
+    // Stampable cores keep byte-identical (placeholders carry the style;
+    // road/path resolve through the same rounded/double arms as walls).
+    private static bool IsStampablePlaceholder(string core, AtherizSettings sset) =>
+        core == sset.SingleWallPlaceholder || core == sset.DoubleWallPlaceholder ||
+        core == sset.RoundedWallPlaceholder || core == sset.PathPlaceholder ||
+        core == sset.RoadPlaceholder;
+
+    private static string PlaceholderForStyle(AtherizSettings sset, string style) => style switch
+    {
+        "single" => sset.SingleWallPlaceholder,
+        "double" => sset.DoubleWallPlaceholder,
+        _ => sset.RoundedWallPlaceholder,
+    };
+
+    // Rewrap a placeholder core in raw's ANSI wrapper (bare when none).
+    private static string WrapLike(string raw, string core, string placeholder)
+    {
+        if (raw == core) return placeholder;
+        if (core.Length == 0) return placeholder;
+        int idx = raw.IndexOf(core, StringComparison.Ordinal);
+        if (idx < 0) return placeholder;
+        return string.Concat(raw.AsSpan(0, idx), placeholder, raw.AsSpan(idx + core.Length));
+    }
+
+    // Modal wall placeholder for a map: most common raw string of the
     // winning style (shared T/cross glyphs vote for both single and
-    // rounded). Null when the map holds no walls at all.
+    // rounded), mapped back to a placeholder when the winner is resolved
+    // box art. Null when the map holds no walls at all.
     private static string? ModalWallRaw(Dictionary<(int X, int Y), string> pre, AtherizSettings sset)
     {
         int single = 0, dbl = 0, rounded = 0;
@@ -627,7 +673,13 @@ public sealed class DigCommand : BuilderCommand
             counts[kv.Value] = n;
             if (n > bestN) { bestN = n; best = kv.Value; }
         }
-        return best;
+        if (best is null) return null;
+        var bestCore = GameUtils.StripAnsi(best);
+        if (IsStampablePlaceholder(bestCore, sset)) return best;
+        // Maze and door art store resolved glyphs in pre-grid: stamping
+        // one literally would repeat one corner everywhere. Stamp the
+        // winning style's placeholder (keeping any color) instead.
+        return WrapLike(best, bestCore, PlaceholderForStyle(sset, winner));
     }
 
     // Modal wall color wrapper for a map: the ANSI prefix/suffix of its
@@ -645,18 +697,23 @@ public sealed class DigCommand : BuilderCommand
     }
 
     // Stairwell glyph sets: the level left behind gets the direction dug,
-    // the level dug into gets the way back.
+    // the level dug into gets the way back. A spot that ends up with
+    // both directions shows one bidirectional marker instead.
     public static readonly string[] DownMarkerGlyphs = ["\u25A2", "\u25CB", "\u25CC", "\u2394", "\u25A1"];
     public static readonly string[] UpMarkerGlyphs = [char.ConvertFromUtf32(0x1CE09), "\uF68B", "\u2B9D", "\u2B06"];
+    public static readonly string[] TwoWayMarkerGlyphs = ["\u2B0D", "\u2B65", "\u2195"];
 
     // Stamps one stairwell marker on a map legend: a random glyph from the
-    // set, wrapped in the map's own modal wall color. Returns the placed
-    // symbol.
+    // set, wrapped in the map's own modal wall color. Stamping the same
+    // label twice on one cell stays a single entry. Returns the placed
+    // (or existing) symbol.
     public static string AddStairMarker(MapInfo mi, (int X, int Y) cell, string label, string[] glyphs)
     {
         ArgumentNullException.ThrowIfNull(mi);
         ArgumentNullException.ThrowIfNull(glyphs);
         if (glyphs.Length == 0) throw new ArgumentException("Glyph set must not be empty.", nameof(glyphs));
+        var existing = mi.LegendEntries.FirstOrDefault(e => e.Desc == label && e.Coord is var cc && cc.HasValue && cc.Value == cell);
+        if (existing is not null) return existing.Symbol ?? "";
         var (prefix, suffix) = DetectWallWrapper(mi);
         string symbol = string.Concat(prefix, glyphs[Random.Shared.Next(glyphs.Length)], suffix);
         mi.AddLegendEntry(new LegendEntry(symbol, label, cell));
@@ -1054,9 +1111,9 @@ public sealed class MazeCommand : BuilderCommand
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         int width = 30, height = 30;
-        var tuple1 = GenMapAndGrid(width, height, "maze1");
-        var tuple2 = GenMapAndGrid(width, height, "maze2");
-        var tuple3 = GenMapAndGrid(width, height, "maze3");
+        var tuple1 = GenMapAndGrid(width, height, "maze1", 0);
+        var tuple2 = GenMapAndGrid(width, height, "maze1", -1);
+        var tuple3 = GenMapAndGrid(width, height, "maze1", -2);
         int rooms = tuple1.grid.Nodes.Count + tuple2.grid.Nodes.Count + tuple3.grid.Nodes.Count;
         sw.Stop();
         go.Msg($"created 3 {width} x {height} mazes, {rooms} rooms, and lots of exits in: {sw.Elapsed.TotalMilliseconds:F2} milliseconds");
@@ -1077,17 +1134,30 @@ public sealed class MazeCommand : BuilderCommand
         // Ensure singleton set without losing existing areas
         NodeHandler.SetCurrent(nh);
         GlobalServices.SetNodeHandler(nh);
-        var area1 = new NodeArea("maze1");
-        var area2 = new NodeArea("maze2");
-        var area3 = new NodeArea("maze3");
-        area1.AddGrid(tuple1.grid);
-        area2.AddGrid(tuple2.grid);
-        area3.AddGrid(tuple3.grid);
+        var area = new NodeArea("maze1");
+        area.AddGrid(tuple1.grid);
+        area.AddGrid(tuple2.grid);
+        area.AddGrid(tuple3.grid);
         // Replace (not blind add): a repeat run must evict the prior
         // generation's nodes from the registry instead of orphaning them.
-        nh.ReplaceArea(area1);
-        nh.ReplaceArea(area2);
-        nh.ReplaceArea(area3);
+        nh.ReplaceArea(area);
+        // Legacy three-area shape (maze1/maze2/maze3 at z=0) collapsed into
+        // one stacked area (maze1 at 0,-1,-2). Evict any leftover levels so a
+        // repeat run never leaves ghost areas behind.
+        foreach (var legacy in new[] { "maze2", "maze3" })
+        {
+            var oldArea = nh.GetArea(legacy);
+            if (oldArea is null) continue;
+            List<Node> evict = [];
+            foreach (var g in oldArea.Grids.Values)
+                foreach (var n in g.Nodes.Values)
+                    evict.Add(n);
+            nh.RemoveArea(legacy);
+            foreach (var n in evict)
+            {
+                try { Atheriz.Core.Globals.ObjectRegistry.RemoveObject(n); } catch (Exception) { }
+            }
+        }
         // MapInfo with pre_grid and legend – use global MapHandler singleton directly
         try
         {
@@ -1101,29 +1171,47 @@ public sealed class MazeCommand : BuilderCommand
         }
         catch { mh = MapHandlerFactory(); }
         GlobalServices.SetMapHandler(mh);
-        var maze1Exit = tuple1.grid.GetRandomNode();
-        var maze2Exit = tuple2.grid.GetRandomNode();
-        var maze3Exit = tuple3.grid.GetRandomNode();
+        var topExit = tuple1.grid.GetRandomNode();
+        var midExit = tuple2.grid.GetRandomNode();
+        var bottomExit = tuple3.grid.GetRandomNode();
         string exitSymbol = GameUtils.WrapXterm256("!", fg: 9);
-        var mi1 = new MapInfo("maze1", tuple1.map, null, [new LegendEntry(exitSymbol, "to maze2", maze1Exit is not null ? (maze1Exit.Coord.X, maze1Exit.Coord.Y) : null)]);
-        var mi2 = new MapInfo("maze2", tuple2.map, null, [new LegendEntry(exitSymbol, "to maze3", maze2Exit is not null ? (maze2Exit.Coord.X, maze2Exit.Coord.Y) : null)]);
-        var mi3 = new MapInfo("maze3", tuple3.map, null, [new LegendEntry(exitSymbol, "to maze1", maze3Exit is not null ? (maze3Exit.Coord.X, maze3Exit.Coord.Y) : null)]);
+        var mi1 = new MapInfo("maze1", tuple1.map, null, [new LegendEntry(exitSymbol, "down", topExit is not null ? (topExit.Coord.X, topExit.Coord.Y) : null)]);
+        var mi2 = new MapInfo("maze1", tuple2.map, null, [new LegendEntry(exitSymbol, "down", midExit is not null ? (midExit.Coord.X, midExit.Coord.Y) : null)]);
+        var mi3 = new MapInfo("maze1", tuple3.map, null, [new LegendEntry(exitSymbol, "down", bottomExit is not null ? (bottomExit.Coord.X, bottomExit.Coord.Y) : null)]);
         mh.SetMapInfo("maze1", 0, mi1);
-        mh.SetMapInfo("maze2", 0, mi2);
-        mh.SetMapInfo("maze3", 0, mi3);
-        if (maze1Exit is not null && maze2Exit is not null) maze1Exit.AddLink(new NodeLink("down", new Coord("maze2", 0, 0, 0), ["d"]));
-        if (maze2Exit is not null && maze3Exit is not null) maze2Exit.AddLink(new NodeLink("down", new Coord("maze3", 0, 0, 0), ["d"]));
-        if (maze3Exit is not null) maze3Exit.AddLink(new NodeLink("down", new Coord("maze1", 0, 0, 0), ["d"]));
+        mh.SetMapInfo("maze1", -1, mi2);
+        mh.SetMapInfo("maze1", -2, mi3);
+        mh.RemoveMapInfo("maze2", 0);
+        mh.RemoveMapInfo("maze3", 0);
+        if (topExit is not null && midExit is not null) topExit.AddLink(new NodeLink("down", new Coord("maze1", 0, 0, -1), ["d"]));
+        if (midExit is not null && bottomExit is not null) midExit.AddLink(new NodeLink("down", new Coord("maze1", 0, 0, -2), ["d"]));
+        if (bottomExit is not null) bottomExit.AddLink(new NodeLink("down", new Coord("maze1", 0, 0, 0), ["d"]));
         var start = nh.GetNode(new Coord("maze1", 0, 0, 0));
-        var end = maze1Exit;
+        var end = topExit;
         // Faithful to atheriz/commands/loggedin/maze.py:97-107 — queue do_pathfind first,
         // then the "moving to" message, map_enabled, and move_to, with no delay.
-        // do_pathfind sends unbackground itself before background, so the highlight
-        // can never be cleared by the area-change unbackground that move_to triggers.
+        // do_pathfind sends unbackground itself before background, after the
+        // move's frames, so the area-change unbackground move_to triggers
+        // can never land after the highlight.
         if (start is not null && end is not null)
         {
             var capturedConn = go.Session?.Connection;
             bool queued = false;
+            // The path computes on the pool but its frames send below on
+            // this thread after MoveTo, so the wire order is deterministic:
+            // the move's unbackground+map, then the path's
+            // unbackground+background. Sending from the pool thread raced
+            // the move: the background could land before the move's
+            // area-change unbackground+map, and the unbackground then wiped
+            // the highlight with no later map to restore it. The first maze
+            // per login always takes the area-change path (limbo->maze1),
+            // so a fresh session's first maze was the one losing the path.
+            bool pathFound = false;
+            List<Node>? pathNodes = null;
+            List<Coord>? deadCells = null;
+            double pathMs = 0;
+            string? pathError = null;
+            using var pathReady = new ManualResetEventSlim(false);
             try
             {
                 var pool = ThreadPoolFactory();
@@ -1136,20 +1224,13 @@ public sealed class MazeCommand : BuilderCommand
                             var sw2 = System.Diagnostics.Stopwatch.StartNew();
                             var (found, path, dead) = Pathfind.AStar(start, end, go, nh);
                             sw2.Stop();
-                            // Verbatim maze.py do_pathfind: unbackground first, then background.
-                            try { capturedConn?.SendCommand("unbackground", [""], null); } catch (Exception) { }
-                            if (found)
-                            {
-                                go.Msg($"path found in: {sw2.Elapsed.TotalMilliseconds:F2} milliseconds");
-                                try { SendBackground(capturedConn, go, [83, 128, 56], path.Select(n => (object)new List<int> { n.Coord.X, n.Coord.Y }).ToList()); } catch (Exception) { }
-                            }
-                            else
-                            {
-                                go.Msg($"path not found in: {sw2.Elapsed.TotalMilliseconds:F2} milliseconds");
-                                try { SendBackground(capturedConn, go, [90, 0, 0], dead.Select(c => (object)new List<int> { c.X, c.Y }).ToList()); } catch (Exception) { }
-                            }
+                            pathFound = found;
+                            pathNodes = path;
+                            deadCells = dead;
+                            pathMs = sw2.Elapsed.TotalMilliseconds;
                         }
-                        catch (Exception ex) { try { go.Msg($"pathfind error: {ex.Message}"); } catch (Exception) { } }
+                        catch (Exception ex) { pathError = ex.Message; }
+                        finally { try { pathReady.Set(); } catch (Exception) { } }
                     });
                 }
             }
@@ -1160,6 +1241,30 @@ public sealed class MazeCommand : BuilderCommand
             go.MapEnabled = true;
             if (!go.MoveTo(start))
                 go.Msg($"Could not move to {start.Coord}.");
+            if (queued)
+            {
+                // MoveTo's frames are already queued ahead of these on this
+                // thread: the area-change unbackground cannot land after.
+                if (!pathReady.Wait(TimeSpan.FromSeconds(30)))
+                    go.Msg("pathfind error: timed out waiting for result.");
+                else if (pathError is not null)
+                    go.Msg($"pathfind error: {pathError}");
+                else
+                {
+                    // Verbatim maze.py do_pathfind: unbackground first, then background.
+                    try { capturedConn?.SendCommand("unbackground", [""], null); } catch (Exception) { }
+                    if (pathFound)
+                    {
+                        go.Msg($"path found in: {pathMs:F2} milliseconds");
+                        try { SendBackground(capturedConn, go, [83, 128, 56], pathNodes!.Select(n => (object)new List<int> { n.Coord.X, n.Coord.Y }).ToList()); } catch (Exception) { }
+                    }
+                    else
+                    {
+                        go.Msg($"path not found in: {pathMs:F2} milliseconds");
+                        try { SendBackground(capturedConn, go, [90, 0, 0], deadCells!.Select(c => (object)new List<int> { c.X, c.Y }).ToList()); } catch (Exception) { }
+                    }
+                }
+            }
         }
         else if (start is null)
         {
@@ -1186,10 +1291,10 @@ public sealed class MazeCommand : BuilderCommand
         if (conn is null) try { go.Session?.Connection?.SendCommand("background", [bgPayload], null); } catch (Exception) { }
     }
 
-    public static (Dictionary<(int,int), string> map, NodeGrid grid) GenMapAndGrid(int w, int h, string area)
+    public static (Dictionary<(int,int), string> map, NodeGrid grid) GenMapAndGrid(int w, int h, string area, int z = 0)
     {
         var maze = CreateMaze(w, h);
-        return CreateMap(maze, w, h, area);
+        return CreateMap(maze, w, h, area, z);
     }
     public static Dictionary<(int,int), List<(int,int)>> CreateMaze(int width, int height)
     {
@@ -1230,10 +1335,10 @@ public sealed class MazeCommand : BuilderCommand
         }
         return maze;
     }
-    public static (Dictionary<(int,int), string> map, NodeGrid grid) CreateMap(Dictionary<(int,int), List<(int,int)>> maze, int width, int height, string area)
+    public static (Dictionary<(int,int), string> map, NodeGrid grid) CreateMap(Dictionary<(int,int), List<(int,int)>> maze, int width, int height, string area, int z = 0)
     {
         Dictionary<(int,int), string> map = [];
-        var grid = new NodeGrid(area, 0);
+        var grid = new NodeGrid(area, z);
         foreach (var kv in maze)
         {
             var k = kv.Key; var v = kv.Value;
@@ -1249,11 +1354,11 @@ public sealed class MazeCommand : BuilderCommand
             if (k.Item1 < width-1 && maze.GetValueOrDefault((k.Item1+1,k.Item2), []).Contains(k)) e=true;
             if (k.Item2 > 0 && maze.GetValueOrDefault((k.Item1,k.Item2-1), []).Contains(k)) s=true;
             if (k.Item2 < height-1 && maze.GetValueOrDefault((k.Item1,k.Item2+1), []).Contains(k)) n=true;
-            var node = new Node(new Coord(area, k.Item1, k.Item2, 0), "Somewhere in a mysterious maze.");
-            if (n) node.AddLink(new NodeLink("north", new Coord(area, k.Item1, k.Item2+1, 0), ["n"]));
-            if (s) node.AddLink(new NodeLink("south", new Coord(area, k.Item1, k.Item2-1, 0), ["s"]));
-            if (e) node.AddLink(new NodeLink("east", new Coord(area, k.Item1+1, k.Item2, 0), ["e"]));
-            if (w) node.AddLink(new NodeLink("west", new Coord(area, k.Item1-1, k.Item2, 0), ["w"]));
+            var node = new Node(new Coord(area, k.Item1, k.Item2, z), "Somewhere in a mysterious maze.");
+            if (n) node.AddLink(new NodeLink("north", new Coord(area, k.Item1, k.Item2+1, z), ["n"]));
+            if (s) node.AddLink(new NodeLink("south", new Coord(area, k.Item1, k.Item2-1, z), ["s"]));
+            if (e) node.AddLink(new NodeLink("east", new Coord(area, k.Item1+1, k.Item2, z), ["e"]));
+            if (w) node.AddLink(new NodeLink("west", new Coord(area, k.Item1-1, k.Item2, z), ["w"]));
             grid.AddNode(node);
             // the Node ctor no longer publishes to the registry —
             // register explicitly (mirrors NodeHandler.AddNode's order).

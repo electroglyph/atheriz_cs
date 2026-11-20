@@ -5,6 +5,11 @@ Webclient (`webclient/`) release notes, split out from the engine `CHANGELOG.md`
 
 ## [1.12.2] - 2026-11-15
 
+- Fixed the maze highlight vanishing on the first run: a path highlight
+  that arrived before its map frame was dropped when the new map replaced
+  the old payload, so the client flashed the highlight and then showed a
+  plain maze. Map frames now keep the live highlight (only `unbackground`
+  clears it), so either arrival order ends with the path shown.
 - The map editor's give-up message now names a full server as the likely
   cause and suggests closing extra game tabs before running `mapedit`
   again, instead of the bare "Connection failed."

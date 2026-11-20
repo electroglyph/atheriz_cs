@@ -466,7 +466,18 @@ function handleMessage(message: WireMessage): void {
             if (mapEnabled) connection.send('map_size', [right.cols, Math.max(1, right.rows - 1)]);
             break;
         case 'map': {
+            const previousBackground = mapPayload?.background;
             mapPayload = asMapPayload(message.args[0]);
+            // A fresh map frame never carries the highlight itself, so a
+            // background that arrived before its map used to be dropped when
+            // the new payload replaced the old one (maze pathfind wins the
+            // race against the move's map). Keep the live highlight across
+            // map refreshes; only `unbackground` clears it.
+            if (previousBackground) {
+                mapPayload.background = mapPayload.background
+                    ? mergeBackgrounds(previousBackground, mapPayload.background)
+                    : previousBackground;
+            }
             if (pendingBackground) {
                 mapPayload.background = mergeBackgrounds(mapPayload.background, pendingBackground);
                 pendingBackground = undefined;

@@ -1,5 +1,5 @@
-// dig: a builder-only single-room carve. The gate needs a drawn wall or
-// floor cell, the new ring copies the neighboring wall style (and color),
+// dig: a builder-only single-room carve. Any direction always digs,
+// the new ring copies the neighboring wall style (and color),
 // and the resolved glyphs must enclose the room and join existing walls.
 using Atheriz.Core.Commands;
 using Atheriz.Core.Commands.LoggedIn;
@@ -154,7 +154,7 @@ public sealed class DigCommandTests
     }
 
     [Fact]
-    public void Dig_OccupiedTargetRefusesWithoutMovingOrLinking()
+    public void Dig_OccupiedTargetWithoutExit_LinksMovesAndKeepsDesc()
     {
         using var env = GlobalTestEnv.Enter();
         var (nh, _, start, caller) = SetupWalled("digoccupied");
@@ -163,20 +163,40 @@ public sealed class DigCommandTests
         grid.AddNode(east);
         ObjectRegistry.AddObject(east);
         new DigCommand().Run(caller, new DigCommand().Parser!.ParseArgs(["e"]));
-        Assert.Contains("already a room", Joined(caller).ToLowerInvariant());
-        Assert.Equal(start.Coord, ((LocationRef.CoordLocation)caller.Location).Coord);
-        Assert.DoesNotContain(start.GetLinks(), l => l.Name == "east");
+        Assert.Contains("you dig east", Joined(caller).ToLowerInvariant());
+        Assert.Equal(new Coord("digoccupied", 1, 0, 0), ((LocationRef.CoordLocation)caller.Location).Coord);
+        Assert.Contains(start.GetLinks(), l => l.Name == "east" && l.Coord.Equals(east.Coord));
+        Assert.Contains(east.GetLinks(), l => l.Name == "west" && l.Coord.Equals(start.Coord));
+        Assert.Equal("East", east.Desc);
+        Assert.NotNull(nh.GetNode(new Coord("digoccupied", 1, 0, 0)));
     }
 
     [Fact]
-    public void Dig_VoidRefusesWithoutCreating()
+    public void Dig_OccupiedTargetWithExit_RefusesWithoutMoving()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var (nh, _, start, caller) = SetupWalled("digoccupiedexit");
+        var grid = nh.GetArea("digoccupiedexit")!.GetGrid(0)!;
+        var east = new Node(new Coord("digoccupiedexit", 1, 0, 0), desc: "East");
+        grid.AddNode(east);
+        ObjectRegistry.AddObject(east);
+        start.AddLinkIfAbsent("east", () => new NodeLink("east", east.Coord, ["e"]));
+        east.AddLinkIfAbsent("west", () => new NodeLink("west", start.Coord, ["w"]));
+        caller.ClearMessages();
+        new DigCommand().Run(caller, new DigCommand().Parser!.ParseArgs(["e"]));
+        Assert.Contains("already a room", Joined(caller).ToLowerInvariant());
+        Assert.Equal(start.Coord, ((LocationRef.CoordLocation)caller.Location).Coord);
+    }
+
+    [Fact]
+    public void Dig_VoidDigsWithoutRefusal()
     {
         using var env = GlobalTestEnv.Enter();
         var (nh, _, start, caller) = SetupWalled("digvoid", stampRing: false);
         new DigCommand().Run(caller, new DigCommand().Parser!.ParseArgs(["e"]));
-        Assert.Contains("nothing to dig into", Joined(caller).ToLowerInvariant());
-        Assert.Null(nh.GetNode(new Coord("digvoid", 1, 0, 0)));
-        Assert.Equal(start.Coord, ((LocationRef.CoordLocation)caller.Location).Coord);
+        Assert.Contains("you dig east", Joined(caller).ToLowerInvariant());
+        Assert.NotNull(nh.GetNode(new Coord("digvoid", 1, 0, 0)));
+        Assert.Equal(new Coord("digvoid", 1, 0, 0), ((LocationRef.CoordLocation)caller.Location).Coord);
     }
 
     [Fact]
@@ -298,7 +318,7 @@ public sealed class DigCommandTests
     }
 
     [Fact]
-    public void DigUp_WithoutTargetMap_UsesRoundedFallback()
+    public void DigUp_FreshLevel_DefaultsToRounded()
     {
         using var env = GlobalTestEnv.Enter();
         var (nh, mh, _, caller) = SetupWalled("digup", "single");
@@ -308,13 +328,75 @@ public sealed class DigCommandTests
         Assert.NotNull(created);
         Assert.Equal("A freshly dug area.", created!.Desc);
         Assert.Equal(created.Coord, ((LocationRef.CoordLocation)caller.Location).Coord);
-        // Fresh level: rounded ring, no color wrapper.
+        // Fresh level has no style to copy: single line, rounded corners.
         var miUp = mh.EnsureMapInfo("digup", 1);
         Assert.Equal(AtherizSettings.Global.RoundedWallPlaceholder, miUp.PreGrid[(1, 1)]);
         Assert.Equal("╮", GameUtils.StripAnsi(miUp.PostGrid[(1, 1)]));
         Assert.Equal("╭", GameUtils.StripAnsi(miUp.PostGrid[(-1, 1)]));
         // The current level is untouched.
         Assert.Equal(before, mh.EnsureMapInfo("digup", 0).PreGrid.Count);
+    }
+
+    [Fact]
+    public void DigDown_ChainedFreshLevels_StayRounded()
+    {
+        // Digging down twice from a double-walled map: neither fresh
+        // level has a style to copy, so both default to single line
+        // with rounded corners instead of carrying the double style down.
+        using var env = GlobalTestEnv.Enter();
+        var (nh, mh, _, caller) = SetupWalled("digdownchain", "double");
+        var parser = new DigCommand().Parser!;
+        new DigCommand().Run(caller, parser.ParseArgs(["d"]));
+        caller.ClearMessages();
+        new DigCommand().Run(caller, parser.ParseArgs(["d"]));
+        Assert.NotNull(nh.GetNode(new Coord("digdownchain", 0, 0, -2)));
+        var sset = AtherizSettings.Global;
+        Assert.Equal(sset.RoundedWallPlaceholder, mh.EnsureMapInfo("digdownchain", -1).PreGrid[(1, 1)]);
+        Assert.Equal(sset.RoundedWallPlaceholder, mh.EnsureMapInfo("digdownchain", -2).PreGrid[(1, 1)]);
+    }
+
+    [Fact]
+    public void DigDown_FreshLevel_DefaultsToRoundedBox()
+    {
+        // Digging down from a double-walled map into a style-less level
+        // falls back to single line with rounded corners, resolving a
+        // joined box, not one corner repeated.
+        using var env = GlobalTestEnv.Enter();
+        var (nh, mh, _, caller) = SetupWalled("digdowndouble", "double");
+        new DigCommand().Run(caller, new DigCommand().Parser!.ParseArgs(["d"]));
+        Assert.NotNull(nh.GetNode(new Coord("digdowndouble", 0, 0, -1)));
+        var sset = AtherizSettings.Global;
+        var miDown = mh.EnsureMapInfo("digdowndouble", -1);
+        Assert.Equal(sset.RoundedWallPlaceholder, miDown.PreGrid[(1, 1)]);
+        var post = miDown.PostGrid;
+        Assert.Equal("╭", GameUtils.StripAnsi(post[(-1, 1)]));
+        Assert.Equal("─", GameUtils.StripAnsi(post[(0, 1)]));
+        Assert.Equal("╮", GameUtils.StripAnsi(post[(1, 1)]));
+        Assert.Equal("│", GameUtils.StripAnsi(post[(-1, 0)]));
+        Assert.Equal("│", GameUtils.StripAnsi(post[(1, 0)]));
+        Assert.Equal("╰", GameUtils.StripAnsi(post[(-1, -1)]));
+        Assert.Equal("─", GameUtils.StripAnsi(post[(0, -1)]));
+        Assert.Equal("╯", GameUtils.StripAnsi(post[(1, -1)]));
+    }
+
+    [Fact]
+    public void DigInto_ResolvedMazeGlyph_StampsPlaceholderBox()
+    {
+        // Maze levels store resolved art (╬╝║) in pre-grid. Digging into
+        // one must stamp the style's placeholder so the new ring renders
+        // corners and straights in the right places, not one glyph copy.
+        using var env = GlobalTestEnv.Enter();
+        var (nh, mh, _, caller) = SetupWalled("digmazeart", "single", stampRing: false);
+        var mi = mh.EnsureMapInfo("digmazeart", 0);
+        mi.UpdateGrid((0, 0), AtherizSettings.Global.RoomPlaceholder);
+        mi.SetPreCell((1, 0), "╝");
+        new DigCommand().Run(caller, new DigCommand().Parser!.ParseArgs(["e"]));
+        Assert.NotNull(nh.GetNode(new Coord("digmazeart", 1, 0, 0)));
+        Assert.Equal(AtherizSettings.Global.DoubleWallPlaceholder, mi.PreGrid[(2, 1)]);
+        var post = mi.PostGrid;
+        Assert.Equal("╗", GameUtils.StripAnsi(post[(2, 1)]));
+        Assert.Equal("═", GameUtils.StripAnsi(post[(1, 1)]));
+        Assert.Equal("║", GameUtils.StripAnsi(post[(2, 0)]));
     }
 
     [Fact]
@@ -560,6 +642,84 @@ public sealed class DigCommandTests
         Assert.EndsWith(suffix, placed2);
         Assert.Contains(GameUtils.StripAnsi(placed2), DigCommand.UpMarkerGlyphs);
         Assert.Throws<ArgumentException>(() => DigCommand.AddStairMarker(mi, (0, 0), "down", []));
+    }
+
+    [Fact]
+    public void DigDown_TwoWaySpot_CollapsesToBidirectionalMarker()
+    {
+        using var env = GlobalTestEnv.Enter();
+        const string area = "digstairtwoway";
+        var (nh, mh, start, caller) = SetupWalled(area, "single");
+        var parser = new DigCommand().Parser!;
+        new DigCommand().Run(caller, parser.ParseArgs(["u"]));
+        Assert.True(caller.MoveTo(start));
+        caller.ClearMessages();
+        new DigCommand().Run(caller, parser.ParseArgs(["d"]));
+        Assert.NotNull(nh.GetNode(new Coord(area, 0, 0, -1)));
+        var legend = mh.EnsureMapInfo(area, 0).LegendEntries;
+        var combined = Assert.Single(legend);
+        Assert.Equal("up, down", combined.Desc);
+        Assert.True(combined.Coord is (0, 0));
+        Assert.Contains(GameUtils.StripAnsi(combined.Symbol!), DigCommand.TwoWayMarkerGlyphs);
+    }
+
+    [Fact]
+    public void DigDown_ChainedColumn_CollapsesMiddleLevel()
+    {
+        using var env = GlobalTestEnv.Enter();
+        const string area = "digstairmid";
+        var (nh, mh, _, caller) = SetupWalled(area, "single");
+        var parser = new DigCommand().Parser!;
+        new DigCommand().Run(caller, parser.ParseArgs(["d"]));
+        caller.ClearMessages();
+        new DigCommand().Run(caller, parser.ParseArgs(["d"]));
+        Assert.NotNull(nh.GetNode(new Coord(area, 0, 0, -2)));
+        var mid = mh.EnsureMapInfo(area, -1).LegendEntries;
+        var combined = Assert.Single(mid);
+        Assert.Equal("up, down", combined.Desc);
+        Assert.Contains(GameUtils.StripAnsi(combined.Symbol!), DigCommand.TwoWayMarkerGlyphs);
+        // End levels keep their single markers.
+        Assert.Single(mh.EnsureMapInfo(area, 0).LegendEntries, e => e.Desc == "down");
+        Assert.Single(mh.EnsureMapInfo(area, -2).LegendEntries, e => e.Desc == "up");
+    }
+
+    [Fact]
+    public void AddStairMarker_SameSpotTwice_StaysSingle()
+    {
+        var mi = new MapInfo("stairstwice");
+        string first = DigCommand.AddStairMarker(mi, (1, 1), "down", DigCommand.DownMarkerGlyphs);
+        string second = DigCommand.AddStairMarker(mi, (1, 1), "down", DigCommand.DownMarkerGlyphs);
+        Assert.Equal(first, second);
+        Assert.Single(mi.LegendEntries);
+    }
+
+    [Fact]
+    public void DigDown_RoomWithUpExitButNoMarker_PlacesBidirectional()
+    {
+        // Stairs built with `build -u` leave exits but no legend markers:
+        // digging back down still lands on an up/down tile.
+        using var env = GlobalTestEnv.Enter();
+        const string area = "digstairexit";
+        var (nh, mh, start, caller) = SetupWalled(area, "single");
+        var buildPa = new GameArgumentParser.ParsedArgs();
+        buildPa["n"] = false; buildPa["e"] = false; buildPa["s"] = false; buildPa["w"] = false;
+        buildPa["u"] = true; buildPa["d"] = false; buildPa["x"] = false;
+        buildPa["room"] = true; buildPa["road"] = false; buildPa["path"] = false;
+        buildPa["desc"] = null; buildPa["single"] = false; buildPa["double"] = false;
+        buildPa["round"] = false; buildPa["none"] = false;
+        new BuildCommand().Run(caller, buildPa);
+        Assert.True(caller.MoveTo(start));
+        caller.ClearMessages();
+        Assert.Empty(mh.EnsureMapInfo(area, 0).LegendEntries);
+        new DigCommand().Run(caller, new DigCommand().Parser!.ParseArgs(["d"]));
+        Assert.NotNull(nh.GetNode(new Coord(area, 0, 0, -1)));
+        var legend = mh.EnsureMapInfo(area, 0).LegendEntries;
+        var combined = Assert.Single(legend);
+        Assert.Equal("up, down", combined.Desc);
+        Assert.True(combined.Coord is (0, 0));
+        Assert.Contains(GameUtils.StripAnsi(combined.Symbol!), DigCommand.TwoWayMarkerGlyphs);
+        var down = mh.EnsureMapInfo(area, -1).LegendEntries;
+        Assert.Single(down, e => e.Desc == "up");
     }
 
     [Fact]

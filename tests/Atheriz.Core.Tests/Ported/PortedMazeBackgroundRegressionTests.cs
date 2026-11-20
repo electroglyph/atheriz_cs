@@ -29,6 +29,15 @@ public class PortedMazeBackgroundRegressionTests
         }
     }
 
+    private sealed class InlinePool : AsyncThreadPool
+    {
+        // Runs the compute during AddTask (before the move), so the old
+        // pool-thread sends land ahead of the move's wipe+map. Fixed code
+        // only computes here and sends after MoveTo, staying ordered.
+        public InlinePool() : base(maxThreads: 1, queueLimit: 1000) { }
+        public override bool AddTask(Action action) { action(); return true; }
+    }
+
     private static void InjectMapHandler(MapHandler mh)
     {
         GlobalServices.Reset();
@@ -230,6 +239,70 @@ public class PortedMazeBackgroundRegressionTests
     }
 
     [Fact]
+    public async Task Maze_FreshSessionAreaChange_BackgroundArrivesAfterLastMap()
+    {
+        // Fresh-session shape: hero in limbo runs maze once, so the move
+        // takes the area-change path (limbo->maze1) with its unbackground.
+        // The highlight must be the last map-frame standing: background
+        // after the last map and after the last unbackground. Before the
+        // fix the pathfind sent from the pool thread and its background
+        // could land before the move's unbackground+map, wiping it.
+        // The inline pool runs the compute during AddTask (before the
+        // move), so old code deterministically emits background ahead of
+        // the move's wipe+map and fails; fixed code sends the path frames
+        // after MoveTo on the command thread and passes.
+        using var env = GlobalTestEnv.Enter();
+        var mh = GlobalServices.GetMapHandler();
+        var nh = GlobalServices.GetNodeHandler();
+        NodeHandler.SetCurrent(nh);
+        InjectBoth(mh, nh);
+
+        var pool = new InlinePool();
+        var origPoolFactory = MazeCommand.ThreadPoolFactory;
+        var origMapFactory = MazeCommand.MapHandlerFactory;
+        var origNodeFactory = MazeCommand.NodeHandlerFactory;
+        MazeCommand.ThreadPoolFactory = () => pool;
+        MazeCommand.MapHandlerFactory = () => mh;
+        MazeCommand.NodeHandlerFactory = () => nh;
+        try
+        {
+            var hero = GameObject.Create("MazeFreshBG", isPc: true);
+            hero.PrivilegeLevel = Privilege.Builder;
+            hero.Symbol = "M";
+            hero.Location = new Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation(new Coord("limbo", 4, 4, 0));
+            hero.MapEnabled = true;
+            hero.IsMapable = true;
+            ObjectRegistry.AddObject(hero);
+            var conn = new CapturingConnection();
+            var sess = new Session(conn);
+            sess.Puppet = hero;
+            hero.Session = sess;
+
+            var cmd = new MazeCommand();
+            cmd.Run(hero, null);
+
+            var gotBg = await PortedHelpers.WaitAsync(() => conn.Snapshot().Any(x => x.Cmd == "background"), 2000);
+            Assert.True(gotBg, $"background not sent; cmds: {string.Join(",", conn.Snapshot().Select(x => x.Cmd))}");
+
+            var snap = conn.Snapshot();
+            int lastMapIdx = snap.FindLastIndex(x => x.Cmd == "map");
+            int lastUbIdx = snap.FindLastIndex(x => x.Cmd == "unbackground");
+            int bgIdx = snap.FindIndex(x => x.Cmd == "background");
+            Assert.True(lastMapIdx >= 0, "no map frame sent");
+            Assert.True(lastUbIdx >= 0, "no unbackground frame sent for the area change");
+            Assert.True(bgIdx > lastMapIdx, $"background (idx {bgIdx}) must follow the last map (idx {lastMapIdx}); cmds: {string.Join(",", snap.Select(x => x.Cmd))}");
+            Assert.True(bgIdx > lastUbIdx, $"background (idx {bgIdx}) must follow the last unbackground (idx {lastUbIdx}); cmds: {string.Join(",", snap.Select(x => x.Cmd))}");
+        }
+        finally
+        {
+            MazeCommand.ThreadPoolFactory = origPoolFactory;
+            MazeCommand.MapHandlerFactory = origMapFactory;
+            MazeCommand.NodeHandlerFactory = origNodeFactory;
+            try { pool.Stop(wait: true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task Maze_BackgroundCoordsMatchPath()
     {
         using var env = GlobalTestEnv.Enter();
@@ -284,13 +357,8 @@ public class PortedMazeBackgroundRegressionTests
             {
                 // Find node for last coord in bgCoords — likely the exit
                 var last = bgCoords.Last();
-                // Search for node in maze1/maze2/maze3 that matches coord
-                Node? endNode = null;
-                foreach (var areaName in new[] { "maze1", "maze2", "maze3" })
-                {
-                    var candidate = nh.GetNode(new Coord(areaName, last[0], last[1], 0));
-                    if (candidate is not null) { endNode = candidate; break; }
-                }
+                // Stacked maze lives in maze1 at z=0,-1,-2; the pathfind runs on level 0.
+                Node? endNode = nh.GetNode(new Coord("maze1", last[0], last[1], 0));
                 // For maze1 path, end is within maze1; if not found, fallback to scanning bgCoords last
                 if (endNode is null)
                 {
@@ -399,16 +467,18 @@ public class PortedMazeBackgroundRegressionTests
             var gotBg = await PortedHelpers.WaitAsync(() => conn.Snapshot().Any(x => x.Cmd == "background"), 2000);
             Assert.True(gotBg, $"background not sent; cmds: {string.Join(",", conn.Snapshot().Select(x=>x.Cmd))}");
 
-            // Verify MapHandler has maze1-3 MapInfos
+            // Verify MapHandler has stacked maze1 MapInfos at 0,-1,-2
             var mi1 = mh.GetMapInfo("maze1", 0);
-            var mi2 = mh.GetMapInfo("maze2", 0);
-            var mi3 = mh.GetMapInfo("maze3", 0);
+            var mi2 = mh.GetMapInfo("maze1", -1);
+            var mi3 = mh.GetMapInfo("maze1", -2);
             Assert.NotNull(mi1);
             Assert.NotNull(mi2);
             Assert.NotNull(mi3);
             Assert.NotEmpty(mi1!.PreGrid);
             Assert.NotEmpty(mi2!.PreGrid);
             Assert.NotEmpty(mi3!.PreGrid);
+            Assert.Null(mh.GetMapInfo("maze2", 0));
+            Assert.Null(mh.GetMapInfo("maze3", 0));
 
             // Verify singleton not lost: GlobalServices still holds same handler
             var globalMh = GlobalServices.GetMapHandler();

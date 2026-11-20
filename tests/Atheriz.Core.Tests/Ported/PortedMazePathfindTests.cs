@@ -22,7 +22,7 @@ public class PortedMazePathfindTests
         Assert.False(cmd.Access(non));
         Assert.True(cmd.Access(b));
     }
-    [Fact] public void MazeGeneratesThreeAreas()
+    [Fact] public void MazeGeneratesStackedLevels()
     {
         using var env = GlobalTestEnv.Enter();
         var caller = GameObject.Create("Builder", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
@@ -35,9 +35,13 @@ public class PortedMazePathfindTests
         var cmd = new MazeCommand();
         caller.ClearMessages();
         cmd.Run(caller, null);
-        Assert.True(nh.GetArea("maze1") is not null);
-        Assert.True(nh.GetArea("maze2") is not null);
-        Assert.True(nh.GetArea("maze3") is not null);
+        var area = nh.GetArea("maze1");
+        Assert.NotNull(area);
+        Assert.NotNull(area!.GetGrid(0));
+        Assert.NotNull(area.GetGrid(-1));
+        Assert.NotNull(area.GetGrid(-2));
+        Assert.Null(nh.GetArea("maze2"));
+        Assert.Null(nh.GetArea("maze3"));
         var txt = string.Join(" ", caller.PeekMessages());
         Assert.Contains("created 3", txt);
     }
@@ -52,12 +56,12 @@ public class PortedMazePathfindTests
         MazeCommand.ThreadPoolFactory = ()=> new Atheriz.Core.Concurrency.AsyncThreadPool();
         var cmd = new MazeCommand();
         cmd.Run(caller, null);
-        foreach(var area in new[]{"maze1","maze2","maze3"})
+        foreach(var z in new[]{0,-1,-2})
         {
-            var mi = mh.GetMapInfo(area,0);
+            var mi = mh.GetMapInfo("maze1",z);
             Assert.NotNull(mi);
             Assert.NotEmpty(mi!.PreGrid);
-            if (area == "maze1")
+            if (z == 0)
             {
                 // After fix, MoveTo to maze1 (0,0,0) triggers Render -> PostGrid filled. Previously stub left it empty.
                 Assert.NotEmpty(mi.PostGrid);
@@ -67,6 +71,8 @@ public class PortedMazePathfindTests
                 Assert.Empty(mi.PostGrid);
             }
         }
+        Assert.Null(mh.GetMapInfo("maze2", 0));
+        Assert.Null(mh.GetMapInfo("maze3", 0));
     }
     [Fact] public void CreateMazeReturnsDict()
     {
@@ -106,6 +112,99 @@ public class PortedMazePathfindTests
         var (mp, grid) = MazeCommand.GenMapAndGrid(3,3,"pure");
         Assert.NotEmpty(mp);
         Assert.True(grid.Nodes.Count>0);
+    }
+    [Fact] public void CreateMapHonorsLevel()
+    {
+        var m = new Dictionary<(int,int), List<(int,int)>>{[(0,0)]=new List<(int,int)>{(1,0)}, [(1,0)]=new List<(int,int)>{(0,0)}};
+        var (mp, grid) = MazeCommand.CreateMap(m,2,1,"stacked", -1);
+        Assert.Equal(-1, grid.Z);
+        Assert.Equal("stacked", grid.Area);
+        var n0 = grid.GetNode((0,0));
+        Assert.NotNull(n0);
+        Assert.Equal(new Coord("stacked", 0, 0, -1), n0!.Coord);
+        Assert.Contains(n0.GetLinks(), l => l.Name == "east" && l.Coord.Equals(new Coord("stacked", 1, 0, -1)));
+        Assert.True(mp.ContainsKey((0,0)));
+    }
+    [Fact] public void MazeDownExitsDropToStackedLevels()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = GameObject.Create("BuilderStack", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
+        var nh = GlobalServices.GetNodeHandler(); NodeHandler.SetCurrent(nh);
+        var mh = GlobalServices.GetMapHandler();
+        MazeCommand.MapHandlerFactory = ()=> mh;
+        MazeCommand.NodeHandlerFactory = ()=> nh;
+        MazeCommand.ThreadPoolFactory = ()=> new Atheriz.Core.Concurrency.AsyncThreadPool();
+        new MazeCommand().Run(caller, null);
+        var start = nh.GetNode(new Coord("maze1", 0, 0, 0));
+        var mid = nh.GetNode(new Coord("maze1", 0, 0, -1));
+        var bottom = nh.GetNode(new Coord("maze1", 0, 0, -2));
+        Assert.NotNull(start);
+        Assert.NotNull(mid);
+        Assert.NotNull(bottom);
+        var downLinks = start!.GetLinks().Where(l => l.Name == "down").ToList();
+        // Only the random exit on level 0 carries down; the origin usually does not.
+        // The stacked destinations must all stay inside maze1 at 0,-1,-2.
+        var allDown = new List<Node>();
+        foreach (var g in nh.GetArea("maze1")!.Grids.Values)
+            foreach (var n in g.Nodes.Values)
+                if (n.GetLinks().Any(l => l.Name == "down"))
+                    allDown.Add(n);
+        Assert.Equal(3, allDown.Count);
+        var dests = allDown.SelectMany(n => n.GetLinks()).Where(l => l.Name == "down").Select(l => l.Coord).ToList();
+        Assert.Contains(new Coord("maze1", 0, 0, -1), dests);
+        Assert.Contains(new Coord("maze1", 0, 0, -2), dests);
+        Assert.Contains(new Coord("maze1", 0, 0, 0), dests);
+        Assert.All(dests, d => Assert.Equal("maze1", d.Area));
+        foreach (var z in new[]{0,-1,-2})
+        {
+            var mi = mh.GetMapInfo("maze1", z);
+            Assert.NotNull(mi);
+            Assert.Contains(mi!.LegendEntries, e => e.Desc == "down");
+        }
+    }
+    [Fact] public void MazeDigDownLinksIntoStackedRoom()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = GameObject.Create("BuilderDig", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
+        var nh = GlobalServices.GetNodeHandler(); NodeHandler.SetCurrent(nh);
+        var mh = GlobalServices.GetMapHandler();
+        MazeCommand.MapHandlerFactory = ()=> mh;
+        MazeCommand.NodeHandlerFactory = ()=> nh;
+        MazeCommand.ThreadPoolFactory = ()=> new Atheriz.Core.Concurrency.AsyncThreadPool();
+        new MazeCommand().Run(caller, null);
+        var start = nh.GetNode(new Coord("maze1", 0, 0, 0));
+        Assert.NotNull(start);
+        Assert.NotNull(nh.GetNode(new Coord("maze1", 0, 0, -1)));
+        Assert.True(caller.MoveTo(start!, force: true));
+        caller.ClearMessages();
+        new DigCommand().Run(caller, new DigCommand().Parser!.ParseArgs(["d"]));
+        Assert.Contains("you dig down", string.Join("\n", caller.PeekMessages()).ToLowerInvariant());
+        Assert.Equal(new Coord("maze1", 0, 0, -1), ((Atheriz.Core.Persistence.Dto.LocationRef.CoordLocation)caller.Location).Coord);
+        Assert.Contains(start!.GetLinks(), l => l.Name == "down" && l.Coord.Equals(new Coord("maze1", 0, 0, -1)));
+    }
+    [Fact] public void MazeRepeatClearsLegacyAreas()
+    {
+        using var env = GlobalTestEnv.Enter();
+        var caller = GameObject.Create("BuilderLegacy", isPc:true); caller.PrivilegeLevel=Privilege.Builder;
+        var nh = GlobalServices.GetNodeHandler(); NodeHandler.SetCurrent(nh);
+        var mh = GlobalServices.GetMapHandler();
+        MazeCommand.MapHandlerFactory = ()=> mh;
+        MazeCommand.NodeHandlerFactory = ()=> nh;
+        MazeCommand.ThreadPoolFactory = ()=> new Atheriz.Core.Concurrency.AsyncThreadPool();
+        var legacyArea = new NodeArea("maze2");
+        var legacyGrid = new NodeGrid("maze2", 0);
+        var legacyNode = new Node(new Coord("maze2", 0, 0, 0), desc: "Legacy");
+        legacyGrid.AddNode(legacyNode);
+        ObjectRegistry.AddObject(legacyNode);
+        legacyArea.AddGrid(legacyGrid);
+        nh.AddArea(legacyArea);
+        mh.SetMapInfo("maze2", 0, new MapInfo("maze2", new Dictionary<(int,int),string>{[(0,0)] = " "}, null));
+        new MazeCommand().Run(caller, null);
+        Assert.Null(nh.GetArea("maze2"));
+        Assert.Null(nh.GetArea("maze3"));
+        Assert.Null(mh.GetMapInfo("maze2", 0));
+        Assert.Null(mh.GetMapInfo("maze3", 0));
+        Assert.NotNull(nh.GetArea("maze1")!.GetGrid(-1));
     }
     [Fact] public void MazeAstar50x20()
     {
